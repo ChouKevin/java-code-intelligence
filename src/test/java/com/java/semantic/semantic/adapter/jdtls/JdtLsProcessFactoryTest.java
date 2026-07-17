@@ -20,6 +20,7 @@ import java.io.OutputStream;
 import java.io.PipedInputStream;
 import java.io.PipedOutputStream;
 import java.lang.reflect.Method;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -375,6 +376,52 @@ class JdtLsProcessFactoryTest {
             stderr.close();
             writer.join(Duration.ofSeconds(2));
         }
+    }
+
+    @Test
+    void should_retain_stderr_lines_in_the_session_buffer_when_the_server_writes_diagnostics()
+            throws Exception {
+        Path home = createJdtLsHome();
+        String diagnostics = "!ENTRY org.eclipse.jdt.ls.core\n!MESSAGE import failed\n";
+        TestProcess process = new TestProcess(
+                new ByteArrayInputStream(diagnostics.getBytes(StandardCharsets.UTF_8)));
+        LanguageServer server = mock(LanguageServer.class, invocation -> {
+            if ("initialize".equals(invocation.getMethod().getName())) {
+                return CompletableFuture.completedFuture(null);
+            }
+            return CALLS_REAL_METHODS.answer(invocation);
+        });
+        JdtLsProcessFactory factory = new JdtLsProcessFactory(
+                properties(home),
+                command -> process,
+                (client, launchedProcess) -> new JdtLsProcessFactory.Connection(
+                        server, CompletableFuture.completedFuture(null)));
+
+        JdtLsProcessFactory.LaunchHandle handle = factory.launch(
+                tempDirectory.resolve("repository"),
+                tempDirectory.resolve("workspace-data"),
+                mock(JdtLanguageClient.class));
+
+        assertThat(handle.stderrDrain().get(2, TimeUnit.SECONDS)).isNull();
+        assertThat(handle.stderrBuffer().lines())
+                .containsExactly("!ENTRY org.eclipse.jdt.ls.core", "!MESSAGE import failed");
+    }
+
+    @Test
+    void should_drop_the_oldest_line_and_truncate_when_the_stderr_buffer_overflows() {
+        StderrRingBuffer buffer = new StderrRingBuffer(2);
+
+        buffer.add("first");
+        buffer.add("second");
+        buffer.add("third");
+        buffer.add("x".repeat(StderrRingBuffer.MAX_LINE_LENGTH + 50));
+
+        assertThat(buffer.lines()).hasSize(2);
+        assertThat(buffer.lines().getFirst()).isEqualTo("third");
+        assertThat(buffer.lines().getLast())
+                .hasSize(StderrRingBuffer.MAX_LINE_LENGTH)
+                .endsWith("...");
+        assertThat(buffer.asText()).contains("third");
     }
 
     private Path createJdtLsHome() throws IOException {

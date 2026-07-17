@@ -72,6 +72,26 @@ class ArchitectureTest {
     }
 
     @Test
+    void should_keep_the_repository_layer_unaware_of_the_semantic_engine_when_service_is_imported() {
+        noClasses()
+                .that().resideInAPackage("com.java.semantic.repository..")
+                .should().dependOnClassesThat().resideInAPackage("com.java.semantic.semantic..")
+                .as("the semantic engine plugs into the repository layer through its port, never the reverse")
+                .allowEmptyShould(true)
+                .check(classes);
+    }
+
+    @Test
+    void should_keep_lsp4j_out_of_the_workspace_lifecycle_contract_when_service_is_imported() {
+        noClasses()
+                .that().haveSimpleName("SemanticEngineStatus")
+                .or().haveSimpleName("JdtWorkspaceManager")
+                .should().dependOnClassesThat().resideInAnyPackage("org.eclipse.lsp4j..", "org.eclipse.jdt..")
+                .as("the lifecycle contract Task 4 and the API consume must stay free of LSP4J types")
+                .check(classes);
+    }
+
+    @Test
     void should_expose_only_annotated_controllers_when_api_is_imported() {
         classes()
                 .that().resideInAPackage("..api..")

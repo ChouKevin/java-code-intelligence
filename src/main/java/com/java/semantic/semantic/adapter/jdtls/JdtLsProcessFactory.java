@@ -17,12 +17,15 @@ import org.eclipse.lsp4j.services.LanguageServer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.OutputStream;
+import java.io.InputStreamReader;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.CompletableFuture;
@@ -38,6 +41,7 @@ public final class JdtLsProcessFactory {
     private static final String LAUNCHER_PREFIX = "org.eclipse.equinox.launcher_";
     private static final String LAUNCHER_SUFFIX = ".jar";
     private static final long TERMINATION_TIMEOUT_MILLIS = 100;
+    private static final int STDERR_BUFFER_LINES = 200;
 
     private final JdtLsProperties properties;
     private final ProcessStarter processStarter;
@@ -77,8 +81,10 @@ public final class JdtLsProcessFactory {
         List<String> command = createCommand(launcherJar, workspaceData);
         Process process = processStarter.start(command);
         LaunchResources resources = new LaunchResources(process);
+        StderrRingBuffer stderrBuffer = new StderrRingBuffer(STDERR_BUFFER_LINES);
         try {
-            CompletableFuture<Void> stderrDrain = startStderrDrain(process.getErrorStream(), resources);
+            CompletableFuture<Void> stderrDrain = startStderrDrain(
+                    process.getErrorStream(), resources, stderrBuffer);
             Connection connection = connectionStarter.connect(client, process);
             resources.registerListener(connection.listener());
             InitializeParams initializeParams = createInitializeParams(workspaceRoot);
@@ -89,7 +95,8 @@ public final class JdtLsProcessFactory {
                     process,
                     connection.languageServer(),
                     connection.listener(),
-                    stderrDrain);
+                    stderrDrain,
+                    stderrBuffer);
         } catch (InterruptedException exception) {
             resources.release(exception);
             Thread.currentThread().interrupt();
@@ -156,11 +163,24 @@ public final class JdtLsProcessFactory {
         return initializeParams;
     }
 
-    private CompletableFuture<Void> startStderrDrain(InputStream stderr, LaunchResources resources) {
+    /**
+     * 逐行讀取 stderr 並保留最後數行
+     *
+     * JDT LS 從未取得任何憑證,其 stderr 只會有檔案路徑、公開的 Maven 網址與堆疊追蹤
+     * 「不記錄網址或憑證」的規則是為 git 失敗而寫,適用於 DefaultRepositoryApplicationService,不在此處
+     */
+    private CompletableFuture<Void> startStderrDrain(
+            InputStream stderr, LaunchResources resources, StderrRingBuffer buffer) {
         CompletableFuture<Void> completion = new CompletableFuture<>();
         stderrThreadStarter.start(() -> {
-            try (InputStream input = stderr) {
-                input.transferTo(OutputStream.nullOutputStream());
+            try (BufferedReader reader = new BufferedReader(
+                    new InputStreamReader(stderr, StandardCharsets.UTF_8))) {
+                String line = reader.readLine();
+                while (Objects.nonNull(line)) {
+                    buffer.add(line);
+                    LOGGER.debug("JDT LS stderr: {}", line);
+                    line = reader.readLine();
+                }
             } catch (Throwable exception) {
                 StderrDrainException drainFailure = new StderrDrainException(
                         exception.getClass().getSimpleName());
@@ -242,7 +262,8 @@ public final class JdtLsProcessFactory {
             Process process,
             LanguageServer languageServer,
             Future<Void> listener,
-            CompletableFuture<Void> stderrDrain) {
+            CompletableFuture<Void> stderrDrain,
+            StderrRingBuffer stderrBuffer) {
     }
 
     /** 表示已清除資源的 stderr drain 失敗 */
