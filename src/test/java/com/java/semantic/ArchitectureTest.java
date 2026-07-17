@@ -72,6 +72,16 @@ class ArchitectureTest {
     }
 
     @Test
+    void should_keep_the_semantic_domain_free_of_lsp4j_when_service_is_imported() {
+        noClasses()
+                .that().resideInAPackage("..semantic.domain..")
+                .should().dependOnClassesThat().resideInAnyPackage("org.eclipse.lsp4j..", "org.eclipse.jdt..")
+                .as("the JavaSemanticService contract and its domain records must stay free of LSP4J types")
+                .allowEmptyShould(true)
+                .check(classes);
+    }
+
+    @Test
     void should_keep_the_repository_layer_unaware_of_the_semantic_engine_when_service_is_imported() {
         noClasses()
                 .that().resideInAPackage("com.java.semantic.repository..")

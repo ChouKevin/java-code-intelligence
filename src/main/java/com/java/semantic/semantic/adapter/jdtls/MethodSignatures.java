@@ -1,0 +1,127 @@
+package com.java.semantic.semantic.adapter.jdtls;
+
+import org.springframework.util.StringUtils;
+
+import java.util.ArrayList;
+import java.util.List;
+
+/**
+ * 解析與正規化方法簽章
+ *
+ * JDT 的符號名帶簽章(如「save(T) : void」),請求端可能給裸名或帶參數的簽章
+ * 兩側都經過同一組正規化,參數比對才會一致:去除泛型與套件前綴、可變參數視為陣列
+ */
+final class MethodSignatures {
+
+    private MethodSignatures() {
+    }
+
+    /**
+     * 解析一個方法名或簽章
+     *
+     * 無括號代表裸名(hasParameters 為 false),參數比對時視為任意多載
+     */
+    static ParsedMethod parse(String raw) {
+        String value = StringUtils.hasText(raw) ? raw.trim() : "";
+        int open = value.indexOf('(');
+        if (open < 0) {
+            return new ParsedMethod(value, false, List.of());
+        }
+        String methodName = value.substring(0, open).trim();
+        int close = value.indexOf(')', open);
+        String inside = close > open ? value.substring(open + 1, close) : value.substring(open + 1);
+        return new ParsedMethod(methodName, true, normalizeParameters(inside));
+    }
+
+    /** JDT 帶簽章名稱剝出的裸方法名 */
+    static String bareName(String raw) {
+        String value = StringUtils.hasText(raw) ? raw.trim() : "";
+        int open = value.indexOf('(');
+        return open >= 0 ? value.substring(0, open).trim() : value;
+    }
+
+    /** 型別的簡單名,去除泛型引數 */
+    static String typeName(String raw) {
+        String value = StringUtils.hasText(raw) ? raw.trim() : "";
+        int open = firstOf(value, '<', '(', ' ');
+        return open >= 0 ? value.substring(0, open).trim() : value;
+    }
+
+    static List<String> normalizeParameters(String inside) {
+        if (!StringUtils.hasText(inside)) {
+            return List.of();
+        }
+        List<String> normalized = new ArrayList<>();
+        for (String part : splitParameters(inside)) {
+            String type = normalizeType(part);
+            if (StringUtils.hasText(type)) {
+                normalized.add(type);
+            }
+        }
+        return List.copyOf(normalized);
+    }
+
+    /**
+     * 依角括號深度切分參數列,巢狀泛型中的逗號不會誤切
+     *
+     * 「Map&lt;String, Order&gt;, Long」切成兩段而非三段
+     */
+    static List<String> splitParameters(String inside) {
+        List<String> parts = new ArrayList<>();
+        int depth = 0;
+        int start = 0;
+        for (int index = 0; index < inside.length(); index++) {
+            char current = inside.charAt(index);
+            if (current == '<') {
+                depth++;
+            } else if (current == '>') {
+                depth--;
+            } else if (current == ',' && depth == 0) {
+                parts.add(inside.substring(start, index));
+                start = index + 1;
+            }
+        }
+        parts.add(inside.substring(start));
+        return parts;
+    }
+
+    /** 去除泛型與套件前綴,可變參數轉為陣列 */
+    static String normalizeType(String type) {
+        String value = StringUtils.hasText(type) ? type.trim() : "";
+        if (!StringUtils.hasText(value)) {
+            return "";
+        }
+        int open = value.indexOf('<');
+        if (open >= 0) {
+            int close = value.lastIndexOf('>');
+            String tail = close >= 0 && close + 1 <= value.length() ? value.substring(close + 1) : "";
+            value = value.substring(0, open) + tail.trim();
+        }
+        value = value.replace("...", "[]").trim();
+        StringBuilder brackets = new StringBuilder();
+        while (value.endsWith("[]")) {
+            brackets.append("[]");
+            value = value.substring(0, value.length() - 2).trim();
+        }
+        int dot = value.lastIndexOf('.');
+        if (dot >= 0) {
+            value = value.substring(dot + 1);
+        }
+        return value + brackets;
+    }
+
+    private static int firstOf(String value, char... markers) {
+        int found = -1;
+        for (char marker : markers) {
+            int index = value.indexOf(marker);
+            if (index >= 0 && (found < 0 || index < found)) {
+                found = index;
+            }
+        }
+        return found;
+    }
+
+    /** 解析後的方法名與正規化參數 */
+    record ParsedMethod(String methodName, boolean hasParameters, List<String> parameterTypes) {
+    }
+}

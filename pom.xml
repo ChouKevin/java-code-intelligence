@@ -18,6 +18,8 @@
     <properties>
         <java.version>21</java.version>
         <archunit.version>1.3.0</archunit.version>
+        <!-- unit runs exclude the real-server tag; the jdtls-it profile clears it -->
+        <test.excluded.groups>jdtls-it</test.excluded.groups>
     </properties>
 
     <dependencies>
@@ -77,6 +79,32 @@
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
             </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <!-- discover *IT too, but never run the jdtls-it tag unless the profile clears it;
+                         unit tests thus never launch a real JDT LS -->
+                    <includes>
+                        <include>**/Test*.java</include>
+                        <include>**/*Test.java</include>
+                        <include>**/*Tests.java</include>
+                        <include>**/*TestCase.java</include>
+                        <include>**/*IT.java</include>
+                    </includes>
+                    <excludedGroups>${test.excluded.groups}</excludedGroups>
+                </configuration>
+            </plugin>
         </plugins>
     </build>
+
+    <profiles>
+        <profile>
+            <!-- real JDT LS integration tests; require JDTLS_HOME and skip cleanly without it -->
+            <id>jdtls-it</id>
+            <properties>
+                <test.excluded.groups></test.excluded.groups>
+            </properties>
+        </profile>
+    </profiles>
 </project>

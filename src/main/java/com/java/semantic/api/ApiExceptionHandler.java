@@ -8,6 +8,8 @@ import com.java.semantic.repository.application.RepositoryNotFoundException;
 import com.java.semantic.repository.application.RepositoryNotReadyException;
 import com.java.semantic.repository.application.RepositoryRevisionMismatchException;
 import com.java.semantic.repository.domain.InvalidRepositoryIdException;
+import com.java.semantic.semantic.domain.SemanticAmbiguousMethodException;
+import com.java.semantic.semantic.domain.SemanticSymbolNotFoundException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
@@ -67,6 +69,22 @@ public class ApiExceptionHandler {
                 HttpStatus.INTERNAL_SERVER_ERROR,
                 "REPOSITORY_MUTATION_FAILED",
                 "repository mutation failed");
+    }
+
+    @ExceptionHandler(SemanticAmbiguousMethodException.class)
+    public ResponseEntity<ApiErrorResponse> ambiguousMethod(SemanticAmbiguousMethodException exception) {
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(
+                ApiErrorResponse.ambiguousMethod(
+                        "method signature is ambiguous; provide a full signature",
+                        exception.candidates()));
+    }
+
+    @ExceptionHandler(SemanticSymbolNotFoundException.class)
+    public ResponseEntity<ApiErrorResponse> symbolNotFound() {
+        return response(
+                HttpStatus.UNPROCESSABLE_ENTITY,
+                "SEMANTIC_SYMBOL_NOT_FOUND",
+                "requested symbol was not found in the workspace");
     }
 
     private ResponseEntity<ApiErrorResponse> response(

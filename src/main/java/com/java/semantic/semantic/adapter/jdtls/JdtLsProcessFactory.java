@@ -5,6 +5,7 @@ import org.eclipse.lsp4j.CallHierarchyCapabilities;
 import org.eclipse.lsp4j.ClientCapabilities;
 import org.eclipse.lsp4j.DefinitionCapabilities;
 import org.eclipse.lsp4j.DocumentSymbolCapabilities;
+import org.eclipse.lsp4j.ImplementationCapabilities;
 import org.eclipse.lsp4j.InitializeParams;
 import org.eclipse.lsp4j.SynchronizationCapabilities;
 import org.eclipse.lsp4j.SymbolCapabilities;
@@ -147,7 +148,10 @@ public final class JdtLsProcessFactory {
         textDocument.setCallHierarchy(new CallHierarchyCapabilities());
         textDocument.setDefinition(new DefinitionCapabilities());
         textDocument.setTypeDefinition(new TypeDefinitionCapabilities());
-        textDocument.setDocumentSymbol(new DocumentSymbolCapabilities());
+        textDocument.setImplementation(new ImplementationCapabilities());
+        DocumentSymbolCapabilities documentSymbol = new DocumentSymbolCapabilities();
+        documentSymbol.setHierarchicalDocumentSymbolSupport(true);
+        textDocument.setDocumentSymbol(documentSymbol);
         textDocument.setSynchronization(new SynchronizationCapabilities());
 
         WorkspaceClientCapabilities workspace = new WorkspaceClientCapabilities();

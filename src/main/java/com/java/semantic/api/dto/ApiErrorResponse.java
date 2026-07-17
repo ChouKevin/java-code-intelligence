@@ -1,5 +1,6 @@
 package com.java.semantic.api.dto;
 
+import java.util.List;
 import java.util.Optional;
 
 /** 穩定且不洩漏內部例外的 API 錯誤 */
@@ -7,10 +8,11 @@ public record ApiErrorResponse(
         String errorCode,
         String message,
         Optional<String> currentRevision,
-        Optional<String> expectedRevision) {
+        Optional<String> expectedRevision,
+        Optional<List<String>> candidates) {
 
     public static ApiErrorResponse of(String errorCode, String message) {
-        return new ApiErrorResponse(errorCode, message, Optional.empty(), Optional.empty());
+        return new ApiErrorResponse(errorCode, message, Optional.empty(), Optional.empty(), Optional.empty());
     }
 
     public static ApiErrorResponse revisionMismatch(
@@ -20,6 +22,16 @@ public record ApiErrorResponse(
                 "REPOSITORY_REVISION_MISMATCH",
                 "expected revision does not match current revision",
                 Optional.of(currentRevision),
-                Optional.of(expectedRevision));
+                Optional.of(expectedRevision),
+                Optional.empty());
+    }
+
+    public static ApiErrorResponse ambiguousMethod(String message, List<String> candidates) {
+        return new ApiErrorResponse(
+                "SEMANTIC_AMBIGUOUS_METHOD",
+                message,
+                Optional.empty(),
+                Optional.empty(),
+                Optional.of(List.copyOf(candidates)));
     }
 }
