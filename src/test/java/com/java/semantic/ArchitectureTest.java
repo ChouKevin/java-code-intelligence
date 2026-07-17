@@ -62,11 +62,12 @@ class ArchitectureTest {
     }
 
     @Test
-    void should_have_no_analysis_dependency_when_service_is_imported() {
+    void should_keep_lsp4j_inside_the_jdtls_adapter_when_service_is_imported() {
         noClasses()
+                .that().resideOutsideOfPackage("..semantic.adapter.jdtls..")
                 .should().dependOnClassesThat().resideInAnyPackage(
                         "com.github.javaparser..", "org.eclipse.lsp4j..", "org.eclipse.jdt..")
-                .as("B1 owns repositories only; analysis arrives in Plan B2")
+                .as("JDT and LSP4J types must not leak past the JDT LS adapter")
                 .check(classes);
     }
 
