@@ -1,0 +1,229 @@
+openapi: 3.0.3
+info:
+  title: Java Semantic Service Repository API
+  version: v1
+security:
+  - ApiToken: []
+paths:
+  /v1/repositories:
+    get:
+      operationId: listRepositories
+      responses:
+        '200':
+          description: Configured repository statuses
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/RepositoryStatusResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/AuthDisabled'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /v1/repositories/{repoId}:
+    parameters:
+      - $ref: '#/components/parameters/RepoId'
+    get:
+      operationId: getRepository
+      responses:
+        '200':
+          $ref: '#/components/responses/RepositoryStatus'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/AuthDisabled'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /v1/repositories/{repoId}/ensure:
+    parameters:
+      - $ref: '#/components/parameters/RepoId'
+    post:
+      operationId: ensureRepository
+      responses:
+        '200':
+          $ref: '#/components/responses/RepositoryStatus'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/AuthDisabled'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/MutationFailed'
+  /v1/repositories/{repoId}/sync:
+    parameters:
+      - $ref: '#/components/parameters/RepoId'
+    post:
+      operationId: syncRepository
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SyncRepositoryRequest'
+      responses:
+        '200':
+          $ref: '#/components/responses/RepositoryStatus'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/AuthDisabled'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/MutationFailed'
+  /v1/repositories/{repoId}/checkout:
+    parameters:
+      - $ref: '#/components/parameters/RepoId'
+    post:
+      operationId: checkoutRepository
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CheckoutRepositoryRequest'
+      responses:
+        '200':
+          $ref: '#/components/responses/RepositoryStatus'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/AuthDisabled'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/MutationFailed'
+components:
+  securitySchemes:
+    ApiToken:
+      type: apiKey
+      in: header
+      name: X-Api-Token
+  parameters:
+    RepoId:
+      name: repoId
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: '^[a-z0-9][a-z0-9._-]{0,63}$'
+  responses:
+    RepositoryStatus:
+      description: Repository status
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/RepositoryStatusResponse'
+    BadRequest:
+      description: Invalid repository id or request
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiErrorResponse'
+    Unauthorized:
+      description: Missing or wrong API token
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiErrorResponse'
+    AuthDisabled:
+      description: API token is not configured
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiErrorResponse'
+    NotFound:
+      description: Repository is not configured
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiErrorResponse'
+    Conflict:
+      description: Repository is busy, immutable, not ready, or revision-mismatched
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiErrorResponse'
+    MutationFailed:
+      description: Sanitized repository mutation failure
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiErrorResponse'
+  schemas:
+    SyncRepositoryRequest:
+      type: object
+      properties:
+        branch:
+          type: string
+    CheckoutRepositoryRequest:
+      type: object
+      required:
+        - revision
+      properties:
+        revision:
+          type: string
+          minLength: 1
+          pattern: '.*\S.*'
+    RepositoryStatusResponse:
+      type: object
+      required:
+        - repoId
+        - mode
+        - displayName
+        - cloned
+      properties:
+        repoId:
+          type: string
+        mode:
+          type: string
+          enum:
+            - REMOTE
+            - LOCAL_FIXTURE
+        displayName:
+          type: string
+        currentBranch:
+          type: string
+          nullable: true
+        currentRevision:
+          type: string
+          nullable: true
+          pattern: '^[0-9a-f]{40}$|^FIXTURE$'
+        cloned:
+          type: boolean
+    ApiErrorResponse:
+      type: object
+      required:
+        - errorCode
+        - message
+      properties:
+        errorCode:
+          type: string
+        message:
+          type: string
+        currentRevision:
+          type: string
+          nullable: true
+        expectedRevision:
+          type: string
+          nullable: true
