@@ -1,6 +1,16 @@
 semantic:
   api:
     api-token: ${SEMANTIC_API_TOKEN:}
+  jdtls:
+    enabled: ${JDTLS_ENABLED:true}
+    home: ${JDTLS_HOME:/opt/jdtls}
+    workspace-data-root: ${JDTLS_WORKSPACE_DATA_ROOT:/data/jdtls}
+    startup-timeout: ${JDTLS_STARTUP_TIMEOUT:180s}
+    import-timeout: ${JDTLS_IMPORT_TIMEOUT:900s}
+    request-timeout: ${JDTLS_REQUEST_TIMEOUT:30s}
+    max-active-workspaces: ${JDTLS_MAX_ACTIVE_WORKSPACES:2}
+    idle-timeout: ${JDTLS_IDLE_TIMEOUT:30m}
+    max-heap: ${JDTLS_MAX_HEAP:2g}
   data-root: /data/repos
   repository-lock-timeout: 5s
   git-username: ${GIT_USERNAME:}

@@ -10,7 +10,12 @@ import com.java.semantic.repository.domain.RepositoryStatus;
 import com.java.semantic.repository.port.GitRepositoryPort;
 import com.java.semantic.repository.port.RepositoryMutationListener;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 
 import java.nio.file.Path;
 import java.time.Duration;
@@ -28,6 +33,7 @@ import java.util.concurrent.locks.Lock;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+@ExtendWith(OutputCaptureExtension.class)
 class RepositoryConcurrencyTest {
 
     private static final RepositoryId REPOSITORY_ID = RepositoryId.of("test-repo");
@@ -144,6 +150,53 @@ class RepositoryConcurrencyTest {
         } finally {
             pool.shutdownNow();
         }
+    }
+
+    @ParameterizedTest
+    @EnumSource(MutationOperation.class)
+    void should_log_mutation_context_and_cause_without_repository_url_or_credentials(
+            MutationOperation operation, CapturedOutput output) {
+        FakeGitRepositoryPort git = new FakeGitRepositoryPort();
+        DefaultRepositoryApplicationService service = service(git, Duration.ofMillis(100));
+        prepareFailedMutation(service, git, operation);
+        int outputStart = output.getAll().length();
+
+        assertThatThrownBy(() -> executeMutation(service, operation))
+                .isInstanceOf(RepositoryMutationException.class);
+
+        String mutationOutput = output.getAll().substring(outputStart);
+        assertThat(mutationOutput).contains("repositoryId=test-repo");
+        assertThat(mutationOutput).contains("operation=" + operation.logName());
+        assertThat(mutationOutput).contains("RepositoryMutationException: repository mutation failed");
+        assertThat(mutationOutput).contains("cause type=IllegalStateException");
+        assertThat(mutationOutput).doesNotContain("https://");
+        assertThat(mutationOutput).doesNotContain("ghp_realsecretvalue");
+    }
+
+    private void prepareFailedMutation(
+            DefaultRepositoryApplicationService service,
+            FakeGitRepositoryPort git,
+            MutationOperation operation) {
+        switch (operation) {
+            case ENSURE -> git.failNextClone();
+            case SYNC -> {
+                service.ensure(REPOSITORY_ID);
+                git.failNextMutation();
+            }
+            case CHECKOUT -> {
+                service.ensure(REPOSITORY_ID);
+                git.failNextCheckout();
+            }
+        }
+    }
+
+    private RepositoryStatus executeMutation(
+            DefaultRepositoryApplicationService service, MutationOperation operation) {
+        return switch (operation) {
+            case ENSURE -> service.ensure(REPOSITORY_ID);
+            case SYNC -> service.sync(REPOSITORY_ID, Optional.empty());
+            case CHECKOUT -> service.checkout(REPOSITORY_ID, "feature");
+        };
     }
 
     @Test
@@ -329,7 +382,7 @@ class RepositoryConcurrencyTest {
         properties.setDataRoot(tempDirectory.toString());
         properties.setRepositoryLockTimeout(lockTimeout);
         RepositoryProperties.RepositoryConfig config = new RepositoryProperties.RepositoryConfig();
-        config.setUrl("file:///unused");
+        config.setUrl("https://user:ghp_realsecretvalue@example.com/repo.git");
         properties.getRepositories().put("test-repo", config);
         return properties;
     }
@@ -352,7 +405,9 @@ class RepositoryConcurrencyTest {
         private RepositoryRevision revision = SHA_ONE;
         private CountDownLatch mutationStarted = new CountDownLatch(0);
         private CountDownLatch mutationMayFinish = new CountDownLatch(0);
+        private boolean failClone;
         private boolean failMutation;
+        private boolean failCheckout;
         private boolean failCurrentBranchLookup;
 
         @Override
@@ -363,6 +418,10 @@ class RepositoryConcurrencyTest {
         @Override
         public RepositoryRevision clone(Path workingTree, String url, String branch) {
             events.add("clone");
+            if (failClone) {
+                failClone = false;
+                throw mutationFailure();
+            }
             cloned = true;
             revision = SHA_ONE;
             return revision;
@@ -375,7 +434,7 @@ class RepositoryConcurrencyTest {
             await(mutationMayFinish);
             if (failMutation) {
                 failMutation = false;
-                throw new RepositoryMutationException("planned mutation failure");
+                throw mutationFailure();
             }
             revision = SHA_TWO;
             return revision;
@@ -384,6 +443,10 @@ class RepositoryConcurrencyTest {
         @Override
         public RepositoryRevision checkout(Path workingTree, String revisionValue) {
             events.add("checkout");
+            if (failCheckout) {
+                failCheckout = false;
+                throw mutationFailure();
+            }
             revision = SHA_TWO;
             return revision;
         }
@@ -419,6 +482,14 @@ class RepositoryConcurrencyTest {
             failMutation = true;
         }
 
+        void failNextClone() {
+            failClone = true;
+        }
+
+        void failNextCheckout() {
+            failCheckout = true;
+        }
+
         void failNextCurrentBranchLookup() {
             failCurrentBranchLookup = true;
         }
@@ -438,6 +509,28 @@ class RepositoryConcurrencyTest {
         void markCloned() {
             cloned = true;
             revision = SHA_ONE;
+        }
+
+        private RepositoryMutationException mutationFailure() {
+            return new RepositoryMutationException(
+                    "planned mutation failure: https://user:ghp_realsecretvalue@example.com/repo.git",
+                    new IllegalStateException("credential ghp_realsecretvalue was rejected"));
+        }
+    }
+
+    private enum MutationOperation {
+        ENSURE("ensure"),
+        SYNC("sync"),
+        CHECKOUT("checkout");
+
+        private final String logName;
+
+        MutationOperation(String logName) {
+            this.logName = logName;
+        }
+
+        String logName() {
+            return logName;
         }
     }
 }
