@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.example.persistence.OrderMapper">
+    <!-- 刻意與 OrderMapper#findByOrderNo 的 @Select 文字不同，讓 annotation 優先於 XML 的順序可被測試偵測 -->
+    <select id="findByOrderNo" resultType="com.example.persistence.OrderEntity">
+        SELECT xml_marker FROM orders WHERE order_no = #{orderNo}
+    </select>
+    <select id="xmlOnly" resultType="com.example.persistence.OrderEntity">
+        SELECT * FROM orders WHERE customer_id = #{customerId}
+    </select>
+</mapper>

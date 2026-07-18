@@ -66,8 +66,28 @@ class ArchitectureTest {
         noClasses()
                 .that().resideOutsideOfPackage("..semantic.adapter.jdtls..")
                 .should().dependOnClassesThat().resideInAnyPackage(
-                        "com.github.javaparser..", "org.eclipse.lsp4j..", "org.eclipse.jdt..")
-                .as("JDT and LSP4J types must not leak past the JDT LS adapter")
+                        "com.github.javaparser..", "org.eclipse.lsp4j..")
+                .as("JavaParser and LSP4J types must not leak past the JDT LS adapter")
+                .check(classes);
+    }
+
+    @Test
+    void should_confine_jdt_core_to_its_two_adapters_when_service_is_imported() {
+        noClasses()
+                .that().resideOutsideOfPackage("..semantic.adapter.jdtls..")
+                .and().resideOutsideOfPackage("..syntax.adapter.jdt..")
+                .should().dependOnClassesThat().resideInAnyPackage("org.eclipse.jdt..")
+                .as("JDT types live in the JDT LS adapter and the syntax adapter, nowhere else")
+                .check(classes);
+    }
+
+    @Test
+    void should_keep_the_syntax_domain_free_of_jdt_when_service_is_imported() {
+        noClasses()
+                .that().resideInAPackage("..syntax.domain..")
+                .should().dependOnClassesThat().resideInAnyPackage("org.eclipse.jdt..", "org.eclipse.lsp4j..")
+                .as("the syntax extraction results the API and callers consume must stay free of JDT types")
+                .allowEmptyShould(true)
                 .check(classes);
     }
 
