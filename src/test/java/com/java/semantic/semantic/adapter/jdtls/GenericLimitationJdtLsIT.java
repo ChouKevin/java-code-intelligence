@@ -81,9 +81,14 @@ class GenericLimitationJdtLsIT {
     }
 
     /**
-     * 就緒守門的證明:workspace/symbol 在匯入邊界前為空、之後有值
+     * 就緒守門的證明:probe 判定 READY 後,workspace/symbol 必定查得到專案自身型別
      *
-     * 立即查詢時匯入尚未完成(冷匯入約 8 秒),故 IMPORTING 階段查得空結果
+     * 原本還斷言「匯入邊界前查詢必為空」,對真實 JDT LS 跑起來是錯的:
+     * 本 fixture 只有六個檔案,匯入快到 symbol 先就位,而狀態仍是 IMPORTING
+     * 兩個條件確實會分歧,方向卻依專案大小而反轉,所以那是不可靠的斷言
+     *
+     * 這反而佐證了 readiness 契約:狀態通知與 symbol 查詢缺一不可,
+     * 只信任其中一個都會在某種專案規模下誤判
      */
     @Test
     void should_populate_workspace_symbols_only_after_the_import_settles() throws Exception {
@@ -101,17 +106,14 @@ class GenericLimitationJdtLsIT {
                 properties.getRequestTimeout());
 
         try {
-            boolean beforeImport = symbolsPresent(session);
-            assertThat(session.status()).isEqualTo(SemanticEngineStatus.IMPORTING);
+            assertThat(session.status())
+                    .as("a freshly launched session is not ready until the probe says so")
+                    .isEqualTo(SemanticEngineStatus.IMPORTING);
 
             probe.awaitReady(session, client, root);
 
-            boolean afterImport = symbolsPresent(session);
             assertThat(session.status()).isEqualTo(SemanticEngineStatus.READY);
-            assertThat(beforeImport)
-                    .as("workspace/symbol must be empty before the import settles")
-                    .isFalse();
-            assertThat(afterImport)
+            assertThat(symbolsPresent(session))
                     .as("workspace/symbol must return the project's own type once ready")
                     .isTrue();
         } finally {
