@@ -1,5 +1,7 @@
 package com.java.semantic;
 
+import com.java.semantic.repository.application.RepositoryApplicationService;
+import com.java.semantic.repository.domain.RepositoryId;
 import com.tngtech.archunit.core.domain.JavaClasses;
 import com.tngtech.archunit.core.importer.ClassFileImporter;
 import com.tngtech.archunit.core.importer.ImportOption;
@@ -7,6 +9,9 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.springframework.stereotype.Controller;
 import org.springframework.web.bind.annotation.RestController;
+
+import java.util.Optional;
+import java.util.function.Function;
 
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.classes;
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
@@ -205,29 +210,99 @@ class ArchitectureTest {
     }
 
     @Test
-    void should_keep_task_seven_callgraph_surface_free_of_http_controllers_and_dtos() {
+    void should_keep_api_away_from_jdtls_adapter_and_protocol_libraries() {
         noClasses()
-                .that().resideInAnyPackage("..callgraph..", "..semantic.application..")
+                .that().resideInAPackage("..api..")
+                .should().dependOnClassesThat().resideInAnyPackage(
+                        "..semantic.adapter.jdtls..",
+                        "org.eclipse.lsp4j..",
+                        "org.eclipse.jdt..",
+                        "org.eclipse.jgit..")
+                .allowEmptyShould(false)
+                .check(classes);
+    }
+
+    @Test
+    void should_keep_jdtls_adapter_types_inside_adapter_and_composition_root() {
+        noClasses()
+                .that().resideOutsideOfPackage("..semantic.adapter.jdtls..")
+                .and().resideOutsideOfPackage("..config..")
+                .should().dependOnClassesThat()
+                .resideInAPackage("..semantic.adapter.jdtls..")
+                .allowEmptyShould(false)
+                .check(classes);
+    }
+
+    @Test
+    void should_keep_repository_layer_away_from_trie_implementation() {
+        noClasses()
+                .that().resideInAPackage("..repository..")
+                .should().dependOnClassesThat().resideInAPackage("..trie..")
+                .allowEmptyShould(false)
+                .check(classes);
+    }
+
+    @Test
+    void should_enter_analysis_and_entry_point_content_through_snapshot_gateway() {
+        classes()
+                .that().haveSimpleName("SemanticAnalysisApplicationService")
+                .or().haveSimpleName("EntryPointDiscoveryApplicationService")
+                .should().callMethod(
+                        RepositoryApplicationService.class,
+                        "withSnapshot",
+                        RepositoryId.class,
+                        Optional.class,
+                        Function.class)
+                .allowEmptyShould(false)
+                .check(classes);
+    }
+
+    @Test
+    void should_keep_public_task_eight_dtos_free_of_runtime_and_filesystem_types() {
+        noClasses()
+                .that().resideInAPackage("..api.dto..")
+                .should().dependOnClassesThat().resideInAnyPackage(
+                        "java.io..",
+                        "java.net..",
+                        "java.nio.file..",
+                        "org.eclipse.lsp4j..",
+                        "org.eclipse.jdt..",
+                        "org.eclipse.jgit..",
+                        "..repository.adapter..",
+                        "..semantic.adapter.jdtls..")
+                .allowEmptyShould(false)
+                .check(classes);
+    }
+
+    @Test
+    void should_keep_http_controllers_inside_api_package() {
+        classes()
+                .that().areAnnotatedWith(RestController.class)
+                .should().resideInAPackage("..api..")
+                .allowEmptyShould(false)
+                .check(classes);
+    }
+
+    @Test
+    void should_keep_application_and_callgraph_types_free_of_web_annotations() {
+        noClasses()
+                .that().resideInAnyPackage(
+                        "..callgraph..",
+                        "..semantic.application..",
+                        "..syntax.application..",
+                        "..trie..",
+                        "..repository.application..")
                 .should().beAnnotatedWith(Controller.class)
-                .as("Task 7 adds analysis contracts and orchestration, not @Controller endpoints")
                 .allowEmptyShould(false)
                 .check(classes);
         noClasses()
-                .that().resideInAnyPackage("..callgraph..", "..semantic.application..")
+                .that().resideInAnyPackage(
+                        "..callgraph..",
+                        "..semantic.application..",
+                        "..syntax.application..",
+                        "..trie..",
+                        "..repository.application..")
                 .should().beAnnotatedWith(RestController.class)
-                .as("Task 7 adds analysis contracts and orchestration, not @RestController endpoints")
-                .allowEmptyShould(false)
-                .check(classes);
-        noClasses()
-                .that().resideInAnyPackage("..callgraph..", "..semantic.application..")
-                .should().haveSimpleNameEndingWith("Dto")
-                .as("Task 7 adds no DTO surface")
-                .allowEmptyShould(false)
-                .check(classes);
-        noClasses()
-                .that().resideInAnyPackage("..callgraph..", "..semantic.application..")
-                .should().haveSimpleNameEndingWith("DTO")
-                .as("Task 7 adds no uppercase DTO surface")
                 .allowEmptyShould(false)
                 .check(classes);
     }

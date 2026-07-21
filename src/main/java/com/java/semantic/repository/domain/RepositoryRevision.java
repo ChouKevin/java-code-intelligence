@@ -34,11 +34,6 @@ public record RepositoryRevision(String value) {
         return new RepositoryRevision(FIXTURE_VALUE);
     }
 
-    /** FIXTURE 無法被 expectedRevision 釘選 */
-    public boolean isPinnable() {
-        return !FIXTURE_VALUE.equals(value);
-    }
-
     @Override
     public String toString() {
         return value;

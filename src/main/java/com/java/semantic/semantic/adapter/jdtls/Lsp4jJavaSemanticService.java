@@ -88,6 +88,12 @@ public class Lsp4jJavaSemanticService implements JavaSemanticService {
     @Override
     public SemanticMethod resolveMethod(
             RepositorySnapshot snapshot, String packageName, String className, String methodSignature) {
+        return JdtLsSemanticExceptionNormalizer.normalize(
+                () -> resolveMethodInternal(snapshot, packageName, className, methodSignature));
+    }
+
+    private SemanticMethod resolveMethodInternal(
+            RepositorySnapshot snapshot, String packageName, String className, String methodSignature) {
         Assert.notNull(snapshot, "snapshot is required");
         Objects.requireNonNull(packageName, "packageName is required");
         Assert.hasText(className, "className is required");
@@ -109,6 +115,12 @@ public class Lsp4jJavaSemanticService implements JavaSemanticService {
 
     @Override
     public List<SemanticCall> outgoingCalls(RepositorySnapshot snapshot, SemanticMethod method) {
+        return JdtLsSemanticExceptionNormalizer.normalize(
+                () -> outgoingCallsInternal(snapshot, method));
+    }
+
+    private List<SemanticCall> outgoingCallsInternal(
+            RepositorySnapshot snapshot, SemanticMethod method) {
         Assert.notNull(snapshot, "snapshot is required");
         Assert.notNull(method, "method is required");
         JdtWorkspaceSession session = workspaceManager.getOrStart(snapshot);
@@ -133,6 +145,12 @@ public class Lsp4jJavaSemanticService implements JavaSemanticService {
 
     @Override
     public Optional<SemanticCall> resolveCallAt(
+            RepositorySnapshot snapshot, SemanticMethod caller, SemanticCallSite callSite) {
+        return JdtLsSemanticExceptionNormalizer.normalize(
+                () -> resolveCallAtInternal(snapshot, caller, callSite));
+    }
+
+    private Optional<SemanticCall> resolveCallAtInternal(
             RepositorySnapshot snapshot, SemanticMethod caller, SemanticCallSite callSite) {
         Assert.notNull(snapshot, "snapshot is required");
         Assert.notNull(caller, "caller is required");
@@ -165,6 +183,12 @@ public class Lsp4jJavaSemanticService implements JavaSemanticService {
 
     @Override
     public List<SemanticMethod> implementations(RepositorySnapshot snapshot, SemanticMethod method) {
+        return JdtLsSemanticExceptionNormalizer.normalize(
+                () -> implementationsInternal(snapshot, method));
+    }
+
+    private List<SemanticMethod> implementationsInternal(
+            RepositorySnapshot snapshot, SemanticMethod method) {
         Assert.notNull(snapshot, "snapshot is required");
         Assert.notNull(method, "method is required");
         JdtWorkspaceSession session = workspaceManager.getOrStart(snapshot);
@@ -312,6 +336,7 @@ public class Lsp4jJavaSemanticService implements JavaSemanticService {
                     external,
                     SemanticResolutionOrigin.CALL_HIERARCHY));
         } catch (RuntimeException exception) {
+            JdtLsSemanticExceptionNormalizer.rethrowIfEngineFailure(exception);
             LOGGER.debug("JDT LS call target conversion failed repositoryId={} category={} exceptionType={}",
                     session.repositoryId().value(), "TARGET_CONVERSION_FAILED",
                     exception.getClass().getSimpleName());

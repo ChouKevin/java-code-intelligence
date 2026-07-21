@@ -1,5 +1,8 @@
 package com.java.semantic.repository.application;
 
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import com.java.semantic.repository.config.RepositoryProperties;
 import com.java.semantic.repository.domain.RepositoryId;
 import com.java.semantic.repository.domain.RepositoryMode;
@@ -9,19 +12,24 @@ import com.java.semantic.repository.domain.RepositorySnapshot;
 import com.java.semantic.repository.domain.RepositoryStatus;
 import com.java.semantic.repository.port.GitRepositoryPort;
 import com.java.semantic.repository.port.RepositoryMutationListener;
+import com.java.semantic.repository.port.RepositorySnapshotPublicationListener;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
+import org.slf4j.LoggerFactory;
 import org.springframework.boot.test.system.CapturedOutput;
 import org.springframework.boot.test.system.OutputCaptureExtension;
 
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -44,6 +52,108 @@ class RepositoryConcurrencyTest {
 
     @TempDir
     private Path tempDirectory;
+
+    @Test
+    void should_publish_fixture_once_through_snapshot_lifecycle() {
+        RecordingPublicationListener publication = new RecordingPublicationListener();
+        DefaultRepositoryApplicationService service = fixtureService(publication);
+
+        RepositoryStatus status = service.ensure(REPOSITORY_ID);
+
+        assertThat(publication.events()).containsExactly(
+                "before:test-repo",
+                "after:test-repo:FIXTURE");
+        assertThat(status.currentRevision()).contains(RepositoryRevision.fixture());
+    }
+
+    @Test
+    void should_reconcile_existing_clone_without_firing_git_mutation_listener() {
+        FakeGitRepositoryPort git = new FakeGitRepositoryPort();
+        git.markCloned();
+        List<String> events = new ArrayList<>();
+        RepositoryMutationListener mutation = repositoryId -> events.add("mutation");
+        RepositorySnapshotPublicationListener publication = new RepositorySnapshotPublicationListener() {
+            @Override
+            public void beforePublication(RepositoryId repositoryId) {
+                events.add("before");
+            }
+
+            @Override
+            public void afterPublication(RepositorySnapshot snapshot) {
+                events.add("after:" + snapshot.revision().value());
+            }
+        };
+        DefaultRepositoryApplicationService service = service(
+                git, List.of(mutation), List.of(publication), Duration.ofMillis(100));
+
+        service.ensure(REPOSITORY_ID);
+
+        assertThat(events).containsExactly("before", "after:" + SHA_ONE.value());
+    }
+
+    @Test
+    void should_clear_existing_publication_before_current_revision_reconciliation() {
+        FakeGitRepositoryPort git = new FakeGitRepositoryPort();
+        git.markCloned();
+        git.failNextCurrentRevisionLookup();
+        RecordingPublicationListener publication = new RecordingPublicationListener();
+        publication.seedPublished(REPOSITORY_ID);
+        DefaultRepositoryApplicationService service = service(
+                git, List.of(), List.of(publication), Duration.ofMillis(100));
+
+        assertThatThrownBy(() -> service.ensure(REPOSITORY_ID))
+                .isInstanceOf(RepositoryMutationException.class);
+
+        assertThat(publication.events()).containsExactly("before:test-repo");
+        assertThat(publication.isPublished(REPOSITORY_ID)).isFalse();
+    }
+
+    @Test
+    void should_not_fire_after_publication_when_branch_lookup_fails() {
+        RecordingPublicationListener publication = new RecordingPublicationListener();
+        FakeGitRepositoryPort git = new FakeGitRepositoryPort();
+        DefaultRepositoryApplicationService service = service(
+                git, List.of(), List.of(publication), Duration.ofMillis(100));
+        service.ensure(REPOSITORY_ID);
+        publication.clearEvents();
+        git.failNextCurrentBranchLookup();
+
+        assertThatThrownBy(() -> service.sync(REPOSITORY_ID, Optional.empty()))
+                .isInstanceOf(RepositoryMutationException.class);
+
+        assertThat(publication.events()).containsExactly("before:test-repo");
+        assertThat(service.withSnapshot(
+                REPOSITORY_ID, Optional.of(SHA_TWO), RepositorySnapshot::revision))
+                .isEqualTo(SHA_TWO);
+    }
+
+    @Test
+    void should_publish_snapshot_but_return_safe_failure_when_after_publication_fails(
+            CapturedOutput output) {
+        RepositorySnapshotPublicationListener publication = new RepositorySnapshotPublicationListener() {
+            @Override
+            public void beforePublication(RepositoryId repositoryId) {
+            }
+
+            @Override
+            public void afterPublication(RepositorySnapshot snapshot) {
+                throw new IllegalStateException("SECRET_PUBLICATION_FAILURE");
+            }
+        };
+        DefaultRepositoryApplicationService service = service(
+                new FakeGitRepositoryPort(), List.of(), List.of(publication), Duration.ofMillis(100));
+        int outputStart = output.getAll().length();
+
+        assertThatThrownBy(() -> service.ensure(REPOSITORY_ID))
+                .isExactlyInstanceOf(RepositoryMutationException.class)
+                .hasMessage("repository publication failed")
+                .hasNoCause();
+        assertThat(service.withSnapshot(
+                REPOSITORY_ID, Optional.of(SHA_ONE), RepositorySnapshot::revision))
+                .isEqualTo(SHA_ONE);
+        assertThat(output.getAll().substring(outputStart))
+                .doesNotContain("SECRET_PUBLICATION_FAILURE");
+    }
 
     @Test
     void should_make_a_mutation_wait_when_a_reader_holds_the_snapshot() throws Exception {
@@ -154,23 +264,38 @@ class RepositoryConcurrencyTest {
 
     @ParameterizedTest
     @EnumSource(MutationOperation.class)
-    void should_log_mutation_context_and_cause_without_repository_url_or_credentials(
-            MutationOperation operation, CapturedOutput output) {
+    void should_log_only_safe_mutation_failure_event(MutationOperation operation) {
         FakeGitRepositoryPort git = new FakeGitRepositoryPort();
         DefaultRepositoryApplicationService service = service(git, Duration.ofMillis(100));
         prepareFailedMutation(service, git, operation);
-        int outputStart = output.getAll().length();
+        Logger logger = (Logger) LoggerFactory.getLogger(DefaultRepositoryApplicationService.class);
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        try {
+            assertThatThrownBy(() -> executeMutation(service, operation))
+                    .isExactlyInstanceOf(RepositoryMutationException.class)
+                    .hasMessageContaining("MUTATION_FAILURE_SENTINEL");
 
-        assertThatThrownBy(() -> executeMutation(service, operation))
-                .isInstanceOf(RepositoryMutationException.class);
-
-        String mutationOutput = output.getAll().substring(outputStart);
-        assertThat(mutationOutput).contains("repositoryId=test-repo");
-        assertThat(mutationOutput).contains("operation=" + operation.logName());
-        assertThat(mutationOutput).contains("RepositoryMutationException: repository mutation failed");
-        assertThat(mutationOutput).contains("cause type=IllegalStateException");
-        assertThat(mutationOutput).doesNotContain("https://");
-        assertThat(mutationOutput).doesNotContain("ghp_realsecretvalue");
+            assertThat(appender.list).singleElement().satisfies(event -> {
+                String renderedOutput = event.getFormattedMessage();
+                String arguments = Arrays.toString(event.getArgumentArray());
+                assertThat(renderedOutput)
+                        .contains("REPOSITORY_MUTATION_FAILED", "repositoryId=test-repo",
+                                "operation=" + operation.logName())
+                        .doesNotContain("MUTATION_FAILURE_SENTINEL", "https://",
+                                "ghp_realsecretvalue", "RepositoryMutationException",
+                                "IllegalStateException", "at ");
+                assertThat(arguments)
+                        .doesNotContain("MUTATION_FAILURE_SENTINEL", "https://",
+                                "ghp_realsecretvalue", "RepositoryMutationException",
+                                "IllegalStateException", "at ");
+                assertThat(event.getThrowableProxy()).isNull();
+            });
+        } finally {
+            logger.detachAppender(appender);
+            appender.stop();
+        }
     }
 
     private void prepareFailedMutation(
@@ -281,7 +406,7 @@ class RepositoryConcurrencyTest {
         config.setPath(tempDirectory.toString());
         RepositoryRuntimeRegistry registry = new RepositoryRuntimeRegistry(properties);
         DefaultRepositoryApplicationService service = new DefaultRepositoryApplicationService(
-                registry, new FakeGitRepositoryPort(), List.of(), properties);
+                registry, new FakeGitRepositoryPort(), List.of(), List.of(), properties);
 
         RepositoryStatus status = service.ensure(REPOSITORY_ID);
 
@@ -291,6 +416,25 @@ class RepositoryConcurrencyTest {
                 .isInstanceOf(ImmutableFixtureException.class);
         assertThatThrownBy(() -> service.checkout(REPOSITORY_ID, "main"))
                 .isInstanceOf(ImmutableFixtureException.class);
+    }
+
+    @Test
+    void should_accept_fixture_as_expected_revision_for_fixture_snapshot() {
+        RepositoryProperties properties = properties(Duration.ofMillis(100));
+        RepositoryProperties.RepositoryConfig config = properties.getRepositories().get("test-repo");
+        config.setMode(RepositoryMode.LOCAL_FIXTURE);
+        config.setPath(tempDirectory.toString());
+        RepositoryRuntimeRegistry registry = new RepositoryRuntimeRegistry(properties);
+        DefaultRepositoryApplicationService service = new DefaultRepositoryApplicationService(
+                registry, new FakeGitRepositoryPort(), List.of(), List.of(), properties);
+        service.ensure(REPOSITORY_ID);
+
+        RepositoryRevision revision = service.withSnapshot(
+                REPOSITORY_ID,
+                Optional.of(RepositoryRevision.fixture()),
+                RepositorySnapshot::revision);
+
+        assertThat(revision).isEqualTo(RepositoryRevision.fixture());
     }
 
     @Test
@@ -370,11 +514,36 @@ class RepositoryConcurrencyTest {
 
     private DefaultRepositoryApplicationService service(
             FakeGitRepositoryPort git,
-            List<RepositoryMutationListener> listeners,
+            List<RepositoryMutationListener> mutationListeners,
+            Duration lockTimeout) {
+        return service(git, mutationListeners, List.of(), lockTimeout);
+    }
+
+    private DefaultRepositoryApplicationService service(
+            FakeGitRepositoryPort git,
+            List<RepositoryMutationListener> mutationListeners,
+            List<RepositorySnapshotPublicationListener> publicationListeners,
             Duration lockTimeout) {
         RepositoryProperties properties = properties(lockTimeout);
         RepositoryRuntimeRegistry registry = new RepositoryRuntimeRegistry(properties);
-        return new DefaultRepositoryApplicationService(registry, git, listeners, properties);
+        return new DefaultRepositoryApplicationService(
+                registry, git, mutationListeners, publicationListeners, properties);
+    }
+
+    private DefaultRepositoryApplicationService fixtureService(
+            RepositorySnapshotPublicationListener publicationListener) {
+        RepositoryProperties properties = properties(Duration.ofMillis(100));
+        RepositoryProperties.RepositoryConfig config =
+                properties.getRepositories().get(REPOSITORY_ID.value());
+        config.setMode(RepositoryMode.LOCAL_FIXTURE);
+        config.setPath(tempDirectory.toString());
+        RepositoryRuntimeRegistry registry = new RepositoryRuntimeRegistry(properties);
+        return new DefaultRepositoryApplicationService(
+                registry,
+                new FakeGitRepositoryPort(),
+                List.of(),
+                List.of(publicationListener),
+                properties);
     }
 
     private RepositoryProperties properties(Duration lockTimeout) {
@@ -398,6 +567,42 @@ class RepositoryConcurrencyTest {
         }
     }
 
+    private static final class RecordingPublicationListener
+            implements RepositorySnapshotPublicationListener {
+
+        private final List<String> events = new ArrayList<>();
+        private final Set<RepositoryId> publishedRepositories = new HashSet<>();
+
+        @Override
+        public void beforePublication(RepositoryId repositoryId) {
+            events.add("before:" + repositoryId.value());
+            publishedRepositories.remove(repositoryId);
+        }
+
+        @Override
+        public void afterPublication(RepositorySnapshot snapshot) {
+            events.add("after:" + snapshot.repositoryId().value()
+                    + ":" + snapshot.revision().value());
+            publishedRepositories.add(snapshot.repositoryId());
+        }
+
+        void seedPublished(RepositoryId repositoryId) {
+            publishedRepositories.add(repositoryId);
+        }
+
+        boolean isPublished(RepositoryId repositoryId) {
+            return publishedRepositories.contains(repositoryId);
+        }
+
+        List<String> events() {
+            return List.copyOf(events);
+        }
+
+        void clearEvents() {
+            events.clear();
+        }
+    }
+
     private static final class FakeGitRepositoryPort implements GitRepositoryPort {
 
         private final List<String> events = new ArrayList<>();
@@ -408,6 +613,7 @@ class RepositoryConcurrencyTest {
         private boolean failClone;
         private boolean failMutation;
         private boolean failCheckout;
+        private boolean failCurrentRevisionLookup;
         private boolean failCurrentBranchLookup;
 
         @Override
@@ -453,6 +659,10 @@ class RepositoryConcurrencyTest {
 
         @Override
         public RepositoryRevision currentRevision(Path workingTree) {
+            if (failCurrentRevisionLookup) {
+                failCurrentRevisionLookup = false;
+                throw new RepositoryMutationException("planned revision lookup failure");
+            }
             return revision;
         }
 
@@ -490,6 +700,10 @@ class RepositoryConcurrencyTest {
             failCheckout = true;
         }
 
+        void failNextCurrentRevisionLookup() {
+            failCurrentRevisionLookup = true;
+        }
+
         void failNextCurrentBranchLookup() {
             failCurrentBranchLookup = true;
         }
@@ -513,7 +727,7 @@ class RepositoryConcurrencyTest {
 
         private RepositoryMutationException mutationFailure() {
             return new RepositoryMutationException(
-                    "planned mutation failure: https://user:ghp_realsecretvalue@example.com/repo.git",
+                    "MUTATION_FAILURE_SENTINEL: https://user:ghp_realsecretvalue@example.com/repo.git",
                     new IllegalStateException("credential ghp_realsecretvalue was rejected"));
         }
     }

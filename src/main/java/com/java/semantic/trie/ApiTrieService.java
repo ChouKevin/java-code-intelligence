@@ -1,5 +1,7 @@
 package com.java.semantic.trie;
 
+import com.java.semantic.repository.domain.RepositoryId;
+import com.java.semantic.repository.domain.RepositorySnapshot;
 import com.java.semantic.syntax.domain.ApiEntryPoint;
 import com.java.semantic.syntax.domain.EntryPointClass;
 import com.java.semantic.syntax.domain.EntryPointMethod;
@@ -7,7 +9,6 @@ import com.java.semantic.syntax.domain.RepositorySyntax;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
-import org.springframework.util.Assert;
 import org.springframework.util.CollectionUtils;
 import org.springframework.util.StringUtils;
 
@@ -30,6 +31,7 @@ public class ApiTrieService {
     private static final Logger log = LoggerFactory.getLogger(ApiTrieService.class);
     private static final Comparator<ApiEntryPointRef> CANDIDATE_COMPARATOR = Comparator
             .comparing(ApiEntryPointRef::repoId)
+            .thenComparing(ApiEntryPointRef::analyzedRevision)
             .thenComparing(ApiEntryPointRef::httpMethod)
             .thenComparing(ApiEntryPointRef::routeTemplate)
             .thenComparing(ApiEntryPointRef::packageName)
@@ -38,26 +40,37 @@ public class ApiTrieService {
 
     private final AtomicReference<TrieState> current = new AtomicReference<>(TrieState.empty());
 
-    public void reload(String repoId, RepositorySyntax syntax) {
+    public void reload(RepositorySnapshot snapshot, RepositorySyntax syntax) {
         Objects.requireNonNull(syntax, "syntax is required");
-        reload(repoId, () -> syntax);
+        reload(snapshot, () -> syntax);
     }
 
-    public synchronized void reload(String repoId, Supplier<RepositorySyntax> syntaxSupplier) {
-        Assert.hasText(repoId, "repoId is required");
+    public synchronized void reload(
+            RepositorySnapshot snapshot,
+            Supplier<RepositorySyntax> syntaxSupplier) {
+        Objects.requireNonNull(snapshot, "snapshot is required");
         Objects.requireNonNull(syntaxSupplier, "syntaxSupplier is required");
+        String repoId = snapshot.repositoryId().value();
         TrieState previous = current.get();
         Map<String, List<ApiEntryPointRef>> available = withoutRepo(previous.entriesByRepo(), repoId);
-        current.set(buildState(available));
+        TrieState cleared = buildState(available);
+        current.set(cleared);
         try {
             RepositorySyntax syntax = Objects.requireNonNull(syntaxSupplier.get(), "syntax is required");
             Map<String, List<ApiEntryPointRef>> rebuilt = new HashMap<>(available);
-            rebuilt.put(repoId, extractRefs(repoId, syntax));
+            rebuilt.put(repoId, extractRefs(snapshot, syntax));
             current.set(buildState(rebuilt));
         } catch (RuntimeException exception) {
             current.set(previous);
             throw exception;
         }
+    }
+
+    public synchronized void clear(RepositoryId repositoryId) {
+        Objects.requireNonNull(repositoryId, "repositoryId is required");
+        TrieState snapshot = current.get();
+        current.set(buildState(withoutRepo(
+                snapshot.entriesByRepo(), repositoryId.value())));
     }
 
     public List<ApiEntryPointRef> lookupCandidates(
@@ -102,7 +115,10 @@ public class ApiTrieService {
                 .toList();
     }
 
-    private List<ApiEntryPointRef> extractRefs(String repoId, RepositorySyntax syntax) {
+    private List<ApiEntryPointRef> extractRefs(
+            RepositorySnapshot snapshot,
+            RepositorySyntax syntax) {
+        String repoId = snapshot.repositoryId().value();
         List<ApiEntryPointRef> refs = new ArrayList<>();
         for (EntryPointClass entryPointClass : syntax.entryPoints()) {
             for (EntryPointMethod method : entryPointClass.methods()) {
@@ -111,6 +127,7 @@ public class ApiTrieService {
                         NormalizedApiPath normalized = ApiPathNormalizer.normalize(api.apiUrl(), httpMethod);
                         ApiEntryPointRef ref = new ApiEntryPointRef(
                                 repoId,
+                                snapshot.revision().value(),
                                 entryPointClass.packageName(),
                                 entryPointClass.className(),
                                 api.name(),
@@ -118,10 +135,9 @@ public class ApiTrieService {
                                 normalized.path());
                         if (hasNonterminalRestWildcard(ref.routeTemplate())) {
                             log.warn(
-                                    "Omitting API route with nonterminal rest wildcard for {} {} at {}",
-                                    ref.httpMethod(),
-                                    ref.routeTemplate(),
-                                    handlerIdentity(ref));
+                                    "API route omitted repoId={} category={}",
+                                    repoId,
+                                    "NONTERMINAL_REST_WILDCARD");
                         } else {
                             refs.add(ref);
                         }
@@ -146,13 +162,9 @@ public class ApiTrieService {
                 ? existing
                 : candidate;
         log.warn(
-                "API route collision for {} {} in repo {} between {} and {}; keeping {}",
-                existing.httpMethod(),
-                existing.routeTemplate(),
+                "API route collision repoId={} category={}",
                 existing.repoId(),
-                handlerIdentity(existing),
-                handlerIdentity(candidate),
-                handlerIdentity(winner));
+                "INTRA_REPOSITORY_COLLISION");
         return winner;
     }
 
@@ -177,10 +189,8 @@ public class ApiTrieService {
         refsByRepo.put(ref.repoId(), ref);
         if (refsByRepo.size() > 1) {
             log.warn(
-                    "API route collision for {} {} across repos: {}",
-                    ref.httpMethod(),
-                    ref.routeTemplate(),
-                    refsByRepo.keySet());
+                    "API route collision category={}",
+                    "CROSS_REPOSITORY_COLLISION");
         }
     }
 
@@ -280,10 +290,6 @@ public class ApiTrieService {
             }
         }
         return false;
-    }
-
-    private static String handlerIdentity(ApiEntryPointRef ref) {
-        return ref.packageName() + "." + ref.className() + "." + ref.methodName();
     }
 
     private record RouteKey(String repoId, String httpMethod, String routeTemplate) {

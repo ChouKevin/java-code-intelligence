@@ -3,6 +3,9 @@ package com.java.semantic.trie;
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.AppenderBase;
+import com.java.semantic.repository.domain.RepositoryId;
+import com.java.semantic.repository.domain.RepositoryRevision;
+import com.java.semantic.repository.domain.RepositorySnapshot;
 import com.java.semantic.syntax.domain.ApiEntryPoint;
 import com.java.semantic.syntax.domain.EntryPointClass;
 import com.java.semantic.syntax.domain.EntryPointMethod;
@@ -14,6 +17,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.boot.test.system.CapturedOutput;
 import org.springframework.boot.test.system.OutputCaptureExtension;
 
+import java.nio.file.Path;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
@@ -23,14 +27,20 @@ import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.tuple;
 
 @ExtendWith(OutputCaptureExtension.class)
 class ApiTrieServiceTest {
 
+    private static final RepositoryRevision SHA_ONE = RepositoryRevision.ofSha(
+            "1111111111111111111111111111111111111111");
+    private static final RepositoryRevision SHA_TWO = RepositoryRevision.ofSha(
+            "2222222222222222222222222222222222222222");
+
     @Test
     void should_prefer_exact_then_wildcard_then_rest_when_multiple_paths_match() {
         ApiTrieService service = new ApiTrieService();
-        service.reload("repo", syntax(
+        service.reload(snapshot("repo", SHA_ONE.value()), syntax(
                 route("ExactController", "exact", "GET", "/api/special"),
                 route("WildcardController", "wildcard", "GET", "/api/{id}"),
                 route("RestController", "rest", "GET", "/api/{*path}")));
@@ -49,7 +59,7 @@ class ApiTrieServiceTest {
     @Test
     void should_backtrack_to_wildcard_when_exact_path_has_no_requested_method() {
         ApiTrieService service = new ApiTrieService();
-        service.reload("repo", syntax(
+        service.reload(snapshot("repo", SHA_ONE.value()), syntax(
                 route("ExactController", "getExact", "GET", "/api/vip/special"),
                 route("WildcardController", "postWildcard", "POST", "/api/vip/{id}")));
 
@@ -61,7 +71,8 @@ class ApiTrieServiceTest {
     @Test
     void should_match_zero_or_many_segments_when_route_uses_terminal_rest_wildcard() {
         ApiTrieService service = new ApiTrieService();
-        service.reload("repo", syntax(route("FileController", "read", "GET", "/files/{*path}")));
+        service.reload(snapshot("repo", SHA_ONE.value()),
+                syntax(route("FileController", "read", "GET", "/files/{*path}")));
 
         assertThat(service.lookupCandidates("/files", "GET", "")).hasSize(1);
         assertThat(service.lookupCandidates("/files/a/b/c", "GET", "")).hasSize(1);
@@ -70,7 +81,7 @@ class ApiTrieServiceTest {
     @Test
     void should_not_descend_when_rest_wildcard_has_registered_children() {
         ApiTrieService service = new ApiTrieService();
-        service.reload("repo", syntax(route(
+        service.reload(snapshot("repo", SHA_ONE.value()), syntax(route(
                 "FileController", "metadata", "GET", "/files/{*path}/metadata")));
 
         assertThat(service.lookupCandidates("/files/a/metadata", "GET", "")).isEmpty();
@@ -79,8 +90,8 @@ class ApiTrieServiceTest {
     @Test
     void should_use_all_only_as_fallback_when_lookup_has_exact_method() {
         ApiTrieService service = new ApiTrieService();
-        service.reload("repo-all", syntax(route("AllController", "all", "ALL", "/orders")));
-        service.reload("repo-get", syntax(route("GetController", "get", "GET", "/orders")));
+        service.reload(snapshot("repo-all", SHA_ONE.value()), syntax(route("AllController", "all", "ALL", "/orders")));
+        service.reload(snapshot("repo-get", SHA_TWO.value()), syntax(route("GetController", "get", "GET", "/orders")));
 
         assertThat(service.lookupCandidates("/orders", "GET", ""))
                 .extracting(ApiEntryPointRef::methodName)
@@ -93,8 +104,10 @@ class ApiTrieServiceTest {
     @Test
     void should_union_all_with_exact_method_when_suggesting_routes() {
         ApiTrieService service = new ApiTrieService();
-        service.reload("repo-all", syntax(route("AllController", "all", "ALL", "/orders/{id}")));
-        service.reload("repo-get", syntax(route("GetController", "get", "GET", "/orders/{id}")));
+        service.reload(snapshot("repo-all", SHA_ONE.value()),
+                syntax(route("AllController", "all", "ALL", "/orders/{id}")));
+        service.reload(snapshot("repo-get", SHA_TWO.value()),
+                syntax(route("GetController", "get", "GET", "/orders/{id}")));
 
         assertThat(service.suggestCandidates("/orders/42", "GET", "", 10))
                 .extracting(ApiEntryPointRef::methodName)
@@ -104,7 +117,7 @@ class ApiTrieServiceTest {
     @Test
     void should_publish_repo_routes_when_rebuild_contains_trace_method() {
         ApiTrieService service = new ApiTrieService();
-        service.reload("repo", syntax(
+        service.reload(snapshot("repo", SHA_ONE.value()), syntax(
                 route("TraceController", "trace", "TRACE", "/diagnostics"),
                 route("HealthController", "health", "GET", "/health")));
 
@@ -120,17 +133,25 @@ class ApiTrieServiceTest {
     void should_keep_lexicographically_smallest_handler_when_same_repo_route_and_method_collide(
             CapturedOutput output) {
         ApiTrieService service = new ApiTrieService();
-        EntryPointClass later = route("ZController", "zHandler", "GET", "/collision");
-        EntryPointClass earlier = route("AController", "aHandler", "GET", "/collision");
-        service.reload("repo", syntax(later, earlier));
+        EntryPointClass later = route("ZControllerSentinel", "zHandlerSentinel", "GET", "/collision-sentinel");
+        EntryPointClass earlier = route("AControllerSentinel", "aHandlerSentinel", "GET", "/collision-sentinel");
+        service.reload(snapshot("repo", SHA_ONE.value()), syntax(later, earlier));
 
-        assertThat(service.lookupCandidates("/collision", "GET", ""))
+        assertThat(service.lookupCandidates("/collision-sentinel", "GET", ""))
                 .extracting(ApiEntryPointRef::className, ApiEntryPointRef::methodName)
-                .containsExactly(Tuple.tuple("AController", "aHandler"));
-        assertThat(service.suggestCandidates("/collision", "GET", "", 10))
+                .containsExactly(Tuple.tuple("AControllerSentinel", "aHandlerSentinel"));
+        assertThat(service.suggestCandidates("/collision-sentinel", "GET", "", 10))
                 .extracting(ApiEntryPointRef::className, ApiEntryPointRef::methodName)
-                .containsExactly(Tuple.tuple("AController", "aHandler"));
-        assertThat(output).contains("AController.aHandler", "ZController.zHandler");
+                .containsExactly(Tuple.tuple("AControllerSentinel", "aHandlerSentinel"));
+        assertThat(output)
+                .contains("repoId=repo", "category=INTRA_REPOSITORY_COLLISION")
+                .doesNotContain(
+                        "/collision-sentinel",
+                        "AControllerSentinel",
+                        "aHandlerSentinel",
+                        "ZControllerSentinel",
+                        "zHandlerSentinel",
+                        "com.example");
     }
 
     @Test
@@ -141,7 +162,7 @@ class ApiTrieServiceTest {
         EntryPointClass smallerPackage = route(
                 "a.package", "ZController", "zHandler", "GET", "/package-collision");
 
-        service.reload("repo", syntax(largerPackage, smallerPackage));
+        service.reload(snapshot("repo", SHA_ONE.value()), syntax(largerPackage, smallerPackage));
 
         assertThat(service.lookupCandidates("/package-collision", "GET", ""))
                 .extracting(ApiEntryPointRef::packageName)
@@ -152,18 +173,25 @@ class ApiTrieServiceTest {
     }
 
     @Test
-    void should_include_package_when_collision_handlers_share_class_and_method(CapturedOutput output) {
+    void should_sanitize_collision_log_when_handlers_share_class_and_method(CapturedOutput output) {
         ApiTrieService service = new ApiTrieService();
         EntryPointClass first = route(
-                "z.package", "SameController", "sameHandler", "GET", "/identity-collision");
+                "z.package.sentinel", "SameControllerSentinel", "sameHandlerSentinel",
+                "GET", "/identity-collision-sentinel");
         EntryPointClass second = route(
-                "a.package", "SameController", "sameHandler", "GET", "/identity-collision");
+                "a.package.sentinel", "SameControllerSentinel", "sameHandlerSentinel",
+                "GET", "/identity-collision-sentinel");
 
-        service.reload("repo", syntax(first, second));
+        service.reload(snapshot("repo", SHA_ONE.value()), syntax(first, second));
 
         assertThat(output)
-                .contains("z.package.SameController.sameHandler")
-                .contains("a.package.SameController.sameHandler");
+                .contains("repoId=repo", "category=INTRA_REPOSITORY_COLLISION")
+                .doesNotContain(
+                        "/identity-collision-sentinel",
+                        "z.package.sentinel",
+                        "a.package.sentinel",
+                        "SameControllerSentinel",
+                        "sameHandlerSentinel");
     }
 
     @Test
@@ -174,7 +202,7 @@ class ApiTrieServiceTest {
         EntryPointClass smallerMethod = route(
                 "same.package", "SameController", "aHandler", "GET", "/method-collision");
 
-        service.reload("repo", syntax(largerMethod, smallerMethod));
+        service.reload(snapshot("repo", SHA_ONE.value()), syntax(largerMethod, smallerMethod));
 
         assertThat(service.lookupCandidates("/method-collision", "GET", ""))
                 .extracting(ApiEntryPointRef::methodName)
@@ -185,54 +213,117 @@ class ApiTrieServiceTest {
     }
 
     @Test
-    void should_order_cross_repo_candidates_when_same_route_exists_in_multiple_repositories() {
+    void should_order_cross_repo_candidates_when_same_route_exists_in_multiple_repositories(
+            CapturedOutput output) {
         ApiTrieService service = new ApiTrieService();
-        service.reload("repo-b", syntax(route("BController", "fromB", "GET", "/shared")));
-        service.reload("repo-a", syntax(route("AController", "fromA", "GET", "/shared")));
+        service.reload(snapshot("repo-b", SHA_TWO.value()), syntax(route(
+                "BControllerSentinel", "fromBSentinel", "GET", "/shared-sentinel")));
+        service.reload(snapshot("repo-a", SHA_ONE.value()), syntax(route(
+                "AControllerSentinel", "fromASentinel", "GET", "/shared-sentinel")));
 
-        assertThat(service.lookupCandidates("/shared", "GET", ""))
+        assertThat(service.lookupCandidates("/shared-sentinel", "GET", ""))
                 .extracting(ApiEntryPointRef::repoId)
                 .containsExactly("repo-a", "repo-b");
-        assertThat(service.lookupCandidates("/shared", "GET", "repo-b"))
+        assertThat(service.lookupCandidates("/shared-sentinel", "GET", "repo-b"))
                 .extracting(ApiEntryPointRef::repoId)
                 .containsExactly("repo-b");
+        assertThat(output)
+                .contains("category=CROSS_REPOSITORY_COLLISION")
+                .doesNotContain(
+                        "/shared-sentinel",
+                        "repo-a",
+                        "repo-b",
+                        "AControllerSentinel",
+                        "fromASentinel",
+                        "BControllerSentinel",
+                        "fromBSentinel");
+    }
+
+    @Test
+    void should_attach_exact_snapshot_revision_to_every_route_reference() {
+        ApiTrieService service = new ApiTrieService();
+        service.reload(snapshot("repo", SHA_ONE.value()),
+                syntax(route("OrderController", "get", "GET", "/orders/{id}")));
+
+        assertThat(service.lookupCandidates("/orders/42", "GET", ""))
+                .extracting(ApiEntryPointRef::repoId, ApiEntryPointRef::analyzedRevision)
+                .containsExactly(tuple("repo", SHA_ONE.value()));
+    }
+
+    @Test
+    void should_clear_only_requested_repository_without_rollback() {
+        ApiTrieService service = new ApiTrieService();
+        service.reload(snapshot("repo-a", SHA_ONE.value()),
+                syntax(route("AController", "a", "GET", "/shared")));
+        service.reload(snapshot("repo-b", SHA_TWO.value()),
+                syntax(route("BController", "b", "GET", "/shared")));
+
+        service.clear(RepositoryId.of("repo-a"));
+
+        assertThat(service.lookupCandidates("/shared", "GET", ""))
+                .extracting(ApiEntryPointRef::repoId, ApiEntryPointRef::analyzedRevision)
+                .containsExactly(tuple("repo-b", SHA_TWO.value()));
+    }
+
+    @Test
+    void should_leave_repository_absent_when_revision_aware_reload_fails() {
+        ApiTrieService service = new ApiTrieService();
+        service.reload(snapshot("repo", SHA_ONE.value()),
+                syntax(route("OldController", "old", "GET", "/old")));
+        service.clear(RepositoryId.of("repo"));
+
+        assertThatThrownBy(() -> service.reload(snapshot("repo", SHA_TWO.value()), () -> {
+            throw new IllegalStateException("syntax failed");
+        })).isInstanceOf(IllegalStateException.class);
+
+        assertThat(service.lookupCandidates("/old", "GET", "")).isEmpty();
     }
 
     @Test
     void should_restore_previous_routes_and_propagate_when_rebuild_fails() {
         ApiTrieService service = new ApiTrieService();
-        service.reload("repo", syntax(route("OldController", "old", "GET", "/old")));
+        service.reload(snapshot("repo", SHA_ONE.value()), syntax(route("OldController", "old", "GET", "/old")));
 
-        assertThatThrownBy(() -> service.reload("repo", () -> {
+        assertThatThrownBy(() -> service.reload(snapshot("repo", SHA_TWO.value()), () -> {
             throw new IllegalStateException("syntax failed");
         })).isInstanceOf(IllegalStateException.class)
                 .hasMessage("syntax failed");
-        assertThat(service.lookupCandidates("/old", "GET", "")).hasSize(1);
+        assertThat(service.lookupCandidates("/old", "GET", ""))
+                .singleElement()
+                .extracting(ApiEntryPointRef::analyzedRevision)
+                .isEqualTo(SHA_ONE.value());
     }
 
     @Test
     void should_omit_nonterminal_rest_route_when_repo_has_valid_sibling(CapturedOutput output) {
         ApiTrieService service = new ApiTrieService();
-        service.reload("repo", syntax(
-                route("InvalidController", "invalid", "GET", "/files/{*path}/metadata"),
+        service.reload(snapshot("repo", SHA_ONE.value()), syntax(
+                route("InvalidControllerSentinel", "invalidSentinel", "GET", "/files/{*path}/metadata-sentinel"),
                 route("ValidController", "valid", "GET", "/files/valid")));
 
-        assertThat(service.lookupCandidates("/files/a/metadata", "GET", "")).isEmpty();
-        assertThat(service.suggestCandidates("/files/a/metadata", "GET", "", 10))
+        assertThat(service.lookupCandidates("/files/a/metadata-sentinel", "GET", "")).isEmpty();
+        assertThat(service.suggestCandidates("/files/a/metadata-sentinel", "GET", "", 10))
                 .extracting(ApiEntryPointRef::methodName)
                 .containsExactly("valid");
         assertThat(service.lookupCandidates("/files/valid", "GET", ""))
                 .extracting(ApiEntryPointRef::methodName)
                 .containsExactly("valid");
-        assertThat(output).contains("InvalidController.invalid", "nonterminal");
+        assertThat(output)
+                .contains("repoId=repo", "category=NONTERMINAL_REST_WILDCARD")
+                .doesNotContain(
+                        "/files/{*path}/metadata-sentinel",
+                        "InvalidControllerSentinel",
+                        "invalidSentinel",
+                        "com.example");
     }
 
     @Test
     void should_return_other_repo_without_stale_repo_when_one_repo_write_lock_and_rebuild_are_blocked()
             throws Exception {
         ApiTrieService service = new ApiTrieService();
-        service.reload("repo-a", syntax(route("OldController", "old", "GET", "/shared")));
-        service.reload("repo-b", syntax(route("OtherController", "other", "GET", "/shared")));
+        service.reload(snapshot("repo-a", SHA_ONE.value()), syntax(route("OldController", "old", "GET", "/shared")));
+        service.reload(snapshot("repo-b", SHA_TWO.value()),
+                syntax(route("OtherController", "other", "GET", "/shared")));
         ReentrantReadWriteLock repoALock = new ReentrantReadWriteLock(true);
         CountDownLatch started = new CountDownLatch(1);
         CountDownLatch release = new CountDownLatch(1);
@@ -240,7 +331,7 @@ class ApiTrieServiceTest {
         CompletableFuture<Void> rebuild = CompletableFuture.runAsync(() -> {
             repoALock.writeLock().lock();
             try {
-                service.reload("repo-a", () -> {
+                service.reload(snapshot("repo-a", SHA_TWO.value()), () -> {
                     started.countDown();
                     await(release);
                     return syntax(route("NewController", "newRoute", "GET", "/shared"));
@@ -265,21 +356,25 @@ class ApiTrieServiceTest {
     @Test
     void should_hide_partial_repo_when_rebuild_is_blocked_during_state_construction() throws Exception {
         ApiTrieService service = new ApiTrieService();
-        service.reload("repo-a", syntax(route("OldController", "old", "GET", "/publication")));
-        service.reload("repo-b", syntax(route("OtherController", "other", "GET", "/publication")));
+        service.reload(snapshot("repo-a", SHA_ONE.value()),
+                syntax(route("OldController", "old", "GET", "/publication")));
+        service.reload(snapshot("repo-b", SHA_TWO.value()),
+                syntax(route("OtherController", "other", "GET", "/publication")));
         CountDownLatch supplierReturned = new CountDownLatch(1);
         CountDownLatch constructionBlocked = new CountDownLatch(1);
         CountDownLatch releaseConstruction = new CountDownLatch(1);
         Logger logger = (Logger) LoggerFactory.getLogger(ApiTrieService.class);
         BlockingCollisionAppender appender = new BlockingCollisionAppender(
-                "/publication", constructionBlocked, releaseConstruction);
+                "category=CROSS_REPOSITORY_COLLISION", constructionBlocked, releaseConstruction);
         appender.start();
         try {
             logger.addAppender(appender);
-            CompletableFuture<Void> rebuild = CompletableFuture.runAsync(() -> service.reload("repo-a", () -> {
-                supplierReturned.countDown();
-                return syntax(route("NewController", "newRoute", "GET", "/publication"));
-            }));
+            CompletableFuture<Void> rebuild = CompletableFuture.runAsync(() -> service.reload(
+                    snapshot("repo-a", SHA_TWO.value()),
+                    () -> {
+                        supplierReturned.countDown();
+                        return syntax(route("NewController", "newRoute", "GET", "/publication"));
+                    }));
             try {
                 assertThat(supplierReturned.await(5, TimeUnit.SECONDS)).isTrue();
                 assertThat(constructionBlocked.await(5, TimeUnit.SECONDS)).isTrue();
@@ -304,11 +399,18 @@ class ApiTrieServiceTest {
     @Test
     void should_return_first_candidate_when_compatibility_lookup_is_used() {
         ApiTrieService service = new ApiTrieService();
-        service.reload("repo", syntax(route("Controller", "handler", "GET", "/route")));
+        service.reload(snapshot("repo", SHA_ONE.value()), syntax(route("Controller", "handler", "GET", "/route")));
 
         Optional<ApiEntryPointRef> result = service.lookup("/route", "GET");
 
         assertThat(result).get().extracting(ApiEntryPointRef::methodName).isEqualTo("handler");
+    }
+
+    private static RepositorySnapshot snapshot(String repoId, String revision) {
+        return new RepositorySnapshot(
+                RepositoryId.of(repoId),
+                Path.of(".").toAbsolutePath().normalize(),
+                new RepositoryRevision(revision));
     }
 
     private static RepositorySyntax syntax(EntryPointClass... classes) {
@@ -353,22 +455,22 @@ class ApiTrieServiceTest {
 
     private static final class BlockingCollisionAppender extends AppenderBase<ILoggingEvent> {
 
-        private final String route;
+        private final String trigger;
         private final CountDownLatch blocked;
         private final CountDownLatch release;
 
         private BlockingCollisionAppender(
-                String route,
+                String trigger,
                 CountDownLatch blocked,
                 CountDownLatch release) {
-            this.route = route;
+            this.trigger = trigger;
             this.blocked = blocked;
             this.release = release;
         }
 
         @Override
         protected void append(ILoggingEvent event) {
-            if (event.getFormattedMessage().contains(route)) {
+            if (event.getFormattedMessage().contains(trigger)) {
                 blocked.countDown();
                 await(release);
             }

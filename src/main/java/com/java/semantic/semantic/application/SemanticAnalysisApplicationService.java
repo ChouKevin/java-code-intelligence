@@ -8,18 +8,21 @@ import com.java.semantic.callgraph.domain.AnalysisStatus;
 import com.java.semantic.callgraph.domain.AnalysisWarning;
 import com.java.semantic.callgraph.domain.EvidenceVisibility;
 import com.java.semantic.callgraph.domain.ExplainableCallGraph;
+import com.java.semantic.callgraph.domain.FlattenedCallGraph;
 import com.java.semantic.callgraph.domain.MethodId;
 import com.java.semantic.identity.PolicyIdentity;
 import com.java.semantic.callgraph.domain.ReadPolicy;
 import com.java.semantic.callgraph.domain.RevisionBoundAnalysisResult;
 import com.java.semantic.config.CallGraphDepthProperties;
 import com.java.semantic.repository.application.RepositoryApplicationService;
-import com.java.semantic.repository.application.RepositoryRevisionMismatchException;
 import com.java.semantic.repository.domain.RepositoryId;
 import com.java.semantic.repository.domain.RepositoryRevision;
 import com.java.semantic.repository.domain.RepositorySnapshot;
 import com.java.semantic.semantic.domain.JavaSemanticService;
+import com.java.semantic.semantic.domain.SemanticAmbiguousMethodException;
+import com.java.semantic.semantic.domain.SemanticEngineException;
 import com.java.semantic.semantic.domain.SemanticMethod;
+import com.java.semantic.semantic.domain.SemanticSymbolNotFoundException;
 import com.java.semantic.syntax.domain.RepositorySyntax;
 import com.java.semantic.syntax.domain.SyntaxExtractionService;
 
@@ -68,15 +71,25 @@ public final class SemanticAnalysisApplicationService {
             String methodSignature) {
         Objects.requireNonNull(repositoryId, "repositoryId is required");
         Objects.requireNonNull(expectedRevision, "expectedRevision is required");
-        try {
-            return repositoryApplicationService.withSnapshot(
-                    repositoryId,
-                    expectedRevision,
-                    snapshot -> analyzeSnapshot(
-                            snapshot, packageName, className, methodSignature));
-        } catch (RepositoryRevisionMismatchException exception) {
-            return failed(repositoryId, exception.getCurrentRevision());
-        }
+        return repositoryApplicationService.withSnapshot(
+                repositoryId,
+                expectedRevision,
+                snapshot -> analyzeSnapshot(
+                        snapshot, packageName, className, methodSignature));
+    }
+
+    public RevisionBoundAnalysisResult<FlattenedCallGraph> analyzeFlattened(
+            RepositoryId repositoryId,
+            Optional<RepositoryRevision> expectedRevision,
+            String packageName,
+            String className,
+            String methodSignature) {
+        return analyze(
+                repositoryId,
+                expectedRevision,
+                packageName,
+                className,
+                methodSignature).mapData(ExplainableCallGraph::legacyFlattened);
     }
 
     private RevisionBoundAnalysisResult<ExplainableCallGraph> analyzeSnapshot(
@@ -101,6 +114,10 @@ public final class SemanticAnalysisApplicationService {
             CallGraphBuildResult buildResult = builder.build(
                     snapshot, syntax, root, maxDepth);
             return result(buildResult, metadata, revision);
+        } catch (SemanticAmbiguousMethodException
+                | SemanticSymbolNotFoundException
+                | SemanticEngineException exception) {
+            throw exception;
         } catch (RuntimeException exception) {
             return failed(metadata, revision);
         }
@@ -134,12 +151,6 @@ public final class SemanticAnalysisApplicationService {
                 "BUSINESS_READ_FORBIDDEN", POLICY_MESSAGE, "");
         return RevisionBoundAnalysisResult.businessReadForbidden(
                 List.of(warning), metadata, revision.value());
-    }
-
-    private RevisionBoundAnalysisResult<ExplainableCallGraph> failed(
-            RepositoryId repositoryId,
-            RepositoryRevision revision) {
-        return failed(metadata(repositoryId), revision);
     }
 
     private RevisionBoundAnalysisResult<ExplainableCallGraph> failed(

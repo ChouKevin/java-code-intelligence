@@ -24,10 +24,10 @@ class RepositoryRevisionTest {
     }
 
     @Test
-    void should_report_non_pinnable_when_revision_is_a_fixture() {
-        RepositoryRevision revision = RepositoryRevision.fixture();
+    void should_accept_fixture_as_an_exact_revision_value() {
+        RepositoryRevision revision = new RepositoryRevision("FIXTURE");
 
+        assertThat(revision).isEqualTo(RepositoryRevision.fixture());
         assertThat(revision.value()).isEqualTo("FIXTURE");
-        assertThat(revision.isPinnable()).isFalse();
     }
 }

@@ -9,6 +9,10 @@ import com.java.semantic.repository.application.RepositoryNotReadyException;
 import com.java.semantic.repository.application.RepositoryRevisionMismatchException;
 import com.java.semantic.repository.domain.InvalidRepositoryIdException;
 import com.java.semantic.semantic.domain.SemanticAmbiguousMethodException;
+import com.java.semantic.semantic.domain.SemanticEngineNotReadyException;
+import com.java.semantic.semantic.domain.SemanticEngineStartFailedException;
+import com.java.semantic.semantic.domain.SemanticProtocolException;
+import com.java.semantic.semantic.domain.SemanticRequestTimeoutException;
 import com.java.semantic.semantic.domain.SemanticSymbolNotFoundException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -85,6 +89,42 @@ public class ApiExceptionHandler {
                 HttpStatus.UNPROCESSABLE_ENTITY,
                 "SEMANTIC_SYMBOL_NOT_FOUND",
                 "requested symbol was not found in the workspace");
+    }
+
+    @ExceptionHandler(SemanticEngineNotReadyException.class)
+    public ResponseEntity<ApiErrorResponse> semanticEngineNotReady() {
+        return response(HttpStatus.SERVICE_UNAVAILABLE,
+                "SEMANTIC_ENGINE_NOT_READY", "semantic engine is not ready");
+    }
+
+    @ExceptionHandler(SemanticEngineStartFailedException.class)
+    public ResponseEntity<ApiErrorResponse> semanticEngineStartFailed() {
+        return response(HttpStatus.SERVICE_UNAVAILABLE,
+                "SEMANTIC_ENGINE_START_FAILED", "semantic engine failed to start");
+    }
+
+    @ExceptionHandler(SemanticRequestTimeoutException.class)
+    public ResponseEntity<ApiErrorResponse> semanticRequestTimeout() {
+        return response(HttpStatus.GATEWAY_TIMEOUT,
+                "SEMANTIC_REQUEST_TIMEOUT", "semantic request timed out");
+    }
+
+    @ExceptionHandler(SemanticProtocolException.class)
+    public ResponseEntity<ApiErrorResponse> semanticProtocolError() {
+        return response(HttpStatus.INTERNAL_SERVER_ERROR,
+                "SEMANTIC_PROTOCOL_ERROR", "semantic protocol request failed");
+    }
+
+    @ExceptionHandler(IllegalArgumentException.class)
+    public ResponseEntity<ApiErrorResponse> invalidArgument() {
+        return response(HttpStatus.BAD_REQUEST,
+                "REQUEST_INVALID", "request body is invalid");
+    }
+
+    @ExceptionHandler(Exception.class)
+    public ResponseEntity<ApiErrorResponse> internalFailure() {
+        return response(HttpStatus.INTERNAL_SERVER_ERROR,
+                "INTERNAL_ERROR", "request failed");
     }
 
     private ResponseEntity<ApiErrorResponse> response(

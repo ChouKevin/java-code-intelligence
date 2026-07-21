@@ -113,6 +113,135 @@ paths:
           $ref: '#/components/responses/Conflict'
         '500':
           $ref: '#/components/responses/MutationFailed'
+  /v1/repositories/{repoId}/entry-points:
+    parameters:
+      - $ref: '#/components/parameters/RepoId'
+    get:
+      operationId: listEntryPoints
+      parameters:
+        - name: types
+          in: query
+          required: false
+          schema:
+            type: string
+            pattern: '^(API|MQ|SCHEDULE)(,(API|MQ|SCHEDULE))*$'
+      responses:
+        '200':
+          $ref: '#/components/responses/EntryPoints'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/AuthDisabled'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/MutationFailed'
+  /v1/analyses/call-graph:
+    post:
+      operationId: analyzeCallGraph
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AnalyzeCallGraphRequest'
+      responses:
+        '200':
+          $ref: '#/components/responses/ExplainableAnalysis'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/AuthDisabled'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/MutationFailed'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+        '504':
+          $ref: '#/components/responses/GatewayTimeout'
+  /v1/analyses/call-graph/flatten:
+    post:
+      operationId: analyzeFlattenedCallGraph
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AnalyzeCallGraphRequest'
+      responses:
+        '200':
+          $ref: '#/components/responses/FlattenedAnalysis'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/AuthDisabled'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/MutationFailed'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+        '504':
+          $ref: '#/components/responses/GatewayTimeout'
+  /v1/api-routes/lookup:
+    post:
+      operationId: lookupApiRoutes
+      description: Unknown-but-valid repoScope values return an empty candidate list with 200 and do not manufacture a repository status error
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ApiRouteLookupRequest'
+      responses:
+        '200':
+          $ref: '#/components/responses/ApiRouteCandidates'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/AuthDisabled'
+        '500':
+          $ref: '#/components/responses/MutationFailed'
+  /v1/api-routes/suggest:
+    post:
+      operationId: suggestApiRoutes
+      description: Unknown-but-valid repoScope values return an empty candidate list with 200 and do not manufacture a repository status error
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ApiRouteSuggestRequest'
+      responses:
+        '200':
+          $ref: '#/components/responses/ApiRouteCandidates'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/AuthDisabled'
+        '500':
+          $ref: '#/components/responses/MutationFailed'
 components:
   securitySchemes:
     ApiToken:
@@ -134,6 +263,30 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/RepositoryStatusResponse'
+    EntryPoints:
+      description: Revision-bound entry-point inventory
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/EntryPointsResponse'
+    ExplainableAnalysis:
+      description: Revision-bound explainable call graph analysis
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ExplainableAnalysisResponse'
+    FlattenedAnalysis:
+      description: Revision-bound flattened call graph analysis
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/FlattenedAnalysisResponse'
+    ApiRouteCandidates:
+      description: Per-candidate route matches, each bound to its analyzed revision
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiRouteCandidatesResponse'
     BadRequest:
       description: Invalid repository id or request
       content:
@@ -153,7 +306,7 @@ components:
           schema:
             $ref: '#/components/schemas/ApiErrorResponse'
     NotFound:
-      description: Repository is not configured
+      description: Repository or analysis symbol is not configured
       content:
         application/json:
           schema:
@@ -164,8 +317,26 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/ApiErrorResponse'
+    UnprocessableEntity:
+      description: Analysis symbol could not be resolved
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiErrorResponse'
     MutationFailed:
-      description: Sanitized repository mutation failure
+      description: Sanitized service failure
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiErrorResponse'
+    ServiceUnavailable:
+      description: Semantic engine is unavailable
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiErrorResponse'
+    GatewayTimeout:
+      description: Semantic engine request timed out
       content:
         application/json:
           schema:
@@ -185,6 +356,602 @@ components:
           type: string
           minLength: 1
           pattern: '.*\S.*'
+    AnalyzeCallGraphRequest:
+      type: object
+      required:
+        - repoId
+        - packageName
+        - className
+        - methodSignature
+      properties:
+        repoId:
+          type: string
+          minLength: 1
+          pattern: '^[a-z0-9][a-z0-9._-]{0,63}$'
+        packageName:
+          type: string
+          minLength: 1
+          pattern: '.*\S.*'
+        className:
+          type: string
+          minLength: 1
+          pattern: '.*\S.*'
+        methodSignature:
+          type: string
+          minLength: 1
+          pattern: '.*\S.*'
+        expectedRevision:
+          type: string
+          nullable: true
+          pattern: '^[0-9a-f]{40}$|^FIXTURE$'
+    ApiRouteLookupRequest:
+      type: object
+      required:
+        - apiPath
+      properties:
+        apiPath:
+          type: string
+          minLength: 1
+          pattern: '.*\S.*'
+        httpMethod:
+          type: string
+          nullable: true
+        repoScope:
+          type: string
+          nullable: true
+    ApiRouteSuggestRequest:
+      type: object
+      required:
+        - apiPath
+        - limit
+      properties:
+        apiPath:
+          type: string
+          minLength: 1
+          pattern: '.*\S.*'
+        httpMethod:
+          type: string
+          nullable: true
+        repoScope:
+          type: string
+          nullable: true
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 20
+    AnalysisStatus:
+      type: string
+      enum:
+        - SUCCESS
+        - PARTIAL
+        - FAILED
+        - BUSINESS_READ_FORBIDDEN
+    ResolutionStrategy:
+      type: string
+      enum:
+        - JDT_CALL_HIERARCHY
+        - JDT_DEFINITION_FALLBACK
+        - SPRING_BEAN_BY_QUALIFIER
+        - SPRING_BEAN_BY_PRIMARY
+        - SPRING_SINGLE_IMPLEMENTATION
+        - MYBATIS_MAPPER
+        - LOMBOK_GENERATED
+        - EXTERNAL_LIBRARY
+        - FEIGN_CLIENT
+        - BUSINESS_READ_FORBIDDEN
+        - SPRING_MULTIPLE_CANDIDATES
+        - DATA_ACCESS_WITHOUT_EVIDENCE
+        - UNRESOLVED_TARGET
+    AnalysisResponse:
+      type: object
+      required:
+        - status
+        - data
+        - warnings
+        - errors
+        - metadata
+        - analyzedRevision
+      properties:
+        status:
+          $ref: '#/components/schemas/AnalysisStatus'
+        data:
+          nullable: true
+        warnings:
+          type: array
+          items:
+            $ref: '#/components/schemas/AnalysisWarning'
+        errors:
+          type: array
+          items:
+            $ref: '#/components/schemas/AnalysisError'
+        metadata:
+          $ref: '#/components/schemas/AnalysisMetadata'
+        analyzedRevision:
+          type: string
+          pattern: '^[0-9a-f]{40}$|^FIXTURE$'
+    ExplainableAnalysisResponse:
+      type: object
+      required:
+        - status
+        - data
+        - warnings
+        - errors
+        - metadata
+        - analyzedRevision
+      properties:
+        status:
+          $ref: '#/components/schemas/AnalysisStatus'
+        data:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/ExplainableCallGraph'
+        warnings:
+          type: array
+          items:
+            $ref: '#/components/schemas/AnalysisWarning'
+        errors:
+          type: array
+          items:
+            $ref: '#/components/schemas/AnalysisError'
+        metadata:
+          $ref: '#/components/schemas/AnalysisMetadata'
+        analyzedRevision:
+          type: string
+          pattern: '^[0-9a-f]{40}$|^FIXTURE$'
+    FlattenedAnalysisResponse:
+      type: object
+      required:
+        - status
+        - data
+        - warnings
+        - errors
+        - metadata
+        - analyzedRevision
+      properties:
+        status:
+          $ref: '#/components/schemas/AnalysisStatus'
+        data:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/FlattenedCallGraph'
+        warnings:
+          type: array
+          items:
+            $ref: '#/components/schemas/AnalysisWarning'
+        errors:
+          type: array
+          items:
+            $ref: '#/components/schemas/AnalysisError'
+        metadata:
+          $ref: '#/components/schemas/AnalysisMetadata'
+        analyzedRevision:
+          type: string
+          pattern: '^[0-9a-f]{40}$|^FIXTURE$'
+    AnalysisMetadata:
+      type: object
+      required:
+        - repoId
+        - analyzedAt
+      properties:
+        repoId:
+          type: string
+        analyzedAt:
+          type: string
+          format: date-time
+    AnalysisWarning:
+      type: object
+      required:
+        - code
+        - message
+        - location
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+        location:
+          type: string
+    AnalysisError:
+      type: object
+      required:
+        - code
+        - message
+        - detail
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+        detail:
+          type: string
+    MethodId:
+      type: object
+      required:
+        - repoId
+        - packageName
+        - className
+        - methodName
+        - parameterTypes
+      properties:
+        repoId:
+          type: string
+        packageName:
+          type: string
+        className:
+          type: string
+        methodName:
+          type: string
+        parameterTypes:
+          type: array
+          items:
+            type: string
+    CallNodeId:
+      type: object
+      required:
+        - value
+      properties:
+        value:
+          type: string
+    CallType:
+      type: string
+      enum:
+        - INTERNAL_SERVICE
+        - INTERNAL_CONTROLLER
+        - INTERNAL_COMPONENT
+        - INTERNAL_SCHEDULE
+        - INTERNAL_INTERFACE_DEFAULT
+        - DATA_ACCESS
+        - RPC_CLIENT
+        - MESSAGE_QUEUE
+        - CACHE_OP
+        - CYCLE_BACK_EDGE
+        - TRAVERSAL_CUTOFF
+        - INTERNAL_CLASS
+        - UNRESOLVED
+        - GENERATED_CODE
+        - EXTERNAL_LIB
+        - INTERFACE
+    EvidenceVisibility:
+      type: string
+      enum:
+        - READABLE
+        - BUSINESS_READ_FORBIDDEN
+    CallNode:
+      type: object
+      required:
+        - nodeId
+        - signature
+        - callType
+        - annotations
+        - visibility
+      properties:
+        nodeId:
+          $ref: '#/components/schemas/CallNodeId'
+        methodId:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/MethodId'
+        signature:
+          type: string
+        callType:
+          $ref: '#/components/schemas/CallType'
+        sourceFile:
+          type: string
+          nullable: true
+        startLine:
+          type: integer
+          nullable: true
+        endLine:
+          type: integer
+          nullable: true
+        annotations:
+          type: object
+          additionalProperties:
+            type: string
+        code:
+          type: string
+          nullable: true
+        visibility:
+          $ref: '#/components/schemas/EvidenceVisibility'
+    CallSiteRange:
+      type: object
+      required:
+        - sourceFile
+        - startLine
+        - startCharacter
+        - endLine
+        - endCharacter
+      properties:
+        sourceFile:
+          type: string
+        startLine:
+          type: integer
+        startCharacter:
+          type: integer
+        endLine:
+          type: integer
+        endCharacter:
+          type: integer
+    CallEdge:
+      type: object
+      required:
+        - caller
+        - callee
+        - callExpression
+        - resolutionStrategy
+        - confidence
+        - evidence
+        - warnings
+        - visibility
+      properties:
+        caller:
+          $ref: '#/components/schemas/CallNodeId'
+        callee:
+          $ref: '#/components/schemas/CallNodeId'
+        callExpression:
+          type: string
+        callSite:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/CallSiteRange'
+        resolutionStrategy:
+          $ref: '#/components/schemas/ResolutionStrategy'
+        confidence:
+          type: number
+          format: double
+        evidence:
+          type: array
+          items:
+            type: string
+        warnings:
+          type: array
+          items:
+            type: string
+        visibility:
+          $ref: '#/components/schemas/EvidenceVisibility'
+    FlattenedMethodNode:
+      type: object
+      required:
+        - signature
+        - className
+        - methodName
+        - callType
+        - description
+        - code
+        - annotations
+        - callees
+      properties:
+        signature:
+          type: string
+        className:
+          type: string
+        methodName:
+          type: string
+        callType:
+          $ref: '#/components/schemas/CallType'
+        description:
+          type: string
+        code:
+          type: string
+        annotations:
+          type: object
+          additionalProperties:
+            type: string
+        callees:
+          type: array
+          items:
+            type: string
+    FlattenedCallGraph:
+      type: object
+      required:
+        - methods
+        - rootSignature
+        - relatedClasses
+      properties:
+        methods:
+          type: array
+          items:
+            $ref: '#/components/schemas/FlattenedMethodNode'
+        rootSignature:
+          type: string
+        relatedClasses:
+          type: object
+          additionalProperties:
+            type: string
+    ExplainableCallGraph:
+      type: object
+      required:
+        - root
+        - nodes
+        - edges
+        - relatedClasses
+        - legacyFlattened
+      properties:
+        root:
+          $ref: '#/components/schemas/MethodId'
+        nodes:
+          type: array
+          items:
+            $ref: '#/components/schemas/CallNode'
+        edges:
+          type: array
+          items:
+            $ref: '#/components/schemas/CallEdge'
+        relatedClasses:
+          type: object
+          additionalProperties:
+            type: string
+        legacyFlattened:
+          $ref: '#/components/schemas/FlattenedCallGraph'
+    ApiRouteCandidateResponse:
+      type: object
+      required:
+        - repoId
+        - analyzedRevision
+        - httpMethod
+        - routeTemplate
+        - packageName
+        - className
+        - methodName
+      properties:
+        repoId:
+          type: string
+        analyzedRevision:
+          type: string
+          pattern: '^[0-9a-f]{40}$|^FIXTURE$'
+        httpMethod:
+          type: string
+        routeTemplate:
+          type: string
+        packageName:
+          type: string
+        className:
+          type: string
+        methodName:
+          type: string
+    ApiRouteCandidatesResponse:
+      type: object
+      required:
+        - candidates
+      properties:
+        candidates:
+          type: array
+          items:
+            $ref: '#/components/schemas/ApiRouteCandidateResponse'
+    EntryPointsResponse:
+      type: object
+      required:
+        - repoId
+        - analyzedRevision
+        - entryPoints
+      properties:
+        repoId:
+          type: string
+        analyzedRevision:
+          type: string
+          pattern: '^[0-9a-f]{40}$|^FIXTURE$'
+        entryPoints:
+          type: array
+          items:
+            $ref: '#/components/schemas/EntryPointClassResponse'
+    EntryPointClassResponse:
+      type: object
+      required:
+        - className
+        - packageName
+        - packagePath
+        - description
+        - basePaths
+        - methods
+      properties:
+        className:
+          type: string
+        packageName:
+          type: string
+        packagePath:
+          type: string
+        description:
+          type: string
+        basePaths:
+          type: array
+          items:
+            type: string
+        methods:
+          type: array
+          items:
+            $ref: '#/components/schemas/EntryPointMethodResponse'
+    EntryPointMethodResponse:
+      oneOf:
+        - $ref: '#/components/schemas/ApiEntryPointMethodResponse'
+        - $ref: '#/components/schemas/MqEntryPointMethodResponse'
+        - $ref: '#/components/schemas/ScheduleEntryPointMethodResponse'
+      discriminator:
+        propertyName: type
+        mapping:
+          API: '#/components/schemas/ApiEntryPointMethodResponse'
+          MQ: '#/components/schemas/MqEntryPointMethodResponse'
+          SCHEDULE: '#/components/schemas/ScheduleEntryPointMethodResponse'
+    ApiEntryPointMethodResponse:
+      type: object
+      required:
+        - name
+        - description
+        - type
+        - apiUrl
+        - httpMethods
+        - swaggerDescriptions
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        type:
+          type: string
+          enum:
+            - API
+        apiUrl:
+          type: string
+        httpMethods:
+          type: array
+          items:
+            type: string
+        swaggerDescriptions:
+          type: array
+          items:
+            type: string
+    MqEntryPointMethodResponse:
+      type: object
+      required:
+        - name
+        - description
+        - type
+        - broker
+        - destinations
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        type:
+          type: string
+          enum:
+            - MQ
+        broker:
+          type: string
+          enum:
+            - RABBIT
+            - KAFKA
+        destinations:
+          type: array
+          items:
+            type: string
+    ScheduleEntryPointMethodResponse:
+      type: object
+      required:
+        - name
+        - description
+        - type
+        - triggerKind
+        - triggerValue
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        type:
+          type: string
+          enum:
+            - SCHEDULE
+        triggerKind:
+          type: string
+          enum:
+            - CRON
+            - FIXED_DELAY
+            - FIXED_RATE
+            - JOB_HANDLER
+            - UNSPECIFIED
+        triggerValue:
+          type: string
     RepositoryStatusResponse:
       type: object
       required:
@@ -224,6 +991,13 @@ components:
         currentRevision:
           type: string
           nullable: true
+          pattern: '^[0-9a-f]{40}$|^FIXTURE$'
         expectedRevision:
           type: string
           nullable: true
+          pattern: '^[0-9a-f]{40}$|^FIXTURE$'
+        candidates:
+          type: array
+          nullable: true
+          items:
+            type: string

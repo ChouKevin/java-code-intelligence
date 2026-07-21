@@ -143,7 +143,8 @@ class SemanticAnalysisConcurrencyTest {
         config.setUrl("https://example.invalid/orders.git");
         properties.getRepositories().put(REPOSITORY_ID.value(), config);
         RepositoryRuntimeRegistry registry = new RepositoryRuntimeRegistry(properties);
-        return new DefaultRepositoryApplicationService(registry, gitRepositoryPort, List.of(), properties);
+        return new DefaultRepositoryApplicationService(
+                registry, gitRepositoryPort, List.of(), List.of(), properties);
     }
 
     private SemanticAnalysisApplicationService analysisService(

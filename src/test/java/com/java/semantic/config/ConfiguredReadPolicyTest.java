@@ -86,6 +86,22 @@ class ConfiguredReadPolicyTest {
     }
 
     @Test
+    void should_hide_every_same_name_discovery_when_exact_overload_rule_cannot_be_distinguished() {
+        ReadPolicy readPolicy = policy(new ReadPolicyProperties(
+                List.of(),
+                List.of(),
+                List.of(),
+                List.of(new ReadPolicyProperties.MethodRule(
+                        "orders", "com.acme", "Vault", "read", List.of("String")))));
+        TypeId typeId = new TypeId("orders", "com.acme", "Vault");
+
+        assertThat(readPolicy.visibilityOfDiscoveredMethod(typeId, "read"))
+                .isEqualTo(EvidenceVisibility.BUSINESS_READ_FORBIDDEN);
+        assertThat(readPolicy.visibilityOfDiscoveredMethod(typeId, "write"))
+                .isEqualTo(EvidenceVisibility.READABLE);
+    }
+
+    @Test
     void should_match_nested_exact_method_rule_after_canonicalizing_generic_and_varargs_parameters() {
         ReadPolicy readPolicy = policy(new ReadPolicyProperties(
                 List.of(),

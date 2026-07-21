@@ -3,6 +3,8 @@ package com.java.semantic.api.security;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.http.MediaType;
 import org.springframework.mock.web.MockFilterChain;
 import org.springframework.mock.web.MockHttpServletRequest;
@@ -75,6 +77,45 @@ class ApiTokenFilterTest {
     void should_reject_when_path_only_starts_with_the_health_path() throws Exception {
         FilterResult result = invokeWithoutToken(
                 filterWith(CONFIGURED_TOKEN), "GET", "/actuator/health-extra");
+
+        assertThat(result.response().getStatus()).isEqualTo(401);
+        assertThat(result.filterChain().getRequest()).isNull();
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+            "/v1/analyses/call-graph",
+            "/v1/api-routes/lookup"
+    })
+    void should_reject_new_semantic_endpoints_when_token_is_missing(String path) throws Exception {
+        FilterResult result = invokeWithoutToken(filterWith(CONFIGURED_TOKEN), "POST", path);
+
+        assertThat(result.response().getStatus()).isEqualTo(401);
+        assertThat(result.filterChain().getRequest()).isNull();
+    }
+
+    @Test
+    void should_reject_entry_point_endpoint_when_token_is_missing() throws Exception {
+        FilterResult result = invokeWithoutToken(
+                filterWith(CONFIGURED_TOKEN), "GET", "/v1/repositories/orders/entry-points");
+
+        assertThat(result.response().getStatus()).isEqualTo(401);
+        assertThat(result.filterChain().getRequest()).isNull();
+    }
+
+    @Test
+    void should_reject_new_analysis_endpoint_when_token_is_wrong() throws Exception {
+        FilterResult result = invoke(
+                filterWith(CONFIGURED_TOKEN), "POST", "/v1/analyses/call-graph", "wrong");
+
+        assertThat(result.response().getStatus()).isEqualTo(401);
+        assertThat(result.filterChain().getRequest()).isNull();
+    }
+
+    @Test
+    void should_reject_new_route_endpoint_when_token_is_wrong() throws Exception {
+        FilterResult result = invoke(
+                filterWith(CONFIGURED_TOKEN), "POST", "/v1/api-routes/lookup", "wrong");
 
         assertThat(result.response().getStatus()).isEqualTo(401);
         assertThat(result.filterChain().getRequest()).isNull();

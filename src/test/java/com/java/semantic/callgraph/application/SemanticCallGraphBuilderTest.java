@@ -21,8 +21,12 @@ import com.java.semantic.semantic.domain.JavaSemanticService;
 import com.java.semantic.semantic.domain.SemanticCall;
 import com.java.semantic.semantic.domain.SemanticCallSite;
 import com.java.semantic.semantic.domain.SemanticCallStatus;
+import com.java.semantic.semantic.domain.SemanticEngineNotReadyException;
+import com.java.semantic.semantic.domain.SemanticEngineStartFailedException;
 import com.java.semantic.semantic.domain.SemanticLocation;
 import com.java.semantic.semantic.domain.SemanticMethod;
+import com.java.semantic.semantic.domain.SemanticProtocolException;
+import com.java.semantic.semantic.domain.SemanticRequestTimeoutException;
 import com.java.semantic.semantic.domain.SemanticPosition;
 import com.java.semantic.semantic.domain.SemanticRange;
 import com.java.semantic.semantic.domain.SemanticResolutionOrigin;
@@ -53,11 +57,88 @@ import java.util.Objects;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class SemanticCallGraphBuilderTest {
 
     private static final RepositorySnapshot SNAPSHOT = new RepositorySnapshot(
             RepositoryId.of("orders"), Path.of("/fixture/orders"), RepositoryRevision.fixture());
+
+    @Test
+    void should_propagate_engine_timeout_when_root_outgoing_query_times_out() {
+        SemanticMethod root = method("Root", "run", List.of(), 0);
+        SemanticRequestTimeoutException timeout = new SemanticRequestTimeoutException();
+        FakeSemanticService semantic = new FakeSemanticService()
+                .failOutgoing(root, timeout);
+
+        assertThatThrownBy(() -> builder(semantic).build(
+                SNAPSHOT, syntax(type(root)), root, 3))
+                .isSameAs(timeout);
+    }
+
+    @Test
+    void should_propagate_engine_not_ready_when_definition_fallback_fails() {
+        SemanticMethod root = method("Root", "run", List.of(), 0);
+        SyntaxInvocation invocation = invocation("port.work()", 2, "", 5);
+        SemanticEngineNotReadyException notReady = new SemanticEngineNotReadyException();
+        FakeSemanticService semantic = new FakeSemanticService()
+                .outgoing(root)
+                .failDefinition(root, semanticRange(invocation.range()), notReady);
+
+        assertThatThrownBy(() -> builder(semantic).build(
+                SNAPSHOT, syntax(type(root, invocation)), root, 3))
+                .isSameAs(notReady);
+    }
+
+    @Test
+    void should_propagate_engine_protocol_failure_when_implementation_lookup_fails() {
+        SemanticMethod root = method("Root", "run", List.of(), 0);
+        SemanticMethod contract = method("PaymentPort", "pay", List.of(), 10);
+        SyntaxInvocation invocation = invocation("port.pay()", 2, "", 5);
+        SemanticProtocolException protocol = new SemanticProtocolException();
+        FakeSemanticService semantic = new FakeSemanticService()
+                .outgoing(root, call(
+                        contract, "pay()", false, semanticRange(invocation.range())))
+                .failImplementations(contract, protocol);
+
+        assertThatThrownBy(() -> builder(semantic).build(
+                SNAPSHOT,
+                syntax(
+                        type(root, invocation),
+                        type(contract, TypeKind.INTERFACE, List.of(), false)),
+                root,
+                3))
+                .isSameAs(protocol);
+    }
+
+    @Test
+    void should_propagate_engine_start_failure_without_recursive_traversal_rollback() {
+        SemanticMethod root = method("Root", "run", List.of(), 0);
+        SemanticMethod child = method("Child", "work", List.of(), 10);
+        SemanticEngineStartFailedException startFailed =
+                new SemanticEngineStartFailedException();
+        FakeSemanticService semantic = new FakeSemanticService()
+                .outgoing(root, call(child, "work()", false, semanticRange(2)))
+                .failOutgoing(child, startFailed);
+
+        assertThatThrownBy(() -> builder(semantic).build(
+                SNAPSHOT, syntax(type(root), type(child)), root, 3))
+                .isSameAs(startFailed);
+    }
+
+    @Test
+    void should_propagate_engine_timeout_when_cutoff_evidence_query_fails() {
+        SemanticMethod root = method("Root", "run", List.of(), 0);
+        SemanticMethod cutoff = method("Cutoff", "work", List.of(), 10);
+        SemanticRequestTimeoutException timeout = new SemanticRequestTimeoutException();
+        FakeSemanticService semantic = new FakeSemanticService()
+                .outgoing(root, call(cutoff, "work()", false, semanticRange(2)))
+                .failOutgoing(cutoff, timeout);
+
+        assertThatThrownBy(() -> builder(semantic).build(
+                SNAPSHOT, syntax(type(root), type(cutoff)), root, 1))
+                .isSameAs(timeout);
+    }
 
     @Test
     void should_preserve_repeated_call_sites_as_distinct_edges() {

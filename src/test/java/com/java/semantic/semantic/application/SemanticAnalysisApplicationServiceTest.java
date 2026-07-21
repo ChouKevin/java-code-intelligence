@@ -5,6 +5,7 @@ import com.java.semantic.callgraph.application.CallGraphClassifier;
 import com.java.semantic.callgraph.application.SemanticCallGraphBuilder;
 import com.java.semantic.callgraph.application.SpringImplementationSelector;
 import com.java.semantic.callgraph.domain.AnalysisError;
+import com.java.semantic.callgraph.domain.AnalysisMetadata;
 import com.java.semantic.callgraph.domain.AnalysisStatus;
 import com.java.semantic.callgraph.domain.AnalysisWarning;
 import com.java.semantic.callgraph.domain.CallEdge;
@@ -25,8 +26,15 @@ import com.java.semantic.repository.domain.RepositoryId;
 import com.java.semantic.repository.domain.RepositoryRevision;
 import com.java.semantic.repository.domain.RepositorySnapshot;
 import com.java.semantic.semantic.domain.JavaSemanticService;
+import com.java.semantic.semantic.domain.SemanticAmbiguousMethodException;
+import com.java.semantic.semantic.domain.SemanticAmbiguousTypeException;
 import com.java.semantic.semantic.domain.SemanticCall;
 import com.java.semantic.semantic.domain.SemanticCallStatus;
+import com.java.semantic.semantic.domain.SemanticEngineNotReadyException;
+import com.java.semantic.semantic.domain.SemanticEngineStartFailedException;
+import com.java.semantic.semantic.domain.SemanticProtocolException;
+import com.java.semantic.semantic.domain.SemanticRequestTimeoutException;
+import com.java.semantic.semantic.domain.SemanticSymbolNotFoundException;
 import com.java.semantic.semantic.domain.SemanticLocation;
 import com.java.semantic.semantic.domain.SemanticMethod;
 import com.java.semantic.semantic.domain.SemanticPosition;
@@ -37,18 +45,22 @@ import com.java.semantic.syntax.domain.SyntaxExtractionService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.api.io.TempDir;
 import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 
+import java.time.Instant;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.function.Function;
+import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -59,6 +71,8 @@ import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -111,6 +125,38 @@ class SemanticAnalysisApplicationServiceTest {
                 builder,
                 readPolicy,
                 new CallGraphDepthProperties(3));
+    }
+
+    @Test
+    void should_keep_ambiguous_type_as_safe_exact_revision_failed_result() {
+        String className = "SECRET_DUPLICATE_TYPE";
+        SemanticAmbiguousTypeException ambiguousType =
+                new SemanticAmbiguousTypeException("com.acme.secret", className);
+        delegateSnapshot(snapshot);
+        when(readPolicy.visibilityOfRepository(REPOSITORY_ID.value()))
+                .thenReturn(EvidenceVisibility.READABLE);
+        when(semanticService.resolveMethod(
+                snapshot, "com.acme.secret", className, "place(Order)"))
+                .thenThrow(ambiguousType);
+
+        RevisionBoundAnalysisResult<ExplainableCallGraph> result = service.analyze(
+                REPOSITORY_ID,
+                Optional.of(REVISION),
+                "com.acme.secret",
+                className,
+                "place(Order)");
+
+        assertThat(result.status()).isEqualTo(AnalysisStatus.FAILED);
+        assertThat(result.data()).isNull();
+        assertThat(result.analyzedRevision()).isEqualTo(REVISION.value());
+        assertThat(result.errors()).singleElement().satisfies(error -> {
+            assertThat(error.code()).isEqualTo("ANALYSIS_FAILED");
+            assertThat(error.message()).isEqualTo("Analysis could not be completed");
+            assertThat(error.detail()).isBlank();
+        });
+        assertThat(result.toString())
+                .doesNotContain(className, "SEMANTIC_AMBIGUOUS_METHOD");
+        verifyNoInteractions(syntaxExtractionService, builder);
     }
 
     @Test
@@ -316,24 +362,76 @@ class SemanticAnalysisApplicationServiceTest {
         verify(builder, never()).build(any(), any(), any(), anyInt());
     }
 
-    @Test
-    void should_return_exact_current_revision_when_expected_revision_mismatches() {
-        RepositoryRevisionMismatchException mismatch =
-                new RepositoryRevisionMismatchException(REVISION, CURRENT_REVISION);
-        when(repositoryApplicationService.withSnapshot(
-                eq(REPOSITORY_ID),
-                eq(Optional.of(REVISION)),
-                any())).thenThrow(mismatch);
+    @ParameterizedTest
+    @MethodSource("requestLevelFailures")
+    void should_propagate_explicit_request_level_failures(RuntimeException failure) {
+        delegateSnapshot(snapshot);
+        when(readPolicy.visibilityOfRepository(REPOSITORY_ID.value()))
+                .thenReturn(EvidenceVisibility.READABLE);
+        when(semanticService.resolveMethod(snapshot, "com.acme", "OrderService", "place(Order)"))
+                .thenThrow(failure);
 
-        RevisionBoundAnalysisResult<ExplainableCallGraph> result = service.analyze(
+        assertThatThrownBy(() -> service.analyze(
                 REPOSITORY_ID,
                 Optional.of(REVISION),
                 "com.acme",
                 "OrderService",
-                "place(Order)");
+                "place(Order)"))
+                .isSameAs(failure);
+    }
 
-        assertSanitizedFailure(result, CURRENT_REVISION);
-        verifyNoInteractions(readPolicy, semanticService, syntaxExtractionService, builder);
+    static Stream<RuntimeException> requestLevelFailures() {
+        return Stream.of(
+                new SemanticAmbiguousMethodException(
+                        "com.acme", "OrderService", "place", List.of("place(Order)", "place(String)")),
+                new SemanticSymbolNotFoundException("secret must not reach HTTP"),
+                new SemanticEngineNotReadyException(),
+                new SemanticEngineStartFailedException(),
+                new SemanticRequestTimeoutException(),
+                new SemanticProtocolException());
+    }
+
+    @Test
+    void should_propagate_revision_mismatch_instead_of_fabricating_failed_result() {
+        RepositoryRevisionMismatchException mismatch =
+                new RepositoryRevisionMismatchException(REVISION, CURRENT_REVISION);
+        when(repositoryApplicationService.withSnapshot(
+                eq(REPOSITORY_ID), eq(Optional.of(REVISION)), any()))
+                .thenThrow(mismatch);
+
+        assertThatThrownBy(() -> service.analyze(
+                REPOSITORY_ID,
+                Optional.of(REVISION),
+                "com.acme",
+                "OrderService",
+                "place(Order)"))
+                .isSameAs(mismatch);
+    }
+
+    @Test
+    void should_analyze_once_and_map_only_graph_data_when_flattened_output_is_requested() {
+        SemanticAnalysisApplicationService spy = spy(service);
+        RevisionBoundAnalysisResult<ExplainableCallGraph> source =
+                RevisionBoundAnalysisResult.partial(
+                        graph,
+                        List.of(new AnalysisWarning("WARN", "safe", "")),
+                        List.of(new AnalysisError("ERROR", "safe", "")),
+                        new AnalysisMetadata(REPOSITORY_ID.value(), Instant.EPOCH),
+                        REVISION.value());
+        doReturn(source).when(spy).analyze(
+                REPOSITORY_ID, Optional.of(REVISION), "com.acme", "OrderService", "place(Order)");
+
+        RevisionBoundAnalysisResult<FlattenedCallGraph> flattened = spy.analyzeFlattened(
+                REPOSITORY_ID, Optional.of(REVISION), "com.acme", "OrderService", "place(Order)");
+
+        assertThat(flattened.data()).isEqualTo(graph.legacyFlattened());
+        assertThat(flattened.status()).isEqualTo(source.status());
+        assertThat(flattened.warnings()).isEqualTo(source.warnings());
+        assertThat(flattened.errors()).isEqualTo(source.errors());
+        assertThat(flattened.metadata()).isSameAs(source.metadata());
+        assertThat(flattened.analyzedRevision()).isEqualTo(source.analyzedRevision());
+        verify(spy, times(1)).analyze(
+                REPOSITORY_ID, Optional.of(REVISION), "com.acme", "OrderService", "place(Order)");
     }
 
     @Test

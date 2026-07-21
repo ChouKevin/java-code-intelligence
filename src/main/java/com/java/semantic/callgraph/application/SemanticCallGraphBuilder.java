@@ -20,6 +20,7 @@ import com.java.semantic.semantic.domain.JavaSemanticService;
 import com.java.semantic.semantic.domain.SemanticCall;
 import com.java.semantic.semantic.domain.SemanticCallSite;
 import com.java.semantic.semantic.domain.SemanticCallStatus;
+import com.java.semantic.semantic.domain.SemanticEngineException;
 import com.java.semantic.semantic.domain.SemanticMethod;
 import com.java.semantic.semantic.domain.SemanticPosition;
 import com.java.semantic.semantic.domain.SemanticRange;
@@ -194,6 +195,8 @@ public final class SemanticCallGraphBuilder {
             Optional<SemanticCall> fallback;
             try {
                 fallback = semanticService.resolveCallAt(snapshot, caller, semanticCallSite(invocation));
+            } catch (SemanticEngineException exception) {
+                throw exception;
             } catch (RuntimeException exception) {
                 pending.add(new PendingCall(
                         Optional.empty(), invocation.expression(), range, false,
@@ -289,6 +292,8 @@ public final class SemanticCallGraphBuilder {
         List<SemanticMethod> implementations;
         try {
             implementations = semanticService.implementations(snapshot, contract);
+        } catch (SemanticEngineException exception) {
+            throw exception;
         } catch (RuntimeException exception) {
             publishChildQueryFailure(
                     snapshot, index, caller, callerNodeId, contract, call, state, exception);
@@ -390,6 +395,8 @@ public final class SemanticCallGraphBuilder {
         }
         try {
             traverse(snapshot, index, target, depth + 1, maxDepth, state, methodEvidence);
+        } catch (SemanticEngineException exception) {
+            throw exception;
         } catch (RuntimeException exception) {
             CallTraversalState.OccurrenceCheckpoint checkpoint = recursiveCheckpoint.orElseThrow();
             state.rollback(checkpoint);
@@ -532,6 +539,8 @@ public final class SemanticCallGraphBuilder {
             for (CallTraversalState.ConversionFailure ignored : outcome.conversionFailures()) {
                 recordTargetConversionFailure(snapshot, state);
             }
+        } catch (SemanticEngineException exception) {
+            throw exception;
         } catch (RuntimeException exception) {
             AnalysisError error = childFailureError(exception);
             outcome = CallTraversalState.CutoffEvidenceOutcome.failure(error);

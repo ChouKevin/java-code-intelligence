@@ -9,6 +9,7 @@ import com.java.semantic.repository.domain.RepositorySnapshot;
 import com.java.semantic.repository.domain.RepositoryStatus;
 import com.java.semantic.repository.port.GitRepositoryPort;
 import com.java.semantic.repository.port.RepositoryMutationListener;
+import com.java.semantic.repository.port.RepositorySnapshotPublicationListener;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -35,16 +36,19 @@ public class DefaultRepositoryApplicationService implements RepositoryApplicatio
     private final RepositoryRuntimeRegistry registry;
     private final GitRepositoryPort gitRepositoryPort;
     private final List<RepositoryMutationListener> mutationListeners;
+    private final List<RepositorySnapshotPublicationListener> publicationListeners;
     private final Duration lockTimeout;
 
     public DefaultRepositoryApplicationService(
             RepositoryRuntimeRegistry registry,
             GitRepositoryPort gitRepositoryPort,
             List<RepositoryMutationListener> mutationListeners,
+            List<RepositorySnapshotPublicationListener> publicationListeners,
             RepositoryProperties properties) {
         this.registry = Objects.requireNonNull(registry, "registry is required");
         this.gitRepositoryPort = Objects.requireNonNull(gitRepositoryPort, "gitRepositoryPort is required");
         this.mutationListeners = List.copyOf(mutationListeners);
+        this.publicationListeners = List.copyOf(publicationListeners);
         this.lockTimeout = Objects.requireNonNull(
                 properties.getRepositoryLockTimeout(), "repositoryLockTimeout is required");
     }
@@ -66,6 +70,7 @@ public class DefaultRepositoryApplicationService implements RepositoryApplicatio
                 requireCloned(runtime);
                 String targetBranch = branch.filter(StringUtils::hasText)
                         .orElse(runtime.defaultBranch());
+                notifyBeforePublication(repositoryId);
                 notifyBeforeMutation(repositoryId);
                 RepositoryRevision revision = gitRepositoryPort.fetchAndReset(
                         runtime.workingTree(), targetBranch);
@@ -82,6 +87,7 @@ public class DefaultRepositoryApplicationService implements RepositoryApplicatio
             return withWriteLock(runtime, () -> {
                 requireRemote(runtime);
                 requireCloned(runtime);
+                notifyBeforePublication(repositoryId);
                 notifyBeforeMutation(repositoryId);
                 RepositoryRevision revision = gitRepositoryPort.checkout(
                         runtime.workingTree(), revisionValue);
@@ -122,11 +128,16 @@ public class DefaultRepositoryApplicationService implements RepositoryApplicatio
     }
 
     private RepositoryStatus ensureLocked(RepositoryRuntime runtime) {
+        notifyBeforePublication(runtime.repositoryId());
         if (RepositoryMode.LOCAL_FIXTURE == runtime.mode()) {
-            if (!Files.isDirectory(runtime.workingTree()) || !Files.isReadable(runtime.workingTree())) {
+            if (!Files.isDirectory(runtime.workingTree())
+                    || !Files.isReadable(runtime.workingTree())) {
                 throw new RepositoryMutationException("fixture path is unavailable");
             }
-            runtime.publish(RepositoryRevision.fixture(), "");
+            RepositoryRevision revision = RepositoryRevision.fixture();
+            runtime.publish(revision, "");
+            notifyAfterPublication(new RepositorySnapshot(
+                    runtime.repositoryId(), runtime.workingTree(), revision));
             return runtime.status();
         }
         RepositoryRevision revision;
@@ -144,10 +155,13 @@ public class DefaultRepositoryApplicationService implements RepositoryApplicatio
     }
 
     private RepositoryStatus publishRevisionAndBranch(
-            RepositoryRuntime runtime, RepositoryRevision revision) {
+            RepositoryRuntime runtime,
+            RepositoryRevision revision) {
         runtime.publish(revision, "");
         String branch = gitRepositoryPort.currentBranch(runtime.workingTree());
         runtime.publish(revision, branch);
+        notifyAfterPublication(new RepositorySnapshot(
+                runtime.repositoryId(), runtime.workingTree(), revision));
         return runtime.status();
     }
 
@@ -169,9 +183,29 @@ public class DefaultRepositoryApplicationService implements RepositoryApplicatio
         }
     }
 
+    private void notifyBeforePublication(RepositoryId repositoryId) {
+        try {
+            for (RepositorySnapshotPublicationListener listener : publicationListeners) {
+                listener.beforePublication(repositoryId);
+            }
+        } catch (RuntimeException exception) {
+            throw new RepositoryMutationException("repository publication failed");
+        }
+    }
+
     private void notifyBeforeMutation(RepositoryId repositoryId) {
         for (RepositoryMutationListener listener : mutationListeners) {
             listener.beforeMutation(repositoryId);
+        }
+    }
+
+    private void notifyAfterPublication(RepositorySnapshot snapshot) {
+        try {
+            for (RepositorySnapshotPublicationListener listener : publicationListeners) {
+                listener.afterPublication(snapshot);
+            }
+        } catch (RuntimeException exception) {
+            throw new RepositoryMutationException("repository publication failed");
         }
     }
 
@@ -180,32 +214,11 @@ public class DefaultRepositoryApplicationService implements RepositoryApplicatio
         try {
             return mutation.get();
         } catch (RepositoryMutationException exception) {
-            RepositoryMutationException sanitizedException = sanitizeForLogging(exception);
             LOGGER.warn(
-                    "Repository mutation failed: repositoryId={}, operation={}",
-                    repositoryId.value(), operation, sanitizedException);
+                    "REPOSITORY_MUTATION_FAILED repositoryId={}, operation={}",
+                    repositoryId.value(), operation);
             throw exception;
         }
-    }
-
-    private RepositoryMutationException sanitizeForLogging(RepositoryMutationException exception) {
-        RepositoryMutationException sanitized =
-                new RepositoryMutationException("repository mutation failed");
-        sanitized.setStackTrace(exception.getStackTrace());
-        Optional.ofNullable(exception.getCause())
-                .map(this::sanitizeCauseForLogging)
-                .ifPresent(sanitized::initCause);
-        return sanitized;
-    }
-
-    private RuntimeException sanitizeCauseForLogging(Throwable cause) {
-        RuntimeException sanitized =
-                new RuntimeException("cause type=" + cause.getClass().getSimpleName());
-        sanitized.setStackTrace(cause.getStackTrace());
-        Optional.ofNullable(cause.getCause())
-                .map(this::sanitizeCauseForLogging)
-                .ifPresent(sanitized::initCause);
-        return sanitized;
     }
 
     private <T> T withReadLock(RepositoryRuntime runtime, Supplier<T> operation) {

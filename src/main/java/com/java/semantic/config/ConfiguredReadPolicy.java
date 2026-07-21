@@ -5,6 +5,7 @@ import com.java.semantic.callgraph.domain.MethodId;
 import com.java.semantic.callgraph.domain.ReadPolicy;
 import com.java.semantic.callgraph.domain.TypeId;
 import com.java.semantic.identity.PolicyIdentity;
+import org.springframework.util.Assert;
 
 import java.util.Objects;
 
@@ -45,6 +46,25 @@ public final class ConfiguredReadPolicy implements ReadPolicy {
                                 && Objects.equals(rule.packageName(), typeId.packageName())
                                 && Objects.equals(PolicyIdentity.className(
                                         rule.packageName(), rule.className()), typeId.className()));
+        return forbidden ? EvidenceVisibility.BUSINESS_READ_FORBIDDEN : EvidenceVisibility.READABLE;
+    }
+
+    @Override
+    public EvidenceVisibility visibilityOfDiscoveredMethod(
+            TypeId declaringType,
+            String methodName) {
+        Objects.requireNonNull(declaringType, "declaringType is required");
+        Assert.hasText(methodName, "methodName is required");
+        if (EvidenceVisibility.BUSINESS_READ_FORBIDDEN.equals(visibilityOf(declaringType))) {
+            return EvidenceVisibility.BUSINESS_READ_FORBIDDEN;
+        }
+        boolean forbidden = properties.forbiddenMethods().stream()
+                .anyMatch(rule -> Objects.equals(rule.repoId(), declaringType.repoId())
+                        && Objects.equals(rule.packageName(), declaringType.packageName())
+                        && Objects.equals(
+                                PolicyIdentity.className(rule.packageName(), rule.className()),
+                                declaringType.className())
+                        && Objects.equals(rule.methodName(), methodName));
         return forbidden ? EvidenceVisibility.BUSINESS_READ_FORBIDDEN : EvidenceVisibility.READABLE;
     }
 

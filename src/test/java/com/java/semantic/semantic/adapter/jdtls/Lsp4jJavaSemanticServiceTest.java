@@ -12,10 +12,13 @@ import com.java.semantic.semantic.domain.SemanticAmbiguousTypeException;
 import com.java.semantic.semantic.domain.SemanticCall;
 import com.java.semantic.semantic.domain.SemanticCallSite;
 import com.java.semantic.semantic.domain.SemanticCallStatus;
+import com.java.semantic.semantic.domain.SemanticEngineNotReadyException;
+import com.java.semantic.semantic.domain.SemanticEngineStartFailedException;
 import com.java.semantic.semantic.domain.SemanticLocation;
 import com.java.semantic.semantic.domain.SemanticMethod;
 import com.java.semantic.semantic.domain.SemanticPosition;
 import com.java.semantic.semantic.domain.SemanticRange;
+import com.java.semantic.semantic.domain.SemanticRequestTimeoutException;
 import com.java.semantic.semantic.domain.SemanticResolutionOrigin;
 import com.java.semantic.semantic.domain.SemanticSymbolNotFoundException;
 import org.eclipse.lsp4j.CallHierarchyItem;
@@ -48,8 +51,11 @@ import org.eclipse.lsp4j.services.TextDocumentService;
 import org.eclipse.lsp4j.services.WorkspaceService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.api.io.TempDir;
 import org.slf4j.LoggerFactory;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
@@ -65,13 +71,16 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.catchThrowable;
 import static org.assertj.core.api.Assertions.catchThrowableOfType;
 
+@ExtendWith(OutputCaptureExtension.class)
 class Lsp4jJavaSemanticServiceTest {
 
     private static final RepositoryId REPOSITORY_ID = RepositoryId.of("order-service");
@@ -90,6 +99,62 @@ class Lsp4jJavaSemanticServiceTest {
         server = new FakeLanguageServer();
         service = new Lsp4jJavaSemanticService(new FakeWorkspaceManager(session(server)));
         snapshot = new RepositorySnapshot(REPOSITORY_ID, root, REVISION);
+    }
+
+    @Test
+    void should_normalize_workspace_startup_failure_at_public_adapter_boundary() {
+        RuntimeException failure = new JdtLsReadinessProbe.JdtWorkspaceStartupException(
+                REPOSITORY_ID, "SECRET_REASON", "SECRET_STDERR", "SECRET_TYPE");
+        service = new Lsp4jJavaSemanticService(new FakeWorkspaceManager(failure));
+
+        Throwable thrown = catchThrowable(
+                () -> service.resolveMethod(snapshot, PACKAGE, "OrderService", "run()"));
+
+        assertThat(thrown).isExactlyInstanceOf(SemanticEngineStartFailedException.class);
+        assertThat(thrown.getCause()).isNull();
+        assertThat(thrown.toString()).doesNotContain("SECRET");
+    }
+
+    @Test
+    void should_normalize_workspace_not_ready_failure_at_public_adapter_boundary() {
+        RuntimeException failure =
+                new DefaultJdtWorkspaceManager.JdtWorkspaceManagerStoppedException(REPOSITORY_ID);
+        service = new Lsp4jJavaSemanticService(new FakeWorkspaceManager(failure));
+
+        SemanticMethod method = methodAt(
+                root.resolve("OrderService.java").toUri().toString(), 1, 0);
+
+        assertThatThrownBy(() -> service.outgoingCalls(snapshot, method))
+                .isExactlyInstanceOf(SemanticEngineNotReadyException.class)
+                .hasNoCause();
+    }
+
+    @Test
+    void should_rethrow_normalized_timeout_instead_of_marking_target_conversion_failed(
+            CapturedOutput output) throws IOException {
+        String callerUri = sourceFile("OrderCrudService");
+        String targetPathSentinel = "SECRET_TIMEOUT_TARGET";
+        String targetUri = writeClassFile(
+                "com/example/secret/" + targetPathSentinel + ".java",
+                "com.example.secret",
+                targetPathSentinel);
+        SemanticMethod caller = methodAt(callerUri, 10, 16);
+        server.prepareItems = List.of(
+                callItem("processOrder(Order) : void", callerUri, 10, 16));
+        server.outgoingCalls = List.of(
+                outgoing(callItem("work() : void", targetUri, 4, 8)));
+        server.hangingDocumentSymbolUris.add(targetUri);
+        service = new Lsp4jJavaSemanticService(
+                new FakeWorkspaceManager(session(server, Duration.ofMillis(50))));
+        int outputStart = output.getAll().length();
+
+        Throwable failure = catchThrowable(() -> service.outgoingCalls(snapshot, caller));
+
+        assertThat(failure).isExactlyInstanceOf(SemanticRequestTimeoutException.class)
+                .hasNoCause();
+        assertThat(failure.getSuppressed()).isEmpty();
+        assertThat(output.getAll().substring(outputStart))
+                .doesNotContain(targetPathSentinel);
     }
 
     @Test
@@ -723,11 +788,17 @@ class Lsp4jJavaSemanticServiceTest {
     }
 
     private JdtWorkspaceSession session(FakeLanguageServer languageServer) {
+        return session(languageServer, Duration.ofSeconds(5));
+    }
+
+    private JdtWorkspaceSession session(
+            FakeLanguageServer languageServer,
+            Duration requestTimeout) {
         JdtLsProcessFactory.LaunchHandle handle = new JdtLsProcessFactory.LaunchHandle(
                 new FakeProcess(), languageServer, new CompletableFuture<>(),
                 new CompletableFuture<>(), new StderrRingBuffer(10));
         JdtWorkspaceSession session = new JdtWorkspaceSession(
-                REPOSITORY_ID, REVISION, handle, Duration.ofSeconds(5));
+                REPOSITORY_ID, REVISION, handle, requestTimeout);
         session.markReady();
         return session;
     }
@@ -735,13 +806,24 @@ class Lsp4jJavaSemanticServiceTest {
     private static final class FakeWorkspaceManager implements JdtWorkspaceManager {
 
         private final JdtWorkspaceSession session;
+        private final RuntimeException getOrStartFailure;
 
         private FakeWorkspaceManager(JdtWorkspaceSession session) {
-            this.session = session;
+            this.session = Objects.requireNonNull(session, "session is required");
+            this.getOrStartFailure = null;
+        }
+
+        private FakeWorkspaceManager(RuntimeException getOrStartFailure) {
+            this.session = null;
+            this.getOrStartFailure = Objects.requireNonNull(
+                    getOrStartFailure, "getOrStartFailure is required");
         }
 
         @Override
         public JdtWorkspaceSession getOrStart(RepositorySnapshot snapshot) {
+            if (Objects.nonNull(getOrStartFailure)) {
+                throw getOrStartFailure;
+            }
             return session;
         }
 
@@ -771,6 +853,7 @@ class Lsp4jJavaSemanticServiceTest {
         private final Map<String, List<Either<SymbolInformation, DocumentSymbol>>> documentSymbols =
                 new ConcurrentHashMap<>();
         private final Map<String, RuntimeException> documentSymbolFailures = new ConcurrentHashMap<>();
+        private final Set<String> hangingDocumentSymbolUris = ConcurrentHashMap.newKeySet();
         private List<CallHierarchyItem> prepareItems = List.of();
         private List<CallHierarchyOutgoingCall> outgoingCalls = List.of();
         private Either<List<? extends Location>, List<? extends LocationLink>> implementationResponse =
@@ -834,6 +917,9 @@ class Lsp4jJavaSemanticServiceTest {
             public CompletableFuture<List<Either<SymbolInformation, DocumentSymbol>>> documentSymbol(
                     DocumentSymbolParams params) {
                 String uri = params.getTextDocument().getUri();
+                if (hangingDocumentSymbolUris.contains(uri)) {
+                    return new CompletableFuture<>();
+                }
                 RuntimeException failure = documentSymbolFailures.get(uri);
                 if (Objects.nonNull(failure)) {
                     return CompletableFuture.failedFuture(failure);
