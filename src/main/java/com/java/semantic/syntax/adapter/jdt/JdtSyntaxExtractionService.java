@@ -42,7 +42,7 @@ public class JdtSyntaxExtractionService implements SyntaxExtractionService {
     public RepositorySyntax extract(Path repositoryRoot) {
         List<Path> sourceRoots = sourceRootLocator.sourceRootsOf(repositoryRoot);
         if (CollectionUtils.isEmpty(sourceRoots)) {
-            log.warn("No Java source roots found for repository: {}", repositoryRoot);
+            log.warn("Syntax extraction skipped category={}", "JAVA_SOURCE_ROOTS_NOT_FOUND");
             return RepositorySyntax.empty();
         }
 
@@ -60,9 +60,9 @@ public class JdtSyntaxExtractionService implements SyntaxExtractionService {
                     SourceSyntax extracted = sourceSyntaxExtractor.extractFrom(parsed, sqlIndex);
                     entryPoints.addAll(extracted.entryPoints());
                     classes.addAll(extracted.classes());
-                } catch (RuntimeException e) {
-                    log.warn("Failed to extract syntax from a source file, skipping it: {}",
-                            parsed.source().path(), e);
+                } catch (RuntimeException exception) {
+                    log.warn("Syntax extraction skipped source category={} exceptionType={}",
+                            "JAVA_SYNTAX_EXTRACTION_FAILED", exception.getClass().getSimpleName());
                 }
             });
 
@@ -71,8 +71,10 @@ public class JdtSyntaxExtractionService implements SyntaxExtractionService {
             classes.sort(Comparator.comparing(ClassMetadata::fullyQualifiedName));
 
             return new RepositorySyntax(entryPoints, classes);
-        } catch (UncheckedIOException e) {
-            throw new SyntaxExtractionException("Failed to extract syntax for " + repositoryRoot, e);
+        } catch (UncheckedIOException exception) {
+            log.warn("Syntax extraction failed category={} exceptionType={}",
+                    "REPOSITORY_SYNTAX_EXTRACTION_FAILED", exception.getClass().getSimpleName());
+            throw new SyntaxExtractionException("Repository syntax extraction failed");
         }
     }
 }

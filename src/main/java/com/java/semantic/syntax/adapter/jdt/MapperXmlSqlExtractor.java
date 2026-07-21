@@ -22,6 +22,9 @@ import org.w3c.dom.Document;
 import org.w3c.dom.Element;
 import org.w3c.dom.NodeList;
 import org.xml.sax.InputSource;
+import org.xml.sax.SAXException;
+import org.xml.sax.SAXParseException;
+import org.xml.sax.helpers.DefaultHandler;
 
 import lombok.extern.slf4j.Slf4j;
 
@@ -83,6 +86,7 @@ class MapperXmlSqlExtractor {
         try {
             DocumentBuilder builder = xmlFactory.newDocumentBuilder();
             builder.setEntityResolver((publicId, systemId) -> new InputSource(new StringReader("")));
+            builder.setErrorHandler(new ThrowingErrorHandler());
 
             Document document = builder.parse(xmlPath.toFile());
             Element root = document.getDocumentElement();
@@ -99,8 +103,9 @@ class MapperXmlSqlExtractor {
             for (String tag : SQL_TAGS) {
                 indexTag(root, tag, statements);
             }
-        } catch (Exception e) {
-            log.warn("Failed to parse mapper XML, skipping it: {}", xmlPath, e);
+        } catch (Exception exception) {
+            log.warn("Mapper XML skipped category={} exceptionType={}",
+                    "MAPPER_XML_PARSE_FAILED", exception.getClass().getSimpleName());
         }
     }
 
@@ -118,6 +123,19 @@ class MapperXmlSqlExtractor {
 
     private String normalize(String raw) {
         return raw.replaceAll("\\s+", " ").trim();
+    }
+
+    private static final class ThrowingErrorHandler extends DefaultHandler {
+
+        @Override
+        public void error(SAXParseException exception) throws SAXException {
+            throw exception;
+        }
+
+        @Override
+        public void fatalError(SAXParseException exception) throws SAXException {
+            throw exception;
+        }
     }
 
     private static DocumentBuilderFactory newXmlFactory() {

@@ -1,5 +1,9 @@
 package com.java.semantic.semantic.adapter.jdtls;
 
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import com.java.semantic.config.JdtLsProperties;
 import org.eclipse.lsp4j.ClientCapabilities;
 import org.eclipse.lsp4j.InitializeParams;
@@ -11,6 +15,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.api.io.TempDir;
 import org.springframework.boot.test.system.CapturedOutput;
 import org.springframework.boot.test.system.OutputCaptureExtension;
+import org.slf4j.LoggerFactory;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -24,6 +29,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
@@ -337,6 +343,22 @@ class JdtLsProcessFactoryTest {
     }
 
     @Test
+    void should_preserve_fatal_stderr_drain_failure_as_the_future_cause() throws Exception {
+        ControlledFatalFailureInputStream stderr = new ControlledFatalFailureInputStream();
+        DrainFailureFixture fixture = launchDrainFailureFixture(stderr);
+        assertThat(stderr.awaitRead()).isTrue();
+
+        stderr.release();
+        Throwable observed = catchThrowable(
+                () -> fixture.handle().stderrDrain().get(2, TimeUnit.SECONDS));
+
+        assertThat(observed).isInstanceOf(ExecutionException.class);
+        assertThat(observed.getCause()).isInstanceOf(OutOfMemoryError.class);
+        assertThat(fixture.listener().isCancelled()).isTrue();
+        assertThat(fixture.process().isDestroyed()).isTrue();
+    }
+
+    @Test
     void should_drain_stderr_independently_when_pipe_capacity_is_exceeded() throws Exception {
         Path home = createJdtLsHome();
         PipedInputStream stderr = new PipedInputStream(128);
@@ -379,10 +401,11 @@ class JdtLsProcessFactoryTest {
     }
 
     @Test
-    void should_retain_stderr_lines_in_the_session_buffer_when_the_server_writes_diagnostics()
+    void should_keep_only_safe_stderr_metadata_across_buffer_and_log_channels(CapturedOutput output)
             throws Exception {
         Path home = createJdtLsHome();
-        String diagnostics = "!ENTRY org.eclipse.jdt.ls.core\n!MESSAGE import failed\n";
+        String sentinel = "RESTRICTED_STDERR_SENTINEL_/protected/Secret.java";
+        String diagnostics = "!ENTRY org.eclipse.jdt.ls.core\n!MESSAGE " + sentinel + "\n";
         TestProcess process = new TestProcess(
                 new ByteArrayInputStream(diagnostics.getBytes(StandardCharsets.UTF_8)));
         LanguageServer server = mock(LanguageServer.class, invocation -> {
@@ -396,32 +419,45 @@ class JdtLsProcessFactoryTest {
                 command -> process,
                 (client, launchedProcess) -> new JdtLsProcessFactory.Connection(
                         server, CompletableFuture.completedFuture(null)));
+        Logger logger = (Logger) LoggerFactory.getLogger(JdtLsProcessFactory.class);
+        Level previous = logger.getLevel();
+        logger.setLevel(Level.DEBUG);
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        try {
+            JdtLsProcessFactory.LaunchHandle handle = factory.launch(
+                    tempDirectory.resolve("repository"),
+                    tempDirectory.resolve("workspace-data"),
+                    mock(JdtLanguageClient.class));
 
-        JdtLsProcessFactory.LaunchHandle handle = factory.launch(
-                tempDirectory.resolve("repository"),
-                tempDirectory.resolve("workspace-data"),
-                mock(JdtLanguageClient.class));
-
-        assertThat(handle.stderrDrain().get(2, TimeUnit.SECONDS)).isNull();
-        assertThat(handle.stderrBuffer().lines())
-                .containsExactly("!ENTRY org.eclipse.jdt.ls.core", "!MESSAGE import failed");
+            assertThat(handle.stderrDrain().get(2, TimeUnit.SECONDS)).isNull();
+            assertThat(handle.stderrBuffer().lines().toString()).doesNotContain(sentinel);
+            assertThat(handle.stderrBuffer().asText()).doesNotContain(sentinel);
+            assertThat(output.getAll()).doesNotContain(sentinel);
+            assertThat(appender.list).hasSize(2).allSatisfy(event -> {
+                assertThat(event.getFormattedMessage()).doesNotContain(sentinel);
+                assertThat(Arrays.toString(event.getArgumentArray())).doesNotContain(sentinel);
+                assertThat(event.getThrowableProxy()).isNull();
+            });
+        } finally {
+            logger.detachAppender(appender);
+            logger.setLevel(previous);
+            appender.stop();
+        }
     }
 
     @Test
-    void should_drop_the_oldest_line_and_truncate_when_the_stderr_buffer_overflows() {
+    void should_drop_the_oldest_safe_category_when_the_stderr_buffer_overflows() {
         StderrRingBuffer buffer = new StderrRingBuffer(2);
 
-        buffer.add("first");
-        buffer.add("second");
-        buffer.add("third");
-        buffer.add("x".repeat(StderrRingBuffer.MAX_LINE_LENGTH + 50));
+        buffer.add("!ENTRY first");
+        buffer.add("!MESSAGE second");
+        buffer.add("!STACK third");
 
-        assertThat(buffer.lines()).hasSize(2);
-        assertThat(buffer.lines().getFirst()).isEqualTo("third");
-        assertThat(buffer.lines().getLast())
-                .hasSize(StderrRingBuffer.MAX_LINE_LENGTH)
-                .endsWith("...");
-        assertThat(buffer.asText()).contains("third");
+        assertThat(buffer.lines()).containsExactly(
+                "stderr-category=MESSAGE", "stderr-category=STACK");
+        assertThat(buffer.asText()).doesNotContain("second", "third");
     }
 
     private Path createJdtLsHome() throws IOException {
@@ -804,6 +840,15 @@ class JdtLsProcessFactoryTest {
         public int read() throws IOException {
             awaitRelease();
             throw new AssertionError(SENSITIVE_VALUE);
+        }
+    }
+
+    private static final class ControlledFatalFailureInputStream extends ControlledReadInputStream {
+
+        @Override
+        public int read() throws IOException {
+            awaitRelease();
+            throw new OutOfMemoryError("fatal-drain-sentinel");
         }
     }
 }

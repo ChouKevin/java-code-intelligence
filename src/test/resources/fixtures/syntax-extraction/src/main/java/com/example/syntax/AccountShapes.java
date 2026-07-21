@@ -20,6 +20,14 @@ public class AccountShapes {
     }
 }
 
+@Accessors(fluent = true, chain = true)
+class ExplicitChainedShapes {
+}
+
+@Accessors(fluent = true, chain = false)
+class ExplicitNonChainedShapes {
+}
+
 /** record 不應成為入口候選，但必須出現在 class metadata 中 */
 record AccountSummary(String accountNo, long total) {
 

@@ -132,9 +132,11 @@ public class DefaultJdtWorkspaceManager implements JdtWorkspaceManager, Reposito
             session.stop();
             LOGGER.info("JDT LS workspace invalidated: repositoryId={}", repositoryId.value());
         } catch (RuntimeException exception) {
-            LOGGER.warn("JDT LS workspace invalidation failed: repositoryId={}",
-                    repositoryId.value(), exception);
-            throw new RepositoryMutationException("semantic workspace invalidation failed", exception);
+            String failureType = exception.getClass().getSimpleName();
+            LOGGER.warn("JDT LS workspace invalidation failed: repositoryId={} failureType={}",
+                    repositoryId.value(), failureType);
+            throw new RepositoryMutationException(
+                    "semantic workspace invalidation failed (failureType=" + failureType + ")");
         }
     }
 
@@ -181,6 +183,7 @@ public class DefaultJdtWorkspaceManager implements JdtWorkspaceManager, Reposito
         JdtWorkspaceSession session = sessions.get(snapshot.repositoryId());
         if (Objects.isNull(session)
                 || SemanticEngineStatus.READY != session.status()
+                || !session.isUsable()
                 || session.isInvalidated()
                 || !session.revision().equals(snapshot.revision())) {
             return Optional.empty();
@@ -200,23 +203,29 @@ public class DefaultJdtWorkspaceManager implements JdtWorkspaceManager, Reposito
                 snapshot.revision(),
                 launch(snapshot, client),
                 properties.getRequestTimeout());
-        sessions.put(repositoryId, session);
-        transientStatuses.remove(repositoryId);
-        registerPeakRssGauge(session);
         try {
+            sessions.put(repositoryId, session);
+            transientStatuses.remove(repositoryId);
+            registerPeakRssGauge(session);
             readinessProbe.awaitReady(session, client, snapshot.root());
-        } catch (RuntimeException exception) {
-            sessions.remove(repositoryId);
-            removeGauge(repositoryId);
-            stopAndPreserve(session, exception);
-            transientStatuses.put(repositoryId, SemanticEngineStatus.FAILED);
-            throw exception;
+            ensureStartupStillOwned(repositoryId, session);
+        } catch (Throwable failure) {
+            cleanupStartup(repositoryId, session, startupFailureStatus(repositoryId, session));
+            JdtFatalErrorPolicy.rethrowIfFatal(failure);
+            if (failure instanceof Error error) {
+                throw launchFailure(repositoryId, "JDT LS startup failed", error);
+            }
+            if (failure instanceof RuntimeException exception) {
+                throw exception;
+            }
+            throw new IllegalStateException("unexpected JDT LS startup failure", failure);
         }
         LOGGER.info("JDT LS workspace ready: repositoryId={}, revision={}",
                 repositoryId.value(), snapshot.revision().value());
         return session;
     }
 
+    @SuppressWarnings("removal")
     private JdtLsProcessFactory.LaunchHandle launch(
             RepositorySnapshot snapshot, JdtLsReadinessProbe.ImportProgressClient client) {
         RepositoryId repositoryId = snapshot.repositoryId();
@@ -228,15 +237,20 @@ public class DefaultJdtWorkspaceManager implements JdtWorkspaceManager, Reposito
             throw launchFailure(repositoryId, "JDT LS launch was interrupted", exception);
         } catch (IOException | ExecutionException | TimeoutException | RuntimeException exception) {
             throw launchFailure(repositoryId, "JDT LS launch failed", exception);
+        } catch (Error error) {
+            JdtFatalErrorPolicy.rethrowIfFatal(error);
+            throw launchFailure(repositoryId, "JDT LS launch failed", error);
         }
     }
 
     private JdtLsReadinessProbe.JdtWorkspaceStartupException launchFailure(
             RepositoryId repositoryId, String reason, Throwable cause) {
         transientStatuses.put(repositoryId, SemanticEngineStatus.FAILED);
-        LOGGER.warn("JDT LS workspace failed: repositoryId={}, reason={}",
-                repositoryId.value(), reason, cause);
-        return new JdtLsReadinessProbe.JdtWorkspaceStartupException(repositoryId, reason, "", cause);
+        String failureType = cause.getClass().getSimpleName();
+        LOGGER.warn("JDT LS workspace failed: repositoryId={}, reason={}, failureType={}",
+                repositoryId.value(), reason, failureType);
+        return new JdtLsReadinessProbe.JdtWorkspaceStartupException(
+                repositoryId, reason, "", failureType);
     }
 
     private void discardUnusable(RepositoryId repositoryId) {
@@ -244,6 +258,35 @@ public class DefaultJdtWorkspaceManager implements JdtWorkspaceManager, Reposito
             LOGGER.info("Discarding unusable JDT LS workspace: repositoryId={}", repositoryId.value());
             stopQuietly(repositoryId);
         }
+    }
+
+    private void ensureStartupStillOwned(RepositoryId repositoryId, JdtWorkspaceSession session) {
+        if (terminated) {
+            throw new JdtWorkspaceManagerStoppedException(repositoryId);
+        }
+        if (!Objects.equals(sessions.get(repositoryId), session)) {
+            throw new JdtLsReadinessProbe.JdtWorkspaceStartupException(
+                    repositoryId, "JDT LS startup session was removed", "", "NONE");
+        }
+        if (SemanticEngineStatus.READY != session.status() || !session.isUsable()) {
+            throw new JdtLsReadinessProbe.JdtWorkspaceStartupException(
+                    repositoryId, "JDT LS session became unavailable while importing", "", "NONE");
+        }
+    }
+
+    private SemanticEngineStatus startupFailureStatus(
+            RepositoryId repositoryId, JdtWorkspaceSession session) {
+        return terminated || !Objects.equals(sessions.get(repositoryId), session)
+                ? SemanticEngineStatus.STOPPED
+                : SemanticEngineStatus.FAILED;
+    }
+
+    private void cleanupStartup(
+            RepositoryId repositoryId, JdtWorkspaceSession session, SemanticEngineStatus status) {
+        sessions.remove(repositoryId, session);
+        removeGauge(repositoryId);
+        stopAfterFailure(session);
+        transientStatuses.put(repositoryId, status);
     }
 
     /**
@@ -265,18 +308,14 @@ public class DefaultJdtWorkspaceManager implements JdtWorkspaceManager, Reposito
         }
     }
 
-    /**
-     * 清理失敗的啟動,但保留原始失敗
-     *
-     * stop 失敗不可以蓋掉啟動失敗:附在 stderr 上的診斷正是這個 task 存在的理由
-     */
-    private void stopAndPreserve(JdtWorkspaceSession session, RuntimeException startupFailure) {
+    /** 清理失敗的啟動,但不讓停止失敗覆蓋原始失敗 */
+    private void stopAfterFailure(JdtWorkspaceSession session) {
         try {
             session.stop();
         } catch (RuntimeException stopFailure) {
-            LOGGER.warn("Stopping a failed JDT LS workspace failed: repositoryId={}",
-                    session.repositoryId().value(), stopFailure);
-            startupFailure.addSuppressed(stopFailure);
+            LOGGER.warn(
+                    "Stopping a failed JDT LS workspace failed: repositoryId={} failureType={}",
+                    session.repositoryId().value(), stopFailure.getClass().getSimpleName());
         }
     }
 
@@ -290,8 +329,8 @@ public class DefaultJdtWorkspaceManager implements JdtWorkspaceManager, Reposito
         try {
             session.stop();
         } catch (RuntimeException exception) {
-            LOGGER.warn("Stopping JDT LS workspace failed: repositoryId={}",
-                    repositoryId.value(), exception);
+            LOGGER.warn("Stopping JDT LS workspace failed: repositoryId={} failureType={}",
+                    repositoryId.value(), exception.getClass().getSimpleName());
         }
     }
 

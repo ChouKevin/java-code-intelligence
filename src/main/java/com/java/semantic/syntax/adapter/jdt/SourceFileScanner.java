@@ -62,7 +62,7 @@ class SourceFileScanner {
                 .toString()
                 .replace('\\', '/');
         if (relative.contains(TEST_SOURCE_MARKER)) {
-            log.debug("Skipping test source: {}", relative);
+            log.debug("Skipping source category={}", "TEST_SOURCE");
             return false;
         }
         return true;

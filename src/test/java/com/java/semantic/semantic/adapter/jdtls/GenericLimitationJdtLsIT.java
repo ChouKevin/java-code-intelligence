@@ -133,8 +133,9 @@ class GenericLimitationJdtLsIT {
 
     private String targetUri(List<SemanticCall> calls, String methodName) {
         return calls.stream()
-                .filter(call -> methodName.equals(call.methodName()))
-                .map(call -> call.target().uri())
+                .flatMap(call -> call.target().stream())
+                .filter(target -> methodName.equals(target.methodName()))
+                .map(target -> target.location().uri())
                 .findFirst()
                 .orElse("<unresolved>");
     }

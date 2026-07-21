@@ -1,4 +1,13 @@
+entry-point:
+  call-graph-depth: ${CALL_GRAPH_DEPTH:3}
+
 semantic:
+  analysis:
+    read-policy:
+      forbidden-repositories: []
+      forbidden-packages: []
+      forbidden-classes: []
+      forbidden-methods: []
   api:
     api-token: ${SEMANTIC_API_TOKEN:}
   jdtls:

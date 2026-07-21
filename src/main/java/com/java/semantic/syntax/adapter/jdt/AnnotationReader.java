@@ -17,6 +17,7 @@ import org.eclipse.jdt.core.dom.NormalAnnotation;
 import org.eclipse.jdt.core.dom.QualifiedName;
 import org.eclipse.jdt.core.dom.SimpleName;
 import org.eclipse.jdt.core.dom.SingleMemberAnnotation;
+import org.eclipse.jdt.core.dom.SingleVariableDeclaration;
 import org.eclipse.jdt.core.dom.StringLiteral;
 import org.springframework.util.CollectionUtils;
 import org.springframework.util.StringUtils;
@@ -46,6 +47,12 @@ final class AnnotationReader {
                 .findFirst();
     }
 
+    static Optional<Annotation> find(SingleVariableDeclaration declaration, String simpleName) {
+        return annotationsOf(declaration).stream()
+                .filter(annotation -> simpleName.equals(simpleNameOf(annotation)))
+                .findFirst();
+    }
+
     /** 依給定順序尋找第一個命中的 annotation，順序即優先序 */
     static Optional<Annotation> findAny(BodyDeclaration declaration, List<String> simpleNamesInPriorityOrder) {
         for (String simpleName : simpleNamesInPriorityOrder) {
@@ -66,6 +73,16 @@ final class AnnotationReader {
     }
 
     static List<Annotation> annotationsOf(BodyDeclaration declaration) {
+        List<Annotation> annotations = new ArrayList<>();
+        for (Object modifier : declaration.modifiers()) {
+            if (modifier instanceof Annotation annotation) {
+                annotations.add(annotation);
+            }
+        }
+        return List.copyOf(annotations);
+    }
+
+    static List<Annotation> annotationsOf(SingleVariableDeclaration declaration) {
         List<Annotation> annotations = new ArrayList<>();
         for (Object modifier : declaration.modifiers()) {
             if (modifier instanceof Annotation annotation) {

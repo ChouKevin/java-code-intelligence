@@ -7,6 +7,7 @@ import org.eclipse.jdt.core.dom.CompilationUnit;
  *
  * @param source 原始檔
  * @param unit   JDT Core AST 根節點
+ * @param text   解析時讀取的原始碼快照
  */
-record ParsedSource(SourceFile source, CompilationUnit unit) {
+record ParsedSource(SourceFile source, CompilationUnit unit, String text) {
 }

@@ -70,6 +70,9 @@ public final class JdtWorkspaceSession {
     }
 
     public SemanticEngineStatus status() {
+        if (SemanticEngineStatus.READY == status && !isUsable()) {
+            return SemanticEngineStatus.FAILED;
+        }
         return status;
     }
 
@@ -143,6 +146,7 @@ public final class JdtWorkspaceSession {
             cancel(pending);
             throw new JdtRequestFailedException(failureMessage(operation), exception);
         } catch (ExecutionException exception) {
+            JdtFatalErrorPolicy.rethrowIfFatal(exception.getCause());
             throw new JdtRequestFailedException(failureMessage(operation), exception.getCause());
         } catch (RuntimeException exception) {
             throw new JdtRequestFailedException(failureMessage(operation), exception);
@@ -152,8 +156,14 @@ public final class JdtWorkspaceSession {
         }
     }
 
-    void markReady() {
-        status = SemanticEngineStatus.READY;
+    boolean markReady() {
+        synchronized (evictionLock) {
+            if (closing || stopped.get() || invalidated.get()) {
+                return false;
+            }
+            status = SemanticEngineStatus.READY;
+            return true;
+        }
     }
 
     void invalidate() {
@@ -172,6 +182,16 @@ public final class JdtWorkspaceSession {
         return handle.process().isAlive();
     }
 
+    boolean isUsable() {
+        synchronized (evictionLock) {
+            return !closing
+                    && !stopped.get()
+                    && !invalidated.get()
+                    && isProcessAlive()
+                    && !handle.stderrDrain().isCompletedExceptionally();
+        }
+    }
+
     /**
      * 讀取子程序的尖峰常駐記憶體
      *
@@ -185,7 +205,8 @@ public final class JdtWorkspaceSession {
                     .mapToLong(Long::parseLong)
                     .findFirst();
         } catch (IOException | RuntimeException exception) {
-            LOGGER.debug("JDT LS peak RSS unavailable: repositoryId={}", repositoryId.value(), exception);
+            LOGGER.debug("JDT LS peak RSS unavailable: repositoryId={} failureType={}",
+                    repositoryId.value(), exception.getClass().getSimpleName());
             return OptionalLong.empty();
         }
     }
@@ -196,6 +217,9 @@ public final class JdtWorkspaceSession {
      * 停止是盡力而為:shutdown 或 exit 失敗只記錄並繼續,程序仍必須被終結
      */
     void stop() {
+        synchronized (evictionLock) {
+            closing = true;
+        }
         if (!stopped.compareAndSet(false, true)) {
             return;
         }
@@ -215,9 +239,13 @@ public final class JdtWorkspaceSession {
             handle.languageServer().shutdown().get(requestTimeout.toMillis(), TimeUnit.MILLISECONDS);
         } catch (InterruptedException exception) {
             Thread.currentThread().interrupt();
-            LOGGER.warn("JDT LS shutdown interrupted: repositoryId={}", repositoryId.value(), exception);
+            LOGGER.warn("JDT LS shutdown interrupted: repositoryId={} failureType={}",
+                    repositoryId.value(), exception.getClass().getSimpleName());
         } catch (ExecutionException | TimeoutException | RuntimeException exception) {
-            LOGGER.warn("JDT LS shutdown request failed: repositoryId={}", repositoryId.value(), exception);
+            JdtFatalErrorPolicy.rethrowIfFatal(exception);
+            JdtFatalErrorPolicy.rethrowIfFatal(exception.getCause());
+            LOGGER.warn("JDT LS shutdown request failed: repositoryId={} failureType={}",
+                    repositoryId.value(), exception.getClass().getSimpleName());
         }
     }
 
@@ -225,7 +253,8 @@ public final class JdtWorkspaceSession {
         try {
             handle.languageServer().exit();
         } catch (RuntimeException exception) {
-            LOGGER.warn("JDT LS exit notification failed: repositoryId={}", repositoryId.value(), exception);
+            LOGGER.warn("JDT LS exit notification failed: repositoryId={} failureType={}",
+                    repositoryId.value(), exception.getClass().getSimpleName());
         }
     }
 
@@ -237,7 +266,8 @@ public final class JdtWorkspaceSession {
             }
         } catch (InterruptedException exception) {
             Thread.currentThread().interrupt();
-            LOGGER.warn("JDT LS exit wait interrupted: repositoryId={}", repositoryId.value(), exception);
+            LOGGER.warn("JDT LS exit wait interrupted: repositoryId={} failureType={}",
+                    repositoryId.value(), exception.getClass().getSimpleName());
         }
         LOGGER.warn("JDT LS did not exit gracefully, forcing termination: repositoryId={}",
                 repositoryId.value());

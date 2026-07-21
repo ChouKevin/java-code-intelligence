@@ -5,19 +5,19 @@ import org.springframework.util.Assert;
 import java.util.ArrayDeque;
 import java.util.Deque;
 import java.util.List;
+import java.util.Locale;
 
 /**
- * 保存 JDT Language Server stderr 最後數行的環狀緩衝
+ * 保存 JDT Language Server stderr 最後數行的安全分類
  *
- * 工作區無法就緒時,stderr 是唯一能說明原因的通道
- * JDT LS 以 log.level=ALL 啟動,輸出量大;無上限保留等同於在 1 GB RSS 的程序旁再開一個記憶體洩漏
+ * 原始 stderr 可能包含儲存庫路徑、符號與原始碼,因此只保留有界分類與行數
  */
 public final class StderrRingBuffer {
 
-    /** 單行上限,超過即截斷;堆疊追蹤中的單行可能極長 */
-    static final int MAX_LINE_LENGTH = 512;
-
-    private static final String TRUNCATION_MARK = "...";
+    private static final String ENTRY_PREFIX = "!ENTRY";
+    private static final String MESSAGE_PREFIX = "!MESSAGE";
+    private static final String STACK_PREFIX = "!STACK";
+    private static final String EXCEPTION_TOKEN = "exception";
 
     private final int capacity;
     private final Deque<String> lines = new ArrayDeque<>();
@@ -27,29 +27,43 @@ public final class StderrRingBuffer {
         this.capacity = capacity;
     }
 
-    /** 加入一行,超出容量時淘汰最舊的一行 */
-    public synchronized void add(String line) {
+    /** 加入一行安全分類,超出容量時淘汰最舊的一行 */
+    public synchronized String add(String line) {
         Assert.notNull(line, "line is required");
         if (lines.size() == capacity) {
             lines.removeFirst();
         }
-        lines.addLast(truncate(line));
+        String safeLine = "stderr-category=" + categoryOf(line);
+        lines.addLast(safeLine);
+        return safeLine;
     }
 
-    /** 回傳目前保留的行,最舊在前 */
+    /** 回傳目前保留的安全分類,最舊在前 */
     public synchronized List<String> lines() {
         return List.copyOf(lines);
     }
 
-    /** 以換行串接保留的行,供失敗診斷輸出 */
+    /** 以換行串接保留的安全分類,供失敗診斷輸出 */
     public synchronized String asText() {
         return String.join(System.lineSeparator(), lines);
     }
 
-    private String truncate(String line) {
-        if (line.length() <= MAX_LINE_LENGTH) {
-            return line;
+    private String categoryOf(String line) {
+        if (line.startsWith(ENTRY_PREFIX)) {
+            return "ENTRY";
         }
-        return line.substring(0, MAX_LINE_LENGTH - TRUNCATION_MARK.length()) + TRUNCATION_MARK;
+        if (line.startsWith(MESSAGE_PREFIX)) {
+            return "MESSAGE";
+        }
+        if (line.startsWith(STACK_PREFIX)) {
+            return "STACK";
+        }
+        if (line.toLowerCase(Locale.ROOT).contains(EXCEPTION_TOKEN)) {
+            return "EXCEPTION";
+        }
+        if (line.isBlank()) {
+            return "EMPTY";
+        }
+        return "OTHER";
     }
 }

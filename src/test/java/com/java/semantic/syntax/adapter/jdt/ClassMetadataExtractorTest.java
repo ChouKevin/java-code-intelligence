@@ -1,13 +1,35 @@
 package com.java.semantic.syntax.adapter.jdt;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import java.nio.file.Path;
 import java.util.List;
+import java.util.Map;
 
 import com.java.semantic.syntax.domain.ClassMetadata;
+import com.java.semantic.syntax.domain.ClassMetadata.FieldInfo;
 import com.java.semantic.syntax.domain.EntryPointMethod;
 import com.java.semantic.syntax.domain.RepositorySyntax;
 import com.java.semantic.syntax.domain.ClassMetadata.MethodSignature;
 import com.java.semantic.syntax.domain.ClassMetadata.SqlSource;
 import com.java.semantic.syntax.domain.ClassMetadata.TypeKind;
+import com.java.semantic.syntax.domain.SyntaxInvocation;
+import com.java.semantic.syntax.domain.SyntaxInvocation.InvocationKind;
+import com.java.semantic.syntax.domain.SyntaxPosition;
+import com.java.semantic.syntax.domain.SyntaxRange;
+import com.java.semantic.syntax.domain.InvocationTarget;
+import com.java.semantic.syntax.domain.ResolvedTypeIdentity;
+import com.java.semantic.syntax.domain.TypeReference;
+import com.java.semantic.callgraph.application.EvidenceEnricher;
+import com.java.semantic.callgraph.application.RepositorySyntaxIndex;
+import com.java.semantic.callgraph.domain.CallNode;
+import com.java.semantic.callgraph.domain.CallNodeId;
+import com.java.semantic.callgraph.domain.CallType;
+import com.java.semantic.callgraph.domain.EvidenceVisibility;
+import com.java.semantic.callgraph.domain.ExplainableCallGraph;
+import com.java.semantic.callgraph.domain.FlattenedCallGraph;
+import com.java.semantic.callgraph.domain.MethodId;
+import com.java.semantic.config.ConfiguredReadPolicy;
+import com.java.semantic.config.ReadPolicyProperties;
 
 import org.junit.jupiter.api.Test;
 
@@ -21,6 +43,303 @@ class ClassMetadataExtractorTest {
     private final List<ClassMetadata> classes = SyntaxFixtures.extractSyntaxFixture().classes();
 
     private final List<ClassMetadata> multiModuleClasses = SyntaxFixtures.extractMultiModuleFixture().classes();
+
+    private final List<ClassMetadata> evidenceClasses = SyntaxFixtures.extract(
+            Path.of("src/test/resources/fixtures/syntax-evidence")).classes();
+
+    // --- 呼叫圖語法證據 ---
+
+    @Test
+    void should_extract_exact_source_qualifier_invocation_and_resolved_type_evidence_in_one_snapshot() {
+        ClassMetadata service = classOf(evidenceClasses, "com.example.evidence.FastOrderService");
+        ClassMetadata coordinator = classOf(evidenceClasses, "com.example.evidence.OrderCoordinator");
+        FieldInfo mapper = coordinator.fields().stream()
+                .filter(field -> "mapper".equals(field.name()))
+                .findFirst()
+                .orElseThrow();
+        FieldInfo unresolved = coordinator.fields().stream()
+                .filter(field -> "unresolved".equals(field.name()))
+                .findFirst()
+                .orElseThrow();
+        FieldInfo libraryValues = coordinator.fields().stream()
+                .filter(field -> "libraryValues".equals(field.name()))
+                .findFirst()
+                .orElseThrow();
+        MethodSignature process = methodOf(evidenceClasses,
+                "com.example.evidence.OrderCoordinator", "process");
+
+        assertThat(service.primary()).isTrue();
+        assertThat(service.beanQualifiers()).containsExactly("fastOrderService");
+        assertThat(service.source().text())
+                .isEqualTo("@Qualifier(\"fastOrderService\")\n@Primary\nclass FastOrderService {\n}");
+        assertThat(service.range().start().line()).isEqualTo(8);
+        assertThat(service.range().start().character()).isZero();
+
+        assertThat(mapper.type()).isEqualTo("OrderMapper");
+        assertThat(mapper.annotations()).containsExactly("Qualifier");
+        assertThat(mapper.annotationEvidence()).singleElement().satisfies(annotation -> {
+            assertThat(annotation.writtenName()).isEqualTo("Qualifier");
+            assertThat(annotation.resolvedType()).get().satisfies(type -> {
+                assertThat(type.packageName()).isEqualTo("com.example.evidence");
+                assertThat(type.className()).isEqualTo("Qualifier");
+            });
+        });
+        assertThat(mapper.qualifier()).isEqualTo("vaultMapper");
+        assertThat(mapper.typeReference().writtenType()).isEqualTo("OrderMapper");
+        assertThat(mapper.typeReference().resolvedType()).isEqualTo("com.example.evidence.OrderMapper");
+        assertThat(mapper.typeReference().sourceDefined()).isTrue();
+        assertThat(unresolved.typeReference().writtenType()).isEqualTo("MissingDependency");
+        assertThat(unresolved.typeReference().resolvedType())
+                .as("JDT recovery binding is not proven identity and must not escape as a guessed name")
+                .isEqualTo("");
+        assertThat(unresolved.typeReference().sourceDefined()).isFalse();
+        assertThat(libraryValues.typeReference().resolvedType()).isEqualTo("java.util.List");
+        assertThat(libraryValues.typeReference().sourceDefined()).isFalse();
+
+        assertThat(process.paramTypes()).containsExactly("OrderLine");
+        assertThat(process.parameterTypeReferences()).singleElement().satisfies(parameter -> {
+            assertThat(parameter.writtenType()).isEqualTo("OrderLine");
+            assertThat(parameter.resolvedType()).isEqualTo("com.example.evidence.OrderLine");
+            assertThat(parameter.sourceDefined()).isTrue();
+        });
+        assertThat(process.returnType()).get().satisfies(returnType -> {
+            assertThat(returnType.writtenType()).isEqualTo("Receipt<OrderLine>");
+            assertThat(returnType.resolvedType()).isEqualTo("com.example.evidence.Receipt");
+            assertThat(returnType.typeArguments()).singleElement().satisfies(argument ->
+                    assertThat(argument.resolvedType()).isEqualTo("com.example.evidence.OrderLine"));
+        });
+        assertThat(process.source().text()).startsWith("Receipt<OrderLine> process(OrderLine order) {")
+                .contains("mapper.save(order)", "OrderLine::new", "record(\"saved\")");
+        assertThat(process.range().start().line()).isEqualTo(22);
+        assertThat(process.range().start().character()).isEqualTo(4);
+
+        assertThat(process.invocations()).hasSize(9);
+        assertThat(process.invocations())
+                .extracting(SyntaxInvocation::kind, SyntaxInvocation::expression)
+                .containsExactly(
+                        tuple(InvocationKind.METHOD, "mapper.save(order)"),
+                        tuple(InvocationKind.METHOD, "mapper.save(order)"),
+                        tuple(InvocationKind.CONSTRUCTOR, "new OrderLine()"),
+                        tuple(InvocationKind.METHOD, "mapper.save(order)"),
+                        tuple(InvocationKind.METHOD_REFERENCE, "mapper::save"),
+                        tuple(InvocationKind.METHOD_REFERENCE, "OrderLine::new"),
+                        tuple(InvocationKind.METHOD_REFERENCE, "OrderLine::value"),
+                        tuple(InvocationKind.STATIC_IMPORT, "record(\"saved\")"),
+                        tuple(InvocationKind.METHOD, "recoveredRecord(\"unresolved\")"));
+
+        List<SyntaxInvocation> repeatedSaves = process.invocations().stream()
+                .filter(invocation -> "mapper.save(order)".equals(invocation.expression()))
+                .toList();
+        assertThat(repeatedSaves).hasSize(3);
+        assertThat(repeatedSaves)
+                .extracting(SyntaxInvocation::range)
+                .containsExactly(
+                        syntaxRange(23, 37, 23, 55),
+                        syntaxRange(24, 38, 24, 56),
+                        syntaxRange(26, 32, 26, 50));
+
+        SyntaxInvocation save = invocationOf(process, "mapper.save(order)");
+        assertThat(save.receiver()).isEqualTo("mapper");
+        assertThat(save.receiverDeclaration()).isEqualTo("com.example.evidence.OrderMapper");
+        assertThat(save.qualifier()).isEqualTo("vaultMapper");
+        assertThat(save.resolvedTarget()).contains(new InvocationTarget(
+                "com.example.evidence", "OrderMapper", "save", List.of("com.example.evidence.OrderLine")));
+        assertThat(save.range().start().line()).isEqualTo(23);
+        assertThat(save.range().start().character()).isEqualTo(37);
+        assertThat(save.range().end().character()).isEqualTo(55);
+
+        SyntaxInvocation constructor = invocationOf(process, "new OrderLine()");
+        assertThat(constructor.receiver()).isEqualTo("OrderLine");
+        assertThat(constructor.receiverDeclaration()).isEqualTo("com.example.evidence.OrderLine");
+        assertThat(constructor.resolvedTarget()).contains(new InvocationTarget(
+                "com.example.evidence", "OrderLine", "OrderLine", List.of("java.lang.String")));
+        assertThat(constructor.range()).isEqualTo(syntaxRange(25, 28, 25, 43));
+
+        SyntaxInvocation creationReference = invocationOf(process, "OrderLine::new");
+        assertThat(creationReference.receiver()).isEqualTo("OrderLine");
+        assertThat(creationReference.receiverDeclaration()).isEqualTo("com.example.evidence.OrderLine");
+        assertThat(creationReference.range()).isEqualTo(syntaxRange(28, 50, 28, 64));
+
+        SyntaxInvocation typeReference = invocationOf(process, "OrderLine::value");
+        assertThat(typeReference.receiver()).isEqualTo("OrderLine");
+        assertThat(typeReference.receiverDeclaration()).isEqualTo("com.example.evidence.OrderLine");
+        assertThat(typeReference.range()).isEqualTo(syntaxRange(29, 52, 29, 68));
+
+        SyntaxInvocation staticImport = invocationOf(process, "record(\"saved\")");
+        assertThat(staticImport.receiver()).isEqualTo("");
+        assertThat(staticImport.receiverDeclaration()).isEqualTo("");
+        assertThat(staticImport.qualifier()).isEqualTo("");
+        assertThat(staticImport.range()).isEqualTo(syntaxRange(30, 8, 30, 23));
+
+        MethodSignature qualifiedSuper = methodOf(evidenceClasses,
+                "com.example.evidence.OuterEvidence.Inner", "qualifiedSuperReference");
+        assertThat(qualifiedSuper.invocations()).singleElement().satisfies(invocation -> {
+            assertThat(invocation.expression()).isEqualTo("OuterEvidence.super::inherited");
+            assertThat(invocation.receiver()).isEqualTo("OuterEvidence.super");
+            assertThat(invocation.receiverDeclaration()).isEqualTo("com.example.evidence.ParentEvidence");
+            assertThat(invocation.range()).isEqualTo(syntaxRange(48, 19, 48, 49));
+        });
+    }
+
+    @Test
+    void should_extract_binding_proven_nested_policy_identities_and_wildcard_bounds() {
+        MethodSignature inspect = methodOf(evidenceClasses,
+                "com.example.evidence.PolicyIdentityFixture", "inspect");
+
+        assertThat(inspect.annotationEvidence()).singleElement().satisfies(annotation ->
+                assertThat(annotation.resolvedType()).contains(
+                        new ResolvedTypeIdentity(
+                                "com.example.evidence", "PolicyMarker.Nested")));
+        assertThat(inspect.parameterTypeReferences()).singleElement().satisfies(parameter -> {
+            TypeReference wildcard = parameter.typeArguments().getFirst();
+            assertThat(wildcard.upperBounds()).singleElement()
+                    .extracting(TypeReference::resolvedType)
+                    .isEqualTo("com.example.evidence.SecretDto");
+        });
+        assertThat(inspect.returnType()).get().satisfies(returnType -> {
+            TypeReference wildcard = returnType.typeArguments().getFirst();
+            assertThat(wildcard.lowerBounds()).singleElement()
+                    .extracting(TypeReference::resolvedType)
+                    .isEqualTo("com.example.evidence.SecretDto");
+        });
+        assertThat(inspect.invocations())
+                .extracting(SyntaxInvocation::expression, SyntaxInvocation::resolvedTarget)
+                .contains(
+                        tuple("accept(values)", java.util.Optional.of(new InvocationTarget(
+                                "com.example.evidence", "PolicyIdentityFixture", "accept", List.of("List")))),
+                        tuple("new OuterIdentity.Inner()", java.util.Optional.of(new InvocationTarget(
+                                "com.example.evidence", "OuterIdentity.Inner", "Inner", List.of()))),
+                        tuple("created::overloaded", java.util.Optional.of(new InvocationTarget(
+                                "com.example.evidence", "OuterIdentity.Inner", "overloaded", List.of("List")))),
+                        tuple("varargs(\"policy\")", java.util.Optional.of(new InvocationTarget(
+                                "com.example.evidence", "PolicyIdentityFixture", "varargs", List.of("String[]")))),
+                        tuple("record(\"policy\")", java.util.Optional.of(new InvocationTarget(
+                                "com.example.evidence", "Audit", "record", List.of("String")))));
+    }
+
+    @Test
+    void should_extract_binding_proven_body_type_identities_from_non_invocation_sites() {
+        MethodSignature inspect = methodOf(evidenceClasses,
+                "com.example.evidence.BodyTypeEvidenceFixture", "inspect");
+
+        assertThat(inspect.bodyTypeReferences()).contains(
+                new ResolvedTypeIdentity("com.example.evidence", "ForbiddenLocal"),
+                new ResolvedTypeIdentity("com.example.evidence", "ForbiddenCast"),
+                new ResolvedTypeIdentity("com.example.evidence", "ForbiddenInstanceof"),
+                new ResolvedTypeIdentity("com.example.evidence", "ForbiddenClassLiteral"),
+                new ResolvedTypeIdentity("com.example.evidence", "SecretHolder"),
+                new ResolvedTypeIdentity("com.example.evidence", "ForbiddenFieldValue"),
+                new ResolvedTypeIdentity("com.example.evidence", "GenericSecretHolder"),
+                new ResolvedTypeIdentity("com.example.evidence", "ForbiddenGenericFieldValue"),
+                new ResolvedTypeIdentity("com.example.evidence", "ForbiddenBareFieldValue"),
+                new ResolvedTypeIdentity("com.example.evidence", "ForbiddenAnnotationMember"));
+    }
+
+    @Test
+    void should_redact_extracted_nested_method_reference_with_canonical_policy_identity() {
+        MethodSignature inspect = methodOf(evidenceClasses,
+                "com.example.evidence.PolicyIdentityFixture", "inspect");
+        MethodId methodId = new MethodId(
+                "orders", "com.example.evidence", "PolicyIdentityFixture", "inspect", inspect.paramTypes());
+        CallNode node = new CallNode(
+                new CallNodeId("node-1"), methodId, methodId.toString(), CallType.INTERNAL_SERVICE,
+                "PolicyIdentityFixture.java", 1, 1, Map.of(), inspect.source().text(),
+                EvidenceVisibility.READABLE);
+        ExplainableCallGraph graph = new ExplainableCallGraph(
+                methodId, List.of(node), List.of(), Map.of(),
+                new FlattenedCallGraph(List.of(), "", Map.of()));
+        ConfiguredReadPolicy policy = new ConfiguredReadPolicy(new ReadPolicyProperties(
+                List.of(), List.of(), List.of(), List.of(new ReadPolicyProperties.MethodRule(
+                        "orders", "com.example.evidence", "OuterIdentity$Inner", "overloaded", List.of("List")))));
+
+        ExplainableCallGraph enriched = new EvidenceEnricher(policy).enrich(
+                graph, new RepositorySyntaxIndex("orders", new RepositorySyntax(List.of(), evidenceClasses)),
+                Map.of()).graph();
+
+        assertThat(enriched.nodes()).singleElement().satisfies(value -> {
+            assertThat(value.code()).isEmpty();
+            assertThat(value.annotations()).isEmpty();
+        });
+    }
+
+    @Test
+    void should_extract_type_variable_binding_bounds_for_method_field_and_self_reference() {
+        MethodSignature load = methodOf(evidenceClasses,
+                "com.example.evidence.GenericBoundFixture", "load");
+        TypeReference parameter = load.parameterTypeReferences().getFirst();
+        TypeReference returned = load.returnType().orElseThrow();
+        FieldInfo field = classOf(evidenceClasses, "com.example.evidence.BoundedBox").fields().stream()
+                .filter(value -> "value".equals(value.name()))
+                .findFirst()
+                .orElseThrow();
+        MethodSignature echo = methodOf(evidenceClasses,
+                "com.example.evidence.GenericBoundFixture", "echo");
+
+        assertThat(parameter.upperBounds()).extracting(TypeReference::resolvedType)
+                .containsExactly("com.example.evidence.ForbiddenDto", "com.example.evidence.ForbiddenMarker");
+        assertThat(returned.upperBounds()).extracting(TypeReference::resolvedType)
+                .containsExactly("com.example.evidence.ForbiddenDto", "com.example.evidence.ForbiddenMarker");
+        assertThat(field.typeReference().upperBounds()).singleElement()
+                .extracting(TypeReference::resolvedType)
+                .isEqualTo("com.example.evidence.ForbiddenDto");
+        assertThat(echo.parameterTypeReferences()).singleElement().satisfies(selfReference -> {
+            assertThat(selfReference.upperBounds()).singleElement().satisfies(comparable -> {
+                assertThat(comparable.resolvedType()).isEqualTo("java.lang.Comparable");
+                assertThat(comparable.typeArguments()).singleElement().satisfies(nested ->
+                        assertThat(nested.upperBounds()).hasSize(0));
+            });
+        });
+    }
+
+    @Test
+    void should_redact_type_variable_bound_sentinels_from_graph_legacy_and_json() throws Exception {
+        MethodSignature load = methodOf(evidenceClasses,
+                "com.example.evidence.GenericBoundFixture", "load");
+        MethodSignature related = methodOf(evidenceClasses,
+                "com.example.evidence.GenericBoundFixture", "related");
+        MethodId loadId = new MethodId(
+                "orders", "com.example.evidence", "GenericBoundFixture", "load", load.paramTypes());
+        MethodId relatedId = new MethodId(
+                "orders", "com.example.evidence", "GenericBoundFixture", "related", related.paramTypes());
+        CallNode loadNode = new CallNode(
+                new CallNodeId("node-1"), loadId, loadId.toString(), CallType.INTERNAL_SERVICE,
+                "GenericBoundFixture.java", 1, 1, Map.of(), "OLD_LOAD", EvidenceVisibility.READABLE);
+        CallNode relatedNode = new CallNode(
+                new CallNodeId("node-2"), relatedId, relatedId.toString(), CallType.INTERNAL_SERVICE,
+                "GenericBoundFixture.java", 1, 1, Map.of(), "OLD_RELATED", EvidenceVisibility.READABLE);
+        ExplainableCallGraph graph = new ExplainableCallGraph(
+                loadId, List.of(loadNode, relatedNode), List.of(), Map.of(),
+                new FlattenedCallGraph(List.of(), "", Map.of()));
+        ConfiguredReadPolicy policy = new ConfiguredReadPolicy(new ReadPolicyProperties(
+                List.of(), List.of(), List.of(new ReadPolicyProperties.ClassRule(
+                "orders", "com.example.evidence", "ForbiddenDto")), List.of()));
+
+        ExplainableCallGraph enriched = new EvidenceEnricher(policy).enrich(
+                graph, new RepositorySyntaxIndex("orders", new RepositorySyntax(List.of(), evidenceClasses)),
+                Map.of()).graph();
+        String serialized = new ObjectMapper().writeValueAsString(enriched);
+
+        assertThat(enriched.nodes()).filteredOn(node -> loadId.equals(node.methodId())).singleElement()
+                .satisfies(node -> {
+                    assertThat(node.code()).hasSize(0);
+                    assertThat(node.annotations()).hasSize(0);
+                });
+        assertThat(enriched.relatedClasses()).doesNotContainKey("com.example.evidence.BoundedBox");
+        assertThat(enriched.legacyFlattened().relatedClasses())
+                .doesNotContainKey("com.example.evidence.BoundedBox");
+        assertThat(enriched.legacyFlattened().methods())
+                .filteredOn(node -> loadId.toString().equals(node.signature()))
+                .singleElement()
+                .satisfies(node -> assertThat(node.code()).hasSize(0));
+        assertThat(enriched.toString()).doesNotContain(
+                "METHOD_PARAMETER_RETURN_BOUND_FORBIDDEN_SENTINEL",
+                "RELATED_CLASS_BOUND_FORBIDDEN_SENTINEL",
+                "FORBIDDEN_DTO_BOUND_SENTINEL");
+        assertThat(serialized).doesNotContain(
+                "METHOD_PARAMETER_RETURN_BOUND_FORBIDDEN_SENTINEL",
+                "RELATED_CLASS_BOUND_FORBIDDEN_SENTINEL",
+                "FORBIDDEN_DTO_BOUND_SENTINEL");
+    }
 
     // --- MyBatis SQL ---
 
@@ -102,6 +421,17 @@ class ClassMetadataExtractorTest {
     }
 
     @Test
+    void should_apply_explicit_and_default_accessors_chain_values() {
+        assertThat(classOf(classes, "com.example.syntax.ExplicitChainedShapes").hasChainedAccessors())
+                .isTrue();
+        assertThat(classOf(classes, "com.example.syntax.ExplicitNonChainedShapes").hasChainedAccessors())
+                .isFalse();
+        assertThat(classOf(classes, "com.example.syntax.AccountShapes").hasChainedAccessors())
+                .as("Lombok defaults chain to fluent when chain is absent")
+                .isTrue();
+    }
+
+    @Test
     void should_read_every_profile_when_the_profile_annotation_declares_an_array() {
         assertThat(classOf(classes, "com.example.syntax.AccountShapes").profiles())
                 .containsExactly("dev", "uat");
@@ -175,5 +505,18 @@ class ClassMetadataExtractorTest {
                 .filter(method -> methodName.equals(method.name()))
                 .findFirst()
                 .orElseThrow(() -> new AssertionError("no method " + fullyQualifiedName + "#" + methodName));
+    }
+
+    private SyntaxInvocation invocationOf(MethodSignature method, String expression) {
+        return method.invocations().stream()
+                .filter(invocation -> expression.equals(invocation.expression()))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("no invocation " + expression));
+    }
+
+    private SyntaxRange syntaxRange(int startLine, int startCharacter, int endLine, int endCharacter) {
+        return new SyntaxRange(
+                new SyntaxPosition(startLine, startCharacter),
+                new SyntaxPosition(endLine, endCharacter));
     }
 }

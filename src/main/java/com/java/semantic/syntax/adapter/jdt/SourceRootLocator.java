@@ -66,8 +66,9 @@ class SourceRootLocator {
                 modules.add(matcher.group(1).trim());
             }
             return List.copyOf(modules);
-        } catch (IOException e) {
-            log.warn("Failed to read pom.xml for module detection: {}", pom, e);
+        } catch (IOException exception) {
+            log.warn("Module detection failed category={} exceptionType={}",
+                    "POM_READ_FAILED", exception.getClass().getSimpleName());
             return List.of();
         }
     }

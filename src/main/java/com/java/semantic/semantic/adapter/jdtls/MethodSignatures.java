@@ -1,5 +1,6 @@
 package com.java.semantic.semantic.adapter.jdtls;
 
+import com.java.semantic.identity.PolicyIdentity;
 import org.springframework.util.StringUtils;
 
 import java.util.ArrayList;
@@ -51,14 +52,9 @@ final class MethodSignatures {
         if (!StringUtils.hasText(inside)) {
             return List.of();
         }
-        List<String> normalized = new ArrayList<>();
-        for (String part : splitParameters(inside)) {
-            String type = normalizeType(part);
-            if (StringUtils.hasText(type)) {
-                normalized.add(type);
-            }
-        }
-        return List.copyOf(normalized);
+        return PolicyIdentity.parameterTypes(splitParameters(inside)).stream()
+                .filter(StringUtils::hasText)
+                .toList();
     }
 
     /**
@@ -87,27 +83,7 @@ final class MethodSignatures {
 
     /** 去除泛型與套件前綴,可變參數轉為陣列 */
     static String normalizeType(String type) {
-        String value = StringUtils.hasText(type) ? type.trim() : "";
-        if (!StringUtils.hasText(value)) {
-            return "";
-        }
-        int open = value.indexOf('<');
-        if (open >= 0) {
-            int close = value.lastIndexOf('>');
-            String tail = close >= 0 && close + 1 <= value.length() ? value.substring(close + 1) : "";
-            value = value.substring(0, open) + tail.trim();
-        }
-        value = value.replace("...", "[]").trim();
-        StringBuilder brackets = new StringBuilder();
-        while (value.endsWith("[]")) {
-            brackets.append("[]");
-            value = value.substring(0, value.length() - 2).trim();
-        }
-        int dot = value.lastIndexOf('.');
-        if (dot >= 0) {
-            value = value.substring(dot + 1);
-        }
-        return value + brackets;
+        return PolicyIdentity.parameterType(type);
     }
 
     private static int firstOf(String value, char... markers) {

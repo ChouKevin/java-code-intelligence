@@ -1,20 +1,26 @@
 package com.java.semantic.syntax.adapter.jdt;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 
 import com.java.semantic.syntax.domain.ClassMetadata;
 import com.java.semantic.syntax.domain.ClassMetadata.FieldInfo;
 import com.java.semantic.syntax.domain.ClassMetadata.MethodSignature;
 import com.java.semantic.syntax.domain.ClassMetadata.SqlSource;
 import com.java.semantic.syntax.domain.ClassMetadata.TypeKind;
+import com.java.semantic.syntax.domain.AnnotationEvidence;
+import com.java.semantic.syntax.domain.ResolvedTypeIdentity;
+import com.java.semantic.syntax.domain.TypeReference;
+import com.java.semantic.identity.PolicyIdentity;
 
 import org.eclipse.jdt.core.dom.AbstractTypeDeclaration;
 import org.eclipse.jdt.core.dom.Annotation;
-import org.eclipse.jdt.core.dom.BodyDeclaration;
 import org.eclipse.jdt.core.dom.ArrayType;
+import org.eclipse.jdt.core.dom.BodyDeclaration;
 import org.eclipse.jdt.core.dom.CompilationUnit;
 import org.eclipse.jdt.core.dom.EnumDeclaration;
 import org.eclipse.jdt.core.dom.FieldDeclaration;
@@ -31,6 +37,10 @@ import org.eclipse.jdt.core.dom.SingleVariableDeclaration;
 import org.eclipse.jdt.core.dom.Type;
 import org.eclipse.jdt.core.dom.TypeDeclaration;
 import org.eclipse.jdt.core.dom.VariableDeclarationFragment;
+import org.eclipse.jdt.core.dom.ITypeBinding;
+import org.eclipse.jdt.core.dom.IntersectionType;
+import org.eclipse.jdt.core.dom.WildcardType;
+import org.springframework.util.StringUtils;
 
 /** 從型別宣告抽取輕量 metadata */
 final class ClassMetadataExtractor {
@@ -42,6 +52,10 @@ final class ClassMetadataExtractor {
 
     private static final String ACCESSORS = "Accessors";
 
+    private static final String PRIMARY = "Primary";
+
+    private static final String QUALIFIER = "Qualifier";
+
     private ClassMetadataExtractor() {
     }
 
@@ -50,6 +64,7 @@ final class ClassMetadataExtractor {
         String packageName = PackageNames.of(parsed);
         String className = SourceTypes.nestedName(type);
         String fullyQualifiedName = PackageNames.qualify(packageName, className);
+        SourceSlices slices = new SourceSlices(parsed.unit(), parsed.text());
 
         return new ClassMetadata(
                 className,
@@ -62,10 +77,16 @@ final class ClassMetadataExtractor {
                 extendedTypesOf(type),
                 annotationNamesOf(type),
                 importsOf(parsed.unit()),
-                fieldsOf(type),
-                methodsOf(parsed.unit(), type, fullyQualifiedName, sqlIndex),
+                fieldsOf(type, slices),
+                methodsOf(parsed.unit(), type, fullyQualifiedName, sqlIndex, slices),
                 hasFluentAccessors(type),
-                profilesOf(type));
+                hasChainedAccessors(type),
+                profilesOf(type),
+                slices.range(type),
+                slices.slice(type),
+                AnnotationReader.isPresent(type, PRIMARY),
+                qualifierValuesOf(type),
+                annotationEvidenceOf(type));
     }
 
     // --- 型別形狀 ---
@@ -120,14 +141,18 @@ final class ClassMetadataExtractor {
 
     // --- 成員 ---
 
-    private static List<FieldInfo> fieldsOf(AbstractTypeDeclaration type) {
+    private static List<FieldInfo> fieldsOf(AbstractTypeDeclaration type, SourceSlices slices) {
         List<FieldInfo> fields = new ArrayList<>();
         if (type instanceof RecordDeclaration record) {
             for (Object component : record.recordComponents()) {
                 SingleVariableDeclaration parameter = (SingleVariableDeclaration) component;
                 fields.add(new FieldInfo(
                         parameter.getName().getIdentifier(),
-                        TypeNames.simpleNameOf(parameter.getType())));
+                        TypeNames.simpleNameOf(parameter.getType()),
+                        annotationNamesOf(parameter),
+                        qualifierValueOf(parameter),
+                        typeReferenceOf(parameter.getType(), slices),
+                        annotationEvidenceOf(parameter)));
             }
         }
         for (Object member : SourceTypes.declaredMembersOf(type)) {
@@ -137,14 +162,19 @@ final class ClassMetadataExtractor {
             String typeName = TypeNames.simpleNameOf(field.getType());
             for (Object variable : field.fragments()) {
                 fields.add(new FieldInfo(
-                        ((VariableDeclarationFragment) variable).getName().getIdentifier(), typeName));
+                        ((VariableDeclarationFragment) variable).getName().getIdentifier(),
+                        typeName,
+                        annotationNamesOf(field),
+                        qualifierValueOf(field),
+                        typeReferenceOf(field.getType(), slices),
+                        annotationEvidenceOf(field)));
             }
         }
         return List.copyOf(fields);
     }
 
     private static List<MethodSignature> methodsOf(CompilationUnit unit, AbstractTypeDeclaration type,
-            String fullyQualifiedName, MapperXmlSqlExtractor.SqlIndex sqlIndex) {
+            String fullyQualifiedName, MapperXmlSqlExtractor.SqlIndex sqlIndex, SourceSlices slices) {
         List<MethodSignature> methods = new ArrayList<>();
         for (MethodDeclaration method : SourceTypes.declaredMethodsOf(type)) {
             String name = method.getName().getIdentifier();
@@ -163,7 +193,14 @@ final class ClassMetadataExtractor {
                     sql,
                     sqlSource,
                     unit.getLineNumber(method.getStartPosition()),
-                    unit.getLineNumber(method.getStartPosition() + method.getLength() - 1)));
+                    unit.getLineNumber(method.getStartPosition() + method.getLength() - 1),
+                    slices.range(method),
+                    slices.slice(method),
+                    parameterTypeReferencesOf(method, slices),
+                    returnTypeReferenceOf(method, slices),
+                    InvocationExtractor.extract(unit, method, slices),
+                    annotationEvidenceOf(method),
+                    BodyTypeReferenceExtractor.extract(method)));
         }
         return List.copyOf(methods);
     }
@@ -178,9 +215,142 @@ final class ClassMetadataExtractor {
     private static List<String> parameterTypesOf(MethodDeclaration method) {
         List<String> types = new ArrayList<>();
         for (Object parameter : method.parameters()) {
-            types.add(TypeNames.simpleNameOf(((SingleVariableDeclaration) parameter).getType()));
+            SingleVariableDeclaration declaration = (SingleVariableDeclaration) parameter;
+            String parameterType = TypeNames.simpleNameOf(declaration.getType());
+            types.add(PolicyIdentity.parameterType(
+                    declaration.isVarargs() ? parameterType + "[]" : parameterType));
         }
         return List.copyOf(types);
+    }
+
+    private static List<TypeReference> parameterTypeReferencesOf(MethodDeclaration method, SourceSlices slices) {
+        List<TypeReference> types = new ArrayList<>();
+        for (Object parameter : method.parameters()) {
+            types.add(typeReferenceOf(((SingleVariableDeclaration) parameter).getType(), slices));
+        }
+        return List.copyOf(types);
+    }
+
+    private static Optional<TypeReference> returnTypeReferenceOf(MethodDeclaration method, SourceSlices slices) {
+        Type returnType = method.getReturnType2();
+        return Objects.isNull(returnType) ? Optional.empty() : Optional.of(typeReferenceOf(returnType, slices));
+    }
+
+    private static TypeReference typeReferenceOf(Type type, SourceSlices slices) {
+        return typeReferenceOf(type, slices, new HashSet<>());
+    }
+
+    private static TypeReference typeReferenceOf(
+            Type type,
+            SourceSlices slices,
+            Set<String> visitingBindings) {
+        ITypeBinding binding = type.resolveBinding();
+        boolean resolved = Objects.nonNull(binding) && !sourceTypeOf(binding).isRecovered();
+        String resolvedType = resolved ? canonicalNameOf(binding) : "";
+        boolean sourceDefined = resolved && sourceTypeOf(binding).isFromSource();
+        List<TypeReference> arguments = new ArrayList<>();
+        List<TypeReference> upperBounds = new ArrayList<>();
+        List<TypeReference> lowerBounds = new ArrayList<>();
+        if (type instanceof ParameterizedType parameterized) {
+            for (Object argument : parameterized.typeArguments()) {
+                arguments.add(typeReferenceOf((Type) argument, slices, visitingBindings));
+            }
+        }
+        if (type instanceof ArrayType array) {
+            arguments.add(typeReferenceOf(array.getElementType(), slices, visitingBindings));
+        }
+        if (type instanceof WildcardType wildcard && Objects.nonNull(wildcard.getBound())) {
+            List<TypeReference> bounds = boundReferencesOf(wildcard.getBound(), slices, visitingBindings);
+            if (wildcard.isUpperBound()) {
+                upperBounds.addAll(bounds);
+            } else {
+                lowerBounds.addAll(bounds);
+            }
+        }
+        if (type instanceof SimpleType && Objects.nonNull(binding)) {
+            upperBounds.addAll(bindingBoundReferencesOf(binding, visitingBindings));
+        }
+        return new TypeReference(
+                slices.slice(type).text(), resolvedType, arguments, upperBounds, lowerBounds, sourceDefined);
+    }
+
+    private static List<TypeReference> boundReferencesOf(
+            Type bound,
+            SourceSlices slices,
+            Set<String> visitingBindings) {
+        if (bound instanceof IntersectionType intersection) {
+            List<TypeReference> references = new ArrayList<>();
+            for (Object type : intersection.types()) {
+                references.add(typeReferenceOf((Type) type, slices, visitingBindings));
+            }
+            return List.copyOf(references);
+        }
+        return List.of(typeReferenceOf(bound, slices, visitingBindings));
+    }
+
+    private static List<TypeReference> bindingBoundReferencesOf(
+            ITypeBinding binding,
+            Set<String> visitingBindings) {
+        if (!bindingCarriesBounds(binding)) {
+            return List.of();
+        }
+        String bindingIdentity = binding.getKey();
+        if (!StringUtils.hasText(bindingIdentity) || !visitingBindings.add(bindingIdentity)) {
+            return List.of();
+        }
+        try {
+            List<TypeReference> bounds = new ArrayList<>();
+            for (ITypeBinding bound : binding.getTypeBounds()) {
+                bindingReferenceOf(bound, visitingBindings).ifPresent(bounds::add);
+            }
+            return List.copyOf(bounds);
+        } finally {
+            visitingBindings.remove(bindingIdentity);
+        }
+    }
+
+    private static boolean bindingCarriesBounds(ITypeBinding binding) {
+        return binding.isTypeVariable() || binding.isCapture() || binding.isIntersectionType();
+    }
+
+    private static Optional<TypeReference> bindingReferenceOf(
+            ITypeBinding binding,
+            Set<String> visitingBindings) {
+        ITypeBinding sourceType = sourceTypeOf(binding);
+        if (sourceType.isRecovered() || !StringUtils.hasText(binding.getName())) {
+            return Optional.empty();
+        }
+        List<TypeReference> arguments = new ArrayList<>();
+        for (ITypeBinding argument : binding.getTypeArguments()) {
+            bindingReferenceOf(argument, visitingBindings).ifPresent(arguments::add);
+        }
+        if (binding.isArray()) {
+            bindingReferenceOf(binding.getElementType(), visitingBindings).ifPresent(arguments::add);
+        }
+        List<TypeReference> upperBounds = new ArrayList<>();
+        List<TypeReference> lowerBounds = new ArrayList<>();
+        if (binding.isWildcardType() && Objects.nonNull(binding.getBound())) {
+            Optional<TypeReference> bound = bindingReferenceOf(binding.getBound(), visitingBindings);
+            if (binding.isUpperbound()) {
+                bound.ifPresent(upperBounds::add);
+            } else {
+                bound.ifPresent(lowerBounds::add);
+            }
+        }
+        upperBounds.addAll(bindingBoundReferencesOf(binding, visitingBindings));
+        return Optional.of(new TypeReference(
+                binding.getName(), canonicalNameOf(binding), arguments, upperBounds, lowerBounds,
+                sourceType.isFromSource()));
+    }
+
+    private static String canonicalNameOf(ITypeBinding binding) {
+        String qualifiedName = sourceTypeOf(binding).getQualifiedName();
+        return StringUtils.hasText(qualifiedName) ? qualifiedName : "";
+    }
+
+    private static ITypeBinding sourceTypeOf(ITypeBinding binding) {
+        ITypeBinding declaration = binding.getTypeDeclaration();
+        return declaration.isArray() ? declaration.getElementType().getTypeDeclaration() : declaration;
     }
 
     // --- 註解衍生資訊 ---
@@ -190,6 +360,59 @@ final class ClassMetadataExtractor {
         return AnnotationReader.annotationsOf(declaration).stream()
                 .map(AnnotationReader::writtenNameOf)
                 .toList();
+    }
+
+    private static List<AnnotationEvidence> annotationEvidenceOf(BodyDeclaration declaration) {
+        return AnnotationReader.annotationsOf(declaration).stream()
+                .map(ClassMetadataExtractor::annotationEvidenceOf)
+                .toList();
+    }
+
+    private static List<String> annotationNamesOf(SingleVariableDeclaration declaration) {
+        return AnnotationReader.annotationsOf(declaration).stream()
+                .map(AnnotationReader::writtenNameOf)
+                .toList();
+    }
+
+    private static List<AnnotationEvidence> annotationEvidenceOf(SingleVariableDeclaration declaration) {
+        return AnnotationReader.annotationsOf(declaration).stream()
+                .map(ClassMetadataExtractor::annotationEvidenceOf)
+                .toList();
+    }
+
+    private static AnnotationEvidence annotationEvidenceOf(Annotation annotation) {
+        ITypeBinding binding = annotation.resolveTypeBinding();
+        if (Objects.isNull(binding) || binding.isRecovered()) {
+            return new AnnotationEvidence(AnnotationReader.writtenNameOf(annotation), Optional.empty());
+        }
+        ITypeBinding declaration = binding.getTypeDeclaration();
+        String qualifiedName = declaration.getQualifiedName();
+        if (declaration.isRecovered() || !StringUtils.hasText(qualifiedName)) {
+            return new AnnotationEvidence(AnnotationReader.writtenNameOf(annotation), Optional.empty());
+        }
+        String packageName = declaration.getPackage().getName();
+        return new AnnotationEvidence(
+                AnnotationReader.writtenNameOf(annotation),
+                Optional.of(new ResolvedTypeIdentity(
+                        packageName, PolicyIdentity.className(packageName, qualifiedName))));
+    }
+
+    private static String qualifierValueOf(BodyDeclaration declaration) {
+        return AnnotationReader.find(declaration, QUALIFIER)
+                .flatMap(annotation -> AnnotationReader.stringValue(annotation, "value"))
+                .orElse("");
+    }
+
+    private static String qualifierValueOf(SingleVariableDeclaration declaration) {
+        return AnnotationReader.find(declaration, QUALIFIER)
+                .flatMap(annotation -> AnnotationReader.stringValue(annotation, "value"))
+                .orElse("");
+    }
+
+    private static List<String> qualifierValuesOf(AbstractTypeDeclaration type) {
+        return AnnotationReader.find(type, QUALIFIER)
+                .map(annotation -> AnnotationReader.stringValues(annotation, "value"))
+                .orElseGet(List::of);
     }
 
     private static List<String> importsOf(CompilationUnit unit) {
@@ -204,6 +427,15 @@ final class ClassMetadataExtractor {
         return AnnotationReader.find(type, ACCESSORS)
                 .flatMap(annotation -> AnnotationReader.booleanValue(annotation, "fluent"))
                 .orElse(false);
+    }
+
+    private static boolean hasChainedAccessors(AbstractTypeDeclaration type) {
+        Optional<Annotation> accessors = AnnotationReader.find(type, ACCESSORS);
+        Optional<Boolean> explicitChain = accessors
+                .flatMap(annotation -> AnnotationReader.booleanValue(annotation, "chain"));
+        return explicitChain.orElseGet(() -> accessors
+                .flatMap(annotation -> AnnotationReader.booleanValue(annotation, "fluent"))
+                .orElse(false));
     }
 
     private static List<String> profilesOf(AbstractTypeDeclaration type) {

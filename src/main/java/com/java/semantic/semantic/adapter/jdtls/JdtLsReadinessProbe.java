@@ -85,7 +85,9 @@ public final class JdtLsReadinessProbe {
             requireUsable(session);
             if (client.isImportSettled() && symbolQuerySucceeds(session, sanityQuery)) {
                 requireUsable(session);
-                session.markReady();
+                if (!session.markReady()) {
+                    throw startupFailure(session, "JDT LS session became unavailable while importing", null);
+                }
                 return;
             }
             if (System.nanoTime() - deadlineNanos >= 0) {
@@ -119,7 +121,8 @@ public final class JdtLsReadinessProbe {
                     .findFirst()
                     .map(name -> name.substring(0, name.length() - JAVA_SUFFIX.length()));
         } catch (IOException exception) {
-            LOGGER.warn("Scanning for a readiness probe type failed: root={}", root, exception);
+            LOGGER.warn("Scanning for a readiness probe type failed: category={} exceptionType={}",
+                    "SOURCE_SCAN_FAILED", exception.getClass().getSimpleName());
             return Optional.empty();
         }
     }
@@ -131,8 +134,8 @@ public final class JdtLsReadinessProbe {
                             .symbol(new WorkspaceSymbolParams(sanityQuery)));
             return hasSymbols(response);
         } catch (JdtWorkspaceSession.JdtRequestFailedException exception) {
-            LOGGER.debug("Readiness symbol query failed while importing: repositoryId={}",
-                    session.repositoryId().value(), exception);
+            LOGGER.debug("Readiness symbol query failed while importing: repositoryId={} exceptionType={}",
+                    session.repositoryId().value(), exception.getClass().getSimpleName());
             return false;
         }
     }
@@ -155,6 +158,9 @@ public final class JdtLsReadinessProbe {
         if (!session.isProcessAlive()) {
             throw startupFailure(session, "JDT LS process exited while importing", null);
         }
+        if (!session.isUsable()) {
+            throw startupFailure(session, "JDT LS session became unavailable while importing", null);
+        }
     }
 
     private void pause(JdtWorkspaceSession session) {
@@ -168,10 +174,17 @@ public final class JdtLsReadinessProbe {
 
     private JdtWorkspaceStartupException startupFailure(
             JdtWorkspaceSession session, String reason, Throwable cause) {
-        String stderr = session.stderrBuffer().asText();
-        LOGGER.warn("JDT LS workspace failed: repositoryId={}, reason={}, stderr={}",
-                session.repositoryId().value(), reason, stderr, cause);
-        return new JdtWorkspaceStartupException(session.repositoryId(), reason, stderr, cause);
+        StderrRingBuffer stderrBuffer = session.stderrBuffer();
+        String failureType = failureType(cause);
+        LOGGER.warn(
+                "JDT LS workspace failed: repositoryId={}, reason={}, stderrLines={}, failureType={}",
+                session.repositoryId().value(), reason, stderrBuffer.lines().size(), failureType);
+        return new JdtWorkspaceStartupException(
+                session.repositoryId(), reason, stderrBuffer.asText(), failureType);
+    }
+
+    private static String failureType(Throwable cause) {
+        return Objects.nonNull(cause) ? cause.getClass().getSimpleName() : "NONE";
     }
 
     /**
@@ -192,13 +205,14 @@ public final class JdtLsReadinessProbe {
             if (Objects.isNull(report)) {
                 return;
             }
-            LOGGER.debug("JDT LS status: type={}, message={}", report.type(), report.message());
+            String statusCategory = statusCategory(report.type());
+            LOGGER.debug("JDT LS status received: category={}", statusCategory);
             if (SERVICE_READY_STATUS.equalsIgnoreCase(report.type())
                     || STARTED_STATUS.equalsIgnoreCase(report.type())) {
                 serviceReady = true;
             }
             if (ERROR_STATUS.equalsIgnoreCase(report.type())) {
-                LOGGER.warn("JDT LS reported an error status: {}", report.message());
+                LOGGER.warn("JDT LS reported an error status");
             }
         }
 
@@ -238,7 +252,7 @@ public final class JdtLsReadinessProbe {
 
         @Override
         public void showMessage(MessageParams message) {
-            LOGGER.debug("JDT LS message: {}", message.getMessage());
+            LOGGER.debug("JDT LS message received: present={}", Objects.nonNull(message));
         }
 
         @Override
@@ -249,7 +263,20 @@ public final class JdtLsReadinessProbe {
 
         @Override
         public void logMessage(MessageParams message) {
-            LOGGER.debug("JDT LS log: {}", message.getMessage());
+            LOGGER.debug("JDT LS log received: present={}", Objects.nonNull(message));
+        }
+
+        private String statusCategory(String status) {
+            if (SERVICE_READY_STATUS.equalsIgnoreCase(status)) {
+                return "SERVICE_READY";
+            }
+            if (STARTED_STATUS.equalsIgnoreCase(status)) {
+                return "STARTED";
+            }
+            if (ERROR_STATUS.equalsIgnoreCase(status)) {
+                return "ERROR";
+            }
+            return "OTHER";
         }
 
         /** 收到 ServiceReady 且沒有未結束的進度回報 */
@@ -262,21 +289,27 @@ public final class JdtLsReadinessProbe {
         }
     }
 
-    /** 工作區無法就緒,附帶 stderr 診斷 */
+    /** 工作區無法就緒,附帶安全 stderr 分類 */
     public static final class JdtWorkspaceStartupException extends RuntimeException {
 
         private final String stderr;
 
         JdtWorkspaceStartupException(
-                RepositoryId repositoryId, String reason, String stderr, Throwable cause) {
-            super("semantic workspace failed for repository " + repositoryId.value() + ": " + reason,
-                    cause);
+                RepositoryId repositoryId, String reason, String stderr, String failureType) {
+            super(message(repositoryId, reason, failureType), null, false, true);
             this.stderr = Objects.requireNonNullElse(stderr, "");
         }
 
-        /** JDT LS 最後數行 stderr,失敗時唯一能說明原因的資料 */
+        /** JDT LS 最後數行安全 stderr 分類 */
         public String stderr() {
             return stderr;
+        }
+
+        private static String message(
+                RepositoryId repositoryId, String reason, String failureType) {
+            String base = "semantic workspace failed for repository "
+                    + repositoryId.value() + ": " + reason;
+            return "NONE".equals(failureType) ? base : base + " (failureType=" + failureType + ")";
         }
     }
 }

@@ -26,7 +26,7 @@ record RepositoryContainment(Path realRepositoryRoot) {
         if (realPath.startsWith(realRepositoryRoot)) {
             return true;
         }
-        log.warn("Refusing to read a file that resolves outside the repository: {} -> {}", path, realPath);
+        log.warn("Refusing repository file read category={}", "OUTSIDE_REPOSITORY");
         return false;
     }
 

@@ -1,5 +1,9 @@
 package com.java.semantic.semantic.adapter.jdtls;
 
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import com.java.semantic.config.JdtLsProperties;
 import com.java.semantic.repository.application.RepositoryMutationException;
 import com.java.semantic.repository.domain.RepositoryId;
@@ -11,6 +15,8 @@ import org.eclipse.lsp4j.DidChangeConfigurationParams;
 import org.eclipse.lsp4j.DidChangeWatchedFilesParams;
 import org.eclipse.lsp4j.InitializeParams;
 import org.eclipse.lsp4j.InitializeResult;
+import org.eclipse.lsp4j.MessageParams;
+import org.eclipse.lsp4j.MessageType;
 import org.eclipse.lsp4j.ProgressParams;
 import org.eclipse.lsp4j.SymbolInformation;
 import org.eclipse.lsp4j.WorkDoneProgressBegin;
@@ -24,6 +30,7 @@ import org.eclipse.lsp4j.services.TextDocumentService;
 import org.eclipse.lsp4j.services.WorkspaceService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.slf4j.LoggerFactory;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -35,11 +42,14 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
+import java.util.ServiceConfigurationError;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
@@ -73,6 +83,34 @@ class DefaultJdtWorkspaceManagerTest {
         assertThat(fixture.manager().status(REPOSITORY_ID)).isEqualTo(SemanticEngineStatus.READY);
         assertThat(session.revision()).isEqualTo(REVISION);
         assertThat(fixture.workspaceService().queries()).containsExactly(SANITY_TYPE);
+    }
+
+    @Test
+    void should_not_expose_language_status_show_message_or_log_message_payloads() {
+        String sentinel = "RESTRICTED_LANGUAGE_MESSAGE_SENTINEL_/protected/Secret.java";
+        JdtLsReadinessProbe.ImportProgressClient client = new JdtLsReadinessProbe(
+                Duration.ofSeconds(1), Duration.ofMillis(1)).newClient();
+        Logger logger = (Logger) LoggerFactory.getLogger(JdtLsReadinessProbe.class);
+        Level previous = logger.getLevel();
+        logger.setLevel(Level.DEBUG);
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        try {
+            client.languageStatus(new StatusReport("Error", sentinel));
+            client.showMessage(new MessageParams(MessageType.Warning, sentinel));
+            client.logMessage(new MessageParams(MessageType.Error, sentinel));
+
+            assertThat(appender.list).hasSize(4).allSatisfy(event -> {
+                assertThat(event.getFormattedMessage()).doesNotContain(sentinel);
+                assertThat(Arrays.toString(event.getArgumentArray())).doesNotContain(sentinel);
+                assertThat(event.getThrowableProxy()).isNull();
+            });
+        } finally {
+            logger.detachAppender(appender);
+            logger.setLevel(previous);
+            appender.stop();
+        }
     }
 
     @Test
@@ -134,9 +172,44 @@ class DefaultJdtWorkspaceManagerTest {
                 () -> fixture.manager().getOrStart(fixture.snapshot()));
 
         assertThat(failure).hasMessageContaining("order-service");
-        assertThat(failure.stderr()).contains("!MESSAGE could not resolve pom.xml");
+        assertThat(failure.stderr()).contains("stderr-category=ENTRY", "stderr-category=MESSAGE")
+                .doesNotContain("could not resolve pom.xml");
         assertThat(fixture.manager().status(REPOSITORY_ID)).isEqualTo(SemanticEngineStatus.FAILED);
         assertThat(fixture.languageServer().lifecycleCalls()).containsExactly("shutdown", "exit");
+    }
+
+    @Test
+    void should_sanitize_startup_exception_stderr_and_throwable_channels() {
+        String sentinel = "RESTRICTED_STARTUP_SENTINEL_/protected/Secret.java";
+        Fixture fixture = new Fixture();
+        fixture.stderr("!MESSAGE " + sentinel + "\n");
+        fixture.workspaceService().respondWith(
+                query -> CompletableFuture.completedFuture(Either.forRight(List.of())));
+        Logger readinessLogger = (Logger) LoggerFactory.getLogger(JdtLsReadinessProbe.class);
+        Level previous = readinessLogger.getLevel();
+        readinessLogger.setLevel(Level.WARN);
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        readinessLogger.addAppender(appender);
+        try {
+            JdtLsReadinessProbe.JdtWorkspaceStartupException failure = catchThrowableOfType(
+                    JdtLsReadinessProbe.JdtWorkspaceStartupException.class,
+                    () -> fixture.manager().getOrStart(fixture.snapshot()));
+
+            assertThat(failure.stderr()).doesNotContain(sentinel);
+            assertThat(failure.toString()).doesNotContain(sentinel);
+            assertThat(failure.getCause()).isNull();
+            assertThat(failure.getSuppressed()).isEmpty();
+            assertThat(appender.list).singleElement().satisfies(event -> {
+                assertThat(event.getFormattedMessage()).doesNotContain(sentinel);
+                assertThat(Arrays.toString(event.getArgumentArray())).doesNotContain(sentinel);
+                assertThat(event.getThrowableProxy()).isNull();
+            });
+        } finally {
+            readinessLogger.detachAppender(appender);
+            readinessLogger.setLevel(previous);
+            appender.stop();
+        }
     }
 
     @Test
@@ -151,9 +224,9 @@ class DefaultJdtWorkspaceManagerTest {
                 JdtLsReadinessProbe.JdtWorkspaceStartupException.class,
                 () -> fixture.manager().getOrStart(fixture.snapshot()));
 
-        assertThat(failure.stderr()).contains("!MESSAGE could not resolve pom.xml");
-        assertThat(failure.getSuppressed()).hasSize(1);
-        assertThat(failure.getSuppressed()[0]).isInstanceOf(IllegalStateException.class);
+        assertThat(failure.stderr()).contains("stderr-category=MESSAGE")
+                .doesNotContain("could not resolve pom.xml");
+        assertThat(failure.getSuppressed()).isEmpty();
         assertThat(fixture.manager().status(REPOSITORY_ID)).isEqualTo(SemanticEngineStatus.FAILED);
     }
 
@@ -249,7 +322,8 @@ class DefaultJdtWorkspaceManagerTest {
 
         assertThatThrownBy(() -> fixture.manager().beforeMutation(REPOSITORY_ID))
                 .isInstanceOf(RepositoryMutationException.class)
-                .hasRootCauseInstanceOf(IllegalStateException.class);
+                .hasMessageContaining("IllegalStateException")
+                .hasNoCause();
     }
 
     @Test
@@ -389,6 +463,53 @@ class DefaultJdtWorkspaceManagerTest {
     }
 
     @Test
+    void should_not_resurrect_a_starting_session_after_shutdown_when_the_process_stays_alive() throws Exception {
+        Fixture fixture = new Fixture(Duration.ofMillis(200), Duration.ofMillis(100));
+        CountDownLatch importReached = new CountDownLatch(1);
+        CountDownLatch releaseImport = new CountDownLatch(1);
+        fixture.workspaceService().respondWith(query -> {
+            importReached.countDown();
+            awaitLatch(releaseImport);
+            return CompletableFuture.completedFuture(symbols());
+        });
+        CompletableFuture<JdtWorkspaceSession> startup = new CompletableFuture<>();
+        Thread starter = Thread.ofPlatform().start(() -> {
+            try {
+                startup.complete(fixture.manager().getOrStart(fixture.snapshot()));
+            } catch (Throwable failure) {
+                startup.completeExceptionally(failure);
+            }
+        });
+
+        try {
+            assertThat(importReached.await(2, TimeUnit.SECONDS)).isTrue();
+            fixture.process().refuseToExit();
+
+            fixture.manager().shutdownAll();
+
+            assertThat(fixture.manager().status(REPOSITORY_ID)).isEqualTo(SemanticEngineStatus.STOPPED);
+            assertThat(fixture.meterRegistry().find("jdtls.workspace.peak.rss.kilobytes").gauge())
+                    .isNull();
+            assertThat(fixture.process().isAlive()).isTrue();
+
+            releaseImport.countDown();
+            Throwable observed = catchThrowable(() -> startup.get(2, TimeUnit.SECONDS));
+
+            assertThat(observed).isInstanceOf(ExecutionException.class);
+            assertThat(observed.getCause())
+                    .isInstanceOf(JdtLsReadinessProbe.JdtWorkspaceStartupException.class);
+            assertThat(observed.getCause().getCause()).isNull();
+            assertThat(fixture.manager().status(REPOSITORY_ID))
+                    .isNotEqualTo(SemanticEngineStatus.READY);
+            assertThatThrownBy(() -> fixture.manager().getOrStart(fixture.snapshot()))
+                    .isInstanceOf(DefaultJdtWorkspaceManager.JdtWorkspaceManagerStoppedException.class);
+        } finally {
+            releaseImport.countDown();
+            starter.join(Duration.ofSeconds(5));
+        }
+    }
+
+    @Test
     void should_not_start_a_process_when_get_or_start_runs_after_shutdown() {
         Fixture fixture = new Fixture();
         fixture.manager().shutdownAll();
@@ -415,15 +536,173 @@ class DefaultJdtWorkspaceManagerTest {
     }
 
     @Test
-    void should_report_failed_when_the_process_cannot_be_launched() {
+    void should_report_sanitized_failed_state_when_the_process_cannot_be_launched() {
+        String sentinel = "RESTRICTED_LAUNCH_FAILURE_SENTINEL_/protected/Secret.java";
         Fixture fixture = new Fixture();
-        fixture.failProcessStartWith(new IOException("no such executable"));
+        fixture.failProcessStartWith(new IOException(sentinel));
+        Logger managerLogger = (Logger) LoggerFactory.getLogger(DefaultJdtWorkspaceManager.class);
+        Level previous = managerLogger.getLevel();
+        managerLogger.setLevel(Level.WARN);
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        managerLogger.addAppender(appender);
+        try {
+            JdtLsReadinessProbe.JdtWorkspaceStartupException failure = catchThrowableOfType(
+                    JdtLsReadinessProbe.JdtWorkspaceStartupException.class,
+                    () -> fixture.manager().getOrStart(fixture.snapshot()));
 
-        assertThatThrownBy(() -> fixture.manager().getOrStart(fixture.snapshot()))
-                .isInstanceOf(JdtLsReadinessProbe.JdtWorkspaceStartupException.class)
-                .hasRootCauseInstanceOf(IOException.class);
+            assertThat(failure.toString()).doesNotContain(sentinel);
+            assertThat(failure.getCause()).isNull();
+            assertThat(failure.getSuppressed()).isEmpty();
+            assertThat(failure.toString()).contains("IOException");
+            assertThat(appender.list).singleElement().satisfies(event -> {
+                assertThat(event.getFormattedMessage()).doesNotContain(sentinel);
+                assertThat(Arrays.toString(event.getArgumentArray())).doesNotContain(sentinel);
+                assertThat(event.getThrowableProxy()).isNull();
+            });
+            assertThat(fixture.manager().status(REPOSITORY_ID)).isEqualTo(SemanticEngineStatus.FAILED);
+        } finally {
+            managerLogger.detachAppender(appender);
+            managerLogger.setLevel(previous);
+            appender.stop();
+        }
+    }
 
+    @Test
+    void should_sanitize_a_launch_error_and_mark_the_workspace_failed() {
+        String sentinel = "RESTRICTED_LAUNCH_ERROR_SENTINEL_/protected/Secret.java";
+        Fixture fixture = new Fixture();
+        fixture.failConnectionWith(new AssertionError(sentinel));
+        Logger managerLogger = (Logger) LoggerFactory.getLogger(DefaultJdtWorkspaceManager.class);
+        Level previous = managerLogger.getLevel();
+        managerLogger.setLevel(Level.WARN);
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        managerLogger.addAppender(appender);
+        try {
+            JdtLsReadinessProbe.JdtWorkspaceStartupException failure = catchThrowableOfType(
+                    JdtLsReadinessProbe.JdtWorkspaceStartupException.class,
+                    () -> fixture.manager().getOrStart(fixture.snapshot()));
+
+            assertThat(failure).hasMessageContaining("AssertionError");
+            assertThat(failure.toString()).doesNotContain(sentinel);
+            assertThat(failure.getCause()).isNull();
+            assertThat(failure.getSuppressed()).isEmpty();
+            assertThat(appender.list).singleElement().satisfies(event -> {
+                assertThat(event.getFormattedMessage()).doesNotContain(sentinel);
+                assertThat(Arrays.toString(event.getArgumentArray())).doesNotContain(sentinel);
+                assertThat(event.getThrowableProxy()).isNull();
+            });
+            assertThat(fixture.process().isDestroyed()).isTrue();
+            assertThat(fixture.manager().status(REPOSITORY_ID)).isEqualTo(SemanticEngineStatus.FAILED);
+        } finally {
+            managerLogger.detachAppender(appender);
+            managerLogger.setLevel(previous);
+            appender.stop();
+        }
+    }
+
+    @Test
+    void should_sanitize_a_service_configuration_error_and_mark_the_workspace_failed() {
+        String sentinel = "RESTRICTED_SERVICE_CONFIGURATION_ERROR_SENTINEL_/protected/Secret.java";
+        Fixture fixture = new Fixture();
+        fixture.failConnectionWith(new ServiceConfigurationError(sentinel));
+        Logger managerLogger = (Logger) LoggerFactory.getLogger(DefaultJdtWorkspaceManager.class);
+        Level previous = managerLogger.getLevel();
+        managerLogger.setLevel(Level.WARN);
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        managerLogger.addAppender(appender);
+        try {
+            JdtLsReadinessProbe.JdtWorkspaceStartupException failure = catchThrowableOfType(
+                    JdtLsReadinessProbe.JdtWorkspaceStartupException.class,
+                    () -> fixture.manager().getOrStart(fixture.snapshot()));
+
+            assertThat(failure).hasMessageContaining("ServiceConfigurationError");
+            assertThat(failure.toString()).doesNotContain(sentinel);
+            assertThat(failure.getCause()).isNull();
+            assertThat(failure.getSuppressed()).isEmpty();
+            assertThat(appender.list).singleElement().satisfies(event -> {
+                assertThat(event.getFormattedMessage()).doesNotContain(sentinel);
+                assertThat(Arrays.toString(event.getArgumentArray())).doesNotContain(sentinel);
+                assertThat(event.getThrowableProxy()).isNull();
+            });
+            assertThat(fixture.process().isDestroyed()).isTrue();
+            assertThat(fixture.manager().status(REPOSITORY_ID)).isEqualTo(SemanticEngineStatus.FAILED);
+        } finally {
+            managerLogger.detachAppender(appender);
+            managerLogger.setLevel(previous);
+            appender.stop();
+        }
+    }
+
+    @Test
+    void should_not_reuse_a_ready_session_after_its_stderr_drain_fails() throws Exception {
+        Fixture fixture = new Fixture();
+        ControlledFatalFailureInputStream stderr = new ControlledFatalFailureInputStream();
+        fixture.stderrStream(stderr);
+
+        JdtWorkspaceSession first = fixture.manager().getOrStart(fixture.snapshot());
+
+        assertThat(first.status()).isEqualTo(SemanticEngineStatus.READY);
+        assertThat(stderr.awaitRead()).isTrue();
+        stderr.release();
+        assertThat(stderr.awaitFailure()).isTrue();
+        awaitUnusable(first);
+        assertThat(first.status()).isEqualTo(SemanticEngineStatus.FAILED);
         assertThat(fixture.manager().status(REPOSITORY_ID)).isEqualTo(SemanticEngineStatus.FAILED);
+
+        fixture.stderr("");
+        JdtWorkspaceSession replacement = fixture.manager().getOrStart(fixture.snapshot());
+
+        assertThat(replacement).isNotSameAs(first);
+        assertThat(replacement.status()).isEqualTo(SemanticEngineStatus.READY);
+        assertThat(fixture.startedCommands()).hasSize(2);
+        assertThat(fixture.meterRegistry().find("jdtls.workspace.peak.rss.kilobytes").gauge()).isNotNull();
+    }
+
+    @Test
+    void should_propagate_a_fatal_lsp_request_failure_unchanged() {
+        Fixture fixture = new Fixture();
+        JdtWorkspaceSession session = fixture.manager().getOrStart(fixture.snapshot());
+        OutOfMemoryError fatal = new OutOfMemoryError("fatal-request-sentinel");
+        fixture.workspaceService().respondWith(query -> CompletableFuture.failedFuture(fatal));
+
+        Throwable observed = catchThrowable(() -> session.call("workspace/symbol",
+                server -> server.getWorkspaceService().symbol(new WorkspaceSymbolParams("x"))));
+
+        assertThat(observed).isSameAs(fatal);
+        assertThat(session.activeRequests()).isZero();
+    }
+
+    @Test
+    void should_cleanup_the_published_session_when_readiness_throws_a_fatal_error() {
+        Fixture fixture = new Fixture();
+        OutOfMemoryError fatal = new OutOfMemoryError("fatal-readiness-sentinel");
+        fixture.workspaceService().respondWith(query -> CompletableFuture.failedFuture(fatal));
+
+        Throwable observed = catchThrowable(() -> fixture.manager().getOrStart(fixture.snapshot()));
+
+        assertThat(observed).isSameAs(fatal);
+        assertThat(fixture.manager().status(REPOSITORY_ID)).isEqualTo(SemanticEngineStatus.FAILED);
+        assertThat(fixture.meterRegistry().find("jdtls.workspace.peak.rss.kilobytes").gauge()).isNull();
+        assertThat(fixture.process().isAlive()).isFalse();
+        assertThat(fixture.languageServer().lifecycleCalls()).containsExactly("shutdown", "exit");
+    }
+
+    @Test
+    void should_cleanup_the_published_session_when_peak_rss_gauge_registration_fails() {
+        Fixture fixture = new Fixture();
+        fixture.meterRegistry().counter(
+                "jdtls.workspace.peak.rss.kilobytes", "repository", REPOSITORY_ID.value());
+
+        Throwable observed = catchThrowable(() -> fixture.manager().getOrStart(fixture.snapshot()));
+
+        assertThat(observed).isInstanceOf(RuntimeException.class);
+        assertThat(fixture.manager().status(REPOSITORY_ID)).isEqualTo(SemanticEngineStatus.FAILED);
+        assertThat(fixture.meterRegistry().find("jdtls.workspace.peak.rss.kilobytes").gauge()).isNull();
+        assertThat(fixture.process().isAlive()).isFalse();
+        assertThat(fixture.languageServer().lifecycleCalls()).containsExactly("shutdown", "exit");
     }
 
     @Test
@@ -475,6 +754,31 @@ class DefaultJdtWorkspaceManagerTest {
     }
 
     @Test
+    void should_not_attach_raw_throwable_when_peak_rss_read_fails() {
+        Fixture fixture = new Fixture();
+        JdtWorkspaceSession session = fixture.manager().getOrStart(fixture.snapshot());
+        fixture.reportPid(0);
+        Logger logger = (Logger) LoggerFactory.getLogger(JdtWorkspaceSession.class);
+        Level previous = logger.getLevel();
+        logger.setLevel(Level.DEBUG);
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        try {
+            assertThat(session.peakResidentKilobytes()).isEmpty();
+            assertThat(appender.list).singleElement().satisfies(event -> {
+                assertThat(event.getFormattedMessage()).contains("repositoryId=order-service");
+                assertThat(Arrays.toString(event.getArgumentArray())).doesNotContain("/proc/0/status");
+                assertThat(event.getThrowableProxy()).isNull();
+            });
+        } finally {
+            logger.detachAppender(appender);
+            logger.setLevel(previous);
+            appender.stop();
+        }
+    }
+
+    @Test
     void should_remove_the_peak_rss_gauge_when_the_session_stops() {
         Fixture fixture = new Fixture();
         fixture.manager().getOrStart(fixture.snapshot());
@@ -493,6 +797,19 @@ class DefaultJdtWorkspaceManagerTest {
         params.setToken(token);
         params.setValue(Either.forLeft(value));
         return params;
+    }
+
+    private static void awaitUnusable(JdtWorkspaceSession session) {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+        while (session.isUsable() && System.nanoTime() < deadline) {
+            try {
+                Thread.sleep(10);
+            } catch (InterruptedException exception) {
+                Thread.currentThread().interrupt();
+                throw new IllegalStateException("session usability wait interrupted", exception);
+            }
+        }
+        assertThat(session.isUsable()).isFalse();
     }
 
     private static void awaitLatch(CountDownLatch latch) {
@@ -516,7 +833,9 @@ class DefaultJdtWorkspaceManagerTest {
         private final DefaultJdtWorkspaceManager manager;
 
         private volatile String stderr = "";
+        private volatile Supplier<InputStream> stderrSupplier = this::newStderr;
         private volatile IOException processStartFailure;
+        private volatile Error connectionFailure;
         private volatile RuntimeException stopFailure;
         private volatile long pid = -1;
         private volatile Consumer<JdtLsReadinessProbe.ImportProgressClient> clientDriver =
@@ -549,8 +868,7 @@ class DefaultJdtWorkspaceManagerTest {
                             throw processStartFailure;
                         }
                         startedCommands.add(List.copyOf(command));
-                        FakeProcess started = new FakeProcess(
-                                new ByteArrayInputStream(stderr.getBytes(StandardCharsets.UTF_8)));
+                        FakeProcess started = new FakeProcess(stderrSupplier.get());
                         started.reportPid(pid);
                         if (Objects.nonNull(stopFailure)) {
                             started.refuseToExit();
@@ -560,6 +878,9 @@ class DefaultJdtWorkspaceManagerTest {
                         return started;
                     },
                     (client, launchedProcess) -> {
+                        if (Objects.nonNull(connectionFailure)) {
+                            throw connectionFailure;
+                        }
                         clientDriver.accept((JdtLsReadinessProbe.ImportProgressClient) client);
                         return new JdtLsProcessFactory.Connection(
                                 languageServer, new CompletableFuture<>());
@@ -582,6 +903,10 @@ class DefaultJdtWorkspaceManagerTest {
             } catch (IOException exception) {
                 throw new IllegalStateException("fake JDT LS home failed", exception);
             }
+        }
+
+        private InputStream newStderr() {
+            return new ByteArrayInputStream(stderr.getBytes(StandardCharsets.UTF_8));
         }
 
         private RepositorySnapshot snapshot() {
@@ -627,10 +952,19 @@ class DefaultJdtWorkspaceManagerTest {
 
         private void stderr(String content) {
             this.stderr = content;
+            this.stderrSupplier = this::newStderr;
+        }
+
+        private void stderrStream(InputStream stream) {
+            this.stderrSupplier = () -> stream;
         }
 
         private void failProcessStartWith(IOException failure) {
             this.processStartFailure = failure;
+        }
+
+        private void failConnectionWith(Error failure) {
+            this.connectionFailure = failure;
         }
 
         private void reportPid(long value) {
@@ -647,6 +981,38 @@ class DefaultJdtWorkspaceManagerTest {
                 client.languageStatus(new StatusReport("ServiceReady", ""));
                 driver.accept(client);
             };
+        }
+    }
+
+    private static final class ControlledFatalFailureInputStream extends InputStream {
+
+        private final CountDownLatch readStarted = new CountDownLatch(1);
+        private final CountDownLatch released = new CountDownLatch(1);
+        private final CountDownLatch failureObserved = new CountDownLatch(1);
+
+        @Override
+        public int read() throws IOException {
+            readStarted.countDown();
+            try {
+                released.await();
+            } catch (InterruptedException exception) {
+                Thread.currentThread().interrupt();
+                throw new IOException("controlled read interrupted", exception);
+            }
+            failureObserved.countDown();
+            throw new OutOfMemoryError("post-ready-drain-sentinel");
+        }
+
+        private boolean awaitRead() throws InterruptedException {
+            return readStarted.await(1, TimeUnit.SECONDS);
+        }
+
+        private void release() {
+            released.countDown();
+        }
+
+        private boolean awaitFailure() throws InterruptedException {
+            return failureObserved.await(1, TimeUnit.SECONDS);
         }
     }
 
@@ -736,6 +1102,7 @@ class DefaultJdtWorkspaceManagerTest {
         private final ByteArrayOutputStream stdin = new ByteArrayOutputStream();
         private volatile boolean alive = true;
         private volatile boolean exits = true;
+        private volatile boolean destroyed;
         private volatile boolean destroyedForcibly;
         private volatile long pid = -1;
         private volatile RuntimeException destroyForciblyFailure;
@@ -766,6 +1133,9 @@ class DefaultJdtWorkspaceManagerTest {
 
         @Override
         public boolean waitFor(long timeout, TimeUnit unit) {
+            if (exits) {
+                alive = false;
+            }
             return exits;
         }
 
@@ -789,7 +1159,8 @@ class DefaultJdtWorkspaceManagerTest {
 
         @Override
         public void destroy() {
-            // 這個 fake 以 destroyForcibly 追蹤終結
+            destroyed = true;
+            alive = false;
         }
 
         @Override
@@ -799,6 +1170,10 @@ class DefaultJdtWorkspaceManagerTest {
                 throw destroyForciblyFailure;
             }
             return this;
+        }
+
+        private boolean isDestroyed() {
+            return destroyed;
         }
 
         private boolean isDestroyedForcibly() {

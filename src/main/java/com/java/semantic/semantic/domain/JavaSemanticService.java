@@ -3,6 +3,7 @@ package com.java.semantic.semantic.domain;
 import com.java.semantic.repository.domain.RepositorySnapshot;
 
 import java.util.List;
+import java.util.Optional;
 
 /**
  * 以 JDT LS 回答真正的語意問題:解析方法、找外呼、找實作
@@ -22,6 +23,10 @@ public interface JavaSemanticService {
 
     /** 回傳方法內解析到的外呼,依 URI 與區間去重 */
     List<SemanticCall> outgoingCalls(RepositorySnapshot snapshot, SemanticMethod method);
+
+    /** 以完整呼叫範圍與語意錨點查 definition */
+    Optional<SemanticCall> resolveCallAt(
+            RepositorySnapshot snapshot, SemanticMethod caller, SemanticCallSite callSite);
 
     /** 回傳方法的所有實作,依 URI 與區間去重 */
     List<SemanticMethod> implementations(RepositorySnapshot snapshot, SemanticMethod method);

@@ -5,6 +5,7 @@ import com.tngtech.archunit.core.importer.ClassFileImporter;
 import com.tngtech.archunit.core.importer.ImportOption;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.springframework.stereotype.Controller;
 import org.springframework.web.bind.annotation.RestController;
 
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.classes;
@@ -27,6 +28,7 @@ class ArchitectureTest {
                 .that().resideOutsideOfPackage("..repository.adapter.jgit..")
                 .should().dependOnClassesThat().resideInAnyPackage("org.eclipse.jgit..")
                 .as("JGit must not leak past the adapter; the domain receives snapshots, not Git objects")
+                .allowEmptyShould(false)
                 .check(classes);
     }
 
@@ -37,7 +39,7 @@ class ArchitectureTest {
                 .should().dependOnClassesThat().resideInAnyPackage(
                         "java.nio.file..", "java.io..", "java.net..")
                 .as("no Path/File/URI may cross the HTTP API")
-                .allowEmptyShould(true)
+                .allowEmptyShould(false)
                 .check(classes);
     }
 
@@ -47,7 +49,7 @@ class ArchitectureTest {
                 .that().resideInAPackage("..repository.domain..")
                 .should().dependOnClassesThat().resideInAnyPackage("org.springframework.web..", "..api..")
                 .as("the domain must not know about HTTP")
-                .allowEmptyShould(true)
+                .allowEmptyShould(false)
                 .check(classes);
     }
 
@@ -57,7 +59,7 @@ class ArchitectureTest {
                 .that().resideInAPackage("..api..")
                 .should().dependOnClassesThat().resideInAPackage("..repository.adapter..")
                 .as("controllers depend on application services, never on adapters")
-                .allowEmptyShould(true)
+                .allowEmptyShould(false)
                 .check(classes);
     }
 
@@ -68,6 +70,7 @@ class ArchitectureTest {
                 .should().dependOnClassesThat().resideInAnyPackage(
                         "com.github.javaparser..", "org.eclipse.lsp4j..")
                 .as("JavaParser and LSP4J types must not leak past the JDT LS adapter")
+                .allowEmptyShould(false)
                 .check(classes);
     }
 
@@ -78,6 +81,7 @@ class ArchitectureTest {
                 .and().resideOutsideOfPackage("..syntax.adapter.jdt..")
                 .should().dependOnClassesThat().resideInAnyPackage("org.eclipse.jdt..")
                 .as("JDT types live in the JDT LS adapter and the syntax adapter, nowhere else")
+                .allowEmptyShould(false)
                 .check(classes);
     }
 
@@ -87,7 +91,7 @@ class ArchitectureTest {
                 .that().resideInAPackage("..syntax.domain..")
                 .should().dependOnClassesThat().resideInAnyPackage("org.eclipse.jdt..", "org.eclipse.lsp4j..")
                 .as("the syntax extraction results the API and callers consume must stay free of JDT types")
-                .allowEmptyShould(true)
+                .allowEmptyShould(false)
                 .check(classes);
     }
 
@@ -97,7 +101,7 @@ class ArchitectureTest {
                 .that().resideInAPackage("..semantic.domain..")
                 .should().dependOnClassesThat().resideInAnyPackage("org.eclipse.lsp4j..", "org.eclipse.jdt..")
                 .as("the JavaSemanticService contract and its domain records must stay free of LSP4J types")
-                .allowEmptyShould(true)
+                .allowEmptyShould(false)
                 .check(classes);
     }
 
@@ -107,7 +111,7 @@ class ArchitectureTest {
                 .that().resideInAPackage("com.java.semantic.repository..")
                 .should().dependOnClassesThat().resideInAPackage("com.java.semantic.semantic..")
                 .as("the semantic engine plugs into the repository layer through its port, never the reverse")
-                .allowEmptyShould(true)
+                .allowEmptyShould(false)
                 .check(classes);
     }
 
@@ -118,6 +122,7 @@ class ArchitectureTest {
                 .or().haveSimpleName("JdtWorkspaceManager")
                 .should().dependOnClassesThat().resideInAnyPackage("org.eclipse.lsp4j..", "org.eclipse.jdt..")
                 .as("the lifecycle contract Task 4 and the API consume must stay free of LSP4J types")
+                .allowEmptyShould(false)
                 .check(classes);
     }
 
@@ -127,7 +132,103 @@ class ArchitectureTest {
                 .that().resideInAPackage("..api..")
                 .and().haveSimpleNameEndingWith("Controller")
                 .should().beAnnotatedWith(RestController.class)
-                .allowEmptyShould(true)
+                .allowEmptyShould(false)
+                .check(classes);
+    }
+
+    @Test
+    void should_keep_callgraph_domain_and_application_free_of_runtime_adapters() {
+        noClasses()
+                .that().resideInAnyPackage("..callgraph.domain..", "..callgraph.application..")
+                .should().dependOnClassesThat().resideInAnyPackage(
+                        "org.eclipse.lsp4j..",
+                        "org.eclipse.jdt..",
+                        "org.eclipse.jgit..",
+                        "..repository.adapter..")
+                .as("call graph contracts and traversal depend only on service-local contracts, never runtime adapters")
+                .allowEmptyShould(false)
+                .check(classes);
+    }
+
+    @Test
+    void should_keep_public_callgraph_and_semantic_contracts_free_of_filesystem_types() {
+        noClasses()
+                .that().resideInAnyPackage(
+                        "..callgraph.domain..",
+                        "..callgraph.application..",
+                        "..semantic.domain..",
+                        "..semantic.application..")
+                .and().resideOutsideOfPackage("..repository.domain..")
+                .and().doNotHaveSimpleName("SemanticCallGraphBuilder")
+                .should().dependOnClassesThat().resideInAnyPackage(
+                        "java.io..", "java.net..", "java.nio.file..")
+                .as("public Task 7 contracts must not expose filesystem paths or URI objects; RepositorySnapshot remains an internal repository contract")
+                .allowEmptyShould(false)
+                .check(classes);
+    }
+
+    @Test
+    void should_keep_semantic_application_away_from_repository_adapters_and_api() {
+        noClasses()
+                .that().resideInAPackage("..semantic.application..")
+                .should().dependOnClassesThat().resideInAnyPackage("..repository.adapter..", "..repository.config..",
+                        "..repository.port..", "..api..")
+                .as("semantic orchestration may use repository application/domain contracts, not adapters or HTTP")
+                .allowEmptyShould(false)
+                .check(classes);
+        classes()
+                .that().resideInAPackage("..semantic.application..")
+                .should().onlyDependOnClassesThat().resideInAnyPackage(
+                        "com.java.semantic.semantic.application..",
+                        "com.java.semantic.semantic.domain..",
+                        "com.java.semantic.callgraph..",
+                        "com.java.semantic.syntax.domain..",
+                        "com.java.semantic.identity..",
+                        "com.java.semantic.config..",
+                        "com.java.semantic.repository.application..",
+                        "com.java.semantic.repository.domain..",
+                        "java..",
+                        "org.springframework..")
+                .as("semantic application may orchestrate repository application/domain contracts only")
+                .allowEmptyShould(false)
+                .check(classes);
+    }
+
+    @Test
+    void should_keep_agent_packages_out_of_semantic_service_production_code() {
+        noClasses()
+                .that().resideInAPackage("com.java.semantic..")
+                .should().dependOnClassesThat().resideInAPackage("com.java.system.agent..")
+                .as("the semantic service and agent remain independent Maven applications")
+                .allowEmptyShould(false)
+                .check(classes);
+    }
+
+    @Test
+    void should_keep_task_seven_callgraph_surface_free_of_http_controllers_and_dtos() {
+        noClasses()
+                .that().resideInAnyPackage("..callgraph..", "..semantic.application..")
+                .should().beAnnotatedWith(Controller.class)
+                .as("Task 7 adds analysis contracts and orchestration, not @Controller endpoints")
+                .allowEmptyShould(false)
+                .check(classes);
+        noClasses()
+                .that().resideInAnyPackage("..callgraph..", "..semantic.application..")
+                .should().beAnnotatedWith(RestController.class)
+                .as("Task 7 adds analysis contracts and orchestration, not @RestController endpoints")
+                .allowEmptyShould(false)
+                .check(classes);
+        noClasses()
+                .that().resideInAnyPackage("..callgraph..", "..semantic.application..")
+                .should().haveSimpleNameEndingWith("Dto")
+                .as("Task 7 adds no DTO surface")
+                .allowEmptyShould(false)
+                .check(classes);
+        noClasses()
+                .that().resideInAnyPackage("..callgraph..", "..semantic.application..")
+                .should().haveSimpleNameEndingWith("DTO")
+                .as("Task 7 adds no uppercase DTO surface")
+                .allowEmptyShould(false)
                 .check(classes);
     }
 }

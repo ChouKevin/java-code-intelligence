@@ -167,12 +167,7 @@ public final class JdtLsProcessFactory {
         return initializeParams;
     }
 
-    /**
-     * 逐行讀取 stderr 並保留最後數行
-     *
-     * JDT LS 從未取得任何憑證,其 stderr 只會有檔案路徑、公開的 Maven 網址與堆疊追蹤
-     * 「不記錄網址或憑證」的規則是為 git 失敗而寫,適用於 DefaultRepositoryApplicationService,不在此處
-     */
+    /** 逐行讀取 stderr 並只保留安全分類 */
     private CompletableFuture<Void> startStderrDrain(
             InputStream stderr, LaunchResources resources, StderrRingBuffer buffer) {
         CompletableFuture<Void> completion = new CompletableFuture<>();
@@ -181,15 +176,22 @@ public final class JdtLsProcessFactory {
                     new InputStreamReader(stderr, StandardCharsets.UTF_8))) {
                 String line = reader.readLine();
                 while (Objects.nonNull(line)) {
-                    buffer.add(line);
-                    LOGGER.debug("JDT LS stderr: {}", line);
+                    String safeLine = buffer.add(line);
+                    LOGGER.debug("JDT LS stderr metadata: {}", safeLine);
                     line = reader.readLine();
                 }
             } catch (Throwable exception) {
-                StderrDrainException drainFailure = new StderrDrainException(
-                        exception.getClass().getSimpleName());
-                LOGGER.error("JDT LS stderr drain failed with {}", drainFailure.failureType());
-                resources.release(drainFailure);
+                Throwable drainFailure = exception;
+                if (!JdtFatalErrorPolicy.isFatal(exception)) {
+                    drainFailure = new StderrDrainException(exception.getClass().getSimpleName());
+                }
+                LOGGER.error("JDT LS stderr drain failed with {}", exception.getClass().getSimpleName());
+                try {
+                    resources.release(drainFailure);
+                } catch (Throwable cleanupFailure) {
+                    completion.completeExceptionally(cleanupFailure);
+                    throw cleanupFailure;
+                }
                 completion.completeExceptionally(drainFailure);
                 return;
             }
@@ -234,6 +236,7 @@ public final class JdtLsProcessFactory {
             action.run();
             return false;
         } catch (Throwable cleanupFailure) {
+            JdtFatalErrorPolicy.rethrowIfFatal(cleanupFailure);
             recordCleanupFailure(launchFailure, cleanupFailure);
             return cleanupFailure instanceof InterruptedException;
         }
@@ -244,6 +247,7 @@ public final class JdtLsProcessFactory {
             boolean terminated = process.waitFor(TERMINATION_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS);
             return new WaitResult(terminated, false);
         } catch (Throwable cleanupFailure) {
+            JdtFatalErrorPolicy.rethrowIfFatal(cleanupFailure);
             recordCleanupFailure(launchFailure, cleanupFailure);
             return new WaitResult(false, cleanupFailure instanceof InterruptedException);
         }
@@ -321,6 +325,7 @@ public final class JdtLsProcessFactory {
         private final Process process;
         private Optional<Future<Void>> listener = Optional.empty();
         private Optional<StderrDrainException> stderrFailure = Optional.empty();
+        private Optional<Error> fatalStderrFailure = Optional.empty();
         private boolean released;
 
         private LaunchResources(Process process) {
@@ -333,6 +338,12 @@ public final class JdtLsProcessFactory {
                 attemptCleanup(() -> listener.cancel(true), failure);
                 throw failure;
             });
+            if (fatalStderrFailure.isPresent()) {
+                Error failure = fatalStderrFailure.get();
+                attemptCleanup(() -> listener.cancel(true), failure);
+                JdtFatalErrorPolicy.rethrowIfFatal(failure);
+                throw new IllegalStateException("fatal stderr failure was not rethrown");
+            }
         }
 
         private synchronized void release(Throwable failure) {
@@ -342,6 +353,8 @@ public final class JdtLsProcessFactory {
             released = true;
             if (failure instanceof StderrDrainException stderrDrainFailure) {
                 stderrFailure = Optional.of(stderrDrainFailure);
+            } else if (JdtFatalErrorPolicy.isFatal(failure)) {
+                fatalStderrFailure = Optional.of((Error) failure);
             }
             releaseFailedLaunch(process, listener, failure);
         }
