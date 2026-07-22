@@ -1,6 +1,8 @@
 package com.java.semantic.trie;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -74,29 +76,16 @@ class ApiPathNormalizerTest {
                 .isEqualTo("/");
     }
 
-    @Test
-    void should_reject_url_when_http_scheme_has_no_authority() {
-        assertThatThrownBy(() -> ApiPathNormalizer.normalize("https:/orders/42", "GET"))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("absolute URL");
-        assertThatThrownBy(() -> ApiPathNormalizer.normalize("https:///orders/42", "GET"))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("absolute URL");
-    }
-
-    @Test
-    void should_reject_url_when_http_uri_is_opaque() {
-        assertThatThrownBy(() -> ApiPathNormalizer.normalize("https:opaque", "GET"))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("absolute URL");
-    }
-
-    @Test
-    void should_reject_url_when_authority_has_no_valid_host() {
-        assertThatThrownBy(() -> ApiPathNormalizer.normalize("https://exa_mple/orders/42", "GET"))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("absolute URL");
-        assertThatThrownBy(() -> ApiPathNormalizer.normalize("https://user@@example.com/orders/42", "GET"))
+    @ParameterizedTest(name = "{0}")
+    @CsvSource({
+            "'single-slash authority', https:/orders/42",
+            "'empty authority', https:///orders/42",
+            "'opaque URI', https:opaque",
+            "'underscore host', https://exa_mple/orders/42",
+            "'double-at authority', https://user@@example.com/orders/42"
+    })
+    void should_reject_malformed_absolute_url(String caseName, String url) {
+        assertThatThrownBy(() -> ApiPathNormalizer.normalize(url, "GET"))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("absolute URL");
     }

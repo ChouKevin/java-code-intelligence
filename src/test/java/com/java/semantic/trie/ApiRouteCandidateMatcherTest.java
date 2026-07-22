@@ -1,24 +1,21 @@
 package com.java.semantic.trie;
 
-import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 class ApiRouteCandidateMatcherTest {
 
-    @Test
-    void should_score_static_positional_and_same_length_matches_when_route_is_similar() {
-        assertThat(ApiRouteCandidateMatcher.score("/orders/42", "/orders/{*}"))
-                .isEqualTo(12);
-        assertThat(ApiRouteCandidateMatcher.score("/orders/42", "/archive/orders"))
-                .isEqualTo(7);
-    }
-
-    @Test
-    void should_reject_candidate_when_route_has_no_static_match() {
-        assertThat(ApiRouteCandidateMatcher.score("/orders/42", "/users/{*}"))
-                .isEqualTo(-1);
-        assertThat(ApiRouteCandidateMatcher.score("/orders/42", "/{*}/{*}"))
-                .isEqualTo(-1);
+    @ParameterizedTest(name = "{0}")
+    @CsvSource({
+            "'static positional', /orders/42, /orders/{*}, 12",
+            "'same length', /orders/42, /archive/orders, 7",
+            "'no static segment', /orders/42, /users/{*}, -1",
+            "'wildcards only', /orders/42, /{*}/{*}, -1"
+    })
+    void should_score_route_candidate(
+            String caseName, String route, String candidate, int expectedScore) {
+        assertThat(ApiRouteCandidateMatcher.score(route, candidate)).isEqualTo(expectedScore);
     }
 }
