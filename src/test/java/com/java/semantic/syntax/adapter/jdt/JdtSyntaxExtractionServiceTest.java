@@ -1,6 +1,7 @@
 package com.java.semantic.syntax.adapter.jdt;
 
 import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
 
@@ -9,6 +10,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.List;
+import java.util.stream.Collectors;
 
 import com.java.semantic.syntax.domain.ClassMetadata;
 import com.java.semantic.syntax.domain.RepositorySyntax;
@@ -68,6 +70,109 @@ class JdtSyntaxExtractionServiceTest {
     }
 
     @Test
+    void should_keep_same_fqn_methods_from_separate_modules_distinct_by_repository_source(@TempDir Path tempDir)
+            throws IOException {
+        Path repositoryRoot = tempDir.resolve("order-service");
+        Files.createDirectories(repositoryRoot);
+        Files.writeString(repositoryRoot.resolve("pom.xml"), """
+                <project>
+                  <packaging>pom</packaging>
+                  <modules><module>module-b</module><module>module-a</module></modules>
+                </project>
+                """);
+        writeOrderClass(repositoryRoot.resolve("module-a/src/main/java/com/example/Order.java"), "a");
+        writeOrderClass(repositoryRoot.resolve("module-b/src/main/java/com/example/Order.java"), "b");
+
+        RepositorySyntax syntax = new JdtSyntaxExtractionService().extract(repositoryRoot);
+
+        assertThat(syntax.classes()).extracting(ClassMetadata::fullyQualifiedName)
+                .containsExactly("com.example.Order", "com.example.Order");
+        assertThat(syntax.classes()).flatExtracting(ClassMetadata::methods)
+                .extracting(method -> method.analysisTarget().status())
+                .containsOnly(com.java.semantic.syntax.domain.AnalysisTargetStatus.RESOLVED);
+        assertThat(syntax.classes()).flatExtracting(ClassMetadata::methods)
+                .extracting(method -> method.analysisTarget().target().orElseThrow().sourceFile())
+                .containsExactly("module-a/src/main/java/com/example/Order.java",
+                        "module-b/src/main/java/com/example/Order.java");
+    }
+
+    @Test
+    void should_fail_closed_for_consumers_of_same_fqn_declared_from_different_source_layouts(
+            @TempDir Path tempDir) throws IOException {
+        RepositorySyntax forward = extractCollidingFqnRepository(tempDir.resolve("forward"),
+                List.of("module-a", "module-b", "module-c"));
+        RepositorySyntax reverse = extractCollidingFqnRepository(tempDir.resolve("reverse"),
+                List.of("module-c", "module-b", "module-a"));
+
+        assertCollidingFqnDeclarationsAreIsolated(forward);
+        assertCollidingFqnDeclarationsAreIsolated(reverse);
+    }
+
+    private RepositorySyntax extractCollidingFqnRepository(Path repositoryRoot, List<String> modules)
+            throws IOException {
+        Files.createDirectories(repositoryRoot);
+        Files.writeString(repositoryRoot.resolve("pom.xml"), """
+                <project>
+                  <packaging>pom</packaging>
+                  <modules>%s</modules>
+                </project>
+                """.formatted(modules.stream().map(module -> "<module>" + module + "</module>")
+                .collect(Collectors.joining())));
+        writeOrderClass(repositoryRoot.resolve("module-a/src/main/java/com/example/Order.java"), "a");
+        writeOrderClass(repositoryRoot.resolve("module-b/src/main/java/layout/Order.java"), "b");
+        Path consumer = repositoryRoot.resolve("module-c/src/main/java/com/example/Consumer.java");
+        Files.createDirectories(consumer.getParent());
+        Files.writeString(consumer, """
+                package com.example;
+
+                class Consumer {
+                    void use(Order order) {
+                    }
+                }
+                """);
+        return new JdtSyntaxExtractionService().extract(repositoryRoot);
+    }
+
+    private void assertCollidingFqnDeclarationsAreIsolated(RepositorySyntax syntax) {
+        assertThat(syntax.classes()).extracting(ClassMetadata::fullyQualifiedName)
+                .containsExactly("com.example.Consumer", "com.example.Order", "com.example.Order");
+        List<ClassMetadata> orders = syntax.classes().stream()
+                .filter(metadata -> "com.example.Order".equals(metadata.fullyQualifiedName()))
+                .toList();
+        assertThat(orders)
+                .flatExtracting(ClassMetadata::methods)
+                .extracting(method -> method.analysisTarget().status())
+                .containsOnly(com.java.semantic.syntax.domain.AnalysisTargetStatus.RESOLVED);
+        assertThat(orders)
+                .flatExtracting(ClassMetadata::methods)
+                .extracting(method -> method.analysisTarget().target().orElseThrow().sourceFile())
+                .containsExactlyInAnyOrder(
+                        "module-a/src/main/java/com/example/Order.java",
+                        "module-b/src/main/java/layout/Order.java");
+        assertThat(syntax.classes().stream()
+                .filter(metadata -> "com.example.Consumer".equals(metadata.fullyQualifiedName()))
+                .flatMap(metadata -> metadata.methods().stream())
+                .filter(method -> "use".equals(method.name()))
+                .findFirst()
+                .orElseThrow()
+                .analysisTarget().status())
+                .isEqualTo(com.java.semantic.syntax.domain.AnalysisTargetStatus.UNRESOLVED);
+    }
+
+    private void writeOrderClass(Path path, String marker) throws IOException {
+        Files.createDirectories(path.getParent());
+        Files.writeString(path, """
+                package com.example;
+
+                class Order {
+                    String origin() {
+                        return \"%s\";
+                    }
+                }
+                """.formatted(marker));
+    }
+
+    @Test
     void should_not_expose_restricted_java_or_xml_failure_channels_in_logs(@TempDir Path tempDir)
             throws IOException {
         Path repositoryRoot = tempDir.resolve("order-service");
@@ -92,6 +197,34 @@ class JdtSyntaxExtractionServiceTest {
         } finally {
             detach(syntaxLogger, syntaxAppender);
             detach(xmlLogger, xmlAppender);
+        }
+    }
+
+    @Test
+    void should_log_unexpected_per_source_failures_at_error_without_raw_source_data(@TempDir Path tempDir)
+            throws IOException {
+        Path repositoryRoot = tempDir.resolve("order-service");
+        Path sourceRoot = repositoryRoot.resolve("src/main/java/com/example");
+        Files.createDirectories(sourceRoot);
+        Files.writeString(sourceRoot.resolve(HOSTILE_CLASS + ".java"),
+                "package com.example; class Hostile {} ");
+        Logger logger = (Logger) LoggerFactory.getLogger(JdtSyntaxExtractionService.class);
+        ListAppender<ILoggingEvent> appender = appender(logger);
+        try {
+            new JdtSyntaxExtractionService(new UnexpectedExplodingSourceSyntaxExtractor()).extract(repositoryRoot);
+
+            List<ILoggingEvent> failures = appender.list.stream()
+                    .filter(event -> event.getFormattedMessage().contains("JAVA_SYNTAX_EXTRACTION_FAILED"))
+                    .toList();
+            assertThat(failures).singleElement().satisfies(event -> {
+                assertThat(event.getLevel()).isEqualTo(Level.ERROR);
+                assertThat(event.getFormattedMessage())
+                        .contains("exceptionType=IllegalStateException")
+                        .doesNotContain("RESTRICTED_UNEXPECTED_SOURCE_SENTINEL", repositoryRoot.toString());
+                assertThat(event.getThrowableProxy()).isNull();
+            });
+        } finally {
+            detach(logger, appender);
         }
     }
 
@@ -187,7 +320,11 @@ class JdtSyntaxExtractionServiceTest {
     }
 
     private void assertSafeFailureEvents(List<ILoggingEvent> events, String category) {
-        assertThat(events).singleElement().satisfies(event -> {
+        List<ILoggingEvent> failureEvents = events.stream()
+                .filter(event -> event.getFormattedMessage().contains(category))
+                .toList();
+        assertThat(failureEvents).singleElement().satisfies(event -> {
+            assertThat(event.getLevel()).isEqualTo(Level.WARN);
             assertThat(event.getFormattedMessage())
                     .contains(category)
                     .doesNotContain(RESTRICTED_JAVA_PATH, RESTRICTED_XML_PATH, RESTRICTED_THROWABLE);
@@ -208,6 +345,17 @@ class JdtSyntaxExtractionServiceTest {
         SourceSyntax extractFrom(ParsedSource parsed, MapperXmlSqlExtractor.SqlIndex sqlIndex) {
             if (parsed.source().relativePath().contains(HOSTILE_CLASS)) {
                 throw new UnsupportedTypeFormException(RESTRICTED_THROWABLE);
+            }
+            return super.extractFrom(parsed, sqlIndex);
+        }
+    }
+
+    private static final class UnexpectedExplodingSourceSyntaxExtractor extends SourceSyntaxExtractor {
+
+        @Override
+        SourceSyntax extractFrom(ParsedSource parsed, MapperXmlSqlExtractor.SqlIndex sqlIndex) {
+            if (parsed.source().relativePath().contains(HOSTILE_CLASS)) {
+                throw new IllegalStateException("RESTRICTED_UNEXPECTED_SOURCE_SENTINEL");
             }
             return super.extractFrom(parsed, sqlIndex);
         }

@@ -9,8 +9,8 @@ import java.util.List;
 /**
  * 解析與正規化方法簽章
  *
- * JDT 的符號名帶簽章(如「save(T) : void」),請求端可能給裸名或帶參數的簽章
- * 兩側都經過同一組正規化,參數比對才會一致:去除泛型與套件前綴、可變參數視為陣列
+ * JDT 的符號名帶簽章(如「save(T) : void」)。這個類別僅保留給外部顯示與舊協定相容；
+ * 精確 requested-root 選擇一律由語法 target 與其 declaration anchor 完成。
  */
 final class MethodSignatures {
 
@@ -18,7 +18,7 @@ final class MethodSignatures {
     }
 
     /**
-     * 解析一個方法名或簽章
+     * 解析舊協定的外部顯示方法名或簽章
      *
      * 無括號代表裸名(hasParameters 為 false),參數比對時視為任意多載
      */

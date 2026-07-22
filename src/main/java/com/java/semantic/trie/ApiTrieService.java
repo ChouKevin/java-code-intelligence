@@ -2,9 +2,11 @@ package com.java.semantic.trie;
 
 import com.java.semantic.repository.domain.RepositoryId;
 import com.java.semantic.repository.domain.RepositorySnapshot;
+import com.java.semantic.identity.MethodTarget;
 import com.java.semantic.syntax.domain.ApiEntryPoint;
 import com.java.semantic.syntax.domain.EntryPointClass;
 import com.java.semantic.syntax.domain.EntryPointMethod;
+import com.java.semantic.syntax.domain.MethodTargetResolution;
 import com.java.semantic.syntax.domain.RepositorySyntax;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -36,7 +38,14 @@ public class ApiTrieService {
             .thenComparing(ApiEntryPointRef::routeTemplate)
             .thenComparing(ApiEntryPointRef::packageName)
             .thenComparing(ApiEntryPointRef::className)
-            .thenComparing(ApiEntryPointRef::methodName);
+            .thenComparing(ApiEntryPointRef::methodName)
+            .thenComparing(ApiEntryPointRef::analysisTarget, ApiTrieService::compareAnalysisTargets);
+    private static final Comparator<MethodTarget> METHOD_TARGET_COMPARATOR = Comparator
+            .comparing(MethodTarget::sourceFile)
+            .thenComparing(MethodTarget::packageName)
+            .thenComparing(MethodTarget::className)
+            .thenComparing(MethodTarget::methodName)
+            .thenComparing(MethodTarget::parameterTypes, ApiTrieService::compareStringsLexicographically);
 
     private final AtomicReference<TrieState> current = new AtomicReference<>(TrieState.empty());
 
@@ -132,7 +141,8 @@ public class ApiTrieService {
                                 entryPointClass.className(),
                                 api.name(),
                                 normalized.httpMethod(),
-                                normalized.path());
+                                normalized.path(),
+                                api.analysisTarget());
                         if (hasNonterminalRestWildcard(ref.routeTemplate())) {
                             log.warn(
                                     "API route omitted repoId={} category={}",
@@ -290,6 +300,57 @@ public class ApiTrieService {
             }
         }
         return false;
+    }
+
+    private static int compareAnalysisTargets(
+            MethodTargetResolution left,
+            MethodTargetResolution right) {
+        int statusComparison = left.status().name().compareTo(right.status().name());
+        if (statusComparison != 0) {
+            return statusComparison;
+        }
+        int targetComparison = compareOptionalTargets(left, right);
+        if (targetComparison != 0) {
+            return targetComparison;
+        }
+        int candidateComparison = compareTargetCollections(left.candidates(), right.candidates());
+        if (candidateComparison != 0) {
+            return candidateComparison;
+        }
+        return left.reasonCode().compareTo(right.reasonCode());
+    }
+
+    private static int compareOptionalTargets(
+            MethodTargetResolution left,
+            MethodTargetResolution right) {
+        if (left.target().isPresent() && right.target().isPresent()) {
+            return METHOD_TARGET_COMPARATOR.compare(left.target().orElseThrow(), right.target().orElseThrow());
+        }
+        return Boolean.compare(left.target().isPresent(), right.target().isPresent());
+    }
+
+    private static int compareTargetCollections(List<MethodTarget> left, List<MethodTarget> right) {
+        List<MethodTarget> sortedLeft = left.stream().sorted(METHOD_TARGET_COMPARATOR).toList();
+        List<MethodTarget> sortedRight = right.stream().sorted(METHOD_TARGET_COMPARATOR).toList();
+        int commonSize = Math.min(sortedLeft.size(), sortedRight.size());
+        for (int index = 0; index < commonSize; index++) {
+            int targetComparison = METHOD_TARGET_COMPARATOR.compare(sortedLeft.get(index), sortedRight.get(index));
+            if (targetComparison != 0) {
+                return targetComparison;
+            }
+        }
+        return Integer.compare(sortedLeft.size(), sortedRight.size());
+    }
+
+    private static int compareStringsLexicographically(List<String> left, List<String> right) {
+        int commonSize = Math.min(left.size(), right.size());
+        for (int index = 0; index < commonSize; index++) {
+            int comparison = left.get(index).compareTo(right.get(index));
+            if (comparison != 0) {
+                return comparison;
+            }
+        }
+        return Integer.compare(left.size(), right.size());
     }
 
     private record RouteKey(String repoId, String httpMethod, String routeTemplate) {

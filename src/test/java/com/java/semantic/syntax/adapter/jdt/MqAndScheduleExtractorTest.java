@@ -2,6 +2,7 @@ package com.java.semantic.syntax.adapter.jdt;
 
 import java.util.List;
 
+import com.java.semantic.identity.MethodTarget;
 import com.java.semantic.syntax.domain.EntryPointClass;
 import com.java.semantic.syntax.domain.MqBroker;
 import com.java.semantic.syntax.domain.MqEntryPoint;
@@ -16,6 +17,30 @@ import static org.assertj.core.api.Assertions.assertThat;
 class MqAndScheduleExtractorTest {
 
     private final List<EntryPointClass> classes = SyntaxFixtures.extractSyntaxFixture().entryPoints();
+
+    @Test
+    void should_expose_the_resolved_canonical_target_for_a_mq_entry_point() {
+        MethodTarget target = mqOf("rabbitMulti").analysisTarget().target().orElseThrow();
+
+        assertThat(target).isEqualTo(new MethodTarget(
+                "src/main/java/com/example/syntax/OrderListeners.java",
+                "com.example.syntax",
+                "OrderListeners",
+                "rabbitMulti",
+                List.of("java.lang.String")));
+    }
+
+    @Test
+    void should_expose_the_resolved_canonical_target_for_a_schedule_entry_point() {
+        MethodTarget target = scheduleOf("bothTriggers").analysisTarget().target().orElseThrow();
+
+        assertThat(target).isEqualTo(new MethodTarget(
+                "src/main/java/com/example/syntax/OrderJobs.java",
+                "com.example.syntax",
+                "OrderJobs",
+                "bothTriggers",
+                List.of()));
+    }
 
     @Test
     void should_prefer_queues_over_value_when_a_rabbit_listener_declares_both() {

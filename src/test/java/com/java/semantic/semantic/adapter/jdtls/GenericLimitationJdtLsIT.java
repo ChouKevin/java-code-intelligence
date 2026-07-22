@@ -1,11 +1,16 @@
 package com.java.semantic.semantic.adapter.jdtls;
 
 import com.java.semantic.config.JdtLsProperties;
+import com.java.semantic.identity.MethodTarget;
 import com.java.semantic.repository.domain.RepositoryId;
 import com.java.semantic.repository.domain.RepositoryRevision;
 import com.java.semantic.repository.domain.RepositorySnapshot;
 import com.java.semantic.semantic.domain.SemanticCall;
+import com.java.semantic.semantic.domain.SemanticDeclarationAnchor;
 import com.java.semantic.semantic.domain.SemanticMethod;
+import com.java.semantic.semantic.application.ExactMethodDeclarationResolver;
+import com.java.semantic.syntax.adapter.jdt.JdtSyntaxExtractionService;
+import com.java.semantic.syntax.domain.RepositorySyntax;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.eclipse.lsp4j.SymbolInformation;
 import org.eclipse.lsp4j.WorkspaceSymbol;
@@ -65,8 +70,8 @@ class GenericLimitationJdtLsIT {
         RepositorySnapshot snapshot = new RepositorySnapshot(REPOSITORY_ID, root, REVISION);
 
         try {
-            SemanticMethod processOrder = service.resolveMethod(
-                    snapshot, PACKAGE, "OrderCrudService", "processOrder(Order)");
+            SemanticMethod processOrder = resolveExactMethod(
+                    service, snapshot, root, "OrderCrudService", "processOrder", List.of("Order"));
             List<SemanticCall> calls = service.outgoingCalls(snapshot, processOrder);
 
             assertThat(targetUri(calls, "save"))
@@ -138,6 +143,27 @@ class GenericLimitationJdtLsIT {
                 .map(target -> target.location().uri())
                 .findFirst()
                 .orElse("<unresolved>");
+    }
+
+    private SemanticMethod resolveExactMethod(
+            Lsp4jJavaSemanticService service,
+            RepositorySnapshot snapshot,
+            Path root,
+            String className,
+            String methodName,
+            List<String> parameterTypes) {
+        RepositorySyntax syntax = new JdtSyntaxExtractionService().extract(root);
+        MethodTarget target = syntax.classes().stream()
+                .filter(metadata -> PACKAGE.equals(metadata.packageName()))
+                .filter(metadata -> className.equals(metadata.className()))
+                .flatMap(metadata -> metadata.methods().stream())
+                .filter(method -> methodName.equals(method.name()))
+                .filter(method -> parameterTypes.equals(method.paramTypes()))
+                .flatMap(method -> method.analysisTarget().target().stream())
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("missing exact syntax target"));
+        SemanticDeclarationAnchor anchor = new ExactMethodDeclarationResolver().resolve(syntax, target);
+        return service.resolveExactMethod(snapshot, anchor);
     }
 
     private Path jdtlsHome() {

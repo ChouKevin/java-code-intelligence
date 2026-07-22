@@ -7,9 +7,9 @@ import ch.qos.logback.core.read.ListAppender;
 import com.java.semantic.config.JdtLsProperties;
 import org.eclipse.lsp4j.ClientCapabilities;
 import org.eclipse.lsp4j.InitializeParams;
+import org.eclipse.lsp4j.InitializeResult;
 import org.eclipse.lsp4j.RegistrationParams;
 import org.eclipse.lsp4j.jsonrpc.services.JsonNotification;
-import org.eclipse.lsp4j.services.LanguageServer;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.api.io.TempDir;
@@ -52,6 +52,35 @@ class JdtLsProcessFactoryTest {
     Path tempDirectory;
 
     @Test
+    void should_observe_the_started_process_before_connection_initialization_begins() throws Exception {
+        Path home = createJdtLsHome();
+        TestProcess process = new TestProcess(new ByteArrayInputStream(new byte[0]));
+        AtomicReference<Process> observedProcess = new AtomicReference<>();
+        JdtLsLanguageServer server = mock(JdtLsLanguageServer.class, invocation -> {
+            if ("initialize".equals(invocation.getMethod().getName())) {
+                return CompletableFuture.completedFuture(new InitializeResult());
+            }
+            return CALLS_REAL_METHODS.answer(invocation);
+        });
+        JdtLsProcessFactory factory = new JdtLsProcessFactory(
+                properties(home),
+                command -> process,
+                (client, launchedProcess) -> {
+                    assertThat(observedProcess.get()).isSameAs(launchedProcess);
+                    return new JdtLsProcessFactory.Connection(server, CompletableFuture.completedFuture(null));
+                });
+
+        JdtLsProcessFactory.LaunchHandle handle = factory.launch(
+                tempDirectory.resolve("repository"),
+                tempDirectory.resolve("workspace-data"),
+                mock(JdtLanguageClient.class),
+                observedProcess::set);
+
+        assertThat(observedProcess.get()).isSameAs(process);
+        assertThat(handle.process()).isSameAs(process);
+    }
+
+    @Test
     void should_build_exact_command_and_initialize_required_capabilities_when_launching() throws Exception {
         Path home = createJdtLsHome();
         Path workspaceRoot = Files.createDirectories(tempDirectory.resolve("repository"));
@@ -61,7 +90,7 @@ class JdtLsProcessFactoryTest {
         AtomicReference<List<String>> capturedCommand = new AtomicReference<>();
         AtomicReference<InitializeParams> capturedInitialize = new AtomicReference<>();
         CountDownLatch initialized = new CountDownLatch(1);
-        LanguageServer server = mock(LanguageServer.class, invocation -> {
+        JdtLsLanguageServer server = mock(JdtLsLanguageServer.class, invocation -> {
             if ("initialize".equals(invocation.getMethod().getName())) {
                 capturedInitialize.set(invocation.getArgument(0));
                 return CompletableFuture.completedFuture(null);
@@ -132,7 +161,7 @@ class JdtLsProcessFactoryTest {
         Path home = createJdtLsHome();
         TestProcess process = new TestProcess(new ByteArrayInputStream(new byte[0]));
         CompletableFuture<Void> listener = new CompletableFuture<>();
-        LanguageServer server = mock(LanguageServer.class, invocation -> {
+        JdtLsLanguageServer server = mock(JdtLsLanguageServer.class, invocation -> {
             if ("initialize".equals(invocation.getMethod().getName())) {
                 return CompletableFuture.failedFuture(new IllegalStateException("initialize failed"));
             }
@@ -204,7 +233,7 @@ class JdtLsProcessFactoryTest {
         Path home = createJdtLsHome();
         FaultyCleanupProcess process = new FaultyCleanupProcess();
         FailingCancelFuture listener = new FailingCancelFuture();
-        LanguageServer server = mock(LanguageServer.class, invocation -> {
+        JdtLsLanguageServer server = mock(JdtLsLanguageServer.class, invocation -> {
             if ("initialize".equals(invocation.getMethod().getName())) {
                 return CompletableFuture.failedFuture(new IllegalStateException("startup failed"));
             }
@@ -265,7 +294,7 @@ class JdtLsProcessFactoryTest {
         ControlledFailureInputStream stderr = new ControlledFailureInputStream();
         TestProcess process = new TestProcess(stderr);
         CompletableFuture<Void> listener = new CompletableFuture<>();
-        LanguageServer server = mock(LanguageServer.class, invocation -> {
+        JdtLsLanguageServer server = mock(JdtLsLanguageServer.class, invocation -> {
             if ("initialize".equals(invocation.getMethod().getName())) {
                 return CompletableFuture.completedFuture(null);
             }
@@ -364,7 +393,7 @@ class JdtLsProcessFactoryTest {
         PipedInputStream stderr = new PipedInputStream(128);
         PipedOutputStream serverStderr = new PipedOutputStream(stderr);
         TestProcess process = new TestProcess(stderr);
-        LanguageServer server = mock(LanguageServer.class, invocation -> {
+        JdtLsLanguageServer server = mock(JdtLsLanguageServer.class, invocation -> {
             if ("initialize".equals(invocation.getMethod().getName())) {
                 return CompletableFuture.completedFuture(null);
             }
@@ -408,7 +437,7 @@ class JdtLsProcessFactoryTest {
         String diagnostics = "!ENTRY org.eclipse.jdt.ls.core\n!MESSAGE " + sentinel + "\n";
         TestProcess process = new TestProcess(
                 new ByteArrayInputStream(diagnostics.getBytes(StandardCharsets.UTF_8)));
-        LanguageServer server = mock(LanguageServer.class, invocation -> {
+        JdtLsLanguageServer server = mock(JdtLsLanguageServer.class, invocation -> {
             if ("initialize".equals(invocation.getMethod().getName())) {
                 return CompletableFuture.completedFuture(null);
             }
@@ -435,9 +464,20 @@ class JdtLsProcessFactoryTest {
             assertThat(handle.stderrBuffer().lines().toString()).doesNotContain(sentinel);
             assertThat(handle.stderrBuffer().asText()).doesNotContain(sentinel);
             assertThat(output.getAll()).doesNotContain(sentinel);
-            assertThat(appender.list).hasSize(2).allSatisfy(event -> {
+            List<ILoggingEvent> stderrEvents = appender.list.stream()
+                    .filter(event -> event.getFormattedMessage().contains("phase=jdtls-stderr"))
+                    .toList();
+            assertThat(stderrEvents).hasSize(2).allSatisfy(event -> {
                 assertThat(event.getFormattedMessage()).doesNotContain(sentinel);
                 assertThat(Arrays.toString(event.getArgumentArray())).doesNotContain(sentinel);
+                assertThat(event.getThrowableProxy()).isNull();
+            });
+            List<ILoggingEvent> processEvents = appender.list.stream()
+                    .filter(event -> event.getFormattedMessage().contains("phase=jdtls-process outcome=started"))
+                    .toList();
+            assertThat(processEvents).singleElement().satisfies(event -> {
+                assertThat(event.getFormattedMessage())
+                        .doesNotContain(sentinel, tempDirectory.toString(), "jsonrpc", "-D");
                 assertThat(event.getThrowableProxy()).isNull();
             });
         } finally {
@@ -485,7 +525,7 @@ class JdtLsProcessFactoryTest {
         Path home = createJdtLsHome();
         TestProcess process = new TestProcess(stderr);
         CompletableFuture<Void> listener = new CompletableFuture<>();
-        LanguageServer server = mock(LanguageServer.class, invocation -> {
+        JdtLsLanguageServer server = mock(JdtLsLanguageServer.class, invocation -> {
             if ("initialize".equals(invocation.getMethod().getName())) {
                 return CompletableFuture.completedFuture(null);
             }

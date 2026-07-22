@@ -6,6 +6,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.Function;
 
 import com.java.semantic.syntax.domain.ClassMetadata;
 import com.java.semantic.syntax.domain.ClassMetadata.FieldInfo;
@@ -15,6 +16,7 @@ import com.java.semantic.syntax.domain.ClassMetadata.TypeKind;
 import com.java.semantic.syntax.domain.AnnotationEvidence;
 import com.java.semantic.syntax.domain.ResolvedTypeIdentity;
 import com.java.semantic.syntax.domain.TypeReference;
+import com.java.semantic.syntax.domain.MethodTargetResolution;
 import com.java.semantic.identity.PolicyIdentity;
 
 import org.eclipse.jdt.core.dom.AbstractTypeDeclaration;
@@ -60,7 +62,8 @@ final class ClassMetadataExtractor {
     }
 
     static ClassMetadata extract(ParsedSource parsed, AbstractTypeDeclaration type,
-            MapperXmlSqlExtractor.SqlIndex sqlIndex) {
+            MapperXmlSqlExtractor.SqlIndex sqlIndex,
+            Function<MethodDeclaration, MethodTargetResolution> analysisTargetOf) {
         String packageName = PackageNames.of(parsed);
         String className = SourceTypes.nestedName(type);
         String fullyQualifiedName = PackageNames.qualify(packageName, className);
@@ -78,7 +81,8 @@ final class ClassMetadataExtractor {
                 annotationNamesOf(type),
                 importsOf(parsed.unit()),
                 fieldsOf(type, slices),
-                methodsOf(parsed.unit(), type, fullyQualifiedName, sqlIndex, slices),
+                methodsOf(parsed, type, packageName, className, fullyQualifiedName, sqlIndex, slices,
+                        analysisTargetOf),
                 hasFluentAccessors(type),
                 hasChainedAccessors(type),
                 profilesOf(type),
@@ -173,8 +177,11 @@ final class ClassMetadataExtractor {
         return List.copyOf(fields);
     }
 
-    private static List<MethodSignature> methodsOf(CompilationUnit unit, AbstractTypeDeclaration type,
-            String fullyQualifiedName, MapperXmlSqlExtractor.SqlIndex sqlIndex, SourceSlices slices) {
+    private static List<MethodSignature> methodsOf(ParsedSource parsed, AbstractTypeDeclaration type,
+            String packageName, String className, String fullyQualifiedName,
+            MapperXmlSqlExtractor.SqlIndex sqlIndex, SourceSlices slices,
+            Function<MethodDeclaration, MethodTargetResolution> analysisTargetOf) {
+        CompilationUnit unit = parsed.unit();
         List<MethodSignature> methods = new ArrayList<>();
         for (MethodDeclaration method : SourceTypes.declaredMethodsOf(type)) {
             String name = method.getName().getIdentifier();
@@ -200,9 +207,39 @@ final class ClassMetadataExtractor {
                     returnTypeReferenceOf(method, slices),
                     InvocationExtractor.extract(unit, method, slices),
                     annotationEvidenceOf(method),
-                    BodyTypeReferenceExtractor.extract(method)));
+                    BodyTypeReferenceExtractor.extract(method),
+                    slices.range(method.getName()).start(),
+                    analysisTargetOf.apply(method),
+                    Objects.nonNull(method.getBody()),
+                    isOverridableDeclaration(type, method)));
         }
         return List.copyOf(methods);
+    }
+
+    private static boolean isOverridableDeclaration(AbstractTypeDeclaration enclosingType, MethodDeclaration method) {
+        if (method.isConstructor() || enclosingType instanceof RecordDeclaration
+                || isExplicitlyFinalClass(enclosingType)) {
+            return false;
+        }
+        for (Object modifier : method.modifiers()) {
+            if (modifier instanceof Modifier keyword
+                    && (keyword.isPrivate() || keyword.isStatic() || keyword.isFinal())) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static boolean isExplicitlyFinalClass(AbstractTypeDeclaration type) {
+        if (!(type instanceof TypeDeclaration typeDeclaration) || typeDeclaration.isInterface()) {
+            return false;
+        }
+        for (Object modifier : type.modifiers()) {
+            if (modifier instanceof Modifier keyword && keyword.isFinal()) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static SqlSource sqlSourceOf(boolean fromAnnotation, String sql) {

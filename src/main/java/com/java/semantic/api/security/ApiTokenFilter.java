@@ -1,5 +1,8 @@
 package com.java.semantic.api.security;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.java.semantic.api.RequestCorrelationFilter;
+import com.java.semantic.api.dto.ApiErrorResponse;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -9,6 +12,8 @@ import org.springframework.http.MediaType;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
+import java.util.List;
+import java.util.Objects;
 
 /**
  * 以共用權杖保護所有端點
@@ -21,6 +26,7 @@ public class ApiTokenFilter extends OncePerRequestFilter {
     public static final String API_TOKEN_HEADER = "X-Api-Token";
 
     private static final String HEALTH_PATH = "/actuator/health";
+    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
     private final ApiSecurityProperties properties;
 
@@ -38,25 +44,37 @@ public class ApiTokenFilter extends OncePerRequestFilter {
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response,
                                     FilterChain filterChain) throws ServletException, IOException {
         if (!properties.hasApiToken()) {
-            writeError(response, HttpStatus.FORBIDDEN, "SEMANTIC_AUTH_DISABLED",
+            writeError(request, response, HttpStatus.FORBIDDEN, "SEMANTIC_AUTH_DISABLED",
                     "semantic.api.api-token is not configured; the service refuses all traffic");
             return;
         }
         if (!properties.matchesApiToken(request.getHeader(API_TOKEN_HEADER))) {
-            writeError(response, HttpStatus.UNAUTHORIZED, "SEMANTIC_UNAUTHORIZED",
+            writeError(request, response, HttpStatus.UNAUTHORIZED, "SEMANTIC_UNAUTHORIZED",
                     API_TOKEN_HEADER + " header is required");
             return;
         }
         filterChain.doFilter(request, response);
     }
 
-    private void writeError(HttpServletResponse response, HttpStatus status, String errorCode, String message)
+    private void writeError(
+            HttpServletRequest request,
+            HttpServletResponse response,
+            HttpStatus status,
+            String errorCode,
+            String message)
             throws IOException {
         response.setStatus(status.value());
         response.setContentType(MediaType.APPLICATION_JSON_VALUE);
-        String responseBody = """
-                {"errorCode":"%s","message":"%s"}\
-                """.formatted(errorCode, message);
-        response.getWriter().write(responseBody);
+        String requestId = Objects.toString(
+                request.getAttribute(RequestCorrelationFilter.REQUEST_ID_ATTRIBUTE), "");
+        OBJECT_MAPPER.writeValue(response.getWriter(), ApiErrorResponse.withContext(
+                errorCode,
+                message,
+                null,
+                null,
+                null,
+                null,
+                List.of(),
+                requestId));
     }
 }

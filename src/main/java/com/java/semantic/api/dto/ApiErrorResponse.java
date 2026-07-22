@@ -1,37 +1,37 @@
 package com.java.semantic.api.dto;
 
 import java.util.List;
-import java.util.Optional;
 
 /** 穩定且不洩漏內部例外的 API 錯誤 */
 public record ApiErrorResponse(
         String errorCode,
         String message,
-        Optional<String> currentRevision,
-        Optional<String> expectedRevision,
-        Optional<List<String>> candidates) {
+        String repoId,
+        String expectedRevision,
+        String currentRevision,
+        MethodTargetResponse target,
+        List<MethodTargetResponse> candidates,
+        String requestId) {
 
-    public static ApiErrorResponse of(String errorCode, String message) {
-        return new ApiErrorResponse(errorCode, message, Optional.empty(), Optional.empty(), Optional.empty());
+    public ApiErrorResponse {
+        candidates = List.copyOf(candidates);
     }
 
-    public static ApiErrorResponse revisionMismatch(
+    public static ApiErrorResponse of(String errorCode, String message, String requestId) {
+        return new ApiErrorResponse(
+                errorCode, message, null, null, null, null, List.of(), requestId);
+    }
+
+    public static ApiErrorResponse withContext(
+            String errorCode,
+            String message,
+            String repoId,
+            String expectedRevision,
             String currentRevision,
-            String expectedRevision) {
+            MethodTargetResponse target,
+            List<MethodTargetResponse> candidates,
+            String requestId) {
         return new ApiErrorResponse(
-                "REPOSITORY_REVISION_MISMATCH",
-                "expected revision does not match current revision",
-                Optional.of(currentRevision),
-                Optional.of(expectedRevision),
-                Optional.empty());
-    }
-
-    public static ApiErrorResponse ambiguousMethod(String message, List<String> candidates) {
-        return new ApiErrorResponse(
-                "SEMANTIC_AMBIGUOUS_METHOD",
-                message,
-                Optional.empty(),
-                Optional.empty(),
-                Optional.of(List.copyOf(candidates)));
+                errorCode, message, repoId, expectedRevision, currentRevision, target, candidates, requestId);
     }
 }

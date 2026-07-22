@@ -8,6 +8,7 @@ import com.java.semantic.syntax.domain.ClassMetadata.MethodSignature;
 import com.java.semantic.syntax.domain.ClassMetadata.FieldInfo;
 import com.java.semantic.syntax.domain.ClassMetadata.SqlSource;
 import com.java.semantic.syntax.domain.ClassMetadata.TypeKind;
+import com.java.semantic.syntax.domain.MethodTargetResolution;
 import com.java.semantic.syntax.domain.RepositorySyntax;
 import com.java.semantic.syntax.domain.SourceSlice;
 import com.java.semantic.syntax.domain.SyntaxPosition;
@@ -440,7 +441,13 @@ class CallGraphClassifierTest {
                 new SourceSlice(range, name),
                 List.of(),
                 Optional.empty(),
-                List.of());
+                List.of(),
+                List.of(),
+                List.of(),
+                range.start(),
+                testAnalysisTarget(),
+                true,
+                true);
     }
 
     private MethodSignature method(
@@ -456,7 +463,12 @@ class CallGraphClassifierTest {
                 new SyntaxPosition(startLine, startCharacter), new SyntaxPosition(endLine, endCharacter));
         return new MethodSignature(
                 name, List.of(parameterType), annotations, null, null, startLine + 1, endLine + 1, range,
-                new SourceSlice(range, source), List.of(), Optional.empty(), List.of());
+                new SourceSlice(range, source), List.of(), Optional.empty(), List.of(), List.of(), List.of(),
+                range.start(), testAnalysisTarget(), true, true);
+    }
+
+    private static MethodTargetResolution testAnalysisTarget() {
+        return MethodTargetResolution.unresolved("TEST_ANALYSIS_TARGET_UNAVAILABLE");
     }
 
     private SyntaxRange range() {

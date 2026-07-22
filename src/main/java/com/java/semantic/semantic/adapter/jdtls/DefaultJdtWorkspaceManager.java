@@ -9,11 +9,11 @@ import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.Meter;
 import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.annotation.PreDestroy;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.util.Assert;
+
+import lombok.extern.slf4j.Slf4j;
 
 import java.io.IOException;
 import java.nio.file.Path;
@@ -24,10 +24,15 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.locks.ReentrantLock;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 /**
  * 每個活躍儲存庫一個 JDT LS 程序
@@ -35,9 +40,9 @@ import java.util.concurrent.locks.ReentrantLock;
  * 每個工作區約 1 GB RSS,因此啟動彼此互斥,且淘汰只挑沒有進行中請求的 session
  */
 @Service
+@Slf4j
 public class DefaultJdtWorkspaceManager implements JdtWorkspaceManager, RepositoryMutationListener {
 
-    private static final Logger LOGGER = LoggerFactory.getLogger(DefaultJdtWorkspaceManager.class);
     private static final String PEAK_RSS_METRIC = "jdtls.workspace.peak.rss.kilobytes";
     private static final String REPOSITORY_TAG = "repository";
     private static final Duration DEFAULT_SHUTDOWN_LOCK_WAIT = Duration.ofSeconds(5);
@@ -47,9 +52,11 @@ public class DefaultJdtWorkspaceManager implements JdtWorkspaceManager, Reposito
     private final JdtLsProperties properties;
     private final MeterRegistry meterRegistry;
     private final Map<RepositoryId, JdtWorkspaceSession> sessions = new ConcurrentHashMap<>();
+    private final Map<RepositoryId, LaunchTracker> launchingProcesses = new ConcurrentHashMap<>();
     private final Map<RepositoryId, SemanticEngineStatus> transientStatuses = new ConcurrentHashMap<>();
     private final Map<RepositoryId, Meter.Id> gauges = new ConcurrentHashMap<>();
     private final ReentrantLock lifecycleLock = new ReentrantLock();
+    private final Object processRegistryLock = new Object();
     private final Duration shutdownLockWait;
     private volatile boolean terminated;
 
@@ -122,18 +129,19 @@ public class DefaultJdtWorkspaceManager implements JdtWorkspaceManager, Reposito
     public void invalidate(RepositoryId repositoryId) {
         Assert.notNull(repositoryId, "repositoryId is required");
         try {
-            JdtWorkspaceSession session = sessions.remove(repositoryId);
-            transientStatuses.remove(repositoryId);
-            removeGauge(repositoryId);
+            JdtWorkspaceSession session = sessions.get(repositoryId);
             if (Objects.isNull(session)) {
                 return;
             }
             session.invalidate();
             session.stop();
-            LOGGER.info("JDT LS workspace invalidated: repositoryId={}", repositoryId.value());
+            removeStoppedSession(repositoryId, session);
+            log.info("phase=jdtls-workspace outcome=invalidated repoId={}", repositoryId.value());
         } catch (RuntimeException exception) {
-            String failureType = exception.getClass().getSimpleName();
-            LOGGER.warn("JDT LS workspace invalidation failed: repositoryId={} failureType={}",
+            String failureType = exception instanceof JdtWorkspaceSession.JdtProcessTerminationException termination
+                    ? termination.failureType()
+                    : exception.getClass().getSimpleName();
+            log.warn("phase=jdtls-workspace outcome=failed repoId={} exceptionType={}",
                     repositoryId.value(), failureType);
             throw new RepositoryMutationException(
                     "semantic workspace invalidation failed (failureType=" + failureType + ")");
@@ -155,13 +163,19 @@ public class DefaultJdtWorkspaceManager implements JdtWorkspaceManager, Reposito
     @Override
     @PreDestroy
     public void shutdownAll() {
-        terminated = true;
+        synchronized (processRegistryLock) {
+            terminated = true;
+        }
         boolean acquired = acquireLifecycleLock();
         try {
             for (RepositoryId repositoryId : Set.copyOf(sessions.keySet())) {
                 stopQuietly(repositoryId);
             }
-            transientStatuses.clear();
+            for (RepositoryId repositoryId : Set.copyOf(launchingProcesses.keySet())) {
+                stopLaunchingProcess(repositoryId);
+            }
+            transientStatuses.keySet().removeIf(repositoryId ->
+                    !sessions.containsKey(repositoryId) && !launchingProcesses.containsKey(repositoryId));
         } finally {
             if (acquired) {
                 lifecycleLock.unlock();
@@ -169,12 +183,24 @@ public class DefaultJdtWorkspaceManager implements JdtWorkspaceManager, Reposito
         }
     }
 
+    Set<Long> activeProcessIds() {
+        return Stream.concat(
+                        sessions.values().stream().map(JdtWorkspaceSession::processId),
+                        launchingProcesses.values().stream()
+                                .map(LaunchTracker::process)
+                                .flatMap(Optional::stream)
+                                .filter(Process::isAlive)
+                                .map(Process::pid))
+                .collect(Collectors.toUnmodifiableSet());
+    }
+
     private boolean acquireLifecycleLock() {
         try {
             return lifecycleLock.tryLock(shutdownLockWait.toMillis(), TimeUnit.MILLISECONDS);
         } catch (InterruptedException exception) {
             Thread.currentThread().interrupt();
-            LOGGER.warn("Interrupted while acquiring the lifecycle lock during shutdown");
+            log.warn("phase=jdtls-workspace outcome=shutdown-lock-interrupted exceptionType={}",
+                    exception.getClass().getSimpleName());
             return false;
         }
     }
@@ -194,19 +220,19 @@ public class DefaultJdtWorkspaceManager implements JdtWorkspaceManager, Reposito
 
     private JdtWorkspaceSession startLocked(RepositorySnapshot snapshot) {
         RepositoryId repositoryId = snapshot.repositoryId();
+        reconcileRetainedLaunch(repositoryId);
         discardUnusable(repositoryId);
         makeRoomFor(repositoryId);
         transientStatuses.put(repositoryId, SemanticEngineStatus.STARTING);
         JdtLsReadinessProbe.ImportProgressClient client = readinessProbe.newClient();
+        JdtLsProcessFactory.LaunchHandle launchHandle = launch(snapshot, client);
         JdtWorkspaceSession session = new JdtWorkspaceSession(
                 repositoryId,
                 snapshot.revision(),
-                launch(snapshot, client),
+                launchHandle,
                 properties.getRequestTimeout());
         try {
-            sessions.put(repositoryId, session);
-            transientStatuses.remove(repositoryId);
-            registerPeakRssGauge(session);
+            publishSession(repositoryId, session, launchHandle.process());
             readinessProbe.awaitReady(session, client, snapshot.root());
             ensureStartupStillOwned(repositoryId, session);
         } catch (Throwable failure) {
@@ -220,7 +246,7 @@ public class DefaultJdtWorkspaceManager implements JdtWorkspaceManager, Reposito
             }
             throw new IllegalStateException("unexpected JDT LS startup failure", failure);
         }
-        LOGGER.info("JDT LS workspace ready: repositoryId={}, revision={}",
+        log.info("phase=jdtls-workspace outcome=ready repoId={} revision={}",
                 repositoryId.value(), snapshot.revision().value());
         return session;
     }
@@ -230,16 +256,83 @@ public class DefaultJdtWorkspaceManager implements JdtWorkspaceManager, Reposito
             RepositorySnapshot snapshot, JdtLsReadinessProbe.ImportProgressClient client) {
         RepositoryId repositoryId = snapshot.repositoryId();
         Path workspaceData = properties.getWorkspaceDataRoot().resolve(repositoryId.value());
+        LaunchTracker tracker = beginLaunch(repositoryId);
         try {
-            return processFactory.launch(snapshot.root(), workspaceData, client);
+            return processFactory.launch(
+                    snapshot.root(), workspaceData, client,
+                    process -> registerLaunchingProcess(repositoryId, tracker, process));
         } catch (InterruptedException exception) {
             Thread.currentThread().interrupt();
+            ensureActive(repositoryId);
             throw launchFailure(repositoryId, "JDT LS launch was interrupted", exception);
         } catch (IOException | ExecutionException | TimeoutException | RuntimeException exception) {
+            ensureActive(repositoryId);
             throw launchFailure(repositoryId, "JDT LS launch failed", exception);
         } catch (Error error) {
             JdtFatalErrorPolicy.rethrowIfFatal(error);
+            ensureActive(repositoryId);
             throw launchFailure(repositoryId, "JDT LS launch failed", error);
+        } finally {
+            tracker.complete();
+            removeTerminatedLaunchingProcess(repositoryId, tracker);
+        }
+    }
+
+    private LaunchTracker beginLaunch(RepositoryId repositoryId) {
+        synchronized (processRegistryLock) {
+            ensureActive(repositoryId);
+            LaunchTracker tracker = new LaunchTracker();
+            LaunchTracker existing = launchingProcesses.putIfAbsent(repositoryId, tracker);
+            if (Objects.nonNull(existing)) {
+                throw new JdtWorkspaceTerminationPendingException(repositoryId);
+            }
+            return tracker;
+        }
+    }
+
+    private void reconcileRetainedLaunch(RepositoryId repositoryId) {
+        LaunchTracker tracker = launchingProcesses.get(repositoryId);
+        if (Objects.isNull(tracker)) {
+            return;
+        }
+        stopLaunchingProcess(repositoryId);
+        if (launchingProcesses.containsKey(repositoryId)) {
+            throw new JdtWorkspaceTerminationPendingException(repositoryId);
+        }
+    }
+
+    private void registerLaunchingProcess(
+            RepositoryId repositoryId, LaunchTracker tracker, Process process) {
+        tracker.processStarted(process);
+        synchronized (processRegistryLock) {
+            if (tracker.isCancelled()) {
+                throw new JdtWorkspaceManagerStoppedException(repositoryId);
+            }
+            ensureActive(repositoryId);
+        }
+    }
+
+    private void publishSession(
+            RepositoryId repositoryId, JdtWorkspaceSession session, Process process) {
+        synchronized (processRegistryLock) {
+            ensureActive(repositoryId);
+            sessions.put(repositoryId, session);
+            LaunchTracker tracker = launchingProcesses.get(repositoryId);
+            if (Objects.nonNull(tracker) && tracker.owns(process)) {
+                launchingProcesses.remove(repositoryId, tracker);
+            }
+            transientStatuses.remove(repositoryId);
+            registerPeakRssGauge(session);
+        }
+    }
+
+    private void removeTerminatedLaunchingProcess(RepositoryId repositoryId, LaunchTracker tracker) {
+        Optional<Process> process = tracker.process();
+        if (tracker.isComplete() && (process.isEmpty() || !process.get().isAlive())) {
+            launchingProcesses.remove(repositoryId, tracker);
+            if (terminated) {
+                transientStatuses.remove(repositoryId);
+            }
         }
     }
 
@@ -247,7 +340,7 @@ public class DefaultJdtWorkspaceManager implements JdtWorkspaceManager, Reposito
             RepositoryId repositoryId, String reason, Throwable cause) {
         transientStatuses.put(repositoryId, SemanticEngineStatus.FAILED);
         String failureType = cause.getClass().getSimpleName();
-        LOGGER.warn("JDT LS workspace failed: repositoryId={}, reason={}, failureType={}",
+        log.warn("phase=jdtls-workspace outcome=failed repoId={} reason={} exceptionType={}",
                 repositoryId.value(), reason, failureType);
         return new JdtLsReadinessProbe.JdtWorkspaceStartupException(
                 repositoryId, reason, "", failureType);
@@ -255,7 +348,7 @@ public class DefaultJdtWorkspaceManager implements JdtWorkspaceManager, Reposito
 
     private void discardUnusable(RepositoryId repositoryId) {
         if (sessions.containsKey(repositoryId)) {
-            LOGGER.info("Discarding unusable JDT LS workspace: repositoryId={}", repositoryId.value());
+            log.info("phase=jdtls-workspace outcome=discarded repoId={}", repositoryId.value());
             stopQuietly(repositoryId);
         }
     }
@@ -283,10 +376,22 @@ public class DefaultJdtWorkspaceManager implements JdtWorkspaceManager, Reposito
 
     private void cleanupStartup(
             RepositoryId repositoryId, JdtWorkspaceSession session, SemanticEngineStatus status) {
-        sessions.remove(repositoryId, session);
-        removeGauge(repositoryId);
         stopAfterFailure(session);
-        transientStatuses.put(repositoryId, status);
+        synchronized (processRegistryLock) {
+            if (session.isProcessAlive()) {
+                sessions.putIfAbsent(repositoryId, session);
+                removeLaunchTracker(repositoryId, session.process());
+                if (!gauges.containsKey(repositoryId)) {
+                    registerPeakRssGauge(session);
+                }
+                transientStatuses.put(repositoryId, SemanticEngineStatus.FAILED);
+                return;
+            }
+            sessions.remove(repositoryId, session);
+            removeLaunchTracker(repositoryId, session.process());
+            removeGauge(repositoryId);
+            transientStatuses.put(repositoryId, status);
+        }
     }
 
     /**
@@ -296,16 +401,25 @@ public class DefaultJdtWorkspaceManager implements JdtWorkspaceManager, Reposito
      * 兩步之間若有請求落地,舊寫法會把有進行中請求的 session 拆掉,讓呼叫端等到逾時
      */
     private void makeRoomFor(RepositoryId repositoryId) {
-        while (sessions.size() >= properties.getMaxActiveWorkspaces()) {
+        removeCompletedTerminatedLaunches();
+        while (trackedWorkspaceCount() >= properties.getMaxActiveWorkspaces()) {
             JdtWorkspaceSession evictable = sessions.values().stream()
                     .sorted(Comparator.comparingLong(JdtWorkspaceSession::lastUsedNanos))
                     .filter(JdtWorkspaceSession::tryBeginEviction)
                     .findFirst()
                     .orElseThrow(() -> new JdtWorkspaceCapacityException(repositoryId));
-            LOGGER.info("Evicting idle JDT LS workspace: repositoryId={}, requestedBy={}",
+            log.info("phase=jdtls-workspace outcome=evicted repoId={} requestedBy={}",
                     evictable.repositoryId().value(), repositoryId.value());
             stopQuietly(evictable.repositoryId());
         }
+    }
+
+    private void removeCompletedTerminatedLaunches() {
+        launchingProcesses.forEach(this::removeTerminatedLaunchingProcess);
+    }
+
+    private int trackedWorkspaceCount() {
+        return sessions.size() + launchingProcesses.size();
     }
 
     /** 清理失敗的啟動,但不讓停止失敗覆蓋原始失敗 */
@@ -313,24 +427,69 @@ public class DefaultJdtWorkspaceManager implements JdtWorkspaceManager, Reposito
         try {
             session.stop();
         } catch (RuntimeException stopFailure) {
-            LOGGER.warn(
-                    "Stopping a failed JDT LS workspace failed: repositoryId={} failureType={}",
+            log.warn(
+                    "phase=jdtls-workspace outcome=failed-stop repoId={} exceptionType={}",
                     session.repositoryId().value(), stopFailure.getClass().getSimpleName());
         }
     }
 
     private void stopQuietly(RepositoryId repositoryId) {
-        JdtWorkspaceSession session = sessions.remove(repositoryId);
-        transientStatuses.remove(repositoryId);
-        removeGauge(repositoryId);
+        JdtWorkspaceSession session = sessions.get(repositoryId);
         if (Objects.isNull(session)) {
             return;
         }
         try {
             session.stop();
+            removeStoppedSession(repositoryId, session);
         } catch (RuntimeException exception) {
-            LOGGER.warn("Stopping JDT LS workspace failed: repositoryId={} failureType={}",
+            log.warn("phase=jdtls-workspace outcome=stop-failed repoId={} exceptionType={}",
                     repositoryId.value(), exception.getClass().getSimpleName());
+        }
+    }
+
+    private void removeStoppedSession(RepositoryId repositoryId, JdtWorkspaceSession session) {
+        synchronized (processRegistryLock) {
+            if (session.isProcessAlive()) {
+                return;
+            }
+            sessions.remove(repositoryId, session);
+            transientStatuses.remove(repositoryId);
+            removeGauge(repositoryId);
+        }
+    }
+
+    private void stopLaunchingProcess(RepositoryId repositoryId) {
+        LaunchTracker tracker = launchingProcesses.get(repositoryId);
+        if (Objects.isNull(tracker)) {
+            return;
+        }
+        tracker.cancel();
+        Optional<Process> process = tracker.process();
+        if (process.isPresent()) {
+            JdtProcessTerminator.TerminationResult result = JdtProcessTerminator.destroyThenAwait(
+                    process.get(), DEFAULT_SHUTDOWN_LOCK_WAIT);
+            if (!result.terminated()) {
+                transientStatuses.put(repositoryId, SemanticEngineStatus.FAILED);
+                log.error("phase=jdtls-process outcome=launch-stop-unconfirmed repoId={} failureType={}",
+                        repositoryId.value(), result.failureType());
+                return;
+            }
+        }
+        boolean launchCompleted = tracker.awaitCompletion(shutdownLockWait);
+        if (launchCompleted) {
+            launchingProcesses.remove(repositoryId, tracker);
+            transientStatuses.remove(repositoryId);
+            log.info("phase=jdtls-process outcome=confirmed-launch-stop repoId={}", repositoryId.value());
+            return;
+        }
+        transientStatuses.put(repositoryId, SemanticEngineStatus.FAILED);
+        log.warn("phase=jdtls-process outcome=launch-cancel-pending repoId={}", repositoryId.value());
+    }
+
+    private void removeLaunchTracker(RepositoryId repositoryId, Process process) {
+        LaunchTracker tracker = launchingProcesses.get(repositoryId);
+        if (Objects.nonNull(tracker) && tracker.owns(process)) {
+            launchingProcesses.remove(repositoryId, tracker);
         }
     }
 
@@ -365,6 +524,58 @@ public class DefaultJdtWorkspaceManager implements JdtWorkspaceManager, Reposito
         JdtWorkspaceManagerStoppedException(RepositoryId repositoryId) {
             super("JDT LS workspace manager has shut down; repository "
                     + repositoryId.value() + " cannot be started");
+        }
+    }
+
+    /** 前一次啟動留下的子程序尚未確認停止,不得以新 tracker 覆蓋。 */
+    public static final class JdtWorkspaceTerminationPendingException extends RuntimeException {
+
+        JdtWorkspaceTerminationPendingException(RepositoryId repositoryId) {
+            super("JDT LS process termination is still pending for repository " + repositoryId.value());
+        }
+    }
+
+    private static final class LaunchTracker {
+
+        private final AtomicReference<Process> process = new AtomicReference<>();
+        private final AtomicBoolean cancelled = new AtomicBoolean();
+        private final CountDownLatch completed = new CountDownLatch(1);
+
+        private void processStarted(Process startedProcess) {
+            process.set(Objects.requireNonNull(startedProcess, "startedProcess is required"));
+        }
+
+        private Optional<Process> process() {
+            return Optional.ofNullable(process.get());
+        }
+
+        private boolean owns(Process candidate) {
+            return process.get() == candidate;
+        }
+
+        private void cancel() {
+            cancelled.set(true);
+        }
+
+        private boolean isCancelled() {
+            return cancelled.get();
+        }
+
+        private void complete() {
+            completed.countDown();
+        }
+
+        private boolean isComplete() {
+            return completed.getCount() == 0;
+        }
+
+        private boolean awaitCompletion(Duration timeout) {
+            try {
+                return completed.await(timeout.toMillis(), TimeUnit.MILLISECONDS);
+            } catch (InterruptedException exception) {
+                Thread.currentThread().interrupt();
+                return false;
+            }
         }
     }
 }

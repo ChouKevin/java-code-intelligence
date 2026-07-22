@@ -111,7 +111,11 @@ public record ClassMetadata(
             Optional<TypeReference> returnType,
             List<SyntaxInvocation> invocations,
             List<AnnotationEvidence> annotationEvidence,
-            List<ResolvedTypeIdentity> bodyTypeReferences) {
+            List<ResolvedTypeIdentity> bodyTypeReferences,
+            SyntaxPosition namePosition,
+            MethodTargetResolution analysisTarget,
+            boolean executableDeclaration,
+            boolean overridableDeclaration) {
 
         public MethodSignature {
             paramTypes = List.copyOf(paramTypes);
@@ -124,26 +128,8 @@ public record ClassMetadata(
             annotationEvidence = List.copyOf(annotationEvidence);
             bodyTypeReferences = List.copyOf(Objects.requireNonNull(
                     bodyTypeReferences, "bodyTypeReferences is required"));
-        }
-
-        /** 保留舊 metadata 建構子；舊資料沒有已解析的註解 identity。 */
-        public MethodSignature(
-                String name, List<String> paramTypes, List<String> annotations, String sql, SqlSource sqlSource,
-                int startLine, int endLine, SyntaxRange range, SourceSlice source,
-                List<TypeReference> parameterTypeReferences, Optional<TypeReference> returnType,
-                List<SyntaxInvocation> invocations) {
-            this(name, paramTypes, annotations, sql, sqlSource, startLine, endLine, range, source,
-                    parameterTypeReferences, returnType, invocations, List.of(), List.of());
-        }
-
-        /** 保留既有 annotation 證據建構子；舊資料沒有方法本體型別證據。 */
-        public MethodSignature(
-                String name, List<String> paramTypes, List<String> annotations, String sql, SqlSource sqlSource,
-                int startLine, int endLine, SyntaxRange range, SourceSlice source,
-                List<TypeReference> parameterTypeReferences, Optional<TypeReference> returnType,
-                List<SyntaxInvocation> invocations, List<AnnotationEvidence> annotationEvidence) {
-            this(name, paramTypes, annotations, sql, sqlSource, startLine, endLine, range, source,
-                    parameterTypeReferences, returnType, invocations, annotationEvidence, List.of());
+            Objects.requireNonNull(namePosition, "namePosition is required");
+            Objects.requireNonNull(analysisTarget, "analysisTarget is required");
         }
 
         /** 參數個數 */

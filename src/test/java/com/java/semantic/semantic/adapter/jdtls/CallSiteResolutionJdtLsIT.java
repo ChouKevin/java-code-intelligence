@@ -1,15 +1,20 @@
 package com.java.semantic.semantic.adapter.jdtls;
 
 import com.java.semantic.config.JdtLsProperties;
+import com.java.semantic.identity.MethodTarget;
 import com.java.semantic.repository.domain.RepositoryId;
 import com.java.semantic.repository.domain.RepositoryRevision;
 import com.java.semantic.repository.domain.RepositorySnapshot;
 import com.java.semantic.semantic.domain.SemanticCall;
 import com.java.semantic.semantic.domain.SemanticCallSite;
+import com.java.semantic.semantic.domain.SemanticDeclarationAnchor;
 import com.java.semantic.semantic.domain.SemanticMethod;
 import com.java.semantic.semantic.domain.SemanticPosition;
 import com.java.semantic.semantic.domain.SemanticRange;
 import com.java.semantic.semantic.domain.SemanticResolutionOrigin;
+import com.java.semantic.semantic.application.ExactMethodDeclarationResolver;
+import com.java.semantic.syntax.adapter.jdt.JdtSyntaxExtractionService;
+import com.java.semantic.syntax.domain.RepositorySyntax;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -59,7 +64,8 @@ class CallSiteResolutionJdtLsIT {
         RepositorySnapshot snapshot = new RepositorySnapshot(REPOSITORY_ID, root, REVISION);
 
         try {
-            SemanticMethod exercise = service.resolveMethod(snapshot, PACKAGE, "CallSiteScenarios", "exercise()");
+            SemanticMethod exercise = resolveExactMethod(
+                    service, snapshot, root, "CallSiteScenarios", "exercise", List.of());
             List<SemanticCall> calls = service.outgoingCalls(snapshot, exercise);
             List<CallScenario> scenarios = callHierarchyScenarios();
 
@@ -83,7 +89,8 @@ class CallSiteResolutionJdtLsIT {
                     .rawSignature())
                     .isEqualTo("decorate(String) : String");
 
-            SemanticMethod workerMethod = service.resolveMethod(snapshot, PACKAGE, "Worker", "work(String)");
+            SemanticMethod workerMethod = resolveExactMethod(
+                    service, snapshot, root, "Worker", "work", List.of("String"));
             assertThat(service.implementations(snapshot, workerMethod))
                     .singleElement()
                     .satisfies(implementation -> {
@@ -195,7 +202,7 @@ class CallSiteResolutionJdtLsIT {
             SemanticCallSite callSite,
             MethodIdentity expected,
             String rawSignature) {
-        SemanticCall call = service.resolveCallAt(snapshot, caller, callSite)
+        SemanticCall call = service.resolveCallResolutionAt(snapshot, caller, callSite).call()
                 .orElseThrow(() -> new AssertionError("Missing definition fallback for " + expected.methodName()));
         assertThat(call.origin()).isEqualTo(SemanticResolutionOrigin.DEFINITION_FALLBACK);
         assertThat(call.rawSignature()).isEqualTo(rawSignature);
@@ -224,6 +231,27 @@ class CallSiteResolutionJdtLsIT {
         return new SemanticRange(
                 new SemanticPosition(startLine, startCharacter),
                 new SemanticPosition(endLine, endCharacter));
+    }
+
+    private SemanticMethod resolveExactMethod(
+            Lsp4jJavaSemanticService service,
+            RepositorySnapshot snapshot,
+            Path root,
+            String className,
+            String methodName,
+            List<String> parameterTypes) {
+        RepositorySyntax syntax = new JdtSyntaxExtractionService().extract(root);
+        MethodTarget target = syntax.classes().stream()
+                .filter(metadata -> PACKAGE.equals(metadata.packageName()))
+                .filter(metadata -> className.equals(metadata.className()))
+                .flatMap(metadata -> metadata.methods().stream())
+                .filter(method -> methodName.equals(method.name()))
+                .filter(method -> parameterTypes.equals(method.paramTypes()))
+                .flatMap(method -> method.analysisTarget().target().stream())
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("missing exact syntax target"));
+        SemanticDeclarationAnchor anchor = new ExactMethodDeclarationResolver().resolve(syntax, target);
+        return service.resolveExactMethod(snapshot, anchor);
     }
 
     private Path requireJdtlsHome(String configuredHome) {

@@ -1,6 +1,8 @@
 package com.java.semantic.repository.application;
 
+import com.java.semantic.diagnostic.ExpectedFailure;
 import com.java.semantic.repository.config.RepositoryProperties;
+import com.java.semantic.repository.domain.InvalidRepositoryIdException;
 import com.java.semantic.repository.domain.RepositoryId;
 import com.java.semantic.repository.domain.RepositoryMode;
 import com.java.semantic.repository.domain.RepositoryRevision;
@@ -10,11 +12,11 @@ import com.java.semantic.repository.domain.RepositoryStatus;
 import com.java.semantic.repository.port.GitRepositoryPort;
 import com.java.semantic.repository.port.RepositoryMutationListener;
 import com.java.semantic.repository.port.RepositorySnapshotPublicationListener;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.util.Assert;
 import org.springframework.util.StringUtils;
+
+import lombok.extern.slf4j.Slf4j;
 
 import java.nio.file.Files;
 import java.time.Duration;
@@ -28,10 +30,8 @@ import java.util.function.Supplier;
 
 /** 以每個儲存庫的公平讀寫鎖協調讀取與 Git 變更 */
 @Service
+@Slf4j
 public class DefaultRepositoryApplicationService implements RepositoryApplicationService {
-
-    private static final Logger LOGGER =
-            LoggerFactory.getLogger(DefaultRepositoryApplicationService.class);
 
     private final RepositoryRuntimeRegistry registry;
     private final GitRepositoryPort gitRepositoryPort;
@@ -119,7 +119,24 @@ public class DefaultRepositoryApplicationService implements RepositoryApplicatio
             RepositorySnapshot snapshot = runtime.snapshot()
                     .orElseThrow(() -> new RepositoryNotReadyException(repositoryId));
             expectedRevision.ifPresent(expected -> requireRevision(snapshot, expected));
-            return operation.apply(snapshot);
+            long startedAt = System.nanoTime();
+            try {
+                T result = operation.apply(snapshot);
+                log.info("phase=snapshot outcome=completed repoId={} revision={} durationMs={}",
+                        repositoryId.value(), snapshot.revision().value(), elapsedMillis(startedAt));
+                return result;
+            } catch (RuntimeException exception) {
+                if (isExpectedSnapshotFailure(exception)) {
+                    log.warn("phase=snapshot outcome=failed repoId={} revision={} exceptionType={} durationMs={}",
+                            repositoryId.value(), snapshot.revision().value(),
+                            exception.getClass().getSimpleName(), elapsedMillis(startedAt));
+                } else {
+                    log.error("phase=snapshot outcome=failed repoId={} revision={} exceptionType={} durationMs={}",
+                            repositoryId.value(), snapshot.revision().value(),
+                            exception.getClass().getSimpleName(), elapsedMillis(startedAt));
+                }
+                throw exception;
+            }
         });
     }
 
@@ -214,9 +231,9 @@ public class DefaultRepositoryApplicationService implements RepositoryApplicatio
         try {
             return mutation.get();
         } catch (RepositoryMutationException exception) {
-            LOGGER.warn(
-                    "REPOSITORY_MUTATION_FAILED repositoryId={}, operation={}",
-                    repositoryId.value(), operation);
+            log.warn(
+                    "phase=repository-mutation outcome=failed repoId={} operation={} exceptionType={}",
+                    repositoryId.value(), operation, exception.getClass().getSimpleName());
             throw exception;
         }
     }
@@ -253,5 +270,20 @@ public class DefaultRepositoryApplicationService implements RepositoryApplicatio
             throw new RepositoryBusyException(
                     "repository lock interrupted: " + repositoryId.value());
         }
+    }
+
+    private long elapsedMillis(long startedAt) {
+        return TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedAt);
+    }
+
+    private boolean isExpectedSnapshotFailure(RuntimeException exception) {
+        return exception instanceof ExpectedFailure
+                || exception instanceof ImmutableFixtureException
+                || exception instanceof InvalidRepositoryIdException
+                || exception instanceof RepositoryBusyException
+                || exception instanceof RepositoryMutationException
+                || exception instanceof RepositoryNotFoundException
+                || exception instanceof RepositoryNotReadyException
+                || exception instanceof RepositoryRevisionMismatchException;
     }
 }

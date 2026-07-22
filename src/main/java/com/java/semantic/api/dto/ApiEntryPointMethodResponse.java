@@ -11,7 +11,8 @@ public record ApiEntryPointMethodResponse(
         EntryPointType type,
         String apiUrl,
         List<String> httpMethods,
-        List<String> swaggerDescriptions) implements EntryPointMethodResponse {
+        List<String> swaggerDescriptions,
+        MethodTargetResolutionResponse analysisTarget) implements EntryPointMethodResponse {
 
     public ApiEntryPointMethodResponse {
         type = Objects.requireNonNull(type, "type is required");
@@ -20,5 +21,6 @@ public record ApiEntryPointMethodResponse(
         }
         httpMethods = List.copyOf(httpMethods);
         swaggerDescriptions = List.copyOf(swaggerDescriptions);
+        analysisTarget = Objects.requireNonNull(analysisTarget, "analysisTarget is required");
     }
 }

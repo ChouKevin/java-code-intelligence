@@ -2,6 +2,7 @@ package com.java.semantic.trie;
 
 import com.java.semantic.repository.domain.RepositoryId;
 import com.java.semantic.repository.domain.RepositoryRevision;
+import com.java.semantic.syntax.domain.MethodTargetResolution;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -43,7 +44,8 @@ class ApiRouteApplicationServiceTest {
                 "OrderController",
                 "getOrder",
                 "GET",
-                "/orders/{*}");
+                "/orders/{*}",
+                unresolved());
         when(apiTrieService.lookupCandidates("/orders/42", "GET", "orders"))
                 .thenReturn(List.of(ref));
 
@@ -59,7 +61,8 @@ class ApiRouteApplicationServiceTest {
                 "/orders/{*}",
                 "com.acme.order",
                 "OrderController",
-                "getOrder"));
+                "getOrder",
+                unresolved()));
     }
 
     @Test
@@ -109,6 +112,11 @@ class ApiRouteApplicationServiceTest {
                 className,
                 "handle",
                 "POST",
-                routeTemplate);
+                routeTemplate,
+                unresolved());
+    }
+
+    private static MethodTargetResolution unresolved() {
+        return MethodTargetResolution.unresolved("TEST_ANALYSIS_TARGET_UNAVAILABLE");
     }
 }

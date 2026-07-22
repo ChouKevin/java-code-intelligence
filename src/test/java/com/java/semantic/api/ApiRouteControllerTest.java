@@ -1,10 +1,13 @@
 package com.java.semantic.api;
 
 import com.java.semantic.api.security.ApiTokenFilter;
+import com.java.semantic.identity.MethodTarget;
 import com.java.semantic.repository.domain.RepositoryId;
 import com.java.semantic.repository.domain.RepositoryRevision;
 import com.java.semantic.trie.ApiRouteApplicationService;
 import com.java.semantic.trie.ApiRouteCandidate;
+import com.java.semantic.syntax.domain.AnalysisTargetStatus;
+import com.java.semantic.syntax.domain.MethodTargetResolution;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
@@ -118,7 +121,7 @@ class ApiRouteControllerTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"apiPath\":\"/orders\",\"repoScope\":\"../secret\"}"))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.errorCode").value("REPOSITORY_ID_INVALID"));
+                .andExpect(jsonPath("$.errorCode").value("REQUEST_INVALID"));
         then(apiRouteApplicationService).shouldHaveNoInteractions();
     }
 
@@ -198,6 +201,50 @@ class ApiRouteControllerTest {
     }
 
     @Test
+    void should_serialize_ambiguous_route_target_candidates_in_complete_value_order() throws Exception {
+        given(apiRouteApplicationService.lookup(any(), any(), any()))
+                .willReturn(List.of(candidate("repo-a", SHA_ONE.value())));
+
+        mockMvc.perform(post("/v1/api-routes/lookup")
+                        .header(ApiTokenFilter.API_TOKEN_HEADER, TOKEN)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"apiPath\":\"/orders\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.candidates[0].analysisTarget.status").value("AMBIGUOUS"))
+                .andExpect(jsonPath("$.candidates[0].analysisTarget.target").doesNotExist())
+                .andExpect(jsonPath("$.candidates[0].analysisTarget.candidates[0].sourceFile")
+                        .value("src/main/java/com/acme/AController.java"))
+                .andExpect(jsonPath("$.candidates[0].analysisTarget.candidates[1].sourceFile")
+                        .value("src/main/java/com/acme/ZController.java"))
+                .andExpect(jsonPath("$.candidates[0].analysisTarget.reasonCode").value("OVERLOAD_AMBIGUOUS"));
+    }
+
+    @Test
+    void should_serialize_an_unresolved_route_target_without_reconstructing_display_fields() throws Exception {
+        given(apiRouteApplicationService.lookup(any(), any(), any()))
+                .willReturn(List.of(new ApiRouteCandidate(
+                        "repo-a",
+                        SHA_ONE.value(),
+                        "GET",
+                        "/orders/{id}",
+                        "com.acme.display",
+                        "DisplayController",
+                        "displayMethod",
+                        MethodTargetResolution.unresolved("METHOD_PARAMETER_BINDING_UNRESOLVED"))));
+
+        mockMvc.perform(post("/v1/api-routes/lookup")
+                        .header(ApiTokenFilter.API_TOKEN_HEADER, TOKEN)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"apiPath\":\"/orders\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.candidates[0].analysisTarget.status").value("UNRESOLVED"))
+                .andExpect(jsonPath("$.candidates[0].analysisTarget.target").doesNotExist())
+                .andExpect(jsonPath("$.candidates[0].analysisTarget.candidates").isEmpty())
+                .andExpect(jsonPath("$.candidates[0].analysisTarget.reasonCode")
+                        .value("METHOD_PARAMETER_BINDING_UNRESOLVED"));
+    }
+
+    @Test
     void should_reject_missing_route_token() throws Exception {
         mockMvc.perform(post("/v1/api-routes/lookup")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -224,6 +271,15 @@ class ApiRouteControllerTest {
                 "/orders/{*}",
                 "com.acme.order",
                 "OrderController",
-                "getOrder");
+                "getOrder",
+                new MethodTargetResolution(
+                        AnalysisTargetStatus.AMBIGUOUS,
+                        Optional.empty(),
+                        List.of(
+                                new MethodTarget("src/main/java/com/acme/ZController.java", "com.acme",
+                                        "ZController", "getOrder", List.of("java.lang.String")),
+                                new MethodTarget("src/main/java/com/acme/AController.java", "com.acme",
+                                        "AController", "getOrder", List.of("java.lang.Long"))),
+                        "OVERLOAD_AMBIGUOUS"));
     }
 }

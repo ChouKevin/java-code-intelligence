@@ -1,18 +1,22 @@
 package com.java.semantic.semantic.adapter.jdtls;
 
 import com.java.semantic.repository.domain.RepositorySnapshot;
+import com.java.semantic.identity.MethodTarget;
 import com.java.semantic.semantic.domain.JavaSemanticService;
-import com.java.semantic.semantic.domain.SemanticAmbiguousMethodException;
 import com.java.semantic.semantic.domain.SemanticAmbiguousTypeException;
 import com.java.semantic.semantic.domain.SemanticCall;
+import com.java.semantic.semantic.domain.SemanticCallResolution;
 import com.java.semantic.semantic.domain.SemanticCallSite;
 import com.java.semantic.semantic.domain.SemanticCallStatus;
+import com.java.semantic.semantic.domain.SemanticBindingUnresolvedException;
+import com.java.semantic.semantic.domain.SemanticDeclarationAnchor;
+import com.java.semantic.semantic.domain.SemanticEngineException;
 import com.java.semantic.semantic.domain.SemanticLocation;
 import com.java.semantic.semantic.domain.SemanticMethod;
 import com.java.semantic.semantic.domain.SemanticPosition;
+import com.java.semantic.semantic.domain.SemanticProtocolException;
 import com.java.semantic.semantic.domain.SemanticRange;
 import com.java.semantic.semantic.domain.SemanticResolutionOrigin;
-import com.java.semantic.semantic.domain.SemanticSymbolNotFoundException;
 import org.eclipse.lsp4j.CallHierarchyItem;
 import org.eclipse.lsp4j.CallHierarchyOutgoingCall;
 import org.eclipse.lsp4j.CallHierarchyOutgoingCallsParams;
@@ -40,18 +44,15 @@ import org.eclipse.jdt.core.dom.ASTParser;
 import org.eclipse.jdt.core.dom.CompilationUnit;
 import org.eclipse.jdt.core.dom.PackageDeclaration;
 import org.eclipse.lsp4j.jsonrpc.messages.Either;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.util.Assert;
 import org.springframework.util.CollectionUtils;
 import org.springframework.util.StringUtils;
 
+import lombok.extern.slf4j.Slf4j;
+
 import java.io.IOException;
-import java.net.URI;
-import java.nio.file.FileSystemNotFoundException;
 import java.nio.file.Files;
-import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.EnumSet;
 import java.util.LinkedHashMap;
@@ -61,6 +62,8 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
+import java.util.function.Supplier;
+import java.util.regex.Pattern;
 
 /**
  * 以 JDT LS 精確回答語意問題的 adapter
@@ -68,49 +71,49 @@ import java.util.concurrent.CompletableFuture;
  * 所有 LSP4J 型別在此轉為 domain record,絕不外洩;位置一律以零基處理
  */
 @Service
+@Slf4j
 public class Lsp4jJavaSemanticService implements JavaSemanticService {
 
-    private static final Logger LOGGER = LoggerFactory.getLogger(Lsp4jJavaSemanticService.class);
     private static final String JAVA_LANGUAGE_ID = "java";
-    private static final String JDT_URI_SCHEME = "jdt:";
     private static final String UNAVAILABLE_TARGET_SIGNATURE = "semantic target identity unavailable";
+    private static final int MAX_EXTERNAL_DISPLAY_SIGNATURE_LENGTH = 256;
+    private static final Pattern SAFE_EXTERNAL_DISPLAY_SIGNATURE = Pattern.compile(
+            "[A-Za-z_$<][A-Za-z0-9_$<>]*(\\([A-Za-z0-9_$.<>?, \\[\\]]*\\))?"
+                    + "(\\s*:\\s*[A-Za-z0-9_$.<>?\\[\\]]+)?");
     private static final Set<SymbolKind> TYPE_KINDS =
             EnumSet.of(SymbolKind.Class, SymbolKind.Interface, SymbolKind.Enum, SymbolKind.Struct);
     private static final Set<SymbolKind> METHOD_KINDS =
             EnumSet.of(SymbolKind.Method, SymbolKind.Constructor);
 
     private final JdtWorkspaceManager workspaceManager;
+    private final JdtWorkspaceSourceLocator sourceLocator;
 
     public Lsp4jJavaSemanticService(JdtWorkspaceManager workspaceManager) {
         this.workspaceManager = Objects.requireNonNull(workspaceManager, "workspaceManager is required");
+        this.sourceLocator = new JdtWorkspaceSourceLocator();
     }
 
     @Override
-    public SemanticMethod resolveMethod(
-            RepositorySnapshot snapshot, String packageName, String className, String methodSignature) {
-        return JdtLsSemanticExceptionNormalizer.normalize(
-                () -> resolveMethodInternal(snapshot, packageName, className, methodSignature));
+    public SemanticMethod resolveExactMethod(RepositorySnapshot snapshot, SemanticDeclarationAnchor anchor) {
+        return JdtLsSemanticExceptionNormalizer.normalize(() -> resolveExactMethodInternal(snapshot, anchor));
     }
 
-    private SemanticMethod resolveMethodInternal(
-            RepositorySnapshot snapshot, String packageName, String className, String methodSignature) {
+    private SemanticMethod resolveExactMethodInternal(RepositorySnapshot snapshot, SemanticDeclarationAnchor anchor) {
         Assert.notNull(snapshot, "snapshot is required");
-        Objects.requireNonNull(packageName, "packageName is required");
-        Assert.hasText(className, "className is required");
-        Assert.hasText(methodSignature, "methodSignature is required");
+        Assert.notNull(anchor, "anchor is required");
+        String uri = sourceLocator.sourceUri(snapshot, anchor.target());
         JdtWorkspaceSession session = workspaceManager.getOrStart(snapshot);
-
-        String typeUri = resolveTypeUri(session, packageName, className);
-        List<MethodSymbol> methods = classMethods(session, typeUri, className);
-        MethodSignatures.ParsedMethod requested = MethodSignatures.parse(methodSignature);
-        MethodSymbol chosen = selectMethod(packageName, className, methods, requested);
-        return new SemanticMethod(
-                packageName,
-                className,
-                chosen.methodName(),
-                chosen.parameterTypes(),
-                chosen.returnType(),
-                new SemanticLocation(typeUri, chosen.range(), chosen.selectionRange()));
+        return session.withDocumentUri(uri, () -> withOpenedDocument(session, snapshot, uri, () -> {
+            CallHierarchyItem item = prepareExactCallHierarchy(session, uri, anchor);
+            MethodTarget target = anchor.target();
+            return new SemanticMethod(
+                    target.packageName(),
+                    target.className(),
+                    target.methodName(),
+                    target.parameterTypes(),
+                    "",
+                    new SemanticLocation(uri, toRange(item.getRange()), toRange(item.getSelectionRange())));
+        }));
     }
 
     @Override
@@ -123,62 +126,85 @@ public class Lsp4jJavaSemanticService implements JavaSemanticService {
             RepositorySnapshot snapshot, SemanticMethod method) {
         Assert.notNull(snapshot, "snapshot is required");
         Assert.notNull(method, "method is required");
+        String uri = requireLocalInvocationUri(snapshot, method.location().uri());
         JdtWorkspaceSession session = workspaceManager.getOrStart(snapshot);
-        String uri = method.location().uri();
         Position namePosition = toPosition(method.location().selectionRange().start());
-        boolean opened = openDocument(session, snapshot, uri);
-        try {
-            CallHierarchyItem root = prepareCallHierarchy(session, uri, namePosition, method.methodName());
+        return session.withDocumentUri(uri, () -> withOpenedDocument(session, snapshot, uri, () -> {
+            Optional<CallHierarchyItem> root = prepareCallHierarchy(session, uri, namePosition, method.methodName());
+            if (root.isEmpty()) {
+                log.warn("phase=jdtls-outgoing outcome=failed reason=call-hierarchy-not-prepared repoId={}",
+                        session.repositoryId().value());
+                return List.of();
+            }
             List<CallHierarchyOutgoingCall> calls = session.call(
                     "callHierarchy/outgoingCalls",
                     server -> server.getTextDocumentService()
-                            .callHierarchyOutgoingCalls(new CallHierarchyOutgoingCallsParams(root)));
-            List<SemanticCall> resolved = nullSafe(calls).stream()
+                            .callHierarchyOutgoingCalls(new CallHierarchyOutgoingCallsParams(root.orElseThrow())));
+            List<CallHierarchyOutgoingCall> presentCalls = nullSafe(calls);
+            List<SemanticCall> resolved = presentCalls.stream()
                     .map(call -> toSemanticCall(session, call, snapshot))
                     .flatMap(Optional::stream)
                     .toList();
+            log.debug("phase=jdtls-outgoing outcome=completed repoId={} rawCallCount={} convertedCallCount={}",
+                    session.repositoryId().value(), presentCalls.size(), resolved.size());
             return dedupeCalls(resolved);
-        } finally {
-            closeDocument(session, uri, opened);
-        }
+        }));
     }
 
     @Override
-    public Optional<SemanticCall> resolveCallAt(
+    public SemanticCallResolution resolveCallResolutionAt(
             RepositorySnapshot snapshot, SemanticMethod caller, SemanticCallSite callSite) {
         return JdtLsSemanticExceptionNormalizer.normalize(
-                () -> resolveCallAtInternal(snapshot, caller, callSite));
+                () -> resolveCallResolutionAtInternal(snapshot, caller, callSite));
     }
 
-    private Optional<SemanticCall> resolveCallAtInternal(
+    private SemanticCallResolution resolveCallResolutionAtInternal(
             RepositorySnapshot snapshot, SemanticMethod caller, SemanticCallSite callSite) {
         Assert.notNull(snapshot, "snapshot is required");
         Assert.notNull(caller, "caller is required");
         Assert.notNull(callSite, "callSite is required");
+        String uri = requireLocalInvocationUri(snapshot, caller.location().uri());
         JdtWorkspaceSession session = workspaceManager.getOrStart(snapshot);
-        String uri = caller.location().uri();
-        boolean opened = openDocument(session, snapshot, uri);
-        try {
+        return session.withDocumentUri(uri, () -> withOpenedDocument(session, snapshot, uri, () -> {
             Either<List<? extends Location>, List<? extends LocationLink>> response = session.call(
                     "textDocument/definition",
                     server -> server.getTextDocumentService().definition(new DefinitionParams(
                             new TextDocumentIdentifier(uri), toPosition(callSite.anchor()))));
-            List<TargetLocation> targets = implementationTargets(response).stream()
-                    .distinct()
-                    .toList();
-            if (targets.size() != 1 || isExternal(targets.getFirst().uri(), snapshot)) {
-                return Optional.empty();
+            Map<String, ResolvedCallTarget> resolved = new LinkedHashMap<>();
+            for (TargetLocation target : implementationTargets(response).stream().distinct().toList()) {
+                if (sourceLocator.localSource(snapshot, target.uri()).isEmpty()) {
+                    continue;
+                }
+                try {
+                    resolveLocalCallTarget(session, snapshot, target)
+                            .ifPresent(candidate -> resolved.putIfAbsent(
+                                    dedupeKey(candidate.method().location()), candidate));
+                } catch (RuntimeException exception) {
+                    JdtLsSemanticExceptionNormalizer.rethrowIfEngineFailure(exception);
+                    log.debug("phase=jdtls-definition outcome=conversion-skipped repoId={} exceptionType={}",
+                            session.repositoryId().value(),
+                            exception.getClass().getSimpleName());
+                }
             }
-            return resolveCallTarget(session, targets.getFirst())
-                    .map(target -> new SemanticCall(
-                            Optional.of(target.method()),
-                            target.rawSignature(),
-                            List.of(callSite.range()),
-                            isExternal(target.method().location().uri(), snapshot),
-                            SemanticResolutionOrigin.DEFINITION_FALLBACK));
-        } finally {
-            closeDocument(session, uri, opened);
-        }
+            if (resolved.isEmpty()) {
+                return SemanticCallResolution.unresolved();
+            }
+            List<ResolvedCallTarget> candidates = List.copyOf(resolved.values());
+            if (candidates.size() > 1) {
+                log.warn("phase=jdtls-definition outcome=ambiguous repoId={} candidateCount={}",
+                        session.repositoryId().value(), candidates.size());
+                return SemanticCallResolution.ambiguous(candidates.stream()
+                        .map(ResolvedCallTarget::method)
+                        .toList());
+            }
+            ResolvedCallTarget target = candidates.getFirst();
+            return SemanticCallResolution.resolved(new SemanticCall(
+                    Optional.of(target.method()),
+                    target.rawSignature(),
+                    List.of(callSite.range()),
+                    false,
+                    SemanticResolutionOrigin.DEFINITION_FALLBACK));
+        }));
     }
 
     @Override
@@ -191,11 +217,10 @@ public class Lsp4jJavaSemanticService implements JavaSemanticService {
             RepositorySnapshot snapshot, SemanticMethod method) {
         Assert.notNull(snapshot, "snapshot is required");
         Assert.notNull(method, "method is required");
+        String uri = requireLocalInvocationUri(snapshot, method.location().uri());
         JdtWorkspaceSession session = workspaceManager.getOrStart(snapshot);
-        String uri = method.location().uri();
         Position namePosition = toPosition(method.location().selectionRange().start());
-        boolean opened = openDocument(session, snapshot, uri);
-        try {
+        return session.withDocumentUri(uri, () -> withOpenedDocument(session, snapshot, uri, () -> {
             Either<List<? extends Location>, List<? extends LocationLink>> response = session.call(
                     "textDocument/implementation",
                     server -> server.getTextDocumentService()
@@ -205,100 +230,14 @@ public class Lsp4jJavaSemanticService implements JavaSemanticService {
                 if (isExternal(target.uri(), snapshot)) {
                     continue;
                 }
-                resolveImplementation(session, target)
+                resolveImplementation(session, snapshot, target)
                         .ifPresent(resolved -> deduped.putIfAbsent(dedupeKey(resolved.location()), resolved));
             }
             return List.copyOf(deduped.values());
-        } finally {
-            closeDocument(session, uri, opened);
-        }
+        }));
     }
 
-    private String resolveTypeUri(JdtWorkspaceSession session, String packageName, String className) {
-        Either<List<? extends SymbolInformation>, List<? extends WorkspaceSymbol>> response = session.call(
-                "workspace/symbol",
-                server -> server.getWorkspaceService().symbol(new WorkspaceSymbolParams(className)));
-        List<String> uris = typeSymbols(response).stream()
-                .filter(symbol -> className.equals(symbol.name()))
-                .filter(symbol -> packageName.equals(Objects.requireNonNullElse(symbol.containerName(), "")))
-                .filter(symbol -> Objects.isNull(symbol.kind()) || TYPE_KINDS.contains(symbol.kind()))
-                .map(TypeSymbol::uri)
-                .filter(StringUtils::hasText)
-                .distinct()
-                .sorted()
-                .toList();
-        if (CollectionUtils.isEmpty(uris)) {
-            throw new SemanticSymbolNotFoundException(
-                    "type " + qualified(packageName, className) + " was not found in the workspace");
-        }
-        if (uris.size() > 1) {
-            throw new SemanticAmbiguousTypeException(packageName, className);
-        }
-        return uris.getFirst();
-    }
-
-    private MethodSymbol selectMethod(
-            String packageName,
-            String className,
-            List<MethodSymbol> methods,
-            MethodSignatures.ParsedMethod requested) {
-        List<MethodSymbol> byName = methods.stream()
-                .filter(method -> method.methodName().equals(requested.methodName()))
-                .toList();
-        if (CollectionUtils.isEmpty(byName)) {
-            throw new SemanticSymbolNotFoundException(
-                    "method " + qualified(packageName, className) + "#" + requested.methodName()
-                            + " was not found");
-        }
-        if (!requested.hasParameters()) {
-            if (byName.size() > 1) {
-                throw new SemanticAmbiguousMethodException(
-                        packageName, className, requested.methodName(), signatures(byName));
-            }
-            return byName.getFirst();
-        }
-        List<MethodSymbol> exact = byName.stream()
-                .filter(method -> method.parameterTypes().equals(requested.parameterTypes()))
-                .toList();
-        if (CollectionUtils.isEmpty(exact)) {
-            throw new SemanticSymbolNotFoundException(
-                    "method " + qualified(packageName, className) + "#" + signature(requested)
-                            + " was not found");
-        }
-        if (exact.size() > 1) {
-            throw new SemanticAmbiguousMethodException(
-                    packageName, className, requested.methodName(), signatures(exact));
-        }
-        return exact.getFirst();
-    }
-
-    private List<MethodSymbol> classMethods(JdtWorkspaceSession session, String typeUri, String className) {
-        List<MethodSymbol> methods = new ArrayList<>();
-        for (Either<SymbolInformation, DocumentSymbol> symbol : documentSymbols(session, typeUri)) {
-            if (symbol.isRight()) {
-                collectClassMethods(symbol.getRight(), className, methods);
-            } else if (isEnclosedMethod(symbol.getLeft(), className)) {
-                methods.add(flatMethodSymbol(symbol.getLeft()));
-            }
-        }
-        return methods;
-    }
-
-    private void collectClassMethods(DocumentSymbol symbol, String className, List<MethodSymbol> methods) {
-        if (isType(symbol.getKind()) && className.equals(MethodSignatures.typeName(symbol.getName()))) {
-            for (DocumentSymbol child : nullSafe(symbol.getChildren())) {
-                if (isMethod(child.getKind())) {
-                    methods.add(hierarchicalMethodSymbol(child));
-                }
-            }
-            return;
-        }
-        for (DocumentSymbol child : nullSafe(symbol.getChildren())) {
-            collectClassMethods(child, className, methods);
-        }
-    }
-
-    private CallHierarchyItem prepareCallHierarchy(
+    private Optional<CallHierarchyItem> prepareCallHierarchy(
             JdtWorkspaceSession session, String uri, Position position, String methodName) {
         List<CallHierarchyItem> items = session.call(
                 "textDocument/prepareCallHierarchy",
@@ -306,13 +245,30 @@ public class Lsp4jJavaSemanticService implements JavaSemanticService {
                         .prepareCallHierarchy(new CallHierarchyPrepareParams(new TextDocumentIdentifier(uri), position)));
         List<CallHierarchyItem> present = nullSafe(items);
         if (CollectionUtils.isEmpty(present)) {
-            throw new SemanticSymbolNotFoundException(
-                    "call hierarchy could not be prepared for method " + methodName);
+            return Optional.empty();
         }
         return present.stream()
                 .filter(item -> methodName.equals(MethodSignatures.bareName(item.getName())))
                 .findFirst()
-                .orElse(present.getFirst());
+                .or(() -> Optional.of(present.getFirst()));
+    }
+
+    private CallHierarchyItem prepareExactCallHierarchy(
+            JdtWorkspaceSession session, String uri, SemanticDeclarationAnchor anchor) {
+        Position position = toPosition(anchor.namePosition());
+        List<CallHierarchyItem> items = session.call(
+                "textDocument/prepareCallHierarchy",
+                server -> server.getTextDocumentService()
+                        .prepareCallHierarchy(new CallHierarchyPrepareParams(new TextDocumentIdentifier(uri), position)));
+        List<CallHierarchyItem> exact = nullSafe(items).stream()
+                .filter(item -> uri.equals(item.getUri()))
+                .filter(item -> Objects.nonNull(item.getSelectionRange()))
+                .filter(item -> anchor.namePosition().equals(toSemanticPosition(item.getSelectionRange().getStart())))
+                .toList();
+        if (exact.size() != 1) {
+            throw new SemanticBindingUnresolvedException(anchor.target());
+        }
+        return exact.getFirst();
     }
 
     private Optional<SemanticCall> toSemanticCall(
@@ -324,11 +280,27 @@ public class Lsp4jJavaSemanticService implements JavaSemanticService {
                 .distinct()
                 .toList();
         boolean external = isExternal(target.getUri(), snapshot);
+        if (external) {
+            return Optional.of(new SemanticCall(
+                    Optional.empty(),
+                    externalDisplaySignature(rawSignature),
+                    callSites,
+                    true,
+                    SemanticResolutionOrigin.CALL_HIERARCHY));
+        }
         try {
-            Optional<SemanticMethod> resolved = external
-                    ? externalTarget(target, rawSignature)
-                    : resolveCallTarget(session, new TargetLocation(target.getUri(), target.getSelectionRange()))
-                            .map(ResolvedCallTarget::method);
+            Optional<SemanticMethod> resolved = resolveCallTarget(
+                    session, snapshot, new TargetLocation(target.getUri(), target.getSelectionRange()))
+                    .map(ResolvedCallTarget::method);
+            if (resolved.isEmpty()) {
+                return Optional.of(new SemanticCall(
+                        Optional.empty(),
+                        UNAVAILABLE_TARGET_SIGNATURE,
+                        callSites,
+                        external,
+                        SemanticResolutionOrigin.CALL_HIERARCHY,
+                        SemanticCallStatus.CONVERSION_FAILED));
+            }
             return Optional.of(new SemanticCall(
                     resolved,
                     rawSignature,
@@ -337,8 +309,8 @@ public class Lsp4jJavaSemanticService implements JavaSemanticService {
                     SemanticResolutionOrigin.CALL_HIERARCHY));
         } catch (RuntimeException exception) {
             JdtLsSemanticExceptionNormalizer.rethrowIfEngineFailure(exception);
-            LOGGER.debug("JDT LS call target conversion failed repositoryId={} category={} exceptionType={}",
-                    session.repositoryId().value(), "TARGET_CONVERSION_FAILED",
+            log.debug("phase=jdtls-call outcome=conversion-failed repoId={} exceptionType={}",
+                    session.repositoryId().value(),
                     exception.getClass().getSimpleName());
             return Optional.of(new SemanticCall(
                     Optional.empty(),
@@ -350,46 +322,50 @@ public class Lsp4jJavaSemanticService implements JavaSemanticService {
         }
     }
 
-    private Optional<SemanticMethod> externalTarget(CallHierarchyItem target, String rawSignature) {
-        MethodSignatures.ParsedMethod parsed = MethodSignatures.parse(rawSignature);
-        String container = Objects.requireNonNullElse(target.getDetail(), "");
-        int separator = container.lastIndexOf('.');
-        String packageName = separator >= 0 ? container.substring(0, separator) : "";
-        String className = separator >= 0 ? container.substring(separator + 1) : container;
-        if (!StringUtils.hasText(packageName) || !StringUtils.hasText(className)) {
-            return Optional.empty();
+    private String externalDisplaySignature(String candidate) {
+        if (StringUtils.hasText(candidate)
+                && candidate.length() <= MAX_EXTERNAL_DISPLAY_SIGNATURE_LENGTH
+                && SAFE_EXTERNAL_DISPLAY_SIGNATURE.matcher(candidate).matches()) {
+            return candidate;
         }
-        return Optional.of(new SemanticMethod(
-                packageName,
-                className,
-                parsed.methodName(),
-                parsed.parameterTypes(),
-                returnType(null, rawSignature),
-                new SemanticLocation(
-                        target.getUri(), toRange(target.getRange()), toRange(target.getSelectionRange()))));
+        return UNAVAILABLE_TARGET_SIGNATURE;
     }
 
-    private Optional<ResolvedCallTarget> resolveCallTarget(JdtWorkspaceSession session, TargetLocation target) {
+    private Optional<ResolvedCallTarget> resolveCallTarget(
+            JdtWorkspaceSession session, RepositorySnapshot snapshot, TargetLocation target) {
+        String uri = requireLocalInvocationUri(snapshot, target.uri());
         SemanticPosition position = toSemanticPosition(target.range().getStart());
-        return findMethodAt(documentSymbols(session, target.uri()), position)
-                .map(match -> new ResolvedCallTarget(
-                        semanticMethod(session, target.uri(), match), match.method().rawSignature()));
+        return findMethodAt(documentSymbols(session, uri), position)
+                .flatMap(match -> semanticMethod(session, snapshot, uri, match)
+                        .map(method -> new ResolvedCallTarget(method, match.method().rawSignature())));
     }
 
-    private SemanticMethod semanticMethod(JdtWorkspaceSession session, String uri, MethodMatch match) {
-        return new SemanticMethod(
-                packageOf(session, uri),
+    private Optional<ResolvedCallTarget> resolveLocalCallTarget(
+            JdtWorkspaceSession session, RepositorySnapshot snapshot, TargetLocation target) {
+        String uri = requireLocalInvocationUri(snapshot, target.uri());
+        SemanticPosition position = toSemanticPosition(target.range().getStart());
+        return findMethodAt(documentSymbols(session, uri), position)
+                .flatMap(match -> semanticMethod(session, snapshot, uri, match)
+                        .map(method -> new ResolvedCallTarget(method, match.method().rawSignature())));
+    }
+
+    private Optional<SemanticMethod> semanticMethod(
+            JdtWorkspaceSession session, RepositorySnapshot snapshot, String uri, MethodMatch match) {
+        return packageOf(session, snapshot, uri).map(packageName -> new SemanticMethod(
+                packageName,
                 match.className(),
                 match.method().methodName(),
                 match.method().parameterTypes(),
                 match.method().returnType(),
-                new SemanticLocation(uri, match.method().range(), match.method().selectionRange()));
+                new SemanticLocation(uri, match.method().range(), match.method().selectionRange())));
     }
 
-    private Optional<SemanticMethod> resolveImplementation(JdtWorkspaceSession session, TargetLocation target) {
+    private Optional<SemanticMethod> resolveImplementation(
+            JdtWorkspaceSession session, RepositorySnapshot snapshot, TargetLocation target) {
+        String uri = requireLocalInvocationUri(snapshot, target.uri());
         SemanticPosition position = toSemanticPosition(target.range().getStart());
-        return findMethodAt(documentSymbols(session, target.uri()), position)
-                .map(match -> semanticMethod(session, target.uri(), match));
+        return findMethodAt(documentSymbols(session, uri), position)
+                .flatMap(match -> semanticMethod(session, snapshot, uri, match));
     }
 
     private Optional<MethodMatch> findMethodAt(
@@ -440,29 +416,6 @@ public class Lsp4jJavaSemanticService implements JavaSemanticService {
         return nullSafe(symbols);
     }
 
-    private List<TypeSymbol> typeSymbols(
-            Either<List<? extends SymbolInformation>, List<? extends WorkspaceSymbol>> response) {
-        if (Objects.isNull(response)) {
-            return List.of();
-        }
-        if (response.isLeft()) {
-            return nullSafe(response.getLeft()).stream()
-                    .map(symbol -> new TypeSymbol(
-                            symbol.getName(),
-                            symbol.getContainerName(),
-                            symbol.getKind(),
-                            Objects.nonNull(symbol.getLocation()) ? symbol.getLocation().getUri() : null))
-                    .toList();
-        }
-        return nullSafe(response.getRight()).stream()
-                .map(symbol -> new TypeSymbol(
-                        symbol.getName(),
-                        symbol.getContainerName(),
-                        symbol.getKind(),
-                        workspaceSymbolUri(symbol.getLocation())))
-                .toList();
-    }
-
     private List<TargetLocation> implementationTargets(
             Either<List<? extends Location>, List<? extends LocationLink>> response) {
         if (Objects.isNull(response)) {
@@ -484,7 +437,7 @@ public class Lsp4jJavaSemanticService implements JavaSemanticService {
         if (isExternal(uri, snapshot)) {
             return false;
         }
-        Optional<String> text = readSource(session, uri);
+        Optional<String> text = readSource(snapshot, uri);
         if (text.isEmpty()) {
             return false;
         }
@@ -507,58 +460,85 @@ public class Lsp4jJavaSemanticService implements JavaSemanticService {
         });
     }
 
-    /**
-     * jdt: 協定或落在根目錄外的檔案皆視為外部
-     *
-     * 外部目標沒有可分析的原始碼,Task 7 不應遞迴進去
-     */
+    private <T> T withOpenedDocument(
+            JdtWorkspaceSession session, RepositorySnapshot snapshot, String uri, Supplier<T> query) {
+        boolean opened = false;
+        Throwable primaryFailure = null;
+        try {
+            opened = openDocument(session, snapshot, uri);
+            return query.get();
+        } catch (RuntimeException | Error exception) {
+            primaryFailure = exception;
+            throw exception;
+        } finally {
+            try {
+                closeDocument(session, uri, opened);
+            } catch (RuntimeException | Error exception) {
+                session.invalidate();
+                if (Objects.nonNull(primaryFailure)) {
+                    primaryFailure.addSuppressed(new JdtDocumentCloseCleanupException());
+                } else {
+                    throw exception;
+                }
+            }
+        }
+    }
+
+    private String requireLocalInvocationUri(RepositorySnapshot snapshot, String uri) {
+        return sourceLocator.localSourceUri(snapshot, uri);
+    }
+
+    private static final class JdtDocumentCloseCleanupException extends RuntimeException {
+
+        private JdtDocumentCloseCleanupException() {
+            super("JDT document close confirmation failed");
+        }
+    }
+
+    /** jdt: 協定結果沒有可分析的工作區原始碼，Task 7 不應遞迴進去。 */
     private boolean isExternal(String uri, RepositorySnapshot snapshot) {
-        if (!StringUtils.hasText(uri) || uri.startsWith(JDT_URI_SCHEME)) {
-            return true;
-        }
+        return sourceLocator.isExternal(snapshot, uri);
+    }
+
+    private Optional<String> readSource(RepositorySnapshot snapshot, String uri) {
+        return sourceLocator.localSource(snapshot, uri).map(this::readSourceText);
+    }
+
+    private String readSourceText(java.nio.file.Path source) {
         try {
-            Path path = Path.of(URI.create(uri)).toAbsolutePath().normalize();
-            return !path.startsWith(snapshot.root().toAbsolutePath().normalize());
-        } catch (IllegalArgumentException | FileSystemNotFoundException exception) {
-            return true;
+            return Files.readString(source);
+        } catch (IOException exception) {
+            throw new SemanticProtocolException();
         }
     }
 
-    private Optional<String> readSource(JdtWorkspaceSession session, String uri) {
+    private Optional<String> packageOf(JdtWorkspaceSession session, RepositorySnapshot snapshot, String uri) {
         try {
-            return Optional.of(Files.readString(Path.of(URI.create(uri))));
-        } catch (IOException | RuntimeException exception) {
-            LOGGER.debug("JDT LS source read failed repositoryId={} category={} exceptionType={}",
-                    session.repositoryId().value(), "SOURCE_READ_FAILED",
-                    exception.getClass().getSimpleName());
-            return Optional.empty();
-        }
-    }
-
-    private String packageOf(JdtWorkspaceSession session, String uri) {
-        try {
-            String source = Files.readString(Path.of(URI.create(uri)));
+            Optional<String> source = sourceLocator.localSource(snapshot, uri).map(this::readSourceText);
+            if (source.isEmpty()) {
+                return Optional.empty();
+            }
             ASTParser parser = ASTParser.newParser(AST.getJLSLatest());
             parser.setKind(ASTParser.K_COMPILATION_UNIT);
-            parser.setSource(source.toCharArray());
+            parser.setSource(source.orElseThrow().toCharArray());
             CompilationUnit unit = (CompilationUnit) parser.createAST(null);
             if (hasPackageRegionErrors(unit)) {
-                throw new IllegalStateException("package declaration could not be parsed");
+                return Optional.empty();
             }
             PackageDeclaration declaration = unit.getPackage();
             if (Objects.nonNull(declaration)) {
                 String packageName = declaration.getName().getFullyQualifiedName();
                 if (StringUtils.hasText(packageName)) {
-                    return packageName;
+                    return Optional.of(packageName);
                 }
-                throw new IllegalStateException("package declaration has no name");
+                return Optional.empty();
             }
-            return "";
-        } catch (IOException | RuntimeException exception) {
-            LOGGER.debug("JDT LS package resolution failed repositoryId={} category={} exceptionType={}",
-                    session.repositoryId().value(), "PACKAGE_RESOLUTION_FAILED",
+            return Optional.of("");
+        } catch (RuntimeException exception) {
+            log.debug("phase=jdtls-package outcome=resolution-failed repoId={} exceptionType={}",
+                    session.repositoryId().value(),
                     exception.getClass().getSimpleName());
-            throw new SemanticSymbolNotFoundException("declaring package could not be proven");
+            return Optional.empty();
         }
     }
 
@@ -596,10 +576,6 @@ public class Lsp4jJavaSemanticService implements JavaSemanticService {
                 returnType(null, symbol.getName()),
                 toRange(range),
                 toRange(range));
-    }
-
-    private boolean isEnclosedMethod(SymbolInformation symbol, String className) {
-        return isMethod(symbol.getKind()) && className.equals(symbol.getContainerName());
     }
 
     private String returnType(String detail, String symbolName) {
@@ -656,31 +632,8 @@ public class Lsp4jJavaSemanticService implements JavaSemanticService {
                 + "-" + range.end().line() + ":" + range.end().character();
     }
 
-    private List<String> signatures(List<MethodSymbol> methods) {
-        return methods.stream().map(this::signature).distinct().toList();
-    }
-
-    private String signature(MethodSymbol method) {
-        return method.methodName() + "(" + String.join(", ", method.parameterTypes()) + ")";
-    }
-
     private String signature(SemanticMethod method) {
         return method.methodName() + "(" + String.join(", ", method.parameterTypes()) + ")";
-    }
-
-    private String signature(MethodSignatures.ParsedMethod requested) {
-        return requested.methodName() + "(" + String.join(", ", requested.parameterTypes()) + ")";
-    }
-
-    private String qualified(String packageName, String className) {
-        return StringUtils.hasText(packageName) ? packageName + "." + className : className;
-    }
-
-    private String workspaceSymbolUri(Either<Location, WorkspaceSymbolLocation> location) {
-        if (Objects.isNull(location)) {
-            return null;
-        }
-        return location.isLeft() ? location.getLeft().getUri() : location.getRight().getUri();
     }
 
     private boolean isType(SymbolKind kind) {
@@ -723,10 +676,6 @@ public class Lsp4jJavaSemanticService implements JavaSemanticService {
 
     private <T> List<T> nullSafe(List<T> list) {
         return Objects.isNull(list) ? List.of() : list;
-    }
-
-    /** workspace/symbol 回傳的型別符號摘要 */
-    private record TypeSymbol(String name, String containerName, SymbolKind kind, String uri) {
     }
 
     /** documentSymbol 解析出的方法摘要,座標為零基 */

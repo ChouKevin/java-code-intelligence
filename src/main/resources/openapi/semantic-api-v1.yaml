@@ -140,24 +140,22 @@ paths:
           $ref: '#/components/responses/Conflict'
         '500':
           $ref: '#/components/responses/MutationFailed'
-  /v1/analyses/call-graph:
+  /v1/analyses/call-graphs/outgoing:
     post:
-      operationId: analyzeCallGraph
+      operationId: analyzeOutgoingCallGraph
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/AnalyzeCallGraphRequest'
+              $ref: '#/components/schemas/AnalyzeOutgoingCallGraphRequest'
       responses:
         '200':
-          $ref: '#/components/responses/ExplainableAnalysis'
+          $ref: '#/components/responses/OutgoingCallGraph'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/AuthDisabled'
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
@@ -166,36 +164,8 @@ paths:
           $ref: '#/components/responses/UnprocessableEntity'
         '500':
           $ref: '#/components/responses/MutationFailed'
-        '503':
-          $ref: '#/components/responses/ServiceUnavailable'
-        '504':
-          $ref: '#/components/responses/GatewayTimeout'
-  /v1/analyses/call-graph/flatten:
-    post:
-      operationId: analyzeFlattenedCallGraph
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/AnalyzeCallGraphRequest'
-      responses:
-        '200':
-          $ref: '#/components/responses/FlattenedAnalysis'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/AuthDisabled'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        '409':
-          $ref: '#/components/responses/Conflict'
-        '422':
-          $ref: '#/components/responses/UnprocessableEntity'
-        '500':
-          $ref: '#/components/responses/MutationFailed'
+        '502':
+          $ref: '#/components/responses/BadGateway'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
         '504':
@@ -269,18 +239,12 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/EntryPointsResponse'
-    ExplainableAnalysis:
-      description: Revision-bound explainable call graph analysis
+    OutgoingCallGraph:
+      description: Revision-bound outgoing call graph fragment
       content:
         application/json:
           schema:
-            $ref: '#/components/schemas/ExplainableAnalysisResponse'
-    FlattenedAnalysis:
-      description: Revision-bound flattened call graph analysis
-      content:
-        application/json:
-          schema:
-            $ref: '#/components/schemas/FlattenedAnalysisResponse'
+            $ref: '#/components/schemas/OutgoingCallGraphResponse'
     ApiRouteCandidates:
       description: Per-candidate route matches, each bound to its analyzed revision
       content:
@@ -304,7 +268,7 @@ components:
       content:
         application/json:
           schema:
-            $ref: '#/components/schemas/ApiErrorResponse'
+            $ref: '#/components/schemas/AuthDisabledErrorResponse'
     NotFound:
       description: Repository or analysis symbol is not configured
       content:
@@ -325,6 +289,12 @@ components:
             $ref: '#/components/schemas/ApiErrorResponse'
     MutationFailed:
       description: Sanitized service failure
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiErrorResponse'
+    BadGateway:
+      description: Semantic protocol failed
       content:
         application/json:
           schema:
@@ -356,34 +326,66 @@ components:
           type: string
           minLength: 1
           pattern: '.*\S.*'
-    AnalyzeCallGraphRequest:
+    AnalyzeOutgoingCallGraphRequest:
       type: object
+      additionalProperties: false
       required:
         - repoId
-        - packageName
-        - className
-        - methodSignature
+        - expectedRevision
+        - target
       properties:
         repoId:
           type: string
           minLength: 1
           pattern: '^[a-z0-9][a-z0-9._-]{0,63}$'
-        packageName:
+        expectedRevision:
           type: string
           minLength: 1
-          pattern: '.*\S.*'
+          pattern: '^[0-9a-f]{40}$|^FIXTURE$'
+        depth:
+          type: integer
+          default: 2
+          minimum: 1
+          maximum: 2
+        target:
+          $ref: '#/components/schemas/MethodTarget'
+    MethodTarget:
+      type: object
+      additionalProperties: false
+      required:
+        - sourceFile
+        - packageName
+        - className
+        - methodName
+        - parameterTypes
+      properties:
+        sourceFile:
+          type: string
+          minLength: 1
+          maxLength: 1024
+          pattern: '^[^\u0000-\u001F\u007F-\u009F]*[^\u0000-\u0020\u007F-\u009F\u1680\u2000-\u2006\u2008-\u200A\u2028-\u2029\u205F\u3000][^\u0000-\u001F\u007F-\u009F]*$'
+          description: Repository-relative source path. The server additionally enforces normalized path segments.
+        packageName:
+          type: string
         className:
           type: string
           minLength: 1
-          pattern: '.*\S.*'
-        methodSignature:
+          maxLength: 255
+          pattern: '^[\p{L}\p{Nl}\p{Sc}\p{Pc}][\p{L}\p{Nl}\p{Sc}\p{Pc}\p{Mn}\p{Mc}\p{Nd}]*(?:\.[\p{L}\p{Nl}\p{Sc}\p{Pc}][\p{L}\p{Nl}\p{Sc}\p{Pc}\p{Mn}\p{Mc}\p{Nd}]*)*$'
+          description: Portable Unicode-category approximation of the server's dot-separated Java identifier validation.
+        methodName:
           type: string
           minLength: 1
-          pattern: '.*\S.*'
-        expectedRevision:
-          type: string
-          nullable: true
-          pattern: '^[0-9a-f]{40}$|^FIXTURE$'
+          maxLength: 255
+          pattern: '^[\p{L}\p{Nl}\p{Sc}\p{Pc}][\p{L}\p{Nl}\p{Sc}\p{Pc}\p{Mn}\p{Mc}\p{Nd}]*$'
+          description: Portable Unicode-category approximation of the server's Java identifier validation.
+        parameterTypes:
+          type: array
+          minItems: 0
+          items:
+            type: string
+            minLength: 1
+            pattern: '.*\S.*'
     ApiRouteLookupRequest:
       type: object
       required:
@@ -419,283 +421,137 @@ components:
           type: integer
           minimum: 1
           maximum: 20
-    AnalysisStatus:
+    OutgoingGraphStatus:
       type: string
       enum:
         - SUCCESS
         - PARTIAL
-        - FAILED
-        - BUSINESS_READ_FORBIDDEN
-    ResolutionStrategy:
+    GraphContentState:
       type: string
       enum:
-        - JDT_CALL_HIERARCHY
-        - JDT_DEFINITION_FALLBACK
-        - SPRING_BEAN_BY_QUALIFIER
-        - SPRING_BEAN_BY_PRIMARY
-        - SPRING_SINGLE_IMPLEMENTATION
-        - MYBATIS_MAPPER
-        - LOMBOK_GENERATED
-        - EXTERNAL_LIBRARY
-        - FEIGN_CLIENT
-        - BUSINESS_READ_FORBIDDEN
-        - SPRING_MULTIPLE_CANDIDATES
-        - DATA_ACCESS_WITHOUT_EVIDENCE
-        - UNRESOLVED_TARGET
-    AnalysisResponse:
-      type: object
-      required:
-        - status
-        - data
-        - warnings
-        - errors
-        - metadata
-        - analyzedRevision
-      properties:
-        status:
-          $ref: '#/components/schemas/AnalysisStatus'
-        data:
-          nullable: true
-        warnings:
-          type: array
-          items:
-            $ref: '#/components/schemas/AnalysisWarning'
-        errors:
-          type: array
-          items:
-            $ref: '#/components/schemas/AnalysisError'
-        metadata:
-          $ref: '#/components/schemas/AnalysisMetadata'
-        analyzedRevision:
-          type: string
-          pattern: '^[0-9a-f]{40}$|^FIXTURE$'
-    ExplainableAnalysisResponse:
-      type: object
-      required:
-        - status
-        - data
-        - warnings
-        - errors
-        - metadata
-        - analyzedRevision
-      properties:
-        status:
-          $ref: '#/components/schemas/AnalysisStatus'
-        data:
-          nullable: true
-          allOf:
-            - $ref: '#/components/schemas/ExplainableCallGraph'
-        warnings:
-          type: array
-          items:
-            $ref: '#/components/schemas/AnalysisWarning'
-        errors:
-          type: array
-          items:
-            $ref: '#/components/schemas/AnalysisError'
-        metadata:
-          $ref: '#/components/schemas/AnalysisMetadata'
-        analyzedRevision:
-          type: string
-          pattern: '^[0-9a-f]{40}$|^FIXTURE$'
-    FlattenedAnalysisResponse:
-      type: object
-      required:
-        - status
-        - data
-        - warnings
-        - errors
-        - metadata
-        - analyzedRevision
-      properties:
-        status:
-          $ref: '#/components/schemas/AnalysisStatus'
-        data:
-          nullable: true
-          allOf:
-            - $ref: '#/components/schemas/FlattenedCallGraph'
-        warnings:
-          type: array
-          items:
-            $ref: '#/components/schemas/AnalysisWarning'
-        errors:
-          type: array
-          items:
-            $ref: '#/components/schemas/AnalysisError'
-        metadata:
-          $ref: '#/components/schemas/AnalysisMetadata'
-        analyzedRevision:
-          type: string
-          pattern: '^[0-9a-f]{40}$|^FIXTURE$'
-    AnalysisMetadata:
-      type: object
-      required:
-        - repoId
-        - analyzedAt
-      properties:
-        repoId:
-          type: string
-        analyzedAt:
-          type: string
-          format: date-time
-    AnalysisWarning:
-      type: object
-      required:
-        - code
-        - message
-        - location
-      properties:
-        code:
-          type: string
-        message:
-          type: string
-        location:
-          type: string
-    AnalysisError:
-      type: object
-      required:
-        - code
-        - message
-        - detail
-      properties:
-        code:
-          type: string
-        message:
-          type: string
-        detail:
-          type: string
-    MethodId:
-      type: object
-      required:
-        - repoId
-        - packageName
-        - className
-        - methodName
-        - parameterTypes
-      properties:
-        repoId:
-          type: string
-        packageName:
-          type: string
-        className:
-          type: string
-        methodName:
-          type: string
-        parameterTypes:
-          type: array
-          items:
-            type: string
-    CallNodeId:
-      type: object
-      required:
-        - value
-      properties:
-        value:
-          type: string
-    CallType:
+        - FULL_SOURCE
+        - TARGET_ONLY
+        - EXTERNAL
+    GraphTraversalState:
       type: string
       enum:
-        - INTERNAL_SERVICE
-        - INTERNAL_CONTROLLER
-        - INTERNAL_COMPONENT
-        - INTERNAL_SCHEDULE
-        - INTERNAL_INTERFACE_DEFAULT
-        - DATA_ACCESS
-        - RPC_CLIENT
-        - MESSAGE_QUEUE
-        - CACHE_OP
-        - CYCLE_BACK_EDGE
-        - TRAVERSAL_CUTOFF
-        - INTERNAL_CLASS
-        - UNRESOLVED
-        - GENERATED_CODE
-        - EXTERNAL_LIB
-        - INTERFACE
-    EvidenceVisibility:
+        - EXPANDED
+        - DEPTH_BOUNDARY
+        - BUDGET_CUTOFF
+        - EXTERNAL
+    GraphLimitReason:
       type: string
       enum:
-        - READABLE
-        - BUSINESS_READ_FORBIDDEN
-    CallNode:
+        - NONE
+        - NODE_BUDGET
+    Position:
       type: object
+      additionalProperties: false
+      description: Zero-based UTF-16 position.
       required:
-        - nodeId
-        - signature
-        - callType
-        - annotations
-        - visibility
+        - line
+        - character
       properties:
-        nodeId:
-          $ref: '#/components/schemas/CallNodeId'
-        methodId:
-          nullable: true
-          allOf:
-            - $ref: '#/components/schemas/MethodId'
-        signature:
-          type: string
-        callType:
-          $ref: '#/components/schemas/CallType'
-        sourceFile:
-          type: string
-          nullable: true
-        startLine:
+        line:
           type: integer
-          nullable: true
-        endLine:
+          minimum: 0
+        character:
           type: integer
-          nullable: true
-        annotations:
-          type: object
-          additionalProperties:
-            type: string
-        code:
-          type: string
-          nullable: true
-        visibility:
-          $ref: '#/components/schemas/EvidenceVisibility'
-    CallSiteRange:
+          minimum: 0
+    SourceRange:
       type: object
+      additionalProperties: false
+      description: Zero-based UTF-16 range with a start-inclusive and end-exclusive boundary.
       required:
         - sourceFile
-        - startLine
-        - startCharacter
-        - endLine
-        - endCharacter
+        - start
+        - end
       properties:
         sourceFile:
           type: string
-        startLine:
-          type: integer
-        startCharacter:
-          type: integer
-        endLine:
-          type: integer
-        endCharacter:
-          type: integer
-    CallEdge:
+          minLength: 1
+          pattern: '.*\S.*'
+        start:
+          $ref: '#/components/schemas/Position'
+        end:
+          $ref: '#/components/schemas/Position'
+    GraphTraversal:
       type: object
+      additionalProperties: false
       required:
-        - caller
-        - callee
+        - requestedDepth
+        - expandedNodeCount
+        - nodeBudget
+        - rootDirectCallsComplete
+        - limitReason
+      properties:
+        requestedDepth:
+          type: integer
+          minimum: 1
+          maximum: 2
+        expandedNodeCount:
+          type: integer
+          minimum: 0
+          description: Number of depth-2 source-expansion nodes included in this fragment.
+        nodeBudget:
+          type: integer
+          minimum: 0
+          description: Server limit for depth-2 source-expansion nodes; it never removes a root direct call.
+        rootDirectCallsComplete:
+          type: boolean
+        limitReason:
+          $ref: '#/components/schemas/GraphLimitReason'
+    GraphNode:
+      type: object
+      additionalProperties: false
+      required:
+        - nodeId
+        - contentState
+        - traversalState
+      properties:
+        nodeId:
+          type: string
+        target:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/MethodTarget'
+        externalSymbol:
+          type: string
+          nullable: true
+        contentState:
+          $ref: '#/components/schemas/GraphContentState'
+        traversalState:
+          $ref: '#/components/schemas/GraphTraversalState'
+        methodBody:
+          type: string
+          nullable: true
+        declarationRange:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/SourceRange'
+    GraphEdge:
+      type: object
+      additionalProperties: false
+      description: A caller-to-callee edge for one proven call site.
+      required:
+        - callerNodeId
+        - calleeNodeId
+        - callSite
         - callExpression
         - resolutionStrategy
         - confidence
         - evidence
-        - warnings
-        - visibility
       properties:
-        caller:
-          $ref: '#/components/schemas/CallNodeId'
-        callee:
-          $ref: '#/components/schemas/CallNodeId'
-        callExpression:
+        callerNodeId:
+          type: string
+        calleeNodeId:
           type: string
         callSite:
-          nullable: true
-          allOf:
-            - $ref: '#/components/schemas/CallSiteRange'
+          $ref: '#/components/schemas/SourceRange'
+        callExpression:
+          type: string
         resolutionStrategy:
-          $ref: '#/components/schemas/ResolutionStrategy'
+          type: string
         confidence:
           type: number
           format: double
@@ -703,86 +559,84 @@ components:
           type: array
           items:
             type: string
-        warnings:
-          type: array
-          items:
-            type: string
-        visibility:
-          $ref: '#/components/schemas/EvidenceVisibility'
-    FlattenedMethodNode:
+    GraphWarning:
       type: object
+      additionalProperties: false
       required:
-        - signature
-        - className
-        - methodName
-        - callType
-        - description
         - code
-        - annotations
-        - callees
+        - message
+        - nodeId
+        - candidates
       properties:
-        signature:
-          type: string
-        className:
-          type: string
-        methodName:
-          type: string
-        callType:
-          $ref: '#/components/schemas/CallType'
-        description:
-          type: string
         code:
           type: string
-        annotations:
-          type: object
-          additionalProperties:
-            type: string
-        callees:
-          type: array
-          items:
-            type: string
-    FlattenedCallGraph:
-      type: object
-      required:
-        - methods
-        - rootSignature
-        - relatedClasses
-      properties:
-        methods:
-          type: array
-          items:
-            $ref: '#/components/schemas/FlattenedMethodNode'
-        rootSignature:
+        message:
           type: string
-        relatedClasses:
-          type: object
-          additionalProperties:
-            type: string
-    ExplainableCallGraph:
+        nodeId:
+          type: string
+        callExpression:
+          type: string
+          nullable: true
+        callSite:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/SourceRange'
+        candidates:
+          type: array
+          items:
+            $ref: '#/components/schemas/MethodTarget'
+    GraphError:
       type: object
+      additionalProperties: false
       required:
-        - root
+        - code
+        - message
+        - nodeId
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+        nodeId:
+          type: string
+    OutgoingCallGraphResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - status
+        - analyzedRevision
+        - rootNodeId
+        - traversal
         - nodes
         - edges
-        - relatedClasses
-        - legacyFlattened
+        - warnings
+        - errors
       properties:
-        root:
-          $ref: '#/components/schemas/MethodId'
+        status:
+          $ref: '#/components/schemas/OutgoingGraphStatus'
+        analyzedRevision:
+          type: string
+          pattern: '^[0-9a-f]{40}$|^FIXTURE$'
+        rootNodeId:
+          type: string
+        traversal:
+          $ref: '#/components/schemas/GraphTraversal'
         nodes:
           type: array
           items:
-            $ref: '#/components/schemas/CallNode'
+            $ref: '#/components/schemas/GraphNode'
         edges:
           type: array
           items:
-            $ref: '#/components/schemas/CallEdge'
-        relatedClasses:
-          type: object
-          additionalProperties:
-            type: string
-        legacyFlattened:
-          $ref: '#/components/schemas/FlattenedCallGraph'
+            $ref: '#/components/schemas/GraphEdge'
+        warnings:
+          type: array
+          items:
+            $ref: '#/components/schemas/GraphWarning'
+        errors:
+          type: array
+          items:
+            $ref: '#/components/schemas/GraphError'
     ApiRouteCandidateResponse:
       type: object
       required:
@@ -980,14 +834,32 @@ components:
           type: boolean
     ApiErrorResponse:
       type: object
+      additionalProperties: false
       required:
         - errorCode
         - message
+        - candidates
       properties:
         errorCode:
           type: string
+          enum:
+            - REQUEST_INVALID
+            - SEMANTIC_UNAUTHORIZED
+            - REPOSITORY_NOT_FOUND
+            - REPOSITORY_NOT_READY
+            - REPOSITORY_REVISION_MISMATCH
+            - SEMANTIC_BINDING_AMBIGUOUS
+            - SEMANTIC_TARGET_NOT_FOUND
+            - SEMANTIC_BINDING_UNRESOLVED
+            - SEMANTIC_PROTOCOL_ERROR
+            - SEMANTIC_ENGINE_START_FAILED
+            - SEMANTIC_REQUEST_TIMEOUT
+            - INTERNAL_ERROR
         message:
           type: string
+        repoId:
+          type: string
+          nullable: true
         currentRevision:
           type: string
           nullable: true
@@ -996,8 +868,50 @@ components:
           type: string
           nullable: true
           pattern: '^[0-9a-f]{40}$|^FIXTURE$'
+        target:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/MethodTarget'
         candidates:
           type: array
-          nullable: true
           items:
-            type: string
+            $ref: '#/components/schemas/MethodTarget'
+        requestId:
+          type: string
+          nullable: true
+    AuthDisabledErrorResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - errorCode
+        - message
+        - candidates
+      properties:
+        errorCode:
+          type: string
+          enum:
+            - SEMANTIC_AUTH_DISABLED
+        message:
+          type: string
+        repoId:
+          type: string
+          nullable: true
+        expectedRevision:
+          type: string
+          nullable: true
+          pattern: '^[0-9a-f]{40}$|^FIXTURE$'
+        currentRevision:
+          type: string
+          nullable: true
+          pattern: '^[0-9a-f]{40}$|^FIXTURE$'
+        target:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/MethodTarget'
+        candidates:
+          type: array
+          items:
+            $ref: '#/components/schemas/MethodTarget'
+        requestId:
+          type: string
+          nullable: true

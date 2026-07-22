@@ -5,8 +5,10 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.Function;
 
 import com.java.semantic.syntax.domain.ApiEntryPoint;
+import com.java.semantic.syntax.domain.MethodTargetResolution;
 
 import org.eclipse.jdt.core.dom.AbstractTypeDeclaration;
 import org.eclipse.jdt.core.dom.Annotation;
@@ -57,7 +59,9 @@ final class ApiExtractor {
     }
 
     /** 型別的所有 HTTP 端點，路徑已與類別層路徑組合 */
-    static List<ApiEntryPoint> extract(AbstractTypeDeclaration type) {
+    static List<ApiEntryPoint> extract(
+            AbstractTypeDeclaration type,
+            Function<MethodDeclaration, MethodTargetResolution> analysisTargetOf) {
         if (isExcluded(type)) {
             return List.of();
         }
@@ -74,13 +78,13 @@ final class ApiExtractor {
             if (mapping.isEmpty()) {
                 continue;
             }
-            entryPoints.addAll(toEntryPoints(method, mapping.get(), effectiveBases));
+            entryPoints.addAll(toEntryPoints(method, mapping.get(), effectiveBases, analysisTargetOf));
         }
         return List.copyOf(entryPoints);
     }
 
     private static List<ApiEntryPoint> toEntryPoints(MethodDeclaration method, Annotation mapping,
-            List<String> basePaths) {
+            List<String> basePaths, Function<MethodDeclaration, MethodTargetResolution> analysisTargetOf) {
         List<String> methodPaths = AnnotationReader.stringValues(mapping, PATH_ATTRIBUTES);
         List<String> effectiveMethodPaths = CollectionUtils.isEmpty(methodPaths) ? List.of("") : methodPaths;
 
@@ -93,7 +97,8 @@ final class ApiExtractor {
         for (String basePath : basePaths) {
             for (String methodPath : effectiveMethodPaths) {
                 entryPoints.add(new ApiEntryPoint(
-                        name, description, PathCombiner.combine(basePath, methodPath), verbs, swagger));
+                        name, description, PathCombiner.combine(basePath, methodPath), verbs, swagger,
+                        analysisTargetOf.apply(method)));
             }
         }
         return entryPoints;

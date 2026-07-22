@@ -3,10 +3,10 @@ package com.java.semantic.semantic.adapter.jdtls;
 import com.java.semantic.repository.domain.RepositoryId;
 import com.java.semantic.repository.domain.RepositoryRevision;
 import org.eclipse.lsp4j.services.LanguageServer;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.util.Assert;
 import org.springframework.util.StringUtils;
+
+import lombok.extern.slf4j.Slf4j;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -15,13 +15,17 @@ import java.time.Duration;
 import java.util.Objects;
 import java.util.OptionalLong;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.locks.ReentrantLock;
+import java.util.function.Consumer;
 import java.util.function.Function;
+import java.util.function.Supplier;
 import java.util.stream.Stream;
 
 /**
@@ -29,9 +33,8 @@ import java.util.stream.Stream;
  *
  * 版本一旦不同就必須重啟:JDT LS 的索引對應的是啟動時的工作樹
  */
+@Slf4j
 public final class JdtWorkspaceSession {
-
-    private static final Logger LOGGER = LoggerFactory.getLogger(JdtWorkspaceSession.class);
     private static final Duration PROCESS_EXIT_TIMEOUT = Duration.ofSeconds(5);
     private static final String VM_HWM_PREFIX = "VmHWM:";
     private static final String NON_DIGITS = "\\D";
@@ -41,10 +44,13 @@ public final class JdtWorkspaceSession {
     private final JdtLsProcessFactory.LaunchHandle handle;
     private final Duration requestTimeout;
     private final AtomicInteger activeRequests = new AtomicInteger();
+    private final AtomicInteger activeDocumentLifecycles = new AtomicInteger();
     private final AtomicBoolean invalidated = new AtomicBoolean();
     private final AtomicBoolean stopped = new AtomicBoolean();
     private final AtomicLong lastUsedNanos = new AtomicLong(System.nanoTime());
     private final Object evictionLock = new Object();
+    private final ConcurrentHashMap<String, ReentrantLock> documentLocks = new ConcurrentHashMap<>();
+    private volatile Consumer<String> documentUriLockContentionObserver = uri -> { };
 
     private boolean closing;
     private volatile SemanticEngineStatus status = SemanticEngineStatus.IMPORTING;
@@ -69,6 +75,14 @@ public final class JdtWorkspaceSession {
         return revision;
     }
 
+    long processId() {
+        return handle.process().pid();
+    }
+
+    Process process() {
+        return handle.process();
+    }
+
     public SemanticEngineStatus status() {
         if (SemanticEngineStatus.READY == status && !isUsable()) {
             return SemanticEngineStatus.FAILED;
@@ -87,13 +101,45 @@ public final class JdtWorkspaceSession {
     }
 
     /**
+     * 對同一份文件持有 session 存活期的鎖,涵蓋 didOpen、查詢與 didClose 的完整生命週期。
+     *
+     * 鎖不移除以避免等待中的執行緒與移除動作競爭而取得不同鎖；session 停止後整張表會一併釋放。
+     */
+    <T> T withDocumentUri(String uri, Supplier<T> operation) {
+        Assert.hasText(uri, "uri is required");
+        Assert.notNull(operation, "operation is required");
+        ReentrantLock lock = documentLocks.computeIfAbsent(uri, key -> new ReentrantLock());
+        if (!lock.tryLock()) {
+            documentUriLockContentionObserver.accept(uri);
+            lock.lock();
+        }
+        boolean lifecycleStarted = false;
+        try {
+            if (!tryBeginDocumentLifecycle()) {
+                throw new JdtWorkspaceClosingException("document lifecycle");
+            }
+            lifecycleStarted = true;
+            return operation.get();
+        } finally {
+            if (lifecycleStarted) {
+                endDocumentLifecycle();
+            }
+            lock.unlock();
+        }
+    }
+
+    void setDocumentUriLockContentionObserver(Consumer<String> observer) {
+        documentUriLockContentionObserver = Objects.requireNonNull(observer, "observer is required");
+    }
+
+    /**
      * 淘汰前的原子交握:僅在沒有進行中請求時把 session 轉為 CLOSING
      *
      * 成功後 call 會拒絕新請求,呼叫端在「拿到 session」與「送出請求」之間的空窗不會被淘汰偷襲
      */
     boolean tryBeginEviction() {
         synchronized (evictionLock) {
-            if (closing || activeRequests.get() != 0) {
+            if (closing || activeRequests.get() != 0 || activeDocumentLifecycles.get() != 0) {
                 return false;
             }
             closing = true;
@@ -108,12 +154,33 @@ public final class JdtWorkspaceSession {
      */
     private boolean tryBeginRequest() {
         synchronized (evictionLock) {
-            if (closing) {
+            if (!acceptingNewWork()) {
                 return false;
             }
             activeRequests.incrementAndGet();
             return true;
         }
+    }
+
+    private boolean tryBeginDocumentLifecycle() {
+        synchronized (evictionLock) {
+            if (!acceptingNewWork()) {
+                return false;
+            }
+            activeDocumentLifecycles.incrementAndGet();
+            return true;
+        }
+    }
+
+    private void endDocumentLifecycle() {
+        synchronized (evictionLock) {
+            activeDocumentLifecycles.decrementAndGet();
+        }
+        touch();
+    }
+
+    private boolean acceptingNewWork() {
+        return !closing && !stopped.get() && !invalidated.get();
     }
 
     /** 失敗診斷用的 stderr 最後數行 */
@@ -139,6 +206,8 @@ public final class JdtWorkspaceSession {
             return pending.get(requestTimeout.toMillis(), TimeUnit.MILLISECONDS);
         } catch (TimeoutException exception) {
             cancel(pending);
+            log.warn("phase=jdtls-request outcome=timeout repoId={} operation={} exceptionType={}",
+                    repositoryId.value(), operation, exception.getClass().getSimpleName());
             throw new JdtRequestTimeoutException(
                     "JDT LS request timed out after " + requestTimeout + ": " + operation, exception);
         } catch (InterruptedException exception) {
@@ -205,7 +274,7 @@ public final class JdtWorkspaceSession {
                     .mapToLong(Long::parseLong)
                     .findFirst();
         } catch (IOException | RuntimeException exception) {
-            LOGGER.debug("JDT LS peak RSS unavailable: repositoryId={} failureType={}",
+            log.debug("phase=jdtls-workspace outcome=peak-rss-unavailable repoId={} exceptionType={}",
                     repositoryId.value(), exception.getClass().getSimpleName());
             return OptionalLong.empty();
         }
@@ -214,20 +283,22 @@ public final class JdtWorkspaceSession {
     /**
      * 依 shutdown → exit → 有限等待 → 強制終結的順序停止
      *
-     * 停止是盡力而為:shutdown 或 exit 失敗只記錄並繼續,程序仍必須被終結
+     * shutdown 或 exit 失敗只記錄並繼續;若強制終止後仍無法確認退出,則標記 FAILED 並拋出明確錯誤
      */
     void stop() {
         synchronized (evictionLock) {
             closing = true;
         }
-        if (!stopped.compareAndSet(false, true)) {
-            return;
+        boolean firstStop = stopped.compareAndSet(false, true);
+        if (firstStop) {
+            status = SemanticEngineStatus.STOPPED;
+            requestShutdown();
+            requestExit();
+            handle.listener().cancel(true);
         }
-        status = SemanticEngineStatus.STOPPED;
-        requestShutdown();
-        requestExit();
-        handle.listener().cancel(true);
-        awaitProcessExit();
+        if (firstStop || handle.process().isAlive()) {
+            awaitProcessExit();
+        }
     }
 
     private Path procStatusPath() {
@@ -239,12 +310,12 @@ public final class JdtWorkspaceSession {
             handle.languageServer().shutdown().get(requestTimeout.toMillis(), TimeUnit.MILLISECONDS);
         } catch (InterruptedException exception) {
             Thread.currentThread().interrupt();
-            LOGGER.warn("JDT LS shutdown interrupted: repositoryId={} failureType={}",
+            log.warn("phase=jdtls-process outcome=shutdown-interrupted repoId={} exceptionType={}",
                     repositoryId.value(), exception.getClass().getSimpleName());
         } catch (ExecutionException | TimeoutException | RuntimeException exception) {
             JdtFatalErrorPolicy.rethrowIfFatal(exception);
             JdtFatalErrorPolicy.rethrowIfFatal(exception.getCause());
-            LOGGER.warn("JDT LS shutdown request failed: repositoryId={} failureType={}",
+            log.warn("phase=jdtls-process outcome=shutdown-failed repoId={} exceptionType={}",
                     repositoryId.value(), exception.getClass().getSimpleName());
         }
     }
@@ -253,25 +324,23 @@ public final class JdtWorkspaceSession {
         try {
             handle.languageServer().exit();
         } catch (RuntimeException exception) {
-            LOGGER.warn("JDT LS exit notification failed: repositoryId={} failureType={}",
+            log.warn("phase=jdtls-process outcome=exit-failed repoId={} exceptionType={}",
                     repositoryId.value(), exception.getClass().getSimpleName());
         }
     }
 
     private void awaitProcessExit() {
-        Process process = handle.process();
-        try {
-            if (process.waitFor(PROCESS_EXIT_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS)) {
-                return;
-            }
-        } catch (InterruptedException exception) {
-            Thread.currentThread().interrupt();
-            LOGGER.warn("JDT LS exit wait interrupted: repositoryId={} failureType={}",
-                    repositoryId.value(), exception.getClass().getSimpleName());
+        JdtProcessTerminator.TerminationResult result = JdtProcessTerminator.awaitThenForce(
+                handle.process(), PROCESS_EXIT_TIMEOUT);
+        if (result.terminated()) {
+            String outcome = result.forced() ? "confirmed-forced-stop" : "confirmed-stop";
+            log.info("phase=jdtls-process outcome={} repoId={}", outcome, repositoryId.value());
+            return;
         }
-        LOGGER.warn("JDT LS did not exit gracefully, forcing termination: repositoryId={}",
-                repositoryId.value());
-        process.destroyForcibly();
+        status = SemanticEngineStatus.FAILED;
+        log.error("phase=jdtls-process outcome=force-stop-unconfirmed repoId={} failureType={}",
+                repositoryId.value(), result.failureType());
+        throw new JdtProcessTerminationException(repositoryId, result.failureType());
     }
 
     private String failureMessage(String operation) {
@@ -297,6 +366,22 @@ public final class JdtWorkspaceSession {
 
         JdtRequestTimeoutException(String message, Throwable cause) {
             super(message, cause);
+        }
+    }
+
+    /** 子程序在 graceful 與 forcible 終止後仍無法確認退出。 */
+    static final class JdtProcessTerminationException extends RuntimeException {
+
+        private final String failureType;
+
+        private JdtProcessTerminationException(RepositoryId repositoryId, String failureType) {
+            super("JDT LS process termination could not be confirmed for repository "
+                    + repositoryId.value() + " (failureType=" + failureType + ")", null, false, true);
+            this.failureType = failureType;
+        }
+
+        String failureType() {
+            return failureType;
         }
     }
 

@@ -23,6 +23,7 @@ import org.springframework.boot.test.system.CapturedOutput;
 import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
@@ -184,7 +185,7 @@ class RepositoryControllerTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{}"))
                 .andExpect(status().isConflict())
-                .andExpect(jsonPath("$.errorCode").value("REPOSITORY_IMMUTABLE_FIXTURE"));
+                .andExpect(jsonPath("$.errorCode").value("REPOSITORY_NOT_READY"));
     }
 
     @Test
@@ -229,8 +230,8 @@ class RepositoryControllerTest {
         mockMvc.perform(get("/v1/repositories/test-repo")
                         .header(ApiTokenFilter.API_TOKEN_HEADER, TOKEN))
                 .andExpect(status().isConflict())
-                .andExpect(jsonPath("$.errorCode").value("REPOSITORY_BUSY"))
-                .andExpect(jsonPath("$.message").value("repository is busy"));
+                .andExpect(jsonPath("$.errorCode").value("REPOSITORY_NOT_READY"))
+                .andExpect(jsonPath("$.message").value("repository is not ready"));
     }
 
     @Test
@@ -275,8 +276,8 @@ class RepositoryControllerTest {
         String body = mockMvc.perform(post("/v1/repositories/test-repo/ensure")
                         .header(ApiTokenFilter.API_TOKEN_HEADER, TOKEN))
                 .andExpect(status().isInternalServerError())
-                .andExpect(jsonPath("$.errorCode").value("REPOSITORY_MUTATION_FAILED"))
-                .andExpect(jsonPath("$.message").value("repository mutation failed"))
+                .andExpect(jsonPath("$.errorCode").value("INTERNAL_ERROR"))
+                .andExpect(jsonPath("$.message").value("request failed"))
                 .andReturn().getResponse().getContentAsString();
 
         assertThat(body).doesNotContain(CONFIGURED_GIT_TOKEN);
@@ -294,8 +295,8 @@ class RepositoryControllerTest {
         mockMvc.perform(post("/v1/repositories/test-repo/ensure")
                         .header(ApiTokenFilter.API_TOKEN_HEADER, TOKEN))
                 .andExpect(status().isInternalServerError())
-                .andExpect(jsonPath("$.errorCode").value("REPOSITORY_MUTATION_FAILED"))
-                .andExpect(jsonPath("$.message").value("repository mutation failed"));
+                .andExpect(jsonPath("$.errorCode").value("INTERNAL_ERROR"))
+                .andExpect(jsonPath("$.message").value("request failed"));
 
         String requestOutput = output.getAll().substring(outputStart);
         assertThat(requestOutput).doesNotContain(CONFIGURED_GIT_TOKEN);
@@ -307,14 +308,17 @@ class RepositoryControllerTest {
         RepositoryRevision expected = RepositoryRevision.ofSha("0".repeat(40));
         RepositoryRevision current = RepositoryRevision.ofSha("1".repeat(40));
         ApiExceptionHandler handler = new ApiExceptionHandler();
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.setAttribute("semantic.requestId", "request-42");
 
         ResponseEntity<ApiErrorResponse> response = handler.revisionMismatch(
-                new RepositoryRevisionMismatchException(expected, current));
+                new RepositoryRevisionMismatchException(expected, current), request);
         ApiErrorResponse body = Objects.requireNonNull(response.getBody(), "response body is required");
 
         assertThat(response.getStatusCode().value()).isEqualTo(409);
-        assertThat(body.currentRevision()).contains(current.value());
-        assertThat(body.expectedRevision()).contains(expected.value());
+        assertThat(body.currentRevision()).isEqualTo(current.value());
+        assertThat(body.expectedRevision()).isEqualTo(expected.value());
+        assertThat(body.requestId()).isEqualTo("request-42");
     }
 
     private ResultActions assertSafeStatus(ResultActions result, String prefix) throws Exception {

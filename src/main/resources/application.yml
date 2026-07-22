@@ -1,8 +1,7 @@
-entry-point:
-  call-graph-depth: ${CALL_GRAPH_DEPTH:3}
-
 semantic:
   analysis:
+    outgoing:
+      depth-two-node-budget: ${OUTGOING_DEPTH_TWO_NODE_BUDGET:40}
     read-policy:
       forbidden-repositories: []
       forbidden-packages: []

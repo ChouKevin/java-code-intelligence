@@ -1,15 +1,14 @@
 package com.java.semantic.semantic.adapter.jdtls;
 
-import ch.qos.logback.classic.Level;
-import ch.qos.logback.classic.Logger;
-import ch.qos.logback.classic.spi.ILoggingEvent;
-import ch.qos.logback.core.read.ListAppender;
 import com.java.semantic.repository.domain.RepositoryId;
 import com.java.semantic.repository.domain.RepositoryRevision;
 import com.java.semantic.repository.domain.RepositorySnapshot;
-import com.java.semantic.semantic.domain.SemanticAmbiguousMethodException;
+import com.java.semantic.identity.MethodTarget;
 import com.java.semantic.semantic.domain.SemanticAmbiguousTypeException;
 import com.java.semantic.semantic.domain.SemanticCall;
+import com.java.semantic.semantic.domain.SemanticCallResolution;
+import com.java.semantic.semantic.domain.SemanticCallResolutionStatus;
+import com.java.semantic.semantic.domain.SemanticDeclarationAnchor;
 import com.java.semantic.semantic.domain.SemanticCallSite;
 import com.java.semantic.semantic.domain.SemanticCallStatus;
 import com.java.semantic.semantic.domain.SemanticEngineNotReadyException;
@@ -17,10 +16,10 @@ import com.java.semantic.semantic.domain.SemanticEngineStartFailedException;
 import com.java.semantic.semantic.domain.SemanticLocation;
 import com.java.semantic.semantic.domain.SemanticMethod;
 import com.java.semantic.semantic.domain.SemanticPosition;
+import com.java.semantic.semantic.domain.SemanticProtocolException;
 import com.java.semantic.semantic.domain.SemanticRange;
 import com.java.semantic.semantic.domain.SemanticRequestTimeoutException;
 import com.java.semantic.semantic.domain.SemanticResolutionOrigin;
-import com.java.semantic.semantic.domain.SemanticSymbolNotFoundException;
 import org.eclipse.lsp4j.CallHierarchyItem;
 import org.eclipse.lsp4j.CallHierarchyOutgoingCall;
 import org.eclipse.lsp4j.CallHierarchyOutgoingCallsParams;
@@ -46,14 +45,12 @@ import org.eclipse.lsp4j.SymbolKind;
 import org.eclipse.lsp4j.WorkspaceSymbol;
 import org.eclipse.lsp4j.WorkspaceSymbolParams;
 import org.eclipse.lsp4j.jsonrpc.messages.Either;
-import org.eclipse.lsp4j.services.LanguageServer;
 import org.eclipse.lsp4j.services.TextDocumentService;
 import org.eclipse.lsp4j.services.WorkspaceService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.api.io.TempDir;
-import org.slf4j.LoggerFactory;
 import org.springframework.boot.test.system.CapturedOutput;
 import org.springframework.boot.test.system.OutputCaptureExtension;
 
@@ -61,11 +58,11 @@ import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
@@ -74,6 +71,12 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -102,31 +105,144 @@ class Lsp4jJavaSemanticServiceTest {
     }
 
     @Test
-    void should_normalize_workspace_startup_failure_at_public_adapter_boundary() {
-        RuntimeException failure = new JdtLsReadinessProbe.JdtWorkspaceStartupException(
-                REPOSITORY_ID, "SECRET_REASON", "SECRET_STDERR", "SECRET_TYPE");
-        service = new Lsp4jJavaSemanticService(new FakeWorkspaceManager(failure));
-
-        Throwable thrown = catchThrowable(
-                () -> service.resolveMethod(snapshot, PACKAGE, "OrderService", "run()"));
-
-        assertThat(thrown).isExactlyInstanceOf(SemanticEngineStartFailedException.class);
-        assertThat(thrown.getCause()).isNull();
-        assertThat(thrown.toString()).doesNotContain("SECRET");
-    }
-
-    @Test
-    void should_normalize_workspace_not_ready_failure_at_public_adapter_boundary() {
+    void should_normalize_workspace_not_ready_failure_at_public_adapter_boundary() throws IOException {
         RuntimeException failure =
                 new DefaultJdtWorkspaceManager.JdtWorkspaceManagerStoppedException(REPOSITORY_ID);
         service = new Lsp4jJavaSemanticService(new FakeWorkspaceManager(failure));
 
-        SemanticMethod method = methodAt(
-                root.resolve("OrderService.java").toUri().toString(), 1, 0);
+        SemanticMethod method = methodAt(sourceFile("OrderService"), 1, 0);
 
         assertThatThrownBy(() -> service.outgoingCalls(snapshot, method))
                 .isExactlyInstanceOf(SemanticEngineNotReadyException.class)
                 .hasNoCause();
+    }
+
+    @Test
+    void should_prepare_call_hierarchy_at_the_syntax_proven_name_position_without_display_root_parsing()
+            throws IOException {
+        String uri = sourceFile("OrderCrudService");
+        MethodTarget target = new MethodTarget(
+                "src/main/java/com/example/generic/OrderCrudService.java",
+                PACKAGE,
+                "OrderCrudService",
+                "processOrder",
+                List.of("com.example.Order"));
+        SemanticDeclarationAnchor anchor = new SemanticDeclarationAnchor(
+                target, new SemanticPosition(10, 16));
+        server.prepareItems = List.of(callItem("unrelated display signature", uri, 10, 16));
+
+        SemanticMethod resolved = service.resolveExactMethod(snapshot, anchor);
+
+        assertThat(resolved.packageName()).isEqualTo(PACKAGE);
+        assertThat(resolved.className()).isEqualTo("OrderCrudService");
+        assertThat(resolved.methodName()).isEqualTo("processOrder");
+        assertThat(resolved.parameterTypes()).containsExactly("com.example.Order");
+        assertThat(server.preparePositions).containsExactly(new Position(10, 16));
+    }
+
+    @Test
+    void should_return_typed_definition_outcomes_without_choosing_the_first_target() throws IOException {
+        String callerUri = sourceFile("OrderCrudService");
+        String alpha = writeClassFile("com/example/alpha/Target.java", "com.example.alpha", "Target");
+        String beta = writeClassFile("com/example/beta/Target.java", "com.example.beta", "Target");
+        SemanticMethod caller = methodAt(callerUri, 10, 16);
+        SemanticCallSite callSite = new SemanticCallSite(
+                semanticRange(18, 8, 18, 14), new SemanticPosition(18, 8));
+        server.documentSymbols.put(alpha, List.of(Either.forRight(
+                classSymbol("Target", method("go()", " : void", 5, 11, 5, 13)))));
+        server.documentSymbols.put(beta, List.of(Either.forRight(
+                classSymbol("Target", method("go()", " : void", 5, 11, 5, 13)))));
+
+        server.definitionResponse = Either.forLeft(List.of(location(alpha, 5, 11, 5, 13)));
+        SemanticCallResolution resolved = service.resolveCallResolutionAt(snapshot, caller, callSite);
+        assertThat(resolved.status()).isEqualTo(SemanticCallResolutionStatus.RESOLVED);
+
+        server.definitionResponse = Either.forLeft(List.of());
+        SemanticCallResolution unresolved = service.resolveCallResolutionAt(snapshot, caller, callSite);
+        assertThat(unresolved.status()).isEqualTo(SemanticCallResolutionStatus.UNRESOLVED);
+
+        server.definitionResponse = Either.forLeft(List.of(
+                location(beta, 5, 11, 5, 13), location(alpha, 5, 11, 5, 13)));
+        SemanticCallResolution ambiguous = service.resolveCallResolutionAt(snapshot, caller, callSite);
+        assertThat(ambiguous.status()).isEqualTo(SemanticCallResolutionStatus.AMBIGUOUS);
+        assertThat(ambiguous.candidates()).extracting(method -> method.location().uri())
+                .containsExactly(alpha, beta);
+    }
+
+    @Test
+    void should_skip_an_unconvertible_local_definition_and_keep_scanning_for_a_resolved_sibling()
+            throws IOException {
+        String callerUri = sourceFile("OrderCrudService");
+        Path unconvertible = root.resolve("src/main/java/com/example/broken/Target.java");
+        Files.createDirectories(unconvertible.getParent());
+        Files.writeString(unconvertible, "package com.example.\nclass Target { void go() { } }\n");
+        String unconvertibleUri = unconvertible.toUri().toString();
+        String resolvedUri = writeClassFile("com/example/valid/Target.java", "com.example.valid", "Target");
+        SemanticMethod caller = methodAt(callerUri, 10, 16);
+        SemanticCallSite callSite = new SemanticCallSite(
+                semanticRange(18, 8, 18, 14), new SemanticPosition(18, 8));
+        server.documentSymbols.put(unconvertibleUri, List.of(Either.forRight(
+                classSymbol("Target", method("go()", " : void", 1, 20, 1, 22)))));
+        server.documentSymbols.put(resolvedUri, List.of(Either.forRight(
+                classSymbol("Target", method("go()", " : void", 4, 8, 4, 10)))));
+        server.definitionResponse = Either.forLeft(List.of(
+                location(unconvertibleUri, 1, 20, 1, 22), location(resolvedUri, 4, 8, 4, 10)));
+
+        SemanticCallResolution resolution = service.resolveCallResolutionAt(snapshot, caller, callSite);
+
+        assertThat(resolution.status()).isEqualTo(SemanticCallResolutionStatus.RESOLVED);
+        assertThat(resolution.call()).get().extracting(call -> call.target().orElseThrow().location().uri())
+                .isEqualTo(resolvedUri);
+    }
+
+    @Test
+    void should_propagate_a_malformed_local_definition_uri_without_leaking_it() throws IOException {
+        String callerUri = sourceFile("OrderCrudService");
+        String unsafeUri = "http://example.invalid/RESTRICTED_DEFINITION_PATH.java";
+        SemanticMethod caller = methodAt(callerUri, 10, 16);
+        SemanticCallSite callSite = new SemanticCallSite(
+                semanticRange(18, 8, 18, 14), new SemanticPosition(18, 8));
+        server.definitionResponse = Either.forLeft(List.of(location(unsafeUri, 4, 8, 4, 12)));
+
+        assertThatThrownBy(() -> service.resolveCallResolutionAt(snapshot, caller, callSite))
+                .isInstanceOf(com.java.semantic.semantic.domain.SemanticProtocolException.class)
+                .hasMessage("semantic protocol request failed")
+                .satisfies(exception -> assertThat(exception.toString())
+                        .doesNotContain("RESTRICTED_DEFINITION_PATH", "example.invalid"));
+    }
+
+    @Test
+    void should_return_an_unresolved_call_for_a_toctou_definition_source_failure() throws IOException {
+        String callerUri = sourceFile("OrderCrudService");
+        Path target = root.resolve("src/main/java/com/example/race/TOCTOU_DEFINITION_PATH.java");
+        Files.createDirectories(target.getParent());
+        Files.writeString(target, "package com.example.race; class Target { void go() { } }\n");
+        String targetUri = target.toUri().toString();
+        SemanticMethod caller = methodAt(callerUri, 10, 16);
+        SemanticCallSite callSite = new SemanticCallSite(
+                semanticRange(18, 8, 18, 14), new SemanticPosition(18, 8));
+        server.definitionResponse = Either.forLeft(List.of(location(targetUri, 0, 54, 0, 56)));
+        server.documentSymbols.put(targetUri, List.of(Either.forRight(
+                classSymbol("Target", method("go()", " : void", 0, 54, 0, 56)))));
+        server.documentSymbolActions.put(targetUri, () -> deleteSource(target));
+
+        SemanticCallResolution resolution = service.resolveCallResolutionAt(snapshot, caller, callSite);
+
+        assertThat(resolution.status()).isEqualTo(SemanticCallResolutionStatus.UNRESOLVED);
+    }
+
+    @Test
+    void should_normalize_ambiguous_candidates_to_an_immutable_total_order_and_reject_duplicates() {
+        SemanticMethod later = methodAt("file:///workspace/B.java", 5, 9);
+        SemanticMethod earlier = methodAt("file:///workspace/A.java", 4, 8);
+        List<SemanticMethod> supplied = new ArrayList<>(List.of(later, earlier));
+
+        SemanticCallResolution resolution = SemanticCallResolution.ambiguous(supplied);
+        supplied.clear();
+
+        assertThat(resolution.candidates()).containsExactly(earlier, later);
+        assertThatThrownBy(() -> SemanticCallResolution.ambiguous(List.of(earlier, earlier)))
+                .isInstanceOf(IllegalArgumentException.class);
     }
 
     @Test
@@ -155,121 +271,6 @@ class Lsp4jJavaSemanticServiceTest {
         assertThat(failure.getSuppressed()).isEmpty();
         assertThat(output.getAll().substring(outputStart))
                 .doesNotContain(targetPathSentinel);
-    }
-
-    @Test
-    void should_resolve_the_exact_method_when_package_class_and_signature_match() throws IOException {
-        String uri = sourceFile("OrderCrudService");
-        server.workspaceSymbols = List.of(workspaceType("OrderCrudService", PACKAGE, uri));
-        server.documentSymbols.put(uri, List.of(Either.forRight(
-                classSymbol("OrderCrudService", method("processOrder(Order)", " : void", 10, 16, 10, 28)))));
-
-        SemanticMethod resolved = service.resolveMethod(snapshot, PACKAGE, "OrderCrudService", "processOrder(Order)");
-
-        assertThat(resolved.methodName()).isEqualTo("processOrder");
-        assertThat(resolved.parameterTypes()).containsExactly("Order");
-        assertThat(resolved.returnType()).isEqualTo("void");
-        assertThat(resolved.location().uri()).isEqualTo(uri);
-        assertThat(resolved.location().selectionRange().start())
-                .isEqualTo(new SemanticPosition(10, 16));
-    }
-
-    @Test
-    void should_resolve_a_bare_name_when_only_one_overload_exists() throws IOException {
-        String uri = sourceFile("OrderCrudService");
-        server.workspaceSymbols = List.of(workspaceType("OrderCrudService", PACKAGE, uri));
-        server.documentSymbols.put(uri, List.of(Either.forRight(
-                classSymbol("OrderCrudService", method("processOrder(Order)", " : void", 10, 16, 10, 28)))));
-
-        SemanticMethod resolved = service.resolveMethod(snapshot, PACKAGE, "OrderCrudService", "processOrder");
-
-        assertThat(resolved.methodName()).isEqualTo("processOrder");
-        assertThat(resolved.parameterTypes()).containsExactly("Order");
-    }
-
-    @Test
-    void should_throw_ambiguous_with_candidates_when_a_bare_name_has_several_overloads() throws IOException {
-        String uri = sourceFile("OrderCrudService");
-        server.workspaceSymbols = List.of(workspaceType("OrderCrudService", PACKAGE, uri));
-        server.documentSymbols.put(uri, List.of(Either.forRight(classSymbol("OrderCrudService",
-                method("save(Order)", " : void", 10, 16, 10, 20),
-                method("save(Long)", " : void", 14, 16, 14, 20)))));
-
-        SemanticAmbiguousMethodException failure = catchThrowableOfType(
-                SemanticAmbiguousMethodException.class,
-                () -> service.resolveMethod(snapshot, PACKAGE, "OrderCrudService", "save"));
-
-        assertThat(failure.candidates()).containsExactlyInAnyOrder("save(Order)", "save(Long)");
-    }
-
-    @Test
-    void should_match_normalized_parameter_types_ignoring_qualifiers_and_generics() throws IOException {
-        String uri = sourceFile("OrderCrudService");
-        server.workspaceSymbols = List.of(workspaceType("OrderCrudService", PACKAGE, uri));
-        server.documentSymbols.put(uri, List.of(Either.forRight(classSymbol("OrderCrudService",
-                method("save(Order)", " : void", 10, 16, 10, 20),
-                method("deleteById(Long)", " : void", 14, 16, 14, 26)))));
-
-        SemanticMethod resolved = service.resolveMethod(
-                snapshot, PACKAGE, "OrderCrudService", "deleteById(java.lang.Long)");
-
-        assertThat(resolved.methodName()).isEqualTo("deleteById");
-        assertThat(resolved.parameterTypes()).containsExactly("Long");
-    }
-
-    @Test
-    void should_not_match_a_same_named_method_in_a_different_package() throws IOException {
-        String wanted = sourceFile("OrderCrudService");
-        String other = otherFile("com/other/OrderCrudService.java");
-        server.workspaceSymbols = List.of(
-                workspaceType("OrderCrudService", "com.other", other),
-                workspaceType("OrderCrudService", PACKAGE, wanted));
-        server.documentSymbols.put(wanted, List.of(Either.forRight(
-                classSymbol("OrderCrudService", method("processOrder(Order)", " : void", 10, 16, 10, 28)))));
-
-        SemanticMethod resolved = service.resolveMethod(snapshot, PACKAGE, "OrderCrudService", "processOrder");
-
-        assertThat(resolved.location().uri()).isEqualTo(wanted);
-    }
-
-    @Test
-    void should_reject_duplicate_type_uris_independently_of_workspace_response_order() throws IOException {
-        String alpha = writeClassFile(
-                "module-a/src/main/java/com/example/generic/Duplicate.java", PACKAGE, "Duplicate");
-        String beta = writeClassFile(
-                "module-b/src/main/java/com/example/generic/Duplicate.java", PACKAGE, "Duplicate");
-        server.documentSymbols.put(alpha, List.of(Either.forRight(
-                classSymbol("Duplicate", method("run()", " : void", 2, 9, 2, 12)))));
-        server.documentSymbols.put(beta, List.of(Either.forRight(
-                classSymbol("Duplicate", method("run()", " : void", 2, 9, 2, 12)))));
-
-        for (List<WorkspaceSymbol> response : List.of(
-                List.of(workspaceType("Duplicate", PACKAGE, alpha), workspaceType("Duplicate", PACKAGE, beta)),
-                List.of(workspaceType("Duplicate", PACKAGE, beta), workspaceType("Duplicate", PACKAGE, alpha)))) {
-            server.workspaceSymbols = response;
-            assertThatThrownBy(() -> service.resolveMethod(snapshot, PACKAGE, "Duplicate", "run()"))
-                    .isInstanceOf(SemanticAmbiguousTypeException.class)
-                    .hasMessage("type " + PACKAGE + ".Duplicate is ambiguous");
-        }
-    }
-
-    @Test
-    void should_throw_symbol_not_found_when_the_type_is_absent() {
-        server.workspaceSymbols = List.of();
-
-        assertThatThrownBy(() -> service.resolveMethod(snapshot, PACKAGE, "Missing", "run"))
-                .isInstanceOf(SemanticSymbolNotFoundException.class);
-    }
-
-    @Test
-    void should_throw_symbol_not_found_when_the_method_name_is_absent() throws IOException {
-        String uri = sourceFile("OrderCrudService");
-        server.workspaceSymbols = List.of(workspaceType("OrderCrudService", PACKAGE, uri));
-        server.documentSymbols.put(uri, List.of(Either.forRight(
-                classSymbol("OrderCrudService", method("processOrder(Order)", " : void", 10, 16, 10, 28)))));
-
-        assertThatThrownBy(() -> service.resolveMethod(snapshot, PACKAGE, "OrderCrudService", "missing"))
-                .isInstanceOf(SemanticSymbolNotFoundException.class);
     }
 
     @Test
@@ -331,7 +332,7 @@ class Lsp4jJavaSemanticServiceTest {
     }
 
     @Test
-    void should_preserve_valid_sibling_when_an_outgoing_target_package_cannot_be_proven() throws IOException {
+    void should_propagate_an_invalid_outgoing_target_location_without_leaking_it() throws IOException {
         String callerUri = sourceFile("OrderCrudService");
         String validUri = writeClassFile(
                 "com/example/generic/ValidWorker.java", PACKAGE, "ValidWorker");
@@ -346,17 +347,10 @@ class Lsp4jJavaSemanticServiceTest {
         server.documentSymbols.put(failedUri, List.of(Either.forRight(
                 classSymbol("RestrictedWorker", method("restricted()", " : void", 4, 8, 4, 18)))));
 
-        List<SemanticCall> calls = service.outgoingCalls(snapshot, caller);
-
-        assertThat(calls).hasSize(2);
-        assertThat(calls).anySatisfy(call -> assertThat(call.target()).get().satisfies(target ->
-                assertThat(target.className()).isEqualTo("ValidWorker")));
-        assertThat(calls).anySatisfy(call -> {
-            assertThat(call.target()).isEmpty();
-            assertThat(call.rawSignature()).isEqualTo("semantic target identity unavailable");
-            assertThat(call.status()).isEqualTo(SemanticCallStatus.CONVERSION_FAILED);
-            assertThat(call.callSites()).containsExactly(semanticRange(13, 4, 13, 16));
-        });
+        assertThatThrownBy(() -> service.outgoingCalls(snapshot, caller))
+                .isInstanceOf(com.java.semantic.semantic.domain.SemanticProtocolException.class)
+                .hasMessage("semantic protocol request failed")
+                .satisfies(exception -> assertThat(exception.toString()).doesNotContain("RestrictedWorker"));
     }
 
     @Test
@@ -405,7 +399,7 @@ class Lsp4jJavaSemanticServiceTest {
     }
 
     @Test
-    void should_fail_closed_and_log_only_safe_channels_when_source_or_package_cannot_be_read() {
+    void should_propagate_an_invalid_caller_location_without_leaking_it() {
         String callerPathSentinel = "RESTRICTED_CALLER_PATH_SENTINEL";
         String targetPathSentinel = "RESTRICTED_TARGET_PATH_SENTINEL";
         String callerUri = root.resolve(callerPathSentinel + ".java").toUri().toString();
@@ -415,37 +409,11 @@ class Lsp4jJavaSemanticServiceTest {
         server.outgoingCalls = List.of(outgoing(callItem("work() : void", targetUri, 4, 8)));
         server.documentSymbols.put(targetUri, List.of(Either.forRight(
                 classSymbol("Target", method("work()", " : void", 4, 8, 4, 12)))));
-        Logger logger = (Logger) LoggerFactory.getLogger(Lsp4jJavaSemanticService.class);
-        Level previous = logger.getLevel();
-        logger.setLevel(Level.DEBUG);
-        ListAppender<ILoggingEvent> appender = new ListAppender<>();
-        appender.start();
-        logger.addAppender(appender);
-        try {
-            assertThat(service.outgoingCalls(snapshot, caller)).singleElement().satisfies(call -> {
-                assertThat(call.target()).isEmpty();
-                assertThat(call.rawSignature()).isEqualTo("semantic target identity unavailable");
-                assertThat(call.status()).isEqualTo(SemanticCallStatus.CONVERSION_FAILED);
-                assertThat(call.toString()).doesNotContain(callerPathSentinel, targetPathSentinel);
-            });
-
-            assertThat(appender.list).hasSize(3).allSatisfy(event -> {
-                assertThat(event.getFormattedMessage())
-                        .contains(REPOSITORY_ID.value())
-                        .doesNotContain(callerPathSentinel, targetPathSentinel);
-                assertThat(Arrays.toString(event.getArgumentArray()))
-                        .doesNotContain(callerPathSentinel, targetPathSentinel);
-                assertThat(event.getThrowableProxy()).isNull();
-            });
-            assertThat(appender.list).extracting(ILoggingEvent::getFormattedMessage)
-                    .anySatisfy(message -> assertThat(message).contains("SOURCE_READ_FAILED"))
-                    .anySatisfy(message -> assertThat(message).contains("PACKAGE_RESOLUTION_FAILED"))
-                    .anySatisfy(message -> assertThat(message).contains("TARGET_CONVERSION_FAILED"));
-        } finally {
-            logger.detachAppender(appender);
-            logger.setLevel(previous);
-            appender.stop();
-        }
+        assertThatThrownBy(() -> service.outgoingCalls(snapshot, caller))
+                .isInstanceOf(com.java.semantic.semantic.domain.SemanticProtocolException.class)
+                .hasMessage("semantic protocol request failed")
+                .satisfies(exception -> assertThat(exception.toString())
+                        .doesNotContain(callerPathSentinel, targetPathSentinel));
     }
 
     @Test
@@ -459,9 +427,9 @@ class Lsp4jJavaSemanticServiceTest {
         server.documentSymbols.put(targetUri, List.of(Either.forRight(
                 classSymbol("Order", constructor("Order(String)", 5, 11, 5, 16)))));
 
-        Optional<SemanticCall> resolved = service.resolveCallAt(
+        Optional<SemanticCall> resolved = service.resolveCallResolutionAt(
                 snapshot, caller,
-                new SemanticCallSite(constructorRange, new SemanticPosition(18, 12)));
+                new SemanticCallSite(constructorRange, new SemanticPosition(18, 12))).call();
 
         assertThat(server.definitionPositions).containsExactly(new Position(18, 12));
         assertThat(resolved).get().satisfies(call -> {
@@ -483,10 +451,10 @@ class Lsp4jJavaSemanticServiceTest {
         server.documentSymbols.put(targetUri, List.of(Either.forRight(
                 classSymbol("Transformer", method("transform(String)", "", 7, 11, 7, 20)))));
 
-        Optional<SemanticCall> resolved = service.resolveCallAt(
+        Optional<SemanticCall> resolved = service.resolveCallResolutionAt(
                 snapshot,
                 caller,
-                new SemanticCallSite(methodReferenceRange, new SemanticPosition(20, 14)));
+                new SemanticCallSite(methodReferenceRange, new SemanticPosition(20, 14))).call();
 
         assertThat(server.definitionPositions).containsExactly(new Position(20, 14));
         assertThat(resolved).get().satisfies(call -> {
@@ -506,9 +474,9 @@ class Lsp4jJavaSemanticServiceTest {
         server.documentSymbols.put(targetUri, List.of(Either.forRight(
                 classSymbol("Order", constructor("Order(String)", 5, 11, 5, 16)))));
 
-        Optional<SemanticCall> resolved = service.resolveCallAt(
+        Optional<SemanticCall> resolved = service.resolveCallResolutionAt(
                 snapshot, caller,
-                new SemanticCallSite(constructorRange, new SemanticPosition(18, 12)));
+                new SemanticCallSite(constructorRange, new SemanticPosition(18, 12))).call();
 
         assertThat(resolved).get().satisfies(call -> {
             SemanticMethod target = call.target().orElseThrow();
@@ -533,9 +501,9 @@ class Lsp4jJavaSemanticServiceTest {
         server.documentSymbols.put(targetUri, List.of(Either.forRight(
                 classSymbol("Transformer", method(selectedName, "", 7, 11, 7, 20)))));
 
-        Optional<SemanticCall> resolved = service.resolveCallAt(
+        Optional<SemanticCall> resolved = service.resolveCallResolutionAt(
                 snapshot, caller,
-                new SemanticCallSite(callRange, new SemanticPosition(20, 12)));
+                new SemanticCallSite(callRange, new SemanticPosition(20, 12))).call();
 
         assertThat(resolved).get().satisfies(call ->
                 assertThat(call.rawSignature()).isEqualTo(selectedName));
@@ -552,7 +520,7 @@ class Lsp4jJavaSemanticServiceTest {
         server.documentSymbolFailures.put(
                 targetUri, new IllegalStateException("external definition must not be queried"));
 
-        Optional<SemanticCall> result = service.resolveCallAt(snapshot, caller, callSite);
+        Optional<SemanticCall> result = service.resolveCallResolutionAt(snapshot, caller, callSite).call();
 
         assertThat(result).isEmpty();
     }
@@ -572,10 +540,10 @@ class Lsp4jJavaSemanticServiceTest {
 
         server.definitionResponse = Either.forLeft(List.of(
                 location(alpha, 4, 8, 4, 12), location(beta, 4, 8, 4, 12)));
-        Optional<SemanticCall> forward = service.resolveCallAt(snapshot, caller, callSite);
+        Optional<SemanticCall> forward = service.resolveCallResolutionAt(snapshot, caller, callSite).call();
         server.definitionResponse = Either.forLeft(List.of(
                 location(beta, 4, 8, 4, 12), location(alpha, 4, 8, 4, 12)));
-        Optional<SemanticCall> reverse = service.resolveCallAt(snapshot, caller, callSite);
+        Optional<SemanticCall> reverse = service.resolveCallResolutionAt(snapshot, caller, callSite).call();
 
         assertThat(forward).isEmpty();
         assertThat(reverse).isEmpty();
@@ -591,22 +559,177 @@ class Lsp4jJavaSemanticServiceTest {
                 outgoing(externalCallItem(
                         "println(String) : void", "java.io.PrintStream", "jdt://opaque/library/1", 1, 1)),
                 outgoing(callItem("size() : int", "jdt://opaque/library/2", 3, 3),
-                        range(22, 8, 22, 23)));
+                        range(22, 8, 22, 23)),
+                outgoing(externalCallItem(
+                        "leak(jdt://opaque/private) : void", "ignored", "jdt://opaque/library/3", 4, 4)));
 
         List<SemanticCall> calls = service.outgoingCalls(snapshot, method);
 
-        assertThat(calls).hasSize(2);
+        assertThat(calls).hasSize(3);
         assertThat(calls).allMatch(SemanticCall::external);
-        assertThat(calls.getFirst().target()).get().satisfies(target -> {
-            assertThat(target.packageName()).isEqualTo("java.io");
-            assertThat(target.className()).isEqualTo("PrintStream");
-            assertThat(target.methodName()).isEqualTo("println");
-        });
-        SemanticCall incomplete = calls.getLast();
+        assertThat(calls.getFirst().target()).isEmpty();
+        assertThat(calls.getFirst().rawSignature()).isEqualTo("println(String) : void");
+        assertThat(calls.getFirst().status()).isEqualTo(SemanticCallStatus.IDENTITY_UNPROVEN);
+        SemanticCall incomplete = calls.get(1);
         assertThat(incomplete.target()).isEqualTo(Optional.empty());
         assertThat(incomplete.rawSignature()).isEqualTo("size() : int");
         assertThat(incomplete.callSites()).containsExactly(missingIdentitySite);
         assertThat(incomplete.external()).isTrue();
+        SemanticCall unsafeDisplay = calls.getLast();
+        assertThat(unsafeDisplay.target()).isEmpty();
+        assertThat(unsafeDisplay.rawSignature()).isEqualTo("semantic target identity unavailable");
+        assertThat(unsafeDisplay.status()).isEqualTo(SemanticCallStatus.IDENTITY_UNPROVEN);
+    }
+
+    @Test
+    void should_reject_forged_external_methods_before_starting_a_workspace() {
+        FakeWorkspaceManager manager = new FakeWorkspaceManager(session(server));
+        service = new Lsp4jJavaSemanticService(manager);
+        SemanticMethod forged = methodAt("jdt://contents/java.lang.String.class", 1, 1);
+        SemanticCallSite callSite = new SemanticCallSite(
+                semanticRange(2, 4, 2, 9), new SemanticPosition(2, 4));
+
+        assertThatThrownBy(() -> service.outgoingCalls(snapshot, forged))
+                .isExactlyInstanceOf(SemanticProtocolException.class);
+        assertThatThrownBy(() -> service.resolveCallResolutionAt(snapshot, forged, callSite))
+                .isExactlyInstanceOf(SemanticProtocolException.class);
+        assertThatThrownBy(() -> service.implementations(snapshot, forged))
+                .isExactlyInstanceOf(SemanticProtocolException.class);
+
+        assertThat(manager.getOrStartCalls()).isZero();
+        assertThat(server.openedUris).isEmpty();
+        assertThat(server.closedUris).isEmpty();
+        assertThat(server.preparePositions).isEmpty();
+        assertThat(server.definitionPositions).isEmpty();
+    }
+
+    @Test
+    void should_invalidate_the_session_and_release_the_uri_lock_when_did_close_fails() throws IOException {
+        JdtWorkspaceSession currentSession = session(server);
+        service = new Lsp4jJavaSemanticService(new FakeWorkspaceManager(currentSession));
+        String uri = sourceFile("OrderCrudService");
+        SemanticMethod method = methodAt(uri, 10, 16);
+        server.prepareItems = List.of(callItem("processOrder(Order) : void", uri, 10, 16));
+        server.closeFailure = new IllegalStateException("did close failed");
+
+        assertThatThrownBy(() -> service.outgoingCalls(snapshot, method))
+                .isExactlyInstanceOf(SemanticProtocolException.class);
+
+        assertThat(currentSession.isInvalidated()).isTrue();
+        assertThatThrownBy(() -> currentSession.withDocumentUri(uri, () -> "late lifecycle"))
+                .isInstanceOf(JdtWorkspaceSession.JdtWorkspaceClosingException.class);
+    }
+
+    @Test
+    void should_preserve_the_primary_query_failure_when_did_close_also_fails() throws IOException {
+        JdtWorkspaceSession currentSession = session(server);
+        service = new Lsp4jJavaSemanticService(new FakeWorkspaceManager(currentSession));
+        String uri = sourceFile("OrderCrudService");
+        SemanticMethod method = methodAt(uri, 10, 16);
+        server.prepareFailure = new IllegalStateException("PRIMARY_QUERY_FAILURE");
+        server.closeFailure = new IllegalStateException("SECRET_CLOSE_FAILURE");
+
+        Throwable failure = catchThrowable(() -> service.outgoingCalls(snapshot, method));
+
+        assertThat(failure).isExactlyInstanceOf(SemanticProtocolException.class);
+        assertThat(failure.toString()).doesNotContain("PRIMARY_QUERY_FAILURE", "SECRET_CLOSE_FAILURE");
+        assertThat(currentSession.isInvalidated()).isTrue();
+    }
+
+    @Test
+    void should_preserve_fatal_query_errors_when_did_close_raises_an_error() throws IOException {
+        JdtWorkspaceSession currentSession = session(server);
+        service = new Lsp4jJavaSemanticService(new FakeWorkspaceManager(currentSession));
+        String uri = sourceFile("OrderCrudService");
+        SemanticMethod method = methodAt(uri, 10, 16);
+        OutOfMemoryError primary = new OutOfMemoryError("PRIMARY_FATAL");
+        server.prepareFailure = primary;
+        server.closeFailure = new AssertionError("SECRET_CLOSE_ERROR");
+
+        Throwable failure = catchThrowable(() -> service.outgoingCalls(snapshot, method));
+
+        assertThat(failure).isSameAs(primary);
+        assertThat(failure.getSuppressed()).singleElement()
+                .satisfies(marker -> assertThat(marker.toString()).doesNotContain("SECRET_CLOSE_ERROR"));
+        assertThat(currentSession.isInvalidated()).isTrue();
+    }
+
+    @Test
+    void should_invalidate_the_session_when_did_close_raises_an_error() throws IOException {
+        JdtWorkspaceSession currentSession = session(server);
+        service = new Lsp4jJavaSemanticService(new FakeWorkspaceManager(currentSession));
+        String uri = sourceFile("OrderCrudService");
+        SemanticMethod method = methodAt(uri, 10, 16);
+        server.prepareItems = List.of(callItem("processOrder(Order) : void", uri, 10, 16));
+        server.closeFailure = new AssertionError("SECRET_CLOSE_ERROR");
+
+        assertThatThrownBy(() -> service.outgoingCalls(snapshot, method))
+                .isExactlyInstanceOf(SemanticProtocolException.class);
+
+        assertThat(currentSession.isInvalidated()).isTrue();
+    }
+
+    @Test
+    void should_serialize_same_uri_document_lifecycles_until_the_first_call_closes() throws Exception {
+        JdtWorkspaceSession currentSession = session(server);
+        service = new Lsp4jJavaSemanticService(new FakeWorkspaceManager(currentSession));
+        String uri = sourceFile("OrderCrudService");
+        SemanticMethod method = methodAt(uri, 10, 16);
+        server.prepareItems = List.of(callItem("processOrder(Order) : void", uri, 10, 16));
+        server.outgoingCallsStarted = new CountDownLatch(1);
+        server.releaseOutgoingCalls = new CountDownLatch(1);
+        CountDownLatch secondContendedForLock = new CountDownLatch(1);
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        try {
+            Future<List<SemanticCall>> first = executor.submit(() -> service.outgoingCalls(snapshot, method));
+            assertThat(server.outgoingCallsStarted.await(1, TimeUnit.SECONDS)).isTrue();
+            currentSession.setDocumentUriLockContentionObserver(uriText -> secondContendedForLock.countDown());
+
+            Future<List<SemanticCall>> second = executor.submit(() -> service.outgoingCalls(snapshot, method));
+            assertThat(secondContendedForLock.await(1, TimeUnit.SECONDS)).isTrue();
+            assertThat(server.openedUris).containsExactly(uri);
+            assertThat(server.lifecycleEvents).containsExactly("open", "query");
+
+            server.releaseOutgoingCalls.countDown();
+            assertThat(first.get(1, TimeUnit.SECONDS)).isEmpty();
+            assertThat(second.get(1, TimeUnit.SECONDS)).isEmpty();
+            assertThat(server.lifecycleEvents).containsExactly(
+                    "open", "query", "close", "open", "query", "close");
+        } finally {
+            executor.shutdownNow();
+        }
+    }
+
+    @Test
+    void should_serialize_real_path_aliases_under_one_canonical_document_uri() throws Exception {
+        JdtWorkspaceSession currentSession = session(server);
+        service = new Lsp4jJavaSemanticService(new FakeWorkspaceManager(currentSession));
+        String uri = sourceFile("OrderCrudService");
+        Path alias = root.resolve("src/main/java/com/example/generic/OrderCrudServiceAlias.java");
+        Files.createSymbolicLink(alias, Path.of(URI.create(uri)));
+        SemanticMethod canonical = methodAt(uri, 10, 16);
+        SemanticMethod aliased = methodAt(alias.toUri().toString(), 10, 16);
+        server.prepareItems = List.of(callItem("processOrder(Order) : void", uri, 10, 16));
+        server.outgoingCallsStarted = new CountDownLatch(1);
+        server.releaseOutgoingCalls = new CountDownLatch(1);
+        CountDownLatch aliasContendedForLock = new CountDownLatch(1);
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        try {
+            Future<List<SemanticCall>> first = executor.submit(() -> service.outgoingCalls(snapshot, canonical));
+            assertThat(server.outgoingCallsStarted.await(1, TimeUnit.SECONDS)).isTrue();
+            currentSession.setDocumentUriLockContentionObserver(uriText -> aliasContendedForLock.countDown());
+            Future<List<SemanticCall>> second = executor.submit(() -> service.outgoingCalls(snapshot, aliased));
+            assertThat(aliasContendedForLock.await(1, TimeUnit.SECONDS)).isTrue();
+            assertThat(server.lifecycleEvents).containsExactly("open", "query");
+            assertThat(server.openedUris).containsExactly(uri);
+
+            server.releaseOutgoingCalls.countDown();
+            assertThat(first.get(1, TimeUnit.SECONDS)).isEmpty();
+            assertThat(second.get(1, TimeUnit.SECONDS)).isEmpty();
+            assertThat(server.openedUris).containsExactly(uri, uri);
+        } finally {
+            executor.shutdownNow();
+        }
     }
 
     @Test
@@ -628,13 +751,36 @@ class Lsp4jJavaSemanticServiceTest {
     }
 
     @Test
-    void should_throw_symbol_not_found_when_the_call_hierarchy_cannot_be_prepared() throws IOException {
-        String orderUri = sourceFile("OrderCrudService");
+    void should_log_a_safe_failure_when_the_call_hierarchy_cannot_be_prepared(
+            CapturedOutput output) throws IOException {
+        String sourceSentinel = "RESTRICTED_PREPARE_EMPTY_SOURCE";
+        String orderUri = sourceFile(sourceSentinel);
         SemanticMethod method = methodAt(orderUri, 10, 16);
         server.prepareItems = List.of();
+        int outputStart = output.getAll().length();
 
-        assertThatThrownBy(() -> service.outgoingCalls(snapshot, method))
-                .isInstanceOf(SemanticSymbolNotFoundException.class);
+        assertThat(service.outgoingCalls(snapshot, method)).isEmpty();
+        assertThat(output.getAll().substring(outputStart))
+                .contains("phase=jdtls-outgoing outcome=failed reason=call-hierarchy-not-prepared "
+                        + "repoId=order-service")
+                .doesNotContain(sourceSentinel);
+    }
+
+    @Test
+    void should_not_log_a_failure_when_jdt_ls_returns_no_outgoing_calls(
+            CapturedOutput output) throws IOException {
+        String sourceSentinel = "RESTRICTED_NO_CALLS_SOURCE";
+        String orderUri = sourceFile(sourceSentinel);
+        SemanticMethod method = methodAt(orderUri, 10, 16);
+        server.prepareItems = List.of(callItem("processOrder(Order) : void", orderUri, 10, 16));
+        server.outgoingCalls = List.of();
+        int outputStart = output.getAll().length();
+
+        assertThat(service.outgoingCalls(snapshot, method)).isEmpty();
+        assertThat(output.getAll().substring(outputStart))
+                .doesNotContain("outcome=no-calls")
+                .doesNotContain("outcome=failed")
+                .doesNotContain(sourceSentinel);
     }
 
     @Test
@@ -681,20 +827,6 @@ class Lsp4jJavaSemanticServiceTest {
         assertThat(implementations).containsExactly();
     }
 
-    @Test
-    void should_read_left_and_right_workspace_symbol_responses_alike() throws IOException {
-        String uri = sourceFile("OrderCrudService");
-        SymbolInformation flat = new SymbolInformation(
-                "OrderCrudService", SymbolKind.Class, new Location(uri, range(0, 0, 30, 0)), PACKAGE);
-        server.workspaceSymbolsLeft = List.of(flat);
-        server.documentSymbols.put(uri, List.of(Either.forRight(
-                classSymbol("OrderCrudService", method("processOrder(Order)", " : void", 10, 16, 10, 28)))));
-
-        SemanticMethod resolved = service.resolveMethod(snapshot, PACKAGE, "OrderCrudService", "processOrder");
-
-        assertThat(resolved.location().uri()).isEqualTo(uri);
-    }
-
     private SemanticMethod methodAt(String uri, int line, int character) {
         SemanticRange range = new SemanticRange(
                 new SemanticPosition(line, character), new SemanticPosition(line + 2, 1));
@@ -714,6 +846,14 @@ class Lsp4jJavaSemanticServiceTest {
         Files.createDirectories(file.getParent());
         Files.writeString(file, "package " + packageName + ";\npublic class " + className + " {}\n");
         return file.toUri().toString();
+    }
+
+    private void deleteSource(Path source) {
+        try {
+            Files.delete(source);
+        } catch (IOException exception) {
+            throw new IllegalStateException(exception);
+        }
     }
 
     private String otherFile(String relativePath) throws IOException {
@@ -807,6 +947,7 @@ class Lsp4jJavaSemanticServiceTest {
 
         private final JdtWorkspaceSession session;
         private final RuntimeException getOrStartFailure;
+        private final AtomicInteger getOrStartCalls = new AtomicInteger();
 
         private FakeWorkspaceManager(JdtWorkspaceSession session) {
             this.session = Objects.requireNonNull(session, "session is required");
@@ -821,10 +962,15 @@ class Lsp4jJavaSemanticServiceTest {
 
         @Override
         public JdtWorkspaceSession getOrStart(RepositorySnapshot snapshot) {
+            getOrStartCalls.incrementAndGet();
             if (Objects.nonNull(getOrStartFailure)) {
                 throw getOrStartFailure;
             }
             return session;
+        }
+
+        private int getOrStartCalls() {
+            return getOrStartCalls.get();
         }
 
         @Override
@@ -843,7 +989,7 @@ class Lsp4jJavaSemanticServiceTest {
         }
     }
 
-    private static final class FakeLanguageServer implements LanguageServer {
+    private static final class FakeLanguageServer implements JdtLsLanguageServer {
 
         private final FakeWorkspaceService workspaceService = new FakeWorkspaceService();
         private final FakeTextDocumentService textDocumentService = new FakeTextDocumentService();
@@ -853,6 +999,7 @@ class Lsp4jJavaSemanticServiceTest {
         private final Map<String, List<Either<SymbolInformation, DocumentSymbol>>> documentSymbols =
                 new ConcurrentHashMap<>();
         private final Map<String, RuntimeException> documentSymbolFailures = new ConcurrentHashMap<>();
+        private final Map<String, Runnable> documentSymbolActions = new ConcurrentHashMap<>();
         private final Set<String> hangingDocumentSymbolUris = ConcurrentHashMap.newKeySet();
         private List<CallHierarchyItem> prepareItems = List.of();
         private List<CallHierarchyOutgoingCall> outgoingCalls = List.of();
@@ -860,9 +1007,15 @@ class Lsp4jJavaSemanticServiceTest {
                 Either.forLeft(List.of());
         private Either<List<? extends Location>, List<? extends LocationLink>> definitionResponse =
                 Either.forLeft(List.of());
+        private Throwable closeFailure;
+        private Throwable prepareFailure;
+        private CountDownLatch outgoingCallsStarted = new CountDownLatch(0);
+        private CountDownLatch releaseOutgoingCalls = new CountDownLatch(0);
         private final List<String> openedUris = Collections.synchronizedList(new ArrayList<>());
+        private final List<Position> preparePositions = Collections.synchronizedList(new ArrayList<>());
         private final List<Position> definitionPositions = Collections.synchronizedList(new ArrayList<>());
         private final List<String> closedUris = Collections.synchronizedList(new ArrayList<>());
+        private final List<String> lifecycleEvents = Collections.synchronizedList(new ArrayList<>());
 
         @Override
         public CompletableFuture<InitializeResult> initialize(InitializeParams params) {
@@ -887,6 +1040,11 @@ class Lsp4jJavaSemanticServiceTest {
         @Override
         public WorkspaceService getWorkspaceService() {
             return workspaceService;
+        }
+
+        @Override
+        public CompletableFuture<JdtLsBuildWorkspaceStatus> buildWorkspace(Boolean forceRebuild) {
+            return CompletableFuture.completedFuture(JdtLsBuildWorkspaceStatus.SUCCEED);
         }
 
         private final class FakeWorkspaceService implements WorkspaceService {
@@ -924,18 +1082,34 @@ class Lsp4jJavaSemanticServiceTest {
                 if (Objects.nonNull(failure)) {
                     return CompletableFuture.failedFuture(failure);
                 }
+                Optional.ofNullable(documentSymbolActions.get(uri)).ifPresent(Runnable::run);
                 return CompletableFuture.completedFuture(documentSymbols.getOrDefault(uri, List.of()));
             }
 
             @Override
             public CompletableFuture<List<CallHierarchyItem>> prepareCallHierarchy(
                     CallHierarchyPrepareParams params) {
+                preparePositions.add(params.getPosition());
+                if (Objects.nonNull(prepareFailure)) {
+                    return CompletableFuture.failedFuture(prepareFailure);
+                }
                 return CompletableFuture.completedFuture(prepareItems);
             }
 
             @Override
             public CompletableFuture<List<CallHierarchyOutgoingCall>> callHierarchyOutgoingCalls(
                     CallHierarchyOutgoingCallsParams params) {
+                lifecycleEvents.add("query");
+                outgoingCallsStarted.countDown();
+                try {
+                    if (!releaseOutgoingCalls.await(1, TimeUnit.SECONDS)) {
+                        return CompletableFuture.failedFuture(
+                                new IllegalStateException("outgoing call was not released"));
+                    }
+                } catch (InterruptedException exception) {
+                    Thread.currentThread().interrupt();
+                    return CompletableFuture.failedFuture(exception);
+                }
                 return CompletableFuture.completedFuture(outgoingCalls);
             }
 
@@ -955,11 +1129,19 @@ class Lsp4jJavaSemanticServiceTest {
             @Override
             public void didOpen(DidOpenTextDocumentParams params) {
                 openedUris.add(params.getTextDocument().getUri());
+                lifecycleEvents.add("open");
             }
 
             @Override
             public void didClose(DidCloseTextDocumentParams params) {
+                if (closeFailure instanceof RuntimeException exception) {
+                    throw exception;
+                }
+                if (closeFailure instanceof Error error) {
+                    throw error;
+                }
                 closedUris.add(params.getTextDocument().getUri());
+                lifecycleEvents.add("close");
             }
 
             @Override

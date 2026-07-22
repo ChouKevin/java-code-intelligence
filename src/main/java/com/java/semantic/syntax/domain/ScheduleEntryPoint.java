@@ -1,5 +1,7 @@
 package com.java.semantic.syntax.domain;
 
+import java.util.Objects;
+
 /**
  * 排程任務
  *
@@ -12,7 +14,12 @@ public record ScheduleEntryPoint(
         String name,
         String description,
         ScheduleTriggerKind triggerKind,
-        String triggerValue) implements EntryPointMethod {
+        String triggerValue,
+        MethodTargetResolution analysisTarget) implements EntryPointMethod {
+
+    public ScheduleEntryPoint {
+        analysisTarget = Objects.requireNonNull(analysisTarget, "analysisTarget is required");
+    }
 
     @Override
     public EntryPointType type() {

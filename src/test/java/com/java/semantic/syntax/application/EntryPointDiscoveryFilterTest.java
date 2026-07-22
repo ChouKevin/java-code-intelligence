@@ -14,6 +14,7 @@ import com.java.semantic.syntax.domain.EntryPointMethod;
 import com.java.semantic.syntax.domain.EntryPointType;
 import com.java.semantic.syntax.domain.MqBroker;
 import com.java.semantic.syntax.domain.MqEntryPoint;
+import com.java.semantic.syntax.domain.MethodTargetResolution;
 import com.java.semantic.syntax.domain.RepositorySyntax;
 import com.java.semantic.syntax.domain.ScheduleEntryPoint;
 import com.java.semantic.syntax.domain.ScheduleTriggerKind;
@@ -55,7 +56,7 @@ class EntryPointDiscoveryFilterTest {
     void should_return_empty_syntax_when_repository_is_forbidden() {
         RepositorySyntax syntax = new RepositorySyntax(
                 List.of(entryPointClass(new ApiEntryPoint(
-                        "read", "secret", "/read", List.of("GET"), List.of("secret")))),
+                        "read", "secret", "/read", List.of("GET"), List.of("secret"), unresolved()))),
                 List.of(secretClassMetadata));
         when(readPolicy.visibilityOfRepository("orders"))
                 .thenReturn(EvidenceVisibility.BUSINESS_READ_FORBIDDEN);
@@ -79,11 +80,13 @@ class EntryPointDiscoveryFilterTest {
                         entryPointClass(
                                 "com.acme.secret.child",
                                 "PackageHidden",
-                                new ApiEntryPoint("packageRead", "", "/package", List.of("GET"), List.of())),
+                                new ApiEntryPoint(
+                                        "packageRead", "", "/package", List.of("GET"), List.of(), unresolved())),
                         entryPointClass(
                                 "com.acme.publicapi",
                                 "HiddenClass",
-                                new ApiEntryPoint("classRead", "", "/class", List.of("GET"), List.of()))),
+                                new ApiEntryPoint(
+                                        "classRead", "", "/class", List.of("GET"), List.of(), unresolved()))),
                 List.of(secretClassMetadata));
 
         RepositorySyntax filtered = configuredFilter.filter(
@@ -104,9 +107,9 @@ class EntryPointDiscoveryFilterTest {
         EntryPointDiscoveryFilter configuredFilter = new EntryPointDiscoveryFilter(configuredPolicy);
         RepositorySyntax syntax = new RepositorySyntax(
                 List.of(entryPointClass(
-                        new ApiEntryPoint("read", "", "/read-one", List.of("GET"), List.of()),
-                        new ApiEntryPoint("read", "", "/read-two", List.of("POST"), List.of()),
-                        new ApiEntryPoint("write", "", "/write", List.of("POST"), List.of()))),
+                        new ApiEntryPoint("read", "", "/read-one", List.of("GET"), List.of(), unresolved()),
+                        new ApiEntryPoint("read", "", "/read-two", List.of("POST"), List.of(), unresolved()),
+                        new ApiEntryPoint("write", "", "/write", List.of("POST"), List.of(), unresolved()))),
                 List.of());
 
         RepositorySyntax filtered = configuredFilter.filter(
@@ -122,10 +125,11 @@ class EntryPointDiscoveryFilterTest {
     void should_filter_denied_and_unrequested_methods_without_reordering_survivors() {
         RepositorySyntax syntax = new RepositorySyntax(
                 List.of(entryPointClass(
-                        new ApiEntryPoint("read", "secret", "/read", List.of("GET"), List.of("secret")),
-                        new MqEntryPoint("consume", "allowed", MqBroker.KAFKA, List.of("orders")),
+                        new ApiEntryPoint(
+                                "read", "secret", "/read", List.of("GET"), List.of("secret"), unresolved()),
+                        new MqEntryPoint("consume", "allowed", MqBroker.KAFKA, List.of("orders"), unresolved()),
                         new ScheduleEntryPoint(
-                                "refresh", "allowed", ScheduleTriggerKind.CRON, "0 * * * * *"))),
+                                "refresh", "allowed", ScheduleTriggerKind.CRON, "0 * * * * *", unresolved()))),
                 List.of(secretClassMetadata));
         when(readPolicy.visibilityOfRepository("orders")).thenReturn(EvidenceVisibility.READABLE);
         when(readPolicy.visibilityOf(any(TypeId.class))).thenReturn(EvidenceVisibility.READABLE);
@@ -151,7 +155,7 @@ class EntryPointDiscoveryFilterTest {
     void should_drop_class_when_no_method_survives() {
         RepositorySyntax syntax = new RepositorySyntax(
                 List.of(entryPointClass(new ApiEntryPoint(
-                        "read", "", "/read", List.of("GET"), List.of()))),
+                        "read", "", "/read", List.of("GET"), List.of(), unresolved()))),
                 List.of());
         when(readPolicy.visibilityOfRepository("orders")).thenReturn(EvidenceVisibility.READABLE);
         when(readPolicy.visibilityOf(any(TypeId.class))).thenReturn(EvidenceVisibility.READABLE);
@@ -167,7 +171,7 @@ class EntryPointDiscoveryFilterTest {
     void should_remove_all_class_metadata_from_public_discovery_result() {
         RepositorySyntax syntax = new RepositorySyntax(
                 List.of(entryPointClass(new ApiEntryPoint(
-                        "allowed", "", "/allowed", List.of("GET"), List.of()))),
+                        "allowed", "", "/allowed", List.of("GET"), List.of(), unresolved()))),
                 List.of(secretClassMetadata));
         when(readPolicy.visibilityOfRepository("orders")).thenReturn(EvidenceVisibility.READABLE);
         when(readPolicy.visibilityOf(any(TypeId.class))).thenReturn(EvidenceVisibility.READABLE);
@@ -184,6 +188,10 @@ class EntryPointDiscoveryFilterTest {
 
     private static EntryPointClass entryPointClass(EntryPointMethod... methods) {
         return entryPointClass("com.acme", "EntryPointController", methods);
+    }
+
+    private static MethodTargetResolution unresolved() {
+        return MethodTargetResolution.unresolved("TEST_ANALYSIS_TARGET_UNAVAILABLE");
     }
 
     private static EntryPointClass entryPointClass(

@@ -1,8 +1,10 @@
 package com.java.semantic.repository.application;
 
 import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
+import com.java.semantic.identity.MethodTarget;
 import com.java.semantic.repository.config.RepositoryProperties;
 import com.java.semantic.repository.domain.RepositoryId;
 import com.java.semantic.repository.domain.RepositoryMode;
@@ -13,6 +15,10 @@ import com.java.semantic.repository.domain.RepositoryStatus;
 import com.java.semantic.repository.port.GitRepositoryPort;
 import com.java.semantic.repository.port.RepositoryMutationListener;
 import com.java.semantic.repository.port.RepositorySnapshotPublicationListener;
+import com.java.semantic.semantic.domain.SemanticBindingAmbiguousException;
+import com.java.semantic.semantic.domain.SemanticBindingUnresolvedException;
+import com.java.semantic.semantic.domain.SemanticRequestTimeoutException;
+import com.java.semantic.semantic.domain.SemanticTargetNotFoundException;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.api.io.TempDir;
@@ -281,20 +287,104 @@ class RepositoryConcurrencyTest {
                 String renderedOutput = event.getFormattedMessage();
                 String arguments = Arrays.toString(event.getArgumentArray());
                 assertThat(renderedOutput)
-                        .contains("REPOSITORY_MUTATION_FAILED", "repositoryId=test-repo",
-                                "operation=" + operation.logName())
+                        .contains("phase=repository-mutation", "outcome=failed", "repoId=test-repo",
+                                "operation=" + operation.logName(),
+                                "exceptionType=RepositoryMutationException")
                         .doesNotContain("MUTATION_FAILURE_SENTINEL", "https://",
-                                "ghp_realsecretvalue", "RepositoryMutationException",
-                                "IllegalStateException", "at ");
+                                "ghp_realsecretvalue", "IllegalStateException", "at ");
                 assertThat(arguments)
                         .doesNotContain("MUTATION_FAILURE_SENTINEL", "https://",
-                                "ghp_realsecretvalue", "RepositoryMutationException",
-                                "IllegalStateException", "at ");
+                                "ghp_realsecretvalue", "IllegalStateException", "at ");
                 assertThat(event.getThrowableProxy()).isNull();
             });
         } finally {
             logger.detachAppender(appender);
             appender.stop();
+        }
+    }
+
+    @Test
+    void should_log_expected_snapshot_failures_at_warn_without_a_throwable() {
+        DefaultRepositoryApplicationService service = service(new FakeGitRepositoryPort(), Duration.ofMillis(100));
+        service.ensure(REPOSITORY_ID);
+        Logger logger = (Logger) LoggerFactory.getLogger(DefaultRepositoryApplicationService.class);
+        ListAppender<ILoggingEvent> appender = attach(logger);
+        try {
+            assertThatThrownBy(() -> service.withSnapshot(
+                    REPOSITORY_ID,
+                    Optional.empty(),
+                    snapshot -> {
+                        throw new RepositoryNotReadyException(REPOSITORY_ID);
+                    }))
+                    .isInstanceOf(RepositoryNotReadyException.class);
+
+            assertSnapshotFailure(appender.list, Level.WARN, "RepositoryNotReadyException");
+        } finally {
+            detach(logger, appender);
+        }
+    }
+
+    @Test
+    void should_log_unexpected_snapshot_failures_at_error_without_a_throwable() {
+        DefaultRepositoryApplicationService service = service(new FakeGitRepositoryPort(), Duration.ofMillis(100));
+        service.ensure(REPOSITORY_ID);
+        Logger logger = (Logger) LoggerFactory.getLogger(DefaultRepositoryApplicationService.class);
+        ListAppender<ILoggingEvent> appender = attach(logger);
+        try {
+            assertThatThrownBy(() -> service.withSnapshot(
+                    REPOSITORY_ID,
+                    Optional.empty(),
+                    snapshot -> {
+                        throw new IllegalStateException("RESTRICTED_SNAPSHOT_FAILURE_SENTINEL");
+                    }))
+                    .isInstanceOf(IllegalStateException.class);
+
+            assertSnapshotFailure(appender.list, Level.ERROR, "IllegalStateException");
+        } finally {
+            detach(logger, appender);
+        }
+    }
+
+    @Test
+    void should_log_expected_semantic_callback_failures_at_warn() {
+        DefaultRepositoryApplicationService service = service(new FakeGitRepositoryPort(), Duration.ofMillis(100));
+        service.ensure(REPOSITORY_ID);
+        MethodTarget target = new MethodTarget(
+                "OrderService.java", "com.example", "OrderService", "placeOrder", List.of());
+        List<RuntimeException> expectedFailures = List.of(
+                new SemanticBindingAmbiguousException(target, List.of(
+                        target,
+                        new MethodTarget(
+                                "AlternativeOrderService.java",
+                                "com.example",
+                                "AlternativeOrderService",
+                                "placeOrder",
+                                List.of()))),
+                new SemanticBindingUnresolvedException(target),
+                new SemanticRequestTimeoutException(),
+                new SemanticTargetNotFoundException(target));
+        Logger logger = (Logger) LoggerFactory.getLogger(DefaultRepositoryApplicationService.class);
+        ListAppender<ILoggingEvent> appender = attach(logger);
+        try {
+            for (RuntimeException expectedFailure : expectedFailures) {
+                assertThatThrownBy(() -> service.withSnapshot(
+                        REPOSITORY_ID,
+                        Optional.empty(),
+                        snapshot -> {
+                            throw expectedFailure;
+                        }))
+                        .isSameAs(expectedFailure);
+            }
+
+            List<ILoggingEvent> failures = appender.list.stream()
+                    .filter(event -> event.getFormattedMessage().contains("phase=snapshot outcome=failed"))
+                    .toList();
+            assertThat(failures).hasSize(4).allSatisfy(event -> {
+                assertThat(event.getLevel()).isEqualTo(Level.WARN);
+                assertThat(event.getThrowableProxy()).isNull();
+            });
+        } finally {
+            detach(logger, appender);
         }
     }
 
@@ -313,6 +403,31 @@ class RepositoryConcurrencyTest {
                 git.failNextCheckout();
             }
         }
+    }
+
+    private ListAppender<ILoggingEvent> attach(Logger logger) {
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        return appender;
+    }
+
+    private void detach(Logger logger, ListAppender<ILoggingEvent> appender) {
+        logger.detachAppender(appender);
+        appender.stop();
+    }
+
+    private void assertSnapshotFailure(List<ILoggingEvent> events, Level level, String exceptionType) {
+        List<ILoggingEvent> failures = events.stream()
+                .filter(event -> event.getFormattedMessage().contains("phase=snapshot outcome=failed"))
+                .toList();
+        assertThat(failures).singleElement().satisfies(event -> {
+            assertThat(event.getLevel()).isEqualTo(level);
+            assertThat(event.getFormattedMessage())
+                    .contains("repoId=test-repo", "exceptionType=" + exceptionType)
+                    .doesNotContain("RESTRICTED_SNAPSHOT_FAILURE_SENTINEL", " at ");
+            assertThat(event.getThrowableProxy()).isNull();
+        });
     }
 
     private RepositoryStatus executeMutation(

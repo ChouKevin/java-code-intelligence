@@ -193,8 +193,10 @@ class ArchitectureTest {
                         "com.java.semantic.repository.application..",
                         "com.java.semantic.repository.domain..",
                         "java..",
+                        "lombok..",
+                        "org.slf4j..",
                         "org.springframework..")
-                .as("semantic application may orchestrate repository application/domain contracts only")
+                .as("semantic application may orchestrate repository application/domain contracts with safe diagnostics")
                 .allowEmptyShould(false)
                 .check(classes);
     }
@@ -270,6 +272,33 @@ class ArchitectureTest {
                         "org.eclipse.jgit..",
                         "..repository.adapter..",
                         "..semantic.adapter.jdtls..")
+                .allowEmptyShould(false)
+                .check(classes);
+    }
+
+    @Test
+    void should_keep_outgoing_graph_response_dtos_free_of_domain_and_runtime_types() {
+        noClasses()
+                .that().haveSimpleName("PositionResponse")
+                .or().haveSimpleName("SourceRangeResponse")
+                .or().haveSimpleName("GraphTraversalResponse")
+                .or().haveSimpleName("GraphNodeResponse")
+                .or().haveSimpleName("GraphEdgeResponse")
+                .or().haveSimpleName("GraphWarningResponse")
+                .or().haveSimpleName("GraphErrorResponse")
+                .or().haveSimpleName("OutgoingCallGraphResponse")
+                .should().dependOnClassesThat().resideInAnyPackage(
+                        "com.java.semantic.identity..",
+                        "com.java.semantic.repository..",
+                        "com.java.semantic.semantic..",
+                        "com.java.semantic.callgraph..",
+                        "java.io..",
+                        "java.net..",
+                        "java.nio.file..",
+                        "org.eclipse.lsp4j..",
+                        "org.eclipse.jdt..",
+                        "org.eclipse.jgit..")
+                .as("outgoing graph response DTOs must remain API-only wire values")
                 .allowEmptyShould(false)
                 .check(classes);
     }

@@ -9,6 +9,9 @@ public sealed interface EntryPointMethod permits ApiEntryPoint, MqEntryPoint, Sc
     /** 方法 Javadoc，取不到時為空字串 */
     String description();
 
+    /** 方法宣告的 canonical analysis target 證明 */
+    MethodTargetResolution analysisTarget();
+
     /** 入口類型 */
     EntryPointType type();
 }

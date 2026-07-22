@@ -6,9 +6,11 @@ import ch.qos.logback.core.AppenderBase;
 import com.java.semantic.repository.domain.RepositoryId;
 import com.java.semantic.repository.domain.RepositoryRevision;
 import com.java.semantic.repository.domain.RepositorySnapshot;
+import com.java.semantic.identity.MethodTarget;
 import com.java.semantic.syntax.domain.ApiEntryPoint;
 import com.java.semantic.syntax.domain.EntryPointClass;
 import com.java.semantic.syntax.domain.EntryPointMethod;
+import com.java.semantic.syntax.domain.MethodTargetResolution;
 import com.java.semantic.syntax.domain.RepositorySyntax;
 import org.assertj.core.groups.Tuple;
 import org.junit.jupiter.api.Test;
@@ -213,6 +215,50 @@ class ApiTrieServiceTest {
     }
 
     @Test
+    void should_choose_the_same_complete_resolved_target_when_tied_route_display_fields_reverse() {
+        MethodTarget smallerTarget = new MethodTarget(
+                "src/main/java/com/example/a/OrderHandler.java",
+                "com.example.a",
+                "OrderHandler",
+                "handle",
+                List.of("java.lang.Integer"));
+        MethodTarget largerTarget = new MethodTarget(
+                "src/main/java/com/example/z/OrderHandler.java",
+                "com.example.z",
+                "OrderHandler",
+                "handle",
+                List.of("java.lang.String"));
+        EntryPointClass smaller = route(
+                "SameController",
+                "sameHandler",
+                "GET",
+                "/complete-target-collision",
+                MethodTargetResolution.resolved(smallerTarget));
+        EntryPointClass larger = route(
+                "SameController",
+                "sameHandler",
+                "GET",
+                "/complete-target-collision",
+                MethodTargetResolution.resolved(largerTarget));
+        ApiTrieService forward = new ApiTrieService();
+        ApiTrieService reversed = new ApiTrieService();
+
+        forward.reload(snapshot("repo", SHA_ONE.value()), syntax(larger, smaller));
+        reversed.reload(snapshot("repo", SHA_ONE.value()), syntax(smaller, larger));
+
+        assertThat(forward.lookupCandidates("/complete-target-collision", "GET", ""))
+                .singleElement()
+                .extracting(ApiEntryPointRef::analysisTarget)
+                .extracting(resolution -> resolution.target().orElseThrow())
+                .isEqualTo(smallerTarget);
+        assertThat(reversed.lookupCandidates("/complete-target-collision", "GET", ""))
+                .singleElement()
+                .extracting(ApiEntryPointRef::analysisTarget)
+                .extracting(resolution -> resolution.target().orElseThrow())
+                .isEqualTo(smallerTarget);
+    }
+
+    @Test
     void should_order_cross_repo_candidates_when_same_route_exists_in_multiple_repositories(
             CapturedOutput output) {
         ApiTrieService service = new ApiTrieService();
@@ -406,6 +452,18 @@ class ApiTrieServiceTest {
         assertThat(result).get().extracting(ApiEntryPointRef::methodName).isEqualTo("handler");
     }
 
+    @Test
+    void should_preserve_the_exact_api_entry_point_resolution_in_the_trie_reference() {
+        MethodTargetResolution resolution = MethodTargetResolution.resolved(new MethodTarget(
+                "src/main/java/com/example/Controller.java", "com.example", "Controller", "handler", List.of()));
+        EntryPointClass entryPointClass = route("Controller", "handler", "GET", "/route", resolution);
+        ApiTrieService service = new ApiTrieService();
+
+        service.reload(snapshot("repo", SHA_ONE.value()), syntax(entryPointClass));
+
+        assertThat(service.lookupCandidates("/route", "GET", "").get(0).analysisTarget()).isSameAs(resolution);
+    }
+
     private static RepositorySnapshot snapshot(String repoId, String revision) {
         return new RepositorySnapshot(
                 RepositoryId.of(repoId),
@@ -426,13 +484,41 @@ class ApiTrieServiceTest {
     }
 
     private static EntryPointClass route(
+            String className,
+            String methodName,
+            String httpMethod,
+            String path,
+            MethodTargetResolution resolution) {
+        List<EntryPointMethod> methods = List.of(new ApiEntryPoint(
+                methodName, "", path, List.of(httpMethod), List.of(), resolution));
+        return new EntryPointClass(
+                className,
+                "com.example",
+                "com/example/" + className + ".java",
+                "",
+                List.of(),
+                methods);
+    }
+
+    private static EntryPointClass route(
             String packageName,
             String className,
             String methodName,
             String httpMethod,
             String path) {
+        return route(packageName, className, methodName, httpMethod, path, resolvedTarget(
+                packageName, className, methodName));
+    }
+
+    private static EntryPointClass route(
+            String packageName,
+            String className,
+            String methodName,
+            String httpMethod,
+            String path,
+            MethodTargetResolution resolution) {
         List<EntryPointMethod> methods = List.of(new ApiEntryPoint(
-                methodName, "", path, List.of(httpMethod), List.of()));
+                methodName, "", path, List.of(httpMethod), List.of(), resolution));
         return new EntryPointClass(
                 className,
                 packageName,
@@ -440,6 +526,15 @@ class ApiTrieServiceTest {
                 "",
                 List.of(),
                 methods);
+    }
+
+    private static MethodTargetResolution resolvedTarget(String packageName, String className, String methodName) {
+        return MethodTargetResolution.resolved(new MethodTarget(
+                "src/main/java/" + packageName.replace('.', '/') + "/" + className + ".java",
+                packageName,
+                className,
+                methodName,
+                List.of()));
     }
 
     private static void await(CountDownLatch latch) {

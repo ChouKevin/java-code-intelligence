@@ -1,10 +1,12 @@
 package com.java.semantic.syntax.adapter.jdt;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 
+import com.java.semantic.identity.MethodTarget;
+import com.java.semantic.callgraph.application.RepositorySyntaxIndex;
 import com.java.semantic.syntax.domain.ClassMetadata;
 import com.java.semantic.syntax.domain.ClassMetadata.FieldInfo;
 import com.java.semantic.syntax.domain.EntryPointMethod;
@@ -16,22 +18,13 @@ import com.java.semantic.syntax.domain.SyntaxInvocation;
 import com.java.semantic.syntax.domain.SyntaxInvocation.InvocationKind;
 import com.java.semantic.syntax.domain.SyntaxPosition;
 import com.java.semantic.syntax.domain.SyntaxRange;
+import com.java.semantic.syntax.domain.AnalysisTargetStatus;
 import com.java.semantic.syntax.domain.InvocationTarget;
 import com.java.semantic.syntax.domain.ResolvedTypeIdentity;
 import com.java.semantic.syntax.domain.TypeReference;
-import com.java.semantic.callgraph.application.EvidenceEnricher;
-import com.java.semantic.callgraph.application.RepositorySyntaxIndex;
-import com.java.semantic.callgraph.domain.CallNode;
-import com.java.semantic.callgraph.domain.CallNodeId;
-import com.java.semantic.callgraph.domain.CallType;
-import com.java.semantic.callgraph.domain.EvidenceVisibility;
-import com.java.semantic.callgraph.domain.ExplainableCallGraph;
-import com.java.semantic.callgraph.domain.FlattenedCallGraph;
-import com.java.semantic.callgraph.domain.MethodId;
-import com.java.semantic.config.ConfiguredReadPolicy;
-import com.java.semantic.config.ReadPolicyProperties;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 import static org.assertj.core.api.Assertions.tuple;
 
@@ -46,6 +39,139 @@ class ClassMetadataExtractorTest {
 
     private final List<ClassMetadata> evidenceClasses = SyntaxFixtures.extract(
             Path.of("src/test/resources/fixtures/syntax-evidence")).classes();
+
+    @Test
+    void should_capture_full_method_declarations_utf16_name_positions_and_declaration_flags(@TempDir Path tempDir)
+            throws java.io.IOException {
+        Path repositoryRoot = tempDir.resolve("order-service");
+        Path sourceRoot = repositoryRoot.resolve("src/main/java/com/example");
+        java.nio.file.Files.createDirectories(sourceRoot);
+        String source = """
+                package com.example;
+
+                abstract class FlagFixture {
+                    FlagFixture() {
+                    }
+
+                    private void privateMethod() {
+                    }
+
+                    static void staticMethod() {
+                    }
+
+                    final void finalMethod() {
+                    }
+
+                    void /* 😀 */ open(String text) {
+                        String emoji = "😀";
+                    }
+
+                    abstract void abstractMethod();
+
+                    void unresolved(MissingDependency dependency) {
+                    }
+                }
+                """;
+        java.nio.file.Files.writeString(sourceRoot.resolve("FlagFixture.java"), source);
+
+        ClassMetadata metadata = new JdtSyntaxExtractionService().extract(repositoryRoot).classes().getFirst();
+        MethodSignature open = methodOf(List.of(metadata), "com.example.FlagFixture", "open");
+        MethodSignature constructor = metadata.methods().stream()
+                .filter(MethodSignature::executableDeclaration)
+                .filter(method -> "FlagFixture".equals(method.name()))
+                .findFirst()
+                .orElseThrow();
+        MethodSignature abstractMethod = methodOf(List.of(metadata), "com.example.FlagFixture", "abstractMethod");
+        MethodSignature unresolved = methodOf(List.of(metadata), "com.example.FlagFixture", "unresolved");
+
+        assertThat(open.source().text()).isEqualTo("""
+                void /* 😀 */ open(String text) {
+                        String emoji = "😀";
+                    }""");
+        assertThat(open.range()).isEqualTo(new SyntaxRange(
+                new SyntaxPosition(15, 4), new SyntaxPosition(17, 5)));
+        assertThat(open.namePosition()).isEqualTo(new SyntaxPosition(15, source.lines().toList().get(15).indexOf("open")));
+        assertThat(open.analysisTarget().status()).isEqualTo(AnalysisTargetStatus.RESOLVED);
+        assertThat(open.analysisTarget().target()).get().satisfies(target -> {
+            assertThat(target.sourceFile()).isEqualTo("src/main/java/com/example/FlagFixture.java");
+            assertThat(target.parameterTypes()).containsExactly("java.lang.String");
+        });
+        assertThat(open.executableDeclaration()).isTrue();
+        assertThat(open.overridableDeclaration()).isTrue();
+        assertThat(constructor.overridableDeclaration()).isFalse();
+        assertThat(metadata.methods().stream().filter(method -> method.name().endsWith("Method"))
+                .filter(method -> !"abstractMethod".equals(method.name())))
+                .allSatisfy(method -> assertThat(method.overridableDeclaration()).isFalse());
+        assertThat(abstractMethod.executableDeclaration()).isFalse();
+        assertThat(abstractMethod.overridableDeclaration()).isTrue();
+
+        RepositorySyntaxIndex index = new RepositorySyntaxIndex(
+                "orders", new RepositorySyntax(List.of(), List.of(metadata)));
+        MethodTarget target = open.analysisTarget().target().orElseThrow();
+        assertThat(index.method(target)).contains(open);
+        assertThat(index.method(target.sourceFile(), open.range())).contains(open);
+        assertThat(index.method("src/main/java/com/example/Other.java", open.range())).isEmpty();
+        assertThat(index.method(target.sourceFile(), new SyntaxRange(
+                new SyntaxPosition(open.range().start().line(), open.range().start().character() + 1),
+                open.range().end()))).isEmpty();
+        assertThat(index.method(new MethodTarget("src/main/java/com/example/Other.java", target.packageName(),
+                target.className(), target.methodName(), target.parameterTypes()))).isEmpty();
+        assertThat(index.method(new MethodTarget(target.sourceFile(), "other.example", target.className(),
+                target.methodName(), target.parameterTypes()))).isEmpty();
+        assertThat(index.method(new MethodTarget(target.sourceFile(), target.packageName(), "Other",
+                target.methodName(), target.parameterTypes()))).isEmpty();
+        assertThat(index.method(new MethodTarget(target.sourceFile(), target.packageName(), target.className(), "other",
+                target.parameterTypes()))).isEmpty();
+        assertThat(index.method(new MethodTarget(target.sourceFile(), target.packageName(), target.className(),
+                target.methodName(), List.of("int")))).isEmpty();
+        assertThat(unresolved.analysisTarget().status()).isEqualTo(AnalysisTargetStatus.UNRESOLVED);
+        assertThat(index.method(target.sourceFile(), unresolved.range())).isEmpty();
+    }
+
+    @Test
+    void should_mark_methods_non_overridable_only_when_their_enclosing_declaration_cannot_be_subclassed(
+            @TempDir Path tempDir) throws java.io.IOException {
+        Path repositoryRoot = tempDir.resolve("overridable-declarations");
+        Path sourceRoot = repositoryRoot.resolve("src/main/java/com/example");
+        Files.createDirectories(sourceRoot);
+        Files.writeString(sourceRoot.resolve("OverridableDeclarations.java"), """
+                package com.example;
+
+                final class FinalFixture {
+                    void open() {
+                    }
+                }
+
+                record RecordFixture(String value) {
+                    void open() {
+                    }
+                }
+
+                class OrdinaryFixture {
+                    void open() {
+                    }
+                }
+
+                enum EnumFixture {
+                    SPECIAL {
+                        @Override
+                        void open() {
+                        }
+                    },
+                    STANDARD;
+
+                    void open() {
+                    }
+                }
+                """);
+
+        List<ClassMetadata> metadata = new JdtSyntaxExtractionService().extract(repositoryRoot).classes();
+
+        assertThat(methodOf(metadata, "com.example.FinalFixture", "open").overridableDeclaration()).isFalse();
+        assertThat(methodOf(metadata, "com.example.RecordFixture", "open").overridableDeclaration()).isFalse();
+        assertThat(methodOf(metadata, "com.example.OrdinaryFixture", "open").overridableDeclaration()).isTrue();
+        assertThat(methodOf(metadata, "com.example.EnumFixture", "open").overridableDeclaration()).isTrue();
+    }
 
     // --- 呼叫圖語法證據 ---
 
@@ -236,33 +362,6 @@ class ClassMetadataExtractorTest {
     }
 
     @Test
-    void should_redact_extracted_nested_method_reference_with_canonical_policy_identity() {
-        MethodSignature inspect = methodOf(evidenceClasses,
-                "com.example.evidence.PolicyIdentityFixture", "inspect");
-        MethodId methodId = new MethodId(
-                "orders", "com.example.evidence", "PolicyIdentityFixture", "inspect", inspect.paramTypes());
-        CallNode node = new CallNode(
-                new CallNodeId("node-1"), methodId, methodId.toString(), CallType.INTERNAL_SERVICE,
-                "PolicyIdentityFixture.java", 1, 1, Map.of(), inspect.source().text(),
-                EvidenceVisibility.READABLE);
-        ExplainableCallGraph graph = new ExplainableCallGraph(
-                methodId, List.of(node), List.of(), Map.of(),
-                new FlattenedCallGraph(List.of(), "", Map.of()));
-        ConfiguredReadPolicy policy = new ConfiguredReadPolicy(new ReadPolicyProperties(
-                List.of(), List.of(), List.of(), List.of(new ReadPolicyProperties.MethodRule(
-                        "orders", "com.example.evidence", "OuterIdentity$Inner", "overloaded", List.of("List")))));
-
-        ExplainableCallGraph enriched = new EvidenceEnricher(policy).enrich(
-                graph, new RepositorySyntaxIndex("orders", new RepositorySyntax(List.of(), evidenceClasses)),
-                Map.of()).graph();
-
-        assertThat(enriched.nodes()).singleElement().satisfies(value -> {
-            assertThat(value.code()).isEmpty();
-            assertThat(value.annotations()).isEmpty();
-        });
-    }
-
-    @Test
     void should_extract_type_variable_binding_bounds_for_method_field_and_self_reference() {
         MethodSignature load = methodOf(evidenceClasses,
                 "com.example.evidence.GenericBoundFixture", "load");
@@ -289,56 +388,6 @@ class ClassMetadataExtractorTest {
                         assertThat(nested.upperBounds()).hasSize(0));
             });
         });
-    }
-
-    @Test
-    void should_redact_type_variable_bound_sentinels_from_graph_legacy_and_json() throws Exception {
-        MethodSignature load = methodOf(evidenceClasses,
-                "com.example.evidence.GenericBoundFixture", "load");
-        MethodSignature related = methodOf(evidenceClasses,
-                "com.example.evidence.GenericBoundFixture", "related");
-        MethodId loadId = new MethodId(
-                "orders", "com.example.evidence", "GenericBoundFixture", "load", load.paramTypes());
-        MethodId relatedId = new MethodId(
-                "orders", "com.example.evidence", "GenericBoundFixture", "related", related.paramTypes());
-        CallNode loadNode = new CallNode(
-                new CallNodeId("node-1"), loadId, loadId.toString(), CallType.INTERNAL_SERVICE,
-                "GenericBoundFixture.java", 1, 1, Map.of(), "OLD_LOAD", EvidenceVisibility.READABLE);
-        CallNode relatedNode = new CallNode(
-                new CallNodeId("node-2"), relatedId, relatedId.toString(), CallType.INTERNAL_SERVICE,
-                "GenericBoundFixture.java", 1, 1, Map.of(), "OLD_RELATED", EvidenceVisibility.READABLE);
-        ExplainableCallGraph graph = new ExplainableCallGraph(
-                loadId, List.of(loadNode, relatedNode), List.of(), Map.of(),
-                new FlattenedCallGraph(List.of(), "", Map.of()));
-        ConfiguredReadPolicy policy = new ConfiguredReadPolicy(new ReadPolicyProperties(
-                List.of(), List.of(), List.of(new ReadPolicyProperties.ClassRule(
-                "orders", "com.example.evidence", "ForbiddenDto")), List.of()));
-
-        ExplainableCallGraph enriched = new EvidenceEnricher(policy).enrich(
-                graph, new RepositorySyntaxIndex("orders", new RepositorySyntax(List.of(), evidenceClasses)),
-                Map.of()).graph();
-        String serialized = new ObjectMapper().writeValueAsString(enriched);
-
-        assertThat(enriched.nodes()).filteredOn(node -> loadId.equals(node.methodId())).singleElement()
-                .satisfies(node -> {
-                    assertThat(node.code()).hasSize(0);
-                    assertThat(node.annotations()).hasSize(0);
-                });
-        assertThat(enriched.relatedClasses()).doesNotContainKey("com.example.evidence.BoundedBox");
-        assertThat(enriched.legacyFlattened().relatedClasses())
-                .doesNotContainKey("com.example.evidence.BoundedBox");
-        assertThat(enriched.legacyFlattened().methods())
-                .filteredOn(node -> loadId.toString().equals(node.signature()))
-                .singleElement()
-                .satisfies(node -> assertThat(node.code()).hasSize(0));
-        assertThat(enriched.toString()).doesNotContain(
-                "METHOD_PARAMETER_RETURN_BOUND_FORBIDDEN_SENTINEL",
-                "RELATED_CLASS_BOUND_FORBIDDEN_SENTINEL",
-                "FORBIDDEN_DTO_BOUND_SENTINEL");
-        assertThat(serialized).doesNotContain(
-                "METHOD_PARAMETER_RETURN_BOUND_FORBIDDEN_SENTINEL",
-                "RELATED_CLASS_BOUND_FORBIDDEN_SENTINEL",
-                "FORBIDDEN_DTO_BOUND_SENTINEL");
     }
 
     // --- MyBatis SQL ---

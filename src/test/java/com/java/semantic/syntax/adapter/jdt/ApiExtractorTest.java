@@ -2,8 +2,10 @@ package com.java.semantic.syntax.adapter.jdt;
 
 import java.util.List;
 
+import com.java.semantic.identity.MethodTarget;
 import com.java.semantic.syntax.domain.ApiEntryPoint;
 import com.java.semantic.syntax.domain.EntryPointClass;
+import com.java.semantic.syntax.domain.RepositorySyntax;
 
 import org.junit.jupiter.api.Test;
 
@@ -12,7 +14,31 @@ import static org.assertj.core.api.Assertions.assertThat;
 /** API 抽取規則，這些規則在舊分析器裡沒有任何測試 */
 class ApiExtractorTest {
 
-    private final List<EntryPointClass> classes = SyntaxFixtures.extractSyntaxFixture().entryPoints();
+    private final RepositorySyntax syntax = SyntaxFixtures.extractSyntaxFixture();
+
+    private final List<EntryPointClass> classes = syntax.entryPoints();
+
+    @Test
+    void should_expose_the_resolved_canonical_target_for_an_api_entry_point_and_reuse_metadata_proof() {
+        ApiEntryPoint api = apiOf("OrderApiController", "get");
+        MethodTarget target = api.analysisTarget().target().orElseThrow();
+
+        assertThat(target).isEqualTo(new MethodTarget(
+                "src/main/java/com/example/syntax/OrderApiController.java",
+                "com.example.syntax",
+                "OrderApiController",
+                "get",
+                List.of("java.lang.Long")));
+        assertThat(metadataTargetOf("OrderApiController", "get")).isSameAs(api.analysisTarget());
+    }
+
+    @Test
+    void should_keep_nested_class_context_in_the_api_entry_point_target() {
+        MethodTarget target = apiOf("OrderApiController.NestedController", "inner").analysisTarget()
+                .target().orElseThrow();
+
+        assertThat(target.className()).isEqualTo("OrderApiController.NestedController");
+    }
 
     @Test
     void should_combine_a_constant_class_mapping_with_the_method_path_when_the_constant_lives_in_another_file() {
@@ -157,5 +183,15 @@ class ApiExtractorTest {
                 .filter(entry -> className.equals(entry.className()))
                 .findFirst()
                 .orElseThrow(() -> new AssertionError("no entry point class " + className));
+    }
+
+    private Object metadataTargetOf(String className, String methodName) {
+        return syntax.classes().stream()
+                .filter(metadata -> className.equals(metadata.className()))
+                .flatMap(metadata -> metadata.methods().stream())
+                .filter(method -> methodName.equals(method.name()))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("no metadata method " + className + "#" + methodName))
+                .analysisTarget();
     }
 }

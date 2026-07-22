@@ -1,13 +1,14 @@
 package com.java.semantic.semantic.adapter.jdtls;
 
-import com.java.semantic.semantic.domain.SemanticAmbiguousMethodException;
 import com.java.semantic.semantic.domain.SemanticAmbiguousTypeException;
+import com.java.semantic.semantic.domain.SemanticBindingAmbiguousException;
+import com.java.semantic.semantic.domain.SemanticBindingUnresolvedException;
 import com.java.semantic.semantic.domain.SemanticEngineException;
 import com.java.semantic.semantic.domain.SemanticEngineNotReadyException;
 import com.java.semantic.semantic.domain.SemanticEngineStartFailedException;
 import com.java.semantic.semantic.domain.SemanticProtocolException;
 import com.java.semantic.semantic.domain.SemanticRequestTimeoutException;
-import com.java.semantic.semantic.domain.SemanticSymbolNotFoundException;
+import com.java.semantic.semantic.domain.SemanticTargetNotFoundException;
 import org.eclipse.lsp4j.jsonrpc.ResponseErrorException;
 
 import java.util.Objects;
@@ -23,9 +24,10 @@ final class JdtLsSemanticExceptionNormalizer {
         Objects.requireNonNull(operation, "operation is required");
         try {
             return operation.get();
-        } catch (SemanticAmbiguousMethodException
-                 | SemanticAmbiguousTypeException
-                 | SemanticSymbolNotFoundException exception) {
+        } catch (SemanticAmbiguousTypeException
+                 | SemanticTargetNotFoundException
+                 | SemanticBindingUnresolvedException
+                 | SemanticBindingAmbiguousException exception) {
             throw exception;
         } catch (RuntimeException exception) {
             throw normalized(exception);
@@ -47,9 +49,10 @@ final class JdtLsSemanticExceptionNormalizer {
     private static RuntimeException normalized(RuntimeException exception) {
         RuntimeException normalized = normalizedOrOriginal(exception);
         return normalized instanceof SemanticEngineException
-                || normalized instanceof SemanticAmbiguousMethodException
                 || normalized instanceof SemanticAmbiguousTypeException
-                || normalized instanceof SemanticSymbolNotFoundException
+                || normalized instanceof SemanticTargetNotFoundException
+                || normalized instanceof SemanticBindingUnresolvedException
+                || normalized instanceof SemanticBindingAmbiguousException
                 ? normalized
                 : new SemanticProtocolException();
     }
@@ -74,13 +77,16 @@ final class JdtLsSemanticExceptionNormalizer {
         if (candidate instanceof SemanticEngineException semanticEngineException) {
             return semanticEngineException;
         }
-        if (candidate instanceof SemanticAmbiguousMethodException semanticException) {
-            return semanticException;
-        }
         if (candidate instanceof SemanticAmbiguousTypeException semanticException) {
             return semanticException;
         }
-        if (candidate instanceof SemanticSymbolNotFoundException semanticException) {
+        if (candidate instanceof SemanticTargetNotFoundException semanticException) {
+            return semanticException;
+        }
+        if (candidate instanceof SemanticBindingUnresolvedException semanticException) {
+            return semanticException;
+        }
+        if (candidate instanceof SemanticBindingAmbiguousException semanticException) {
             return semanticException;
         }
         if (candidate instanceof JdtWorkspaceSession.JdtRequestTimeoutException) {
@@ -93,7 +99,8 @@ final class JdtLsSemanticExceptionNormalizer {
             return new SemanticEngineStartFailedException();
         }
         if (candidate instanceof DefaultJdtWorkspaceManager.JdtWorkspaceManagerStoppedException
-                || candidate instanceof DefaultJdtWorkspaceManager.JdtWorkspaceCapacityException) {
+                || candidate instanceof DefaultJdtWorkspaceManager.JdtWorkspaceCapacityException
+                || candidate instanceof DefaultJdtWorkspaceManager.JdtWorkspaceTerminationPendingException) {
             return new SemanticEngineNotReadyException();
         }
         if (candidate instanceof JdtWorkspaceSession.JdtRequestFailedException

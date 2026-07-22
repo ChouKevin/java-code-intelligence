@@ -1,14 +1,20 @@
 package com.java.semantic.syntax.adapter.jdt;
 
 import java.util.ArrayList;
+import java.util.IdentityHashMap;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
+import java.util.function.Function;
 
 import com.java.semantic.syntax.domain.ClassMetadata;
 import com.java.semantic.syntax.domain.EntryPointClass;
 import com.java.semantic.syntax.domain.EntryPointMethod;
+import com.java.semantic.syntax.domain.MethodTargetResolution;
 
+import org.eclipse.jdt.core.dom.ASTNode;
 import org.eclipse.jdt.core.dom.AbstractTypeDeclaration;
+import org.eclipse.jdt.core.dom.MethodDeclaration;
 import org.springframework.util.CollectionUtils;
 
 /**
@@ -22,6 +28,15 @@ class SourceSyntaxExtractor {
 
     /** 一份編譯單元中的入口類別與型別 metadata */
     SourceSyntax extractFrom(ParsedSource parsed, MapperXmlSqlExtractor.SqlIndex sqlIndex) {
+        IdentityHashMap<MethodDeclaration, MethodTargetResolution> targetCache = new IdentityHashMap<>();
+        JdtCanonicalMethodTargetResolver resolver = new JdtCanonicalMethodTargetResolver();
+        Function<MethodDeclaration, MethodTargetResolution> analysisTargetOf = method -> targetCache.computeIfAbsent(
+                method,
+                declaration -> resolver.resolve(
+                        parsed.source(),
+                        PackageNames.of(parsed),
+                        SourceTypes.nestedName(enclosingTypeOf(declaration)),
+                        declaration));
         List<AbstractTypeDeclaration> types = SourceTypes.allTypesOf(parsed.unit());
         boolean skipEntryPoints = types.stream().anyMatch(ApiExtractor::isControllerAdvice);
 
@@ -29,24 +44,27 @@ class SourceSyntaxExtractor {
         List<ClassMetadata> classes = new ArrayList<>();
         for (AbstractTypeDeclaration type : types) {
             if (!skipEntryPoints) {
-                toEntryPointClass(parsed, type).ifPresent(entryPoints::add);
+                toEntryPointClass(parsed, type, analysisTargetOf).ifPresent(entryPoints::add);
             }
             if (SourceTypes.isMetadataCandidate(type)) {
-                classes.add(ClassMetadataExtractor.extract(parsed, type, sqlIndex));
+                classes.add(ClassMetadataExtractor.extract(parsed, type, sqlIndex, analysisTargetOf));
             }
         }
         return new SourceSyntax(List.copyOf(entryPoints), List.copyOf(classes));
     }
 
-    private Optional<EntryPointClass> toEntryPointClass(ParsedSource parsed, AbstractTypeDeclaration type) {
+    private Optional<EntryPointClass> toEntryPointClass(
+            ParsedSource parsed,
+            AbstractTypeDeclaration type,
+            Function<MethodDeclaration, MethodTargetResolution> analysisTargetOf) {
         if (AnnotationReader.isPresent(type, DEPRECATED)) {
             return Optional.empty();
         }
 
         List<EntryPointMethod> methods = new ArrayList<>();
-        methods.addAll(ApiExtractor.extract(type));
-        methods.addAll(MqExtractor.extract(type));
-        methods.addAll(ScheduleExtractor.extract(type));
+        methods.addAll(ApiExtractor.extract(type, analysisTargetOf));
+        methods.addAll(MqExtractor.extract(type, analysisTargetOf));
+        methods.addAll(ScheduleExtractor.extract(type, analysisTargetOf));
 
         if (CollectionUtils.isEmpty(methods)) {
             return Optional.empty();
@@ -59,5 +77,16 @@ class SourceSyntaxExtractor {
                 JavadocReader.descriptionOf(type),
                 ApiExtractor.basePathsOf(type),
                 methods));
+    }
+
+    private AbstractTypeDeclaration enclosingTypeOf(MethodDeclaration method) {
+        ASTNode current = method.getParent();
+        while (Objects.nonNull(current)) {
+            if (current instanceof AbstractTypeDeclaration type) {
+                return type;
+            }
+            current = current.getParent();
+        }
+        throw new IllegalArgumentException("method declaration has no enclosing type");
     }
 }

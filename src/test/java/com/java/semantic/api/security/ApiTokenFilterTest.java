@@ -35,6 +35,10 @@ class ApiTokenFilterTest {
         assertThat(result.response().getStatus()).isEqualTo(401);
         assertThat(result.filterChain().getRequest()).isNull();
         assertJsonError(result.response(), "SEMANTIC_UNAUTHORIZED", "X-Api-Token header is required");
+        assertThat(OBJECT_MAPPER.readTree(result.response().getContentAsString()).path("requestId").asText())
+                .isEqualTo("request-42");
+        assertThat(OBJECT_MAPPER.readTree(result.response().getContentAsString()).path("candidates").isArray())
+                .isTrue();
     }
 
     @Test
@@ -141,6 +145,7 @@ class ApiTokenFilterTest {
 
     private FilterResult invoke(ApiTokenFilter filter, MockHttpServletRequest request)
             throws Exception {
+        request.setAttribute("semantic.requestId", "request-42");
         MockHttpServletResponse response = new MockHttpServletResponse();
         MockFilterChain filterChain = new MockFilterChain();
         filter.doFilter(request, response, filterChain);

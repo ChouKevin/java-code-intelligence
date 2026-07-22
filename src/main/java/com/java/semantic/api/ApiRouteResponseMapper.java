@@ -25,6 +25,7 @@ public final class ApiRouteResponseMapper {
                 candidate.routeTemplate(),
                 candidate.packageName(),
                 candidate.className(),
-                candidate.methodName());
+                candidate.methodName(),
+                EntryPointResponseMapper.toResponse(candidate.analysisTarget()));
     }
 }

@@ -11,7 +11,8 @@ public record MqEntryPointMethodResponse(
         String description,
         EntryPointType type,
         MqBroker broker,
-        List<String> destinations) implements EntryPointMethodResponse {
+        List<String> destinations,
+        MethodTargetResolutionResponse analysisTarget) implements EntryPointMethodResponse {
 
     public MqEntryPointMethodResponse {
         type = Objects.requireNonNull(type, "type is required");
@@ -19,5 +20,6 @@ public record MqEntryPointMethodResponse(
             throw new IllegalArgumentException("MQ response requires MQ type");
         }
         destinations = List.copyOf(destinations);
+        analysisTarget = Objects.requireNonNull(analysisTarget, "analysisTarget is required");
     }
 }

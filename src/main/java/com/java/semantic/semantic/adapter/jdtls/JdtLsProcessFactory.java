@@ -13,10 +13,8 @@ import org.eclipse.lsp4j.TextDocumentClientCapabilities;
 import org.eclipse.lsp4j.TypeDefinitionCapabilities;
 import org.eclipse.lsp4j.WorkspaceClientCapabilities;
 import org.eclipse.lsp4j.jsonrpc.Launcher;
-import org.eclipse.lsp4j.launch.LSPLauncher;
-import org.eclipse.lsp4j.services.LanguageServer;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+
+import lombok.extern.slf4j.Slf4j;
 
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -33,12 +31,13 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.function.Consumer;
 import java.util.stream.Stream;
 
 /** 建立 JDT Language Server 程序與 LSP4J 連線 */
+@Slf4j
 public final class JdtLsProcessFactory {
 
-    private static final Logger LOGGER = LoggerFactory.getLogger(JdtLsProcessFactory.class);
     private static final String LAUNCHER_PREFIX = "org.eclipse.equinox.launcher_";
     private static final String LAUNCHER_SUFFIX = ".jar";
     private static final long TERMINATION_TIMEOUT_MILLIS = 100;
@@ -78,12 +77,24 @@ public final class JdtLsProcessFactory {
     /** 啟動程序並完成 LSP initialize handshake */
     public LaunchHandle launch(Path workspaceRoot, Path workspaceData, JdtLanguageClient client)
             throws IOException, InterruptedException, ExecutionException, TimeoutException {
+        return launch(workspaceRoot, workspaceData, client, process -> { });
+    }
+
+    LaunchHandle launch(
+            Path workspaceRoot,
+            Path workspaceData,
+            JdtLanguageClient client,
+            Consumer<Process> processStartedObserver)
+            throws IOException, InterruptedException, ExecutionException, TimeoutException {
+        Objects.requireNonNull(processStartedObserver, "processStartedObserver is required");
         Path launcherJar = findLauncherJar();
         List<String> command = createCommand(launcherJar, workspaceData);
         Process process = processStarter.start(command);
+        log.info("phase=jdtls-process outcome=started");
         LaunchResources resources = new LaunchResources(process);
         StderrRingBuffer stderrBuffer = new StderrRingBuffer(STDERR_BUFFER_LINES);
         try {
+            processStartedObserver.accept(process);
             CompletableFuture<Void> stderrDrain = startStderrDrain(
                     process.getErrorStream(), resources, stderrBuffer);
             Connection connection = connectionStarter.connect(client, process);
@@ -177,7 +188,7 @@ public final class JdtLsProcessFactory {
                 String line = reader.readLine();
                 while (Objects.nonNull(line)) {
                     String safeLine = buffer.add(line);
-                    LOGGER.debug("JDT LS stderr metadata: {}", safeLine);
+                    log.debug("phase=jdtls-stderr outcome=metadata {}", safeLine);
                     line = reader.readLine();
                 }
             } catch (Throwable exception) {
@@ -185,7 +196,8 @@ public final class JdtLsProcessFactory {
                 if (!JdtFatalErrorPolicy.isFatal(exception)) {
                     drainFailure = new StderrDrainException(exception.getClass().getSimpleName());
                 }
-                LOGGER.error("JDT LS stderr drain failed with {}", exception.getClass().getSimpleName());
+                log.error("phase=jdtls-stderr outcome=failed exceptionType={}",
+                        exception.getClass().getSimpleName());
                 try {
                     resources.release(drainFailure);
                 } catch (Throwable cleanupFailure) {
@@ -204,8 +216,8 @@ public final class JdtLsProcessFactory {
         Thread.ofPlatform()
                 .name("jdtls-stderr-drain")
                 .daemon(true)
-                .uncaughtExceptionHandler((thread, exception) -> LOGGER.error(
-                        "JDT LS stderr drain failed with {}", exception.getClass().getSimpleName()))
+                .uncaughtExceptionHandler((thread, exception) -> log.error(
+                        "phase=jdtls-stderr outcome=failed exceptionType={}", exception.getClass().getSimpleName()))
                 .start(task);
     }
 
@@ -260,15 +272,18 @@ public final class JdtLsProcessFactory {
     }
 
     private static Connection connect(JdtLanguageClient client, Process process) {
-        Launcher<LanguageServer> launcher = LSPLauncher.createClientLauncher(
-                client, process.getInputStream(), process.getOutputStream());
+        Launcher<JdtLsLanguageServer> launcher = Launcher.createLauncher(
+                client,
+                JdtLsLanguageServer.class,
+                process.getInputStream(),
+                process.getOutputStream());
         return new Connection(launcher.getRemoteProxy(), launcher.startListening());
     }
 
     /** 持有已啟動程序及其通訊資源 */
     public record LaunchHandle(
             Process process,
-            LanguageServer languageServer,
+            JdtLsLanguageServer languageServer,
             Future<Void> listener,
             CompletableFuture<Void> stderrDrain,
             StderrRingBuffer stderrBuffer) {
@@ -290,7 +305,7 @@ public final class JdtLsProcessFactory {
         }
     }
 
-    record Connection(LanguageServer languageServer, Future<Void> listener) {
+    record Connection(JdtLsLanguageServer languageServer, Future<Void> listener) {
     }
 
     @FunctionalInterface

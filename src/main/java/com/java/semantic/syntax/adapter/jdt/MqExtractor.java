@@ -3,9 +3,11 @@ package com.java.semantic.syntax.adapter.jdt;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.function.Function;
 
 import com.java.semantic.syntax.domain.MqBroker;
 import com.java.semantic.syntax.domain.MqEntryPoint;
+import com.java.semantic.syntax.domain.MethodTargetResolution;
 
 import org.eclipse.jdt.core.dom.AbstractTypeDeclaration;
 import org.eclipse.jdt.core.dom.Annotation;
@@ -35,7 +37,9 @@ final class MqExtractor {
     private MqExtractor() {
     }
 
-    static List<MqEntryPoint> extract(AbstractTypeDeclaration type) {
+    static List<MqEntryPoint> extract(
+            AbstractTypeDeclaration type,
+            Function<MethodDeclaration, MethodTargetResolution> analysisTargetOf) {
         if (!SourceTypes.isEntryPointCandidate(type)) {
             return List.of();
         }
@@ -45,12 +49,14 @@ final class MqExtractor {
             if (AnnotationReader.isPresent(method, DEPRECATED)) {
                 continue;
             }
-            toEntryPoint(method).ifPresent(entryPoints::add);
+            toEntryPoint(method, analysisTargetOf).ifPresent(entryPoints::add);
         }
         return List.copyOf(entryPoints);
     }
 
-    private static Optional<MqEntryPoint> toEntryPoint(MethodDeclaration method) {
+    private static Optional<MqEntryPoint> toEntryPoint(
+            MethodDeclaration method,
+            Function<MethodDeclaration, MethodTargetResolution> analysisTargetOf) {
         for (BrokerBinding binding : BINDINGS) {
             Optional<Annotation> listener = AnnotationReader.find(method, binding.annotation());
             if (listener.isEmpty()) {
@@ -62,7 +68,8 @@ final class MqExtractor {
                     method.getName().getIdentifier(),
                     JavadocReader.descriptionOf(method),
                     binding.broker(),
-                    destinations));
+                    destinations,
+                    analysisTargetOf.apply(method)));
         }
         return Optional.empty();
     }

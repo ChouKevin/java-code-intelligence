@@ -1,9 +1,7 @@
 package com.java.semantic.api;
 
-import com.java.semantic.api.dto.AnalyzeCallGraphRequest;
-import com.java.semantic.api.dto.AnalysisResponse;
-import com.java.semantic.callgraph.domain.ExplainableCallGraph;
-import com.java.semantic.callgraph.domain.FlattenedCallGraph;
+import com.java.semantic.api.dto.AnalyzeOutgoingCallGraphRequest;
+import com.java.semantic.api.dto.OutgoingCallGraphResponse;
 import com.java.semantic.repository.domain.RepositoryId;
 import com.java.semantic.repository.domain.RepositoryRevision;
 import com.java.semantic.semantic.application.SemanticAnalysisApplicationService;
@@ -14,8 +12,8 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.Objects;
-import java.util.Optional;
 
+/** HTTP boundary for the sole stateless outgoing graph-fragment operation. */
 @RestController
 @RequestMapping("/v1/analyses")
 public final class AnalysisController {
@@ -30,29 +28,13 @@ public final class AnalysisController {
         this.mapper = Objects.requireNonNull(mapper, "mapper is required");
     }
 
-    @PostMapping("/call-graph")
-    public AnalysisResponse<ExplainableCallGraph> analyze(
-            @Valid @RequestBody AnalyzeCallGraphRequest request) {
-        return mapper.toResponse(service.analyze(
+    @PostMapping("/call-graphs/outgoing")
+    public OutgoingCallGraphResponse analyzeOutgoing(
+            @Valid @RequestBody AnalyzeOutgoingCallGraphRequest request) {
+        return mapper.toResponse(service.analyzeOutgoing(
                 RepositoryId.of(request.repoId()),
-                expectedRevision(request.expectedRevision()),
-                request.packageName(),
-                request.className(),
-                request.methodSignature()));
-    }
-
-    @PostMapping("/call-graph/flatten")
-    public AnalysisResponse<FlattenedCallGraph> analyzeFlattened(
-            @Valid @RequestBody AnalyzeCallGraphRequest request) {
-        return mapper.toResponse(service.analyzeFlattened(
-                RepositoryId.of(request.repoId()),
-                expectedRevision(request.expectedRevision()),
-                request.packageName(),
-                request.className(),
-                request.methodSignature()));
-    }
-
-    private Optional<RepositoryRevision> expectedRevision(String value) {
-        return Optional.ofNullable(value).map(RepositoryRevision::new);
+                new RepositoryRevision(request.expectedRevision()),
+                request.target().toDomain(),
+                request.depth()));
     }
 }

@@ -1,5 +1,6 @@
 package com.java.semantic.trie;
 
+import com.java.semantic.identity.MethodTarget;
 import com.java.semantic.repository.domain.RepositoryId;
 import com.java.semantic.repository.domain.RepositoryRevision;
 import com.java.semantic.repository.domain.RepositorySnapshot;
@@ -8,6 +9,7 @@ import com.java.semantic.syntax.domain.ApiEntryPoint;
 import com.java.semantic.syntax.domain.EntryPointClass;
 import com.java.semantic.syntax.domain.EntryPointMethod;
 import com.java.semantic.syntax.domain.EntryPointType;
+import com.java.semantic.syntax.domain.MethodTargetResolution;
 import com.java.semantic.syntax.domain.RepositorySyntax;
 import com.java.semantic.syntax.domain.SyntaxExtractionService;
 import org.junit.jupiter.api.Test;
@@ -192,7 +194,17 @@ class ApiTrieRepositorySnapshotPublicationListenerTest {
             String httpMethod,
             String path) {
         List<EntryPointMethod> methods = List.of(new ApiEntryPoint(
-                methodName, "", path, List.of(httpMethod), List.of()));
+                methodName,
+                "",
+                path,
+                List.of(httpMethod),
+                List.of(),
+                MethodTargetResolution.resolved(new MethodTarget(
+                        "src/main/java/com/example/" + className + ".java",
+                        "com.example",
+                        className,
+                        methodName,
+                        List.of()))));
         return new EntryPointClass(
                 className,
                 "com.example",

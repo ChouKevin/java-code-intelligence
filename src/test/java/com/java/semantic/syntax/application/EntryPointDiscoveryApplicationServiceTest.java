@@ -7,6 +7,7 @@ import com.java.semantic.repository.domain.RepositorySnapshot;
 import com.java.semantic.syntax.domain.ApiEntryPoint;
 import com.java.semantic.syntax.domain.EntryPointClass;
 import com.java.semantic.syntax.domain.EntryPointType;
+import com.java.semantic.syntax.domain.MethodTargetResolution;
 import com.java.semantic.syntax.domain.RepositorySyntax;
 import com.java.semantic.syntax.domain.SyntaxExtractionService;
 import org.junit.jupiter.api.BeforeEach;
@@ -112,6 +113,11 @@ class EntryPointDiscoveryApplicationServiceTest {
                 "com/acme/order/OrderController.java",
                 "",
                 List.of(),
-                List.of(new ApiEntryPoint(methodName, "", "/orders", List.of("GET"), List.of())));
+                List.of(new ApiEntryPoint(
+                        methodName, "", "/orders", List.of("GET"), List.of(), unresolved())));
+    }
+
+    private static MethodTargetResolution unresolved() {
+        return MethodTargetResolution.unresolved("TEST_ANALYSIS_TARGET_UNAVAILABLE");
     }
 }

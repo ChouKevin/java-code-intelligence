@@ -1,6 +1,7 @@
 package com.java.semantic.syntax.domain;
 
 import java.util.List;
+import java.util.Objects;
 
 /**
  * HTTP 端點
@@ -19,7 +20,8 @@ public record ApiEntryPoint(
         String description,
         String apiUrl,
         List<String> httpMethods,
-        List<String> swaggerDescriptions) implements EntryPointMethod {
+        List<String> swaggerDescriptions,
+        MethodTargetResolution analysisTarget) implements EntryPointMethod {
 
     /** 未指定動詞時的萬用值 */
     public static final String ALL_METHODS = "ALL";
@@ -27,6 +29,7 @@ public record ApiEntryPoint(
     public ApiEntryPoint {
         httpMethods = List.copyOf(httpMethods);
         swaggerDescriptions = List.copyOf(swaggerDescriptions);
+        analysisTarget = Objects.requireNonNull(analysisTarget, "analysisTarget is required");
     }
 
     @Override

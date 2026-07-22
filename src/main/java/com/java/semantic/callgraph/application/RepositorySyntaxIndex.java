@@ -1,9 +1,11 @@
 package com.java.semantic.callgraph.application;
 
 import com.java.semantic.callgraph.domain.MethodId;
+import com.java.semantic.identity.MethodTarget;
 import com.java.semantic.syntax.domain.ClassMetadata;
 import com.java.semantic.syntax.domain.ClassMetadata.MethodSignature;
 import com.java.semantic.syntax.domain.RepositorySyntax;
+import com.java.semantic.syntax.domain.SyntaxRange;
 import com.java.semantic.identity.PolicyIdentity;
 
 import java.util.ArrayList;
@@ -14,6 +16,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 
 /** Immutable deterministic lookup over one repository syntax snapshot. */
 public final class RepositorySyntaxIndex {
@@ -49,12 +52,18 @@ public final class RepositorySyntaxIndex {
     private final String repoId;
     private final Map<String, List<ClassMetadata>> classesByFqn;
     private final Map<MethodId, List<MethodSignature>> methodsById;
+    private final Map<MethodTarget, MethodSignature> methodsByTarget;
+    private final Map<MethodTarget, ClassMetadata> metadataByTarget;
+    private final Map<SourceRange, MethodSignature> methodsBySourceRange;
 
     public RepositorySyntaxIndex(String repoId, RepositorySyntax syntax) {
         this.repoId = Objects.requireNonNull(repoId, "repoId is required");
         Objects.requireNonNull(syntax, "syntax is required");
         this.classesByFqn = indexClasses(syntax.classes());
         this.methodsById = indexMethods(syntax.classes());
+        this.methodsByTarget = indexMethodsByTarget(syntax.classes());
+        this.metadataByTarget = indexMetadataByTarget(syntax.classes());
+        this.methodsBySourceRange = indexMethodsBySourceRange(syntax.classes());
     }
 
     public List<ClassMetadata> classes(String fullyQualifiedName) {
@@ -63,6 +72,37 @@ public final class RepositorySyntaxIndex {
 
     public List<MethodSignature> methods(MethodId methodId) {
         return methodsById.getOrDefault(methodId, List.of());
+    }
+
+    /** Finds only a method with an exact resolved source-qualified identity. */
+    public Optional<MethodSignature> method(MethodTarget target) {
+        return Optional.ofNullable(methodsByTarget.get(target));
+    }
+
+    /** Finds the declaring type by the method's exact repository-qualified target. */
+    public Optional<ClassMetadata> classMetadata(MethodTarget target) {
+        return Optional.ofNullable(metadataByTarget.get(target));
+    }
+
+    /** Finds only a resolved method at its exact repository-relative declaration range. */
+    public Optional<MethodSignature> method(String sourceFile, SyntaxRange declarationRange) {
+        return Optional.ofNullable(methodsBySourceRange.get(new SourceRange(sourceFile, declarationRange)));
+    }
+
+    /** Finds a complete target only when its source-qualified declaration is proven by syntax. */
+    public Optional<MethodTarget> target(
+            String sourceFile,
+            String packageName,
+            String className,
+            String methodName,
+            List<String> parameterTypes) {
+        return methodsByTarget.keySet().stream()
+                .filter(target -> target.sourceFile().equals(sourceFile))
+                .filter(target -> target.packageName().equals(packageName))
+                .filter(target -> target.className().equals(className))
+                .filter(target -> target.methodName().equals(methodName))
+                .filter(target -> target.parameterTypes().equals(parameterTypes))
+                .findFirst();
     }
 
     private Map<String, List<ClassMetadata>> indexClasses(List<ClassMetadata> classes) {
@@ -95,6 +135,46 @@ public final class RepositorySyntaxIndex {
         return Collections.unmodifiableMap(new LinkedHashMap<>(indexed));
     }
 
+    private Map<MethodTarget, MethodSignature> indexMethodsByTarget(List<ClassMetadata> classes) {
+        Map<MethodTarget, MethodSignature> indexed = new LinkedHashMap<>();
+        for (IndexedMethod indexedMethod : sortedMethods(classes)) {
+            indexedMethod.method().analysisTarget().target()
+                    .ifPresent(target -> indexed.putIfAbsent(target, indexedMethod.method()));
+        }
+        return Collections.unmodifiableMap(indexed);
+    }
+
+    private Map<MethodTarget, ClassMetadata> indexMetadataByTarget(List<ClassMetadata> classes) {
+        Map<MethodTarget, ClassMetadata> indexed = new LinkedHashMap<>();
+        for (IndexedMethod indexedMethod : sortedMethods(classes)) {
+            indexedMethod.method().analysisTarget().target()
+                    .ifPresent(target -> indexed.putIfAbsent(target, indexedMethod.metadata()));
+        }
+        return Collections.unmodifiableMap(indexed);
+    }
+
+    private Map<SourceRange, MethodSignature> indexMethodsBySourceRange(List<ClassMetadata> classes) {
+        Map<SourceRange, MethodSignature> indexed = new LinkedHashMap<>();
+        for (IndexedMethod indexedMethod : sortedMethods(classes)) {
+            indexedMethod.method().analysisTarget().target().ifPresent(target -> indexed.putIfAbsent(
+                    new SourceRange(target.sourceFile(), indexedMethod.method().range()), indexedMethod.method()));
+        }
+        return Collections.unmodifiableMap(indexed);
+    }
+
+    private List<IndexedMethod> sortedMethods(List<ClassMetadata> classes) {
+        List<IndexedMethod> methods = new ArrayList<>();
+        for (ClassMetadata metadata : classes) {
+            for (MethodSignature method : metadata.methods()) {
+                methods.add(new IndexedMethod(metadata, method));
+            }
+        }
+        return methods.stream().sorted(METHOD_ORDER).toList();
+    }
+
     private record IndexedMethod(ClassMetadata metadata, MethodSignature method) {
+    }
+
+    private record SourceRange(String sourceFile, SyntaxRange declarationRange) {
     }
 }

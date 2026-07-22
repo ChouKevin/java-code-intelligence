@@ -1,175 +1,133 @@
 package com.java.semantic.semantic.application;
 
-import com.java.semantic.callgraph.application.CallGraphBuildResult;
 import com.java.semantic.callgraph.application.SemanticCallGraphBuilder;
-import com.java.semantic.callgraph.domain.AnalysisError;
-import com.java.semantic.callgraph.domain.AnalysisMetadata;
-import com.java.semantic.callgraph.domain.AnalysisStatus;
-import com.java.semantic.callgraph.domain.AnalysisWarning;
-import com.java.semantic.callgraph.domain.EvidenceVisibility;
-import com.java.semantic.callgraph.domain.ExplainableCallGraph;
-import com.java.semantic.callgraph.domain.FlattenedCallGraph;
-import com.java.semantic.callgraph.domain.MethodId;
-import com.java.semantic.identity.PolicyIdentity;
-import com.java.semantic.callgraph.domain.ReadPolicy;
-import com.java.semantic.callgraph.domain.RevisionBoundAnalysisResult;
-import com.java.semantic.config.CallGraphDepthProperties;
+import com.java.semantic.callgraph.domain.OutgoingGraphFragment;
+import com.java.semantic.config.OutgoingGraphProperties;
+import com.java.semantic.identity.MethodTarget;
+import com.java.semantic.identity.MethodTargetDiagnosticId;
 import com.java.semantic.repository.application.RepositoryApplicationService;
 import com.java.semantic.repository.domain.RepositoryId;
 import com.java.semantic.repository.domain.RepositoryRevision;
-import com.java.semantic.repository.domain.RepositorySnapshot;
 import com.java.semantic.semantic.domain.JavaSemanticService;
-import com.java.semantic.semantic.domain.SemanticAmbiguousMethodException;
-import com.java.semantic.semantic.domain.SemanticEngineException;
+import com.java.semantic.semantic.domain.SemanticBindingAmbiguousException;
+import com.java.semantic.semantic.domain.SemanticBindingUnresolvedException;
+import com.java.semantic.semantic.domain.SemanticDeclarationAnchor;
 import com.java.semantic.semantic.domain.SemanticMethod;
-import com.java.semantic.semantic.domain.SemanticSymbolNotFoundException;
+import com.java.semantic.semantic.domain.SemanticRequestTimeoutException;
+import com.java.semantic.semantic.domain.SemanticTargetNotFoundException;
 import com.java.semantic.syntax.domain.RepositorySyntax;
 import com.java.semantic.syntax.domain.SyntaxExtractionService;
+import lombok.extern.slf4j.Slf4j;
+import org.slf4j.MDC;
 
-import java.time.Instant;
-import java.util.List;
+import java.util.Locale;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.concurrent.TimeUnit;
 
-/** 在單一儲存庫讀鎖內協調版本綁定的語意分析 */
+/** Orchestrates one revision-locked exact outgoing fragment within a single repository snapshot lease. */
+@Slf4j
 public final class SemanticAnalysisApplicationService {
-
-    private static final String POLICY_MESSAGE =
-            "Business policy prohibits reading or summarizing this target";
-    private static final String FAILURE_MESSAGE = "Analysis could not be completed";
 
     private final RepositoryApplicationService repositoryApplicationService;
     private final SyntaxExtractionService syntaxExtractionService;
+    private final ExactMethodDeclarationResolver declarationResolver;
     private final JavaSemanticService semanticService;
     private final SemanticCallGraphBuilder builder;
-    private final ReadPolicy readPolicy;
-    private final int maxDepth;
+    private final OutgoingGraphProperties outgoingGraphProperties;
 
     public SemanticAnalysisApplicationService(
             RepositoryApplicationService repositoryApplicationService,
             SyntaxExtractionService syntaxExtractionService,
+            ExactMethodDeclarationResolver declarationResolver,
             JavaSemanticService semanticService,
             SemanticCallGraphBuilder builder,
-            ReadPolicy readPolicy,
-            CallGraphDepthProperties depthProperties) {
+            OutgoingGraphProperties outgoingGraphProperties) {
         this.repositoryApplicationService = Objects.requireNonNull(
                 repositoryApplicationService, "repositoryApplicationService is required");
         this.syntaxExtractionService = Objects.requireNonNull(
                 syntaxExtractionService, "syntaxExtractionService is required");
+        this.declarationResolver = Objects.requireNonNull(
+                declarationResolver, "declarationResolver is required");
         this.semanticService = Objects.requireNonNull(semanticService, "semanticService is required");
         this.builder = Objects.requireNonNull(builder, "builder is required");
-        this.readPolicy = Objects.requireNonNull(readPolicy, "readPolicy is required");
-        this.maxDepth = Objects.requireNonNull(depthProperties, "depthProperties is required")
-                .callGraphDepth();
+        this.outgoingGraphProperties = Objects.requireNonNull(
+                outgoingGraphProperties, "outgoingGraphProperties is required");
     }
 
-    public RevisionBoundAnalysisResult<ExplainableCallGraph> analyze(
+    public OutgoingGraphFragment analyzeOutgoing(
             RepositoryId repositoryId,
-            Optional<RepositoryRevision> expectedRevision,
-            String packageName,
-            String className,
-            String methodSignature) {
+            RepositoryRevision expectedRevision,
+            MethodTarget target,
+            int depth) {
         Objects.requireNonNull(repositoryId, "repositoryId is required");
         Objects.requireNonNull(expectedRevision, "expectedRevision is required");
-        return repositoryApplicationService.withSnapshot(
-                repositoryId,
-                expectedRevision,
-                snapshot -> analyzeSnapshot(
-                        snapshot, packageName, className, methodSignature));
-    }
-
-    public RevisionBoundAnalysisResult<FlattenedCallGraph> analyzeFlattened(
-            RepositoryId repositoryId,
-            Optional<RepositoryRevision> expectedRevision,
-            String packageName,
-            String className,
-            String methodSignature) {
-        return analyze(
-                repositoryId,
-                expectedRevision,
-                packageName,
-                className,
-                methodSignature).mapData(ExplainableCallGraph::legacyFlattened);
-    }
-
-    private RevisionBoundAnalysisResult<ExplainableCallGraph> analyzeSnapshot(
-            RepositorySnapshot snapshot,
-            String packageName,
-            String className,
-            String methodSignature) {
-        AnalysisMetadata metadata = metadata(snapshot.repositoryId());
-        RepositoryRevision revision = snapshot.revision();
+        Objects.requireNonNull(target, "target is required");
+        long startedAt = System.nanoTime();
+        String targetId = MethodTargetDiagnosticId.from(target);
+        log.info("phase=analysis outcome=started requestId={} repoId={} revision={} targetId={}",
+                requestId(), repositoryId.value(), expectedRevision.value(), targetId);
         try {
-            if (EvidenceVisibility.BUSINESS_READ_FORBIDDEN.equals(
-                    readPolicy.visibilityOfRepository(snapshot.repositoryId().value()))) {
-                return forbidden(metadata, revision);
-            }
-            SemanticMethod root = semanticService.resolveMethod(
-                    snapshot, packageName, className, methodSignature);
-            if (EvidenceVisibility.BUSINESS_READ_FORBIDDEN.equals(
-                    readPolicy.visibilityOf(methodId(snapshot.repositoryId(), root)))) {
-                return forbidden(metadata, revision);
-            }
-            RepositorySyntax syntax = syntaxExtractionService.extract(snapshot.root());
-            CallGraphBuildResult buildResult = builder.build(
-                    snapshot, syntax, root, maxDepth);
-            return result(buildResult, metadata, revision);
-        } catch (SemanticAmbiguousMethodException
-                | SemanticSymbolNotFoundException
-                | SemanticEngineException exception) {
+            OutgoingGraphFragment result = repositoryApplicationService.withSnapshot(
+                    repositoryId,
+                    Optional.of(expectedRevision),
+                    snapshot -> analyzeSnapshot(snapshot, target, depth));
+            String outcome = Optional.ofNullable(result)
+                    .map(OutgoingGraphFragment::status)
+                    .map(Object::toString)
+                    .orElse("completed")
+                    .toLowerCase(Locale.ROOT);
+            logTerminal(outcome, repositoryId, expectedRevision, startedAt);
+            return result;
+        } catch (SemanticTargetNotFoundException | SemanticBindingUnresolvedException
+                 | SemanticBindingAmbiguousException | SemanticRequestTimeoutException exception) {
+            log.warn("phase=analysis outcome=failed requestId={} repoId={} revision={} exceptionType={} durationMs={}",
+                    requestId(), repositoryId.value(), expectedRevision.value(), exception.getClass().getSimpleName(),
+                    elapsedMillis(startedAt));
             throw exception;
         } catch (RuntimeException exception) {
-            return failed(metadata, revision);
+            log.error("phase=analysis outcome=failed requestId={} repoId={} revision={} exceptionType={} durationMs={}",
+                    requestId(), repositoryId.value(), expectedRevision.value(), exception.getClass().getSimpleName(),
+                    elapsedMillis(startedAt));
+            throw exception;
         }
     }
 
-    private RevisionBoundAnalysisResult<ExplainableCallGraph> result(
-            CallGraphBuildResult buildResult,
-            AnalysisMetadata metadata,
-            RepositoryRevision revision) {
-        if (buildResult.partial()) {
-            return RevisionBoundAnalysisResult.partial(
-                    buildResult.graph(),
-                    buildResult.warnings(),
-                    buildResult.errors(),
-                    metadata,
-                    revision.value());
+    private OutgoingGraphFragment analyzeSnapshot(
+            com.java.semantic.repository.domain.RepositorySnapshot snapshot,
+            MethodTarget target,
+            int depth) {
+        RepositorySyntax syntax = syntaxExtractionService.extract(snapshot.root());
+        SemanticDeclarationAnchor anchor = declarationResolver.resolve(syntax, target);
+        SemanticMethod root = semanticService.resolveExactMethod(snapshot, anchor);
+        return builder.build(
+                snapshot,
+                syntax,
+                target,
+                root,
+                depth,
+                outgoingGraphProperties.depthTwoNodeBudget());
+    }
+
+    private long elapsedMillis(long startedAt) {
+        return TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedAt);
+    }
+
+    private void logTerminal(
+            String outcome,
+            RepositoryId repositoryId,
+            RepositoryRevision expectedRevision,
+            long startedAt) {
+        if ("partial".equals(outcome)) {
+            log.warn("phase=analysis outcome={} requestId={} repoId={} revision={} durationMs={}",
+                    outcome, requestId(), repositoryId.value(), expectedRevision.value(), elapsedMillis(startedAt));
+            return;
         }
-        return new RevisionBoundAnalysisResult<>(
-                AnalysisStatus.SUCCESS,
-                buildResult.graph(),
-                buildResult.warnings(),
-                buildResult.errors(),
-                metadata,
-                revision.value());
+        log.info("phase=analysis outcome={} requestId={} repoId={} revision={} durationMs={}",
+                outcome, requestId(), repositoryId.value(), expectedRevision.value(), elapsedMillis(startedAt));
     }
 
-    private RevisionBoundAnalysisResult<ExplainableCallGraph> forbidden(
-            AnalysisMetadata metadata,
-            RepositoryRevision revision) {
-        AnalysisWarning warning = new AnalysisWarning(
-                "BUSINESS_READ_FORBIDDEN", POLICY_MESSAGE, "");
-        return RevisionBoundAnalysisResult.businessReadForbidden(
-                List.of(warning), metadata, revision.value());
-    }
-
-    private RevisionBoundAnalysisResult<ExplainableCallGraph> failed(
-            AnalysisMetadata metadata,
-            RepositoryRevision revision) {
-        AnalysisError error = new AnalysisError("ANALYSIS_FAILED", FAILURE_MESSAGE, "");
-        return RevisionBoundAnalysisResult.failed(List.of(error), metadata, revision.value());
-    }
-
-    private AnalysisMetadata metadata(RepositoryId repositoryId) {
-        return new AnalysisMetadata(repositoryId.value(), Instant.now());
-    }
-
-    private MethodId methodId(RepositoryId repositoryId, SemanticMethod method) {
-        return new MethodId(
-                repositoryId.value(),
-                method.packageName(),
-                PolicyIdentity.className(method.packageName(), method.className()),
-                method.methodName(),
-                PolicyIdentity.parameterTypes(method.parameterTypes()));
+    private String requestId() {
+        return Objects.toString(MDC.get("requestId"), "");
     }
 }

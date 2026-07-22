@@ -1,6 +1,7 @@
 package com.java.semantic.syntax.domain;
 
 import java.util.List;
+import java.util.Objects;
 
 /**
  * 訊息佇列消費者
@@ -14,10 +15,12 @@ public record MqEntryPoint(
         String name,
         String description,
         MqBroker broker,
-        List<String> destinations) implements EntryPointMethod {
+        List<String> destinations,
+        MethodTargetResolution analysisTarget) implements EntryPointMethod {
 
     public MqEntryPoint {
         destinations = List.copyOf(destinations);
+        analysisTarget = Objects.requireNonNull(analysisTarget, "analysisTarget is required");
     }
 
     @Override

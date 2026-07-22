@@ -30,16 +30,17 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Stream;
 
 /**
- * 輪詢 JDT LS 的四項就緒條件
+ * 輪詢 JDT LS 的五項就緒條件
  *
- * ServiceReady 不等於匯入完成:spike 實測它在 3799 ms 就送出,而符號要更晚才解析得到
- * 只認狀態通知會讓每次分析都跟匯入賽跑,而且錯得無聲無息
+ * ServiceReady 不等於匯入完成:JDT LS 在其匯入與背景 build 前送出此通知
+ * 因此必須用 java/buildWorkspace 建立明確的同步邊界
  */
 public final class JdtLsReadinessProbe {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(JdtLsReadinessProbe.class);
     private static final Duration DEFAULT_POLL_INTERVAL = Duration.ofMillis(500);
     private static final String SYMBOL_OPERATION = "workspace/symbol";
+    private static final String BUILD_WORKSPACE_OPERATION = "java/buildWorkspace";
     private static final String JAVA_SUFFIX = ".java";
     private static final Set<String> NON_TYPE_SOURCES = Set.of("package-info.java", "module-info.java");
     private static final Path MAIN_SOURCE_ROOT = Path.of("src", "main", "java");
@@ -66,12 +67,13 @@ public final class JdtLsReadinessProbe {
     }
 
     /**
-     * 等到四項條件全部成立才標記 READY
+     * 等到五項條件全部成立才標記 READY
      *
      * 1. initialize 完成(launch 回傳即代表完成)
      * 2. 匯入進度回到閒置或完成
-     * 3. workspace/symbol 實際查得到專案自己的型別
-     * 4. session 綁定的版本仍然有效
+     * 3. java/buildWorkspace 的增量 build 已經完成
+     * 4. workspace/symbol 實際查得到專案自己的型別
+     * 5. session 綁定的版本仍然有效
      */
     public void awaitReady(
             JdtWorkspaceSession session, ImportProgressClient client, Path workspaceRoot) {
@@ -81,9 +83,17 @@ public final class JdtLsReadinessProbe {
         String sanityQuery = sanityQuery(workspaceRoot).orElseThrow(() -> startupFailure(
                 session, "working tree has no Java source to verify the import against", null));
         long deadlineNanos = System.nanoTime() + importTimeout.toNanos();
+        boolean buildCompleted = false;
         while (true) {
             requireUsable(session);
-            if (client.isImportSettled() && symbolQuerySucceeds(session, sanityQuery)) {
+            if (client.isImportSettled() && !buildCompleted) {
+                awaitIncrementalBuild(session);
+                buildCompleted = true;
+            }
+            if (buildCompleted
+                    && client.isImportSettled()
+                    && symbolQuerySucceeds(session, sanityQuery)
+                    && client.isImportSettled()) {
                 requireUsable(session);
                 if (!session.markReady()) {
                     throw startupFailure(session, "JDT LS session became unavailable while importing", null);
@@ -137,6 +147,25 @@ public final class JdtLsReadinessProbe {
             LOGGER.debug("Readiness symbol query failed while importing: repositoryId={} exceptionType={}",
                     session.repositoryId().value(), exception.getClass().getSimpleName());
             return false;
+        }
+    }
+
+    private void awaitIncrementalBuild(JdtWorkspaceSession session) {
+        try {
+            JdtLsBuildWorkspaceStatus status = session.call(
+                    BUILD_WORKSPACE_OPERATION,
+                    server -> ((JdtLsLanguageServer) server).buildWorkspace(false));
+            if (Objects.isNull(status)) {
+                throw startupFailure(session, "incremental workspace build returned no status", null);
+            }
+            if (status == JdtLsBuildWorkspaceStatus.FAILED) {
+                throw startupFailure(session, "incremental workspace build failed", null);
+            }
+            if (status == JdtLsBuildWorkspaceStatus.CANCELLED) {
+                throw startupFailure(session, "incremental workspace build was cancelled", null);
+            }
+        } catch (JdtWorkspaceSession.JdtRequestFailedException exception) {
+            throw startupFailure(session, "incremental workspace build request failed", exception);
         }
     }
 

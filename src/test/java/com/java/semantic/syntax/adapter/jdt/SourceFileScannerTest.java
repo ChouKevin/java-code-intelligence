@@ -99,4 +99,31 @@ class SourceFileScannerTest {
 
         assertThat(files.get(0).relativePath()).isEqualTo("com/example/Order.java");
     }
+
+    @Test
+    void should_keep_repository_relative_identity_for_same_fqn_in_multiple_modules_regardless_of_root_order(
+            @TempDir Path tempDir) throws IOException {
+        Path repositoryRoot = tempDir.resolve("order-service");
+        Path moduleASourceRoot = repositoryRoot.resolve("module-a/src/main/java");
+        Path moduleBSourceRoot = repositoryRoot.resolve("module-b/src/main/java");
+        writeOrder(moduleASourceRoot, "A");
+        writeOrder(moduleBSourceRoot, "B");
+
+        List<SourceFile> forward = scanner.scan(repositoryRoot, List.of(moduleASourceRoot, moduleBSourceRoot));
+        List<SourceFile> reverse = scanner.scan(repositoryRoot, List.of(moduleBSourceRoot, moduleASourceRoot));
+
+        assertThat(forward).extracting(SourceFile::repositoryRelativePath)
+                .containsExactly("module-a/src/main/java/com/example/Order.java", "module-b/src/main/java/com/example/Order.java");
+        assertThat(reverse).extracting(SourceFile::repositoryRelativePath)
+                .containsExactlyElementsOf(forward.stream().map(SourceFile::repositoryRelativePath).toList());
+        assertThat(forward).extracting(SourceFile::sourceRootRelativePath)
+                .containsExactly("com/example/Order.java", "com/example/Order.java");
+    }
+
+    private void writeOrder(Path sourceRoot, String marker) throws IOException {
+        Path packageDirectory = sourceRoot.resolve("com/example");
+        Files.createDirectories(packageDirectory);
+        Files.writeString(packageDirectory.resolve("Order.java"),
+                "package com.example; class Order { String marker() { return \"" + marker + "\"; } }");
+    }
 }

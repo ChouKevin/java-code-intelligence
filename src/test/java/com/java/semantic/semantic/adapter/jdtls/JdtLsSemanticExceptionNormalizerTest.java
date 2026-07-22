@@ -1,14 +1,14 @@
 package com.java.semantic.semantic.adapter.jdtls;
 
 import com.java.semantic.repository.domain.RepositoryId;
-import com.java.semantic.semantic.domain.SemanticAmbiguousMethodException;
+import com.java.semantic.identity.MethodTarget;
 import com.java.semantic.semantic.domain.SemanticAmbiguousTypeException;
 import com.java.semantic.semantic.domain.SemanticEngineException;
 import com.java.semantic.semantic.domain.SemanticEngineNotReadyException;
 import com.java.semantic.semantic.domain.SemanticEngineStartFailedException;
 import com.java.semantic.semantic.domain.SemanticProtocolException;
 import com.java.semantic.semantic.domain.SemanticRequestTimeoutException;
-import com.java.semantic.semantic.domain.SemanticSymbolNotFoundException;
+import com.java.semantic.semantic.domain.SemanticTargetNotFoundException;
 import org.eclipse.lsp4j.jsonrpc.ResponseErrorException;
 import org.eclipse.lsp4j.jsonrpc.messages.ResponseError;
 import org.eclipse.lsp4j.jsonrpc.messages.ResponseErrorCode;
@@ -68,6 +68,11 @@ class JdtLsSemanticExceptionNormalizerTest {
                         SemanticEngineNotReadyException.class,
                         "SEMANTIC_ENGINE_NOT_READY"),
                 Arguments.of(
+                        new DefaultJdtWorkspaceManager.JdtWorkspaceTerminationPendingException(
+                                RepositoryId.of("orders")),
+                        SemanticEngineNotReadyException.class,
+                        "SEMANTIC_ENGINE_NOT_READY"),
+                Arguments.of(
                         new JdtWorkspaceSession.JdtWorkspaceClosingException(SECRET),
                         SemanticEngineNotReadyException.class,
                         "SEMANTIC_ENGINE_NOT_READY"),
@@ -104,12 +109,18 @@ class JdtLsSemanticExceptionNormalizerTest {
     }
 
     @Test
-    void should_preserve_existing_semantic_contract_exception_identity() {
-        SemanticSymbolNotFoundException failure = new SemanticSymbolNotFoundException("safe test message");
+    void should_preserve_exact_target_contract_failures_without_exposing_target_text() {
+        SemanticTargetNotFoundException failure = new SemanticTargetNotFoundException(new MethodTarget(
+                "src/main/java/com/acme/Secret.java",
+                "com.acme",
+                "Secret",
+                "run",
+                List.of()));
 
         assertThatThrownBy(() -> JdtLsSemanticExceptionNormalizer.normalize(() -> {
             throw failure;
         })).isSameAs(failure);
+        assertThat(failure.getMessage()).doesNotContain("Secret.java");
     }
 
     @Test
@@ -118,34 +129,6 @@ class JdtLsSemanticExceptionNormalizerTest {
                 new SemanticAmbiguousTypeException("com.acme", "Duplicate");
         SemanticAmbiguousTypeException wrapped =
                 new SemanticAmbiguousTypeException("com.acme", "Duplicate");
-
-        assertThatThrownBy(() -> JdtLsSemanticExceptionNormalizer.normalize(() -> {
-            throw direct;
-        })).isSameAs(direct);
-        assertThatThrownBy(() -> JdtLsSemanticExceptionNormalizer.normalize(() -> {
-            throw new CompletionException(wrapped);
-        })).isSameAs(wrapped);
-    }
-
-    @Test
-    void should_preserve_direct_and_completion_wrapped_semantic_contract_exception_identity() {
-        SemanticSymbolNotFoundException direct = new SemanticSymbolNotFoundException("safe direct message");
-        SemanticSymbolNotFoundException wrapped = new SemanticSymbolNotFoundException("safe wrapped message");
-
-        assertThatThrownBy(() -> JdtLsSemanticExceptionNormalizer.normalize(() -> {
-            throw direct;
-        })).isSameAs(direct);
-        assertThatThrownBy(() -> JdtLsSemanticExceptionNormalizer.normalize(() -> {
-            throw new CompletionException(wrapped);
-        })).isSameAs(wrapped);
-    }
-
-    @Test
-    void should_preserve_direct_and_completion_wrapped_ambiguous_method_identity() {
-        SemanticAmbiguousMethodException direct = new SemanticAmbiguousMethodException(
-                "com.acme", "OrderService", "save", List.of("save(Order)"));
-        SemanticAmbiguousMethodException wrapped = new SemanticAmbiguousMethodException(
-                "com.acme", "OrderService", "save", List.of("save(Order)"));
 
         assertThatThrownBy(() -> JdtLsSemanticExceptionNormalizer.normalize(() -> {
             throw direct;

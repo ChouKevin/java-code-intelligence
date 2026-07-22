@@ -1,6 +1,7 @@
 package com.java.semantic.api;
 
 import com.java.semantic.api.security.ApiTokenFilter;
+import com.java.semantic.identity.MethodTarget;
 import com.java.semantic.repository.domain.RepositoryId;
 import com.java.semantic.repository.domain.RepositoryRevision;
 import com.java.semantic.syntax.application.EntryPointDiscoveryApplicationService;
@@ -10,6 +11,7 @@ import com.java.semantic.syntax.domain.EntryPointClass;
 import com.java.semantic.syntax.domain.EntryPointType;
 import com.java.semantic.syntax.domain.MqBroker;
 import com.java.semantic.syntax.domain.MqEntryPoint;
+import com.java.semantic.syntax.domain.MethodTargetResolution;
 import com.java.semantic.syntax.domain.ScheduleEntryPoint;
 import com.java.semantic.syntax.domain.ScheduleTriggerKind;
 import org.junit.jupiter.api.Test;
@@ -179,6 +181,27 @@ class EntryPointControllerTest {
         then(entryPointDiscoveryApplicationService).shouldHaveNoInteractions();
     }
 
+    @Test
+    void should_serialize_resolved_and_unresolved_entry_point_targets() throws Exception {
+        given(entryPointDiscoveryApplicationService.list(
+                eq(REPOSITORY_ID), eq(EnumSet.allOf(EntryPointType.class))))
+                .willReturn(resultWithAllMethods());
+
+        mockMvc.perform(get("/v1/repositories/orders/entry-points")
+                        .header(ApiTokenFilter.API_TOKEN_HEADER, TOKEN))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.entryPoints[0].methods[0].analysisTarget.status").value("RESOLVED"))
+                .andExpect(jsonPath("$.entryPoints[0].methods[0].analysisTarget.target.sourceFile")
+                        .value("src/main/java/com/acme/OrderController.java"))
+                .andExpect(jsonPath("$.entryPoints[0].methods[0].analysisTarget.target.parameterTypes[0]")
+                        .value("java.lang.Long"))
+                .andExpect(jsonPath("$.entryPoints[0].methods[1].analysisTarget.status").value("UNRESOLVED"))
+                .andExpect(jsonPath("$.entryPoints[0].methods[1].analysisTarget.target").doesNotExist())
+                .andExpect(jsonPath("$.entryPoints[0].methods[1].analysisTarget.candidates").isEmpty())
+                .andExpect(jsonPath("$.entryPoints[0].methods[1].analysisTarget.reasonCode")
+                        .value("METHOD_PARAMETER_BINDING_UNRESOLVED"));
+    }
+
     private static RevisionBoundEntryPoints resultWithAllMethods() {
         EntryPointClass entryPointClass = new EntryPointClass(
                 "OrderController",
@@ -187,9 +210,14 @@ class EntryPointControllerTest {
                 "orders",
                 List.of("/orders"),
                 List.of(
-                        new ApiEntryPoint("place", "place order", "/orders", List.of("GET"), List.of("orders")),
-                        new MqEntryPoint("consume", "consume order", MqBroker.KAFKA, List.of("orders")),
-                        new ScheduleEntryPoint("refresh", "refresh orders", ScheduleTriggerKind.CRON, "0 * * * *")));
+                        new ApiEntryPoint("place", "place order", "/orders", List.of("GET"), List.of("orders"),
+                                MethodTargetResolution.resolved(new MethodTarget(
+                                        "src/main/java/com/acme/OrderController.java", "com.acme",
+                                        "OrderController", "place", List.of("java.lang.Long")))),
+                        new MqEntryPoint("consume", "consume order", MqBroker.KAFKA, List.of("orders"),
+                                MethodTargetResolution.unresolved("METHOD_PARAMETER_BINDING_UNRESOLVED")),
+                        new ScheduleEntryPoint("refresh", "refresh orders", ScheduleTriggerKind.CRON, "0 * * * *",
+                                MethodTargetResolution.unresolved("METHOD_PARAMETER_BINDING_UNRESOLVED"))));
         return new RevisionBoundEntryPoints(
                 REPOSITORY_ID, RepositoryRevision.fixture(), List.of(entryPointClass));
     }

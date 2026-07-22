@@ -48,6 +48,7 @@ public class JdtSyntaxExtractionService implements SyntaxExtractionService {
 
         try {
             List<SourceFile> files = sourceFileScanner.scan(repositoryRoot, sourceRoots);
+            log.info("phase=syntax-extraction outcome=started sourceFileCount={}", files.size());
             MapperXmlSqlExtractor.SqlIndex sqlIndex = mapperXmlSqlExtractor.index(
                     repositoryRoot, sourceRootLocator.resourceRootsOf(repositoryRoot));
 
@@ -61,8 +62,13 @@ public class JdtSyntaxExtractionService implements SyntaxExtractionService {
                     entryPoints.addAll(extracted.entryPoints());
                     classes.addAll(extracted.classes());
                 } catch (RuntimeException exception) {
-                    log.warn("Syntax extraction skipped source category={} exceptionType={}",
-                            "JAVA_SYNTAX_EXTRACTION_FAILED", exception.getClass().getSimpleName());
+                    if (isExpectedSourceExtractionFailure(exception)) {
+                        log.warn("Syntax extraction skipped source category={} exceptionType={}",
+                                "JAVA_SYNTAX_EXTRACTION_FAILED", exception.getClass().getSimpleName());
+                    } else {
+                        log.error("Syntax extraction skipped source category={} exceptionType={}",
+                                "JAVA_SYNTAX_EXTRACTION_FAILED", exception.getClass().getSimpleName());
+                    }
                 }
             });
 
@@ -70,11 +76,17 @@ public class JdtSyntaxExtractionService implements SyntaxExtractionService {
                     .thenComparing(EntryPointClass::className));
             classes.sort(Comparator.comparing(ClassMetadata::fullyQualifiedName));
 
+            log.info("phase=syntax-extraction outcome=completed sourceFileCount={} classCount={} entryPointCount={}",
+                    files.size(), classes.size(), entryPoints.size());
             return new RepositorySyntax(entryPoints, classes);
         } catch (UncheckedIOException exception) {
             log.warn("Syntax extraction failed category={} exceptionType={}",
                     "REPOSITORY_SYNTAX_EXTRACTION_FAILED", exception.getClass().getSimpleName());
             throw new SyntaxExtractionException("Repository syntax extraction failed");
         }
+    }
+
+    private boolean isExpectedSourceExtractionFailure(RuntimeException exception) {
+        return exception instanceof UnsupportedTypeFormException;
     }
 }

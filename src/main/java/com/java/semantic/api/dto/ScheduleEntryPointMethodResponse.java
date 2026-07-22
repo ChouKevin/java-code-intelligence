@@ -10,12 +10,14 @@ public record ScheduleEntryPointMethodResponse(
         String description,
         EntryPointType type,
         ScheduleTriggerKind triggerKind,
-        String triggerValue) implements EntryPointMethodResponse {
+        String triggerValue,
+        MethodTargetResolutionResponse analysisTarget) implements EntryPointMethodResponse {
 
     public ScheduleEntryPointMethodResponse {
         type = Objects.requireNonNull(type, "type is required");
         if (!EntryPointType.SCHEDULE.equals(type)) {
             throw new IllegalArgumentException("schedule response requires SCHEDULE type");
         }
+        analysisTarget = Objects.requireNonNull(analysisTarget, "analysisTarget is required");
     }
 }

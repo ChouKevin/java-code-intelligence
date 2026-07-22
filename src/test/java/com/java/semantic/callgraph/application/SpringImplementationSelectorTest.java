@@ -1,12 +1,12 @@
 package com.java.semantic.callgraph.application;
 
 import com.java.semantic.callgraph.domain.ResolutionStrategy;
+import com.java.semantic.identity.MethodTarget;
 import com.java.semantic.semantic.domain.SemanticLocation;
 import com.java.semantic.semantic.domain.SemanticMethod;
 import com.java.semantic.semantic.domain.SemanticPosition;
 import com.java.semantic.semantic.domain.SemanticRange;
 import com.java.semantic.syntax.domain.SyntaxInvocation;
-import com.java.semantic.syntax.domain.SyntaxInvocation.InvocationKind;
 import com.java.semantic.syntax.domain.SyntaxPosition;
 import com.java.semantic.syntax.domain.SyntaxRange;
 import org.junit.jupiter.api.Test;
@@ -15,112 +15,80 @@ import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException;
 
 class SpringImplementationSelectorTest {
 
-    private final SpringImplementationSelector selector = new SpringImplementationSelector();
-
     @Test
-    void should_select_qualifier_even_when_receiver_variable_names_another_candidate() {
-        ImplementationCandidate slowCandidate = candidate("SlowOrderService", false, List.of(), List.of());
-        ImplementationCandidate fastQualifiedCandidate = candidate(
-                "FastOrderService", false, List.of("fastOrderService"), List.of());
+    void should_select_a_unique_qualified_candidate() {
+        ImplementationCandidate candidate = candidate("FastWorker", true, List.of("fast"));
+        ImplementationSelection selection = new SpringImplementationSelector().select(invocation("fast"), List.of(candidate));
 
-        ImplementationSelection selection = selector.select(
-                invocation("slowService", "fastOrderService"),
-                List.of(slowCandidate, fastQualifiedCandidate));
-
-        assertThat(selection.candidates()).containsExactly(fastQualifiedCandidate.method());
-        assertThat(selection.strategy()).isEqualTo(ResolutionStrategy.SPRING_BEAN_BY_QUALIFIER);
+        assertThat(selection).isInstanceOf(ImplementationSelection.Selected.class);
+        ImplementationSelection.Selected selected = (ImplementationSelection.Selected) selection;
+        assertThat(selected.candidate()).isEqualTo(candidate);
+        assertThat(selected.strategy()).isEqualTo(ResolutionStrategy.SPRING_BEAN_BY_QUALIFIER);
     }
 
     @Test
-    void should_select_unique_primary() {
-        ImplementationCandidate ordinary = candidate("OrdinaryOrderService", false, List.of(), List.of());
-        ImplementationCandidate primary = candidate("PrimaryOrderService", true, List.of(), List.of());
+    void should_return_complete_sorted_candidates_when_unqualified_implementations_remain() {
+        ImplementationCandidate zeta = candidate("ZetaWorker", false, List.of());
+        ImplementationCandidate alpha = candidate("AlphaWorker", false, List.of());
+        ImplementationSelection selection = new SpringImplementationSelector().select(invocation(""), List.of(zeta, alpha));
 
-        ImplementationSelection selection = selector.select(invocation("orderService", ""), List.of(ordinary, primary));
-
-        assertThat(selection.candidates()).containsExactly(primary.method());
-        assertThat(selection.strategy()).isEqualTo(ResolutionStrategy.SPRING_BEAN_BY_PRIMARY);
+        assertThat(selection).isInstanceOf(ImplementationSelection.Ambiguous.class);
+        assertThat(((ImplementationSelection.Ambiguous) selection).candidates())
+                .extracting(MethodTarget::className)
+                .containsExactly("AlphaWorker", "ZetaWorker");
     }
 
     @Test
-    void should_not_fall_back_to_primary_when_explicit_qualifier_has_no_match() {
-        ImplementationCandidate ordinary = candidate("OrdinaryOrderService", false, List.of(), List.of());
-        ImplementationCandidate primary = candidate("PrimaryOrderService", true, List.of(), List.of());
+    void should_select_the_only_primary_candidate() {
+        ImplementationCandidate primary = candidate("PrimaryWorker", true, List.of());
+        ImplementationCandidate fallback = candidate("FallbackWorker", false, List.of());
 
-        ImplementationSelection selection = selector.select(
-                invocation("orderService", "missingOrderService"), List.of(ordinary, primary));
+        ImplementationSelection selection = new SpringImplementationSelector()
+                .select(invocation(""), List.of(fallback, primary));
 
-        assertThat(selection.candidates()).containsExactly(ordinary.method(), primary.method());
-        assertThat(selection.strategy()).isEqualTo(ResolutionStrategy.SPRING_MULTIPLE_CANDIDATES);
-        assertThat(selection.warnings()).singleElement().asString().contains("qualifier");
+        assertThat(selection).isEqualTo(new ImplementationSelection.Selected(
+                primary, ResolutionStrategy.SPRING_BEAN_BY_PRIMARY, 1.0d));
     }
 
     @Test
-    void should_select_exactly_one_implementation() {
-        ImplementationCandidate only = candidate("OnlyOrderService", false, List.of(), List.of());
+    void should_select_a_single_default_candidate() {
+        ImplementationCandidate defaultCandidate = candidate("DefaultWorker", false, List.of());
 
-        ImplementationSelection selection = selector.select(invocation("orderService", ""), List.of(only));
+        ImplementationSelection selection = new SpringImplementationSelector()
+                .select(invocation(""), List.of(defaultCandidate));
 
-        assertThat(selection.candidates()).containsExactly(only.method());
-        assertThat(selection.strategy()).isEqualTo(ResolutionStrategy.SPRING_SINGLE_IMPLEMENTATION);
+        assertThat(selection).isEqualTo(new ImplementationSelection.Selected(
+                defaultCandidate, ResolutionStrategy.SPRING_SINGLE_IMPLEMENTATION, 1.0d));
     }
 
     @Test
-    void should_retain_multiple_primaries_in_canonical_order() {
-        ImplementationCandidate zeta = candidate("ZetaOrderService", true, List.of(), List.of());
-        ImplementationCandidate alpha = candidate("AlphaOrderService", true, List.of(), List.of());
+    void should_fail_closed_when_a_qualifier_matches_multiple_overrides() {
+        ImplementationCandidate inheritedDefault = candidate("InheritedDefaultWorker", false, List.of("shared"));
+        ImplementationCandidate override = candidate("OverrideWorker", false, List.of("shared"));
 
-        ImplementationSelection selection = selector.select(invocation("orderService", ""), List.of(zeta, alpha));
+        ImplementationSelection selection = new SpringImplementationSelector()
+                .select(invocation("shared"), List.of(override, inheritedDefault));
 
-        assertThat(selection.candidates()).containsExactly(alpha.method(), zeta.method());
-        assertThat(selection.strategy()).isEqualTo(ResolutionStrategy.SPRING_MULTIPLE_CANDIDATES);
-        assertThat(selection.warnings()).singleElement().asString().contains("multiple implementations");
+        assertThat(selection).isEqualTo(new ImplementationSelection.Ambiguous(List.of(
+                inheritedDefault.target(), override.target())));
     }
 
-    @Test
-    void should_retain_all_profile_candidates_when_no_active_profile_is_known() {
-        ImplementationCandidate prodCandidate = candidate("ProdOrderService", false, List.of(), List.of("prod"));
-        ImplementationCandidate testCandidate = candidate("TestOrderService", false, List.of(), List.of("test"));
-
-        ImplementationSelection selection = selector.select(
-                invocation("orderService", ""), List.of(prodCandidate, testCandidate));
-
-        assertThat(selection.candidates()).containsExactly(prodCandidate.method(), testCandidate.method());
-        assertThat(selection.strategy()).isEqualTo(ResolutionStrategy.SPRING_MULTIPLE_CANDIDATES);
-        assertThat(selection.warnings()).singleElement().asString().contains("profiles are evidence only");
-    }
-
-    @Test
-    void should_reject_empty_candidate_input() {
-        assertThatIllegalArgumentException()
-                .isThrownBy(() -> selector.select(invocation("orderService", ""), List.of()))
-                .withMessageContaining("candidates");
-    }
-
-    private ImplementationCandidate candidate(
-            String className, boolean primary, List<String> qualifiers, List<String> profiles) {
-        SemanticPosition position = new SemanticPosition(0, 0);
-        SemanticRange range = new SemanticRange(position, position);
+    private static ImplementationCandidate candidate(String className, boolean primary, List<String> qualifiers) {
+        MethodTarget target = new MethodTarget(className + ".java", "com.example", className, "work", List.of());
+        SemanticRange range = new SemanticRange(new SemanticPosition(0, 0), new SemanticPosition(1, 0));
         SemanticMethod method = new SemanticMethod(
-                "com.example", className, "process", List.of("Order"), "Result",
-                new SemanticLocation("file:///repo/" + className + ".java", range, range));
-        return new ImplementationCandidate(method, primary, qualifiers, profiles);
+                "com.example", className, "work", List.of(), "void",
+                new SemanticLocation("file:///fixture/" + className + ".java", range, range));
+        return new ImplementationCandidate(method, target, primary, qualifiers, List.of());
     }
 
-    private SyntaxInvocation invocation(String receiver, String qualifier) {
-        SyntaxPosition position = new SyntaxPosition(0, 0);
+    private static SyntaxInvocation invocation(String qualifier) {
+        SyntaxRange range = new SyntaxRange(new SyntaxPosition(0, 0), new SyntaxPosition(0, 4));
         return new SyntaxInvocation(
-                InvocationKind.METHOD,
-                new SyntaxRange(position, position),
-                receiver + ".process(order)",
-                receiver,
-                "OrderService " + receiver,
-                qualifier,
-                Optional.empty(),
-                position);
+                SyntaxInvocation.InvocationKind.METHOD, range, "work()", "worker", "", qualifier,
+                Optional.empty(), range.start());
     }
 }

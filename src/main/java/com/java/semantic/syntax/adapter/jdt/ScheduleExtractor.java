@@ -3,9 +3,11 @@ package com.java.semantic.syntax.adapter.jdt;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.function.Function;
 
 import com.java.semantic.syntax.domain.ScheduleEntryPoint;
 import com.java.semantic.syntax.domain.ScheduleTriggerKind;
+import com.java.semantic.syntax.domain.MethodTargetResolution;
 
 import org.eclipse.jdt.core.dom.AbstractTypeDeclaration;
 import org.eclipse.jdt.core.dom.Annotation;
@@ -43,7 +45,9 @@ final class ScheduleExtractor {
     private ScheduleExtractor() {
     }
 
-    static List<ScheduleEntryPoint> extract(AbstractTypeDeclaration type) {
+    static List<ScheduleEntryPoint> extract(
+            AbstractTypeDeclaration type,
+            Function<MethodDeclaration, MethodTargetResolution> analysisTargetOf) {
         if (!SourceTypes.isEntryPointCandidate(type)) {
             return List.of();
         }
@@ -53,25 +57,31 @@ final class ScheduleExtractor {
             if (AnnotationReader.isPresent(method, DEPRECATED)) {
                 continue;
             }
-            toEntryPoint(method).ifPresent(entryPoints::add);
+            toEntryPoint(method, analysisTargetOf).ifPresent(entryPoints::add);
         }
         return List.copyOf(entryPoints);
     }
 
-    private static Optional<ScheduleEntryPoint> toEntryPoint(MethodDeclaration method) {
+    private static Optional<ScheduleEntryPoint> toEntryPoint(
+            MethodDeclaration method,
+            Function<MethodDeclaration, MethodTargetResolution> analysisTargetOf) {
         Optional<Annotation> scheduled = AnnotationReader.find(method, SCHEDULED);
         if (scheduled.isPresent()) {
-            return Optional.of(fromScheduled(method, scheduled.get()));
+            return Optional.of(fromScheduled(method, scheduled.get(), analysisTargetOf));
         }
         return AnnotationReader.findAny(method, JOB_ANNOTATIONS)
                 .map(job -> new ScheduleEntryPoint(
                         method.getName().getIdentifier(),
                         JavadocReader.descriptionOf(method),
                         ScheduleTriggerKind.JOB_HANDLER,
-                        AnnotationReader.stringValue(job, "value").orElse("")));
+                        AnnotationReader.stringValue(job, "value").orElse(""),
+                        analysisTargetOf.apply(method)));
     }
 
-    private static ScheduleEntryPoint fromScheduled(MethodDeclaration method, Annotation scheduled) {
+    private static ScheduleEntryPoint fromScheduled(
+            MethodDeclaration method,
+            Annotation scheduled,
+            Function<MethodDeclaration, MethodTargetResolution> analysisTargetOf) {
         String name = method.getName().getIdentifier();
         String description = JavadocReader.descriptionOf(method);
 
@@ -80,9 +90,10 @@ final class ScheduleExtractor {
                     ? AnnotationReader.numberValue(scheduled, trigger.attribute()).map(String::valueOf)
                     : AnnotationReader.stringValue(scheduled, trigger.attribute());
             if (value.isPresent()) {
-                return new ScheduleEntryPoint(name, description, trigger.kind(), value.get());
+                return new ScheduleEntryPoint(name, description, trigger.kind(), value.get(), analysisTargetOf.apply(method));
             }
         }
-        return new ScheduleEntryPoint(name, description, ScheduleTriggerKind.UNSPECIFIED, "");
+        return new ScheduleEntryPoint(
+                name, description, ScheduleTriggerKind.UNSPECIFIED, "", analysisTargetOf.apply(method));
     }
 }
