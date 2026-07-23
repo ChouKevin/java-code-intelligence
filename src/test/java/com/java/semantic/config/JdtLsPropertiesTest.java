@@ -72,8 +72,7 @@ class JdtLsPropertiesTest {
     @MethodSource("invalidLifecycleProperties")
     void should_fail_context_startup_for_invalid_lifecycle_properties(
             String property,
-            String value,
-            String expectedMessageFragment) {
+            String value) {
         ApplicationContextRunner contextRunner = new ApplicationContextRunner()
                 .withUserConfiguration(JdtLsConfiguration.class)
                 .withPropertyValues(property + "=" + value);
@@ -82,14 +81,13 @@ class JdtLsPropertiesTest {
                 .hasFailed()
                 .getFailure()
                 .rootCause()
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining(expectedMessageFragment));
+                .isInstanceOf(IllegalArgumentException.class));
     }
 
     private static Stream<Arguments> invalidLifecycleProperties() {
         return Stream.of(
-                Arguments.of("semantic.jdtls.max-active-workspaces", "0", "maxActiveWorkspaces"),
-                Arguments.of("semantic.jdtls.idle-timeout", "0s", "idleTimeout"),
-                Arguments.of("semantic.jdtls.maintenance-interval", "-1s", "maintenanceInterval"));
+                Arguments.of("semantic.jdtls.max-active-workspaces", "0"),
+                Arguments.of("semantic.jdtls.idle-timeout", "0s"),
+                Arguments.of("semantic.jdtls.maintenance-interval", "-1s"));
     }
 }

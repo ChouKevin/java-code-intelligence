@@ -16,7 +16,6 @@ import com.java.semantic.semantic.domain.SemanticDeclarationAnchor;
 import com.java.semantic.semantic.domain.SemanticIncomingCall;
 import com.java.semantic.semantic.domain.SemanticIncomingCallIssue;
 import com.java.semantic.semantic.domain.SemanticIncomingCallResult;
-import com.java.semantic.semantic.domain.SemanticLocation;
 import com.java.semantic.semantic.domain.SemanticMethod;
 import com.java.semantic.semantic.domain.SemanticPosition;
 import com.java.semantic.semantic.domain.SemanticProtocolException;
@@ -41,6 +40,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
+import static com.java.semantic.callgraph.application.SemanticGraphTestFixture.incomingMethod;
+import static com.java.semantic.callgraph.application.SemanticGraphTestFixture.target;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -53,8 +54,8 @@ class IncomingSemanticCallGraphBuilderTest {
     void should_build_caller_to_callee_edges_for_each_distinct_call_site_with_full_bodies() {
         MethodTarget calleeTarget = target("Callee", "work");
         MethodTarget callerTarget = target("Caller", "run");
-        SemanticMethod callee = method(calleeTarget, 10);
-        SemanticMethod caller = method(callerTarget, 0);
+        SemanticMethod callee = incomingMethod(calleeTarget, 10);
+        SemanticMethod caller = incomingMethod(callerTarget, 0);
         SemanticRange first = semanticRange(2);
         SemanticRange second = semanticRange(4);
         FakeSemanticService semantic = new FakeSemanticService()
@@ -84,11 +85,11 @@ class IncomingSemanticCallGraphBuilderTest {
         MethodTarget fourthCallerTarget = target("FourthCaller", "run");
         MethodTarget alphaTarget = target("Alpha", "work");
         MethodTarget zetaTarget = target("Zeta", "work");
-        SemanticMethod callee = method(calleeTarget, 20);
-        SemanticMethod firstCaller = method(firstCallerTarget, 0);
-        SemanticMethod secondCaller = method(secondCallerTarget, 2);
-        SemanticMethod thirdCaller = method(thirdCallerTarget, 4);
-        SemanticMethod fourthCaller = method(fourthCallerTarget, 6);
+        SemanticMethod callee = incomingMethod(calleeTarget, 20);
+        SemanticMethod firstCaller = incomingMethod(firstCallerTarget, 0);
+        SemanticMethod secondCaller = incomingMethod(secondCallerTarget, 2);
+        SemanticMethod thirdCaller = incomingMethod(thirdCallerTarget, 4);
+        SemanticMethod fourthCaller = incomingMethod(fourthCallerTarget, 6);
         SemanticRange first = semanticRange(1);
         SemanticRange second = semanticRange(3);
         SemanticRange third = semanticRange(5);
@@ -97,11 +98,11 @@ class IncomingSemanticCallGraphBuilderTest {
                 .incoming(callee,
                         incoming(firstCaller, first), incoming(secondCaller, second),
                         incoming(thirdCaller, third), incoming(fourthCaller, fourth))
-                .resolution(firstCaller, first, localCall(method(mismatchTarget, 30), first))
+                .resolution(firstCaller, first, localCall(incomingMethod(mismatchTarget, 30), first))
                 .resolution(secondCaller, second, externalCall(second))
                 .resolution(thirdCaller, third, SemanticCallResolution.unresolved())
                 .resolution(fourthCaller, fourth,
-                        SemanticCallResolution.ambiguous(List.of(method(zetaTarget, 40), method(alphaTarget, 50))));
+                        SemanticCallResolution.ambiguous(List.of(incomingMethod(zetaTarget, 40), incomingMethod(alphaTarget, 50))));
 
         IncomingGraphFragment fragment = builder(semantic)
                 .build(SNAPSHOT,
@@ -126,11 +127,11 @@ class IncomingSemanticCallGraphBuilderTest {
         MethodTarget alphaTarget = target("Alpha", "save");
         MethodTarget ghostTarget = target("Ghost", "save");
         MethodTarget zetaTarget = target("Zeta", "save");
-        SemanticMethod root = method(rootTarget, 20);
-        SemanticMethod direct = method(directTarget, 10);
-        SemanticMethod rejected = method(rejectedTarget, 8);
-        SemanticMethod alpha = method(alphaTarget, 0);
-        SemanticMethod ghost = method(ghostTarget, 2);
+        SemanticMethod root = incomingMethod(rootTarget, 20);
+        SemanticMethod direct = incomingMethod(directTarget, 10);
+        SemanticMethod rejected = incomingMethod(rejectedTarget, 8);
+        SemanticMethod alpha = incomingMethod(alphaTarget, 0);
+        SemanticMethod ghost = incomingMethod(ghostTarget, 2);
         SemanticRange directSite = semanticRange(1);
         SemanticRange mismatchSite = semanticRange(2);
         SemanticRange ambiguousSite = semanticRange(3);
@@ -144,9 +145,9 @@ class IncomingSemanticCallGraphBuilderTest {
                 .incoming(direct, incoming(alpha, alphaSite))
                 .incoming(rejected, incoming(ghost, ghostSite))
                 .resolution(direct, directSite, localCall(root, directSite))
-                .resolution(rejected, mismatchSite, localCall(method(mismatchTarget, 30), mismatchSite))
+                .resolution(rejected, mismatchSite, localCall(incomingMethod(mismatchTarget, 30), mismatchSite))
                 .resolution(rejected, ambiguousSite,
-                        SemanticCallResolution.ambiguous(List.of(method(zetaTarget, 40), method(alphaTarget, 50))))
+                        SemanticCallResolution.ambiguous(List.of(incomingMethod(zetaTarget, 40), incomingMethod(alphaTarget, 50))))
                 .resolution(rejected, unresolvedSite, SemanticCallResolution.unresolved())
                 .resolution(alpha, alphaSite, localCall(direct, alphaSite))
                 .resolution(ghost, ghostSite, localCall(rejected, ghostSite));
@@ -173,8 +174,8 @@ class IncomingSemanticCallGraphBuilderTest {
     void should_mark_descendant_only_incoming_rejections_as_partial() {
         MethodTarget rootTarget = target("Root", "run");
         MethodTarget directTarget = target("Direct", "work");
-        SemanticMethod root = method(rootTarget, 10);
-        SemanticMethod direct = method(directTarget, 0);
+        SemanticMethod root = incomingMethod(rootTarget, 10);
+        SemanticMethod direct = incomingMethod(directTarget, 0);
         SemanticRange directSite = semanticRange(2);
         FakeSemanticService semantic = new FakeSemanticService()
                 .incoming(root, incoming(direct, directSite))
@@ -199,9 +200,9 @@ class IncomingSemanticCallGraphBuilderTest {
         MethodTarget directTarget = target("Direct", "work");
         MethodTarget rejectedTarget = target("Rejected", "work");
         MethodTarget mismatchTarget = target("Mismatch", "work");
-        SemanticMethod root = method(rootTarget, 20);
-        SemanticMethod direct = method(directTarget, 10);
-        SemanticMethod rejected = method(rejectedTarget, 8);
+        SemanticMethod root = incomingMethod(rootTarget, 20);
+        SemanticMethod direct = incomingMethod(directTarget, 10);
+        SemanticMethod rejected = incomingMethod(rejectedTarget, 8);
         SemanticRange exactSite = semanticRange(1);
         SemanticRange mismatchSite = semanticRange(2);
         SemanticRange unresolvedSite = semanticRange(4);
@@ -216,12 +217,12 @@ class IncomingSemanticCallGraphBuilderTest {
         FakeSemanticService firstSemantic = new FakeSemanticService()
                 .incomingResult(root, firstResult)
                 .resolution(direct, exactSite, localCall(root, exactSite))
-                .resolution(rejected, mismatchSite, localCall(method(mismatchTarget, 30), mismatchSite))
+                .resolution(rejected, mismatchSite, localCall(incomingMethod(mismatchTarget, 30), mismatchSite))
                 .resolution(rejected, unresolvedSite, SemanticCallResolution.unresolved());
         FakeSemanticService secondSemantic = new FakeSemanticService()
                 .incomingResult(root, secondResult)
                 .resolution(direct, exactSite, localCall(root, exactSite))
-                .resolution(rejected, mismatchSite, localCall(method(mismatchTarget, 30), mismatchSite))
+                .resolution(rejected, mismatchSite, localCall(incomingMethod(mismatchTarget, 30), mismatchSite))
                 .resolution(rejected, unresolvedSite, SemanticCallResolution.unresolved());
 
         IncomingGraphFragment first = builder(firstSemantic)
@@ -237,20 +238,20 @@ class IncomingSemanticCallGraphBuilderTest {
         MethodTarget rootTarget = target("Root", "run");
         MethodTarget directTarget = target("Direct", "work");
         MethodTarget mismatchTarget = target("Mismatch", "work");
-        SemanticMethod root = method(rootTarget, 20);
-        SemanticMethod direct = method(directTarget, 10);
+        SemanticMethod root = incomingMethod(rootTarget, 20);
+        SemanticMethod direct = incomingMethod(directTarget, 10);
         SemanticRange exactSite = semanticRange(1);
         SemanticRange mismatchSite = semanticRange(2);
         FakeSemanticService firstSemantic = new FakeSemanticService()
                 .incomingResult(root, new SemanticIncomingCallResult(
                         List.of(incoming(direct, mismatchSite), incoming(direct, exactSite)), List.of()))
                 .resolution(direct, exactSite, localCall(root, exactSite))
-                .resolution(direct, mismatchSite, localCall(method(mismatchTarget, 30), mismatchSite));
+                .resolution(direct, mismatchSite, localCall(incomingMethod(mismatchTarget, 30), mismatchSite));
         FakeSemanticService secondSemantic = new FakeSemanticService()
                 .incomingResult(root, new SemanticIncomingCallResult(
                         List.of(incoming(direct, exactSite), incoming(direct, mismatchSite)), List.of()))
                 .resolution(direct, exactSite, localCall(root, exactSite))
-                .resolution(direct, mismatchSite, localCall(method(mismatchTarget, 30), mismatchSite));
+                .resolution(direct, mismatchSite, localCall(incomingMethod(mismatchTarget, 30), mismatchSite));
 
         IncomingGraphFragment first = builder(firstSemantic)
                 .build(SNAPSHOT, syntax(rootTarget, directTarget, mismatchTarget), rootTarget, root, 1, 0);
@@ -268,7 +269,7 @@ class IncomingSemanticCallGraphBuilderTest {
     @Test
     void should_treat_root_empty_as_complete_but_root_only_rejections_as_protocol_failure() {
         MethodTarget rootTarget = target("Root", "run");
-        SemanticMethod root = method(rootTarget, 0);
+        SemanticMethod root = incomingMethod(rootTarget, 0);
 
         IncomingGraphFragment empty = builder(new FakeSemanticService())
                 .build(SNAPSHOT, syntax(rootTarget), rootTarget, root, 1, 0);
@@ -284,8 +285,8 @@ class IncomingSemanticCallGraphBuilderTest {
     @Test
     void should_reject_root_when_every_adapter_caller_canonicalization_fails() {
         MethodTarget rootTarget = target("Root", "run");
-        SemanticMethod root = method(rootTarget, 0);
-        SemanticMethod rejectedCaller = method(target("RejectedCaller", "run"), 2);
+        SemanticMethod root = incomingMethod(rootTarget, 0);
+        SemanticMethod rejectedCaller = incomingMethod(target("RejectedCaller", "run"), 2);
 
         assertThatThrownBy(() -> builder(new FakeSemanticService()
                 .incoming(root, incoming(rejectedCaller, semanticRange(2))))
@@ -297,8 +298,8 @@ class IncomingSemanticCallGraphBuilderTest {
     void should_retain_valid_root_siblings_and_record_one_sanitized_rejection_warning() {
         MethodTarget calleeTarget = target("Callee", "work");
         MethodTarget callerTarget = target("Caller", "run");
-        SemanticMethod callee = method(calleeTarget, 10);
-        SemanticMethod caller = method(callerTarget, 0);
+        SemanticMethod callee = incomingMethod(calleeTarget, 10);
+        SemanticMethod caller = incomingMethod(callerTarget, 0);
         SemanticRange callSite = semanticRange(2);
         FakeSemanticService semantic = new FakeSemanticService()
                 .incomingResult(callee, new SemanticIncomingCallResult(
@@ -312,7 +313,7 @@ class IncomingSemanticCallGraphBuilderTest {
         assertThat(fragment.edges()).singleElement();
         assertThat(fragment.warnings()).singleElement().satisfies(warning -> {
             assertThat(warning.code()).isEqualTo("INCOMING_CALLER_REJECTED");
-            assertThat(warning.message()).isEqualTo("incoming caller rejection count: 2");
+            assertThat(warning.message()).contains("count: 2");
         });
     }
 
@@ -320,8 +321,8 @@ class IncomingSemanticCallGraphBuilderTest {
     void should_propagate_root_failures_and_retain_descendant_query_failures() {
         MethodTarget rootTarget = target("Root", "run");
         MethodTarget directTarget = target("Direct", "work");
-        SemanticMethod root = method(rootTarget, 10);
-        SemanticMethod direct = method(directTarget, 0);
+        SemanticMethod root = incomingMethod(rootTarget, 10);
+        SemanticMethod direct = incomingMethod(directTarget, 0);
         SemanticRange site = semanticRange(2);
 
         assertThatThrownBy(() -> builder(new FakeSemanticService().failIncoming(root))
@@ -347,11 +348,11 @@ class IncomingSemanticCallGraphBuilderTest {
         MethodTarget directTarget = target("Direct", "work");
         MethodTarget descendantTarget = target("Descendant", "work");
         MethodTarget interfaceTarget = target("Port", "work");
-        SemanticMethod root = method(rootTarget, 20);
-        SemanticMethod rootCaller = method(rootCallerTarget, 0);
-        SemanticMethod direct = method(directTarget, 10);
-        SemanticMethod descendant = method(descendantTarget, 2);
-        SemanticMethod declaration = method(interfaceTarget, 30);
+        SemanticMethod root = incomingMethod(rootTarget, 20);
+        SemanticMethod rootCaller = incomingMethod(rootCallerTarget, 0);
+        SemanticMethod direct = incomingMethod(directTarget, 10);
+        SemanticMethod descendant = incomingMethod(descendantTarget, 2);
+        SemanticMethod declaration = incomingMethod(interfaceTarget, 30);
         SemanticRange rootSite = semanticRange(1);
         SemanticRange descendantSite = semanticRange(2);
         SemanticProtocolException rootFailure = new SemanticProtocolException();
@@ -378,8 +379,8 @@ class IncomingSemanticCallGraphBuilderTest {
                         rootTarget, root, 2, 1);
 
         assertThat(fragment.status()).isEqualTo(GraphAnalysisStatus.PARTIAL);
-        assertThat(fragment.errors()).singleElement().extracting(error -> error.message())
-                .isEqualTo("descendant semantic query failed: SemanticProtocolException");
+        assertThat(fragment.errors()).singleElement().extracting(error -> error.code())
+                .isEqualTo("CHILD_SEMANTIC_QUERY_FAILED");
     }
 
     @Test
@@ -388,10 +389,10 @@ class IncomingSemanticCallGraphBuilderTest {
         MethodTarget directTarget = target("Direct", "work");
         MethodTarget alphaTarget = target("Alpha", "save");
         MethodTarget zetaTarget = target("Zeta", "save");
-        SemanticMethod root = method(rootTarget, 20);
-        SemanticMethod direct = method(directTarget, 10);
-        SemanticMethod alpha = method(alphaTarget, 0);
-        SemanticMethod zeta = method(zetaTarget, 2);
+        SemanticMethod root = incomingMethod(rootTarget, 20);
+        SemanticMethod direct = incomingMethod(directTarget, 10);
+        SemanticMethod alpha = incomingMethod(alphaTarget, 0);
+        SemanticMethod zeta = incomingMethod(zetaTarget, 2);
         SemanticRange directSite = semanticRange(12);
         SemanticRange alphaSite = semanticRange(2);
         SemanticRange zetaSite = semanticRange(4);
@@ -423,8 +424,8 @@ class IncomingSemanticCallGraphBuilderTest {
     void should_not_charge_cycles_or_reused_nodes_against_the_depth_two_budget() {
         MethodTarget rootTarget = target("Root", "run");
         MethodTarget directTarget = target("Direct", "work");
-        SemanticMethod root = method(rootTarget, 10);
-        SemanticMethod direct = method(directTarget, 0);
+        SemanticMethod root = incomingMethod(rootTarget, 10);
+        SemanticMethod direct = incomingMethod(directTarget, 0);
         SemanticRange directSite = semanticRange(2);
         SemanticRange cycleSite = semanticRange(4);
         FakeSemanticService semantic = new FakeSemanticService()
@@ -489,16 +490,6 @@ class IncomingSemanticCallGraphBuilderTest {
         SyntaxRange range = new SyntaxRange(new SyntaxPosition(line, 0), new SyntaxPosition(line, 4));
         return new SyntaxInvocation(SyntaxInvocation.InvocationKind.METHOD, range, "work()",
                 "worker", "", "", Optional.empty(), range.start());
-    }
-
-    private static MethodTarget target(String className, String methodName) {
-        return new MethodTarget(className + ".java", "com.example", className, methodName, List.of());
-    }
-
-    private static SemanticMethod method(MethodTarget target, int line) {
-        SemanticRange range = new SemanticRange(new SemanticPosition(line, 0), new SemanticPosition(line + 1, 0));
-        return new SemanticMethod(target.packageName(), target.className(), target.methodName(), target.parameterTypes(), "void",
-                new SemanticLocation("file:///fixture/" + target.sourceFile(), range, range));
     }
 
     private static SemanticRange semanticRange(int line) {

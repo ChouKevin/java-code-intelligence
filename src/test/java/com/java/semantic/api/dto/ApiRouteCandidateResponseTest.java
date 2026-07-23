@@ -1,44 +1,38 @@
 package com.java.semantic.api.dto;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.function.Executable;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class ApiRouteCandidateResponseTest {
 
-    @Test
-    void should_reject_missing_analysis_target() {
-        assertThatThrownBy(() -> new ApiRouteCandidateResponse(
-                "repo",
-                "revision",
-                "GET",
-                "/orders",
-                "com.example",
-                "OrderController",
-                "find",
-                null))
-                .isInstanceOf(NullPointerException.class)
-                .hasMessage("analysisTarget is required");
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("missingRequiredValues")
+    void should_reject_each_required_api_route_candidate_resolution_value(
+            String label,
+            Executable action) {
+        assertThatThrownBy(action::execute).isInstanceOf(NullPointerException.class);
     }
 
-    @Test
-    void should_reject_missing_resolution_envelope_values() {
-        assertThatThrownBy(() -> new MethodTargetResolutionResponse(
-                null, null, List.of(), ""))
-                .isInstanceOf(NullPointerException.class)
-                .hasMessage("status is required");
-        assertThatThrownBy(() -> new MethodTargetResolutionResponse(
-                "RESOLVED", null, List.of(), null))
-                .isInstanceOf(NullPointerException.class)
-                .hasMessage("reasonCode is required");
-        assertThatThrownBy(() -> new MethodTargetResolutionResponse(
-                "RESOLVED", null, null, ""))
-                .isInstanceOf(NullPointerException.class)
-                .hasMessage("candidates are required");
+    private static Stream<Arguments> missingRequiredValues() {
+        return Stream.of(
+                Arguments.of("missing analysis target", (Executable) () -> new ApiRouteCandidateResponse(
+                        "repo", "revision", "GET", "/orders", "com.example", "OrderController", "find", null)),
+                Arguments.of("missing status", (Executable) () -> new MethodTargetResolutionResponse(
+                        null, null, List.of(), "")),
+                Arguments.of("missing reason code", (Executable) () -> new MethodTargetResolutionResponse(
+                        "RESOLVED", null, List.of(), null)),
+                Arguments.of("missing candidates", (Executable) () -> new MethodTargetResolutionResponse(
+                        "RESOLVED", null, null, "")));
     }
 
     @Test

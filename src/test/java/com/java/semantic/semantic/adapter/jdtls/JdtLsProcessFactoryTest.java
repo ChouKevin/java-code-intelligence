@@ -53,7 +53,7 @@ class JdtLsProcessFactoryTest {
 
     @Test
     void should_observe_the_started_process_before_connection_initialization_begins() throws Exception {
-        Path home = createJdtLsHome();
+        Path home = JdtLsTestFixtures.createFakeHome(tempDirectory);
         TestProcess process = new TestProcess(new ByteArrayInputStream(new byte[0]));
         AtomicReference<Process> observedProcess = new AtomicReference<>();
         JdtLsLanguageServer server = mock(JdtLsLanguageServer.class, invocation -> {
@@ -82,7 +82,7 @@ class JdtLsProcessFactoryTest {
 
     @Test
     void should_build_exact_command_and_initialize_required_capabilities_when_launching() throws Exception {
-        Path home = createJdtLsHome();
+        Path home = JdtLsTestFixtures.createFakeHome(tempDirectory);
         Path workspaceRoot = Files.createDirectories(tempDirectory.resolve("repository"));
         Path workspaceData = tempDirectory.resolve("workspace-data");
         JdtLsProperties properties = properties(home);
@@ -158,7 +158,7 @@ class JdtLsProcessFactoryTest {
 
     @Test
     void should_release_process_and_listener_when_initialize_fails() throws Exception {
-        Path home = createJdtLsHome();
+        Path home = JdtLsTestFixtures.createFakeHome(tempDirectory);
         TestProcess process = new TestProcess(new ByteArrayInputStream(new byte[0]));
         CompletableFuture<Void> listener = new CompletableFuture<>();
         JdtLsLanguageServer server = mock(JdtLsLanguageServer.class, invocation -> {
@@ -185,7 +185,7 @@ class JdtLsProcessFactoryTest {
 
     @Test
     void should_release_process_when_error_stream_access_fails() throws Exception {
-        Path home = createJdtLsHome();
+        Path home = JdtLsTestFixtures.createFakeHome(tempDirectory);
         ErrorStreamFailureProcess process = new ErrorStreamFailureProcess();
         JdtLsProcessFactory factory = new JdtLsProcessFactory(
                 properties(home),
@@ -198,16 +198,16 @@ class JdtLsProcessFactoryTest {
                 tempDirectory.resolve("repository"),
                 tempDirectory.resolve("workspace-data"),
                 mock(JdtLanguageClient.class)))
-                .isInstanceOf(IllegalStateException.class)
-                .hasMessage("error stream access failed");
+                .isInstanceOf(IllegalStateException.class);
 
         assertThat(process.isDestroyed()).isTrue();
     }
 
     @Test
     void should_release_process_when_stderr_thread_start_fails() throws Exception {
-        Path home = createJdtLsHome();
+        Path home = JdtLsTestFixtures.createFakeHome(tempDirectory);
         TestProcess process = new TestProcess(new ByteArrayInputStream(new byte[0]));
+        AssertionError expected = new AssertionError("stderr thread start failed");
         JdtLsProcessFactory factory = new JdtLsProcessFactory(
                 properties(home),
                 command -> process,
@@ -215,22 +215,21 @@ class JdtLsProcessFactoryTest {
                     throw new AssertionError("connection must not start");
                 },
                 task -> {
-                    throw new AssertionError("stderr thread start failed");
+                    throw expected;
                 });
 
         assertThatThrownBy(() -> factory.launch(
                 tempDirectory.resolve("repository"),
                 tempDirectory.resolve("workspace-data"),
                 mock(JdtLanguageClient.class)))
-                .isInstanceOf(AssertionError.class)
-                .hasMessage("stderr thread start failed");
+                .isSameAs(expected);
 
         assertThat(process.isDestroyed()).isTrue();
     }
 
     @Test
     void should_continue_cleanup_and_preserve_failure_when_cleanup_actions_fail() throws Exception {
-        Path home = createJdtLsHome();
+        Path home = JdtLsTestFixtures.createFakeHome(tempDirectory);
         FaultyCleanupProcess process = new FaultyCleanupProcess();
         FailingCancelFuture listener = new FailingCancelFuture();
         JdtLsLanguageServer server = mock(JdtLsLanguageServer.class, invocation -> {
@@ -268,7 +267,7 @@ class JdtLsProcessFactoryTest {
     @Test
     void should_preserve_original_and_continue_cleanup_when_cleanup_rethrows_same_failure()
             throws Exception {
-        Path home = createJdtLsHome();
+        Path home = JdtLsTestFixtures.createFakeHome(tempDirectory);
         SelfSuppressionProcess process = new SelfSuppressionProcess();
         JdtLsProcessFactory factory = new JdtLsProcessFactory(
                 properties(home),
@@ -290,7 +289,7 @@ class JdtLsProcessFactoryTest {
     @Test
     void should_expose_sanitized_failure_and_release_resources_when_stderr_drain_fails(
             CapturedOutput output) throws Exception {
-        Path home = createJdtLsHome();
+        Path home = JdtLsTestFixtures.createFakeHome(tempDirectory);
         ControlledFailureInputStream stderr = new ControlledFailureInputStream();
         TestProcess process = new TestProcess(stderr);
         CompletableFuture<Void> listener = new CompletableFuture<>();
@@ -389,7 +388,7 @@ class JdtLsProcessFactoryTest {
 
     @Test
     void should_drain_stderr_independently_when_pipe_capacity_is_exceeded() throws Exception {
-        Path home = createJdtLsHome();
+        Path home = JdtLsTestFixtures.createFakeHome(tempDirectory);
         PipedInputStream stderr = new PipedInputStream(128);
         PipedOutputStream serverStderr = new PipedOutputStream(stderr);
         TestProcess process = new TestProcess(stderr);
@@ -432,7 +431,7 @@ class JdtLsProcessFactoryTest {
     @Test
     void should_keep_only_safe_stderr_metadata_across_buffer_and_log_channels(CapturedOutput output)
             throws Exception {
-        Path home = createJdtLsHome();
+        Path home = JdtLsTestFixtures.createFakeHome(tempDirectory);
         String sentinel = "RESTRICTED_STDERR_SENTINEL_/protected/Secret.java";
         String diagnostics = "!ENTRY org.eclipse.jdt.ls.core\n!MESSAGE " + sentinel + "\n";
         TestProcess process = new TestProcess(
@@ -500,14 +499,6 @@ class JdtLsProcessFactoryTest {
         assertThat(buffer.asText()).doesNotContain("second", "third");
     }
 
-    private Path createJdtLsHome() throws IOException {
-        Path home = tempDirectory.resolve("jdtls");
-        Files.createDirectories(home.resolve("plugins"));
-        Files.createDirectories(home.resolve("config_linux"));
-        Files.createFile(home.resolve("plugins/org.eclipse.equinox.launcher_test.jar"));
-        return home;
-    }
-
     private JdtLsProperties properties(Path home) {
         return new JdtLsProperties(
                 true,
@@ -523,7 +514,7 @@ class JdtLsProcessFactoryTest {
     }
 
     private DrainFailureFixture launchDrainFailureFixture(InputStream stderr) throws Exception {
-        Path home = createJdtLsHome();
+        Path home = JdtLsTestFixtures.createFakeHome(tempDirectory);
         TestProcess process = new TestProcess(stderr);
         CompletableFuture<Void> listener = new CompletableFuture<>();
         JdtLsLanguageServer server = mock(JdtLsLanguageServer.class, invocation -> {

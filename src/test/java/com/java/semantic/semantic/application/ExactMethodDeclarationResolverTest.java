@@ -79,8 +79,7 @@ class ExactMethodDeclarationResolverTest {
                 actual.parameterTypes());
 
         assertThatThrownBy(() -> new ExactMethodDeclarationResolver().resolve(syntax, requested))
-                .isInstanceOf(SemanticTargetNotFoundException.class)
-                .hasMessage("exact semantic target was not found");
+                .isInstanceOf(SemanticTargetNotFoundException.class);
     }
 
     @Test

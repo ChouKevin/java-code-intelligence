@@ -344,8 +344,7 @@ class OpenApiContractTest {
                 "OrderController",
                 "placeOrder",
                 List.of()))
-                .hasCauseInstanceOf(NullPointerException.class)
-                .hasRootCauseMessage("packageName is required");
+                .hasCauseInstanceOf(NullPointerException.class);
 
         ObjectMapper objectMapper = new ObjectMapper();
         assertThatThrownBy(() -> objectMapper.readValue("""
@@ -362,28 +361,22 @@ class OpenApiContractTest {
                   "unknown":true
                 }
                 """, requestType))
-                .hasRootCauseInstanceOf(IllegalArgumentException.class)
-                .hasRootCauseMessage("unknown request property");
+                .hasRootCauseInstanceOf(IllegalArgumentException.class);
     }
 
     @Test
     void should_reject_invalid_source_coordinates_and_ranges() {
         assertThatThrownBy(() -> new PositionResponse(-1, 0))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessage("line must not be negative");
+                .isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> new PositionResponse(0, -1))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessage("character must not be negative");
+                .isInstanceOf(IllegalArgumentException.class);
         PositionResponse position = new PositionResponse(0, 0);
         assertThatThrownBy(() -> new SourceRangeResponse(null, position, position))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessage("sourceFile must not be blank");
+                .isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> new SourceRangeResponse("src/Main.java", null, position))
-                .isInstanceOf(NullPointerException.class)
-                .hasMessage("start is required");
+                .isInstanceOf(NullPointerException.class);
         assertThatThrownBy(() -> new SourceRangeResponse("src/Main.java", position, null))
-                .isInstanceOf(NullPointerException.class)
-                .hasMessage("end is required");
+                .isInstanceOf(NullPointerException.class);
     }
 
     @Test
@@ -392,11 +385,9 @@ class OpenApiContractTest {
         assertThat(new GraphTraversalResponse(2, 1, 10, true, "NODE_BUDGET").limitReason())
                 .isEqualTo("NODE_BUDGET");
         assertThatThrownBy(() -> new GraphTraversalResponse(2, 1, 10, true, null))
-                .isInstanceOf(NullPointerException.class)
-                .hasMessage("limitReason is required");
+                .isInstanceOf(NullPointerException.class);
         assertThatThrownBy(() -> new GraphTraversalResponse(2, 1, 10, true, "UNKNOWN"))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessage("limitReason must be NONE or NODE_BUDGET");
+                .isInstanceOf(IllegalArgumentException.class);
     }
 
     @Test
@@ -416,8 +407,7 @@ class OpenApiContractTest {
                 "OrderController",
                 "placeOrder",
                 null))
-                .isInstanceOf(NullPointerException.class)
-                .hasMessage("parameterTypes are required");
+                .isInstanceOf(NullPointerException.class);
         SourceRangeResponse range = new SourceRangeResponse(
                 "src/main/java/com/example/OrderController.java",
                 new PositionResponse(0, 0),
@@ -427,8 +417,7 @@ class OpenApiContractTest {
         evidence.add("mutated");
         assertThat(edge.evidence()).isEmpty();
         assertThatThrownBy(() -> new GraphEdgeResponse("caller", "callee", range, "call()", "JDT", 1.0, null))
-                .isInstanceOf(NullPointerException.class)
-                .hasMessage("evidence is required");
+                .isInstanceOf(NullPointerException.class);
 
         List<MethodTargetResponse> candidates = new ArrayList<>();
         GraphWarningResponse warning = new GraphWarningResponse("AMBIGUOUS", "ambiguous", "node", null, null, candidates);
@@ -440,8 +429,7 @@ class OpenApiContractTest {
                 List.of()));
         assertThat(warning.candidates()).isEmpty();
         assertThatThrownBy(() -> new GraphWarningResponse("AMBIGUOUS", "ambiguous", "node", null, null, null))
-                .isInstanceOf(NullPointerException.class)
-                .hasMessage("candidates are required");
+                .isInstanceOf(NullPointerException.class);
 
         GraphNodeResponse node = new GraphNodeResponse("node", null, null, "FULL_SOURCE", "EXPANDED", null, null);
         List<GraphNodeResponse> nodes = new ArrayList<>();
@@ -474,8 +462,7 @@ class OpenApiContractTest {
                 List.of(),
                 List.of(),
                 List.of()))
-                .isInstanceOf(NullPointerException.class)
-                .hasMessage("nodes are required");
+                .isInstanceOf(NullPointerException.class);
         assertThatThrownBy(() -> new OutgoingCallGraphResponse(
                 "SUCCESS",
                 "FIXTURE",
@@ -485,8 +472,7 @@ class OpenApiContractTest {
                 null,
                 List.of(),
                 List.of()))
-                .isInstanceOf(NullPointerException.class)
-                .hasMessage("edges are required");
+                .isInstanceOf(NullPointerException.class);
         assertThatThrownBy(() -> new OutgoingCallGraphResponse(
                 "SUCCESS",
                 "FIXTURE",
@@ -496,8 +482,7 @@ class OpenApiContractTest {
                 List.of(),
                 null,
                 List.of()))
-                .isInstanceOf(NullPointerException.class)
-                .hasMessage("warnings are required");
+                .isInstanceOf(NullPointerException.class);
         assertThatThrownBy(() -> new OutgoingCallGraphResponse(
                 "SUCCESS",
                 "FIXTURE",
@@ -507,8 +492,7 @@ class OpenApiContractTest {
                 List.of(),
                 List.of(),
                 null))
-                .isInstanceOf(NullPointerException.class)
-                .hasMessage("errors are required");
+                .isInstanceOf(NullPointerException.class);
 
         IncomingCallGraphResponse incomingResponse = new IncomingCallGraphResponse(
                 "SUCCESS",

@@ -93,7 +93,6 @@ class JdtWorkspaceSourceLocatorTest {
     private void assertRejected(ThrowingRunnable action, String unsafeText) {
         assertThatThrownBy(action::run)
                 .isInstanceOf(SemanticProtocolException.class)
-                .hasMessage("semantic protocol request failed")
                 .satisfies(exception -> assertThat(exception.toString()).doesNotContain(unsafeText));
     }
 

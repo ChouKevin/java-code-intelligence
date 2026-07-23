@@ -12,7 +12,6 @@ import com.java.semantic.semantic.domain.SemanticCallSite;
 import com.java.semantic.semantic.domain.SemanticDeclarationAnchor;
 import com.java.semantic.semantic.domain.SemanticIncomingCall;
 import com.java.semantic.semantic.domain.SemanticIncomingCallResult;
-import com.java.semantic.semantic.domain.SemanticLocation;
 import com.java.semantic.semantic.domain.SemanticMethod;
 import com.java.semantic.semantic.domain.SemanticPosition;
 import com.java.semantic.semantic.domain.SemanticRange;
@@ -34,6 +33,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
+import static com.java.semantic.callgraph.application.SemanticGraphTestFixture.incomingMethod;
 import static org.assertj.core.api.Assertions.assertThat;
 
 class DirectionalCallGraphParityTest {
@@ -46,8 +46,8 @@ class DirectionalCallGraphParityTest {
         MethodTarget callerTarget = new MethodTarget("Caller.java", "com.example", "Caller", "run", List.of());
         MethodTarget stringTarget = new MethodTarget("Target.java", "com.example", "Target", "work", List.of("java.lang.String"));
         MethodTarget intTarget = new MethodTarget("Target.java", "com.example", "Target", "work", List.of("int"));
-        SemanticMethod caller = method(callerTarget, 0);
-        SemanticMethod stringTargetMethod = method(stringTarget, 10);
+        SemanticMethod caller = incomingMethod(callerTarget, 0);
+        SemanticMethod stringTargetMethod = incomingMethod(stringTarget, 10);
         SemanticRange callSite = new SemanticRange(new SemanticPosition(2, 0), new SemanticPosition(2, 4));
         FakeSemanticService semantic = new FakeSemanticService(caller, stringTargetMethod, callSite);
         RepositorySyntax syntax = new RepositorySyntax(List.of(), List.of(
@@ -100,12 +100,6 @@ class DirectionalCallGraphParityTest {
                 new SyntaxPosition(range.end().line(), range.end().character()));
         return new SyntaxInvocation(SyntaxInvocation.InvocationKind.METHOD, syntaxRange, "work(value)",
                 "target", "", "", Optional.empty(), syntaxRange.start());
-    }
-
-    private static SemanticMethod method(MethodTarget target, int line) {
-        SemanticRange range = new SemanticRange(new SemanticPosition(line, 0), new SemanticPosition(line + 1, 0));
-        return new SemanticMethod(target.packageName(), target.className(), target.methodName(), target.parameterTypes(), "void",
-                new SemanticLocation("file:///fixture/" + target.sourceFile(), range, range));
     }
 
     private static final class FakeSemanticService implements JavaSemanticService {

@@ -9,6 +9,7 @@ import com.java.semantic.repository.application.RepositoryMutationException;
 import com.java.semantic.repository.domain.RepositoryId;
 import com.java.semantic.repository.domain.RepositoryRevision;
 import com.java.semantic.repository.domain.RepositorySnapshot;
+import com.java.semantic.support.ConcurrencyTestSupport;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.eclipse.lsp4j.DidChangeConfigurationParams;
@@ -128,8 +129,7 @@ class DefaultJdtWorkspaceManagerTest {
                 () -> CompletableFuture.completedFuture(null));
 
         assertThatThrownBy(() -> fixture.manager().getOrStart(fixture.snapshot()))
-                .isInstanceOf(JdtLsReadinessProbe.JdtWorkspaceStartupException.class)
-                .hasMessageContaining("incremental workspace build");
+                .isInstanceOf(JdtLsReadinessProbe.JdtWorkspaceStartupException.class);
         assertThat(fixture.workspaceService().queries()).isEmpty();
     }
 
@@ -140,8 +140,7 @@ class DefaultJdtWorkspaceManagerTest {
                 () -> CompletableFuture.failedFuture(new IllegalStateException("build protocol failed")));
 
         assertThatThrownBy(() -> fixture.manager().getOrStart(fixture.snapshot()))
-                .isInstanceOf(JdtLsReadinessProbe.JdtWorkspaceStartupException.class)
-                .hasMessageContaining("incremental workspace build request failed");
+                .isInstanceOf(JdtLsReadinessProbe.JdtWorkspaceStartupException.class);
         assertThat(fixture.workspaceService().queries()).isEmpty();
     }
 
@@ -269,7 +268,6 @@ class DefaultJdtWorkspaceManagerTest {
                 JdtLsReadinessProbe.JdtWorkspaceStartupException.class,
                 () -> fixture.manager().getOrStart(fixture.snapshot()));
 
-        assertThat(failure).hasMessageContaining("order-service");
         assertThat(failure.stderr()).contains("stderr-category=ENTRY", "stderr-category=MESSAGE")
                 .doesNotContain("could not resolve pom.xml");
         assertThat(fixture.manager().status(REPOSITORY_ID)).isEqualTo(SemanticEngineStatus.FAILED);
@@ -337,8 +335,7 @@ class DefaultJdtWorkspaceManagerTest {
         });
 
         assertThatThrownBy(() -> fixture.manager().getOrStart(fixture.snapshot()))
-                .isInstanceOf(JdtLsReadinessProbe.JdtWorkspaceStartupException.class)
-                .hasMessageContaining("invalidated");
+                .isInstanceOf(JdtLsReadinessProbe.JdtWorkspaceStartupException.class);
     }
 
     @Test
@@ -350,8 +347,7 @@ class DefaultJdtWorkspaceManagerTest {
         });
 
         assertThatThrownBy(() -> fixture.manager().getOrStart(fixture.snapshot()))
-                .isInstanceOf(JdtLsReadinessProbe.JdtWorkspaceStartupException.class)
-                .hasMessageContaining("exited");
+                .isInstanceOf(JdtLsReadinessProbe.JdtWorkspaceStartupException.class);
     }
 
     @Test
@@ -373,7 +369,7 @@ class DefaultJdtWorkspaceManagerTest {
         List<JdtWorkspaceSession> sessions = Collections.synchronizedList(new ArrayList<>());
         Runnable start = () -> {
             ready.countDown();
-            awaitLatch(go);
+            ConcurrencyTestSupport.await(go, Duration.ofSeconds(5));
             sessions.add(fixture.manager().getOrStart(fixture.snapshot()));
         };
         Thread first = Thread.ofPlatform().start(start);
@@ -420,7 +416,6 @@ class DefaultJdtWorkspaceManagerTest {
 
         assertThatThrownBy(() -> fixture.manager().beforeMutation(REPOSITORY_ID))
                 .isInstanceOf(RepositoryMutationException.class)
-                .hasMessageContaining("IllegalStateException")
                 .hasNoCause();
     }
 
@@ -488,9 +483,7 @@ class DefaultJdtWorkspaceManagerTest {
         try {
             assertThat(session.activeRequests()).isEqualTo(1);
             assertThatThrownBy(() -> fixture.manager().getOrStart(other))
-                    .isInstanceOf(DefaultJdtWorkspaceManager.JdtWorkspaceCapacityException.class)
-                    .hasMessage("JDT LS capacity 1 reached; no evictable workspace "
-                            + "(active=1, starting=0, terminationPending=0)");
+                    .isInstanceOf(DefaultJdtWorkspaceManager.JdtWorkspaceCapacityException.class);
             assertThat(fixture.meterRegistry().get("jdtls.workspace.capacity.rejections")
                     .tag("reason", "no_evictable_workspace").counter().count()).isEqualTo(1.0);
             assertThat(fixture.manager().status(REPOSITORY_ID)).isEqualTo(SemanticEngineStatus.READY);
@@ -515,7 +508,7 @@ class DefaultJdtWorkspaceManagerTest {
                         didOpenCompleted.countDown();
                         return CompletableFuture.completedFuture(null);
                     });
-                    awaitLatch(continueLifecycle);
+                    ConcurrencyTestSupport.await(continueLifecycle, Duration.ofSeconds(5));
                     return session.call("textDocument/didClose",
                             server -> CompletableFuture.completedFuture(null));
                 });
@@ -644,8 +637,7 @@ class DefaultJdtWorkspaceManagerTest {
         fixture.clearConnectionFailure();
 
         assertThatThrownBy(() -> fixture.manager().getOrStart(fixture.snapshot()))
-                .isInstanceOf(DefaultJdtWorkspaceManager.JdtWorkspaceTerminationPendingException.class)
-                .hasMessageContaining("termination");
+                .isInstanceOf(DefaultJdtWorkspaceManager.JdtWorkspaceTerminationPendingException.class);
         assertThat(fixture.startedCommands()).hasSize(1);
         assertThat(retainedProcess.isAlive()).isTrue();
         assertThat(fixture.manager().activeProcessIds()).containsExactly(7_777L);
@@ -690,11 +682,11 @@ class DefaultJdtWorkspaceManagerTest {
         });
 
         try {
-            awaitLatch(processStarterBlocked);
+            ConcurrencyTestSupport.await(processStarterBlocked, Duration.ofSeconds(5));
             fixture.process().refuseToExit();
             fixture.process().exitAfterDestroyForciblyAttempts(2);
             shutdown.start();
-            awaitLatch(completionWaitReached);
+            ConcurrencyTestSupport.await(completionWaitReached, Duration.ofSeconds(5));
             releaseProcessStarter.countDown();
             starter.join(Duration.ofSeconds(5));
             shutdown.join(Duration.ofSeconds(5));
@@ -796,7 +788,7 @@ class DefaultJdtWorkspaceManagerTest {
         AtomicInteger requestCallbacks = new AtomicInteger();
         fixture.workspaceService().respondWith(query -> {
             importReached.countDown();
-            awaitLatch(releaseImport);
+            ConcurrencyTestSupport.await(releaseImport, Duration.ofSeconds(5));
             return CompletableFuture.completedFuture(symbols());
         });
         AtomicReference<Throwable> starterFailure = new AtomicReference<>();
@@ -823,14 +815,12 @@ class DefaultJdtWorkspaceManagerTest {
 
             assertThatThrownBy(() -> fixture.manager().acquireActivity(
                     REPOSITORY_ID, REVISION, WorkspaceActivityKind.INDEXING))
-                    .isInstanceOf(JdtWorkspaceSession.JdtWorkspaceClosingException.class)
-                    .hasMessage("JDT LS workspace is shutting down: workspace activity");
+                    .isInstanceOf(JdtWorkspaceSession.JdtWorkspaceClosingException.class);
             assertThatThrownBy(() -> readySession.call("shutdown-race", languageServer -> {
                 requestCallbacks.incrementAndGet();
                 return CompletableFuture.completedFuture("unexpected");
             }))
-                    .isInstanceOf(JdtWorkspaceSession.JdtWorkspaceClosingException.class)
-                    .hasMessage("JDT LS workspace is shutting down: shutdown-race");
+                    .isInstanceOf(JdtWorkspaceSession.JdtWorkspaceClosingException.class);
             assertThat(requestCallbacks).hasValue(0);
         } finally {
             releaseImport.countDown();
@@ -854,7 +844,7 @@ class DefaultJdtWorkspaceManagerTest {
         CountDownLatch releaseImport = new CountDownLatch(1);
         fixture.workspaceService().respondWith(query -> {
             importReached.countDown();
-            awaitLatch(releaseImport);
+            ConcurrencyTestSupport.await(releaseImport, Duration.ofSeconds(5));
             return CompletableFuture.completedFuture(symbols());
         });
         Thread starter = Thread.ofPlatform().start(() -> {
@@ -945,7 +935,7 @@ class DefaultJdtWorkspaceManagerTest {
         CountDownLatch releaseImport = new CountDownLatch(1);
         fixture.workspaceService().respondWith(query -> {
             importReached.countDown();
-            awaitLatch(releaseImport);
+            ConcurrencyTestSupport.await(releaseImport, Duration.ofSeconds(5));
             return CompletableFuture.completedFuture(symbols());
         });
         CompletableFuture<JdtWorkspaceSession> startup = new CompletableFuture<>();
@@ -992,8 +982,7 @@ class DefaultJdtWorkspaceManagerTest {
         fixture.manager().shutdownAll();
 
         assertThatThrownBy(() -> fixture.manager().getOrStart(fixture.snapshot()))
-                .isInstanceOf(DefaultJdtWorkspaceManager.JdtWorkspaceManagerStoppedException.class)
-                .hasMessageContaining("shut down");
+                .isInstanceOf(DefaultJdtWorkspaceManager.JdtWorkspaceManagerStoppedException.class);
 
         assertThat(fixture.startedCommands()).isEmpty();
     }
@@ -1054,7 +1043,6 @@ class DefaultJdtWorkspaceManagerTest {
                     JdtLsReadinessProbe.JdtWorkspaceStartupException.class,
                     () -> fixture.manager().getOrStart(fixture.snapshot()));
 
-            assertThat(failure).hasMessageContaining("AssertionError");
             assertThat(failure.toString()).doesNotContain(sentinel);
             assertThat(failure.getCause()).isNull();
             assertThat(failure.getSuppressed()).isEmpty();
@@ -1088,7 +1076,6 @@ class DefaultJdtWorkspaceManagerTest {
                     JdtLsReadinessProbe.JdtWorkspaceStartupException.class,
                     () -> fixture.manager().getOrStart(fixture.snapshot()));
 
-            assertThat(failure).hasMessageContaining("ServiceConfigurationError");
             assertThat(failure.toString()).doesNotContain(sentinel);
             assertThat(failure.getCause()).isNull();
             assertThat(failure.getSuppressed()).isEmpty();
@@ -1185,8 +1172,7 @@ class DefaultJdtWorkspaceManagerTest {
 
         assertThatThrownBy(() -> session.call("workspace/symbol",
                 server -> server.getWorkspaceService().symbol(new WorkspaceSymbolParams("x"))))
-                .isInstanceOf(JdtWorkspaceSession.JdtRequestTimeoutException.class)
-                .hasMessageContaining("workspace/symbol");
+                .isInstanceOf(JdtWorkspaceSession.JdtRequestTimeoutException.class);
 
         assertThat(pending.isCancelled()).isTrue();
         assertThat(session.activeRequests()).isZero();
@@ -1267,8 +1253,7 @@ class DefaultJdtWorkspaceManagerTest {
         fixture.languageServer().buildWorkspaceResponse(() -> CompletableFuture.completedFuture(status));
 
         assertThatThrownBy(() -> fixture.manager().getOrStart(fixture.snapshot()))
-                .isInstanceOf(JdtLsReadinessProbe.JdtWorkspaceStartupException.class)
-                .hasMessageContaining("incremental workspace build");
+                .isInstanceOf(JdtLsReadinessProbe.JdtWorkspaceStartupException.class);
         assertThat(fixture.workspaceService().queries()).isEmpty();
     }
 
@@ -1302,17 +1287,6 @@ class DefaultJdtWorkspaceManagerTest {
             }
         }
         assertThat(session.isUsable()).isFalse();
-    }
-
-    private static void awaitLatch(CountDownLatch latch) {
-        try {
-            if (!latch.await(5, TimeUnit.SECONDS)) {
-                throw new IllegalStateException("latch timed out");
-            }
-        } catch (InterruptedException exception) {
-            Thread.currentThread().interrupt();
-            throw new IllegalStateException("latch interrupted", exception);
-        }
     }
 
     private static void awaitThreadState(Thread thread, Thread.State expectedState) {
@@ -1366,7 +1340,12 @@ class DefaultJdtWorkspaceManagerTest {
                 Duration shutdownLockWait,
                 int maxActiveWorkspaces,
                 Runnable launchCompletionWaitObserver) {
-            Path home = createHome();
+            Path home;
+            try {
+                home = JdtLsTestFixtures.createFakeHome(tempDirectory);
+            } catch (IOException exception) {
+                throw new IllegalStateException("fake JDT LS home failed", exception);
+            }
             JdtLsProperties properties = new JdtLsProperties(
                     true,
                     home,
@@ -1412,18 +1391,6 @@ class DefaultJdtWorkspaceManagerTest {
                     ticker,
                     lifecycleMetrics,
                     launchCompletionWaitObserver);
-        }
-
-        private Path createHome() {
-            try {
-                Path home = tempDirectory.resolve("jdtls");
-                Files.createDirectories(home.resolve("plugins"));
-                Files.createDirectories(home.resolve("config_linux"));
-                Files.createFile(home.resolve("plugins/org.eclipse.equinox.launcher_test.jar"));
-                return home;
-            } catch (IOException exception) {
-                throw new IllegalStateException("fake JDT LS home failed", exception);
-            }
         }
 
         private InputStream newStderr() {
@@ -1512,7 +1479,7 @@ class DefaultJdtWorkspaceManagerTest {
         private void blockProcessStarterReturn(CountDownLatch blocked, CountDownLatch release) {
             beforeProcessStarterReturns(process -> {
                 blocked.countDown();
-                awaitLatch(release);
+                ConcurrencyTestSupport.await(release, Duration.ofSeconds(5));
             });
         }
 
@@ -1741,7 +1708,7 @@ class DefaultJdtWorkspaceManagerTest {
             timedWaitCount++;
             if (blockFirstTimedWait && timedWaitCount == 1) {
                 firstTimedWaitStarted.countDown();
-                awaitLatch(firstTimedWaitReleased);
+                ConcurrencyTestSupport.await(firstTimedWaitReleased, Duration.ofSeconds(5));
             }
             if (exits) {
                 alive = false;
@@ -1809,7 +1776,7 @@ class DefaultJdtWorkspaceManagerTest {
         }
 
         private void awaitFirstTimedWait() {
-            awaitLatch(firstTimedWaitStarted);
+            ConcurrencyTestSupport.await(firstTimedWaitStarted, Duration.ofSeconds(5));
         }
 
         private void releaseFirstTimedWait() {

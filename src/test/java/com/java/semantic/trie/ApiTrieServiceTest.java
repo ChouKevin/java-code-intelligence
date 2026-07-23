@@ -6,6 +6,7 @@ import ch.qos.logback.core.AppenderBase;
 import com.java.semantic.repository.domain.RepositoryId;
 import com.java.semantic.repository.domain.RepositoryRevision;
 import com.java.semantic.repository.domain.RepositorySnapshot;
+import com.java.semantic.support.ConcurrencyTestSupport;
 import com.java.semantic.identity.MethodTarget;
 import com.java.semantic.syntax.domain.ApiEntryPoint;
 import com.java.semantic.syntax.domain.EntryPointClass;
@@ -20,6 +21,7 @@ import org.springframework.boot.test.system.CapturedOutput;
 import org.springframework.boot.test.system.OutputCaptureExtension;
 
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
@@ -329,11 +331,11 @@ class ApiTrieServiceTest {
     void should_restore_previous_routes_and_propagate_when_rebuild_fails() {
         ApiTrieService service = new ApiTrieService();
         service.reload(snapshot("repo", SHA_ONE.value()), syntax(route("OldController", "old", "GET", "/old")));
+        IllegalStateException expected = new IllegalStateException("syntax failed");
 
         assertThatThrownBy(() -> service.reload(snapshot("repo", SHA_TWO.value()), () -> {
-            throw new IllegalStateException("syntax failed");
-        })).isInstanceOf(IllegalStateException.class)
-                .hasMessage("syntax failed");
+            throw expected;
+        })).isSameAs(expected);
         assertThat(service.lookupCandidates("/old", "GET", ""))
                 .singleElement()
                 .extracting(ApiEntryPointRef::analyzedRevision)
@@ -379,7 +381,7 @@ class ApiTrieServiceTest {
             try {
                 service.reload(snapshot("repo-a", SHA_TWO.value()), () -> {
                     started.countDown();
-                    await(release);
+                    ConcurrencyTestSupport.await(release, Duration.ofSeconds(5));
                     return syntax(route("NewController", "newRoute", "GET", "/shared"));
                 });
             } finally {
@@ -537,17 +539,6 @@ class ApiTrieServiceTest {
                 List.of()));
     }
 
-    private static void await(CountDownLatch latch) {
-        try {
-            if (!latch.await(5, TimeUnit.SECONDS)) {
-                throw new IllegalStateException("timed out awaiting test latch");
-            }
-        } catch (InterruptedException exception) {
-            Thread.currentThread().interrupt();
-            throw new IllegalStateException("interrupted awaiting test latch", exception);
-        }
-    }
-
     private static final class BlockingCollisionAppender extends AppenderBase<ILoggingEvent> {
 
         private final String trigger;
@@ -567,7 +558,7 @@ class ApiTrieServiceTest {
         protected void append(ILoggingEvent event) {
             if (event.getFormattedMessage().contains(trigger)) {
                 blocked.countDown();
-                await(release);
+                ConcurrencyTestSupport.await(release, Duration.ofSeconds(5));
             }
         }
     }

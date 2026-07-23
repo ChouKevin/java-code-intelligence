@@ -19,9 +19,11 @@ import com.java.semantic.semantic.domain.SemanticPosition;
 import com.java.semantic.semantic.domain.SemanticRange;
 import com.java.semantic.syntax.domain.RepositorySyntax;
 import com.java.semantic.syntax.domain.SyntaxExtractionService;
+import com.java.semantic.support.ConcurrencyTestSupport;
 import org.junit.jupiter.api.Test;
 
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CountDownLatch;
@@ -68,7 +70,7 @@ class SemanticAnalysisConcurrencyTest {
             RepositoryId repositoryId = invocation.getArgument(0);
             RepositorySnapshot snapshot = firstId.equals(repositoryId) ? firstSnapshot : secondSnapshot;
             callbacksReady.countDown();
-            await(releaseCallbacks);
+            ConcurrencyTestSupport.await(releaseCallbacks, Duration.ofSeconds(1));
             Function<RepositorySnapshot, OutgoingGraphFragment> callback = invocation.getArgument(2);
             return callback.apply(snapshot);
         });
@@ -131,7 +133,7 @@ class SemanticAnalysisConcurrencyTest {
             RepositoryId repositoryId = invocation.getArgument(0);
             RepositorySnapshot snapshot = firstId.equals(repositoryId) ? firstSnapshot : secondSnapshot;
             callbacksReady.countDown();
-            await(releaseCallbacks);
+            ConcurrencyTestSupport.await(releaseCallbacks, Duration.ofSeconds(1));
             Function<RepositorySnapshot, IncomingGraphFragment> callback = invocation.getArgument(2);
             return callback.apply(snapshot);
         });
@@ -162,17 +164,6 @@ class SemanticAnalysisConcurrencyTest {
             assertThat(second.get(1, TimeUnit.SECONDS)).isSameAs(secondResult);
         } finally {
             executor.shutdownNow();
-        }
-    }
-
-    private static void await(CountDownLatch latch) {
-        try {
-            if (!latch.await(1, TimeUnit.SECONDS)) {
-                throw new IllegalStateException("analysis callbacks were not released");
-            }
-        } catch (InterruptedException exception) {
-            Thread.currentThread().interrupt();
-            throw new IllegalStateException("analysis callback was interrupted", exception);
         }
     }
 

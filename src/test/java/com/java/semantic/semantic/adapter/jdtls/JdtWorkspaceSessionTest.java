@@ -5,6 +5,7 @@ import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
 import com.java.semantic.repository.domain.RepositoryId;
 import com.java.semantic.repository.domain.RepositoryRevision;
+import com.java.semantic.support.ConcurrencyTestSupport;
 import org.eclipse.lsp4j.InitializeParams;
 import org.eclipse.lsp4j.InitializeResult;
 import org.eclipse.lsp4j.services.TextDocumentService;
@@ -109,7 +110,7 @@ class JdtWorkspaceSessionTest {
         try {
             Future<String> first = executor.submit(() -> session.withDocumentUri("file:///Order.java", () -> {
                 firstEntered.countDown();
-                await(releaseFirst);
+                ConcurrencyTestSupport.await(releaseFirst, Duration.ofSeconds(1));
                 return "first";
             }));
             assertThat(firstEntered.await(1, TimeUnit.SECONDS)).isTrue();
@@ -191,17 +192,6 @@ class JdtWorkspaceSessionTest {
         return new JdtWorkspaceSession(
                 RepositoryId.of("order-service"), RepositoryRevision.ofSha("a".repeat(40)),
                 handle, Duration.ofSeconds(1), ticker);
-    }
-
-    private void await(CountDownLatch latch) {
-        try {
-            if (!latch.await(1, TimeUnit.SECONDS)) {
-                throw new IllegalStateException("test operation was not released");
-            }
-        } catch (InterruptedException exception) {
-            Thread.currentThread().interrupt();
-            throw new IllegalStateException("test operation was interrupted", exception);
-        }
     }
 
     private static final class TestLanguageServer implements JdtLsLanguageServer {

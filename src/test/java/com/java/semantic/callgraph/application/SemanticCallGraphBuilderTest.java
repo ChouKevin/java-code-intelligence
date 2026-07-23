@@ -38,6 +38,9 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Arrays;
 
+import static com.java.semantic.callgraph.application.SemanticGraphTestFixture.outgoingMethod;
+import static com.java.semantic.callgraph.application.SemanticGraphTestFixture.resolvedCall;
+import static com.java.semantic.callgraph.application.SemanticGraphTestFixture.target;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.groups.Tuple.tuple;
@@ -50,7 +53,7 @@ class SemanticCallGraphBuilderTest {
     @Test
     void should_return_success_for_a_root_without_calls() {
         MethodTarget rootTarget = target("Root", "run");
-        SemanticMethod root = method(rootTarget, 0);
+        SemanticMethod root = outgoingMethod(rootTarget, 0);
 
         com.java.semantic.callgraph.domain.OutgoingGraphFragment fragment = builder(new FakeSemanticService())
                 .build(SNAPSHOT, syntax(rootTarget), rootTarget, root, 2, 40);
@@ -69,9 +72,9 @@ class SemanticCallGraphBuilderTest {
     void should_keep_every_depth_one_local_callee_as_full_source_boundary() {
         MethodTarget rootTarget = target("Root", "run");
         MethodTarget childTarget = target("Child", "work");
-        SemanticMethod root = method(rootTarget, 0);
-        SemanticMethod child = method(childTarget, 10);
-        FakeSemanticService semantic = new FakeSemanticService().outgoing(root, call(child, 2));
+        SemanticMethod root = outgoingMethod(rootTarget, 0);
+        SemanticMethod child = outgoingMethod(childTarget, 10);
+        FakeSemanticService semantic = new FakeSemanticService().outgoing(root, resolvedCall(child, 2));
 
         com.java.semantic.callgraph.domain.OutgoingGraphFragment fragment = builder(semantic)
                 .build(SNAPSHOT, syntax(rootTarget, childTarget), rootTarget, root, 1, 0);
@@ -91,12 +94,12 @@ class SemanticCallGraphBuilderTest {
         MethodTarget rootTarget = target("Root", "run");
         MethodTarget directTarget = target("Direct", "work");
         MethodTarget grandchildTarget = target("Grandchild", "save");
-        SemanticMethod root = method(rootTarget, 0);
-        SemanticMethod direct = method(directTarget, 10);
-        SemanticMethod grandchild = method(grandchildTarget, 20);
+        SemanticMethod root = outgoingMethod(rootTarget, 0);
+        SemanticMethod direct = outgoingMethod(directTarget, 10);
+        SemanticMethod grandchild = outgoingMethod(grandchildTarget, 20);
         FakeSemanticService semantic = new FakeSemanticService()
-                .outgoing(root, call(direct, 2))
-                .outgoing(direct, call(grandchild, 12));
+                .outgoing(root, resolvedCall(direct, 2))
+                .outgoing(direct, resolvedCall(grandchild, 12));
 
         com.java.semantic.callgraph.domain.OutgoingGraphFragment fragment = builder(semantic)
                 .build(SNAPSHOT, syntax(rootTarget, directTarget, grandchildTarget), rootTarget, root, 2, 0);
@@ -117,9 +120,9 @@ class SemanticCallGraphBuilderTest {
     void should_return_a_root_call_site_diagnostic_without_guessing_an_unproven_local_edge() {
         MethodTarget rootTarget = target("Root", "run");
         MethodTarget unprovenTarget = target("Unproven", "work");
-        SemanticMethod root = method(rootTarget, 0);
-        SemanticMethod unproven = method(unprovenTarget, 10);
-        FakeSemanticService semantic = new FakeSemanticService().outgoing(root, call(unproven, 2));
+        SemanticMethod root = outgoingMethod(rootTarget, 0);
+        SemanticMethod unproven = outgoingMethod(unprovenTarget, 10);
+        FakeSemanticService semantic = new FakeSemanticService().outgoing(root, resolvedCall(unproven, 2));
 
         com.java.semantic.callgraph.domain.OutgoingGraphFragment fragment = builder(semantic)
                 .build(SNAPSHOT, syntax(rootTarget), rootTarget, root, 1, 40);
@@ -136,7 +139,7 @@ class SemanticCallGraphBuilderTest {
         MethodTarget rootTarget = target("Root", "run");
         MethodTarget childTarget = new MethodTarget(
                 "Child.java", "com.example", "Child", "work", List.of("com.example.PlaceOrderRequest"));
-        SemanticMethod root = method(rootTarget, 10);
+        SemanticMethod root = outgoingMethod(rootTarget, 10);
         SemanticRange declarationRange = new SemanticRange(
                 new SemanticPosition(0, 0), new SemanticPosition(5, 0));
         SemanticMethod childFromJdt = new SemanticMethod(
@@ -146,7 +149,7 @@ class SemanticCallGraphBuilderTest {
                 List.of("PlaceOrderRequest"),
                 "void",
                 new SemanticLocation("file:///fixture/Child.java", declarationRange, declarationRange));
-        FakeSemanticService semantic = new FakeSemanticService().outgoing(root, call(childFromJdt, 12));
+        FakeSemanticService semantic = new FakeSemanticService().outgoing(root, resolvedCall(childFromJdt, 12));
 
         com.java.semantic.callgraph.domain.OutgoingGraphFragment fragment = builder(semantic)
                 .build(SNAPSHOT, syntax(rootTarget, childTarget), rootTarget, root, 1, 40);
@@ -162,10 +165,10 @@ class SemanticCallGraphBuilderTest {
     void should_retain_a_usable_fragment_when_depth_one_enumeration_fails() {
         MethodTarget rootTarget = target("Root", "run");
         MethodTarget childTarget = target("Child", "work");
-        SemanticMethod root = method(rootTarget, 0);
-        SemanticMethod child = method(childTarget, 10);
+        SemanticMethod root = outgoingMethod(rootTarget, 0);
+        SemanticMethod child = outgoingMethod(childTarget, 10);
         FakeSemanticService semantic = new FakeSemanticService()
-                .outgoing(root, call(child, 2))
+                .outgoing(root, resolvedCall(child, 2))
                 .failOutgoing(child);
 
         com.java.semantic.callgraph.domain.OutgoingGraphFragment fragment = builder(semantic)
@@ -180,7 +183,7 @@ class SemanticCallGraphBuilderTest {
     @Test
     void should_warn_without_an_edge_for_a_targetless_root_hierarchy_call() {
         MethodTarget rootTarget = target("Root", "run");
-        SemanticMethod root = method(rootTarget, 0);
+        SemanticMethod root = outgoingMethod(rootTarget, 0);
         SemanticCall targetless = new SemanticCall(Optional.empty(), "unknown()", List.of(new SemanticRange(
                 new SemanticPosition(2, 0), new SemanticPosition(2, 4))), false,
                 SemanticResolutionOrigin.CALL_HIERARCHY, SemanticCallStatus.IDENTITY_UNPROVEN);
@@ -198,13 +201,13 @@ class SemanticCallGraphBuilderTest {
     void should_warn_without_an_edge_for_a_targetless_depth_one_hierarchy_call() {
         MethodTarget rootTarget = target("Root", "run");
         MethodTarget childTarget = target("Child", "work");
-        SemanticMethod root = method(rootTarget, 0);
-        SemanticMethod child = method(childTarget, 10);
+        SemanticMethod root = outgoingMethod(rootTarget, 0);
+        SemanticMethod child = outgoingMethod(childTarget, 10);
         SemanticCall targetless = new SemanticCall(Optional.empty(), "unknown()", List.of(new SemanticRange(
                 new SemanticPosition(12, 0), new SemanticPosition(12, 4))), false,
                 SemanticResolutionOrigin.CALL_HIERARCHY, SemanticCallStatus.IDENTITY_UNPROVEN);
         FakeSemanticService semantic = new FakeSemanticService()
-                .outgoing(root, call(child, 2))
+                .outgoing(root, resolvedCall(child, 2))
                 .outgoing(child, targetless);
 
         com.java.semantic.callgraph.domain.OutgoingGraphFragment fragment = builder(semantic)
@@ -218,7 +221,7 @@ class SemanticCallGraphBuilderTest {
     @Test
     void should_keep_distinct_external_calls_when_their_targets_are_not_proven() {
         MethodTarget rootTarget = target("Root", "run");
-        SemanticMethod root = method(rootTarget, 0);
+        SemanticMethod root = outgoingMethod(rootTarget, 0);
         SemanticCall first = externalCall("library.alpha()", 2);
         SemanticCall second = externalCall("library.beta()", 3);
 
@@ -236,26 +239,27 @@ class SemanticCallGraphBuilderTest {
     void should_propagate_root_interface_resolution_failures() {
         MethodTarget rootTarget = target("Root", "run");
         MethodTarget interfaceTarget = target("Port", "handle");
-        SemanticMethod root = method(rootTarget, 0);
-        SemanticMethod declaration = method(interfaceTarget, 10);
+        SemanticMethod root = outgoingMethod(rootTarget, 0);
+        SemanticMethod declaration = outgoingMethod(interfaceTarget, 10);
+        IllegalStateException expected = new IllegalStateException("planned implementation query failure");
         FakeSemanticService semantic = new FakeSemanticService()
-                .outgoing(root, call(declaration, 2))
-                .failImplementations(declaration);
+                .outgoing(root, resolvedCall(declaration, 2))
+                .failImplementations(declaration, expected);
 
         assertThatThrownBy(() -> builder(semantic)
                 .build(SNAPSHOT, syntax(rootTarget, interfaceType(interfaceTarget)), rootTarget, root, 1, 40))
-                .isInstanceOf(IllegalStateException.class)
-                .hasMessage("planned implementation query failure");
+                .isSameAs(expected);
     }
 
     @Test
     void should_rethrow_root_point_resolution_failures() {
         MethodTarget rootTarget = target("Root", "run");
-        SemanticMethod root = method(rootTarget, 0);
+        SemanticMethod root = outgoingMethod(rootTarget, 0);
         SyntaxInvocation invocation = invocation("worker.failed()", 2);
         SemanticCallSite callSite = new SemanticCallSite(
                 semanticRange(invocation.range()), new SemanticPosition(2, 0));
-        FakeSemanticService semantic = new FakeSemanticService().failResolutionAt(callSite);
+        IllegalStateException expected = new IllegalStateException("planned point resolution failure");
+        FakeSemanticService semantic = new FakeSemanticService().failResolutionAt(callSite, expected);
 
         assertThatThrownBy(() -> builder(semantic)
                 .build(SNAPSHOT,
@@ -264,8 +268,7 @@ class SemanticCallGraphBuilderTest {
                         root,
                         1,
                         40))
-                .isInstanceOf(IllegalStateException.class)
-                .hasMessage("planned point resolution failure");
+                .isSameAs(expected);
     }
 
     @Test
@@ -274,13 +277,13 @@ class SemanticCallGraphBuilderTest {
         MethodTarget childTarget = target("Child", "work");
         MethodTarget interfaceTarget = target("Port", "handle");
         MethodTarget successfulTarget = target("Successful", "save");
-        SemanticMethod root = method(rootTarget, 0);
-        SemanticMethod child = method(childTarget, 10);
-        SemanticMethod declaration = method(interfaceTarget, 20);
-        SemanticMethod successful = method(successfulTarget, 30);
+        SemanticMethod root = outgoingMethod(rootTarget, 0);
+        SemanticMethod child = outgoingMethod(childTarget, 10);
+        SemanticMethod declaration = outgoingMethod(interfaceTarget, 20);
+        SemanticMethod successful = outgoingMethod(successfulTarget, 30);
         FakeSemanticService semantic = new FakeSemanticService()
-                .outgoing(root, call(child, 2))
-                .outgoing(child, call(declaration, 12), call(successful, 14))
+                .outgoing(root, resolvedCall(child, 2))
+                .outgoing(child, resolvedCall(declaration, 12), resolvedCall(successful, 14))
                 .failImplementations(declaration);
 
         com.java.semantic.callgraph.domain.OutgoingGraphFragment fragment = builder(semantic)
@@ -306,16 +309,16 @@ class SemanticCallGraphBuilderTest {
         MethodTarget rootTarget = target("Root", "run");
         MethodTarget childTarget = target("Child", "work");
         MethodTarget grandchildTarget = target("Grandchild", "save");
-        SemanticMethod root = method(rootTarget, 0);
-        SemanticMethod child = method(childTarget, 10);
-        SemanticMethod grandchild = method(grandchildTarget, 20);
+        SemanticMethod root = outgoingMethod(rootTarget, 0);
+        SemanticMethod child = outgoingMethod(childTarget, 10);
+        SemanticMethod grandchild = outgoingMethod(grandchildTarget, 20);
         SyntaxInvocation failedInvocation = invocation("worker.failed()", 12);
         SyntaxInvocation successfulInvocation = invocation("worker.save()", 14);
         SemanticCallSite failedCallSite = new SemanticCallSite(
                 semanticRange(failedInvocation.range()), new SemanticPosition(12, 0));
         FakeSemanticService semantic = new FakeSemanticService()
-                .outgoing(root, call(child, 2))
-                .resolution(child, SemanticCallResolution.resolved(call(grandchild, 14)))
+                .outgoing(root, resolvedCall(child, 2))
+                .resolution(child, SemanticCallResolution.resolved(resolvedCall(grandchild, 14)))
                 .failResolutionAt(failedCallSite);
 
         com.java.semantic.callgraph.domain.OutgoingGraphFragment fragment = builder(semantic)
@@ -346,9 +349,9 @@ class SemanticCallGraphBuilderTest {
         SemanticCallGraphBuilder builder = builder(new FakeSemanticService());
 
         com.java.semantic.callgraph.domain.OutgoingGraphFragment first = builder
-                .build(SNAPSHOT, syntax(firstTarget), firstTarget, method(firstTarget, 0), 1, 40);
+                .build(SNAPSHOT, syntax(firstTarget), firstTarget, outgoingMethod(firstTarget, 0), 1, 40);
         com.java.semantic.callgraph.domain.OutgoingGraphFragment second = builder
-                .build(SNAPSHOT, syntax(secondTarget), secondTarget, method(secondTarget, 0), 1, 40);
+                .build(SNAPSHOT, syntax(secondTarget), secondTarget, outgoingMethod(secondTarget, 0), 1, 40);
 
         assertThat(first.rootNodeId().value()).isEqualTo("node-0000");
         assertThat(second.rootNodeId().value()).isEqualTo("node-0000");
@@ -360,12 +363,12 @@ class SemanticCallGraphBuilderTest {
     void should_deduplicate_repeated_call_sites_and_order_a_cycle_deterministically() {
         MethodTarget rootTarget = target("Root", "run");
         MethodTarget childTarget = target("Child", "work");
-        SemanticMethod root = method(rootTarget, 0);
-        SemanticMethod child = method(childTarget, 10);
-        SemanticCall repeatedCall = call(child, 2);
+        SemanticMethod root = outgoingMethod(rootTarget, 0);
+        SemanticMethod child = outgoingMethod(childTarget, 10);
+        SemanticCall repeatedCall = resolvedCall(child, 2);
         FakeSemanticService semantic = new FakeSemanticService()
                 .outgoing(root, repeatedCall, repeatedCall)
-                .outgoing(child, call(root, 12));
+                .outgoing(child, resolvedCall(root, 12));
         SemanticCallGraphBuilder builder = builder(semantic);
 
         com.java.semantic.callgraph.domain.OutgoingGraphFragment first = builder
@@ -390,11 +393,11 @@ class SemanticCallGraphBuilderTest {
         MethodTarget directTarget = target("Direct", "work");
         MethodTarget zetaTarget = target("Zeta", "save");
         MethodTarget alphaTarget = target("Alpha", "save");
-        SemanticMethod root = method(rootTarget, 0);
-        SemanticMethod direct = method(directTarget, 10);
+        SemanticMethod root = outgoingMethod(rootTarget, 0);
+        SemanticMethod direct = outgoingMethod(directTarget, 10);
         FakeSemanticService semantic = new FakeSemanticService()
-                .outgoing(root, call(direct, 2))
-                .outgoing(direct, call(method(zetaTarget, 20), 14), call(method(alphaTarget, 30), 12));
+                .outgoing(root, resolvedCall(direct, 2))
+                .outgoing(direct, resolvedCall(outgoingMethod(zetaTarget, 20), 14), resolvedCall(outgoingMethod(alphaTarget, 30), 12));
 
         com.java.semantic.callgraph.domain.OutgoingGraphFragment fragment = builder(semantic)
                 .build(SNAPSHOT, syntax(rootTarget, directTarget, zetaTarget, alphaTarget), rootTarget, root, 2, 1);
@@ -410,11 +413,11 @@ class SemanticCallGraphBuilderTest {
     void should_keep_full_source_and_ranges_for_an_annotated_depth_one_target() {
         MethodTarget rootTarget = target("Root", "run");
         MethodTarget childTarget = target("Child", "work");
-        SemanticMethod root = method(rootTarget, 0);
-        SemanticMethod child = method(childTarget, 10);
+        SemanticMethod root = outgoingMethod(rootTarget, 0);
+        SemanticMethod child = outgoingMethod(childTarget, 10);
 
         com.java.semantic.callgraph.domain.OutgoingGraphFragment fragment = builder(
-                new FakeSemanticService().outgoing(root, call(child, 2)))
+                new FakeSemanticService().outgoing(root, resolvedCall(child, 2)))
                 .build(SNAPSHOT, syntax(List.of(type(rootTarget), annotatedType(childTarget))), rootTarget, root, 1, 40);
 
         assertThat(fragment.nodes()).filteredOn(node -> node.target().filter(childTarget::equals).isPresent())
@@ -432,11 +435,11 @@ class SemanticCallGraphBuilderTest {
                 "PortInterface.java", "com.example", "Port", "handle", List.of());
         MethodTarget duplicateClassTarget = new MethodTarget(
                 "PortClass.java", "com.example", "Port", "handle", List.of());
-        SemanticMethod root = method(rootTarget, 0);
-        SemanticMethod interfaceMethod = method(interfaceTarget, 10);
+        SemanticMethod root = outgoingMethod(rootTarget, 0);
+        SemanticMethod interfaceMethod = outgoingMethod(interfaceTarget, 10);
 
         com.java.semantic.callgraph.domain.OutgoingGraphFragment fragment = builder(
-                new FakeSemanticService().outgoing(root, call(interfaceMethod, 2)))
+                new FakeSemanticService().outgoing(root, resolvedCall(interfaceMethod, 2)))
                 .build(SNAPSHOT, syntax(List.of(type(rootTarget), type(duplicateClassTarget), interfaceType(interfaceTarget))),
                         rootTarget, root, 1, 40);
 
@@ -452,11 +455,11 @@ class SemanticCallGraphBuilderTest {
                 "src/main/java/com/example/Port.java", "com.example", "Port", "handle", List.of());
         MethodTarget cardTarget = target("CardPort", "handle");
         MethodTarget cashTarget = target("CashPort", "handle");
-        SemanticMethod root = method(rootTarget, 0);
-        SemanticMethod declaration = method(declarationTarget, 10);
+        SemanticMethod root = outgoingMethod(rootTarget, 0);
+        SemanticMethod declaration = outgoingMethod(declarationTarget, 10);
         FakeSemanticService semantic = new FakeSemanticService()
-                .outgoing(root, call(declaration, 2))
-                .implementations(declaration, method(cardTarget, 20), method(cashTarget, 30));
+                .outgoing(root, resolvedCall(declaration, 2))
+                .implementations(declaration, outgoingMethod(cardTarget, 20), outgoingMethod(cashTarget, 30));
 
         com.java.semantic.callgraph.domain.OutgoingGraphFragment fragment = builder(semantic)
                 .build(SNAPSHOT, syntax(List.of(
@@ -482,10 +485,10 @@ class SemanticCallGraphBuilderTest {
         MethodTarget rootTarget = target("Root", "run");
         MethodTarget zetaTarget = target("Zeta", "work");
         MethodTarget alphaTarget = target("Alpha", "work");
-        SemanticMethod root = method(rootTarget, 0);
+        SemanticMethod root = outgoingMethod(rootTarget, 0);
         SyntaxInvocation invocation = invocation("worker.work()", 2);
         FakeSemanticService semantic = new FakeSemanticService().resolution(root,
-                SemanticCallResolution.ambiguous(List.of(method(zetaTarget, 20), method(alphaTarget, 10))));
+                SemanticCallResolution.ambiguous(List.of(outgoingMethod(zetaTarget, 20), outgoingMethod(alphaTarget, 10))));
 
         com.java.semantic.callgraph.domain.OutgoingGraphFragment fragment = builder(semantic)
                 .build(SNAPSHOT, syntax(List.of(type(rootTarget, List.of(invocation)), type(zetaTarget), type(alphaTarget))),
@@ -502,11 +505,11 @@ class SemanticCallGraphBuilderTest {
     void should_select_an_executable_interface_default_without_implementations() {
         MethodTarget rootTarget = target("Root", "run");
         MethodTarget defaultTarget = target("Port", "handle");
-        SemanticMethod root = method(rootTarget, 0);
-        SemanticMethod defaultMethod = method(defaultTarget, 10);
+        SemanticMethod root = outgoingMethod(rootTarget, 0);
+        SemanticMethod defaultMethod = outgoingMethod(defaultTarget, 10);
 
         com.java.semantic.callgraph.domain.OutgoingGraphFragment fragment = builder(
-                new FakeSemanticService().outgoing(root, call(defaultMethod, 2)))
+                new FakeSemanticService().outgoing(root, resolvedCall(defaultMethod, 2)))
                 .build(SNAPSHOT, syntax(List.of(type(rootTarget), executableInterfaceType(defaultTarget))),
                         rootTarget, root, 1, 40);
 
@@ -519,11 +522,11 @@ class SemanticCallGraphBuilderTest {
         MethodTarget rootTarget = target("Root", "run");
         MethodTarget defaultTarget = target("Port", "handle");
         MethodTarget overrideTarget = target("PortOverride", "handle");
-        SemanticMethod root = method(rootTarget, 0);
-        SemanticMethod defaultMethod = method(defaultTarget, 10);
+        SemanticMethod root = outgoingMethod(rootTarget, 0);
+        SemanticMethod defaultMethod = outgoingMethod(defaultTarget, 10);
         FakeSemanticService semantic = new FakeSemanticService()
-                .outgoing(root, call(defaultMethod, 2))
-                .implementations(defaultMethod, method(overrideTarget, 20));
+                .outgoing(root, resolvedCall(defaultMethod, 2))
+                .implementations(defaultMethod, outgoingMethod(overrideTarget, 20));
 
         com.java.semantic.callgraph.domain.OutgoingGraphFragment fragment = builder(semantic)
                 .build(SNAPSHOT, syntax(List.of(type(rootTarget), executableInterfaceType(defaultTarget), type(overrideTarget))),
@@ -539,11 +542,11 @@ class SemanticCallGraphBuilderTest {
         MethodTarget rootTarget = target("Root", "run");
         MethodTarget declarationTarget = target("Port", "handle");
         MethodTarget implementationTarget = target("PortImpl", "handle");
-        SemanticMethod root = method(rootTarget, 0);
-        SemanticMethod declaration = method(declarationTarget, 10);
+        SemanticMethod root = outgoingMethod(rootTarget, 0);
+        SemanticMethod declaration = outgoingMethod(declarationTarget, 10);
         FakeSemanticService semantic = new FakeSemanticService()
-                .outgoing(root, call(declaration, 2))
-                .implementations(declaration, method(implementationTarget, 20));
+                .outgoing(root, resolvedCall(declaration, 2))
+                .implementations(declaration, outgoingMethod(implementationTarget, 20));
 
         com.java.semantic.callgraph.domain.OutgoingGraphFragment fragment = builder(semantic)
                 .build(SNAPSHOT, syntax(List.of(type(rootTarget), interfaceType(declarationTarget), type(implementationTarget))),
@@ -650,23 +653,6 @@ class SemanticCallGraphBuilderTest {
                 MethodTargetResolution.resolved(target), executableDeclaration, true);
     }
 
-    private static MethodTarget target(String className, String methodName) {
-        return new MethodTarget(className + ".java", "com.example", className, methodName, List.of());
-    }
-
-    private static SemanticMethod method(MethodTarget target, int line) {
-        SemanticRange range = new SemanticRange(new SemanticPosition(line, 0), new SemanticPosition(line + 2, 0));
-        return new SemanticMethod(
-                target.packageName(), target.className(), target.methodName(), target.parameterTypes(), "void",
-                new SemanticLocation("file:///fixture/" + target.sourceFile(), range, range));
-    }
-
-    private static SemanticCall call(SemanticMethod target, int line) {
-        SemanticRange range = new SemanticRange(new SemanticPosition(line, 0), new SemanticPosition(line, 4));
-        return new SemanticCall(Optional.of(target), target.methodName() + "()", List.of(range), false,
-                SemanticResolutionOrigin.CALL_HIERARCHY);
-    }
-
     private static SemanticCall externalCall(String rawSignature, int line) {
         SemanticRange range = new SemanticRange(new SemanticPosition(line, 0), new SemanticPosition(line, 4));
         return new SemanticCall(Optional.empty(), rawSignature, List.of(range), true,
@@ -694,7 +680,7 @@ class SemanticCallGraphBuilderTest {
 
         private final Map<SemanticMethod, List<SemanticCall>> outgoing = new HashMap<>();
         private final List<SemanticMethod> failingOutgoing = new java.util.ArrayList<>();
-        private final List<SemanticMethod> failingImplementations = new java.util.ArrayList<>();
+        private final Map<SemanticMethod, RuntimeException> failingImplementations = new HashMap<>();
         private final Map<SemanticMethod, List<SemanticMethod>> implementations = new HashMap<>();
         private final Map<SemanticMethod, SemanticCallResolution> resolutions = new HashMap<>();
         private final Map<SemanticCallSite, RuntimeException> failingResolutions = new HashMap<>();
@@ -710,7 +696,11 @@ class SemanticCallGraphBuilderTest {
         }
 
         FakeSemanticService failImplementations(SemanticMethod declaration) {
-            failingImplementations.add(declaration);
+            return failImplementations(declaration, new IllegalStateException("planned implementation query failure"));
+        }
+
+        FakeSemanticService failImplementations(SemanticMethod declaration, RuntimeException failure) {
+            failingImplementations.put(declaration, failure);
             return this;
         }
 
@@ -725,7 +715,11 @@ class SemanticCallGraphBuilderTest {
         }
 
         FakeSemanticService failResolutionAt(SemanticCallSite callSite) {
-            failingResolutions.put(callSite, new IllegalStateException("planned point resolution failure"));
+            return failResolutionAt(callSite, new IllegalStateException("planned point resolution failure"));
+        }
+
+        FakeSemanticService failResolutionAt(SemanticCallSite callSite, RuntimeException failure) {
+            failingResolutions.put(callSite, failure);
             return this;
         }
 
@@ -759,8 +753,8 @@ class SemanticCallGraphBuilderTest {
 
         @Override
         public List<SemanticMethod> implementations(RepositorySnapshot snapshot, SemanticMethod method) {
-            if (failingImplementations.contains(method)) {
-                throw new IllegalStateException("planned implementation query failure");
+            if (failingImplementations.containsKey(method)) {
+                throw failingImplementations.get(method);
             }
             return implementations.getOrDefault(method, List.of());
         }

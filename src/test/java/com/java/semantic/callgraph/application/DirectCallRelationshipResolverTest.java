@@ -35,6 +35,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
+import static com.java.semantic.callgraph.application.SemanticGraphTestFixture.outgoingMethod;
+import static com.java.semantic.callgraph.application.SemanticGraphTestFixture.resolvedCall;
+import static com.java.semantic.callgraph.application.SemanticGraphTestFixture.target;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.catchThrowable;
@@ -51,16 +54,16 @@ class DirectCallRelationshipResolverTest {
         MethodTarget interfaceTarget = target("Port", "handle");
         MethodTarget alphaTarget = target("AlphaPort", "handle");
         MethodTarget zetaTarget = target("ZetaPort", "handle");
-        SemanticMethod caller = method(callerTarget, 0);
-        SemanticMethod local = method(localTarget, 10);
-        SemanticMethod declaration = method(interfaceTarget, 20);
+        SemanticMethod caller = outgoingMethod(callerTarget, 0);
+        SemanticMethod local = outgoingMethod(localTarget, 10);
+        SemanticMethod declaration = outgoingMethod(interfaceTarget, 20);
         FakeSemanticService semantic = new FakeSemanticService()
                 .outgoing(caller,
-                        call(local, 8),
+                        resolvedCall(local, 8),
                         externalCall("library.client()", 2),
-                        call(declaration, 4),
+                        resolvedCall(declaration, 4),
                         targetlessCall(6))
-                .implementations(declaration, method(zetaTarget, 30), method(alphaTarget, 40));
+                .implementations(declaration, outgoingMethod(zetaTarget, 30), outgoingMethod(alphaTarget, 40));
 
         List<DirectCallRelationship> relationships = resolver(semantic).resolveAll(
                 SNAPSHOT,
@@ -90,11 +93,11 @@ class DirectCallRelationshipResolverTest {
     void should_use_definition_fallback_for_uncovered_syntax_invocations() {
         MethodTarget callerTarget = target("Root", "run");
         MethodTarget target = target("Local", "work");
-        SemanticMethod caller = method(callerTarget, 0);
-        SemanticMethod local = method(target, 10);
+        SemanticMethod caller = outgoingMethod(callerTarget, 0);
+        SemanticMethod local = outgoingMethod(target, 10);
         SyntaxInvocation invocation = invocation("worker.work()", 2, 3);
         FakeSemanticService semantic = new FakeSemanticService().resolution(caller,
-                SemanticCallResolution.resolved(call(local, 2)));
+                SemanticCallResolution.resolved(resolvedCall(local, 2)));
 
         List<DirectCallRelationship> relationships = resolver(semantic).resolveAll(
                 SNAPSHOT, index(type(callerTarget, List.of(invocation)), type(target)), callerTarget, caller);
@@ -112,14 +115,14 @@ class DirectCallRelationshipResolverTest {
     void should_retain_ordered_fallback_relationships_when_one_point_resolution_fails() {
         MethodTarget callerTarget = target("Root", "run");
         MethodTarget localTarget = target("Local", "work");
-        SemanticMethod caller = method(callerTarget, 0);
-        SemanticMethod local = method(localTarget, 10);
+        SemanticMethod caller = outgoingMethod(callerTarget, 0);
+        SemanticMethod local = outgoingMethod(localTarget, 10);
         SyntaxInvocation failedInvocation = invocation("worker.failed()", 2, 3);
         SyntaxInvocation successfulInvocation = invocation("worker.work()", 4, 5);
         SemanticCallSite failedCallSite = new SemanticCallSite(
                 semanticRange(failedInvocation.range()), new SemanticPosition(2, 3));
         FakeSemanticService semantic = new FakeSemanticService()
-                .resolution(caller, SemanticCallResolution.resolved(call(local, 4)))
+                .resolution(caller, SemanticCallResolution.resolved(resolvedCall(local, 4)))
                 .failResolutionAt(failedCallSite);
 
         Throwable throwable = catchThrowable(
@@ -144,11 +147,12 @@ class DirectCallRelationshipResolverTest {
     @Test
     void should_rethrow_raw_point_resolution_failure_from_direct_resolution() {
         MethodTarget callerTarget = target("Root", "run");
-        SemanticMethod caller = method(callerTarget, 0);
+        SemanticMethod caller = outgoingMethod(callerTarget, 0);
         SyntaxInvocation invocation = invocation("worker.failed()", 2, 3);
         SemanticCallSite callSite = new SemanticCallSite(
                 semanticRange(invocation.range()), new SemanticPosition(2, 3));
-        FakeSemanticService semantic = new FakeSemanticService().failResolutionAt(callSite);
+        IllegalStateException expected = new IllegalStateException("planned point resolution failure");
+        FakeSemanticService semantic = new FakeSemanticService().failResolutionAt(callSite, expected);
 
         assertThatThrownBy(() -> resolver(semantic).resolveAt(
                 SNAPSHOT,
@@ -156,8 +160,7 @@ class DirectCallRelationshipResolverTest {
                 callerTarget,
                 caller,
                 semanticRange(invocation.range())))
-                .isInstanceOf(IllegalStateException.class)
-                .hasMessage("planned point resolution failure");
+                .isSameAs(expected);
     }
 
     @Test
@@ -166,12 +169,12 @@ class DirectCallRelationshipResolverTest {
         MethodTarget firstInterfaceTarget = target("FirstPort", "handle");
         MethodTarget localTarget = target("Local", "work");
         MethodTarget secondInterfaceTarget = target("SecondPort", "handle");
-        SemanticMethod caller = method(callerTarget, 0);
-        SemanticMethod firstDeclaration = method(firstInterfaceTarget, 10);
-        SemanticMethod local = method(localTarget, 20);
-        SemanticMethod secondDeclaration = method(secondInterfaceTarget, 30);
+        SemanticMethod caller = outgoingMethod(callerTarget, 0);
+        SemanticMethod firstDeclaration = outgoingMethod(firstInterfaceTarget, 10);
+        SemanticMethod local = outgoingMethod(localTarget, 20);
+        SemanticMethod secondDeclaration = outgoingMethod(secondInterfaceTarget, 30);
         FakeSemanticService semantic = new FakeSemanticService()
-                .outgoing(caller, call(firstDeclaration, 2), call(local, 4), call(secondDeclaration, 6))
+                .outgoing(caller, resolvedCall(firstDeclaration, 2), resolvedCall(local, 4), resolvedCall(secondDeclaration, 6))
                 .failImplementations(firstDeclaration)
                 .failImplementations(secondDeclaration);
 
@@ -206,12 +209,12 @@ class DirectCallRelationshipResolverTest {
     void should_resolve_at_only_with_the_exact_syntax_invocation_anchor() {
         MethodTarget callerTarget = target("Root", "run");
         MethodTarget target = target("Local", "work");
-        SemanticMethod caller = method(callerTarget, 0);
-        SemanticMethod local = method(target, 10);
+        SemanticMethod caller = outgoingMethod(callerTarget, 0);
+        SemanticMethod local = outgoingMethod(target, 10);
         SyntaxInvocation nearby = invocation("worker.work()", 2, 1);
         SyntaxInvocation exact = invocation("worker.work()", 3, 7);
         FakeSemanticService semantic = new FakeSemanticService().resolution(caller,
-                SemanticCallResolution.resolved(call(local, 3)));
+                SemanticCallResolution.resolved(resolvedCall(local, 3)));
         DirectCallRelationshipResolver resolver = resolver(semantic);
 
         DirectCallRelationship relationship = resolver.resolveAt(
@@ -230,8 +233,8 @@ class DirectCallRelationshipResolverTest {
     void should_publish_the_full_syntax_invocation_when_incoming_call_hierarchy_uses_its_anchor() {
         MethodTarget callerTarget = target("Listener", "consume");
         MethodTarget target = target("OrderService", "placeFromMessage");
-        SemanticMethod caller = method(callerTarget, 0);
-        SemanticMethod local = method(target, 10);
+        SemanticMethod caller = outgoingMethod(callerTarget, 0);
+        SemanticMethod local = outgoingMethod(target, 10);
         SyntaxRange invocationRange = range(3, 15, 3, 53);
         SemanticRange incomingCallSite = new SemanticRange(
                 new SemanticPosition(3, 28), new SemanticPosition(3, 53));
@@ -245,7 +248,7 @@ class DirectCallRelationshipResolverTest {
                 Optional.empty(),
                 new SyntaxPosition(3, 28));
         FakeSemanticService semantic = new FakeSemanticService().resolution(caller,
-                SemanticCallResolution.resolved(call(local, 3)));
+                SemanticCallResolution.resolved(resolvedCall(local, 3)));
 
         DirectCallRelationship relationship = resolver(semantic).resolveAt(
                 SNAPSHOT,
@@ -263,7 +266,7 @@ class DirectCallRelationshipResolverTest {
     @Test
     void should_not_guess_a_nearby_or_same_name_invocation_when_exact_call_site_is_missing() {
         MethodTarget callerTarget = target("Root", "run");
-        SemanticMethod caller = method(callerTarget, 0);
+        SemanticMethod caller = outgoingMethod(callerTarget, 0);
         SyntaxInvocation nearby = invocation("worker.work()", 2, 1);
         FakeSemanticService semantic = new FakeSemanticService();
 
@@ -283,7 +286,7 @@ class DirectCallRelationshipResolverTest {
         MethodTarget callerTarget = target("Root", "run");
         MethodTarget canonicalTarget = new MethodTarget(
                 "src/main/java/com/example/Port.java", "com.example", "Port", "handle", List.of("com.example.Request"));
-        SemanticMethod caller = method(callerTarget, 0);
+        SemanticMethod caller = outgoingMethod(callerTarget, 0);
         SemanticRange declarationRange = new SemanticRange(new SemanticPosition(0, 0), new SemanticPosition(5, 0));
         SemanticMethod semanticMethod = new SemanticMethod(
                 "com.example", "Port", "handle", List.of("Request"), "void",
@@ -333,23 +336,6 @@ class DirectCallRelationshipResolverTest {
                 target.sourceFile(), kind, false, List.of(), List.of(), List.of(), List.of(), List.of(),
                 List.of(method), false, false, List.of(), range,
                 new SourceSlice(range, "class " + target.className() + " {}"), false, List.of());
-    }
-
-    private static MethodTarget target(String className, String methodName) {
-        return new MethodTarget(className + ".java", "com.example", className, methodName, List.of());
-    }
-
-    private static SemanticMethod method(MethodTarget target, int line) {
-        SemanticRange range = new SemanticRange(new SemanticPosition(line, 0), new SemanticPosition(line + 2, 0));
-        return new SemanticMethod(
-                target.packageName(), target.className(), target.methodName(), target.parameterTypes(), "void",
-                new SemanticLocation("file:///fixture/" + target.sourceFile(), range, range));
-    }
-
-    private static SemanticCall call(SemanticMethod target, int line) {
-        SemanticRange range = new SemanticRange(new SemanticPosition(line, 0), new SemanticPosition(line, 4));
-        return new SemanticCall(Optional.of(target), target.methodName() + "()", List.of(range), false,
-                SemanticResolutionOrigin.CALL_HIERARCHY);
     }
 
     private static SemanticCall externalCall(String rawSignature, int line) {
@@ -412,7 +398,11 @@ class DirectCallRelationshipResolverTest {
         }
 
         FakeSemanticService failResolutionAt(SemanticCallSite callSite) {
-            failingResolutions.put(callSite, new IllegalStateException("planned point resolution failure"));
+            return failResolutionAt(callSite, new IllegalStateException("planned point resolution failure"));
+        }
+
+        FakeSemanticService failResolutionAt(SemanticCallSite callSite, RuntimeException failure) {
+            failingResolutions.put(callSite, failure);
             return this;
         }
 

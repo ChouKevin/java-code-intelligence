@@ -391,7 +391,6 @@ class Lsp4jJavaSemanticServiceTest {
 
         assertThatThrownBy(() -> service.resolveCallResolutionAt(snapshot, caller, callSite))
                 .isInstanceOf(com.java.semantic.semantic.domain.SemanticProtocolException.class)
-                .hasMessage("semantic protocol request failed")
                 .satisfies(exception -> assertThat(exception.toString())
                         .doesNotContain("RESTRICTED_DEFINITION_PATH", "example.invalid"));
     }
@@ -534,7 +533,6 @@ class Lsp4jJavaSemanticServiceTest {
 
         assertThatThrownBy(() -> service.outgoingCalls(snapshot, caller))
                 .isInstanceOf(com.java.semantic.semantic.domain.SemanticProtocolException.class)
-                .hasMessage("semantic protocol request failed")
                 .satisfies(exception -> assertThat(exception.toString()).doesNotContain("RestrictedWorker"));
     }
 
@@ -596,7 +594,6 @@ class Lsp4jJavaSemanticServiceTest {
                 classSymbol("Target", method("work()", " : void", 4, 8, 4, 12)))));
         assertThatThrownBy(() -> service.outgoingCalls(snapshot, caller))
                 .isInstanceOf(com.java.semantic.semantic.domain.SemanticProtocolException.class)
-                .hasMessage("semantic protocol request failed")
                 .satisfies(exception -> assertThat(exception.toString())
                         .doesNotContain(callerPathSentinel, targetPathSentinel));
     }

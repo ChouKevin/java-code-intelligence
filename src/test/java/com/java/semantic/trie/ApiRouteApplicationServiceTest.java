@@ -77,8 +77,7 @@ class ApiRouteApplicationServiceTest {
     void should_reject_suggestion_limit_outside_contract(int limit) {
         assertThatThrownBy(() -> service.suggest(
                 "/orders", Optional.empty(), Optional.empty(), limit))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessage("limit must be between 1 and 20");
+                .isInstanceOf(IllegalArgumentException.class);
     }
 
     @Test

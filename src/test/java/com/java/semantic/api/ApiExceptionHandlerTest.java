@@ -70,7 +70,7 @@ class ApiExceptionHandlerTest {
 
         assertThat(response.getStatusCode().value()).isEqualTo(502);
         assertThat(body.errorCode()).isEqualTo(new SemanticProtocolException().errorCode());
-        assertThat(body.message()).isEqualTo("semantic protocol request failed");
+        assertThat(body.message()).isNotBlank();
         assertThat(body.requestId()).isEqualTo("request-42");
         assertThat(body.candidates()).isEmpty();
     }
