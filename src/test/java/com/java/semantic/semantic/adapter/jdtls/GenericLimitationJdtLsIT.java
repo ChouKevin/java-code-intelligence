@@ -181,15 +181,19 @@ class GenericLimitationJdtLsIT {
                 Duration.ofSeconds(60),
                 1,
                 Duration.ofMinutes(30),
+                Duration.ofMinutes(1),
                 "2g");
     }
 
     private DefaultJdtWorkspaceManager manager(JdtLsProperties properties) {
+        SimpleMeterRegistry meterRegistry = new SimpleMeterRegistry();
+        JdtWorkspaceLifecycleMetrics lifecycleMetrics = new JdtWorkspaceLifecycleMetrics(meterRegistry);
         return new DefaultJdtWorkspaceManager(
                 new JdtLsProcessFactory(properties),
                 new JdtLsReadinessProbe(properties),
                 properties,
-                new SimpleMeterRegistry());
+                meterRegistry,
+                lifecycleMetrics);
     }
 
     private Path copyFixture() throws IOException {

@@ -518,6 +518,7 @@ class JdtLsProcessFactoryTest {
                 Duration.ofSeconds(1),
                 1,
                 Duration.ofMinutes(1),
+                Duration.ofMinutes(1),
                 "768m");
     }
 

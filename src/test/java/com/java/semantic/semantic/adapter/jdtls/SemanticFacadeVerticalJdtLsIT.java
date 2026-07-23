@@ -4,12 +4,19 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.java.semantic.api.security.ApiTokenFilter;
+import com.java.semantic.repository.domain.RepositoryId;
+import com.java.semantic.repository.domain.RepositoryRevision;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Import;
+import org.springframework.context.annotation.Primary;
+import org.springframework.scheduling.annotation.ScheduledAnnotationBeanPostProcessor;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
@@ -19,10 +26,12 @@ import org.springframework.util.StringUtils;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
-import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import java.util.stream.StreamSupport;
@@ -36,6 +45,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @SpringBootTest
 @AutoConfigureMockMvc
 @Tag("jdtls-it")
+@Import(SemanticFacadeVerticalJdtLsIT.LifecycleTestConfiguration.class)
 class SemanticFacadeVerticalJdtLsIT {
 
     private static final String TOKEN = "semantic-facade-vertical-token";
@@ -46,6 +56,7 @@ class SemanticFacadeVerticalJdtLsIT {
             .toAbsolutePath().normalize();
     private static final Path WORKSPACE_DATA = Path.of("target/semantic-facade-vertical-jdtls")
             .toAbsolutePath().normalize();
+    private static final MutableTicker LIFECYCLE_TICKER = new MutableTicker();
 
     @Autowired
     private MockMvc mockMvc;
@@ -56,6 +67,12 @@ class SemanticFacadeVerticalJdtLsIT {
     @Autowired
     private DefaultJdtWorkspaceManager workspaceManager;
 
+    @Autowired
+    private JdtWorkspaceIdleReaper workspaceIdleReaper;
+
+    @Autowired
+    private ScheduledAnnotationBeanPostProcessor scheduledAnnotationBeanPostProcessor;
+
     @DynamicPropertySource
     static void semanticFacadeProperties(DynamicPropertyRegistry registry) {
         registry.add("semantic.api.api-token", () -> TOKEN);
@@ -63,6 +80,7 @@ class SemanticFacadeVerticalJdtLsIT {
         registry.add("semantic.jdtls.home", () -> requireJdtlsHome().toString());
         registry.add("semantic.jdtls.workspace-data-root", () -> WORKSPACE_DATA.resolve("workspaces").toString());
         registry.add("semantic.jdtls.max-active-workspaces", () -> "2");
+        registry.add("semantic.jdtls.maintenance-interval", () -> "24h");
         registry.add("semantic.repositories.fixed-system-agent.mode", () -> "REMOTE");
         registry.add("semantic.repositories.fixed-system-agent.url", () -> enclosingRepository().toUri().toString());
         registry.add("semantic.repositories.fixed-system-agent.default-branch", () -> "uat");
@@ -73,6 +91,9 @@ class SemanticFacadeVerticalJdtLsIT {
 
     @Test
     void should_prove_revision_pinned_http_discovery_directional_fragments_and_process_shutdown() throws Exception {
+        scheduledAnnotationBeanPostProcessor.postProcessBeforeDestruction(
+                workspaceIdleReaper, "jdtWorkspaceIdleReaper");
+        LIFECYCLE_TICKER.reset();
         ensureAndCheckoutFixedRepository();
 
         ObjectNode fixedApi = discoverTarget(FIXED_REPOSITORY, "API", "AnalysisController", "getApiCallGraph");
@@ -87,6 +108,13 @@ class SemanticFacadeVerticalJdtLsIT {
         assertFullSource(fixedRoot);
         assertProvenEdgesHaveCallRangesAndEvidence(fixedFragment);
         assertUnresolvedDescendantsAreExplicit(fixedFragment);
+
+        Set<Long> fixedProcessIds = workspaceManager.activeProcessIds();
+        assertThat(fixedProcessIds).hasSize(1);
+        long fixedProcessId = fixedProcessIds.iterator().next();
+        ProcessHandle fixedProcess = ProcessHandle.of(fixedProcessId)
+                .orElseThrow(() -> new AssertionError("missing fixed JDT LS process"));
+        assertThat(fixedProcess.isAlive()).isTrue();
 
         ensureRepository(FIXTURE_REPOSITORY);
         ObjectNode fixtureRest = discoverTarget(FIXTURE_REPOSITORY, "API", "OrderController", "place");
@@ -192,18 +220,58 @@ class SemanticFacadeVerticalJdtLsIT {
         assertThat(normalizedRootEdges(callStringOutgoingFragment, "outgoing"))
                 .containsExactlyElementsOf(normalizedRootEdges(stringIncomingFragment, "incoming"));
 
-        Set<Long> processIds = workspaceManager.activeProcessIds();
-        assertThat(processIds).isNotEmpty();
-        List<ProcessHandle> processes = processIds.stream()
-                .map(ProcessHandle::of)
-                .flatMap(Optional::stream)
-                .toList();
-        assertThat(processes).hasSize(processIds.size()).allSatisfy(process ->
-                assertThat(process.isAlive()).isTrue());
+        Set<Long> initialProcessIds = workspaceManager.activeProcessIds();
+        assertThat(initialProcessIds).hasSize(2).contains(fixedProcessId);
+        Set<Long> fixtureProcessIds = initialProcessIds.stream()
+                .filter(processId -> processId.longValue() != fixedProcessId)
+                .collect(Collectors.toSet());
+        assertThat(fixtureProcessIds).hasSize(1);
+        long fixtureProcessId = fixtureProcessIds.iterator().next();
+        ProcessHandle fixtureProcess = ProcessHandle.of(fixtureProcessId)
+                .orElseThrow(() -> new AssertionError("missing fixture JDT LS process"));
+        assertThat(fixtureProcess.isAlive()).isTrue();
+
+        RepositoryId fixtureRepositoryId = RepositoryId.of(FIXTURE_REPOSITORY);
+        WorkspaceActivityLease indexingLease = workspaceManager.acquireActivity(
+                fixtureRepositoryId, RepositoryRevision.fixture(), WorkspaceActivityKind.INDEXING);
+        try {
+            LIFECYCLE_TICKER.advance(Duration.ofMinutes(31));
+            workspaceIdleReaper.runOnce();
+
+            Set<Long> protectedProcessIds = workspaceManager.activeProcessIds();
+            assertThat(protectedProcessIds).containsExactly(fixtureProcessId);
+            assertThat(fixtureProcess.isAlive()).isTrue();
+        } finally {
+            indexingLease.close();
+        }
+
+        workspaceIdleReaper.runOnce();
+
+        assertThat(fixtureProcess.isAlive()).isTrue();
+        LIFECYCLE_TICKER.advance(Duration.ofMinutes(30));
+        workspaceIdleReaper.runOnce();
+
+        assertThat(fixtureProcess.isAlive()).isFalse();
+        assertThat(workspaceManager.activeProcessIds()).isEmpty();
+
+        JsonNode restartedFixtureFragment = analyze(FIXTURE_REPOSITORY, "FIXTURE", callStringTarget, 2, "outgoing");
+        assertThat(restartedFixtureFragment.path("status").asText()).isEqualTo("SUCCESS");
+        assertFullSource(nodeById(restartedFixtureFragment, restartedFixtureFragment.path("rootNodeId").asText()));
+        Set<Long> restartedProcessIds = workspaceManager.activeProcessIds();
+        assertThat(restartedProcessIds).hasSize(1);
+        long restartedProcessId = restartedProcessIds.iterator().next();
+        ProcessHandle restartedProcess = ProcessHandle.of(restartedProcessId)
+                .orElseThrow(() -> new AssertionError("missing restarted JDT LS process"));
+        assertThat(restartedProcess.isAlive()).isTrue();
+        assertThat(restartedProcessId).isNotEqualTo(fixtureProcessId);
 
         workspaceManager.shutdownAll();
 
-        assertThat(processes).allSatisfy(process -> assertThat(process.isAlive()).isFalse());
+        Set<ProcessHandle> allCapturedProcesses = new HashSet<>();
+        allCapturedProcesses.add(fixedProcess);
+        allCapturedProcesses.add(fixtureProcess);
+        allCapturedProcesses.add(restartedProcess);
+        assertThat(allCapturedProcesses).allSatisfy(process -> assertThat(process.isAlive()).isFalse());
     }
 
     @AfterEach
@@ -454,6 +522,34 @@ class SemanticFacadeVerticalJdtLsIT {
     }
 
     private record TargetIdentity(String className, String methodName) {
+    }
+
+    @TestConfiguration
+    static class LifecycleTestConfiguration {
+
+        @Bean
+        @Primary
+        JdtMonotonicTicker lifecycleTicker() {
+            return LIFECYCLE_TICKER;
+        }
+    }
+
+    private static final class MutableTicker implements JdtMonotonicTicker {
+
+        private final AtomicLong nanos = new AtomicLong();
+
+        @Override
+        public long readNanos() {
+            return nanos.get();
+        }
+
+        void advance(Duration duration) {
+            nanos.addAndGet(duration.toNanos());
+        }
+
+        void reset() {
+            nanos.set(0L);
+        }
     }
 
 }

@@ -3,6 +3,7 @@ package com.java.semantic.semantic.adapter.jdtls;
 import com.java.semantic.config.JdtLsProperties;
 import com.java.semantic.repository.application.RepositoryMutationException;
 import com.java.semantic.repository.domain.RepositoryId;
+import com.java.semantic.repository.domain.RepositoryRevision;
 import com.java.semantic.repository.domain.RepositorySnapshot;
 import com.java.semantic.repository.port.RepositoryMutationListener;
 import io.micrometer.core.instrument.Gauge;
@@ -18,7 +19,11 @@ import lombok.extern.slf4j.Slf4j;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.EnumMap;
+import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -51,6 +56,7 @@ public class DefaultJdtWorkspaceManager implements JdtWorkspaceManager, Reposito
     private final JdtLsReadinessProbe readinessProbe;
     private final JdtLsProperties properties;
     private final MeterRegistry meterRegistry;
+    private final JdtWorkspaceLifecycleMetrics lifecycleMetrics;
     private final Map<RepositoryId, JdtWorkspaceSession> sessions = new ConcurrentHashMap<>();
     private final Map<RepositoryId, LaunchTracker> launchingProcesses = new ConcurrentHashMap<>();
     private final Map<RepositoryId, SemanticEngineStatus> transientStatuses = new ConcurrentHashMap<>();
@@ -58,6 +64,8 @@ public class DefaultJdtWorkspaceManager implements JdtWorkspaceManager, Reposito
     private final ReentrantLock lifecycleLock = new ReentrantLock();
     private final Object processRegistryLock = new Object();
     private final Duration shutdownLockWait;
+    private final JdtMonotonicTicker ticker;
+    private final Runnable launchCompletionWaitObserver;
     private volatile boolean terminated;
 
     @Autowired
@@ -65,8 +73,11 @@ public class DefaultJdtWorkspaceManager implements JdtWorkspaceManager, Reposito
             JdtLsProcessFactory processFactory,
             JdtLsReadinessProbe readinessProbe,
             JdtLsProperties properties,
-            MeterRegistry meterRegistry) {
-        this(processFactory, readinessProbe, properties, meterRegistry, DEFAULT_SHUTDOWN_LOCK_WAIT);
+            MeterRegistry meterRegistry,
+            JdtMonotonicTicker ticker,
+            JdtWorkspaceLifecycleMetrics lifecycleMetrics) {
+        this(processFactory, readinessProbe, properties, meterRegistry, DEFAULT_SHUTDOWN_LOCK_WAIT, ticker,
+                lifecycleMetrics);
     }
 
     DefaultJdtWorkspaceManager(
@@ -74,12 +85,46 @@ public class DefaultJdtWorkspaceManager implements JdtWorkspaceManager, Reposito
             JdtLsReadinessProbe readinessProbe,
             JdtLsProperties properties,
             MeterRegistry meterRegistry,
-            Duration shutdownLockWait) {
+            JdtWorkspaceLifecycleMetrics lifecycleMetrics) {
+        this(processFactory, readinessProbe, properties, meterRegistry, DEFAULT_SHUTDOWN_LOCK_WAIT, System::nanoTime,
+                lifecycleMetrics);
+    }
+
+    /**
+     * A registry's singleton manager binds exactly one metrics owner created from that registry.
+     */
+    DefaultJdtWorkspaceManager(
+            JdtLsProcessFactory processFactory,
+            JdtLsReadinessProbe readinessProbe,
+            JdtLsProperties properties,
+            MeterRegistry meterRegistry,
+            Duration shutdownLockWait,
+            JdtMonotonicTicker ticker,
+            JdtWorkspaceLifecycleMetrics lifecycleMetrics) {
+        this(processFactory, readinessProbe, properties, meterRegistry, shutdownLockWait, ticker,
+                lifecycleMetrics, () -> { });
+    }
+
+    /** 僅供 package-private lifecycle race test 精確觀察取消後的 completion wait 邊界。 */
+    DefaultJdtWorkspaceManager(
+            JdtLsProcessFactory processFactory,
+            JdtLsReadinessProbe readinessProbe,
+            JdtLsProperties properties,
+            MeterRegistry meterRegistry,
+            Duration shutdownLockWait,
+            JdtMonotonicTicker ticker,
+            JdtWorkspaceLifecycleMetrics lifecycleMetrics,
+            Runnable launchCompletionWaitObserver) {
         this.processFactory = Objects.requireNonNull(processFactory, "processFactory is required");
         this.readinessProbe = Objects.requireNonNull(readinessProbe, "readinessProbe is required");
         this.properties = Objects.requireNonNull(properties, "properties is required");
         this.meterRegistry = Objects.requireNonNull(meterRegistry, "meterRegistry is required");
+        this.lifecycleMetrics = Objects.requireNonNull(lifecycleMetrics, "lifecycleMetrics is required");
         this.shutdownLockWait = Objects.requireNonNull(shutdownLockWait, "shutdownLockWait is required");
+        this.ticker = Objects.requireNonNull(ticker, "ticker is required");
+        this.launchCompletionWaitObserver = Objects.requireNonNull(
+                launchCompletionWaitObserver, "launchCompletionWaitObserver is required");
+        this.lifecycleMetrics.bind(this::lifecycleSnapshot);
     }
 
     @Override
@@ -134,7 +179,7 @@ public class DefaultJdtWorkspaceManager implements JdtWorkspaceManager, Reposito
                 return;
             }
             session.invalidate();
-            session.stop();
+            stopSession(session, JdtWorkspaceLifecycleMetrics.EvictionTrigger.INVALIDATION);
             removeStoppedSession(repositoryId, session);
             log.info("phase=jdtls-workspace outcome=invalidated repoId={}", repositoryId.value());
         } catch (RuntimeException exception) {
@@ -164,15 +209,16 @@ public class DefaultJdtWorkspaceManager implements JdtWorkspaceManager, Reposito
     @PreDestroy
     public void shutdownAll() {
         synchronized (processRegistryLock) {
+            sessions.values().forEach(JdtWorkspaceSession::rejectNewWork);
             terminated = true;
         }
         boolean acquired = acquireLifecycleLock();
         try {
             for (RepositoryId repositoryId : Set.copyOf(sessions.keySet())) {
-                stopQuietly(repositoryId);
+                stopQuietly(repositoryId, JdtWorkspaceLifecycleMetrics.EvictionTrigger.SHUTDOWN, false);
             }
             for (RepositoryId repositoryId : Set.copyOf(launchingProcesses.keySet())) {
-                stopLaunchingProcess(repositoryId);
+                stopLaunchingProcess(repositoryId, JdtWorkspaceLifecycleMetrics.EvictionTrigger.SHUTDOWN);
             }
             transientStatuses.keySet().removeIf(repositoryId ->
                     !sessions.containsKey(repositoryId) && !launchingProcesses.containsKey(repositoryId));
@@ -192,6 +238,142 @@ public class DefaultJdtWorkspaceManager implements JdtWorkspaceManager, Reposito
                                 .filter(Process::isAlive)
                                 .map(Process::pid))
                 .collect(Collectors.toUnmodifiableSet());
+    }
+
+    WorkspaceActivityLease acquireActivity(
+            RepositoryId repositoryId, RepositoryRevision revision, WorkspaceActivityKind kind) {
+        Assert.notNull(repositoryId, "repositoryId is required");
+        Assert.notNull(revision, "revision is required");
+        Assert.notNull(kind, "activity kind is required");
+        synchronized (processRegistryLock) {
+            JdtWorkspaceSession session = sessions.get(repositoryId);
+            if (terminated
+                    || Objects.isNull(session)
+                    || !revision.equals(session.revision())
+                    || SemanticEngineStatus.READY != session.status()
+                    || !session.isUsable()) {
+                throw new JdtWorkspaceSession.JdtWorkspaceClosingException("workspace activity");
+            }
+            return session.acquireActivity(kind, "workspace activity");
+        }
+    }
+
+    MaintenanceReport runMaintenance() {
+        if (terminated) {
+            return MaintenanceReport.empty();
+        }
+        if (!lifecycleLock.tryLock()) {
+            return MaintenanceReport.busy();
+        }
+        List<MaintenanceCandidate> candidates;
+        try {
+            if (terminated) {
+                return MaintenanceReport.empty();
+            }
+            candidates = snapshotMaintenanceCandidates();
+        } finally {
+            lifecycleLock.unlock();
+        }
+        int confirmedRetries = 0;
+        int idleEvictions = 0;
+        int retainedProcesses = 0;
+        for (MaintenanceCandidate candidate : candidates) {
+            MaintenanceCandidateResult result = terminateMaintenanceCandidate(candidate);
+            confirmedRetries += result.confirmedRetries();
+            idleEvictions += result.idleEvictions();
+            retainedProcesses += result.retainedProcesses();
+        }
+        return new MaintenanceReport(false, confirmedRetries, idleEvictions, retainedProcesses);
+    }
+
+    private List<MaintenanceCandidate> snapshotMaintenanceCandidates() {
+        List<MaintenanceCandidate> candidates = new ArrayList<>();
+        for (Map.Entry<RepositoryId, LaunchTracker> entry : new ArrayList<>(launchingProcesses.entrySet())) {
+            LaunchTracker tracker = entry.getValue();
+            if (tracker.isComplete() && tracker.isProcessAlive()) {
+                candidates.add(MaintenanceCandidate.retryingTracker(entry.getKey(), tracker));
+            }
+        }
+        long nowNanos = ticker.readNanos();
+        for (Map.Entry<RepositoryId, JdtWorkspaceSession> entry : new ArrayList<>(sessions.entrySet())) {
+            RepositoryId repositoryId = entry.getKey();
+            JdtWorkspaceSession session = entry.getValue();
+            if (!session.isProcessAlive()) {
+                continue;
+            }
+            if (isRetryEligible(session)) {
+                candidates.add(MaintenanceCandidate.retryingSession(repositoryId, session));
+            } else if (session.tryBeginIdleEviction(nowNanos, properties.getIdleTimeout())) {
+                candidates.add(MaintenanceCandidate.idleSession(repositoryId, session));
+            }
+        }
+        return List.copyOf(candidates);
+    }
+
+    private boolean isRetryEligible(JdtWorkspaceSession session) {
+        return SemanticEngineStatus.FAILED == session.status()
+                || session.isInvalidated()
+                || !session.isUsable();
+    }
+
+    private MaintenanceCandidateResult terminateMaintenanceCandidate(MaintenanceCandidate candidate) {
+        try {
+            if (Objects.nonNull(candidate.session())) {
+                return terminateSessionCandidate(candidate);
+            }
+            return terminateTrackerCandidate(candidate);
+        } catch (Throwable failure) {
+            JdtFatalErrorPolicy.rethrowIfFatal(failure);
+            log.warn("phase=jdtls-maintenance outcome=candidate-failed repoId={} exceptionType={}",
+                    candidate.repositoryId().value(), failure.getClass().getSimpleName());
+            return candidate.isStillLive() ? MaintenanceCandidateResult.retained()
+                    : MaintenanceCandidateResult.empty();
+        }
+    }
+
+    private MaintenanceCandidateResult terminateSessionCandidate(MaintenanceCandidate candidate) {
+        JdtWorkspaceSession session = candidate.session();
+        boolean processAttempted = session.isProcessAlive();
+        JdtWorkspaceLifecycleMetrics.EvictionTrigger trigger = candidate.kind() == MaintenanceCandidateKind.IDLE
+                ? JdtWorkspaceLifecycleMetrics.EvictionTrigger.IDLE
+                : JdtWorkspaceLifecycleMetrics.EvictionTrigger.MAINTENANCE_RETRY;
+        Optional<JdtProcessTerminator.TerminationResult> result;
+        try {
+            result = session.tryStop();
+        } catch (JdtWorkspaceSession.JdtProcessTerminationException exception) {
+            if (processAttempted) {
+                recordTermination(trigger, JdtWorkspaceLifecycleMetrics.TerminationOutcome.UNCONFIRMED);
+                recordIdleEviction(candidate, JdtWorkspaceLifecycleMetrics.TerminationOutcome.UNCONFIRMED);
+            }
+            throw exception;
+        }
+        if (result.isEmpty()) {
+            recordTermination(trigger, JdtWorkspaceLifecycleMetrics.TerminationOutcome.SKIPPED_BUSY);
+            recordIdleEviction(candidate, JdtWorkspaceLifecycleMetrics.TerminationOutcome.SKIPPED_BUSY);
+            return MaintenanceCandidateResult.retained();
+        }
+        if (processAttempted) {
+            JdtWorkspaceLifecycleMetrics.TerminationOutcome outcome = terminationOutcome(result.get());
+            recordTermination(trigger, outcome);
+            recordIdleEviction(candidate, outcome);
+        }
+        removeStoppedSession(candidate.repositoryId(), session);
+        return candidate.kind() == MaintenanceCandidateKind.IDLE
+                ? MaintenanceCandidateResult.idleEvicted()
+                : MaintenanceCandidateResult.retryConfirmed();
+    }
+
+    private MaintenanceCandidateResult terminateTrackerCandidate(MaintenanceCandidate candidate) {
+        LaunchStopOutcome outcome = tryStopLaunchingProcess(
+                candidate.repositoryId(), candidate.tracker(),
+                JdtWorkspaceLifecycleMetrics.EvictionTrigger.MAINTENANCE_RETRY);
+        return switch (outcome) {
+            case CONFIRMED -> MaintenanceCandidateResult.retryConfirmed();
+            case BUSY, RETAINED -> MaintenanceCandidateResult.retained();
+            case NOT_TRACKED -> candidate.isStillLive()
+                    ? MaintenanceCandidateResult.retained()
+                    : MaintenanceCandidateResult.empty();
+        };
     }
 
     private boolean acquireLifecycleLock() {
@@ -230,14 +412,19 @@ public class DefaultJdtWorkspaceManager implements JdtWorkspaceManager, Reposito
                 repositoryId,
                 snapshot.revision(),
                 launchHandle,
-                properties.getRequestTimeout());
+                properties.getRequestTimeout(),
+                ticker);
         try {
             publishSession(repositoryId, session, launchHandle.process());
             readinessProbe.awaitReady(session, client, snapshot.root());
             ensureStartupStillOwned(repositoryId, session);
         } catch (Throwable failure) {
+            boolean shutdownPreemptedLiveStartup = terminated && session.isProcessAlive();
             cleanupStartup(repositoryId, session, startupFailureStatus(repositoryId, session));
             JdtFatalErrorPolicy.rethrowIfFatal(failure);
+            if (shutdownPreemptedLiveStartup) {
+                throw new JdtWorkspaceManagerStoppedException(repositoryId);
+            }
             if (failure instanceof Error error) {
                 throw launchFailure(repositoryId, "JDT LS startup failed", error);
             }
@@ -295,7 +482,7 @@ public class DefaultJdtWorkspaceManager implements JdtWorkspaceManager, Reposito
         if (Objects.isNull(tracker)) {
             return;
         }
-        stopLaunchingProcess(repositoryId);
+        stopLaunchingProcess(repositoryId, null);
         if (launchingProcesses.containsKey(repositoryId)) {
             throw new JdtWorkspaceTerminationPendingException(repositoryId);
         }
@@ -349,7 +536,7 @@ public class DefaultJdtWorkspaceManager implements JdtWorkspaceManager, Reposito
     private void discardUnusable(RepositoryId repositoryId) {
         if (sessions.containsKey(repositoryId)) {
             log.info("phase=jdtls-workspace outcome=discarded repoId={}", repositoryId.value());
-            stopQuietly(repositoryId);
+            stopQuietly(repositoryId, null, false);
         }
     }
 
@@ -407,10 +594,10 @@ public class DefaultJdtWorkspaceManager implements JdtWorkspaceManager, Reposito
                     .sorted(Comparator.comparingLong(JdtWorkspaceSession::lastUsedNanos))
                     .filter(JdtWorkspaceSession::tryBeginEviction)
                     .findFirst()
-                    .orElseThrow(() -> new JdtWorkspaceCapacityException(repositoryId));
+                    .orElseThrow(() -> capacityReached(repositoryId));
             log.info("phase=jdtls-workspace outcome=evicted repoId={} requestedBy={}",
                     evictable.repositoryId().value(), repositoryId.value());
-            stopQuietly(evictable.repositoryId());
+            stopQuietly(evictable.repositoryId(), JdtWorkspaceLifecycleMetrics.EvictionTrigger.DEMAND, true);
         }
     }
 
@@ -420,6 +607,158 @@ public class DefaultJdtWorkspaceManager implements JdtWorkspaceManager, Reposito
 
     private int trackedWorkspaceCount() {
         return sessions.size() + launchingProcesses.size();
+    }
+
+    private JdtWorkspaceCapacityException capacityReached(RepositoryId repositoryId) {
+        CapacitySnapshot snapshot = capacitySnapshot();
+        recordCapacityRejection(JdtWorkspaceLifecycleMetrics.CapacityRejectionReason.NO_EVICTABLE_WORKSPACE);
+        return new JdtWorkspaceCapacityException(repositoryId, properties.getMaxActiveWorkspaces(), snapshot);
+    }
+
+    private CapacitySnapshot capacitySnapshot() {
+        int active = 0;
+        int starting = 0;
+        int terminationPending = 0;
+        Set<RepositoryId> accounted = new HashSet<>();
+        for (Map.Entry<RepositoryId, JdtWorkspaceSession> entry : sessions.entrySet()) {
+            accounted.add(entry.getKey());
+            if (isTerminationPending(entry.getValue())) {
+                terminationPending++;
+            } else if (isStarting(entry.getValue())) {
+                starting++;
+            } else {
+                active++;
+            }
+        }
+        for (Map.Entry<RepositoryId, LaunchTracker> entry : launchingProcesses.entrySet()) {
+            if (!accounted.add(entry.getKey())) {
+                continue;
+            }
+            if (entry.getValue().isComplete() && entry.getValue().isProcessAlive()) {
+                terminationPending++;
+            } else {
+                starting++;
+            }
+        }
+        return new CapacitySnapshot(active, starting, terminationPending);
+    }
+
+    private boolean isTerminationPending(JdtWorkspaceSession session) {
+        return SemanticEngineStatus.FAILED == session.status()
+                || session.isInvalidated()
+                || !session.isUsable();
+    }
+
+    private boolean isStarting(JdtWorkspaceSession session) {
+        return SemanticEngineStatus.READY != session.status();
+    }
+
+    private JdtWorkspaceLifecycleMetrics.LifecycleSnapshot lifecycleSnapshot() {
+        Map<JdtWorkspaceLifecycleMetrics.WorkspaceState, Integer> workspaces =
+                new EnumMap<>(JdtWorkspaceLifecycleMetrics.WorkspaceState.class);
+        Map<WorkspaceActivityKind, Integer> activities = new EnumMap<>(WorkspaceActivityKind.class);
+        Set<RepositoryId> accounted = new HashSet<>();
+        for (Map.Entry<RepositoryId, JdtWorkspaceSession> entry : sessions.entrySet()) {
+            accounted.add(entry.getKey());
+            increment(workspaces, workspaceState(entry.getValue()));
+            entry.getValue().activitySnapshot().forEach((kind, count) -> activities.merge(kind, count, Integer::sum));
+        }
+        for (Map.Entry<RepositoryId, LaunchTracker> entry : launchingProcesses.entrySet()) {
+            if (!accounted.add(entry.getKey())) {
+                continue;
+            }
+            JdtWorkspaceLifecycleMetrics.WorkspaceState state = entry.getValue().isComplete()
+                    && entry.getValue().isProcessAlive()
+                    ? JdtWorkspaceLifecycleMetrics.WorkspaceState.FAILED
+                    : JdtWorkspaceLifecycleMetrics.WorkspaceState.STARTING;
+            increment(workspaces, state);
+        }
+        return new JdtWorkspaceLifecycleMetrics.LifecycleSnapshot(workspaces, activities);
+    }
+
+    private JdtWorkspaceLifecycleMetrics.WorkspaceState workspaceState(JdtWorkspaceSession session) {
+        if (SemanticEngineStatus.FAILED == session.status()) {
+            return JdtWorkspaceLifecycleMetrics.WorkspaceState.FAILED;
+        }
+        if (session.isInvalidated() || !session.isUsable()) {
+            return JdtWorkspaceLifecycleMetrics.WorkspaceState.CLOSING;
+        }
+        if (SemanticEngineStatus.READY == session.status()) {
+            return JdtWorkspaceLifecycleMetrics.WorkspaceState.READY;
+        }
+        return JdtWorkspaceLifecycleMetrics.WorkspaceState.STARTING;
+    }
+
+    private <T> void increment(Map<T, Integer> counts, T key) {
+        counts.merge(key, 1, Integer::sum);
+    }
+
+    private Optional<JdtWorkspaceLifecycleMetrics.TerminationOutcome> stopSession(
+            JdtWorkspaceSession session,
+            JdtWorkspaceLifecycleMetrics.EvictionTrigger trigger) {
+        boolean processAttempted = session.isProcessAlive();
+        try {
+            JdtProcessTerminator.TerminationResult result = session.stop();
+            if (!processAttempted) {
+                return Optional.empty();
+            }
+            JdtWorkspaceLifecycleMetrics.TerminationOutcome outcome = terminationOutcome(result);
+            recordTermination(trigger, outcome);
+            return Optional.of(outcome);
+        } catch (JdtWorkspaceSession.JdtProcessTerminationException exception) {
+            if (processAttempted) {
+                recordTermination(trigger, JdtWorkspaceLifecycleMetrics.TerminationOutcome.UNCONFIRMED);
+            }
+            throw exception;
+        }
+    }
+
+    private JdtWorkspaceLifecycleMetrics.TerminationOutcome terminationOutcome(
+            JdtProcessTerminator.TerminationResult result) {
+        return result.forced()
+                ? JdtWorkspaceLifecycleMetrics.TerminationOutcome.FORCED
+                : JdtWorkspaceLifecycleMetrics.TerminationOutcome.GRACEFUL;
+    }
+
+    private void recordIdleEviction(
+            MaintenanceCandidate candidate,
+            JdtWorkspaceLifecycleMetrics.TerminationOutcome outcome) {
+        if (candidate.kind() == MaintenanceCandidateKind.IDLE) {
+            recordEviction(JdtWorkspaceLifecycleMetrics.EvictionTrigger.IDLE, outcome);
+        }
+    }
+
+    private void recordEviction(
+            JdtWorkspaceLifecycleMetrics.EvictionTrigger trigger,
+            JdtWorkspaceLifecycleMetrics.TerminationOutcome outcome) {
+        recordMetric(() -> lifecycleMetrics.recordEviction(trigger, outcome));
+    }
+
+    private void recordTermination(
+            JdtWorkspaceLifecycleMetrics.EvictionTrigger trigger,
+            JdtWorkspaceLifecycleMetrics.TerminationOutcome outcome) {
+        if (Objects.nonNull(trigger)) {
+            recordMetric(() -> lifecycleMetrics.recordTermination(trigger, outcome));
+        }
+    }
+
+    private void recordTermination(
+            JdtWorkspaceLifecycleMetrics.EvictionTrigger trigger,
+            Optional<JdtWorkspaceLifecycleMetrics.TerminationOutcome> outcome) {
+        outcome.ifPresent(value -> recordTermination(trigger, value));
+    }
+
+    private void recordCapacityRejection(JdtWorkspaceLifecycleMetrics.CapacityRejectionReason reason) {
+        recordMetric(() -> lifecycleMetrics.recordCapacityRejection(reason));
+    }
+
+    private void recordMetric(Runnable metricOperation) {
+        try {
+            metricOperation.run();
+        } catch (RuntimeException exception) {
+            log.debug("phase=jdtls-metrics outcome=record-failed exceptionType={}",
+                    exception.getClass().getSimpleName());
+        }
     }
 
     /** 清理失敗的啟動,但不讓停止失敗覆蓋原始失敗 */
@@ -433,15 +772,26 @@ public class DefaultJdtWorkspaceManager implements JdtWorkspaceManager, Reposito
         }
     }
 
-    private void stopQuietly(RepositoryId repositoryId) {
+    private void stopQuietly(
+            RepositoryId repositoryId,
+            JdtWorkspaceLifecycleMetrics.EvictionTrigger trigger,
+            boolean eviction) {
         JdtWorkspaceSession session = sessions.get(repositoryId);
         if (Objects.isNull(session)) {
             return;
         }
+        boolean processAttempted = session.isProcessAlive();
         try {
-            session.stop();
+            Optional<JdtWorkspaceLifecycleMetrics.TerminationOutcome> outcome = stopSession(session, trigger);
             removeStoppedSession(repositoryId, session);
+            if (eviction) {
+                outcome.ifPresent(value -> recordEviction(trigger, value));
+            }
         } catch (RuntimeException exception) {
+            if (eviction && processAttempted
+                    && exception instanceof JdtWorkspaceSession.JdtProcessTerminationException) {
+                recordEviction(trigger, JdtWorkspaceLifecycleMetrics.TerminationOutcome.UNCONFIRMED);
+            }
             log.warn("phase=jdtls-workspace outcome=stop-failed repoId={} exceptionType={}",
                     repositoryId.value(), exception.getClass().getSimpleName());
         }
@@ -452,38 +802,105 @@ public class DefaultJdtWorkspaceManager implements JdtWorkspaceManager, Reposito
             if (session.isProcessAlive()) {
                 return;
             }
-            sessions.remove(repositoryId, session);
+            boolean removed = sessions.remove(repositoryId, session);
+            if (!removed) {
+                return;
+            }
             transientStatuses.remove(repositoryId);
             removeGauge(repositoryId);
         }
     }
 
-    private void stopLaunchingProcess(RepositoryId repositoryId) {
+    private void stopLaunchingProcess(
+            RepositoryId repositoryId,
+            JdtWorkspaceLifecycleMetrics.EvictionTrigger trigger) {
         LaunchTracker tracker = launchingProcesses.get(repositoryId);
         if (Objects.isNull(tracker)) {
             return;
         }
+        tracker.terminationLock().lock();
+        try {
+            stopLaunchingProcessLocked(repositoryId, tracker, trigger);
+        } finally {
+            tracker.terminationLock().unlock();
+        }
+    }
+
+    LaunchStopOutcome tryStopLaunchingProcess(RepositoryId repositoryId) {
+        LaunchTracker tracker = launchingProcesses.get(repositoryId);
+        if (Objects.isNull(tracker)) {
+            return LaunchStopOutcome.NOT_TRACKED;
+        }
+        return tryStopLaunchingProcess(repositoryId, tracker, null);
+    }
+
+    private LaunchStopOutcome tryStopLaunchingProcess(
+            RepositoryId repositoryId,
+            LaunchTracker tracker,
+            JdtWorkspaceLifecycleMetrics.EvictionTrigger trigger) {
+        if (!tracker.terminationLock().tryLock()) {
+            if (Objects.nonNull(trigger)) {
+                recordTermination(trigger, JdtWorkspaceLifecycleMetrics.TerminationOutcome.SKIPPED_BUSY);
+            }
+            return LaunchStopOutcome.BUSY;
+        }
+        try {
+            if (!Objects.equals(launchingProcesses.get(repositoryId), tracker)) {
+                return LaunchStopOutcome.NOT_TRACKED;
+            }
+            return stopLaunchingProcessLocked(repositoryId, tracker, trigger);
+        } finally {
+            tracker.terminationLock().unlock();
+        }
+    }
+
+    private LaunchStopOutcome stopLaunchingProcessLocked(
+            RepositoryId repositoryId,
+            LaunchTracker tracker,
+            JdtWorkspaceLifecycleMetrics.EvictionTrigger trigger) {
         tracker.cancel();
         Optional<Process> process = tracker.process();
+        Optional<JdtWorkspaceLifecycleMetrics.TerminationOutcome> terminationOutcome = Optional.empty();
         if (process.isPresent()) {
             JdtProcessTerminator.TerminationResult result = JdtProcessTerminator.destroyThenAwait(
                     process.get(), DEFAULT_SHUTDOWN_LOCK_WAIT);
+            terminationOutcome = Optional.of(terminationOutcome(result));
             if (!result.terminated()) {
                 transientStatuses.put(repositoryId, SemanticEngineStatus.FAILED);
                 log.error("phase=jdtls-process outcome=launch-stop-unconfirmed repoId={} failureType={}",
                         repositoryId.value(), result.failureType());
-                return;
+                recordTermination(trigger, JdtWorkspaceLifecycleMetrics.TerminationOutcome.UNCONFIRMED);
+                return LaunchStopOutcome.RETAINED;
             }
         }
+        launchCompletionWaitObserver.run();
         boolean launchCompleted = tracker.awaitCompletion(shutdownLockWait);
-        if (launchCompleted) {
-            launchingProcesses.remove(repositoryId, tracker);
-            transientStatuses.remove(repositoryId);
-            log.info("phase=jdtls-process outcome=confirmed-launch-stop repoId={}", repositoryId.value());
-            return;
+        if (!launchCompleted) {
+            transientStatuses.put(repositoryId, SemanticEngineStatus.FAILED);
+            log.warn("phase=jdtls-process outcome=launch-cancel-pending repoId={}", repositoryId.value());
+            recordTermination(trigger, terminationOutcome);
+            return LaunchStopOutcome.RETAINED;
         }
-        transientStatuses.put(repositoryId, SemanticEngineStatus.FAILED);
-        log.warn("phase=jdtls-process outcome=launch-cancel-pending repoId={}", repositoryId.value());
+        Optional<Process> completedProcess = tracker.process();
+        if (completedProcess.isPresent() && completedProcess.get().isAlive()) {
+            JdtProcessTerminator.TerminationResult result = JdtProcessTerminator.destroyThenAwait(
+                    completedProcess.get(), DEFAULT_SHUTDOWN_LOCK_WAIT);
+            terminationOutcome = Optional.of(terminationOutcome(result));
+            if (!result.terminated()) {
+                transientStatuses.put(repositoryId, SemanticEngineStatus.FAILED);
+                log.error("phase=jdtls-process outcome=launch-stop-unconfirmed repoId={} failureType={}",
+                        repositoryId.value(), result.failureType());
+                recordTermination(trigger, JdtWorkspaceLifecycleMetrics.TerminationOutcome.UNCONFIRMED);
+                return LaunchStopOutcome.RETAINED;
+            }
+        }
+        boolean removed = launchingProcesses.remove(repositoryId, tracker);
+        if (removed) {
+            transientStatuses.remove(repositoryId);
+        }
+        log.info("phase=jdtls-process outcome=confirmed-launch-stop repoId={}", repositoryId.value());
+        recordTermination(trigger, terminationOutcome);
+        return LaunchStopOutcome.CONFIRMED;
     }
 
     private void removeLaunchTracker(RepositoryId repositoryId, Process process) {
@@ -510,11 +927,31 @@ public class DefaultJdtWorkspaceManager implements JdtWorkspaceManager, Reposito
         }
     }
 
+    /**
+     * 非阻塞停止結果只描述呼叫當下擷取的 tracker 所有權。NOT_TRACKED 表示呼叫時沒有目前 tracker，
+     * BUSY 表示無法取得其終止鎖，RETAINED 表示其終止尚未確認；CONFIRMED 不保證 repository 目前未被追蹤。
+     */
+    enum LaunchStopOutcome {
+        NOT_TRACKED,
+        BUSY,
+        CONFIRMED,
+        RETAINED
+    }
+
     /** 容量已滿且每個工作區都有進行中請求 */
     public static final class JdtWorkspaceCapacityException extends RuntimeException {
 
-        JdtWorkspaceCapacityException(RepositoryId repositoryId) {
-            super("no idle JDT LS workspace can be evicted for repository " + repositoryId.value());
+        JdtWorkspaceCapacityException(RepositoryId repositoryId, int capacity, CapacitySnapshot snapshot) {
+            super(capacityMessage(repositoryId, capacity, snapshot));
+        }
+
+        private static String capacityMessage(RepositoryId repositoryId, int capacity, CapacitySnapshot snapshot) {
+            Objects.requireNonNull(repositoryId, "repositoryId is required");
+            Assert.isTrue(capacity > 0, "capacity must be positive");
+            CapacitySnapshot requiredSnapshot = Objects.requireNonNull(snapshot, "snapshot is required");
+            return "JDT LS capacity " + capacity + " reached; no evictable workspace (active="
+                    + requiredSnapshot.active() + ", starting=" + requiredSnapshot.starting()
+                    + ", terminationPending=" + requiredSnapshot.terminationPending() + ")";
         }
     }
 
@@ -535,11 +972,69 @@ public class DefaultJdtWorkspaceManager implements JdtWorkspaceManager, Reposito
         }
     }
 
+    private enum MaintenanceCandidateKind {
+        IDLE,
+        RETRY
+    }
+
+    private record MaintenanceCandidate(
+            RepositoryId repositoryId,
+            MaintenanceCandidateKind kind,
+            JdtWorkspaceSession session,
+            LaunchTracker tracker) {
+
+        private static MaintenanceCandidate idleSession(
+                RepositoryId repositoryId, JdtWorkspaceSession session) {
+            return new MaintenanceCandidate(repositoryId, MaintenanceCandidateKind.IDLE, session, null);
+        }
+
+        private static MaintenanceCandidate retryingSession(
+                RepositoryId repositoryId, JdtWorkspaceSession session) {
+            return new MaintenanceCandidate(repositoryId, MaintenanceCandidateKind.RETRY, session, null);
+        }
+
+        private static MaintenanceCandidate retryingTracker(
+                RepositoryId repositoryId, LaunchTracker tracker) {
+            return new MaintenanceCandidate(repositoryId, MaintenanceCandidateKind.RETRY, null, tracker);
+        }
+
+        private boolean isStillLive() {
+            if (Objects.nonNull(session)) {
+                return session.isProcessAlive();
+            }
+            return tracker.isProcessAlive();
+        }
+    }
+
+    private record MaintenanceCandidateResult(int confirmedRetries, int idleEvictions, int retainedProcesses) {
+
+        private static MaintenanceCandidateResult empty() {
+            return new MaintenanceCandidateResult(0, 0, 0);
+        }
+
+        private static MaintenanceCandidateResult retryConfirmed() {
+            return new MaintenanceCandidateResult(1, 0, 0);
+        }
+
+        private static MaintenanceCandidateResult idleEvicted() {
+            return new MaintenanceCandidateResult(0, 1, 0);
+        }
+
+        private static MaintenanceCandidateResult retained() {
+            return new MaintenanceCandidateResult(0, 0, 1);
+        }
+    }
+
     private static final class LaunchTracker {
 
         private final AtomicReference<Process> process = new AtomicReference<>();
         private final AtomicBoolean cancelled = new AtomicBoolean();
         private final CountDownLatch completed = new CountDownLatch(1);
+        private final ReentrantLock terminationLock = new ReentrantLock();
+
+        private ReentrantLock terminationLock() {
+            return terminationLock;
+        }
 
         private void processStarted(Process startedProcess) {
             process.set(Objects.requireNonNull(startedProcess, "startedProcess is required"));
@@ -569,6 +1064,10 @@ public class DefaultJdtWorkspaceManager implements JdtWorkspaceManager, Reposito
             return completed.getCount() == 0;
         }
 
+        private boolean isProcessAlive() {
+            return process().map(Process::isAlive).orElse(false);
+        }
+
         private boolean awaitCompletion(Duration timeout) {
             try {
                 return completed.await(timeout.toMillis(), TimeUnit.MILLISECONDS);
@@ -577,5 +1076,25 @@ public class DefaultJdtWorkspaceManager implements JdtWorkspaceManager, Reposito
                 return false;
             }
         }
+    }
+}
+
+record MaintenanceReport(boolean skippedBusy, int confirmedRetries, int idleEvictions, int retainedProcesses) {
+
+    static MaintenanceReport busy() {
+        return new MaintenanceReport(true, 0, 0, 0);
+    }
+
+    static MaintenanceReport empty() {
+        return new MaintenanceReport(false, 0, 0, 0);
+    }
+}
+
+record CapacitySnapshot(int active, int starting, int terminationPending) {
+
+    CapacitySnapshot {
+        Assert.isTrue(active >= 0, "active must not be negative");
+        Assert.isTrue(starting >= 0, "starting must not be negative");
+        Assert.isTrue(terminationPending >= 0, "terminationPending must not be negative");
     }
 }

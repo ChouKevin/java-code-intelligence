@@ -20,6 +20,7 @@ semantic:
     request-timeout: ${JDTLS_REQUEST_TIMEOUT:30s}
     max-active-workspaces: ${JDTLS_MAX_ACTIVE_WORKSPACES:2}
     idle-timeout: ${JDTLS_IDLE_TIMEOUT:30m}
+    maintenance-interval: ${JDTLS_MAINTENANCE_INTERVAL:1m}
     max-heap: ${JDTLS_MAX_HEAP:2g}
   data-root: /data/repos
   repository-lock-timeout: 5s

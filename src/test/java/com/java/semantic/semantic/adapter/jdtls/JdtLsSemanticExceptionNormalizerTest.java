@@ -64,7 +64,7 @@ class JdtLsSemanticExceptionNormalizerTest {
                         "SEMANTIC_ENGINE_NOT_READY"),
                 Arguments.of(
                         new DefaultJdtWorkspaceManager.JdtWorkspaceCapacityException(
-                                RepositoryId.of("orders")),
+                                RepositoryId.of("orders"), 2, new CapacitySnapshot(1, 0, 1)),
                         SemanticEngineNotReadyException.class,
                         "SEMANTIC_ENGINE_NOT_READY"),
                 Arguments.of(

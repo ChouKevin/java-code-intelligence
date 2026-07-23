@@ -12,7 +12,10 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.EnumMap;
+import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.OptionalLong;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
@@ -20,7 +23,6 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Consumer;
@@ -43,12 +45,14 @@ public final class JdtWorkspaceSession {
     private final RepositoryRevision revision;
     private final JdtLsProcessFactory.LaunchHandle handle;
     private final Duration requestTimeout;
-    private final AtomicInteger activeRequests = new AtomicInteger();
-    private final AtomicInteger activeDocumentLifecycles = new AtomicInteger();
+    private final JdtMonotonicTicker ticker;
+    private final EnumMap<WorkspaceActivityKind, Integer> activities =
+            new EnumMap<>(WorkspaceActivityKind.class);
     private final AtomicBoolean invalidated = new AtomicBoolean();
     private final AtomicBoolean stopped = new AtomicBoolean();
-    private final AtomicLong lastUsedNanos = new AtomicLong(System.nanoTime());
+    private final AtomicLong lastUsedNanos;
     private final Object evictionLock = new Object();
+    private final ReentrantLock terminationLock = new ReentrantLock();
     private final ConcurrentHashMap<String, ReentrantLock> documentLocks = new ConcurrentHashMap<>();
     private volatile Consumer<String> documentUriLockContentionObserver = uri -> { };
 
@@ -60,10 +64,21 @@ public final class JdtWorkspaceSession {
             RepositoryRevision revision,
             JdtLsProcessFactory.LaunchHandle handle,
             Duration requestTimeout) {
+        this(repositoryId, revision, handle, requestTimeout, System::nanoTime);
+    }
+
+    JdtWorkspaceSession(
+            RepositoryId repositoryId,
+            RepositoryRevision revision,
+            JdtLsProcessFactory.LaunchHandle handle,
+            Duration requestTimeout,
+            JdtMonotonicTicker ticker) {
         this.repositoryId = Objects.requireNonNull(repositoryId, "repositoryId is required");
         this.revision = Objects.requireNonNull(revision, "revision is required");
         this.handle = Objects.requireNonNull(handle, "handle is required");
         this.requestTimeout = Objects.requireNonNull(requestTimeout, "requestTimeout is required");
+        this.ticker = Objects.requireNonNull(ticker, "ticker is required");
+        this.lastUsedNanos = new AtomicLong(ticker.readNanos());
     }
 
     public RepositoryId repositoryId() {
@@ -97,7 +112,15 @@ public final class JdtWorkspaceSession {
 
     /** 進行中的請求數,大於零的 session 不可被淘汰 */
     public int activeRequests() {
-        return activeRequests.get();
+        synchronized (evictionLock) {
+            return activityCountLocked(WorkspaceActivityKind.REQUEST);
+        }
+    }
+
+    Map<WorkspaceActivityKind, Integer> activitySnapshot() {
+        synchronized (evictionLock) {
+            return Map.copyOf(activities);
+        }
     }
 
     /**
@@ -108,23 +131,18 @@ public final class JdtWorkspaceSession {
     <T> T withDocumentUri(String uri, Supplier<T> operation) {
         Assert.hasText(uri, "uri is required");
         Assert.notNull(operation, "operation is required");
-        ReentrantLock lock = documentLocks.computeIfAbsent(uri, key -> new ReentrantLock());
-        if (!lock.tryLock()) {
-            documentUriLockContentionObserver.accept(uri);
-            lock.lock();
-        }
-        boolean lifecycleStarted = false;
-        try {
-            if (!tryBeginDocumentLifecycle()) {
-                throw new JdtWorkspaceClosingException("document lifecycle");
+        try (WorkspaceActivityLease ignored = acquireActivity(WorkspaceActivityKind.DOCUMENT,
+                "document lifecycle")) {
+            ReentrantLock lock = documentLocks.computeIfAbsent(uri, key -> new ReentrantLock());
+            if (!lock.tryLock()) {
+                documentUriLockContentionObserver.accept(uri);
+                lock.lock();
             }
-            lifecycleStarted = true;
-            return operation.get();
-        } finally {
-            if (lifecycleStarted) {
-                endDocumentLifecycle();
+            try {
+                return operation.get();
+            } finally {
+                lock.unlock();
             }
-            lock.unlock();
         }
     }
 
@@ -139,7 +157,7 @@ public final class JdtWorkspaceSession {
      */
     boolean tryBeginEviction() {
         synchronized (evictionLock) {
-            if (closing || activeRequests.get() != 0 || activeDocumentLifecycles.get() != 0) {
+            if (closing || totalActivityCountLocked() > 0) {
                 return false;
             }
             closing = true;
@@ -148,35 +166,59 @@ public final class JdtWorkspaceSession {
     }
 
     /**
-     * 登記一次進行中的請求,已進入 CLOSING 就拒絕
+     * 拒絕新的工作 lease，但不影響已取得的 lease 完成。
      *
-     * 與 tryBeginEviction 互斥:兩者對 closing 與 activeRequests 的判斷都在同一把鎖內完成
+     * 管理器在發布 terminal 狀態前呼叫此 transition，讓已由呼叫端持有的 session
+     * 也無法在 shutdown 與實際停止之間再送出 request 或 document lifecycle。
      */
-    private boolean tryBeginRequest() {
+    void rejectNewWork() {
         synchronized (evictionLock) {
-            if (!acceptingNewWork()) {
-                return false;
-            }
-            activeRequests.incrementAndGet();
-            return true;
+            closing = true;
         }
     }
 
-    private boolean tryBeginDocumentLifecycle() {
+    /**
+     * 登記一次 session 活動,已進入 CLOSING 就拒絕
+     *
+     * 與淘汰交握互斥:兩者對 closing 與活動數的判斷都在同一把鎖內完成
+     */
+    WorkspaceActivityLease acquireActivity(WorkspaceActivityKind kind, String operation) {
+        Assert.notNull(kind, "activity kind is required");
+        Assert.hasText(operation, "operation is required");
         synchronized (evictionLock) {
             if (!acceptingNewWork()) {
-                return false;
+                throw new JdtWorkspaceClosingException(operation);
             }
-            activeDocumentLifecycles.incrementAndGet();
-            return true;
+            activities.merge(kind, 1, Integer::sum);
+            touchLocked();
+            return new WorkspaceActivityLease(() -> releaseActivity(kind));
         }
     }
 
-    private void endDocumentLifecycle() {
+    private void releaseActivity(WorkspaceActivityKind kind) {
         synchronized (evictionLock) {
-            activeDocumentLifecycles.decrementAndGet();
+            Integer activityCount = activities.get(kind);
+            Assert.state(Objects.nonNull(activityCount) && activityCount > 0,
+                    "activity lease is not active: " + kind);
+            if (activityCount == 1) {
+                activities.remove(kind);
+            } else {
+                activities.put(kind, activityCount - 1);
+            }
+            touchLocked();
         }
-        touch();
+    }
+
+    private int activityCountLocked(WorkspaceActivityKind kind) {
+        return activities.getOrDefault(kind, 0);
+    }
+
+    private int totalActivityCountLocked() {
+        int total = 0;
+        for (Integer activityCount : activities.values()) {
+            total += activityCount;
+        }
+        return total;
     }
 
     private boolean acceptingNewWork() {
@@ -197,31 +239,27 @@ public final class JdtWorkspaceSession {
     public <T> T call(String operation, Function<LanguageServer, CompletableFuture<T>> request) {
         Assert.hasText(operation, "operation is required");
         Assert.notNull(request, "request is required");
-        if (!tryBeginRequest()) {
-            throw new JdtWorkspaceClosingException(operation);
-        }
-        CompletableFuture<T> pending = null;
-        try {
-            pending = request.apply(handle.languageServer());
-            return pending.get(requestTimeout.toMillis(), TimeUnit.MILLISECONDS);
-        } catch (TimeoutException exception) {
-            cancel(pending);
-            log.warn("phase=jdtls-request outcome=timeout repoId={} operation={} exceptionType={}",
-                    repositoryId.value(), operation, exception.getClass().getSimpleName());
-            throw new JdtRequestTimeoutException(
-                    "JDT LS request timed out after " + requestTimeout + ": " + operation, exception);
-        } catch (InterruptedException exception) {
-            Thread.currentThread().interrupt();
-            cancel(pending);
-            throw new JdtRequestFailedException(failureMessage(operation), exception);
-        } catch (ExecutionException exception) {
-            JdtFatalErrorPolicy.rethrowIfFatal(exception.getCause());
-            throw new JdtRequestFailedException(failureMessage(operation), exception.getCause());
-        } catch (RuntimeException exception) {
-            throw new JdtRequestFailedException(failureMessage(operation), exception);
-        } finally {
-            activeRequests.decrementAndGet();
-            touch();
+        try (WorkspaceActivityLease ignored = acquireActivity(WorkspaceActivityKind.REQUEST, operation)) {
+            CompletableFuture<T> pending = null;
+            try {
+                pending = request.apply(handle.languageServer());
+                return pending.get(requestTimeout.toMillis(), TimeUnit.MILLISECONDS);
+            } catch (TimeoutException exception) {
+                cancel(pending);
+                log.warn("phase=jdtls-request outcome=timeout repoId={} operation={} exceptionType={}",
+                        repositoryId.value(), operation, exception.getClass().getSimpleName());
+                throw new JdtRequestTimeoutException(
+                        "JDT LS request timed out after " + requestTimeout + ": " + operation, exception);
+            } catch (InterruptedException exception) {
+                Thread.currentThread().interrupt();
+                cancel(pending);
+                throw new JdtRequestFailedException(failureMessage(operation), exception);
+            } catch (ExecutionException exception) {
+                JdtFatalErrorPolicy.rethrowIfFatal(exception.getCause());
+                throw new JdtRequestFailedException(failureMessage(operation), exception.getCause());
+            } catch (RuntimeException exception) {
+                throw new JdtRequestFailedException(failureMessage(operation), exception);
+            }
         }
     }
 
@@ -231,6 +269,7 @@ public final class JdtWorkspaceSession {
                 return false;
             }
             status = SemanticEngineStatus.READY;
+            touchLocked();
             return true;
         }
     }
@@ -240,7 +279,16 @@ public final class JdtWorkspaceSession {
     }
 
     void touch() {
-        lastUsedNanos.set(System.nanoTime());
+        updateLastUsed();
+    }
+
+    private void touchLocked() {
+        updateLastUsed();
+    }
+
+    private void updateLastUsed() {
+        long sampledNanos = ticker.readNanos();
+        lastUsedNanos.accumulateAndGet(sampledNanos, Math::max);
     }
 
     long lastUsedNanos() {
@@ -249,6 +297,25 @@ public final class JdtWorkspaceSession {
 
     boolean isProcessAlive() {
         return handle.process().isAlive();
+    }
+
+    boolean tryBeginIdleEviction(long nowNanos, Duration idleTimeout) {
+        Assert.notNull(idleTimeout, "idle timeout is required");
+        Assert.isTrue(!idleTimeout.isNegative(), "idle timeout must not be negative");
+        synchronized (evictionLock) {
+            if (SemanticEngineStatus.READY != status
+                    || !acceptingNewWork()
+                    || !isProcessAlive()
+                    || totalActivityCountLocked() > 0) {
+                return false;
+            }
+            long elapsedNanos = nowNanos - lastUsedNanos.get();
+            if (elapsedNanos < 0 || elapsedNanos < idleTimeout.toNanos()) {
+                return false;
+            }
+            closing = true;
+            return true;
+        }
     }
 
     boolean isUsable() {
@@ -285,7 +352,27 @@ public final class JdtWorkspaceSession {
      *
      * shutdown 或 exit 失敗只記錄並繼續;若強制終止後仍無法確認退出,則標記 FAILED 並拋出明確錯誤
      */
-    void stop() {
+    JdtProcessTerminator.TerminationResult stop() {
+        terminationLock.lock();
+        try {
+            return stopLocked();
+        } finally {
+            terminationLock.unlock();
+        }
+    }
+
+    Optional<JdtProcessTerminator.TerminationResult> tryStop() {
+        if (!terminationLock.tryLock()) {
+            return Optional.empty();
+        }
+        try {
+            return Optional.of(stopLocked());
+        } finally {
+            terminationLock.unlock();
+        }
+    }
+
+    private JdtProcessTerminator.TerminationResult stopLocked() {
         synchronized (evictionLock) {
             closing = true;
         }
@@ -297,8 +384,9 @@ public final class JdtWorkspaceSession {
             handle.listener().cancel(true);
         }
         if (firstStop || handle.process().isAlive()) {
-            awaitProcessExit();
+            return awaitProcessExit();
         }
+        return new JdtProcessTerminator.TerminationResult(true, false, false, "NONE");
     }
 
     private Path procStatusPath() {
@@ -329,13 +417,13 @@ public final class JdtWorkspaceSession {
         }
     }
 
-    private void awaitProcessExit() {
+    private JdtProcessTerminator.TerminationResult awaitProcessExit() {
         JdtProcessTerminator.TerminationResult result = JdtProcessTerminator.awaitThenForce(
                 handle.process(), PROCESS_EXIT_TIMEOUT);
         if (result.terminated()) {
             String outcome = result.forced() ? "confirmed-forced-stop" : "confirmed-stop";
             log.info("phase=jdtls-process outcome={} repoId={}", outcome, repositoryId.value());
-            return;
+            return result;
         }
         status = SemanticEngineStatus.FAILED;
         log.error("phase=jdtls-process outcome=force-stop-unconfirmed repoId={} failureType={}",

@@ -1,6 +1,9 @@
 package com.java.semantic.config;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.boot.context.properties.bind.Bindable;
 import org.springframework.boot.context.properties.bind.Binder;
@@ -8,6 +11,7 @@ import org.springframework.mock.env.MockEnvironment;
 
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -29,6 +33,7 @@ class JdtLsPropertiesTest {
             assertThat(properties.getRequestTimeout()).isEqualTo(Duration.ofSeconds(30));
             assertThat(properties.getMaxActiveWorkspaces()).isEqualTo(2);
             assertThat(properties.getIdleTimeout()).isEqualTo(Duration.ofMinutes(30));
+            assertThat(properties.getMaintenanceInterval()).isEqualTo(Duration.ofMinutes(1));
             assertThat(properties.getMaxHeap()).isEqualTo("2g");
         });
     }
@@ -44,6 +49,7 @@ class JdtLsPropertiesTest {
                 .withProperty("semantic.jdtls.request-timeout", "5s")
                 .withProperty("semantic.jdtls.max-active-workspaces", "4")
                 .withProperty("semantic.jdtls.idle-timeout", "20m")
+                .withProperty("semantic.jdtls.maintenance-interval", "45s")
                 .withProperty("semantic.jdtls.max-heap", "3g");
 
         JdtLsProperties properties = Binder.get(environment)
@@ -58,6 +64,32 @@ class JdtLsPropertiesTest {
         assertThat(properties.getRequestTimeout()).isEqualTo(Duration.ofSeconds(5));
         assertThat(properties.getMaxActiveWorkspaces()).isEqualTo(4);
         assertThat(properties.getIdleTimeout()).isEqualTo(Duration.ofMinutes(20));
+        assertThat(properties.getMaintenanceInterval()).isEqualTo(Duration.ofSeconds(45));
         assertThat(properties.getMaxHeap()).isEqualTo("3g");
+    }
+
+    @ParameterizedTest
+    @MethodSource("invalidLifecycleProperties")
+    void should_fail_context_startup_for_invalid_lifecycle_properties(
+            String property,
+            String value,
+            String expectedMessageFragment) {
+        ApplicationContextRunner contextRunner = new ApplicationContextRunner()
+                .withUserConfiguration(JdtLsConfiguration.class)
+                .withPropertyValues(property + "=" + value);
+
+        contextRunner.run(context -> assertThat(context)
+                .hasFailed()
+                .getFailure()
+                .rootCause()
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining(expectedMessageFragment));
+    }
+
+    private static Stream<Arguments> invalidLifecycleProperties() {
+        return Stream.of(
+                Arguments.of("semantic.jdtls.max-active-workspaces", "0", "maxActiveWorkspaces"),
+                Arguments.of("semantic.jdtls.idle-timeout", "0s", "idleTimeout"),
+                Arguments.of("semantic.jdtls.maintenance-interval", "-1s", "maintenanceInterval"));
     }
 }
