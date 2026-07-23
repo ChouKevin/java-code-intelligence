@@ -10,14 +10,14 @@ public final class ResolutionStrategyPartition {
             Map.entry(ResolutionStrategy.SPRING_BEAN_BY_QUALIFIER, ResolutionCategory.RESOLVED_ANALYZABLE),
             Map.entry(ResolutionStrategy.SPRING_BEAN_BY_PRIMARY, ResolutionCategory.RESOLVED_ANALYZABLE),
             Map.entry(ResolutionStrategy.SPRING_SINGLE_IMPLEMENTATION, ResolutionCategory.RESOLVED_ANALYZABLE),
-            Map.entry(ResolutionStrategy.MYBATIS_MAPPER, ResolutionCategory.RESOLVED_ANALYZABLE),
-            Map.entry(ResolutionStrategy.LOMBOK_GENERATED, ResolutionCategory.RESOLVED_ANALYZABLE),
+            Map.entry(ResolutionStrategy.MYBATIS_MAPPER, ResolutionCategory.RESOLVED_OPAQUE),
+            Map.entry(ResolutionStrategy.LOMBOK_GENERATED, ResolutionCategory.RESOLVED_OPAQUE),
+            Map.entry(ResolutionStrategy.SPRING_DATA_REPOSITORY, ResolutionCategory.RESOLVED_OPAQUE),
             Map.entry(ResolutionStrategy.EXTERNAL_LIBRARY, ResolutionCategory.RESOLVED_OPAQUE),
             Map.entry(ResolutionStrategy.FEIGN_CLIENT, ResolutionCategory.RESOLVED_OPAQUE),
             Map.entry(ResolutionStrategy.BUSINESS_READ_FORBIDDEN, ResolutionCategory.RESOLVED_OPAQUE),
             Map.entry(ResolutionStrategy.SPRING_MULTIPLE_CANDIDATES, ResolutionCategory.UNRESOLVED_GUESS),
-            Map.entry(ResolutionStrategy.DATA_ACCESS_WITHOUT_EVIDENCE, ResolutionCategory.UNRESOLVED_GUESS),
-            Map.entry(ResolutionStrategy.UNRESOLVED_TARGET, ResolutionCategory.UNRESOLVED_GUESS));
+            Map.entry(ResolutionStrategy.DATA_ACCESS_WITHOUT_EVIDENCE, ResolutionCategory.UNRESOLVED_GUESS));
 
     private ResolutionStrategyPartition() {
     }

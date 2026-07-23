@@ -42,16 +42,18 @@ public record GraphNode(
                 Assert.isTrue(methodBody.isEmpty(), "target-only node body is forbidden");
                 Assert.isTrue(declarationRange.isEmpty(), "target-only node range is forbidden");
                 Assert.isTrue(!StringUtils.hasText(externalSymbol), "target-only node external symbol is forbidden");
-                Assert.isTrue(NodeTraversalState.BUDGET_CUTOFF.equals(traversalState),
-                        "target-only node must be budget cutoff");
+                Assert.isTrue(NodeTraversalState.BUDGET_CUTOFF.equals(traversalState)
+                                || NodeTraversalState.OPAQUE.equals(traversalState),
+                        "target-only node must be budget cutoff or opaque");
             }
             case EXTERNAL -> {
                 Assert.isTrue(target.isEmpty(), "external node target is forbidden");
                 Assert.isTrue(methodBody.isEmpty(), "external node body is forbidden");
                 Assert.isTrue(declarationRange.isEmpty(), "external node range is forbidden");
                 Assert.hasText(externalSymbol, "external node symbol is required");
-                Assert.isTrue(NodeTraversalState.EXTERNAL.equals(traversalState),
-                        "external node must be external traversal state");
+                Assert.isTrue(NodeTraversalState.EXTERNAL.equals(traversalState)
+                                || NodeTraversalState.OPAQUE.equals(traversalState),
+                        "external node must be external or opaque traversal state");
             }
         }
     }

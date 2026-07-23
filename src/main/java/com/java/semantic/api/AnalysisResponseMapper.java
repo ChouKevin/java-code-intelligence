@@ -23,6 +23,7 @@ import com.java.semantic.callgraph.domain.NodeContentState;
 import com.java.semantic.callgraph.domain.NodeTraversalState;
 import com.java.semantic.callgraph.domain.OutgoingGraphFragment;
 import com.java.semantic.callgraph.domain.ResolutionStrategy;
+import com.java.semantic.callgraph.domain.ResolutionStrategyPartition;
 import com.java.semantic.identity.MethodTarget;
 import org.springframework.stereotype.Component;
 
@@ -92,6 +93,7 @@ public final class AnalysisResponseMapper {
                 range(edge.callSite()),
                 edge.callExpression(),
                 resolutionStrategy(edge.resolutionStrategy()),
+                ResolutionStrategyPartition.categoryOf(edge.resolutionStrategy()).name(),
                 edge.confidence(),
                 edge.evidence());
     }
@@ -146,6 +148,7 @@ public final class AnalysisResponseMapper {
             case EXPANDED -> "EXPANDED";
             case DEPTH_BOUNDARY -> "DEPTH_BOUNDARY";
             case BUDGET_CUTOFF -> "BUDGET_CUTOFF";
+            case OPAQUE -> "OPAQUE";
             case EXTERNAL -> "EXTERNAL";
         };
     }
@@ -158,13 +161,13 @@ public final class AnalysisResponseMapper {
             case SPRING_BEAN_BY_PRIMARY -> "SPRING_BEAN_BY_PRIMARY";
             case SPRING_SINGLE_IMPLEMENTATION -> "SPRING_SINGLE_IMPLEMENTATION";
             case MYBATIS_MAPPER -> "MYBATIS_MAPPER";
+            case SPRING_DATA_REPOSITORY -> "SPRING_DATA_REPOSITORY";
             case LOMBOK_GENERATED -> "LOMBOK_GENERATED";
             case EXTERNAL_LIBRARY -> "EXTERNAL_LIBRARY";
             case FEIGN_CLIENT -> "FEIGN_CLIENT";
             case BUSINESS_READ_FORBIDDEN -> "BUSINESS_READ_FORBIDDEN";
             case SPRING_MULTIPLE_CANDIDATES -> "SPRING_MULTIPLE_CANDIDATES";
             case DATA_ACCESS_WITHOUT_EVIDENCE -> "DATA_ACCESS_WITHOUT_EVIDENCE";
-            case UNRESOLVED_TARGET -> "UNRESOLVED_TARGET";
         };
     }
 }

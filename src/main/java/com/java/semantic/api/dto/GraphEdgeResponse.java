@@ -10,6 +10,7 @@ public record GraphEdgeResponse(
         SourceRangeResponse callSite,
         String callExpression,
         String resolutionStrategy,
+        String category,
         double confidence,
         List<String> evidence) {
 
@@ -19,6 +20,7 @@ public record GraphEdgeResponse(
         callSite = Objects.requireNonNull(callSite, "callSite is required");
         callExpression = Objects.requireNonNull(callExpression, "callExpression is required");
         resolutionStrategy = Objects.requireNonNull(resolutionStrategy, "resolutionStrategy is required");
+        category = Objects.requireNonNull(category, "category is required");
         evidence = List.copyOf(Objects.requireNonNull(evidence, "evidence is required"));
     }
 }

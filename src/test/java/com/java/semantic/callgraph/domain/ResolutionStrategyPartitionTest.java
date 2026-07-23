@@ -16,25 +16,30 @@ class ResolutionStrategyPartitionTest {
                 Map.entry(ResolutionStrategy.SPRING_BEAN_BY_QUALIFIER, ResolutionCategory.RESOLVED_ANALYZABLE),
                 Map.entry(ResolutionStrategy.SPRING_BEAN_BY_PRIMARY, ResolutionCategory.RESOLVED_ANALYZABLE),
                 Map.entry(ResolutionStrategy.SPRING_SINGLE_IMPLEMENTATION, ResolutionCategory.RESOLVED_ANALYZABLE),
-                Map.entry(ResolutionStrategy.MYBATIS_MAPPER, ResolutionCategory.RESOLVED_ANALYZABLE),
-                Map.entry(ResolutionStrategy.LOMBOK_GENERATED, ResolutionCategory.RESOLVED_ANALYZABLE),
+                Map.entry(ResolutionStrategy.MYBATIS_MAPPER, ResolutionCategory.RESOLVED_OPAQUE),
+                Map.entry(ResolutionStrategy.LOMBOK_GENERATED, ResolutionCategory.RESOLVED_OPAQUE),
+                Map.entry(ResolutionStrategy.SPRING_DATA_REPOSITORY, ResolutionCategory.RESOLVED_OPAQUE),
                 Map.entry(ResolutionStrategy.EXTERNAL_LIBRARY, ResolutionCategory.RESOLVED_OPAQUE),
                 Map.entry(ResolutionStrategy.FEIGN_CLIENT, ResolutionCategory.RESOLVED_OPAQUE),
                 Map.entry(ResolutionStrategy.BUSINESS_READ_FORBIDDEN, ResolutionCategory.RESOLVED_OPAQUE),
                 Map.entry(ResolutionStrategy.SPRING_MULTIPLE_CANDIDATES, ResolutionCategory.UNRESOLVED_GUESS),
-                Map.entry(ResolutionStrategy.DATA_ACCESS_WITHOUT_EVIDENCE, ResolutionCategory.UNRESOLVED_GUESS),
-                Map.entry(ResolutionStrategy.UNRESOLVED_TARGET, ResolutionCategory.UNRESOLVED_GUESS));
+                Map.entry(ResolutionStrategy.DATA_ACCESS_WITHOUT_EVIDENCE, ResolutionCategory.UNRESOLVED_GUESS));
 
         assertThat(expectedCategories).hasSize(ResolutionStrategy.values().length);
         expectedCategories.forEach((strategy, category) ->
                 assertThat(ResolutionStrategyPartition.categoryOf(strategy)).isEqualTo(category));
+
+        for (ResolutionStrategy strategy : ResolutionStrategy.values()) {
+            assertThat(ResolutionStrategyPartition.categoryOf(strategy))
+                    .as("every constant must be partitioned: %s", strategy)
+                    .isNotNull();
+        }
     }
 
     @Test
     void should_treat_opaque_and_unresolved_behavior_as_unverified_when_llm_gate_is_asked() {
         assertThat(ResolutionStrategyPartition.isGuessed(ResolutionStrategy.EXTERNAL_LIBRARY)).isTrue();
         assertThat(ResolutionStrategyPartition.isGuessed(ResolutionStrategy.BUSINESS_READ_FORBIDDEN)).isTrue();
-        assertThat(ResolutionStrategyPartition.isGuessed(ResolutionStrategy.UNRESOLVED_TARGET)).isTrue();
-        assertThat(ResolutionStrategyPartition.isGuessed(ResolutionStrategy.LOMBOK_GENERATED)).isFalse();
+        assertThat(ResolutionStrategyPartition.isGuessed(ResolutionStrategy.LOMBOK_GENERATED)).isTrue();
     }
 }

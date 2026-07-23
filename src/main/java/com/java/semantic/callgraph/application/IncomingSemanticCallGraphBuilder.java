@@ -23,6 +23,7 @@ import com.java.semantic.semantic.domain.SemanticMethod;
 import com.java.semantic.semantic.domain.SemanticPosition;
 import com.java.semantic.semantic.domain.SemanticProtocolException;
 import com.java.semantic.semantic.domain.SemanticRange;
+import com.java.semantic.syntax.domain.ClassMetadata;
 import com.java.semantic.syntax.domain.ClassMetadata.MethodSignature;
 import com.java.semantic.syntax.domain.RepositorySyntax;
 import org.springframework.util.Assert;
@@ -58,14 +59,26 @@ public final class IncomingSemanticCallGraphBuilder {
                     .comparingInt(SemanticPosition::line)
                     .thenComparingInt(SemanticPosition::character));
 
+    private static final Set<ResolutionStrategy> HIGH_CONFIDENCE_OPAQUE_DATA_ACCESS = Set.of(
+            ResolutionStrategy.MYBATIS_MAPPER, ResolutionStrategy.SPRING_DATA_REPOSITORY);
+
     private final JavaSemanticService semanticService;
     private final DirectCallRelationshipResolver relationshipResolver;
+    private final DataAccessEvidence dataAccessEvidence;
 
     public IncomingSemanticCallGraphBuilder(
             JavaSemanticService semanticService,
             DirectCallRelationshipResolver relationshipResolver) {
+        this(semanticService, relationshipResolver, new DataAccessEvidence());
+    }
+
+    public IncomingSemanticCallGraphBuilder(
+            JavaSemanticService semanticService,
+            DirectCallRelationshipResolver relationshipResolver,
+            DataAccessEvidence dataAccessEvidence) {
         this.semanticService = Objects.requireNonNull(semanticService, "semanticService is required");
         this.relationshipResolver = Objects.requireNonNull(relationshipResolver, "relationshipResolver is required");
+        this.dataAccessEvidence = Objects.requireNonNull(dataAccessEvidence, "dataAccessEvidence is required");
     }
 
     public IncomingGraphFragment build(
@@ -147,8 +160,9 @@ public final class IncomingSemanticCallGraphBuilder {
             throw new SemanticProtocolException();
         }
         for (IncomingCaller incoming : canonicalCallers.callers()) {
-            List<DirectCallRelationship> relationships = resolveRelationships(
-                    snapshot, index, state, calleeTarget, incoming, rootNeighborhood);
+            List<DirectCallRelationship> relationships = relabelOpaqueDataAccessCallers(
+                    index, state, calleeTarget,
+                    resolveRelationships(snapshot, index, state, calleeTarget, incoming, rootNeighborhood));
             boolean exactRelationship = relationships.stream()
                     .anyMatch(relationship -> isExactLocalRelationship(relationship, calleeTarget));
             if (!exactRelationship) {
@@ -207,6 +221,54 @@ public final class IncomingSemanticCallGraphBuilder {
     private static boolean isExactLocalRelationship(DirectCallRelationship relationship, MethodTarget calleeTarget) {
         return DirectCallRelationship.Status.LOCAL.equals(relationship.status())
                 && relationship.target().filter(calleeTarget::equals).isPresent();
+    }
+
+    /**
+     * 將指向資料存取介面（高信心不透明）的 UNRESOLVED 前向關係，重標為指向該介面方法的 LOCAL 邊
+     * <p>
+     * 讓 incoming 與 outgoing 一致地依證據接受不透明資料存取呼叫者；僅
+     * {@code MYBATIS_MAPPER} 與 {@code SPRING_DATA_REPOSITORY} 這類高信心證據會被接受，
+     * {@code DATA_ACCESS_WITHOUT_EVIDENCE} 或無證據維持原樣，交由既有 fail-closed 拒絕路徑
+     */
+    private List<DirectCallRelationship> relabelOpaqueDataAccessCallers(
+            RepositorySyntaxIndex index,
+            BuildState state,
+            MethodTarget calleeTarget,
+            List<DirectCallRelationship> relationships) {
+        Optional<EvidenceMatch> match = highConfidenceDataAccessEvidence(index, calleeTarget);
+        Optional<SemanticMethod> calleeMethod = state.semanticMethod(calleeTarget);
+        if (match.isEmpty() || calleeMethod.isEmpty()) {
+            return relationships;
+        }
+        EvidenceMatch evidenceMatch = match.orElseThrow();
+        SemanticMethod semanticMethod = calleeMethod.orElseThrow();
+        List<DirectCallRelationship> relabeled = new ArrayList<>();
+        for (DirectCallRelationship relationship : relationships) {
+            if (isOpaqueDataAccessCall(relationship, calleeTarget)) {
+                relabeled.add(DirectCallRelationship.local(
+                        calleeTarget, semanticMethod, relationship.callSite(), relationship.expression(),
+                        evidenceMatch.strategy(), evidenceMatch.confidence(), evidenceMatch.evidence()));
+            } else {
+                relabeled.add(relationship);
+            }
+        }
+        return relabeled;
+    }
+
+    private static boolean isOpaqueDataAccessCall(DirectCallRelationship relationship, MethodTarget calleeTarget) {
+        return DirectCallRelationship.Status.UNRESOLVED.equals(relationship.status())
+                && relationship.declarationTarget().filter(calleeTarget::equals).isPresent();
+    }
+
+    private Optional<EvidenceMatch> highConfidenceDataAccessEvidence(
+            RepositorySyntaxIndex index, MethodTarget calleeTarget) {
+        Optional<ClassMetadata> declaringType = index.classMetadata(calleeTarget);
+        Optional<MethodSignature> declaredMethod = index.method(calleeTarget);
+        if (declaringType.isEmpty() || declaredMethod.isEmpty()) {
+            return Optional.empty();
+        }
+        return dataAccessEvidence.evaluate(declaringType.orElseThrow(), declaredMethod.orElseThrow(), calleeTarget)
+                .filter(match -> HIGH_CONFIDENCE_OPAQUE_DATA_ACCESS.contains(match.strategy()));
     }
 
     private CanonicalCallers canonicalCallers(

@@ -4,6 +4,7 @@ import com.java.semantic.callgraph.domain.ResolutionStrategy;
 import com.java.semantic.identity.MethodTarget;
 import com.java.semantic.semantic.domain.SemanticMethod;
 import com.java.semantic.semantic.domain.SemanticRange;
+import com.java.semantic.syntax.domain.SyntaxInvocation;
 import org.springframework.util.Assert;
 import org.springframework.util.CollectionUtils;
 import org.springframework.util.StringUtils;
@@ -23,7 +24,9 @@ record DirectCallRelationship(
         ResolutionStrategy strategy,
         double confidence,
         List<String> evidence,
-        List<MethodTarget> candidates) {
+        List<MethodTarget> candidates,
+        Optional<SyntaxInvocation> invocation,
+        Optional<MethodTarget> declarationTarget) {
 
     DirectCallRelationship {
         status = Objects.requireNonNull(status, "status is required");
@@ -37,7 +40,9 @@ record DirectCallRelationship(
                 "confidence must be between zero and one");
         evidence = List.copyOf(Objects.requireNonNull(evidence, "evidence is required"));
         candidates = List.copyOf(Objects.requireNonNull(candidates, "candidates are required"));
-        assertPayload(status, target, semanticMethod, externalSymbol, candidates);
+        invocation = Objects.requireNonNull(invocation, "invocation is required");
+        declarationTarget = Objects.requireNonNull(declarationTarget, "declarationTarget is required");
+        assertPayload(status, target, semanticMethod, externalSymbol, candidates, invocation, declarationTarget);
     }
 
     static DirectCallRelationship local(
@@ -58,7 +63,9 @@ record DirectCallRelationship(
                 strategy,
                 confidence,
                 evidence,
-                List.of());
+                List.of(),
+                Optional.empty(),
+                Optional.empty());
     }
 
     static DirectCallRelationship external(
@@ -77,7 +84,9 @@ record DirectCallRelationship(
                 ResolutionStrategy.EXTERNAL_LIBRARY,
                 1.0d,
                 evidence,
-                List.of());
+                List.of(),
+                Optional.empty(),
+                Optional.empty());
     }
 
     static DirectCallRelationship ambiguous(
@@ -96,7 +105,9 @@ record DirectCallRelationship(
                 strategy,
                 confidence,
                 List.of(),
-                candidates);
+                candidates,
+                Optional.empty(),
+                Optional.empty());
     }
 
     static DirectCallRelationship unresolved(
@@ -104,6 +115,16 @@ record DirectCallRelationship(
             String expression,
             ResolutionStrategy strategy,
             double confidence) {
+        return unresolved(callSite, expression, strategy, confidence, Optional.empty(), Optional.empty());
+    }
+
+    static DirectCallRelationship unresolved(
+            SemanticRange callSite,
+            String expression,
+            ResolutionStrategy strategy,
+            double confidence,
+            Optional<SyntaxInvocation> invocation,
+            Optional<MethodTarget> declarationTarget) {
         return new DirectCallRelationship(
                 Status.UNRESOLVED,
                 Optional.empty(),
@@ -114,7 +135,9 @@ record DirectCallRelationship(
                 strategy,
                 confidence,
                 List.of(),
-                List.of());
+                List.of(),
+                invocation,
+                declarationTarget);
     }
 
     private static void assertPayload(
@@ -122,25 +145,33 @@ record DirectCallRelationship(
             Optional<MethodTarget> target,
             Optional<SemanticMethod> semanticMethod,
             Optional<String> externalSymbol,
-            List<MethodTarget> candidates) {
+            List<MethodTarget> candidates,
+            Optional<SyntaxInvocation> invocation,
+            Optional<MethodTarget> declarationTarget) {
         switch (status) {
             case LOCAL -> {
                 Assert.isTrue(target.isPresent(), "local target is required");
                 Assert.isTrue(semanticMethod.isPresent(), "local semanticMethod is required");
                 Assert.isTrue(!externalSymbol.isPresent(), "local externalSymbol is forbidden");
                 Assert.isTrue(CollectionUtils.isEmpty(candidates), "local candidates are forbidden");
+                Assert.isTrue(!invocation.isPresent(), "local invocation is forbidden");
+                Assert.isTrue(!declarationTarget.isPresent(), "local declarationTarget is forbidden");
             }
             case EXTERNAL -> {
                 Assert.isTrue(!target.isPresent(), "external target is forbidden");
                 Assert.isTrue(!semanticMethod.isPresent(), "external semanticMethod is forbidden");
                 Assert.isTrue(externalSymbol.filter(StringUtils::hasText).isPresent(), "externalSymbol is required");
                 Assert.isTrue(CollectionUtils.isEmpty(candidates), "external candidates are forbidden");
+                Assert.isTrue(!invocation.isPresent(), "external invocation is forbidden");
+                Assert.isTrue(!declarationTarget.isPresent(), "external declarationTarget is forbidden");
             }
             case AMBIGUOUS -> {
                 Assert.isTrue(!target.isPresent(), "ambiguous target is forbidden");
                 Assert.isTrue(!semanticMethod.isPresent(), "ambiguous semanticMethod is forbidden");
                 Assert.isTrue(!externalSymbol.isPresent(), "ambiguous externalSymbol is forbidden");
                 Assert.isTrue(candidates.size() > 1, "ambiguous candidates are required");
+                Assert.isTrue(!invocation.isPresent(), "ambiguous invocation is forbidden");
+                Assert.isTrue(!declarationTarget.isPresent(), "ambiguous declarationTarget is forbidden");
             }
             case UNRESOLVED -> {
                 Assert.isTrue(!target.isPresent(), "unresolved target is forbidden");

@@ -1,5 +1,11 @@
 package com.java.semantic.semantic.adapter.jdtls;
 
+import com.java.semantic.callgraph.application.SemanticCallGraphBuilder;
+import com.java.semantic.callgraph.application.SpringImplementationSelector;
+import com.java.semantic.callgraph.domain.CallNodeId;
+import com.java.semantic.callgraph.domain.GraphNode;
+import com.java.semantic.callgraph.domain.OutgoingGraphFragment;
+import com.java.semantic.callgraph.domain.ResolutionStrategy;
 import com.java.semantic.config.JdtLsProperties;
 import com.java.semantic.identity.MethodTarget;
 import com.java.semantic.repository.domain.RepositoryId;
@@ -119,6 +125,57 @@ class CallSiteResolutionJdtLsIT {
         } finally {
             manager.shutdownAll();
         }
+    }
+
+    @Test
+    void should_resolve_a_qualifier_annotated_field_to_the_matching_bean_under_real_jdt() throws IOException {
+        Path home = requireJdtlsHome(System.getenv("JDTLS_HOME"));
+        Path root = copyFixture();
+        DefaultJdtWorkspaceManager manager = manager(properties(home));
+        Lsp4jJavaSemanticService service = new Lsp4jJavaSemanticService(manager);
+        RepositorySnapshot snapshot = new RepositorySnapshot(REPOSITORY_ID, root, REVISION);
+        SemanticCallGraphBuilder builder = new SemanticCallGraphBuilder(service, new SpringImplementationSelector());
+
+        try {
+            RepositorySyntax syntax = new JdtSyntaxExtractionService().extract(root);
+            MethodTarget routeTarget = exactTarget(syntax, "QualifierScenarios", "route", List.of("String"));
+            SemanticDeclarationAnchor anchor = new ExactMethodDeclarationResolver().resolve(syntax, routeTarget);
+            SemanticMethod route = service.resolveExactMethod(snapshot, anchor);
+
+            OutgoingGraphFragment fragment = builder.build(snapshot, syntax, routeTarget, route, 1, 40);
+
+            assertThat(fragment.edges())
+                    .singleElement()
+                    .satisfies(edge -> {
+                        assertThat(edge.resolutionStrategy())
+                                .isEqualTo(ResolutionStrategy.SPRING_BEAN_BY_QUALIFIER);
+                        GraphNode callee = nodeById(fragment, edge.calleeNodeId());
+                        assertThat(callee.target().orElseThrow().className()).isEqualTo("FastWorker");
+                        assertThat(callee.target().orElseThrow().methodName()).isEqualTo("process");
+                    });
+        } finally {
+            manager.shutdownAll();
+        }
+    }
+
+    private GraphNode nodeById(OutgoingGraphFragment fragment, CallNodeId nodeId) {
+        return fragment.nodes().stream()
+                .filter(node -> nodeId.equals(node.nodeId()))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("missing graph node " + nodeId));
+    }
+
+    private MethodTarget exactTarget(
+            RepositorySyntax syntax, String className, String methodName, List<String> parameterTypes) {
+        return syntax.classes().stream()
+                .filter(metadata -> PACKAGE.equals(metadata.packageName()))
+                .filter(metadata -> className.equals(metadata.className()))
+                .flatMap(metadata -> metadata.methods().stream())
+                .filter(method -> methodName.equals(method.name()))
+                .filter(method -> parameterTypes.equals(method.paramTypes()))
+                .flatMap(method -> method.analysisTarget().target().stream())
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("missing exact syntax target " + className + "#" + methodName));
     }
 
     private List<CallScenario> callHierarchyScenarios() {

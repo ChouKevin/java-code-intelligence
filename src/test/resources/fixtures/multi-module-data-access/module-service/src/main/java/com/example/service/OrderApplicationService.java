@@ -1,5 +1,7 @@
 package com.example.service;
 
+import com.example.persistence.AuditDao;
+import com.example.persistence.CustomerRepository;
 import com.example.persistence.JdbcOrderRepository;
 import com.example.persistence.OrderJpaRepository;
 import com.example.persistence.OrderMapper;
@@ -10,10 +12,18 @@ public class OrderApplicationService {
     private final OrderMapper orderMapper = null;
     private final OrderJpaRepository orderJpaRepository = null;
     private final JdbcOrderRepository jdbcOrderRepository = null;
+    private final CustomerRepository customerRepository = null;
+    private final AuditDao auditDao = null;
 
     public String loadOrder(String orderNo) {
         orderMapper.findByOrderNo(orderNo);
         orderJpaRepository.findByOrderNo(orderNo);
         return jdbcOrderRepository.findName(orderNo);
+    }
+
+    public void reconcile(Long customerId) {
+        orderMapper.xmlOnly(customerId);
+        customerRepository.findById(customerId);
+        auditDao.latest();
     }
 }

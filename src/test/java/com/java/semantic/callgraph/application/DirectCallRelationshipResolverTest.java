@@ -90,6 +90,42 @@ class DirectCallRelationshipResolverTest {
     }
 
     @Test
+    void should_expose_declaration_target_and_invocation_when_interface_has_no_implementations() {
+        MethodTarget callerTarget = target("Root", "run");
+        MethodTarget interfaceTarget = target("Port", "handle");
+        SemanticMethod caller = outgoingMethod(callerTarget, 0);
+        SemanticMethod declaration = outgoingMethod(interfaceTarget, 10);
+        FakeSemanticService semantic = new FakeSemanticService()
+                .outgoing(caller, resolvedCall(declaration, 2));
+
+        List<DirectCallRelationship> relationships = resolver(semantic).resolveAll(
+                SNAPSHOT, index(type(callerTarget), interfaceType(interfaceTarget)), callerTarget, caller);
+
+        assertThat(relationships).singleElement().satisfies(relationship -> {
+            assertThat(relationship.status()).isEqualTo(DirectCallRelationship.Status.UNRESOLVED);
+            assertThat(relationship.declarationTarget()).contains(interfaceTarget);
+            assertThat(relationship.invocation()).isPresent();
+        });
+    }
+
+    @Test
+    void should_carry_invocation_without_declaration_target_when_definition_fallback_stays_unresolved() {
+        MethodTarget callerTarget = target("Root", "run");
+        SemanticMethod caller = outgoingMethod(callerTarget, 0);
+        SyntaxInvocation invocation = invocation("worker.work()", 2, 3);
+        FakeSemanticService semantic = new FakeSemanticService();
+
+        List<DirectCallRelationship> relationships = resolver(semantic).resolveAll(
+                SNAPSHOT, index(type(callerTarget, List.of(invocation))), callerTarget, caller);
+
+        assertThat(relationships).singleElement().satisfies(relationship -> {
+            assertThat(relationship.status()).isEqualTo(DirectCallRelationship.Status.UNRESOLVED);
+            assertThat(relationship.invocation()).isPresent();
+            assertThat(relationship.declarationTarget()).isNotPresent();
+        });
+    }
+
+    @Test
     void should_use_definition_fallback_for_uncovered_syntax_invocations() {
         MethodTarget callerTarget = target("Root", "run");
         MethodTarget target = target("Local", "work");
@@ -264,6 +300,84 @@ class DirectCallRelationshipResolverTest {
     }
 
     @Test
+    void should_apply_anchor_aligned_syntax_invocation_qualifier_for_call_hierarchy_call_site() {
+        MethodTarget callerTarget = target("Root", "run");
+        MethodTarget interfaceTarget = target("Port", "handle");
+        MethodTarget fastTarget = target("FastPort", "handle");
+        MethodTarget slowTarget = target("SlowPort", "handle");
+        SemanticMethod caller = outgoingMethod(callerTarget, 0);
+        SemanticMethod declaration = outgoingMethod(interfaceTarget, 10);
+        SemanticCall call = resolvedCall(declaration, 2);
+        SyntaxInvocation fastInvocation = new SyntaxInvocation(
+                SyntaxInvocation.InvocationKind.METHOD,
+                range(2, 0, 2, 20),
+                "port.handle()",
+                "port",
+                "com.example.Port",
+                "fast",
+                Optional.empty(),
+                new SyntaxPosition(2, 0));
+        FakeSemanticService semantic = new FakeSemanticService()
+                .outgoing(caller, call)
+                .implementations(declaration, outgoingMethod(fastTarget, 30), outgoingMethod(slowTarget, 40));
+
+        List<DirectCallRelationship> relationships = resolver(semantic).resolveAll(
+                SNAPSHOT,
+                index(
+                        type(callerTarget, List.of(fastInvocation)),
+                        interfaceType(interfaceTarget),
+                        qualifiedType(fastTarget, "fast"),
+                        type(slowTarget)),
+                callerTarget,
+                caller);
+
+        DirectCallRelationship hierarchyRelationship = relationships.stream()
+                .filter(relationship -> relationship.callSite().equals(call.callSites().getFirst()))
+                .findFirst()
+                .orElseThrow();
+        assertThat(hierarchyRelationship.status()).isEqualTo(DirectCallRelationship.Status.LOCAL);
+        assertThat(hierarchyRelationship.target()).contains(fastTarget);
+        assertThat(hierarchyRelationship.strategy()).isEqualTo(ResolutionStrategy.SPRING_BEAN_BY_QUALIFIER);
+    }
+
+    @Test
+    void should_synthesize_blank_invocation_when_multiple_syntax_invocations_align_with_the_same_call_hierarchy_anchor() {
+        MethodTarget callerTarget = target("Root", "run");
+        MethodTarget interfaceTarget = target("Port", "handle");
+        MethodTarget fastTarget = target("FastPort", "handle");
+        MethodTarget slowTarget = target("SlowPort", "handle");
+        SemanticMethod caller = outgoingMethod(callerTarget, 0);
+        SemanticMethod declaration = outgoingMethod(interfaceTarget, 10);
+        SemanticCall call = resolvedCall(declaration, 2);
+        SyntaxInvocation first = new SyntaxInvocation(
+                SyntaxInvocation.InvocationKind.METHOD, range(2, 0, 2, 20), "port.handle()",
+                "port", "com.example.Port", "fast", Optional.empty(), new SyntaxPosition(2, 0));
+        SyntaxInvocation second = new SyntaxInvocation(
+                SyntaxInvocation.InvocationKind.METHOD, range(2, 0, 2, 15), "port.handle()",
+                "port", "com.example.Port", "fast", Optional.empty(), new SyntaxPosition(2, 0));
+        FakeSemanticService semantic = new FakeSemanticService()
+                .outgoing(caller, call)
+                .implementations(declaration, outgoingMethod(fastTarget, 30), outgoingMethod(slowTarget, 40));
+
+        List<DirectCallRelationship> relationships = resolver(semantic).resolveAll(
+                SNAPSHOT,
+                index(
+                        type(callerTarget, List.of(first, second)),
+                        interfaceType(interfaceTarget),
+                        qualifiedType(fastTarget, "fast"),
+                        type(slowTarget)),
+                callerTarget,
+                caller);
+
+        DirectCallRelationship hierarchyRelationship = relationships.stream()
+                .filter(relationship -> relationship.callSite().equals(call.callSites().getFirst()))
+                .findFirst()
+                .orElseThrow();
+        assertThat(hierarchyRelationship.status()).isEqualTo(DirectCallRelationship.Status.AMBIGUOUS);
+        assertThat(hierarchyRelationship.candidates()).containsExactly(fastTarget, slowTarget);
+    }
+
+    @Test
     void should_not_guess_a_nearby_or_same_name_invocation_when_exact_call_site_is_missing() {
         MethodTarget callerTarget = target("Root", "run");
         SemanticMethod caller = outgoingMethod(callerTarget, 0);
@@ -279,6 +393,58 @@ class DirectCallRelationshipResolverTest {
 
         assertThat(relationship.status()).isEqualTo(DirectCallRelationship.Status.UNRESOLVED);
         assertThat(semantic.lastCallSite()).isNotPresent();
+    }
+
+    @Test
+    void should_keep_mappable_ambiguous_candidates_when_only_some_candidates_map_to_syntax_targets() {
+        MethodTarget callerTarget = target("Root", "run");
+        MethodTarget alphaTarget = target("AlphaPort", "handle");
+        MethodTarget betaTarget = target("BetaPort", "handle");
+        MethodTarget unmappedTarget = target("GammaPort", "handle");
+        SemanticMethod caller = outgoingMethod(callerTarget, 0);
+        SemanticMethod alpha = outgoingMethod(alphaTarget, 10);
+        SemanticMethod beta = outgoingMethod(betaTarget, 20);
+        SemanticMethod unmapped = outgoingMethod(unmappedTarget, 30);
+        SyntaxInvocation invocation = invocation("worker.handle()", 2, 3);
+        FakeSemanticService semantic = new FakeSemanticService().resolution(
+                caller, SemanticCallResolution.ambiguous(List.of(alpha, beta, unmapped)));
+
+        List<DirectCallRelationship> relationships = resolver(semantic).resolveAll(
+                SNAPSHOT,
+                index(type(callerTarget, List.of(invocation)), type(alphaTarget), type(betaTarget)),
+                callerTarget,
+                caller);
+
+        assertThat(relationships).singleElement().satisfies(relationship -> {
+            assertThat(relationship.status()).isEqualTo(DirectCallRelationship.Status.AMBIGUOUS);
+            assertThat(relationship.candidates()).containsExactly(alphaTarget, betaTarget);
+        });
+    }
+
+    @Test
+    void should_stay_unresolved_when_only_one_ambiguous_candidate_maps_to_a_syntax_target() {
+        MethodTarget callerTarget = target("Root", "run");
+        MethodTarget alphaTarget = target("AlphaPort", "handle");
+        MethodTarget unmappedBetaTarget = target("BetaPort", "handle");
+        MethodTarget unmappedGammaTarget = target("GammaPort", "handle");
+        SemanticMethod caller = outgoingMethod(callerTarget, 0);
+        SemanticMethod alpha = outgoingMethod(alphaTarget, 10);
+        SemanticMethod unmappedBeta = outgoingMethod(unmappedBetaTarget, 20);
+        SemanticMethod unmappedGamma = outgoingMethod(unmappedGammaTarget, 30);
+        SyntaxInvocation invocation = invocation("worker.handle()", 2, 3);
+        FakeSemanticService semantic = new FakeSemanticService().resolution(
+                caller, SemanticCallResolution.ambiguous(List.of(alpha, unmappedBeta, unmappedGamma)));
+
+        List<DirectCallRelationship> relationships = resolver(semantic).resolveAll(
+                SNAPSHOT,
+                index(type(callerTarget, List.of(invocation)), type(alphaTarget)),
+                callerTarget,
+                caller);
+
+        assertThat(relationships).singleElement().satisfies(relationship -> {
+            assertThat(relationship.status()).isEqualTo(DirectCallRelationship.Status.UNRESOLVED);
+            assertThat(relationship.invocation()).isPresent();
+        });
     }
 
     @Test
@@ -308,22 +474,27 @@ class DirectCallRelationshipResolverTest {
     }
 
     private static ClassMetadata type(MethodTarget target) {
-        return type(target, ClassMetadata.TypeKind.CLASS, true, List.of());
+        return type(target, ClassMetadata.TypeKind.CLASS, true, List.of(), List.of());
     }
 
     private static ClassMetadata type(MethodTarget target, List<SyntaxInvocation> invocations) {
-        return type(target, ClassMetadata.TypeKind.CLASS, true, invocations);
+        return type(target, ClassMetadata.TypeKind.CLASS, true, invocations, List.of());
     }
 
     private static ClassMetadata interfaceType(MethodTarget target) {
-        return type(target, ClassMetadata.TypeKind.INTERFACE, false, List.of());
+        return type(target, ClassMetadata.TypeKind.INTERFACE, false, List.of(), List.of());
+    }
+
+    private static ClassMetadata qualifiedType(MethodTarget target, String qualifier) {
+        return type(target, ClassMetadata.TypeKind.CLASS, true, List.of(), List.of(qualifier));
     }
 
     private static ClassMetadata type(
             MethodTarget target,
             ClassMetadata.TypeKind kind,
             boolean executableDeclaration,
-            List<SyntaxInvocation> invocations) {
+            List<SyntaxInvocation> invocations,
+            List<String> beanQualifiers) {
         SyntaxRange range = range(0, 0, 30, 0);
         SyntaxRange methodRange = range(0, 0, 5, 0);
         MethodSignature method = new MethodSignature(
@@ -335,7 +506,7 @@ class DirectCallRelationshipResolverTest {
                 target.className(), target.packageName(), target.packageName() + "." + target.className(),
                 target.sourceFile(), kind, false, List.of(), List.of(), List.of(), List.of(), List.of(),
                 List.of(method), false, false, List.of(), range,
-                new SourceSlice(range, "class " + target.className() + " {}"), false, List.of());
+                new SourceSlice(range, "class " + target.className() + " {}"), false, beanQualifiers);
     }
 
     private static SemanticCall externalCall(String rawSignature, int line) {

@@ -497,7 +497,15 @@ components:
         - EXPANDED
         - DEPTH_BOUNDARY
         - BUDGET_CUTOFF
+        - OPAQUE
         - EXTERNAL
+      description: >-
+        How far the service traversed this node in this response-local fragment.
+        EXPANDED: source was hydrated and its own calls were traversed.
+        DEPTH_BOUNDARY: source was hydrated but traversal stopped at the requested depth.
+        BUDGET_CUTOFF: node identity only; omitted from expansion because the node budget was reached.
+        OPAQUE: evidence-terminal node; not expandable, not a re-root continuation.
+        EXTERNAL: node lies outside the analyzed source set.
     GraphLimitReason:
       type: string
       enum:
@@ -599,6 +607,7 @@ components:
         - callSite
         - callExpression
         - resolutionStrategy
+        - category
         - confidence
         - evidence
       properties:
@@ -612,6 +621,46 @@ components:
           type: string
         resolutionStrategy:
           type: string
+          enum:
+            - JDT_CALL_HIERARCHY
+            - JDT_DEFINITION_FALLBACK
+            - SPRING_BEAN_BY_QUALIFIER
+            - SPRING_BEAN_BY_PRIMARY
+            - SPRING_SINGLE_IMPLEMENTATION
+            - MYBATIS_MAPPER
+            - SPRING_DATA_REPOSITORY
+            - LOMBOK_GENERATED
+            - EXTERNAL_LIBRARY
+            - FEIGN_CLIENT
+            - BUSINESS_READ_FORBIDDEN
+            - SPRING_MULTIPLE_CANDIDATES
+            - DATA_ACCESS_WITHOUT_EVIDENCE
+          description: >-
+            How the callee was resolved, and what that implies for further traversal.
+            JDT_CALL_HIERARCHY: resolved via the language server's call hierarchy; expandable and usable as a re-root.
+            JDT_DEFINITION_FALLBACK: resolved via go-to-definition fallback; expandable and usable as a re-root.
+            SPRING_BEAN_BY_QUALIFIER: resolved to a single Spring bean by @Qualifier; expandable and usable as a re-root.
+            SPRING_BEAN_BY_PRIMARY: resolved to a single Spring bean by @Primary; expandable and usable as a re-root.
+            SPRING_SINGLE_IMPLEMENTATION: resolved to the sole implementation of the target interface; expandable and usable as a re-root.
+            MYBATIS_MAPPER: resolved to a MyBatis mapper method; proven terminal, not expandable, never a re-root; evidence carries the mapper SQL text.
+            SPRING_DATA_REPOSITORY: resolved to a Spring Data repository method; proven terminal, not expandable, never a re-root.
+            LOMBOK_GENERATED: resolved to a Lombok-generated member; proven terminal, not expandable, never a re-root.
+            EXTERNAL_LIBRARY: resolved to a method outside the analyzed source set; proven terminal, not expandable, never a re-root.
+            FEIGN_CLIENT: resolved to a Feign HTTP client method; proven terminal, not expandable, never a re-root.
+            BUSINESS_READ_FORBIDDEN: resolved but excluded from disclosure by the read policy; proven terminal, not expandable, never a re-root.
+            SPRING_MULTIPLE_CANDIDATES: multiple Spring bean candidates with no disambiguator; unverified guess, do not expand or re-root.
+            DATA_ACCESS_WITHOUT_EVIDENCE: data access inferred without confirming evidence; unverified guess, do not expand or re-root.
+        category:
+          type: string
+          enum:
+            - RESOLVED_ANALYZABLE
+            - RESOLVED_OPAQUE
+            - UNRESOLVED_GUESS
+          description: >-
+            Coarse-grained resolution outcome derived from resolutionStrategy, for consumers that do not need the full strategy taxonomy.
+            RESOLVED_ANALYZABLE: target is proven and expandable; safe to traverse further or use as a re-root.
+            RESOLVED_OPAQUE: target is proven but a terminal; never expandable and never a re-root.
+            UNRESOLVED_GUESS: target is unverified; treat as a guess, not a proven fact.
         confidence:
           type: number
           format: double
@@ -619,6 +668,7 @@ components:
           type: array
           items:
             type: string
+          description: Human-readable proof strings; for MYBATIS_MAPPER edges includes the mapper SQL text.
     GraphWarning:
       type: object
       additionalProperties: false
@@ -630,6 +680,16 @@ components:
       properties:
         code:
           type: string
+          enum:
+            - DESCENDANT_CALL_AMBIGUOUS
+            - DESCENDANT_CALL_UNRESOLVED
+            - INCOMING_CALLER_REJECTED
+            - NODE_BUDGET_REACHED
+          description: >-
+            DESCENDANT_CALL_AMBIGUOUS: a descendant call site has multiple exact target candidates; see candidates.
+            DESCENDANT_CALL_UNRESOLVED: a descendant call site could not be resolved to any target.
+            INCOMING_CALLER_REJECTED: one or more incoming callers were rejected by the read policy and omitted.
+            NODE_BUDGET_REACHED: traversal stopped expanding descendants because the node budget was reached.
         message:
           type: string
         nodeId:
@@ -655,6 +715,10 @@ components:
       properties:
         code:
           type: string
+          enum:
+            - CHILD_SEMANTIC_QUERY_FAILED
+          description: >-
+            CHILD_SEMANTIC_QUERY_FAILED: a descendant semantic query failed after a usable root fragment was already established.
         message:
           type: string
         nodeId:

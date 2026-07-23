@@ -1,6 +1,8 @@
 package com.java.semantic.config;
 
+import com.java.semantic.callgraph.application.DataAccessEvidence;
 import com.java.semantic.callgraph.application.DirectCallRelationshipResolver;
+import com.java.semantic.callgraph.application.GeneratedMemberEvidence;
 import com.java.semantic.callgraph.application.IncomingSemanticCallGraphBuilder;
 import com.java.semantic.callgraph.application.SemanticCallGraphBuilder;
 import com.java.semantic.callgraph.application.SpringImplementationSelector;
@@ -35,7 +37,7 @@ public class SemanticAnalysisConfiguration {
     @ConditionalOnBean(JavaSemanticService.class)
     public SemanticCallGraphBuilder semanticCallGraphBuilder(
             DirectCallRelationshipResolver relationshipResolver) {
-        return new SemanticCallGraphBuilder(relationshipResolver);
+        return new SemanticCallGraphBuilder(relationshipResolver, new GeneratedMemberEvidence(), new DataAccessEvidence());
     }
 
     @Bean
@@ -43,7 +45,7 @@ public class SemanticAnalysisConfiguration {
     public IncomingSemanticCallGraphBuilder incomingSemanticCallGraphBuilder(
             JavaSemanticService semanticService,
             DirectCallRelationshipResolver relationshipResolver) {
-        return new IncomingSemanticCallGraphBuilder(semanticService, relationshipResolver);
+        return new IncomingSemanticCallGraphBuilder(semanticService, relationshipResolver, new DataAccessEvidence());
     }
 
     @Bean

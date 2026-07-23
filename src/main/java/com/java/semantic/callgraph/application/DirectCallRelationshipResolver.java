@@ -161,6 +161,19 @@ public final class DirectCallRelationshipResolver {
         if (exact.isPresent()) {
             return exact;
         }
+        return anchorAlignedInvocation(invocations, callSite);
+    }
+
+    /**
+     * 找出 resolutionAnchor 對齊呼叫位置起點、且範圍涵蓋呼叫位置的唯一語法呼叫證據
+     *
+     * JDT call hierarchy 回報的是 selection range，語法解析回報的是完整 invocation range
+     * 兩者本質上不同，因此在精確範圍比對失敗後，改以 anchor 對齊比對，僅在唯一候選時採用，
+     * 避免靜默退化成空白呼叫證據
+     */
+    private Optional<SyntaxInvocation> anchorAlignedInvocation(
+            List<SyntaxInvocation> invocations,
+            SemanticRange callSite) {
         List<SyntaxInvocation> anchorAligned = invocations.stream()
                 .filter(candidate -> toSemanticPosition(candidate.resolutionAnchor()).equals(callSite.start()))
                 .filter(candidate -> contains(candidate.range(), callSite))
@@ -214,7 +227,7 @@ public final class DirectCallRelationshipResolver {
                     .flatMap(Optional::stream)
                     .sorted(TARGET_ORDER)
                     .toList();
-            if (candidates.size() == resolution.candidates().size()) {
+            if (candidates.size() > 1) {
                 return DirectCallRelationship.ambiguous(
                         relationshipCallSite,
                         invocation.expression(),
@@ -227,7 +240,9 @@ public final class DirectCallRelationshipResolver {
                 relationshipCallSite,
                 invocation.expression(),
                 ResolutionStrategy.JDT_DEFINITION_FALLBACK,
-                confidence(ResolutionStrategy.JDT_DEFINITION_FALLBACK));
+                confidence(ResolutionStrategy.JDT_DEFINITION_FALLBACK),
+                Optional.of(invocation),
+                Optional.empty());
     }
 
     private DirectCallRelationship resolveCall(
@@ -246,14 +261,16 @@ public final class DirectCallRelationshipResolver {
         if (!call.target().isPresent()) {
             log.debug("phase=callgraph-resolution outcome=unresolved reason=semantic-target-missing callerTargetId={}",
                     MethodTargetDiagnosticId.from(callerTarget));
-            return DirectCallRelationship.unresolved(callSite, expression, strategy, confidence(strategy));
+            return DirectCallRelationship.unresolved(
+                    callSite, expression, strategy, confidence(strategy), Optional.of(invocation), Optional.empty());
         }
         SemanticMethod semanticTarget = call.target().orElseThrow();
         Optional<MethodTarget> target = targetFor(snapshot, index, semanticTarget);
         if (!target.isPresent()) {
             log.debug("phase=callgraph-resolution outcome=unresolved reason=syntax-index-miss callerTargetId={}",
                     MethodTargetDiagnosticId.from(callerTarget));
-            return DirectCallRelationship.unresolved(callSite, expression, strategy, confidence(strategy));
+            return DirectCallRelationship.unresolved(
+                    callSite, expression, strategy, confidence(strategy), Optional.of(invocation), Optional.empty());
         }
         MethodTarget localTarget = target.orElseThrow();
         if (!interfaceDeclaration(index, localTarget)) {
@@ -300,7 +317,9 @@ public final class DirectCallRelationshipResolver {
                 .sorted(Comparator.comparing(ImplementationCandidate::target, TARGET_ORDER))
                 .toList();
         if (CollectionUtils.isEmpty(distinct)) {
-            return DirectCallRelationship.unresolved(callSite, expression, strategy, confidence(strategy));
+            return DirectCallRelationship.unresolved(
+                    callSite, expression, strategy, confidence(strategy),
+                    Optional.of(invocation), Optional.of(declarationTarget));
         }
         ImplementationSelection selection = implementationSelector.select(invocation, distinct);
         if (selection instanceof ImplementationSelection.Ambiguous ambiguous) {
@@ -323,9 +342,14 @@ public final class DirectCallRelationshipResolver {
             RepositorySyntaxIndex index,
             SemanticMethod caller,
             SemanticRange callSite) {
-        return invocations(snapshot, index, caller).stream()
+        List<SyntaxInvocation> invocations = invocations(snapshot, index, caller);
+        Optional<SyntaxInvocation> exact = invocations.stream()
                 .filter(candidate -> semanticRange(candidate.range()).equals(callSite))
-                .findFirst()
+                .findFirst();
+        if (exact.isPresent()) {
+            return exact.orElseThrow();
+        }
+        return anchorAlignedInvocation(invocations, callSite)
                 .orElseGet(() -> new SyntaxInvocation(
                         SyntaxInvocation.InvocationKind.METHOD,
                         syntaxRange(callSite),

@@ -159,7 +159,7 @@ class OpenApiContractTest {
         assertThat(list(schema(schemas, "GraphContentState").get("enum")))
                 .containsExactly("FULL_SOURCE", "TARGET_ONLY", "EXTERNAL");
         assertThat(list(schema(schemas, "GraphTraversalState").get("enum")))
-                .containsExactly("EXPANDED", "DEPTH_BOUNDARY", "BUDGET_CUTOFF", "EXTERNAL");
+                .containsExactly("EXPANDED", "DEPTH_BOUNDARY", "BUDGET_CUTOFF", "OPAQUE", "EXTERNAL");
 
         Map<String, Object> traversal = schema(schemas, "GraphTraversal");
         assertClosedObject(traversal);
@@ -190,15 +190,45 @@ class OpenApiContractTest {
         Map<String, Object> edge = schema(schemas, "GraphEdge");
         assertClosedObject(edge);
         assertExactPropertiesAndRequired(edge,
-                "callerNodeId", "calleeNodeId", "callSite", "callExpression", "resolutionStrategy", "confidence", "evidence");
+                "callerNodeId", "calleeNodeId", "callSite", "callExpression", "resolutionStrategy", "category",
+                "confidence", "evidence");
         assertThat(edge.get("description")).asString().contains("caller", "callee");
         assertRequiredNonNullableArray(edge, "evidence");
+        assertThat(schema(properties(edge), "evidence").get("description"))
+                .asString().contains("MYBATIS_MAPPER", "SQL");
+        assertThat(list(schema(properties(edge), "resolutionStrategy").get("enum"))).containsExactly(
+                "JDT_CALL_HIERARCHY",
+                "JDT_DEFINITION_FALLBACK",
+                "SPRING_BEAN_BY_QUALIFIER",
+                "SPRING_BEAN_BY_PRIMARY",
+                "SPRING_SINGLE_IMPLEMENTATION",
+                "MYBATIS_MAPPER",
+                "SPRING_DATA_REPOSITORY",
+                "LOMBOK_GENERATED",
+                "EXTERNAL_LIBRARY",
+                "FEIGN_CLIENT",
+                "BUSINESS_READ_FORBIDDEN",
+                "SPRING_MULTIPLE_CANDIDATES",
+                "DATA_ACCESS_WITHOUT_EVIDENCE");
+        assertThat(schema(properties(edge), "resolutionStrategy").get("description"))
+                .asString().contains("MYBATIS_MAPPER", "SQL");
+        assertThat(list(schema(properties(edge), "category").get("enum"))).containsExactly(
+                "RESOLVED_ANALYZABLE", "RESOLVED_OPAQUE", "UNRESOLVED_GUESS");
+        assertThat(schema(properties(edge), "category").get("description"))
+                .asString().contains("expandable", "terminal", "guess");
 
         Map<String, Object> warning = schema(schemas, "GraphWarning");
         assertClosedObject(warning);
         assertExactProperties(warning,
                 "code", "message", "nodeId", "callExpression", "callSite", "candidates");
         assertThat(required(warning)).containsExactlyInAnyOrder("code", "message", "nodeId", "candidates");
+        assertThat(list(schema(properties(warning), "code").get("enum"))).containsExactly(
+                "DESCENDANT_CALL_AMBIGUOUS",
+                "DESCENDANT_CALL_UNRESOLVED",
+                "INCOMING_CALLER_REJECTED",
+                "NODE_BUDGET_REACHED");
+        assertThat(schema(properties(warning), "code").get("description")).asString()
+                .contains("DESCENDANT_CALL_AMBIGUOUS", "NODE_BUDGET_REACHED");
         assertNullableString(properties(warning), "callExpression");
         assertNullableReference(properties(warning), "callSite", "SourceRange");
         assertRequiredNonNullableArray(warning, "candidates");
@@ -208,6 +238,10 @@ class OpenApiContractTest {
         Map<String, Object> error = schema(schemas, "GraphError");
         assertClosedObject(error);
         assertExactPropertiesAndRequired(error, "code", "message", "nodeId");
+        assertThat(list(schema(properties(error), "code").get("enum")))
+                .containsExactly("CHILD_SEMANTIC_QUERY_FAILED");
+        assertThat(schema(properties(error), "code").get("description"))
+                .asString().contains("CHILD_SEMANTIC_QUERY_FAILED");
 
         Map<String, Object> position = schema(schemas, "Position");
         assertClosedObject(position);
@@ -413,10 +447,15 @@ class OpenApiContractTest {
                 new PositionResponse(0, 0),
                 new PositionResponse(0, 1));
         List<String> evidence = new ArrayList<>();
-        GraphEdgeResponse edge = new GraphEdgeResponse("caller", "callee", range, "call()", "JDT", 1.0, evidence);
+        GraphEdgeResponse edge = new GraphEdgeResponse(
+                "caller", "callee", range, "call()", "JDT", "RESOLVED_ANALYZABLE", 1.0, evidence);
         evidence.add("mutated");
         assertThat(edge.evidence()).isEmpty();
-        assertThatThrownBy(() -> new GraphEdgeResponse("caller", "callee", range, "call()", "JDT", 1.0, null))
+        assertThatThrownBy(() -> new GraphEdgeResponse(
+                "caller", "callee", range, "call()", "JDT", "RESOLVED_ANALYZABLE", 1.0, null))
+                .isInstanceOf(NullPointerException.class);
+        assertThatThrownBy(() -> new GraphEdgeResponse(
+                "caller", "callee", range, "call()", "JDT", null, 1.0, evidence))
                 .isInstanceOf(NullPointerException.class);
 
         List<MethodTargetResponse> candidates = new ArrayList<>();

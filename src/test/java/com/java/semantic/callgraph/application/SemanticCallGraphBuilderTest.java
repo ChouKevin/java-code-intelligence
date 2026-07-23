@@ -21,7 +21,9 @@ import com.java.semantic.semantic.domain.SemanticPosition;
 import com.java.semantic.semantic.domain.SemanticRange;
 import com.java.semantic.semantic.domain.SemanticResolutionOrigin;
 import com.java.semantic.syntax.domain.ClassMetadata;
+import com.java.semantic.syntax.domain.ClassMetadata.FieldInfo;
 import com.java.semantic.syntax.domain.ClassMetadata.MethodSignature;
+import com.java.semantic.syntax.domain.ClassMetadata.SqlSource;
 import com.java.semantic.syntax.domain.MethodTargetResolution;
 import com.java.semantic.syntax.domain.RepositorySyntax;
 import com.java.semantic.syntax.domain.SourceSlice;
@@ -556,6 +558,129 @@ class SemanticCallGraphBuilderTest {
                 .isEqualTo(com.java.semantic.callgraph.domain.ResolutionStrategy.SPRING_SINGLE_IMPLEMENTATION);
         assertThat(fragment.nodes()).filteredOn(node -> node.target().filter(implementationTarget::equals).isPresent())
                 .hasSize(1);
+    }
+
+    @Test
+    void should_relabel_a_lombok_generated_getter_as_a_suppressed_opaque_edge() {
+        MethodTarget rootTarget = target("Caller", "run");
+        SemanticMethod root = outgoingMethod(rootTarget, 0);
+        SyntaxInvocation getterInvocation = receiverInvocation("order.getTotal()", 2, "com.example.Order");
+        ClassMetadata callerType = type(rootTarget, List.of(getterInvocation));
+        ClassMetadata orderType = lombokDataType("com.example.Order", "total");
+
+        com.java.semantic.callgraph.domain.OutgoingGraphFragment fragment = builder(new FakeSemanticService())
+                .build(SNAPSHOT, new RepositorySyntax(List.of(), List.of(callerType, orderType)),
+                        rootTarget, root, 1, 40);
+
+        assertThat(fragment.status()).isEqualTo(GraphAnalysisStatus.SUCCESS);
+        assertThat(fragment.warnings()).isEmpty();
+        assertThat(fragment.edges()).singleElement()
+                .extracting(edge -> edge.resolutionStrategy())
+                .isEqualTo(com.java.semantic.callgraph.domain.ResolutionStrategy.LOMBOK_GENERATED);
+        assertThat(fragment.nodes()).filteredOn(node -> NodeContentState.EXTERNAL.equals(node.contentState()))
+                .singleElement().satisfies(node -> {
+                    assertThat(node.traversalState()).isEqualTo(NodeTraversalState.OPAQUE);
+                    assertThat(node.externalSymbol()).isEqualTo("com.example.Order#getTotal()");
+                });
+    }
+
+    @Test
+    void should_relabel_a_mybatis_mapper_with_sql_as_a_suppressed_opaque_edge() {
+        MethodTarget rootTarget = target("Caller", "run");
+        MethodTarget mapperTarget = target("OrderMapper", "insert");
+        SemanticMethod root = outgoingMethod(rootTarget, 0);
+        SemanticMethod mapperDeclaration = outgoingMethod(mapperTarget, 10);
+        FakeSemanticService semantic = new FakeSemanticService().outgoing(root, resolvedCall(mapperDeclaration, 2));
+
+        com.java.semantic.callgraph.domain.OutgoingGraphFragment fragment = builder(semantic)
+                .build(SNAPSHOT, syntax(List.of(type(rootTarget),
+                                mapperInterfaceType(mapperTarget, "insert into orders (id) values (#{id})"))),
+                        rootTarget, root, 1, 40);
+
+        assertThat(fragment.status()).isEqualTo(GraphAnalysisStatus.SUCCESS);
+        assertThat(fragment.warnings()).isEmpty();
+        assertThat(fragment.edges()).singleElement().satisfies(edge -> {
+            assertThat(edge.resolutionStrategy())
+                    .isEqualTo(com.java.semantic.callgraph.domain.ResolutionStrategy.MYBATIS_MAPPER);
+            assertThat(edge.evidence()).containsExactly("mapper SQL: insert into orders (id) values (#{id})");
+        });
+        assertThat(fragment.nodes()).filteredOn(node -> node.target().filter(mapperTarget::equals).isPresent())
+                .singleElement().satisfies(node -> {
+                    assertThat(node.contentState()).isEqualTo(NodeContentState.TARGET_ONLY);
+                    assertThat(node.traversalState()).isEqualTo(NodeTraversalState.OPAQUE);
+                });
+    }
+
+    @Test
+    void should_relabel_an_annotated_dao_without_evidence_and_keep_the_warning() {
+        MethodTarget rootTarget = target("Caller", "run");
+        MethodTarget mapperTarget = target("PaymentMapper", "insertPayment");
+        SemanticMethod root = outgoingMethod(rootTarget, 0);
+        SemanticMethod mapperDeclaration = outgoingMethod(mapperTarget, 10);
+        FakeSemanticService semantic = new FakeSemanticService().outgoing(root, resolvedCall(mapperDeclaration, 2));
+
+        com.java.semantic.callgraph.domain.OutgoingGraphFragment fragment = builder(semantic)
+                .build(SNAPSHOT, syntax(List.of(type(rootTarget), annotatedMapperInterfaceType(mapperTarget))),
+                        rootTarget, root, 1, 40);
+
+        assertThat(fragment.status()).isEqualTo(GraphAnalysisStatus.PARTIAL);
+        assertThat(fragment.warnings()).extracting(warning -> warning.code())
+                .containsExactly("DESCENDANT_CALL_UNRESOLVED");
+        assertThat(fragment.edges()).singleElement().satisfies(edge -> {
+            assertThat(edge.resolutionStrategy()).isEqualTo(
+                    com.java.semantic.callgraph.domain.ResolutionStrategy.DATA_ACCESS_WITHOUT_EVIDENCE);
+            assertThat(edge.confidence()).isEqualTo(0.5d);
+        });
+        assertThat(fragment.nodes()).filteredOn(node -> node.target().filter(mapperTarget::equals).isPresent())
+                .singleElement().satisfies(node -> {
+                    assertThat(node.contentState()).isEqualTo(NodeContentState.TARGET_ONLY);
+                    assertThat(node.traversalState()).isEqualTo(NodeTraversalState.OPAQUE);
+                });
+    }
+
+    private static SyntaxInvocation receiverInvocation(String expression, int line, String receiverDeclaration) {
+        SyntaxRange invocationRange = range(line, 0, line, expression.length());
+        return new SyntaxInvocation(SyntaxInvocation.InvocationKind.METHOD, invocationRange, expression,
+                "receiver", receiverDeclaration, "", Optional.empty(), invocationRange.start());
+    }
+
+    private static ClassMetadata lombokDataType(String fullyQualifiedName, String fieldName) {
+        int lastDot = fullyQualifiedName.lastIndexOf('.');
+        String simpleName = fullyQualifiedName.substring(lastDot + 1);
+        String packageName = fullyQualifiedName.substring(0, lastDot);
+        SyntaxRange range = range(0, 0, 10, 0);
+        FieldInfo field = new FieldInfo(
+                fieldName, "BigDecimal", List.of(), "", new TypeReference("BigDecimal", "BigDecimal", List.of(), true));
+        return new ClassMetadata(
+                simpleName, packageName, fullyQualifiedName, simpleName + ".java",
+                ClassMetadata.TypeKind.CLASS, false, List.of(), List.of(), List.of("Data"), List.of(),
+                List.of(field), List.of(), false, false, List.of(), range,
+                new SourceSlice(range, "class " + simpleName + " {}"), false, List.of());
+    }
+
+    private static ClassMetadata mapperInterfaceType(MethodTarget target, String sql) {
+        return mapperInterfaceType(target, List.of(), sql, SqlSource.ANNOTATION);
+    }
+
+    private static ClassMetadata annotatedMapperInterfaceType(MethodTarget target) {
+        return mapperInterfaceType(target, List.of("Mapper"), null, null);
+    }
+
+    private static ClassMetadata mapperInterfaceType(
+            MethodTarget target, List<String> annotations, String sql, SqlSource sqlSource) {
+        SyntaxRange typeRange = range(0, 0, 30, 0);
+        SyntaxRange methodRange = range(0, 0, 5, 0);
+        MethodSignature declaration = new MethodSignature(
+                target.methodName(), target.parameterTypes(), List.of(), sql, sqlSource, 1, 6,
+                methodRange, new SourceSlice(methodRange, target.methodName() + "();"),
+                List.<TypeReference>of(), Optional.empty(), List.of(), List.of(), List.of(), methodRange.start(),
+                MethodTargetResolution.resolved(target), false, false);
+        return new ClassMetadata(
+                target.className(), target.packageName(), target.packageName() + "." + target.className(),
+                target.sourceFile(), ClassMetadata.TypeKind.INTERFACE, false,
+                List.of(), List.of(), annotations, List.of(), List.of(),
+                List.of(declaration), false, false, List.of(), typeRange,
+                new SourceSlice(typeRange, "interface " + target.className() + " {}"), false, List.of());
     }
 
     private SemanticCallGraphBuilder builder(JavaSemanticService semanticService) {

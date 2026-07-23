@@ -4,6 +4,7 @@ import com.java.semantic.callgraph.domain.GraphAnalysisStatus;
 import com.java.semantic.callgraph.domain.GraphLimitReason;
 import com.java.semantic.callgraph.domain.IncomingGraphFragment;
 import com.java.semantic.callgraph.domain.NodeContentState;
+import com.java.semantic.callgraph.domain.ResolutionStrategy;
 import com.java.semantic.identity.MethodTarget;
 import com.java.semantic.repository.domain.RepositoryId;
 import com.java.semantic.repository.domain.RepositoryRevision;
@@ -441,6 +442,68 @@ class IncomingSemanticCallGraphBuilderTest {
         assertThat(fragment.traversal().expandedNodeCount()).isZero();
         assertThat(fragment.traversal().limitReason()).isEqualTo(GraphLimitReason.NONE);
         assertThat(fragment.warnings()).hasSize(0);
+    }
+
+    @Test
+    void should_accept_a_mapper_root_caller_via_data_access_evidence_with_the_sql_edge() {
+        MethodTarget mapperTarget = target("OrderMapper", "xmlOnly");
+        MethodTarget callerTarget = target("OrderService", "reconcile");
+        SemanticMethod mapper = incomingMethod(mapperTarget, 10);
+        SemanticMethod caller = incomingMethod(callerTarget, 0);
+        SemanticRange callSite = semanticRange(2);
+        FakeSemanticService semantic = new FakeSemanticService()
+                .incoming(mapper, incoming(caller, callSite))
+                .resolution(caller, callSite, localCall(mapper, callSite));
+
+        IncomingGraphFragment fragment = builder(semantic)
+                .build(SNAPSHOT,
+                        syntax(dataAccessInterfaceType(
+                                        mapperTarget, "select xml from orders", ClassMetadata.SqlSource.MAPPER_XML, List.of()),
+                                type(callerTarget)),
+                        mapperTarget, mapper, 1, 0);
+
+        assertThat(fragment.edges()).singleElement().satisfies(edge -> {
+            assertThat(edge.resolutionStrategy()).isEqualTo(ResolutionStrategy.MYBATIS_MAPPER);
+            assertThat(edge.evidence()).anySatisfy(entry -> assertThat(entry).contains("select xml from orders"));
+        });
+        assertThat(fragment.nodes()).anySatisfy(node -> assertThat(node.target()).contains(callerTarget));
+        assertThat(fragment.warnings()).noneMatch(warning -> "DESCENDANT_CALL_UNRESOLVED".equals(warning.code()));
+    }
+
+    @Test
+    void should_reject_a_data_access_root_caller_without_high_confidence_evidence() {
+        MethodTarget daoTarget = target("AuditDao", "latest");
+        MethodTarget callerTarget = target("OrderService", "reconcile");
+        SemanticMethod dao = incomingMethod(daoTarget, 10);
+        SemanticMethod caller = incomingMethod(callerTarget, 0);
+        SemanticRange callSite = semanticRange(2);
+        FakeSemanticService semantic = new FakeSemanticService()
+                .incoming(dao, incoming(caller, callSite))
+                .resolution(caller, callSite, localCall(dao, callSite));
+
+        IncomingGraphFragment fragment = builder(semantic)
+                .build(SNAPSHOT,
+                        syntax(dataAccessInterfaceType(daoTarget, null, null, List.of("Mapper")), type(callerTarget)),
+                        daoTarget, dao, 1, 0);
+
+        assertThat(fragment.edges()).isEmpty();
+        assertThat(fragment.nodes()).noneMatch(node -> node.target().filter(callerTarget::equals).isPresent());
+        assertThat(fragment.warnings()).extracting(warning -> warning.code()).contains("DESCENDANT_CALL_UNRESOLVED");
+    }
+
+    private static ClassMetadata dataAccessInterfaceType(
+            MethodTarget target, String sql, ClassMetadata.SqlSource sqlSource, List<String> annotations) {
+        SyntaxRange range = new SyntaxRange(new SyntaxPosition(0, 0), new SyntaxPosition(30, 0));
+        MethodSignature method = new MethodSignature(
+                target.methodName(), target.parameterTypes(), List.of(), sql, sqlSource, 1, 6,
+                range, new SourceSlice(range, target.methodName() + "();"), List.<TypeReference>of(),
+                Optional.empty(), List.of(), List.of(), List.of(), range.start(),
+                MethodTargetResolution.resolved(target), false, true);
+        return new ClassMetadata(
+                target.className(), target.packageName(), target.packageName() + "." + target.className(),
+                target.sourceFile(), ClassMetadata.TypeKind.INTERFACE, false,
+                List.of(), List.of(), annotations, List.of(), List.of(), List.of(method), false, false, List.of(), range,
+                new SourceSlice(range, "interface " + target.className() + " {}"), false, List.of());
     }
 
     private static IncomingSemanticCallGraphBuilder builder(FakeSemanticService semanticService) {

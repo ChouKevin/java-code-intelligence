@@ -18,10 +18,13 @@ import com.java.semantic.repository.domain.RepositorySnapshot;
 import com.java.semantic.semantic.domain.JavaSemanticService;
 import com.java.semantic.semantic.domain.SemanticMethod;
 import com.java.semantic.semantic.domain.SemanticRange;
+import com.java.semantic.syntax.domain.ClassMetadata;
 import com.java.semantic.syntax.domain.ClassMetadata.MethodSignature;
 import com.java.semantic.syntax.domain.RepositorySyntax;
+import com.java.semantic.syntax.domain.SyntaxInvocation;
 import com.java.semantic.syntax.domain.SyntaxRange;
 import org.springframework.util.Assert;
+import org.springframework.util.StringUtils;
 
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -44,15 +47,24 @@ public final class SemanticCallGraphBuilder {
             .thenComparing(MethodTarget::parameterTypes, SemanticCallGraphBuilder::compareParameters);
 
     private final DirectCallRelationshipResolver relationshipResolver;
+    private final GeneratedMemberEvidence generatedMemberEvidence;
+    private final DataAccessEvidence dataAccessEvidence;
 
     public SemanticCallGraphBuilder(
             JavaSemanticService semanticService,
             SpringImplementationSelector implementationSelector) {
-        this(new DirectCallRelationshipResolver(semanticService, implementationSelector));
+        this(new DirectCallRelationshipResolver(semanticService, implementationSelector),
+                new GeneratedMemberEvidence(), new DataAccessEvidence());
     }
 
-    public SemanticCallGraphBuilder(DirectCallRelationshipResolver relationshipResolver) {
+    public SemanticCallGraphBuilder(
+            DirectCallRelationshipResolver relationshipResolver,
+            GeneratedMemberEvidence generatedMemberEvidence,
+            DataAccessEvidence dataAccessEvidence) {
         this.relationshipResolver = Objects.requireNonNull(relationshipResolver, "relationshipResolver is required");
+        this.generatedMemberEvidence = Objects.requireNonNull(
+                generatedMemberEvidence, "generatedMemberEvidence is required");
+        this.dataAccessEvidence = Objects.requireNonNull(dataAccessEvidence, "dataAccessEvidence is required");
     }
 
     public OutgoingGraphFragment build(
@@ -71,7 +83,8 @@ public final class SemanticCallGraphBuilder {
         Assert.isTrue(depthTwoNodeBudget >= 0, "depthTwoNodeBudget must not be negative");
 
         RepositorySyntaxIndex index = new RepositorySyntaxIndex(snapshot.repositoryId().value(), syntax);
-        BuildState state = new BuildState(index, snapshot, requestedDepth, depthTwoNodeBudget);
+        BuildState state = new BuildState(
+                index, snapshot, requestedDepth, depthTwoNodeBudget, generatedMemberEvidence, dataAccessEvidence);
         state.addRoot(rootTarget);
 
         List<DirectCallRelationship> rootCalls;
@@ -186,21 +199,32 @@ public final class SemanticCallGraphBuilder {
         private final RepositorySnapshot snapshot;
         private final int requestedDepth;
         private final int budget;
+        private final GeneratedMemberEvidence generatedMemberEvidence;
+        private final DataAccessEvidence dataAccessEvidence;
         private final CallTraversalState traversalState = new CallTraversalState();
         private final Map<MethodTarget, LocalNode> localNodes = new LinkedHashMap<>();
         private final Map<MethodTarget, SemanticMethod> semanticMethods = new LinkedHashMap<>();
         private final Map<String, CallNodeId> externalNodes = new LinkedHashMap<>();
+        private final Map<String, NodeTraversalState> externalNodeTraversalStates = new LinkedHashMap<>();
         private final List<GraphEdge> edges = new ArrayList<>();
         private final List<GraphWarning> warnings = new ArrayList<>();
         private final List<GraphError> errors = new ArrayList<>();
         private final List<PendingDepthTwoEdge> pendingDepthTwo = new ArrayList<>();
         private final Set<EdgeKey> edgeKeys = new LinkedHashSet<>();
 
-        private BuildState(RepositorySyntaxIndex index, RepositorySnapshot snapshot, int requestedDepth, int budget) {
+        private BuildState(
+                RepositorySyntaxIndex index,
+                RepositorySnapshot snapshot,
+                int requestedDepth,
+                int budget,
+                GeneratedMemberEvidence generatedMemberEvidence,
+                DataAccessEvidence dataAccessEvidence) {
             this.index = index;
             this.snapshot = snapshot;
             this.requestedDepth = requestedDepth;
             this.budget = budget;
+            this.generatedMemberEvidence = generatedMemberEvidence;
+            this.dataAccessEvidence = dataAccessEvidence;
         }
 
         void addRoot(MethodTarget target) {
@@ -261,6 +285,14 @@ public final class SemanticCallGraphBuilder {
         }
 
         void addUnresolved(MethodTarget caller, DirectCallRelationship relationship) {
+            Optional<EvidenceMatch> match = evidenceFor(relationship);
+            if (match.isPresent()) {
+                EvidenceMatch evidenceMatch = match.orElseThrow();
+                addOpaqueEdge(caller, relationship, evidenceMatch);
+                if (!ResolutionStrategy.DATA_ACCESS_WITHOUT_EVIDENCE.equals(evidenceMatch.strategy())) {
+                    return;
+                }
+            }
             warnings.add(new GraphWarning(
                     "DESCENDANT_CALL_UNRESOLVED",
                     "descendant call target is not proven",
@@ -268,6 +300,81 @@ public final class SemanticCallGraphBuilder {
                     Optional.of(relationship.expression()),
                     Optional.of(callSite(caller, relationship.callSite())),
                     List.of()));
+        }
+
+        /**
+         * 依證據將本應標記為未解析的呼叫，重新標記為一個不透明終端節點的邊
+         * <p>
+         * declarationTarget 存在時優先採用資料存取證據；否則採用生成成員證據
+         * <p>
+         * 任一步驟無法明確判定即回傳空值，維持既有警告行為（fail-closed）
+         */
+        private Optional<EvidenceMatch> evidenceFor(DirectCallRelationship relationship) {
+            if (relationship.declarationTarget().isPresent()) {
+                return dataAccessEvidenceFor(relationship.declarationTarget().orElseThrow());
+            }
+            if (relationship.invocation().isEmpty()) {
+                return Optional.empty();
+            }
+            return generatedMemberEvidenceFor(relationship.invocation().orElseThrow());
+        }
+
+        private Optional<EvidenceMatch> dataAccessEvidenceFor(MethodTarget declarationTarget) {
+            Optional<ClassMetadata> declaringType = index.classMetadata(declarationTarget);
+            Optional<MethodSignature> declaredMethod = index.method(declarationTarget);
+            if (declaringType.isEmpty() || declaredMethod.isEmpty()) {
+                return Optional.empty();
+            }
+            return dataAccessEvidence.evaluate(declaringType.orElseThrow(), declaredMethod.orElseThrow(), declarationTarget);
+        }
+
+        private Optional<EvidenceMatch> generatedMemberEvidenceFor(SyntaxInvocation invocation) {
+            String receiverDeclaration = invocation.receiverDeclaration();
+            if (!StringUtils.hasText(receiverDeclaration)) {
+                return Optional.empty();
+            }
+            return receiverMetadata(receiverDeclaration)
+                    .flatMap(metadata -> generatedMemberEvidence.evaluate(metadata, invocation));
+        }
+
+        /** builder chain 的 receiver（如 {@code X.XBuilder}）改以外層已標註型別重試一次 */
+        private Optional<ClassMetadata> receiverMetadata(String fullyQualifiedName) {
+            List<ClassMetadata> matches = index.classes(fullyQualifiedName);
+            if (matches.size() == 1) {
+                return Optional.of(matches.getFirst());
+            }
+            if (!matches.isEmpty() || !fullyQualifiedName.endsWith("Builder")) {
+                return Optional.empty();
+            }
+            int lastDot = fullyQualifiedName.lastIndexOf('.');
+            if (lastDot < 0) {
+                return Optional.empty();
+            }
+            List<ClassMetadata> outerMatches = index.classes(fullyQualifiedName.substring(0, lastDot));
+            return outerMatches.size() == 1 ? Optional.of(outerMatches.getFirst()) : Optional.empty();
+        }
+
+        private void addOpaqueEdge(MethodTarget caller, DirectCallRelationship relationship, EvidenceMatch match) {
+            CallNodeId nodeId = match.declarationTarget()
+                    .map(this::opaqueLocalNodeId)
+                    .orElseGet(() -> opaqueExternalNodeId(match.opaqueSymbol()));
+            addEdge(caller, nodeId, relationship, match.strategy(), match.confidence(), match.evidence());
+        }
+
+        private CallNodeId opaqueLocalNodeId(MethodTarget target) {
+            LocalNode existing = localNodes.get(target);
+            if (existing != null) { // cs-allow
+                return existing.nodeId();
+            }
+            CallNodeId nodeId = traversalState.localNodeId(target);
+            localNodes.put(target, LocalNode.opaque(nodeId, target));
+            return nodeId;
+        }
+
+        private CallNodeId opaqueExternalNodeId(String symbol) {
+            CallNodeId nodeId = externalNodes.computeIfAbsent(symbol, traversalState::externalNodeId);
+            externalNodeTraversalStates.put(symbol, NodeTraversalState.OPAQUE);
+            return nodeId;
         }
 
         void addAmbiguous(MethodTarget caller, DirectCallRelationship relationship) {
@@ -378,7 +485,7 @@ public final class SemanticCallGraphBuilder {
                         Optional.empty(),
                         external.getKey(),
                         NodeContentState.EXTERNAL,
-                        NodeTraversalState.EXTERNAL,
+                        externalNodeTraversalStates.getOrDefault(external.getKey(), NodeTraversalState.EXTERNAL),
                         Optional.empty(),
                         Optional.empty()));
             }
@@ -397,14 +504,23 @@ public final class SemanticCallGraphBuilder {
                 DirectCallRelationship relationship,
                 ResolutionStrategy strategy,
                 double confidence) {
+            addEdge(caller, callee, relationship, strategy, confidence, relationship.evidence());
+        }
+
+        private void addEdge(
+                MethodTarget caller,
+                CallNodeId callee,
+                DirectCallRelationship relationship,
+                ResolutionStrategy strategy,
+                double confidence,
+                List<String> evidence) {
             CallNodeId callerId = localNodes.get(caller).nodeId();
             CallSiteRange range = callSite(caller, relationship.callSite());
             EdgeKey key = new EdgeKey(callerId, callee, range);
             if (!edgeKeys.add(key)) {
                 return;
             }
-            edges.add(new GraphEdge(
-                    callerId, callee, range, relationship.expression(), strategy, confidence, relationship.evidence()));
+            edges.add(new GraphEdge(callerId, callee, range, relationship.expression(), strategy, confidence, evidence));
         }
 
         private CallSiteRange callSite(MethodTarget caller, SemanticRange range) {
@@ -444,6 +560,11 @@ public final class SemanticCallGraphBuilder {
             static LocalNode targetOnly(CallNodeId nodeId, MethodTarget target) {
                 return new LocalNode(nodeId, target, 2, NodeContentState.TARGET_ONLY,
                         NodeTraversalState.BUDGET_CUTOFF);
+            }
+
+            /** 證據判定為資料存取進入點的不透明終端節點；depth 固定為 2，不參與 depth-one 展開或 depth-two 水合 */
+            static LocalNode opaque(CallNodeId nodeId, MethodTarget target) {
+                return new LocalNode(nodeId, target, 2, NodeContentState.TARGET_ONLY, NodeTraversalState.OPAQUE);
             }
 
             GraphNode graphNode(RepositorySyntaxIndex index) {
