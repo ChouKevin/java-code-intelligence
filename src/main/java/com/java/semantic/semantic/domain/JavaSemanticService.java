@@ -21,6 +21,9 @@ public interface JavaSemanticService {
     /** 回傳方法內解析到的外呼,依 URI 與區間去重 */
     List<SemanticCall> outgoingCalls(RepositorySnapshot snapshot, SemanticMethod method);
 
+    /** Returns locally resolvable callers and sanitized conversion issues. */
+    SemanticIncomingCallResult incomingCalls(RepositorySnapshot snapshot, SemanticMethod callee);
+
     /** 回傳方法的所有實作,依 URI 與區間去重 */
     List<SemanticMethod> implementations(RepositorySnapshot snapshot, SemanticMethod method);
 }

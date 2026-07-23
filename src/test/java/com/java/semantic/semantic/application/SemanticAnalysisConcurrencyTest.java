@@ -1,6 +1,9 @@
 package com.java.semantic.semantic.application;
 
+import com.java.semantic.callgraph.application.IncomingSemanticCallGraphBuilder;
 import com.java.semantic.callgraph.application.SemanticCallGraphBuilder;
+import com.java.semantic.callgraph.domain.IncomingGraphFragment;
+import com.java.semantic.config.IncomingGraphProperties;
 import com.java.semantic.callgraph.domain.OutgoingGraphFragment;
 import com.java.semantic.config.OutgoingGraphProperties;
 import com.java.semantic.identity.MethodTarget;
@@ -57,6 +60,7 @@ class SemanticAnalysisConcurrencyTest {
         ExactMethodDeclarationResolver resolver = mock(ExactMethodDeclarationResolver.class);
         JavaSemanticService semantic = mock(JavaSemanticService.class);
         SemanticCallGraphBuilder builder = mock(SemanticCallGraphBuilder.class);
+        IncomingSemanticCallGraphBuilder incomingBuilder = mock(IncomingSemanticCallGraphBuilder.class);
         CountDownLatch callbacksReady = new CountDownLatch(2);
         CountDownLatch releaseCallbacks = new CountDownLatch(1);
 
@@ -79,7 +83,8 @@ class SemanticAnalysisConcurrencyTest {
         when(builder.build(firstSnapshot, firstSyntax, firstTarget, firstMethod, 2, 7)).thenReturn(firstResult);
         when(builder.build(secondSnapshot, secondSyntax, secondTarget, secondMethod, 2, 7)).thenReturn(secondResult);
         SemanticAnalysisApplicationService service = new SemanticAnalysisApplicationService(
-                repositories, syntax, resolver, semantic, builder, new OutgoingGraphProperties(7));
+                repositories, syntax, resolver, semantic, builder, incomingBuilder,
+                new OutgoingGraphProperties(7), new IncomingGraphProperties(11));
 
         ExecutorService executor = Executors.newFixedThreadPool(2);
         try {
@@ -87,6 +92,69 @@ class SemanticAnalysisConcurrencyTest {
                     () -> service.analyzeOutgoing(firstId, firstRevision, firstTarget, 2));
             Future<OutgoingGraphFragment> second = executor.submit(
                     () -> service.analyzeOutgoing(secondId, secondRevision, secondTarget, 2));
+            assertThat(callbacksReady.await(1, TimeUnit.SECONDS)).isTrue();
+            releaseCallbacks.countDown();
+
+            assertThat(first.get(1, TimeUnit.SECONDS)).isSameAs(firstResult);
+            assertThat(second.get(1, TimeUnit.SECONDS)).isSameAs(secondResult);
+        } finally {
+            executor.shutdownNow();
+        }
+    }
+
+    @Test
+    void should_keep_concurrent_incoming_analysis_callbacks_bound_to_their_own_snapshot() throws Exception {
+        RepositoryId firstId = RepositoryId.of("first");
+        RepositoryId secondId = RepositoryId.of("second");
+        RepositoryRevision firstRevision = RepositoryRevision.ofSha("1".repeat(40));
+        RepositoryRevision secondRevision = RepositoryRevision.ofSha("2".repeat(40));
+        MethodTarget firstTarget = target("First.java", "First");
+        MethodTarget secondTarget = target("Second.java", "Second");
+        RepositorySnapshot firstSnapshot = new RepositorySnapshot(firstId, Path.of("/first"), firstRevision);
+        RepositorySnapshot secondSnapshot = new RepositorySnapshot(secondId, Path.of("/second"), secondRevision);
+        RepositorySyntax firstSyntax = RepositorySyntax.empty();
+        RepositorySyntax secondSyntax = RepositorySyntax.empty();
+        SemanticMethod firstMethod = method(firstTarget, "/first");
+        SemanticMethod secondMethod = method(secondTarget, "/second");
+        IncomingGraphFragment firstResult = mock(IncomingGraphFragment.class);
+        IncomingGraphFragment secondResult = mock(IncomingGraphFragment.class);
+        RepositoryApplicationService repositories = mock(RepositoryApplicationService.class);
+        SyntaxExtractionService syntax = mock(SyntaxExtractionService.class);
+        ExactMethodDeclarationResolver resolver = mock(ExactMethodDeclarationResolver.class);
+        JavaSemanticService semantic = mock(JavaSemanticService.class);
+        SemanticCallGraphBuilder outgoingBuilder = mock(SemanticCallGraphBuilder.class);
+        IncomingSemanticCallGraphBuilder incomingBuilder = mock(IncomingSemanticCallGraphBuilder.class);
+        CountDownLatch callbacksReady = new CountDownLatch(2);
+        CountDownLatch releaseCallbacks = new CountDownLatch(1);
+
+        when(repositories.withSnapshot(any(), any(), any())).thenAnswer(invocation -> {
+            RepositoryId repositoryId = invocation.getArgument(0);
+            RepositorySnapshot snapshot = firstId.equals(repositoryId) ? firstSnapshot : secondSnapshot;
+            callbacksReady.countDown();
+            await(releaseCallbacks);
+            Function<RepositorySnapshot, IncomingGraphFragment> callback = invocation.getArgument(2);
+            return callback.apply(snapshot);
+        });
+        when(syntax.extract(firstSnapshot.root())).thenReturn(firstSyntax);
+        when(syntax.extract(secondSnapshot.root())).thenReturn(secondSyntax);
+        when(resolver.resolve(firstSyntax, firstTarget)).thenReturn(new SemanticDeclarationAnchor(
+                firstTarget, new SemanticPosition(0, 0)));
+        when(resolver.resolve(secondSyntax, secondTarget)).thenReturn(new SemanticDeclarationAnchor(
+                secondTarget, new SemanticPosition(0, 0)));
+        when(semantic.resolveExactMethod(eq(firstSnapshot), any())).thenReturn(firstMethod);
+        when(semantic.resolveExactMethod(eq(secondSnapshot), any())).thenReturn(secondMethod);
+        when(incomingBuilder.build(firstSnapshot, firstSyntax, firstTarget, firstMethod, 2, 11)).thenReturn(firstResult);
+        when(incomingBuilder.build(secondSnapshot, secondSyntax, secondTarget, secondMethod, 2, 11)).thenReturn(secondResult);
+        SemanticAnalysisApplicationService service = new SemanticAnalysisApplicationService(
+                repositories, syntax, resolver, semantic, outgoingBuilder, incomingBuilder,
+                new OutgoingGraphProperties(7), new IncomingGraphProperties(11));
+
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        try {
+            Future<IncomingGraphFragment> first = executor.submit(
+                    () -> service.analyzeIncoming(firstId, firstRevision, firstTarget, 2));
+            Future<IncomingGraphFragment> second = executor.submit(
+                    () -> service.analyzeIncoming(secondId, secondRevision, secondTarget, 2));
             assertThat(callbacksReady.await(1, TimeUnit.SECONDS)).isTrue();
             releaseCallbacks.countDown();
 

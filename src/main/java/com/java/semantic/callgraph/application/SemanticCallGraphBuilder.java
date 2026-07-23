@@ -14,30 +14,15 @@ import com.java.semantic.callgraph.domain.NodeTraversalState;
 import com.java.semantic.callgraph.domain.OutgoingGraphFragment;
 import com.java.semantic.callgraph.domain.ResolutionStrategy;
 import com.java.semantic.identity.MethodTarget;
-import com.java.semantic.identity.MethodTargetDiagnosticId;
 import com.java.semantic.repository.domain.RepositorySnapshot;
 import com.java.semantic.semantic.domain.JavaSemanticService;
-import com.java.semantic.semantic.domain.SemanticCall;
-import com.java.semantic.semantic.domain.SemanticCallResolution;
-import com.java.semantic.semantic.domain.SemanticCallResolutionStatus;
-import com.java.semantic.semantic.domain.SemanticCallSite;
 import com.java.semantic.semantic.domain.SemanticMethod;
 import com.java.semantic.semantic.domain.SemanticRange;
-import com.java.semantic.semantic.domain.SemanticPosition;
-import com.java.semantic.syntax.domain.ClassMetadata;
 import com.java.semantic.syntax.domain.ClassMetadata.MethodSignature;
-import com.java.semantic.syntax.domain.ClassMetadata.TypeKind;
 import com.java.semantic.syntax.domain.RepositorySyntax;
-import com.java.semantic.syntax.domain.SyntaxInvocation;
-import com.java.semantic.syntax.domain.SyntaxPosition;
 import com.java.semantic.syntax.domain.SyntaxRange;
 import org.springframework.util.Assert;
-import org.springframework.util.StringUtils;
 
-import lombok.extern.slf4j.Slf4j;
-
-import java.net.URI;
-import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
@@ -47,10 +32,8 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
-import java.util.stream.Collectors;
 
 /** Builds one deterministic, response-local outgoing fragment from syntax-proven method targets. */
-@Slf4j
 public final class SemanticCallGraphBuilder {
 
     private static final Comparator<MethodTarget> TARGET_ORDER = Comparator
@@ -60,20 +43,16 @@ public final class SemanticCallGraphBuilder {
             .thenComparing(MethodTarget::methodName)
             .thenComparing(MethodTarget::parameterTypes, SemanticCallGraphBuilder::compareParameters);
 
-    private static final Comparator<CallObservation> OBSERVATION_ORDER = Comparator
-            .comparing(CallObservation::callSite, SemanticCallGraphBuilder::compareRanges)
-            .thenComparing(CallObservation::expression)
-            .thenComparing(CallObservation::strategy);
-
-    private final JavaSemanticService semanticService;
-    private final SpringImplementationSelector implementationSelector;
+    private final DirectCallRelationshipResolver relationshipResolver;
 
     public SemanticCallGraphBuilder(
             JavaSemanticService semanticService,
             SpringImplementationSelector implementationSelector) {
-        this.semanticService = Objects.requireNonNull(semanticService, "semanticService is required");
-        this.implementationSelector = Objects.requireNonNull(
-                implementationSelector, "implementationSelector is required");
+        this(new DirectCallRelationshipResolver(semanticService, implementationSelector));
+    }
+
+    public SemanticCallGraphBuilder(DirectCallRelationshipResolver relationshipResolver) {
+        this.relationshipResolver = Objects.requireNonNull(relationshipResolver, "relationshipResolver is required");
     }
 
     public OutgoingGraphFragment build(
@@ -95,9 +74,14 @@ public final class SemanticCallGraphBuilder {
         BuildState state = new BuildState(index, snapshot, requestedDepth, depthTwoNodeBudget);
         state.addRoot(rootTarget);
 
-        List<CallObservation> rootCalls = observations(snapshot, index, root);
-        for (CallObservation rootCall : rootCalls) {
-            resolveAndAddDepthOne(snapshot, index, state, rootTarget, root, rootCall);
+        List<DirectCallRelationship> rootCalls;
+        try {
+            rootCalls = relationshipResolver.resolveAll(snapshot, index, rootTarget, root);
+        } catch (DirectCallRelationshipResolver.ResolutionFailure exception) {
+            throw exception.original();
+        }
+        for (DirectCallRelationship rootCall : rootCalls) {
+            resolveAndAddDepthOne(state, rootTarget, rootCall);
         }
         if (requestedDepth == 2) {
             expandDepthOne(snapshot, index, state);
@@ -107,27 +91,23 @@ public final class SemanticCallGraphBuilder {
     }
 
     private void resolveAndAddDepthOne(
-            RepositorySnapshot snapshot,
-            RepositorySyntaxIndex index,
             BuildState state,
             MethodTarget callerTarget,
-            SemanticMethod caller,
-            CallObservation observation) {
-        List<ResolvedDestination> destinations = destinations(
-                snapshot, index, state, callerTarget, caller, observation);
-        for (ResolvedDestination destination : destinations) {
-            if (destination.externalSymbol().isPresent()) {
-                state.addExternalEdge(callerTarget, destination.externalSymbol().orElseThrow(), observation);
-            } else {
-                MethodTarget target = destination.target().orElseThrow();
-                state.addDepthOneEdge(
-                        callerTarget,
-                        target,
-                        observation,
-                        destination.strategy(),
-                        destination.confidence(),
-                        destination.semanticMethod().orElseThrow());
-            }
+            DirectCallRelationship relationship) {
+        if (DirectCallRelationship.Status.LOCAL.equals(relationship.status())) {
+            state.addDepthOneEdge(
+                    callerTarget,
+                    relationship.target().orElseThrow(),
+                    relationship,
+                    relationship.strategy(),
+                    relationship.confidence(),
+                    relationship.semanticMethod().orElseThrow());
+        } else if (DirectCallRelationship.Status.EXTERNAL.equals(relationship.status())) {
+            state.addExternalEdge(callerTarget, relationship.externalSymbol().orElseThrow(), relationship);
+        } else if (DirectCallRelationship.Status.AMBIGUOUS.equals(relationship.status())) {
+            state.addAmbiguous(callerTarget, relationship);
+        } else {
+            state.addUnresolved(callerTarget, relationship);
         }
     }
 
@@ -138,290 +118,45 @@ public final class SemanticCallGraphBuilder {
         List<MethodTarget> depthOneTargets = state.depthOneTargets();
         for (MethodTarget depthOneTarget : depthOneTargets) {
             SemanticMethod depthOneMethod = state.semanticMethod(depthOneTarget).orElseThrow();
-            List<CallObservation> calls;
+            List<DirectCallRelationship> calls;
             try {
-                calls = observations(snapshot, index, depthOneMethod);
+                calls = relationshipResolver.resolveAll(snapshot, index, depthOneTarget, depthOneMethod);
+            } catch (DirectCallRelationshipResolver.ResolutionFailure exception) {
+                for (DirectCallRelationship relationship : exception.relationships()) {
+                    resolveAndAddDepthTwo(state, depthOneTarget, relationship);
+                }
+                for (RuntimeException original : exception.originals()) {
+                    state.addChildFailure(depthOneTarget, original);
+                }
+                continue;
             } catch (RuntimeException exception) {
                 state.addChildFailure(depthOneTarget, exception);
                 continue;
             }
-            for (CallObservation observation : calls) {
-                List<ResolvedDestination> destinations;
-                try {
-                    destinations = destinations(
-                            snapshot, index, state, depthOneTarget, depthOneMethod, observation);
-                } catch (RuntimeException exception) {
-                    state.addUnresolved(depthOneTarget, observation);
-                    state.addChildFailure(depthOneTarget, exception);
-                    continue;
-                }
-                for (ResolvedDestination destination : destinations) {
-                    if (destination.externalSymbol().isPresent()) {
-                        state.addExternalEdge(depthOneTarget, destination.externalSymbol().orElseThrow(), observation);
-                    } else {
-                        state.addDepthTwoEdge(
-                                depthOneTarget,
-                                destination.target().orElseThrow(),
-                                observation,
-                                destination.strategy(),
-                                destination.confidence());
-                    }
-                }
+            for (DirectCallRelationship relationship : calls) {
+                resolveAndAddDepthTwo(state, depthOneTarget, relationship);
             }
         }
     }
 
-    private List<ResolvedDestination> destinations(
-            RepositorySnapshot snapshot,
-            RepositorySyntaxIndex index,
+    private void resolveAndAddDepthTwo(
             BuildState state,
             MethodTarget callerTarget,
-            SemanticMethod caller,
-            CallObservation observation) {
-        if (SemanticCallResolutionStatus.UNRESOLVED.equals(observation.status())) {
-            state.addUnresolved(callerTarget, observation);
-            return List.of();
+            DirectCallRelationship relationship) {
+        if (DirectCallRelationship.Status.LOCAL.equals(relationship.status())) {
+            state.addDepthTwoEdge(
+                    callerTarget,
+                    relationship.target().orElseThrow(),
+                    relationship,
+                    relationship.strategy(),
+                    relationship.confidence());
+        } else if (DirectCallRelationship.Status.EXTERNAL.equals(relationship.status())) {
+            state.addExternalEdge(callerTarget, relationship.externalSymbol().orElseThrow(), relationship);
+        } else if (DirectCallRelationship.Status.AMBIGUOUS.equals(relationship.status())) {
+            state.addAmbiguous(callerTarget, relationship);
+        } else {
+            state.addUnresolved(callerTarget, relationship);
         }
-        if (SemanticCallResolutionStatus.AMBIGUOUS.equals(observation.status())) {
-            state.addAmbiguous(callerTarget, observation);
-            return List.of();
-        }
-        SemanticCall call = observation.call().orElseThrow();
-        if (call.external()) {
-            return List.of(ResolvedDestination.external(externalSymbol(call, observation, callerTarget)));
-        }
-        if (call.target().isEmpty()) {
-            log.debug("phase=callgraph-resolution outcome=unresolved reason=semantic-target-missing callerTargetId={}",
-                    MethodTargetDiagnosticId.from(callerTarget));
-            state.addUnresolved(callerTarget, observation);
-            return List.of();
-        }
-        SemanticMethod semanticTarget = call.target().orElseThrow();
-        Optional<MethodTarget> target = targetFor(snapshot, index, semanticTarget);
-        if (target.isEmpty()) {
-            log.debug("phase=callgraph-resolution outcome=unresolved reason=syntax-index-miss callerTargetId={}",
-                    MethodTargetDiagnosticId.from(callerTarget));
-            state.addUnresolved(callerTarget, observation);
-            return List.of();
-        }
-        if (!interfaceDeclaration(index, target.orElseThrow())) {
-            return List.of(ResolvedDestination.local(
-                    target.orElseThrow(), observation.strategy(), confidence(observation.strategy()), semanticTarget));
-        }
-        return selectImplementation(snapshot, index, state, callerTarget, observation, target.orElseThrow(), semanticTarget);
-    }
-
-    private List<ResolvedDestination> selectImplementation(
-            RepositorySnapshot snapshot,
-            RepositorySyntaxIndex index,
-            BuildState state,
-            MethodTarget callerTarget,
-            CallObservation observation,
-            MethodTarget declarationTarget,
-            SemanticMethod declarationMethod) {
-        List<ImplementationCandidate> candidates = new ArrayList<>();
-        if (index.method(declarationTarget)
-                .map(MethodSignature::executableDeclaration)
-                .orElse(false)) {
-            candidates.add(candidate(index, declarationMethod, declarationTarget));
-        }
-        try {
-            for (SemanticMethod implementation : semanticService.implementations(snapshot, declarationMethod)) {
-                targetFor(snapshot, index, implementation)
-                        .map(target -> candidate(index, implementation, target))
-                        .ifPresent(candidates::add);
-            }
-        } catch (RuntimeException exception) {
-            if (state.isRoot(callerTarget)) {
-                throw exception;
-            }
-            state.addUnresolved(callerTarget, observation);
-            state.addChildFailure(callerTarget, exception);
-            return List.of();
-        }
-        List<ImplementationCandidate> distinct = candidates.stream()
-                .collect(Collectors.toMap(
-                        ImplementationCandidate::target,
-                        candidate -> candidate,
-                        (left, ignored) -> left,
-                        LinkedHashMap::new))
-                .values().stream()
-                .sorted(Comparator.comparing(ImplementationCandidate::target, TARGET_ORDER))
-                .toList();
-        if (distinct.isEmpty()) {
-            state.addUnresolved(callerTarget, observation);
-            return List.of();
-        }
-        ImplementationSelection selection = implementationSelector.select(observation.invocation(), distinct);
-        if (selection instanceof ImplementationSelection.Ambiguous ambiguous) {
-            state.addAmbiguous(callerTarget, observation.withCandidates(ambiguous.candidates()));
-            return List.of();
-        }
-        ImplementationSelection.Selected selected = (ImplementationSelection.Selected) selection;
-        return List.of(ResolvedDestination.local(
-                selected.candidate().target(), selected.strategy(), selected.confidence(), selected.candidate().method()));
-    }
-
-    private List<CallObservation> observations(
-            RepositorySnapshot snapshot, RepositorySyntaxIndex index, SemanticMethod caller) {
-        List<CallObservation> observations = new ArrayList<>();
-        Set<SemanticRange> covered = new LinkedHashSet<>();
-        for (SemanticCall call : semanticService.outgoingCalls(snapshot, caller)) {
-            for (SemanticRange callSite : call.callSites()) {
-                covered.add(callSite);
-                SyntaxInvocation invocation = invocation(snapshot, index, caller, callSite);
-                observations.add(CallObservation.resolved(
-                        call,
-                        callSite,
-                        invocation.expression(),
-                        ResolutionStrategy.JDT_CALL_HIERARCHY,
-                        invocation));
-            }
-        }
-        for (SyntaxInvocation invocation : invocations(snapshot, index, caller)) {
-            SemanticRange range = semanticRange(invocation.range());
-            if (covered.contains(range)) {
-                continue;
-            }
-            SemanticCallResolution resolution = semanticService.resolveCallResolutionAt(
-                    snapshot,
-                    caller,
-                    new SemanticCallSite(range, toSemanticPosition(invocation.resolutionAnchor())));
-            if (SemanticCallResolutionStatus.RESOLVED.equals(resolution.status())) {
-                observations.add(CallObservation.resolved(
-                        resolution.call().orElseThrow(),
-                        range,
-                        invocation.expression(),
-                        ResolutionStrategy.JDT_DEFINITION_FALLBACK,
-                        invocation));
-            } else if (SemanticCallResolutionStatus.AMBIGUOUS.equals(resolution.status())) {
-                List<MethodTarget> candidates = resolution.candidates().stream()
-                        .map(candidate -> targetFor(snapshot, index, candidate))
-                        .flatMap(Optional::stream)
-                        .sorted(TARGET_ORDER)
-                        .toList();
-                if (candidates.size() == resolution.candidates().size()) {
-                    observations.add(CallObservation.ambiguous(
-                            range, invocation.expression(), invocation, candidates));
-                } else {
-                    observations.add(CallObservation.unresolved(range, invocation.expression(), invocation));
-                }
-            } else {
-                observations.add(CallObservation.unresolved(range, invocation.expression(), invocation));
-            }
-        }
-        return observations.stream().sorted(OBSERVATION_ORDER).toList();
-    }
-
-    private Optional<MethodTarget> targetFor(
-            RepositorySnapshot snapshot, RepositorySyntaxIndex index, SemanticMethod method) {
-        Optional<String> sourceFile = sourceFile(snapshot, method.location().uri());
-        return sourceFile.flatMap(file -> index.target(
-                        file,
-                        method.packageName(),
-                        method.className(),
-                        method.methodName(),
-                        method.parameterTypes())
-                .or(() -> index.method(file, syntaxRange(method.location().range()))
-                        .flatMap(signature -> signature.analysisTarget().target())));
-    }
-
-    private Optional<String> sourceFile(RepositorySnapshot snapshot, String uri) {
-        try {
-            Path source = Path.of(URI.create(uri)).normalize();
-            Path root = snapshot.root().toAbsolutePath().normalize();
-            if (!source.startsWith(root)) {
-                return Optional.empty();
-            }
-            return Optional.of(root.relativize(source).toString().replace('\\', '/'));
-        } catch (RuntimeException exception) {
-            return Optional.empty();
-        }
-    }
-
-    private boolean interfaceDeclaration(RepositorySyntaxIndex index, MethodTarget target) {
-        Optional<ClassMetadata> metadata = index.classMetadata(target);
-        boolean interfaceDeclaration = metadata
-                .map(ClassMetadata::kind)
-                .filter(TypeKind.INTERFACE::equals)
-                .isPresent();
-        log.debug(
-                "phase=callgraph-resolution outcome=interface-classification targetId={} metadataPresent={} interface={}",
-                MethodTargetDiagnosticId.from(target), metadata.isPresent(), interfaceDeclaration);
-        return interfaceDeclaration;
-    }
-
-    private ImplementationCandidate candidate(
-            RepositorySyntaxIndex index, SemanticMethod method, MethodTarget target) {
-        Optional<ClassMetadata> metadata = index.classMetadata(target);
-        return new ImplementationCandidate(
-                method,
-                target,
-                metadata.map(ClassMetadata::primary).orElse(false),
-                metadata.map(ClassMetadata::beanQualifiers).orElse(List.of()),
-                metadata.map(ClassMetadata::profiles).orElse(List.of()));
-    }
-
-    private List<SyntaxInvocation> invocations(
-            RepositorySnapshot snapshot, RepositorySyntaxIndex index, SemanticMethod caller) {
-        return targetFor(snapshot, index, caller)
-                .flatMap(index::method)
-                .map(MethodSignature::invocations)
-                .orElse(List.of());
-    }
-
-    private SyntaxInvocation invocation(
-            RepositorySnapshot snapshot, RepositorySyntaxIndex index, SemanticMethod caller, SemanticRange callSite) {
-        return invocations(snapshot, index, caller).stream()
-                .filter(candidate -> semanticRange(candidate.range()).equals(callSite))
-                .findFirst()
-                .orElseGet(() -> new SyntaxInvocation(
-                        SyntaxInvocation.InvocationKind.METHOD,
-                        syntaxRange(callSite),
-                        "semantic call",
-                        "",
-                        "",
-                        "",
-                        Optional.empty(),
-                        syntaxRange(callSite).start()));
-    }
-
-    private String externalSymbol(
-            SemanticCall call,
-            CallObservation observation,
-            MethodTarget callerTarget) {
-        return call.target().map(target -> target.packageName() + "." + target.className()
-                + "#" + target.methodName() + "(" + String.join(",", target.parameterTypes()) + ")")
-                .filter(StringUtils::hasText)
-                .or(() -> Optional.of(call.rawSignature()).filter(this::safeExternalSymbol))
-                .orElse("external semantic symbol at " + callerTarget.sourceFile() + ":"
-                        + observation.callSite().start().line() + ":"
-                        + observation.callSite().start().character());
-    }
-
-    private boolean safeExternalSymbol(String value) {
-        return StringUtils.hasText(value) && value.length() <= 256 && value.chars()
-                .allMatch(character -> character >= 32 && character < 127);
-    }
-
-    private static SemanticRange semanticRange(SyntaxRange range) {
-        return new SemanticRange(
-                toSemanticPosition(range.start()),
-                toSemanticPosition(range.end()));
-    }
-
-    private static SemanticPosition toSemanticPosition(SyntaxPosition position) {
-        return new SemanticPosition(position.line(), position.character());
-    }
-
-    private static SyntaxRange syntaxRange(SemanticRange range) {
-        return new SyntaxRange(
-                new SyntaxPosition(range.start().line(), range.start().character()),
-                new SyntaxPosition(range.end().line(), range.end().character()));
-    }
-
-    private static double confidence(ResolutionStrategy strategy) {
-        return ResolutionStrategy.JDT_CALL_HIERARCHY.equals(strategy) ? 1.0d : 0.9d;
     }
 
     private static int compareParameters(List<String> left, List<String> right) {
@@ -433,88 +168,6 @@ public final class SemanticCallGraphBuilder {
             }
         }
         return Integer.compare(left.size(), right.size());
-    }
-
-    private static int compareRanges(SemanticRange left, SemanticRange right) {
-        int line = Integer.compare(left.start().line(), right.start().line());
-        if (line != 0) {
-            return line;
-        }
-        int character = Integer.compare(left.start().character(), right.start().character());
-        if (character != 0) {
-            return character;
-        }
-        line = Integer.compare(left.end().line(), right.end().line());
-        if (line != 0) {
-            return line;
-        }
-        return Integer.compare(left.end().character(), right.end().character());
-    }
-
-    private record CallObservation(
-            SemanticCallResolutionStatus status,
-            Optional<SemanticCall> call,
-            SemanticRange callSite,
-            String expression,
-            ResolutionStrategy strategy,
-            SyntaxInvocation invocation,
-            List<MethodTarget> candidates) {
-
-        private CallObservation {
-            status = Objects.requireNonNull(status, "status is required");
-            call = Objects.requireNonNull(call, "call is required");
-            callSite = Objects.requireNonNull(callSite, "callSite is required");
-            Assert.hasText(expression, "expression is required");
-            strategy = Objects.requireNonNull(strategy, "strategy is required");
-            invocation = Objects.requireNonNull(invocation, "invocation is required");
-            candidates = List.copyOf(Objects.requireNonNull(candidates, "candidates are required"));
-        }
-
-        static CallObservation resolved(
-                SemanticCall call, SemanticRange callSite, String expression,
-                ResolutionStrategy strategy, SyntaxInvocation invocation) {
-            return new CallObservation(
-                    SemanticCallResolutionStatus.RESOLVED,
-                    Optional.of(call), callSite, expression, strategy, invocation, List.of());
-        }
-
-        static CallObservation unresolved(SemanticRange callSite, String expression, SyntaxInvocation invocation) {
-            return new CallObservation(
-                    SemanticCallResolutionStatus.UNRESOLVED,
-                    Optional.empty(), callSite, expression,
-                    ResolutionStrategy.JDT_DEFINITION_FALLBACK, invocation, List.of());
-        }
-
-        static CallObservation ambiguous(
-                SemanticRange callSite, String expression, SyntaxInvocation invocation, List<MethodTarget> candidates) {
-            return new CallObservation(
-                    SemanticCallResolutionStatus.AMBIGUOUS,
-                    Optional.empty(), callSite, expression,
-                    ResolutionStrategy.JDT_DEFINITION_FALLBACK, invocation, candidates);
-        }
-
-        CallObservation withCandidates(List<MethodTarget> replacement) {
-            return new CallObservation(status, call, callSite, expression, strategy, invocation, replacement);
-        }
-    }
-
-    private record ResolvedDestination(
-            Optional<MethodTarget> target,
-            Optional<String> externalSymbol,
-            ResolutionStrategy strategy,
-            double confidence,
-            Optional<SemanticMethod> semanticMethod) {
-
-        static ResolvedDestination local(
-                MethodTarget target, ResolutionStrategy strategy, double confidence, SemanticMethod semanticMethod) {
-            return new ResolvedDestination(
-                    Optional.of(target), Optional.empty(), strategy, confidence, Optional.of(semanticMethod));
-        }
-
-        static ResolvedDestination external(String externalSymbol) {
-            return new ResolvedDestination(
-                    Optional.empty(), Optional.of(externalSymbol), ResolutionStrategy.EXTERNAL_LIBRARY, 1.0d, Optional.empty());
-        }
     }
 
     private static final class BuildState {
@@ -533,7 +186,6 @@ public final class SemanticCallGraphBuilder {
         private final RepositorySnapshot snapshot;
         private final int requestedDepth;
         private final int budget;
-        private MethodTarget rootTarget;
         private final CallTraversalState traversalState = new CallTraversalState();
         private final Map<MethodTarget, LocalNode> localNodes = new LinkedHashMap<>();
         private final Map<MethodTarget, SemanticMethod> semanticMethods = new LinkedHashMap<>();
@@ -552,34 +204,29 @@ public final class SemanticCallGraphBuilder {
         }
 
         void addRoot(MethodTarget target) {
-            rootTarget = target;
             localNodes.put(target, LocalNode.full(traversalState.localNodeId(target), target, 0, requestedDepth));
-        }
-
-        boolean isRoot(MethodTarget target) {
-            return target.equals(rootTarget);
         }
 
         void addDepthOneEdge(
                 MethodTarget caller,
                 MethodTarget target,
-                CallObservation observation,
+                DirectCallRelationship relationship,
                 ResolutionStrategy strategy,
                 double confidence,
                 SemanticMethod semanticMethod) {
             LocalNode callee = localNodes.computeIfAbsent(target,
                     ignored -> LocalNode.full(traversalState.localNodeId(target), target, 1, requestedDepth));
             semanticMethods.putIfAbsent(target, semanticMethod);
-            addEdge(caller, callee.nodeId(), observation, strategy, confidence);
+            addEdge(caller, callee.nodeId(), relationship, strategy, confidence);
         }
 
         void addDepthTwoEdge(
                 MethodTarget caller,
                 MethodTarget target,
-                CallObservation observation,
+                DirectCallRelationship relationship,
                 ResolutionStrategy strategy,
                 double confidence) {
-            pendingDepthTwo.add(new PendingDepthTwoEdge(caller, target, observation, strategy, confidence));
+            pendingDepthTwo.add(new PendingDepthTwoEdge(caller, target, relationship, strategy, confidence));
         }
 
         void hydrateDepthTwo() {
@@ -604,33 +251,33 @@ public final class SemanticCallGraphBuilder {
             }
             for (PendingDepthTwoEdge pending : pendingDepthTwo) {
                 LocalNode target = localNodes.get(pending.target());
-                addEdge(pending.caller(), target.nodeId(), pending.observation(), pending.strategy(), pending.confidence());
+                addEdge(pending.caller(), target.nodeId(), pending.relationship(), pending.strategy(), pending.confidence());
             }
         }
 
-        void addExternalEdge(MethodTarget caller, String symbol, CallObservation observation) {
+        void addExternalEdge(MethodTarget caller, String symbol, DirectCallRelationship relationship) {
             CallNodeId nodeId = externalNodes.computeIfAbsent(symbol, traversalState::externalNodeId);
-            addEdge(caller, nodeId, observation, ResolutionStrategy.EXTERNAL_LIBRARY, 1.0d);
+            addEdge(caller, nodeId, relationship, ResolutionStrategy.EXTERNAL_LIBRARY, 1.0d);
         }
 
-        void addUnresolved(MethodTarget caller, CallObservation observation) {
+        void addUnresolved(MethodTarget caller, DirectCallRelationship relationship) {
             warnings.add(new GraphWarning(
                     "DESCENDANT_CALL_UNRESOLVED",
                     "descendant call target is not proven",
                     localNodes.get(caller).nodeId(),
-                    Optional.of(observation.expression()),
-                    Optional.of(callSite(caller, observation.callSite())),
+                    Optional.of(relationship.expression()),
+                    Optional.of(callSite(caller, relationship.callSite())),
                     List.of()));
         }
 
-        void addAmbiguous(MethodTarget caller, CallObservation observation) {
+        void addAmbiguous(MethodTarget caller, DirectCallRelationship relationship) {
             warnings.add(new GraphWarning(
                     "DESCENDANT_CALL_AMBIGUOUS",
                     "descendant call has multiple exact targets",
                     localNodes.get(caller).nodeId(),
-                    Optional.of(observation.expression()),
-                    Optional.of(callSite(caller, observation.callSite())),
-                    observation.candidates().stream().sorted(TARGET_ORDER).toList()));
+                    Optional.of(relationship.expression()),
+                    Optional.of(callSite(caller, relationship.callSite())),
+                    relationship.candidates().stream().sorted(TARGET_ORDER).toList()));
         }
 
         void addChildFailure(MethodTarget caller, RuntimeException exception) {
@@ -747,20 +394,17 @@ public final class SemanticCallGraphBuilder {
         private void addEdge(
                 MethodTarget caller,
                 CallNodeId callee,
-                CallObservation observation,
+                DirectCallRelationship relationship,
                 ResolutionStrategy strategy,
                 double confidence) {
             CallNodeId callerId = localNodes.get(caller).nodeId();
-            CallSiteRange range = callSite(caller, observation.callSite());
+            CallSiteRange range = callSite(caller, relationship.callSite());
             EdgeKey key = new EdgeKey(callerId, callee, range);
             if (!edgeKeys.add(key)) {
                 return;
             }
-            List<String> evidence = observation.call().map(SemanticCall::rawSignature)
-                    .map(List::of)
-                    .orElse(List.of());
             edges.add(new GraphEdge(
-                    callerId, callee, range, observation.expression(), strategy, confidence, evidence));
+                    callerId, callee, range, relationship.expression(), strategy, confidence, relationship.evidence()));
         }
 
         private CallSiteRange callSite(MethodTarget caller, SemanticRange range) {
@@ -778,7 +422,7 @@ public final class SemanticCallGraphBuilder {
         private record PendingDepthTwoEdge(
                 MethodTarget caller,
                 MethodTarget target,
-                CallObservation observation,
+                DirectCallRelationship relationship,
                 ResolutionStrategy strategy,
                 double confidence) {
         }

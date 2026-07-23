@@ -14,6 +14,7 @@ import com.java.semantic.semantic.domain.SemanticCallResolution;
 import com.java.semantic.semantic.domain.SemanticCallSite;
 import com.java.semantic.semantic.domain.SemanticCallStatus;
 import com.java.semantic.semantic.domain.SemanticDeclarationAnchor;
+import com.java.semantic.semantic.domain.SemanticIncomingCallResult;
 import com.java.semantic.semantic.domain.SemanticLocation;
 import com.java.semantic.semantic.domain.SemanticMethod;
 import com.java.semantic.semantic.domain.SemanticPosition;
@@ -245,6 +246,97 @@ class SemanticCallGraphBuilderTest {
                 .build(SNAPSHOT, syntax(rootTarget, interfaceType(interfaceTarget)), rootTarget, root, 1, 40))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessage("planned implementation query failure");
+    }
+
+    @Test
+    void should_rethrow_root_point_resolution_failures() {
+        MethodTarget rootTarget = target("Root", "run");
+        SemanticMethod root = method(rootTarget, 0);
+        SyntaxInvocation invocation = invocation("worker.failed()", 2);
+        SemanticCallSite callSite = new SemanticCallSite(
+                semanticRange(invocation.range()), new SemanticPosition(2, 0));
+        FakeSemanticService semantic = new FakeSemanticService().failResolutionAt(callSite);
+
+        assertThatThrownBy(() -> builder(semantic)
+                .build(SNAPSHOT,
+                        syntax(List.of(type(rootTarget, List.of(invocation)))),
+                        rootTarget,
+                        root,
+                        1,
+                        40))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("planned point resolution failure");
+    }
+
+    @Test
+    void should_preserve_successful_child_relationships_when_another_interface_resolution_fails() {
+        MethodTarget rootTarget = target("Root", "run");
+        MethodTarget childTarget = target("Child", "work");
+        MethodTarget interfaceTarget = target("Port", "handle");
+        MethodTarget successfulTarget = target("Successful", "save");
+        SemanticMethod root = method(rootTarget, 0);
+        SemanticMethod child = method(childTarget, 10);
+        SemanticMethod declaration = method(interfaceTarget, 20);
+        SemanticMethod successful = method(successfulTarget, 30);
+        FakeSemanticService semantic = new FakeSemanticService()
+                .outgoing(root, call(child, 2))
+                .outgoing(child, call(declaration, 12), call(successful, 14))
+                .failImplementations(declaration);
+
+        com.java.semantic.callgraph.domain.OutgoingGraphFragment fragment = builder(semantic)
+                .build(SNAPSHOT, syntax(List.of(
+                                type(rootTarget),
+                                type(childTarget),
+                                interfaceType(interfaceTarget),
+                                type(successfulTarget))),
+                        rootTarget, root, 2, 40);
+
+        assertThat(fragment.edges()).extracting(edge -> edge.callSite().startLine())
+                .containsExactly(2, 14);
+        assertThat(fragment.nodes()).filteredOn(node -> node.target().filter(successfulTarget::equals).isPresent())
+                .singleElement();
+        assertThat(fragment.warnings()).extracting(warning -> warning.code())
+                .containsExactly("DESCENDANT_CALL_UNRESOLVED");
+        assertThat(fragment.errors()).extracting(error -> error.code())
+                .containsExactly("CHILD_SEMANTIC_QUERY_FAILED");
+    }
+
+    @Test
+    void should_retain_later_child_fallback_edges_when_an_earlier_point_resolution_fails() {
+        MethodTarget rootTarget = target("Root", "run");
+        MethodTarget childTarget = target("Child", "work");
+        MethodTarget grandchildTarget = target("Grandchild", "save");
+        SemanticMethod root = method(rootTarget, 0);
+        SemanticMethod child = method(childTarget, 10);
+        SemanticMethod grandchild = method(grandchildTarget, 20);
+        SyntaxInvocation failedInvocation = invocation("worker.failed()", 12);
+        SyntaxInvocation successfulInvocation = invocation("worker.save()", 14);
+        SemanticCallSite failedCallSite = new SemanticCallSite(
+                semanticRange(failedInvocation.range()), new SemanticPosition(12, 0));
+        FakeSemanticService semantic = new FakeSemanticService()
+                .outgoing(root, call(child, 2))
+                .resolution(child, SemanticCallResolution.resolved(call(grandchild, 14)))
+                .failResolutionAt(failedCallSite);
+
+        com.java.semantic.callgraph.domain.OutgoingGraphFragment fragment = builder(semantic)
+                .build(SNAPSHOT,
+                        syntax(List.of(
+                                type(rootTarget),
+                                type(childTarget, List.of(failedInvocation, successfulInvocation)),
+                                type(grandchildTarget))),
+                        rootTarget,
+                        root,
+                        2,
+                        40);
+
+        assertThat(fragment.edges()).extracting(edge -> edge.callSite().startLine())
+                .containsExactly(2, 14);
+        assertThat(fragment.nodes()).filteredOn(node -> node.target().filter(grandchildTarget::equals).isPresent())
+                .singleElement();
+        assertThat(fragment.warnings()).extracting(warning -> warning.code())
+                .containsExactly("DESCENDANT_CALL_UNRESOLVED");
+        assertThat(fragment.errors()).extracting(error -> error.code())
+                .containsExactly("CHILD_SEMANTIC_QUERY_FAILED");
     }
 
     @Test
@@ -592,6 +684,12 @@ class SemanticCallGraphBuilderTest {
                 new SyntaxPosition(startLine, startCharacter), new SyntaxPosition(endLine, endCharacter));
     }
 
+    private static SemanticRange semanticRange(SyntaxRange range) {
+        return new SemanticRange(
+                new SemanticPosition(range.start().line(), range.start().character()),
+                new SemanticPosition(range.end().line(), range.end().character()));
+    }
+
     private static final class FakeSemanticService implements JavaSemanticService {
 
         private final Map<SemanticMethod, List<SemanticCall>> outgoing = new HashMap<>();
@@ -599,6 +697,7 @@ class SemanticCallGraphBuilderTest {
         private final List<SemanticMethod> failingImplementations = new java.util.ArrayList<>();
         private final Map<SemanticMethod, List<SemanticMethod>> implementations = new HashMap<>();
         private final Map<SemanticMethod, SemanticCallResolution> resolutions = new HashMap<>();
+        private final Map<SemanticCallSite, RuntimeException> failingResolutions = new HashMap<>();
 
         FakeSemanticService outgoing(SemanticMethod caller, SemanticCall... calls) {
             outgoing.put(caller, List.of(calls));
@@ -625,6 +724,11 @@ class SemanticCallGraphBuilderTest {
             return this;
         }
 
+        FakeSemanticService failResolutionAt(SemanticCallSite callSite) {
+            failingResolutions.put(callSite, new IllegalStateException("planned point resolution failure"));
+            return this;
+        }
+
         @Override
         public SemanticMethod resolveExactMethod(RepositorySnapshot snapshot, SemanticDeclarationAnchor anchor) {
             throw new UnsupportedOperationException("not used");
@@ -633,6 +737,10 @@ class SemanticCallGraphBuilderTest {
         @Override
         public SemanticCallResolution resolveCallResolutionAt(
                 RepositorySnapshot snapshot, SemanticMethod caller, SemanticCallSite callSite) {
+            RuntimeException failure = failingResolutions.get(callSite);
+            Optional.ofNullable(failure).ifPresent(exception -> {
+                throw exception;
+            });
             return resolutions.getOrDefault(caller, SemanticCallResolution.unresolved());
         }
 
@@ -642,6 +750,11 @@ class SemanticCallGraphBuilderTest {
                 throw new IllegalStateException("planned child query failure");
             }
             return outgoing.getOrDefault(method, List.of());
+        }
+
+        @Override
+        public SemanticIncomingCallResult incomingCalls(RepositorySnapshot snapshot, SemanticMethod callee) {
+            return SemanticIncomingCallResult.empty();
         }
 
         @Override

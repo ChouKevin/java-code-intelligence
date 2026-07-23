@@ -1,5 +1,7 @@
 package com.java.semantic.config;
 
+import com.java.semantic.callgraph.application.DirectCallRelationshipResolver;
+import com.java.semantic.callgraph.application.IncomingSemanticCallGraphBuilder;
 import com.java.semantic.callgraph.application.SemanticCallGraphBuilder;
 import com.java.semantic.callgraph.application.SpringImplementationSelector;
 import com.java.semantic.callgraph.domain.ReadPolicy;
@@ -14,7 +16,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 @Configuration
-@EnableConfigurationProperties({OutgoingGraphProperties.class, ReadPolicyProperties.class})
+@EnableConfigurationProperties({IncomingGraphProperties.class, OutgoingGraphProperties.class, ReadPolicyProperties.class})
 public class SemanticAnalysisConfiguration {
 
     @Bean
@@ -24,30 +26,48 @@ public class SemanticAnalysisConfiguration {
 
     @Bean
     @ConditionalOnBean(JavaSemanticService.class)
-    public SemanticCallGraphBuilder semanticCallGraphBuilder(
+    public DirectCallRelationshipResolver directCallRelationshipResolver(
             JavaSemanticService semanticService) {
-        return new SemanticCallGraphBuilder(semanticService, new SpringImplementationSelector());
+        return new DirectCallRelationshipResolver(semanticService, new SpringImplementationSelector());
+    }
+
+    @Bean
+    @ConditionalOnBean(JavaSemanticService.class)
+    public SemanticCallGraphBuilder semanticCallGraphBuilder(
+            DirectCallRelationshipResolver relationshipResolver) {
+        return new SemanticCallGraphBuilder(relationshipResolver);
+    }
+
+    @Bean
+    @ConditionalOnBean(JavaSemanticService.class)
+    public IncomingSemanticCallGraphBuilder incomingSemanticCallGraphBuilder(
+            JavaSemanticService semanticService,
+            DirectCallRelationshipResolver relationshipResolver) {
+        return new IncomingSemanticCallGraphBuilder(semanticService, relationshipResolver);
     }
 
     @Bean
     @ConditionalOnBean({
             RepositoryApplicationService.class,
             SyntaxExtractionService.class,
-            JavaSemanticService.class,
-            SemanticCallGraphBuilder.class
+            JavaSemanticService.class
     })
     public SemanticAnalysisApplicationService semanticAnalysisApplicationService(
             RepositoryApplicationService repositoryApplicationService,
             SyntaxExtractionService syntaxExtractionService,
             JavaSemanticService semanticService,
-            SemanticCallGraphBuilder builder,
-            OutgoingGraphProperties outgoingGraphProperties) {
+            SemanticCallGraphBuilder outgoingBuilder,
+            IncomingSemanticCallGraphBuilder incomingBuilder,
+            OutgoingGraphProperties outgoingGraphProperties,
+            IncomingGraphProperties incomingGraphProperties) {
         return new SemanticAnalysisApplicationService(
                 repositoryApplicationService,
                 syntaxExtractionService,
                 new ExactMethodDeclarationResolver(),
                 semanticService,
-                builder,
-                outgoingGraphProperties);
+                outgoingBuilder,
+                incomingBuilder,
+                outgoingGraphProperties,
+                incomingGraphProperties);
     }
 }

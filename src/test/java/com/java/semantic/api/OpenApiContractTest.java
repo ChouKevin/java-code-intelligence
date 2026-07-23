@@ -1,6 +1,7 @@
 package com.java.semantic.api;
 
 import com.java.semantic.identity.MethodTarget;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.java.semantic.api.dto.GraphEdgeResponse;
 import com.java.semantic.api.dto.GraphErrorResponse;
 import com.java.semantic.api.dto.GraphNodeResponse;
@@ -9,6 +10,7 @@ import com.java.semantic.api.dto.GraphWarningResponse;
 import com.java.semantic.api.dto.MethodTargetRequest;
 import com.java.semantic.api.dto.MethodTargetResponse;
 import com.java.semantic.api.dto.OutgoingCallGraphResponse;
+import com.java.semantic.api.dto.IncomingCallGraphResponse;
 import com.java.semantic.api.dto.PositionResponse;
 import com.java.semantic.api.dto.SourceRangeResponse;
 import jakarta.validation.ConstraintViolation;
@@ -56,7 +58,7 @@ class OpenApiContractTest {
     }
 
     @Test
-    void should_expose_only_the_outgoing_graph_operation_with_expected_responses() {
+    void should_expose_outgoing_and_incoming_graph_operations_with_expected_responses() {
         Map<String, Object> paths = map(document.get("paths"));
 
         assertThat(paths.keySet()).containsExactlyInAnyOrderElementsOf(Set.of(
@@ -67,25 +69,38 @@ class OpenApiContractTest {
                 "/v1/repositories/{repoId}/checkout",
                 "/v1/repositories/{repoId}/entry-points",
                 "/v1/analyses/call-graphs/outgoing",
+                "/v1/analyses/call-graphs/incoming",
                 "/v1/api-routes/lookup",
                 "/v1/api-routes/suggest"));
         assertThat(paths.keySet()).doesNotContain(
                 "/v1/analyses/call-graph",
                 "/v1/analyses/call-graph/flatten",
-                "/v1/analyses/call-graphs/incoming",
                 "/v1/analyses/call-graphs/expand");
         assertThat(map(paths.get("/v1/analyses/call-graphs/outgoing"))).containsOnlyKeys("post");
+        assertThat(map(paths.get("/v1/analyses/call-graphs/incoming"))).containsOnlyKeys("post");
         assertResponseCodes(operation(paths, "/v1/analyses/call-graphs/outgoing", "post"),
                 "200", "400", "401", "404", "409", "422", "500", "502", "503", "504");
+        assertThat(operation(paths, "/v1/analyses/call-graphs/incoming", "post").get("operationId"))
+                .isEqualTo("analyzeIncomingCallGraph");
+        assertResponseCodes(operation(paths, "/v1/analyses/call-graphs/incoming", "post"),
+                "200", "400", "401", "404", "409", "422", "500", "502", "503", "504");
+        assertThat(map(map(operation(paths, "/v1/analyses/call-graphs/incoming", "post").get("responses"))
+                .get("200")))
+                .isEqualTo(Map.of("$ref", "#/components/responses/IncomingCallGraph"));
         assertRequiredRequestBody(
                 operation(paths, "/v1/analyses/call-graphs/outgoing", "post"),
                 "#/components/schemas/AnalyzeOutgoingCallGraphRequest");
+        assertRequiredRequestBody(
+                operation(paths, "/v1/analyses/call-graphs/incoming", "post"),
+                "#/components/schemas/AnalyzeIncomingCallGraphRequest");
     }
 
     @Test
-    void should_describe_the_revision_bound_outgoing_request() {
+    void should_describe_revision_bound_graph_requests_with_matching_shapes() {
         Map<String, Object> schemas = schemas();
         Map<String, Object> request = schema(schemas, "AnalyzeOutgoingCallGraphRequest");
+        Map<String, Object> incomingRequest = schema(schemas, "AnalyzeIncomingCallGraphRequest");
+        assertThat(incomingRequest).isEqualTo(request);
         assertClosedObject(request);
         assertThat(required(request)).containsExactlyInAnyOrder("repoId", "expectedRevision", "target");
         Map<String, Object> requestProperties = properties(request);
@@ -127,12 +142,17 @@ class OpenApiContractTest {
     }
 
     @Test
-    void should_pin_normalized_outgoing_graph_shapes_and_wire_semantics() {
+    void should_pin_normalized_graph_response_shapes_and_wire_semantics() {
         Map<String, Object> schemas = schemas();
         Map<String, Object> response = schema(schemas, "OutgoingCallGraphResponse");
+        Map<String, Object> incomingResponse = schema(schemas, "IncomingCallGraphResponse");
         assertClosedObject(response);
+        assertClosedObject(incomingResponse);
         assertExactPropertiesAndRequired(response,
                 "status", "analyzedRevision", "rootNodeId", "traversal", "nodes", "edges", "warnings", "errors");
+        assertExactPropertiesAndRequired(incomingResponse,
+                "status", "analyzedRevision", "rootNodeId", "traversal", "nodes", "edges", "warnings", "errors");
+        assertThat(properties(incomingResponse)).isEqualTo(properties(response));
         assertThat(schema(properties(response), "status"))
                 .isEqualTo(Map.of("$ref", "#/components/schemas/OutgoingGraphStatus"));
         assertThat(list(schema(schemas, "OutgoingGraphStatus").get("enum"))).containsExactly("SUCCESS", "PARTIAL");
@@ -268,8 +288,13 @@ class OpenApiContractTest {
     }
 
     @Test
-    void should_default_depth_validate_nested_targets_and_convert_the_exact_target() throws Exception {
-        Class<?> requestType = Class.forName("com.java.semantic.api.dto.AnalyzeOutgoingCallGraphRequest");
+    void should_give_incoming_and_outgoing_requests_identical_validation_and_conversion_contracts() throws Exception {
+        assertRequestContract("com.java.semantic.api.dto.AnalyzeOutgoingCallGraphRequest");
+        assertRequestContract("com.java.semantic.api.dto.AnalyzeIncomingCallGraphRequest");
+    }
+
+    private void assertRequestContract(String requestClassName) throws Exception {
+        Class<?> requestType = Class.forName(requestClassName);
         Class<?> targetType = Class.forName("com.java.semantic.api.dto.MethodTargetRequest");
         Constructor<?> targetConstructor = targetType.getConstructor(
                 String.class, String.class, String.class, String.class, List.class);
@@ -321,6 +346,24 @@ class OpenApiContractTest {
                 List.of()))
                 .hasCauseInstanceOf(NullPointerException.class)
                 .hasRootCauseMessage("packageName is required");
+
+        ObjectMapper objectMapper = new ObjectMapper();
+        assertThatThrownBy(() -> objectMapper.readValue("""
+                {
+                  "repoId":"order-service",
+                  "expectedRevision":"FIXTURE",
+                  "target":{
+                    "sourceFile":"src/main/java/com/example/OrderController.java",
+                    "packageName":"",
+                    "className":"OrderController",
+                    "methodName":"placeOrder",
+                    "parameterTypes":[]
+                  },
+                  "unknown":true
+                }
+                """, requestType))
+                .hasRootCauseInstanceOf(IllegalArgumentException.class)
+                .hasRootCauseMessage("unknown request property");
     }
 
     @Test
@@ -466,6 +509,18 @@ class OpenApiContractTest {
                 null))
                 .isInstanceOf(NullPointerException.class)
                 .hasMessage("errors are required");
+
+        IncomingCallGraphResponse incomingResponse = new IncomingCallGraphResponse(
+                "SUCCESS",
+                "FIXTURE",
+                "node",
+                new GraphTraversalResponse(1, 0, 0, true, "NONE"),
+                List.of(),
+                List.of(),
+                List.of(),
+                List.of());
+        assertThat(incomingResponse.getClass()).isNotEqualTo(response.getClass());
+        assertThat(incomingResponse.nodes()).hasSize(0);
 
         assertThat(new GraphNodeResponse("node", null, null, "FULL_SOURCE", "EXPANDED", null, null).target()).isNull();
         assertThat(new GraphWarningResponse("AMBIGUOUS", "ambiguous", "node", null, null, List.of()).callExpression())

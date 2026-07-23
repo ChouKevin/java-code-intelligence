@@ -23,7 +23,7 @@ public record GraphWarning(
         callExpression = Objects.requireNonNull(callExpression, "callExpression is required");
         callSite = Objects.requireNonNull(callSite, "callSite is required");
         candidates = List.copyOf(Objects.requireNonNull(candidates, "candidates are required"));
-        Assert.isTrue(List.of("DESCENDANT_CALL_AMBIGUOUS", "DESCENDANT_CALL_UNRESOLVED", "NODE_BUDGET_REACHED")
+        Assert.isTrue(List.of("DESCENDANT_CALL_AMBIGUOUS", "DESCENDANT_CALL_UNRESOLVED", "INCOMING_CALLER_REJECTED", "NODE_BUDGET_REACHED")
                 .contains(code), "graph warning code is invalid");
         if ("DESCENDANT_CALL_AMBIGUOUS".equals(code)) {
             Assert.isTrue(candidates.size() > 1, "ambiguous warning candidates are required");

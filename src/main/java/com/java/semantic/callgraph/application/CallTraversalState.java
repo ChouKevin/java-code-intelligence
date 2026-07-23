@@ -6,7 +6,7 @@ import com.java.semantic.identity.MethodTarget;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
-/** Response-local deterministic node identifier allocation for one outgoing fragment. */
+/** Response-local deterministic node identifier allocation for one directional graph fragment. */
 final class CallTraversalState {
 
     private final Map<MethodTarget, CallNodeId> localNodeIds = new LinkedHashMap<>();

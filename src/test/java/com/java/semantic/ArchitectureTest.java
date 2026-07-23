@@ -188,6 +188,7 @@ class ArchitectureTest {
                         "com.java.semantic.semantic.domain..",
                         "com.java.semantic.callgraph..",
                         "com.java.semantic.syntax.domain..",
+                        "com.java.semantic.diagnostic..",
                         "com.java.semantic.identity..",
                         "com.java.semantic.config..",
                         "com.java.semantic.repository.application..",

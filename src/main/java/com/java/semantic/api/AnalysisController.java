@@ -1,6 +1,8 @@
 package com.java.semantic.api;
 
+import com.java.semantic.api.dto.AnalyzeIncomingCallGraphRequest;
 import com.java.semantic.api.dto.AnalyzeOutgoingCallGraphRequest;
+import com.java.semantic.api.dto.IncomingCallGraphResponse;
 import com.java.semantic.api.dto.OutgoingCallGraphResponse;
 import com.java.semantic.repository.domain.RepositoryId;
 import com.java.semantic.repository.domain.RepositoryRevision;
@@ -13,7 +15,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.util.Objects;
 
-/** HTTP boundary for the sole stateless outgoing graph-fragment operation. */
+/** Stateless HTTP boundary for incoming and outgoing graph-fragment operations. */
 @RestController
 @RequestMapping("/v1/analyses")
 public final class AnalysisController {
@@ -32,6 +34,16 @@ public final class AnalysisController {
     public OutgoingCallGraphResponse analyzeOutgoing(
             @Valid @RequestBody AnalyzeOutgoingCallGraphRequest request) {
         return mapper.toResponse(service.analyzeOutgoing(
+                RepositoryId.of(request.repoId()),
+                new RepositoryRevision(request.expectedRevision()),
+                request.target().toDomain(),
+                request.depth()));
+    }
+
+    @PostMapping("/call-graphs/incoming")
+    public IncomingCallGraphResponse analyzeIncoming(
+            @Valid @RequestBody AnalyzeIncomingCallGraphRequest request) {
+        return mapper.toResponse(service.analyzeIncoming(
                 RepositoryId.of(request.repoId()),
                 new RepositoryRevision(request.expectedRevision()),
                 request.target().toDomain(),

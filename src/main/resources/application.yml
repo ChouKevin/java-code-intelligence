@@ -2,6 +2,8 @@ semantic:
   analysis:
     outgoing:
       depth-two-node-budget: ${OUTGOING_DEPTH_TWO_NODE_BUDGET:40}
+    incoming:
+      depth-two-node-budget: ${INCOMING_DEPTH_TWO_NODE_BUDGET:40}
     read-policy:
       forbidden-repositories: []
       forbidden-packages: []

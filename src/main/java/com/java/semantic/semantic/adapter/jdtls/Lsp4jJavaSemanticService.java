@@ -11,6 +11,9 @@ import com.java.semantic.semantic.domain.SemanticCallStatus;
 import com.java.semantic.semantic.domain.SemanticBindingUnresolvedException;
 import com.java.semantic.semantic.domain.SemanticDeclarationAnchor;
 import com.java.semantic.semantic.domain.SemanticEngineException;
+import com.java.semantic.semantic.domain.SemanticIncomingCall;
+import com.java.semantic.semantic.domain.SemanticIncomingCallIssue;
+import com.java.semantic.semantic.domain.SemanticIncomingCallResult;
 import com.java.semantic.semantic.domain.SemanticLocation;
 import com.java.semantic.semantic.domain.SemanticMethod;
 import com.java.semantic.semantic.domain.SemanticPosition;
@@ -18,6 +21,8 @@ import com.java.semantic.semantic.domain.SemanticProtocolException;
 import com.java.semantic.semantic.domain.SemanticRange;
 import com.java.semantic.semantic.domain.SemanticResolutionOrigin;
 import org.eclipse.lsp4j.CallHierarchyItem;
+import org.eclipse.lsp4j.CallHierarchyIncomingCall;
+import org.eclipse.lsp4j.CallHierarchyIncomingCallsParams;
 import org.eclipse.lsp4j.CallHierarchyOutgoingCall;
 import org.eclipse.lsp4j.CallHierarchyOutgoingCallsParams;
 import org.eclipse.lsp4j.CallHierarchyPrepareParams;
@@ -52,8 +57,10 @@ import org.springframework.util.StringUtils;
 import lombok.extern.slf4j.Slf4j;
 
 import java.io.IOException;
+import java.net.URI;
 import java.nio.file.Files;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.EnumSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -61,6 +68,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.TreeSet;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Supplier;
 import java.util.regex.Pattern;
@@ -84,6 +92,20 @@ public class Lsp4jJavaSemanticService implements JavaSemanticService {
             EnumSet.of(SymbolKind.Class, SymbolKind.Interface, SymbolKind.Enum, SymbolKind.Struct);
     private static final Set<SymbolKind> METHOD_KINDS =
             EnumSet.of(SymbolKind.Method, SymbolKind.Constructor);
+    private static final Comparator<SemanticMethod> INCOMING_CALLER_ORDER =
+            Comparator.comparing(SemanticMethod::packageName)
+                    .thenComparing(SemanticMethod::className)
+                    .thenComparing(SemanticMethod::methodName)
+                    .thenComparing(SemanticMethod::parameterTypes,
+                            Lsp4jJavaSemanticService::compareParameterTypes)
+                    .thenComparing(SemanticMethod::returnType)
+                    .thenComparing(method -> method.location().uri())
+                    .thenComparing(method -> method.location().range(),
+                            Lsp4jJavaSemanticService::compareRanges)
+                    .thenComparing(method -> method.location().selectionRange(),
+                            Lsp4jJavaSemanticService::compareRanges);
+    private static final Comparator<SemanticRange> INCOMING_RANGE_ORDER =
+            Lsp4jJavaSemanticService::compareRanges;
 
     private final JdtWorkspaceManager workspaceManager;
     private final JdtWorkspaceSourceLocator sourceLocator;
@@ -148,6 +170,66 @@ public class Lsp4jJavaSemanticService implements JavaSemanticService {
             log.debug("phase=jdtls-outgoing outcome=completed repoId={} rawCallCount={} convertedCallCount={}",
                     session.repositoryId().value(), presentCalls.size(), resolved.size());
             return dedupeCalls(resolved);
+        }));
+    }
+
+    @Override
+    public SemanticIncomingCallResult incomingCalls(RepositorySnapshot snapshot, SemanticMethod callee) {
+        return JdtLsSemanticExceptionNormalizer.normalize(
+                () -> incomingCallsInternal(snapshot, callee));
+    }
+
+    private SemanticIncomingCallResult incomingCallsInternal(
+            RepositorySnapshot snapshot, SemanticMethod callee) {
+        Assert.notNull(snapshot, "snapshot is required");
+        Assert.notNull(callee, "callee is required");
+        String uri = requireLocalInvocationUri(snapshot, callee.location().uri());
+        JdtWorkspaceSession session = workspaceManager.getOrStart(snapshot);
+        return session.withDocumentUri(uri, () -> withOpenedDocument(session, snapshot, uri, () -> {
+            Optional<CallHierarchyItem> prepared = prepareIncomingCallHierarchy(session, uri, callee);
+            if (!prepared.isPresent()) {
+                log.warn("phase=jdtls-incoming outcome=failed repoId={} rawCallCount={} issueCount={}",
+                        session.repositoryId().value(), 0, 0);
+                throw new SemanticProtocolException();
+            }
+            List<CallHierarchyIncomingCall> incoming = session.call(
+                    "callHierarchy/incomingCalls",
+                    server -> server.getTextDocumentService().callHierarchyIncomingCalls(
+                            new CallHierarchyIncomingCallsParams(prepared.orElseThrow())));
+            List<CallHierarchyIncomingCall> presentCalls = nullSafe(incoming);
+            List<SemanticIncomingCall> converted = new ArrayList<>();
+            List<SemanticIncomingCallIssue> issues = new ArrayList<>();
+            for (CallHierarchyIncomingCall incomingCall : presentCalls) {
+                try {
+                    CallHierarchyItem caller = Objects.requireNonNull(
+                            incomingCall.getFrom(), "incoming caller is required");
+                    if (isJdtCaller(caller)) {
+                        continue;
+                    }
+                    Optional<SemanticIncomingCall> resolved = toSemanticIncomingCall(
+                            session, snapshot, incomingCall);
+                    if (resolved.isPresent()) {
+                        converted.add(resolved.orElseThrow());
+                    } else {
+                        issues.add(SemanticIncomingCallIssue.callerRejected());
+                    }
+                } catch (SemanticProtocolException exception) {
+                    log.debug("phase=jdtls-incoming outcome=caller-rejected repoId={} issueCount={} exceptionType={}",
+                            session.repositoryId().value(), issues.size() + 1,
+                            exception.getClass().getSimpleName());
+                    issues.add(SemanticIncomingCallIssue.callerRejected());
+                } catch (RuntimeException exception) {
+                    JdtLsSemanticExceptionNormalizer.rethrowIfEngineFailure(exception);
+                    log.debug("phase=jdtls-incoming outcome=caller-rejected repoId={} issueCount={} exceptionType={}",
+                            session.repositoryId().value(), issues.size() + 1,
+                            exception.getClass().getSimpleName());
+                    issues.add(SemanticIncomingCallIssue.callerRejected());
+                }
+            }
+            SemanticIncomingCallResult result = dedupeIncomingCalls(converted, issues);
+            log.debug("phase=jdtls-incoming outcome=completed repoId={} rawCallCount={} callerCount={} issueCount={}",
+                    session.repositoryId().value(), presentCalls.size(), result.calls().size(), result.issues().size());
+            return result;
         }));
     }
 
@@ -253,6 +335,28 @@ public class Lsp4jJavaSemanticService implements JavaSemanticService {
                 .or(() -> Optional.of(present.getFirst()));
     }
 
+    private Optional<CallHierarchyItem> prepareIncomingCallHierarchy(
+            JdtWorkspaceSession session, String uri, SemanticMethod callee) {
+        Position position = toPosition(callee.location().selectionRange().start());
+        List<CallHierarchyItem> items = session.call(
+                "textDocument/prepareCallHierarchy",
+                server -> server.getTextDocumentService()
+                        .prepareCallHierarchy(new CallHierarchyPrepareParams(new TextDocumentIdentifier(uri), position)));
+        List<CallHierarchyItem> exact = nullSafe(items).stream()
+                .filter(Objects::nonNull)
+                .filter(item -> uri.equals(item.getUri()))
+                .filter(item -> callee.methodName().equals(MethodSignatures.bareName(item.getName())))
+                .filter(item -> Objects.nonNull(item.getSelectionRange()))
+                .filter(item -> Objects.nonNull(item.getSelectionRange().getStart()))
+                .filter(item -> Objects.nonNull(item.getSelectionRange().getEnd()))
+                .filter(item -> callee.location().selectionRange().equals(toRange(item.getSelectionRange())))
+                .toList();
+        if (exact.size() != 1) {
+            return Optional.empty();
+        }
+        return Optional.of(exact.getFirst());
+    }
+
     private CallHierarchyItem prepareExactCallHierarchy(
             JdtWorkspaceSession session, String uri, SemanticDeclarationAnchor anchor) {
         Position position = toPosition(anchor.namePosition());
@@ -320,6 +424,23 @@ public class Lsp4jJavaSemanticService implements JavaSemanticService {
                     SemanticResolutionOrigin.CALL_HIERARCHY,
                     SemanticCallStatus.CONVERSION_FAILED));
         }
+    }
+
+    private Optional<SemanticIncomingCall> toSemanticIncomingCall(
+            JdtWorkspaceSession session,
+            RepositorySnapshot snapshot,
+            CallHierarchyIncomingCall incomingCall) {
+        CallHierarchyItem caller = Objects.requireNonNull(incomingCall.getFrom(), "incoming caller is required");
+        if (!sourceLocator.localSource(snapshot, caller.getUri()).isPresent()) {
+            return Optional.empty();
+        }
+        List<SemanticRange> callSites = nullSafe(incomingCall.getFromRanges()).stream()
+                .map(this::toRange)
+                .toList();
+        return resolveLocalCallTarget(
+                session, snapshot, new TargetLocation(caller.getUri(), caller.getSelectionRange()))
+                .map(resolved -> new SemanticIncomingCall(
+                        resolved.method(), caller.getName(), callSites));
     }
 
     private String externalDisplaySignature(String candidate) {
@@ -625,6 +746,56 @@ public class Lsp4jJavaSemanticService implements JavaSemanticService {
         return List.copyOf(deduped.values());
     }
 
+    private SemanticIncomingCallResult dedupeIncomingCalls(
+            List<SemanticIncomingCall> calls,
+            List<SemanticIncomingCallIssue> issues) {
+        Map<SemanticMethod, IncomingCallAccumulator> merged = new LinkedHashMap<>();
+        for (SemanticIncomingCall call : calls.stream()
+                .sorted(Comparator.comparing(SemanticIncomingCall::caller, INCOMING_CALLER_ORDER)
+                        .thenComparing(SemanticIncomingCall::rawSignature))
+                .toList()) {
+            IncomingCallAccumulator accumulator = merged.computeIfAbsent(
+                    call.caller(), IncomingCallAccumulator::new);
+            accumulator.add(call);
+        }
+        List<SemanticIncomingCall> normalized = merged.values().stream()
+                .map(IncomingCallAccumulator::toIncomingCall)
+                .toList();
+        return new SemanticIncomingCallResult(normalized, issues);
+    }
+
+    private boolean isJdtCaller(CallHierarchyItem caller) {
+        String scheme = URI.create(caller.getUri()).getScheme();
+        return "jdt".equalsIgnoreCase(scheme);
+    }
+
+    private static int compareParameterTypes(List<String> left, List<String> right) {
+        int shared = Math.min(left.size(), right.size());
+        for (int index = 0; index < shared; index++) {
+            int comparison = left.get(index).compareTo(right.get(index));
+            if (comparison != 0) {
+                return comparison;
+            }
+        }
+        return Integer.compare(left.size(), right.size());
+    }
+
+    private static int compareRanges(SemanticRange left, SemanticRange right) {
+        int start = comparePositions(left.start(), right.start());
+        if (start != 0) {
+            return start;
+        }
+        return comparePositions(left.end(), right.end());
+    }
+
+    private static int comparePositions(SemanticPosition left, SemanticPosition right) {
+        int line = Integer.compare(left.line(), right.line());
+        if (line != 0) {
+            return line;
+        }
+        return Integer.compare(left.character(), right.character());
+    }
+
     private String dedupeKey(SemanticLocation location) {
         SemanticRange range = location.range();
         return location.uri()
@@ -707,5 +878,27 @@ public class Lsp4jJavaSemanticService implements JavaSemanticService {
             boolean external,
             SemanticResolutionOrigin origin,
             SemanticCallStatus status) {
+    }
+
+    private static final class IncomingCallAccumulator {
+
+        private final SemanticMethod caller;
+        private String rawSignature;
+        private final Set<SemanticRange> callSites = new TreeSet<>(INCOMING_RANGE_ORDER);
+
+        private IncomingCallAccumulator(SemanticMethod caller) {
+            this.caller = caller;
+        }
+
+        private void add(SemanticIncomingCall call) {
+            if (Objects.isNull(rawSignature) || call.rawSignature().compareTo(rawSignature) < 0) {
+                rawSignature = call.rawSignature();
+            }
+            callSites.addAll(call.callSites());
+        }
+
+        private SemanticIncomingCall toIncomingCall() {
+            return new SemanticIncomingCall(caller, rawSignature, List.copyOf(callSites));
+        }
     }
 }

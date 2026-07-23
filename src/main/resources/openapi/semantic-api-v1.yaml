@@ -170,6 +170,36 @@ paths:
           $ref: '#/components/responses/ServiceUnavailable'
         '504':
           $ref: '#/components/responses/GatewayTimeout'
+  /v1/analyses/call-graphs/incoming:
+    post:
+      operationId: analyzeIncomingCallGraph
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AnalyzeIncomingCallGraphRequest'
+      responses:
+        '200':
+          $ref: '#/components/responses/IncomingCallGraph'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/MutationFailed'
+        '502':
+          $ref: '#/components/responses/BadGateway'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+        '504':
+          $ref: '#/components/responses/GatewayTimeout'
   /v1/api-routes/lookup:
     post:
       operationId: lookupApiRoutes
@@ -245,6 +275,12 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/OutgoingCallGraphResponse'
+    IncomingCallGraph:
+      description: Revision-bound incoming call graph fragment
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/IncomingCallGraphResponse'
     ApiRouteCandidates:
       description: Per-candidate route matches, each bound to its analyzed revision
       content:
@@ -327,6 +363,29 @@ components:
           minLength: 1
           pattern: '.*\S.*'
     AnalyzeOutgoingCallGraphRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - repoId
+        - expectedRevision
+        - target
+      properties:
+        repoId:
+          type: string
+          minLength: 1
+          pattern: '^[a-z0-9][a-z0-9._-]{0,63}$'
+        expectedRevision:
+          type: string
+          minLength: 1
+          pattern: '^[0-9a-f]{40}$|^FIXTURE$'
+        depth:
+          type: integer
+          default: 2
+          minimum: 1
+          maximum: 2
+        target:
+          $ref: '#/components/schemas/MethodTarget'
+    AnalyzeIncomingCallGraphRequest:
       type: object
       additionalProperties: false
       required:
@@ -499,6 +558,7 @@ components:
           description: Server limit for depth-2 source-expansion nodes; it never removes a root direct call.
         rootDirectCallsComplete:
           type: boolean
+          description: Whether root direct calls for the requested traversal direction are complete.
         limitReason:
           $ref: '#/components/schemas/GraphLimitReason'
     GraphNode:
@@ -600,6 +660,44 @@ components:
         nodeId:
           type: string
     OutgoingCallGraphResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - status
+        - analyzedRevision
+        - rootNodeId
+        - traversal
+        - nodes
+        - edges
+        - warnings
+        - errors
+      properties:
+        status:
+          $ref: '#/components/schemas/OutgoingGraphStatus'
+        analyzedRevision:
+          type: string
+          pattern: '^[0-9a-f]{40}$|^FIXTURE$'
+        rootNodeId:
+          type: string
+        traversal:
+          $ref: '#/components/schemas/GraphTraversal'
+        nodes:
+          type: array
+          items:
+            $ref: '#/components/schemas/GraphNode'
+        edges:
+          type: array
+          items:
+            $ref: '#/components/schemas/GraphEdge'
+        warnings:
+          type: array
+          items:
+            $ref: '#/components/schemas/GraphWarning'
+        errors:
+          type: array
+          items:
+            $ref: '#/components/schemas/GraphError'
+    IncomingCallGraphResponse:
       type: object
       additionalProperties: false
       required:

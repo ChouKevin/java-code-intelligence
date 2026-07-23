@@ -5,6 +5,7 @@ import com.java.semantic.api.dto.GraphErrorResponse;
 import com.java.semantic.api.dto.GraphNodeResponse;
 import com.java.semantic.api.dto.GraphTraversalResponse;
 import com.java.semantic.api.dto.GraphWarningResponse;
+import com.java.semantic.api.dto.IncomingCallGraphResponse;
 import com.java.semantic.api.dto.MethodTargetResponse;
 import com.java.semantic.api.dto.OutgoingCallGraphResponse;
 import com.java.semantic.api.dto.PositionResponse;
@@ -17,6 +18,7 @@ import com.java.semantic.callgraph.domain.GraphLimitReason;
 import com.java.semantic.callgraph.domain.GraphNode;
 import com.java.semantic.callgraph.domain.GraphTraversal;
 import com.java.semantic.callgraph.domain.GraphWarning;
+import com.java.semantic.callgraph.domain.IncomingGraphFragment;
 import com.java.semantic.callgraph.domain.NodeContentState;
 import com.java.semantic.callgraph.domain.NodeTraversalState;
 import com.java.semantic.callgraph.domain.OutgoingGraphFragment;
@@ -33,6 +35,19 @@ public final class AnalysisResponseMapper {
     public OutgoingCallGraphResponse toResponse(OutgoingGraphFragment fragment) {
         Objects.requireNonNull(fragment, "fragment is required");
         return new OutgoingCallGraphResponse(
+                status(fragment.status()),
+                fragment.analyzedRevision().value(),
+                fragment.rootNodeId().value(),
+                traversal(fragment.traversal()),
+                fragment.nodes().stream().map(this::node).toList(),
+                fragment.edges().stream().map(this::edge).toList(),
+                fragment.warnings().stream().map(this::warning).toList(),
+                fragment.errors().stream().map(this::error).toList());
+    }
+
+    public IncomingCallGraphResponse toResponse(IncomingGraphFragment fragment) {
+        Objects.requireNonNull(fragment, "fragment is required");
+        return new IncomingCallGraphResponse(
                 status(fragment.status()),
                 fragment.analyzedRevision().value(),
                 fragment.rootNodeId().value(),

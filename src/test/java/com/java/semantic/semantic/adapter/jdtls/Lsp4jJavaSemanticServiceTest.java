@@ -13,6 +13,7 @@ import com.java.semantic.semantic.domain.SemanticCallSite;
 import com.java.semantic.semantic.domain.SemanticCallStatus;
 import com.java.semantic.semantic.domain.SemanticEngineNotReadyException;
 import com.java.semantic.semantic.domain.SemanticEngineStartFailedException;
+import com.java.semantic.semantic.domain.SemanticIncomingCallResult;
 import com.java.semantic.semantic.domain.SemanticLocation;
 import com.java.semantic.semantic.domain.SemanticMethod;
 import com.java.semantic.semantic.domain.SemanticPosition;
@@ -21,6 +22,8 @@ import com.java.semantic.semantic.domain.SemanticRange;
 import com.java.semantic.semantic.domain.SemanticRequestTimeoutException;
 import com.java.semantic.semantic.domain.SemanticResolutionOrigin;
 import org.eclipse.lsp4j.CallHierarchyItem;
+import org.eclipse.lsp4j.CallHierarchyIncomingCall;
+import org.eclipse.lsp4j.CallHierarchyIncomingCallsParams;
 import org.eclipse.lsp4j.CallHierarchyOutgoingCall;
 import org.eclipse.lsp4j.CallHierarchyOutgoingCallsParams;
 import org.eclipse.lsp4j.CallHierarchyPrepareParams;
@@ -115,6 +118,188 @@ class Lsp4jJavaSemanticServiceTest {
         assertThatThrownBy(() -> service.outgoingCalls(snapshot, method))
                 .isExactlyInstanceOf(SemanticEngineNotReadyException.class)
                 .hasNoCause();
+    }
+
+    @Test
+    void should_convert_merge_and_sort_local_incoming_callers_and_ranges() throws IOException {
+        String calleeUri = sourceFile("OrderCrudService");
+        String alphaUri = writeClassFile("com/example/generic/AlphaFacade.java", PACKAGE, "AlphaFacade");
+        String callerUri = writeClassFile("com/example/generic/OrderFacade.java", PACKAGE, "OrderFacade");
+        SemanticMethod callee = methodAt(calleeUri, 10, 16);
+        server.prepareItems = List.of(incomingCallItem("processOrder(Order) : void", calleeUri, 10, 16));
+        server.incomingCalls = List.of(
+                incoming(callItem("submit(Order) : void", callerUri, 20, 16),
+                        range(15, 12, 15, 24), range(12, 8, 12, 20)),
+                incoming(callItem("submit(Order) : void", callerUri, 20, 16),
+                        range(12, 8, 12, 20), range(18, 4, 18, 16)),
+                incoming(callItem("submit() : void", alphaUri, 6, 12), range(6, 12, 6, 18)));
+        server.documentSymbols.put(alphaUri, List.of(Either.forRight(
+                classSymbol("AlphaFacade", method("submit()", " : void", 6, 12, 6, 18)))));
+        server.documentSymbols.put(callerUri, List.of(Either.forRight(
+                classSymbol("OrderFacade", method("submit(Order)", " : void", 20, 16, 20, 22)))));
+
+        SemanticIncomingCallResult result = service.incomingCalls(snapshot, callee);
+
+        assertThat(result.issues()).hasSize(0);
+        assertThat(result.calls()).extracting(call -> call.caller().className())
+                .containsExactly("AlphaFacade", "OrderFacade");
+        assertThat(result.calls().get(1)).satisfies(call -> {
+            assertThat(call.caller().className()).isEqualTo("OrderFacade");
+            assertThat(call.rawSignature()).isEqualTo("submit(Order) : void");
+            assertThat(call.callSites()).containsExactly(
+                    semanticRange(12, 8, 12, 20),
+                    semanticRange(15, 12, 15, 24),
+                    semanticRange(18, 4, 18, 16));
+        });
+        assertThat(server.incomingItems).containsExactly(server.prepareItems.getFirst());
+        assertThat(server.openedUris).containsExactly(calleeUri);
+        assertThat(server.closedUris).containsExactly(calleeUri);
+    }
+
+    @Test
+    void should_return_an_empty_incoming_result_for_an_empty_language_server_response() throws IOException {
+        String calleeUri = sourceFile("OrderCrudService");
+        SemanticMethod callee = methodAt(calleeUri, 10, 16);
+        server.prepareItems = List.of(incomingCallItem("processOrder(Order) : void", calleeUri, 10, 16));
+
+        SemanticIncomingCallResult result = service.incomingCalls(snapshot, callee);
+
+        assertThat(result).isEqualTo(SemanticIncomingCallResult.empty());
+        assertThat(server.closedUris).containsExactly(calleeUri);
+    }
+
+    @Test
+    void should_exclude_jdt_callers_without_an_issue() throws IOException {
+        String calleeUri = sourceFile("OrderCrudService");
+        SemanticMethod callee = methodAt(calleeUri, 10, 16);
+        server.prepareItems = List.of(incomingCallItem("processOrder(Order) : void", calleeUri, 10, 16));
+        server.incomingCalls = List.of(incoming(
+                callItem("libraryCaller() : void", "jdt://contents/Library.class", 3, 4),
+                range(4, 1, 4, 8)));
+
+        SemanticIncomingCallResult result = service.incomingCalls(snapshot, callee);
+
+        assertThat(result).isEqualTo(SemanticIncomingCallResult.empty());
+    }
+
+    @Test
+    void should_reject_unsafe_or_unconvertible_incoming_callers_and_keep_a_valid_sibling() throws IOException {
+        String calleeUri = sourceFile("OrderCrudService");
+        String validUri = writeClassFile("com/example/generic/OrderFacade.java", PACKAGE, "OrderFacade");
+        Path invalidSource = root.resolve("src/main/java/com/example/generic/BrokenCaller.java");
+        Files.writeString(invalidSource, "package com.example.\nclass BrokenCaller { void submit() { } }\n");
+        Path outside = Files.createTempFile("outside-incoming-caller", ".java");
+        Files.writeString(outside, "package com.outside; class OutsideCaller { }\n");
+        Path alias = root.resolve("src/main/java/com/example/generic/AliasCaller.java");
+        Files.createSymbolicLink(alias, outside);
+        SemanticMethod callee = methodAt(calleeUri, 10, 16);
+        server.prepareItems = List.of(incomingCallItem("processOrder(Order) : void", calleeUri, 10, 16));
+        server.incomingCalls = List.of(
+                incoming(callItem("valid() : void", validUri, 8, 12), range(8, 12, 8, 17)),
+                incoming(callItem("broken() : void", invalidSource.toUri().toString(), 1, 26), range(1, 26, 1, 32)),
+                incoming(callItem("outside() : void", outside.toUri().toString(), 1, 1), range(1, 1, 1, 8)),
+                incoming(callItem("alias() : void", alias.toUri().toString(), 1, 1), range(1, 1, 1, 6)),
+                incoming(callItem("unknown() : void", "https://example.invalid/caller.java", 1, 1), range(1, 1, 1, 8)));
+        server.documentSymbols.put(validUri, List.of(Either.forRight(
+                classSymbol("OrderFacade", method("valid()", " : void", 8, 12, 8, 17)))));
+        server.documentSymbols.put(invalidSource.toUri().toString(), List.of(Either.forRight(
+                classSymbol("BrokenCaller", method("broken()", " : void", 1, 26, 1, 32)))));
+
+        SemanticIncomingCallResult result = service.incomingCalls(snapshot, callee);
+
+        assertThat(result.calls()).singleElement().extracting(call -> call.caller().className())
+                .isEqualTo("OrderFacade");
+        assertThat(result.issues()).hasSize(4)
+                .allSatisfy(issue -> assertThat(issue.code()).isEqualTo("CALLER_REJECTED"))
+                .allSatisfy(issue -> assertThat(issue.message()).doesNotContain(
+                        "outside-incoming-caller", "example.invalid", "BrokenCaller", "AliasCaller"));
+        Files.deleteIfExists(outside);
+    }
+
+    @Test
+    void should_return_only_issues_when_no_incoming_caller_can_be_converted() throws IOException {
+        String calleeUri = sourceFile("OrderCrudService");
+        SemanticMethod callee = methodAt(calleeUri, 10, 16);
+        server.prepareItems = List.of(incomingCallItem("processOrder(Order) : void", calleeUri, 10, 16));
+        server.incomingCalls = List.of(incoming(
+                callItem("unknown() : void", "https://example.invalid/caller.java", 1, 1),
+                range(1, 1, 1, 8)));
+
+        SemanticIncomingCallResult result = service.incomingCalls(snapshot, callee);
+
+        assertThat(result.calls()).hasSize(0);
+        assertThat(result.issues()).isNotEmpty();
+    }
+
+    @Test
+    void should_normalize_incoming_timeout_and_protocol_failures_and_close_the_document() throws IOException {
+        String calleeUri = sourceFile("OrderCrudService");
+        SemanticMethod callee = methodAt(calleeUri, 10, 16);
+        server.prepareItems = List.of(incomingCallItem("processOrder(Order) : void", calleeUri, 10, 16));
+        server.hangIncomingCalls = true;
+        service = new Lsp4jJavaSemanticService(new FakeWorkspaceManager(session(server, Duration.ofMillis(50))));
+
+        assertThatThrownBy(() -> service.incomingCalls(snapshot, callee))
+                .isExactlyInstanceOf(SemanticRequestTimeoutException.class);
+        assertThat(server.closedUris).containsExactly(calleeUri);
+
+        server.hangIncomingCalls = false;
+        server.incomingFailure = new IllegalStateException("incoming failure");
+
+        assertThatThrownBy(() -> service.incomingCalls(snapshot, callee))
+                .isExactlyInstanceOf(SemanticProtocolException.class);
+        assertThat(server.closedUris).containsExactly(calleeUri, calleeUri);
+    }
+
+    @Test
+    void should_fail_when_an_exact_callee_cannot_be_prepared_and_close_the_document() throws IOException {
+        String calleeUri = sourceFile("OrderCrudService");
+        SemanticMethod callee = methodAt(calleeUri, 10, 16);
+
+        assertThatThrownBy(() -> service.incomingCalls(snapshot, callee))
+                .isExactlyInstanceOf(SemanticProtocolException.class);
+        assertThat(server.closedUris).containsExactly(calleeUri);
+        assertThat(server.incomingItems).hasSize(0);
+    }
+
+    @Test
+    void should_reject_a_nonmatching_prepared_callee_without_an_incoming_request() throws IOException {
+        String calleeUri = sourceFile("OrderCrudService");
+        String otherUri = sourceFile("OtherCrudService");
+        SemanticMethod callee = methodAt(calleeUri, 10, 16);
+        server.prepareItems = List.of(callItem("cancelOrder(Invoice) : void", otherUri, 24, 8));
+
+        assertThatThrownBy(() -> service.incomingCalls(snapshot, callee))
+                .isExactlyInstanceOf(SemanticProtocolException.class);
+        assertThat(server.incomingItems).hasSize(0);
+        assertThat(server.closedUris).containsExactly(calleeUri);
+    }
+
+    @Test
+    void should_reject_a_prepared_callee_with_a_mismatching_selection_end() throws IOException {
+        String calleeUri = sourceFile("OrderCrudService");
+        SemanticMethod callee = methodAt(calleeUri, 10, 16);
+        server.prepareItems = List.of(incomingCallItem(
+                "processOrder(Order) : void", calleeUri, 10, 16, 10, 20));
+
+        assertThatThrownBy(() -> service.incomingCalls(snapshot, callee))
+                .isExactlyInstanceOf(SemanticProtocolException.class);
+        assertThat(server.incomingItems).hasSize(0);
+        assertThat(server.closedUris).containsExactly(calleeUri);
+    }
+
+    @Test
+    void should_reject_multiple_exactly_matching_prepared_callees() throws IOException {
+        String calleeUri = sourceFile("OrderCrudService");
+        SemanticMethod callee = methodAt(calleeUri, 10, 16);
+        server.prepareItems = List.of(
+                incomingCallItem("processOrder(Order) : void", calleeUri, 10, 16),
+                incomingCallItem("processOrder(Order) : void", calleeUri, 10, 16));
+
+        assertThatThrownBy(() -> service.incomingCalls(snapshot, callee))
+                .isExactlyInstanceOf(SemanticProtocolException.class);
+        assertThat(server.incomingItems).hasSize(0);
+        assertThat(server.closedUris).containsExactly(calleeUri);
     }
 
     @Test
@@ -896,6 +1081,17 @@ class Lsp4jJavaSemanticServiceTest {
                 range(line, 4, line + 2, 5), range(line, character, line, character + 4));
     }
 
+    private CallHierarchyItem incomingCallItem(String name, String uri, int line, int character) {
+        return incomingCallItem(name, uri, line, character, line, character + 5);
+    }
+
+    private CallHierarchyItem incomingCallItem(
+            String name, String uri, int startLine, int startCharacter, int endLine, int endCharacter) {
+        return new CallHierarchyItem(name, SymbolKind.Method, uri,
+                range(startLine, 4, startLine + 2, 5),
+                range(startLine, startCharacter, endLine, endCharacter));
+    }
+
     private CallHierarchyItem externalCallItem(
             String name, String detail, String uri, int line, int character) {
         CallHierarchyItem item = callItem(name, uri, line, character);
@@ -909,6 +1105,10 @@ class Lsp4jJavaSemanticServiceTest {
 
     private CallHierarchyOutgoingCall outgoing(CallHierarchyItem to, Range... fromRanges) {
         return new CallHierarchyOutgoingCall(to, List.of(fromRanges));
+    }
+
+    private CallHierarchyIncomingCall incoming(CallHierarchyItem from, Range... fromRanges) {
+        return new CallHierarchyIncomingCall(from, List.of(fromRanges));
     }
 
     private Location location(String uri, int sl, int sc, int el, int ec) {
@@ -1002,6 +1202,7 @@ class Lsp4jJavaSemanticServiceTest {
         private final Map<String, Runnable> documentSymbolActions = new ConcurrentHashMap<>();
         private final Set<String> hangingDocumentSymbolUris = ConcurrentHashMap.newKeySet();
         private List<CallHierarchyItem> prepareItems = List.of();
+        private List<CallHierarchyIncomingCall> incomingCalls = List.of();
         private List<CallHierarchyOutgoingCall> outgoingCalls = List.of();
         private Either<List<? extends Location>, List<? extends LocationLink>> implementationResponse =
                 Either.forLeft(List.of());
@@ -1009,10 +1210,13 @@ class Lsp4jJavaSemanticServiceTest {
                 Either.forLeft(List.of());
         private Throwable closeFailure;
         private Throwable prepareFailure;
+        private RuntimeException incomingFailure;
+        private boolean hangIncomingCalls;
         private CountDownLatch outgoingCallsStarted = new CountDownLatch(0);
         private CountDownLatch releaseOutgoingCalls = new CountDownLatch(0);
         private final List<String> openedUris = Collections.synchronizedList(new ArrayList<>());
         private final List<Position> preparePositions = Collections.synchronizedList(new ArrayList<>());
+        private final List<CallHierarchyItem> incomingItems = Collections.synchronizedList(new ArrayList<>());
         private final List<Position> definitionPositions = Collections.synchronizedList(new ArrayList<>());
         private final List<String> closedUris = Collections.synchronizedList(new ArrayList<>());
         private final List<String> lifecycleEvents = Collections.synchronizedList(new ArrayList<>());
@@ -1111,6 +1315,20 @@ class Lsp4jJavaSemanticServiceTest {
                     return CompletableFuture.failedFuture(exception);
                 }
                 return CompletableFuture.completedFuture(outgoingCalls);
+            }
+
+            @Override
+            public CompletableFuture<List<CallHierarchyIncomingCall>> callHierarchyIncomingCalls(
+                    CallHierarchyIncomingCallsParams params) {
+                lifecycleEvents.add("incoming-query");
+                incomingItems.add(params.getItem());
+                if (hangIncomingCalls) {
+                    return new CompletableFuture<>();
+                }
+                if (Objects.nonNull(incomingFailure)) {
+                    return CompletableFuture.failedFuture(incomingFailure);
+                }
+                return CompletableFuture.completedFuture(incomingCalls);
             }
 
             @Override

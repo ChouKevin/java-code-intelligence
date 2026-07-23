@@ -32,7 +32,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-/** Real-process, authenticated HTTP proof for the revision-pinned outgoing semantic facade. */
+/** Real-process, authenticated HTTP proof for the revision-pinned directional semantic facade. */
 @SpringBootTest
 @AutoConfigureMockMvc
 @Tag("jdtls-it")
@@ -41,7 +41,7 @@ class SemanticFacadeVerticalJdtLsIT {
     private static final String TOKEN = "semantic-facade-vertical-token";
     private static final String FIXED_REPOSITORY = "fixed-system-agent";
     private static final String FIXTURE_REPOSITORY = "semantic-vertical";
-    private static final String FIXED_REVISION = "406dddba50e830a95a93a3d204b0f42c5d459a09";
+    private static final String FIXED_REVISION = "1a151e96ecff748a3c7b2b2cee4a4fe813bb2770";
     private static final Path FIXTURE = Path.of("src/test/resources/fixtures/semantic-facade-vertical")
             .toAbsolutePath().normalize();
     private static final Path WORKSPACE_DATA = Path.of("target/semantic-facade-vertical-jdtls")
@@ -65,20 +65,21 @@ class SemanticFacadeVerticalJdtLsIT {
         registry.add("semantic.jdtls.max-active-workspaces", () -> "2");
         registry.add("semantic.repositories.fixed-system-agent.mode", () -> "REMOTE");
         registry.add("semantic.repositories.fixed-system-agent.url", () -> enclosingRepository().toUri().toString());
-        registry.add("semantic.repositories.fixed-system-agent.default-branch", () -> "tmp/plan-c-task1");
+        registry.add("semantic.repositories.fixed-system-agent.default-branch", () -> "uat");
         registry.add("semantic.repositories.semantic-vertical.mode", () -> "LOCAL_FIXTURE");
         registry.add("semantic.repositories.semantic-vertical.path", () -> FIXTURE.toString());
+        registry.add("semantic.analysis.incoming.depth-two-node-budget", () -> "0");
     }
 
     @Test
-    void should_prove_revision_pinned_http_discovery_outgoing_fragments_and_process_shutdown() throws Exception {
+    void should_prove_revision_pinned_http_discovery_directional_fragments_and_process_shutdown() throws Exception {
         ensureAndCheckoutFixedRepository();
 
         ObjectNode fixedApi = discoverTarget(FIXED_REPOSITORY, "API", "AnalysisController", "getApiCallGraph");
         ObjectNode fixedSchedule = discoverTarget(FIXED_REPOSITORY, "SCHEDULE", "RateLimitingService", "cleanup");
         assertThat(fixedSchedule.path("className").asText()).isEqualTo("RateLimitingService");
 
-        JsonNode fixedFragment = analyze(FIXED_REPOSITORY, FIXED_REVISION, fixedApi, 2);
+        JsonNode fixedFragment = analyze(FIXED_REPOSITORY, FIXED_REVISION, fixedApi, 2, "outgoing");
         assertThat(fixedFragment.path("status").asText()).isEqualTo("PARTIAL");
         assertThat(fixedFragment.path("analyzedRevision").asText()).isEqualTo(FIXED_REVISION);
         assertThat(fixedFragment.path("traversal").path("rootDirectCallsComplete").asBoolean()).isTrue();
@@ -95,21 +96,21 @@ class SemanticFacadeVerticalJdtLsIT {
                 .textNode("com.example.vertical.PlaceOrderRequest"));
         assertThat(fixtureSchedule.path("className").asText()).isEqualTo("OrderJob");
 
-        JsonNode restFragment = analyze(FIXTURE_REPOSITORY, "FIXTURE", fixtureRest, 2);
+        JsonNode restFragment = analyze(FIXTURE_REPOSITORY, "FIXTURE", fixtureRest, 2, "outgoing");
         assertThat(restFragment.path("analyzedRevision").asText()).isEqualTo("FIXTURE");
         assertFullSource(nodeById(restFragment, restFragment.path("rootNodeId").asText()));
         assertDirectNodesHaveFullSource(restFragment);
         assertProvenEdgesHaveCallRangesAndEvidence(restFragment);
 
         ObjectNode depthBoundary = targetOfFirstDepthBoundary(restFragment);
-        JsonNode reRootedFixtureFragment = analyze(FIXTURE_REPOSITORY, "FIXTURE", depthBoundary, 2);
+        JsonNode reRootedFixtureFragment = analyze(FIXTURE_REPOSITORY, "FIXTURE", depthBoundary, 2, "outgoing");
         JsonNode reRootedFixtureRoot = nodeById(
                 reRootedFixtureFragment, reRootedFixtureFragment.path("rootNodeId").asText());
         assertThat(reRootedFixtureFragment.path("analyzedRevision").asText()).isEqualTo("FIXTURE");
         assertThat(reRootedFixtureRoot.path("target")).isEqualTo(depthBoundary);
         assertFullSource(reRootedFixtureRoot);
 
-        JsonNode mqFragment = analyze(FIXTURE_REPOSITORY, "FIXTURE", fixtureMq, 2);
+        JsonNode mqFragment = analyze(FIXTURE_REPOSITORY, "FIXTURE", fixtureMq, 2, "outgoing");
         assertThat(mqFragment.path("analyzedRevision").asText()).isEqualTo("FIXTURE");
         JsonNode mqRoot = nodeById(mqFragment, mqFragment.path("rootNodeId").asText());
         JsonNode serviceNode = nodeByClassAndMethod(mqFragment, "OrderService", "placeFromMessage");
@@ -122,7 +123,7 @@ class SemanticFacadeVerticalJdtLsIT {
         });
 
         ObjectNode ambiguityRoot = targetByClassAndMethod(mqFragment, "OrderService", "placeFromMessage");
-        JsonNode ambiguityFragment = analyze(FIXTURE_REPOSITORY, "FIXTURE", ambiguityRoot, 2);
+        JsonNode ambiguityFragment = analyze(FIXTURE_REPOSITORY, "FIXTURE", ambiguityRoot, 2, "outgoing");
         JsonNode immutableAmbiguityFragment = ambiguityFragment.deepCopy();
         assertThat(ambiguityFragment.path("status").asText()).isEqualTo("PARTIAL");
         assertThat(candidateIdentities(ambiguityFragment)).containsExactlyInAnyOrder(
@@ -138,11 +139,58 @@ class SemanticFacadeVerticalJdtLsIT {
         });
 
         ObjectNode candidate = firstCandidate(ambiguityFragment);
-        JsonNode candidateFragment = analyze(FIXTURE_REPOSITORY, "FIXTURE", candidate, 2);
+        JsonNode candidateFragment = analyze(FIXTURE_REPOSITORY, "FIXTURE", candidate, 2, "outgoing");
         JsonNode candidateRoot = nodeById(candidateFragment, candidateFragment.path("rootNodeId").asText());
         assertThat(candidateRoot.path("target")).isEqualTo(candidate);
         assertFullSource(candidateRoot);
         assertThat(ambiguityFragment).isEqualTo(immutableAmbiguityFragment);
+
+        ObjectNode serviceTarget = targetByClassAndMethod(mqFragment, "OrderService", "placeFromMessage");
+        JsonNode incomingServiceFragment = analyze(FIXTURE_REPOSITORY, "FIXTURE", serviceTarget, 2, "incoming");
+        JsonNode incomingServiceRoot = nodeById(incomingServiceFragment, incomingServiceFragment.path("rootNodeId").asText());
+        assertFullSource(incomingServiceRoot);
+        assertIncomingDirectNodesHaveFullSource(incomingServiceFragment);
+        assertProvenEdgesHaveCallRangesAndEvidence(incomingServiceFragment);
+        assertThat(incomingCallerIdentities(incomingServiceFragment))
+                .contains(new TargetIdentity("OrderListener", "consume"));
+
+        ObjectNode uncalledTarget = target("OverloadedTarget", "uncalled", List.of());
+        JsonNode uncalledIncomingFragment = analyze(FIXTURE_REPOSITORY, "FIXTURE", uncalledTarget, 2, "incoming");
+        assertThat(uncalledIncomingFragment.path("status").asText()).isEqualTo("SUCCESS");
+        assertThat(stream(uncalledIncomingFragment.path("nodes")).toList()).hasSize(1);
+        assertFullSource(nodeById(uncalledIncomingFragment, uncalledIncomingFragment.path("rootNodeId").asText()));
+        assertThat(stream(uncalledIncomingFragment.path("edges")).toList()).hasSize(0);
+        assertThat(stream(uncalledIncomingFragment.path("warnings")).toList()).hasSize(0);
+        assertThat(stream(uncalledIncomingFragment.path("errors")).toList()).hasSize(0);
+
+        ObjectNode stringOverloadTarget = target("OverloadedTarget", "accept", List.of("java.lang.String"));
+        JsonNode stringIncomingFragment = analyze(FIXTURE_REPOSITORY, "FIXTURE", stringOverloadTarget, 2, "incoming");
+        assertThat(incomingCallerIdentities(stringIncomingFragment))
+                .contains(new TargetIdentity("OverloadedCaller", "callString"))
+                .doesNotContain(new TargetIdentity("OverloadedCaller", "callInt"));
+        assertIncomingDirectNodesHaveFullSource(stringIncomingFragment);
+
+        JsonNode budgetFragment = analyze(FIXTURE_REPOSITORY, "FIXTURE", stringOverloadTarget, 2, "incoming");
+        JsonNode directCaller = nodeByClassAndMethod(budgetFragment, "OverloadedCaller", "callString");
+        JsonNode cutoffCaller = nodeByClassAndMethod(budgetFragment, "OverloadedCaller", "callStringEntry");
+        assertFullSource(directCaller);
+        assertThat(cutoffCaller.path("contentState").asText()).isEqualTo("TARGET_ONLY");
+        assertThat(cutoffCaller.path("traversalState").asText()).isEqualTo("BUDGET_CUTOFF");
+        assertThat(budgetFragment.path("traversal").path("limitReason").asText()).isEqualTo("NODE_BUDGET");
+        assertThat(stream(budgetFragment.path("warnings"))
+                .map(warning -> warning.path("code").asText()).toList()).contains("NODE_BUDGET_REACHED");
+
+        ObjectNode cutoffTarget = objectNode(cutoffCaller.path("target")).deepCopy();
+        JsonNode rerootedCutoffFragment = analyze(FIXTURE_REPOSITORY, "FIXTURE", cutoffTarget, 2, "incoming");
+        JsonNode rerootedCutoffRoot = nodeById(rerootedCutoffFragment, rerootedCutoffFragment.path("rootNodeId").asText());
+        assertThat(rerootedCutoffRoot.path("target")).isEqualTo(cutoffTarget);
+        assertFullSource(rerootedCutoffRoot);
+        assertStatelessExpansion(rerootedCutoffFragment);
+
+        ObjectNode callStringTarget = target("OverloadedCaller", "callString", List.of());
+        JsonNode callStringOutgoingFragment = analyze(FIXTURE_REPOSITORY, "FIXTURE", callStringTarget, 2, "outgoing");
+        assertThat(normalizedRootEdges(callStringOutgoingFragment, "outgoing"))
+                .containsExactlyElementsOf(normalizedRootEdges(stringIncomingFragment, "incoming"));
 
         Set<Long> processIds = workspaceManager.activeProcessIds();
         assertThat(processIds).isNotEmpty();
@@ -169,8 +217,8 @@ class SemanticFacadeVerticalJdtLsIT {
                         .header(ApiTokenFilter.API_TOKEN_HEADER, TOKEN)
                         .contentType("application/json")
                         .content("""
-                                {"revision":"406dddba50e830a95a93a3d204b0f42c5d459a09"}
-                                """))
+                                {"revision":"%s"}
+                                """.formatted(FIXED_REVISION)))
                 .andExpect(status().isOk());
     }
 
@@ -200,13 +248,19 @@ class SemanticFacadeVerticalJdtLsIT {
         return objectNode(method.path("analysisTarget").path("target")).deepCopy();
     }
 
-    private JsonNode analyze(String repositoryId, String revision, ObjectNode target, int depth) throws Exception {
+    private JsonNode analyze(String repositoryId, String revision, ObjectNode target, int depth, String direction)
+            throws Exception {
         ObjectNode request = objectMapper.createObjectNode();
         request.put("repoId", repositoryId);
         request.put("expectedRevision", revision);
         request.put("depth", depth);
         request.set("target", target.deepCopy());
-        return response(mockMvc.perform(post("/v1/analyses/call-graphs/outgoing")
+        String requestedDirection = Objects.requireNonNull(direction, "graph direction is required");
+        String endpoint = switch (requestedDirection) {
+            case "outgoing", "incoming" -> "/v1/analyses/call-graphs/" + requestedDirection;
+            default -> throw new IllegalArgumentException("unsupported graph direction: " + requestedDirection);
+        };
+        return response(mockMvc.perform(post(endpoint)
                         .header(ApiTokenFilter.API_TOKEN_HEADER, TOKEN)
                         .contentType("application/json")
                         .content(objectMapper.writeValueAsString(request)))
@@ -235,6 +289,16 @@ class SemanticFacadeVerticalJdtLsIT {
 
     private ObjectNode targetByClassAndMethod(JsonNode fragment, String className, String methodName) {
         return objectNode(nodeByClassAndMethod(fragment, className, methodName).path("target")).deepCopy();
+    }
+
+    private ObjectNode target(String className, String methodName, List<String> parameterTypes) {
+        ObjectNode target = objectMapper.createObjectNode();
+        target.put("sourceFile", "src/main/java/com/example/vertical/" + className + ".java");
+        target.put("packageName", "com.example.vertical");
+        target.put("className", className);
+        target.put("methodName", methodName);
+        target.set("parameterTypes", objectMapper.valueToTree(parameterTypes));
+        return target;
     }
 
     private ObjectNode targetOfFirstDepthBoundary(JsonNode fragment) {
@@ -280,6 +344,58 @@ class SemanticFacadeVerticalJdtLsIT {
                 .as("fixed response: %s", fragment)
                 .isNotEmpty()
                 .allSatisfy(this::assertFullSource);
+    }
+
+    private void assertIncomingDirectNodesHaveFullSource(JsonNode fragment) {
+        String rootNodeId = fragment.path("rootNodeId").asText();
+        List<JsonNode> directNodes = stream(fragment.path("edges"))
+                .filter(edge -> rootNodeId.equals(edge.path("calleeNodeId").asText()))
+                .map(edge -> nodeById(fragment, edge.path("callerNodeId").asText()))
+                .toList();
+        assertThat(directNodes)
+                .as("incoming response: %s", fragment)
+                .isNotEmpty()
+                .allSatisfy(this::assertFullSource);
+    }
+
+    private Set<TargetIdentity> incomingCallerIdentities(JsonNode fragment) {
+        String rootNodeId = fragment.path("rootNodeId").asText();
+        return stream(fragment.path("edges"))
+                .filter(edge -> rootNodeId.equals(edge.path("calleeNodeId").asText()))
+                .map(edge -> nodeById(fragment, edge.path("callerNodeId").asText()).path("target"))
+                .map(target -> new TargetIdentity(target.path("className").asText(), target.path("methodName").asText()))
+                .collect(Collectors.toSet());
+    }
+
+    private List<ObjectNode> normalizedRootEdges(JsonNode fragment, String direction) {
+        String rootNodeId = fragment.path("rootNodeId").asText();
+        return stream(fragment.path("edges"))
+                .filter(edge -> rootNodeId.equals(edge.path(rootEdgeField(direction)).asText()))
+                .map(edge -> normalizeEdge(fragment, edge))
+                .toList();
+    }
+
+    private String rootEdgeField(String direction) {
+        String requestedDirection = Objects.requireNonNull(direction, "graph direction is required");
+        return switch (requestedDirection) {
+            case "outgoing" -> "callerNodeId";
+            case "incoming" -> "calleeNodeId";
+            default -> throw new IllegalArgumentException("unsupported graph direction: " + requestedDirection);
+        };
+    }
+
+    private ObjectNode normalizeEdge(JsonNode fragment, JsonNode edge) {
+        ObjectNode normalized = objectMapper.createObjectNode();
+        normalized.set("caller", nodeById(fragment, edge.path("callerNodeId").asText()).path("target").deepCopy());
+        normalized.set("callee", nodeById(fragment, edge.path("calleeNodeId").asText()).path("target").deepCopy());
+        normalized.set("callSite", edge.path("callSite").deepCopy());
+        return normalized;
+    }
+
+    private void assertStatelessExpansion(JsonNode fragment) {
+        assertThat(fragment.has("cursor")).isFalse();
+        assertThat(fragment.has("page")).isFalse();
+        assertThat(fragment.has("token")).isFalse();
     }
 
     private void assertProvenEdgesHaveCallRangesAndEvidence(JsonNode fragment) {
