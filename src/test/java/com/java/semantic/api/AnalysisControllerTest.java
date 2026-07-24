@@ -3,6 +3,7 @@ package com.java.semantic.api;
 import com.java.semantic.api.security.ApiTokenFilter;
 import com.java.semantic.callgraph.domain.CallNodeId;
 import com.java.semantic.callgraph.domain.CallSiteRange;
+import com.java.semantic.callgraph.domain.DispatchKind;
 import com.java.semantic.callgraph.domain.GraphAnalysisStatus;
 import com.java.semantic.callgraph.domain.GraphEdge;
 import com.java.semantic.callgraph.domain.GraphLimitReason;
@@ -336,6 +337,7 @@ class AnalysisControllerTest {
                 "",
                 NodeContentState.FULL_SOURCE,
                 NodeTraversalState.EXPANDED,
+                DispatchKind.SYNCHRONOUS,
                 Optional.of("void place() {}"),
                 Optional.of(new CallSiteRange(TARGET.sourceFile(), 0, 0, 1, 0))));
     }
@@ -348,6 +350,7 @@ class AnalysisControllerTest {
                 "",
                 NodeContentState.FULL_SOURCE,
                 NodeTraversalState.EXPANDED,
+                DispatchKind.SYNCHRONOUS,
                 Optional.of("void checkout() {}"),
                 Optional.of(new CallSiteRange(CALLER_TARGET.sourceFile(), 0, 0, 1, 0))));
         return nodes;

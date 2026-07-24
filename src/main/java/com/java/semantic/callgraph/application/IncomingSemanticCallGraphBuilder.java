@@ -2,6 +2,7 @@ package com.java.semantic.callgraph.application;
 
 import com.java.semantic.callgraph.domain.CallNodeId;
 import com.java.semantic.callgraph.domain.CallSiteRange;
+import com.java.semantic.callgraph.domain.DispatchKind;
 import com.java.semantic.callgraph.domain.GraphAnalysisStatus;
 import com.java.semantic.callgraph.domain.GraphEdge;
 import com.java.semantic.callgraph.domain.GraphError;
@@ -663,7 +664,7 @@ public final class IncomingSemanticCallGraphBuilder {
                 if (NodeContentState.TARGET_ONLY.equals(contentState)) {
                     return new GraphNode(
                             nodeId, Optional.of(target), "", contentState, traversalState,
-                            Optional.empty(), Optional.empty());
+                            dispatchKind(index), Optional.empty(), Optional.empty());
                 }
                 MethodSignature method = index.method(target).orElseThrow();
                 CallSiteRange range = new CallSiteRange(
@@ -678,8 +679,16 @@ public final class IncomingSemanticCallGraphBuilder {
                         "",
                         contentState,
                         traversalState,
+                        dispatchKind(index),
                         Optional.of(method.source().text()),
                         Optional.of(range));
+            }
+
+            private DispatchKind dispatchKind(RepositorySyntaxIndex index) {
+                return index.method(target)
+                        .filter(method -> method.annotations().contains("Async"))
+                        .map(ignored -> DispatchKind.ASYNC)
+                        .orElse(DispatchKind.SYNCHRONOUS);
             }
         }
     }

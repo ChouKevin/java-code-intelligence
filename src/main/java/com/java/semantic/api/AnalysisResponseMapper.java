@@ -11,6 +11,7 @@ import com.java.semantic.api.dto.OutgoingCallGraphResponse;
 import com.java.semantic.api.dto.PositionResponse;
 import com.java.semantic.api.dto.SourceRangeResponse;
 import com.java.semantic.callgraph.domain.CallSiteRange;
+import com.java.semantic.callgraph.domain.DispatchKind;
 import com.java.semantic.callgraph.domain.GraphAnalysisStatus;
 import com.java.semantic.callgraph.domain.GraphEdge;
 import com.java.semantic.callgraph.domain.GraphError;
@@ -82,6 +83,7 @@ public final class AnalysisResponseMapper {
                 NodeContentState.EXTERNAL.equals(node.contentState()) ? node.externalSymbol() : null,
                 contentState(node.contentState()),
                 traversalState(node.traversalState()),
+                dispatchKind(node.dispatchKind()),
                 node.methodBody().orElse(null),
                 node.declarationRange().map(this::range).orElse(null));
     }
@@ -168,6 +170,13 @@ public final class AnalysisResponseMapper {
             case BUSINESS_READ_FORBIDDEN -> "BUSINESS_READ_FORBIDDEN";
             case SPRING_MULTIPLE_CANDIDATES -> "SPRING_MULTIPLE_CANDIDATES";
             case DATA_ACCESS_WITHOUT_EVIDENCE -> "DATA_ACCESS_WITHOUT_EVIDENCE";
+        };
+    }
+
+    private String dispatchKind(DispatchKind value) {
+        return switch (value) {
+            case SYNCHRONOUS -> "SYNCHRONOUS";
+            case ASYNC -> "ASYNC";
         };
     }
 }

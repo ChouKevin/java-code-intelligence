@@ -1,5 +1,6 @@
 package com.java.semantic.callgraph.application;
 
+import com.java.semantic.callgraph.domain.DispatchKind;
 import com.java.semantic.callgraph.domain.GraphAnalysisStatus;
 import com.java.semantic.callgraph.domain.GraphLimitReason;
 import com.java.semantic.callgraph.domain.IncomingGraphFragment;
@@ -74,6 +75,18 @@ class IncomingSemanticCallGraphBuilderTest {
             assertThat(node.contentState()).isEqualTo(NodeContentState.FULL_SOURCE);
             assertThat(node.methodBody()).isPresent();
         });
+    }
+
+    @Test
+    void should_mark_an_async_annotated_root_as_asynchronous_dispatch() {
+        MethodTarget rootTarget = target("Root", "run");
+        SemanticMethod root = incomingMethod(rootTarget, 0);
+
+        IncomingGraphFragment fragment = builder(new FakeSemanticService())
+                .build(SNAPSHOT, syntax(asyncType(rootTarget)), rootTarget, root, 1, 0);
+
+        assertThat(fragment.nodes()).singleElement()
+                .extracting(node -> node.dispatchKind()).isEqualTo(DispatchKind.ASYNC);
     }
 
     @Test
@@ -405,18 +418,23 @@ class IncomingSemanticCallGraphBuilderTest {
                 .resolution(zeta, zetaSite, localCall(direct, zetaSite));
         IncomingSemanticCallGraphBuilder builder = builder(semantic);
 
+        RepositorySyntax syntaxWithAsyncZeta = syntax(type(rootTarget), type(directTarget), type(alphaTarget), asyncType(zetaTarget));
+
         IncomingGraphFragment fragment = builder
-                .build(SNAPSHOT, syntax(rootTarget, directTarget, alphaTarget, zetaTarget), rootTarget, root, 2, 1);
+                .build(SNAPSHOT, syntaxWithAsyncZeta, rootTarget, root, 2, 1);
 
         assertThat(fragment.traversal().expandedNodeCount()).isEqualTo(1);
         assertThat(fragment.traversal().limitReason()).isEqualTo(GraphLimitReason.NODE_BUDGET);
         assertThat(fragment.nodes()).filteredOn(node -> node.target().filter(alphaTarget::equals).isPresent())
                 .singleElement().extracting(node -> node.contentState()).isEqualTo(NodeContentState.FULL_SOURCE);
         assertThat(fragment.nodes()).filteredOn(node -> node.target().filter(zetaTarget::equals).isPresent())
-                .singleElement().extracting(node -> node.contentState()).isEqualTo(NodeContentState.TARGET_ONLY);
+                .singleElement().satisfies(node -> {
+                    assertThat(node.contentState()).isEqualTo(NodeContentState.TARGET_ONLY);
+                    assertThat(node.dispatchKind()).isEqualTo(DispatchKind.ASYNC);
+                });
 
         IncomingGraphFragment rerooted = builder
-                .build(SNAPSHOT, syntax(rootTarget, directTarget, alphaTarget, zetaTarget), zetaTarget, zeta, 1, 0);
+                .build(SNAPSHOT, syntaxWithAsyncZeta, zetaTarget, zeta, 1, 0);
         assertThat(rerooted.nodes()).filteredOn(node -> node.target().filter(zetaTarget::equals).isPresent())
                 .singleElement().extracting(node -> node.contentState()).isEqualTo(NodeContentState.FULL_SOURCE);
     }
@@ -527,6 +545,22 @@ class IncomingSemanticCallGraphBuilderTest {
                 target.methodName(), target.parameterTypes(), List.of(), null, null, 1, 6,
                 range, new SourceSlice(range, "void " + target.methodName() + "() {}"), List.<TypeReference>of(),
                 Optional.empty(), invocations, List.of(), List.of(), range.start(),
+                MethodTargetResolution.resolved(target), true, true);
+        return new ClassMetadata(
+                target.className(), target.packageName(), target.packageName() + "." + target.className(),
+                target.sourceFile(), ClassMetadata.TypeKind.CLASS, false,
+                List.of(), List.of(), List.of(), List.of(), List.of(), List.of(method), false, false, List.of(), range,
+                new SourceSlice(range, "class " + target.className() + " {}"), false, List.of());
+    }
+
+    private static ClassMetadata asyncType(MethodTarget target) {
+        SyntaxRange range = new SyntaxRange(new SyntaxPosition(0, 0), new SyntaxPosition(30, 0));
+        List<SyntaxInvocation> invocations = List.of(
+                invocation(1), invocation(2), invocation(3), invocation(4), invocation(5), invocation(7), invocation(12));
+        MethodSignature method = new MethodSignature(
+                target.methodName(), target.parameterTypes(), List.of("Async"), null, null, 1, 6,
+                range, new SourceSlice(range, "@Async\nvoid " + target.methodName() + "() {}"),
+                List.<TypeReference>of(), Optional.empty(), invocations, List.of(), List.of(), range.start(),
                 MethodTargetResolution.resolved(target), true, true);
         return new ClassMetadata(
                 target.className(), target.packageName(), target.packageName() + "." + target.className(),

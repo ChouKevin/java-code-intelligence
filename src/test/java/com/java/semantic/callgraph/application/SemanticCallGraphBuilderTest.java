@@ -1,5 +1,6 @@
 package com.java.semantic.callgraph.application;
 
+import com.java.semantic.callgraph.domain.DispatchKind;
 import com.java.semantic.callgraph.domain.GraphAnalysisStatus;
 import com.java.semantic.callgraph.domain.GraphLimitReason;
 import com.java.semantic.callgraph.domain.NodeContentState;
@@ -402,13 +403,17 @@ class SemanticCallGraphBuilderTest {
                 .outgoing(direct, resolvedCall(outgoingMethod(zetaTarget, 20), 14), resolvedCall(outgoingMethod(alphaTarget, 30), 12));
 
         com.java.semantic.callgraph.domain.OutgoingGraphFragment fragment = builder(semantic)
-                .build(SNAPSHOT, syntax(rootTarget, directTarget, zetaTarget, alphaTarget), rootTarget, root, 2, 1);
+                .build(SNAPSHOT, syntax(List.of(type(rootTarget), type(directTarget), asyncType(zetaTarget), type(alphaTarget))),
+                        rootTarget, root, 2, 1);
 
         assertThat(fragment.traversal().expandedNodeCount()).isEqualTo(1);
         assertThat(fragment.nodes()).filteredOn(node -> node.target().filter(alphaTarget::equals).isPresent())
                 .singleElement().extracting(node -> node.contentState()).isEqualTo(NodeContentState.FULL_SOURCE);
         assertThat(fragment.nodes()).filteredOn(node -> node.target().filter(zetaTarget::equals).isPresent())
-                .singleElement().extracting(node -> node.contentState()).isEqualTo(NodeContentState.TARGET_ONLY);
+                .singleElement().satisfies(node -> {
+                    assertThat(node.contentState()).isEqualTo(NodeContentState.TARGET_ONLY);
+                    assertThat(node.dispatchKind()).isEqualTo(DispatchKind.ASYNC);
+                });
     }
 
     @Test
@@ -427,7 +432,23 @@ class SemanticCallGraphBuilderTest {
                     assertThat(node.methodBody()).contains("@Transactional\nvoid work() {}");
                     assertThat(node.declarationRange()).contains(new com.java.semantic.callgraph.domain.CallSiteRange(
                             childTarget.sourceFile(), 0, 0, 5, 0));
+                    assertThat(node.dispatchKind()).isEqualTo(DispatchKind.SYNCHRONOUS);
                 });
+    }
+
+    @Test
+    void should_mark_an_async_annotated_depth_one_target_as_asynchronous_dispatch() {
+        MethodTarget rootTarget = target("Root", "run");
+        MethodTarget childTarget = target("Child", "work");
+        SemanticMethod root = outgoingMethod(rootTarget, 0);
+        SemanticMethod child = outgoingMethod(childTarget, 10);
+
+        com.java.semantic.callgraph.domain.OutgoingGraphFragment fragment = builder(
+                new FakeSemanticService().outgoing(root, resolvedCall(child, 2)))
+                .build(SNAPSHOT, syntax(List.of(type(rootTarget), asyncType(childTarget))), rootTarget, root, 1, 40);
+
+        assertThat(fragment.nodes()).filteredOn(node -> node.target().filter(childTarget::equals).isPresent())
+                .singleElement().extracting(node -> node.dispatchKind()).isEqualTo(DispatchKind.ASYNC);
     }
 
     @Test
@@ -730,6 +751,25 @@ class SemanticCallGraphBuilderTest {
                 List.of(method(target, true, List.of(), "@Transactional\nvoid " + target.methodName() + "() {}")),
                 false, false, List.of(), range, new SourceSlice(range, "class " + target.className() + " {}"),
                 false, List.of());
+    }
+
+    private static ClassMetadata asyncType(MethodTarget target) {
+        SyntaxRange range = range(0, 0, 30, 0);
+        return new ClassMetadata(
+                target.className(), target.packageName(), target.packageName() + "." + target.className(),
+                target.sourceFile(), ClassMetadata.TypeKind.CLASS, false,
+                List.of(), List.of(), List.of(), List.of(), List.of(),
+                List.of(asyncMethod(target)), false, false, List.of(), range,
+                new SourceSlice(range, "class " + target.className() + " {}"), false, List.of());
+    }
+
+    private static MethodSignature asyncMethod(MethodTarget target) {
+        SyntaxRange range = range(0, 0, 5, 0);
+        return new MethodSignature(
+                target.methodName(), target.parameterTypes(), List.of("Async"), null, null, 1, 6,
+                range, new SourceSlice(range, "@Async\nvoid " + target.methodName() + "() {}"),
+                List.<TypeReference>of(), Optional.empty(), List.of(), List.of(), List.of(), range.start(),
+                MethodTargetResolution.resolved(target), true, true);
     }
 
     private static ClassMetadata type(MethodTarget target, ClassMetadata.TypeKind kind, boolean executableDeclaration) {

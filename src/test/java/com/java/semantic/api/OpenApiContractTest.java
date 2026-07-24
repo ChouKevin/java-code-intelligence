@@ -176,8 +176,10 @@ class OpenApiContractTest {
         Map<String, Object> node = schema(schemas, "GraphNode");
         assertClosedObject(node);
         assertExactProperties(node,
-                "nodeId", "target", "externalSymbol", "contentState", "traversalState", "methodBody", "declarationRange");
-        assertThat(required(node)).containsExactlyInAnyOrder("nodeId", "contentState", "traversalState");
+                "nodeId", "target", "externalSymbol", "contentState", "traversalState", "dispatchKind", "methodBody",
+                "declarationRange");
+        assertThat(required(node)).containsExactlyInAnyOrder(
+                "nodeId", "contentState", "traversalState", "dispatchKind");
         assertNullableReference(properties(node), "target", "MethodTarget");
         assertNullableString(properties(node), "externalSymbol");
         assertNullableString(properties(node), "methodBody");
@@ -186,6 +188,9 @@ class OpenApiContractTest {
                 .isEqualTo(Map.of("$ref", "#/components/schemas/GraphContentState"));
         assertThat(schema(properties(node), "traversalState"))
                 .isEqualTo(Map.of("$ref", "#/components/schemas/GraphTraversalState"));
+        assertThat(schema(properties(node), "dispatchKind"))
+                .isEqualTo(Map.of("$ref", "#/components/schemas/DispatchKind"));
+        assertThat(list(schema(schemas, "DispatchKind").get("enum"))).containsExactly("SYNCHRONOUS", "ASYNC");
 
         Map<String, Object> edge = schema(schemas, "GraphEdge");
         assertClosedObject(edge);
@@ -470,7 +475,7 @@ class OpenApiContractTest {
         assertThatThrownBy(() -> new GraphWarningResponse("AMBIGUOUS", "ambiguous", "node", null, null, null))
                 .isInstanceOf(NullPointerException.class);
 
-        GraphNodeResponse node = new GraphNodeResponse("node", null, null, "FULL_SOURCE", "EXPANDED", null, null);
+        GraphNodeResponse node = new GraphNodeResponse("node", null, null, "FULL_SOURCE", "EXPANDED", "SYNCHRONOUS", null, null);
         List<GraphNodeResponse> nodes = new ArrayList<>();
         List<GraphEdgeResponse> edges = new ArrayList<>(List.of(edge));
         List<GraphWarningResponse> warnings = new ArrayList<>(List.of(warning));
@@ -545,7 +550,7 @@ class OpenApiContractTest {
         assertThat(incomingResponse.getClass()).isNotEqualTo(response.getClass());
         assertThat(incomingResponse.nodes()).hasSize(0);
 
-        assertThat(new GraphNodeResponse("node", null, null, "FULL_SOURCE", "EXPANDED", null, null).target()).isNull();
+        assertThat(new GraphNodeResponse("node", null, null, "FULL_SOURCE", "EXPANDED", "SYNCHRONOUS", null, null).target()).isNull();
         assertThat(new GraphWarningResponse("AMBIGUOUS", "ambiguous", "node", null, null, List.of()).callExpression())
                 .isNull();
         assertThat(new GraphWarningResponse("AMBIGUOUS", "ambiguous", "node", null, null, List.of()).callSite())

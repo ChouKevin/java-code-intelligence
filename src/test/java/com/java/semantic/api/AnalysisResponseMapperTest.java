@@ -3,6 +3,7 @@ package com.java.semantic.api;
 import com.java.semantic.api.dto.OutgoingCallGraphResponse;
 import com.java.semantic.callgraph.domain.CallNodeId;
 import com.java.semantic.callgraph.domain.CallSiteRange;
+import com.java.semantic.callgraph.domain.DispatchKind;
 import com.java.semantic.callgraph.domain.GraphAnalysisStatus;
 import com.java.semantic.callgraph.domain.GraphEdge;
 import com.java.semantic.callgraph.domain.GraphLimitReason;
@@ -47,6 +48,7 @@ class AnalysisResponseMapperTest {
                         "",
                         NodeContentState.TARGET_ONLY,
                         NodeTraversalState.BUDGET_CUTOFF,
+                        DispatchKind.SYNCHRONOUS,
                         Optional.empty(),
                         Optional.empty())),
                 List.of(
@@ -76,5 +78,6 @@ class AnalysisResponseMapperTest {
         assertThat(response.edges().get(0).category()).isEqualTo("RESOLVED_OPAQUE");
         assertThat(response.edges().get(1).resolutionStrategy()).isEqualTo("JDT_CALL_HIERARCHY");
         assertThat(response.edges().get(1).category()).isEqualTo("RESOLVED_ANALYZABLE");
+        assertThat(response.nodes().get(0).dispatchKind()).isEqualTo("SYNCHRONOUS");
     }
 }

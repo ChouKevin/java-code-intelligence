@@ -14,6 +14,7 @@ public record GraphNode(
         String externalSymbol,
         NodeContentState contentState,
         NodeTraversalState traversalState,
+        DispatchKind dispatchKind,
         Optional<String> methodBody,
         Optional<CallSiteRange> declarationRange) {
 
@@ -24,6 +25,7 @@ public record GraphNode(
         externalSymbol = Objects.requireNonNullElse(externalSymbol, "");
         contentState = Objects.requireNonNull(contentState, "contentState is required");
         traversalState = Objects.requireNonNull(traversalState, "traversalState is required");
+        dispatchKind = Objects.requireNonNull(dispatchKind, "dispatchKind is required");
         methodBody = Objects.requireNonNull(methodBody, "methodBody is required");
         declarationRange = Objects.requireNonNull(declarationRange, "declarationRange is required");
         switch (contentState) {
@@ -54,6 +56,8 @@ public record GraphNode(
                 Assert.isTrue(NodeTraversalState.EXTERNAL.equals(traversalState)
                                 || NodeTraversalState.OPAQUE.equals(traversalState),
                         "external node must be external or opaque traversal state");
+                Assert.isTrue(DispatchKind.SYNCHRONOUS.equals(dispatchKind),
+                        "external node dispatch kind must be synchronous");
             }
         }
     }

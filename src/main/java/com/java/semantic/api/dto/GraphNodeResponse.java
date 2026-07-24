@@ -9,6 +9,7 @@ public record GraphNodeResponse(
         String externalSymbol,
         String contentState,
         String traversalState,
+        String dispatchKind,
         String methodBody,
         SourceRangeResponse declarationRange) {
 
@@ -16,5 +17,6 @@ public record GraphNodeResponse(
         nodeId = Objects.requireNonNull(nodeId, "nodeId is required");
         contentState = Objects.requireNonNull(contentState, "contentState is required");
         traversalState = Objects.requireNonNull(traversalState, "traversalState is required");
+        dispatchKind = Objects.requireNonNull(dispatchKind, "dispatchKind is required");
     }
 }

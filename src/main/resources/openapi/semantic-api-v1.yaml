@@ -506,6 +506,15 @@ components:
         BUDGET_CUTOFF: node identity only; omitted from expansion because the node budget was reached.
         OPAQUE: evidence-terminal node; not expandable, not a re-root continuation.
         EXTERNAL: node lies outside the analyzed source set.
+    DispatchKind:
+      type: string
+      enum:
+        - SYNCHRONOUS
+        - ASYNC
+      description: >-
+        How the node's own declaration is invoked, independent of any specific edge.
+        SYNCHRONOUS: ordinary in-thread invocation, or a node with no observable dispatch annotation.
+        ASYNC: the declaration carries @Async; callers return immediately and execution happens on a separate thread.
     GraphLimitReason:
       type: string
       enum:
@@ -576,6 +585,7 @@ components:
         - nodeId
         - contentState
         - traversalState
+        - dispatchKind
       properties:
         nodeId:
           type: string
@@ -590,6 +600,8 @@ components:
           $ref: '#/components/schemas/GraphContentState'
         traversalState:
           $ref: '#/components/schemas/GraphTraversalState'
+        dispatchKind:
+          $ref: '#/components/schemas/DispatchKind'
         methodBody:
           type: string
           nullable: true
