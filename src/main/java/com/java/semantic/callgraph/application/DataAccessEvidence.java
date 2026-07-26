@@ -25,10 +25,6 @@ import com.java.semantic.syntax.domain.ClassMetadata.TypeKind;
  */
 public final class DataAccessEvidence {
 
-    private static final double MYBATIS_CONFIDENCE = 1.0d;
-    private static final double SPRING_DATA_CONFIDENCE = 1.0d;
-    private static final double WITHOUT_EVIDENCE_CONFIDENCE = 0.5d;
-
     private static final Set<String> SPRING_DATA_SUPERTYPES = Set.of(
             "JpaRepository", "CrudRepository", "PagingAndSortingRepository", "MongoRepository",
             "R2dbcRepository", "ListCrudRepository", "ReactiveCrudRepository");
@@ -65,7 +61,7 @@ public final class DataAccessEvidence {
         }
         return Optional.of(matched(
                 ResolutionStrategy.MYBATIS_MAPPER, declaringType, declaredMethod, declarationTarget,
-                MYBATIS_CONFIDENCE, List.of("mapper SQL: " + declaredMethod.sql())));
+                List.of("mapper SQL: " + declaredMethod.sql())));
     }
 
     /**
@@ -80,7 +76,7 @@ public final class DataAccessEvidence {
                 .findFirst()
                 .map(supertype -> matched(
                         ResolutionStrategy.SPRING_DATA_REPOSITORY, declaringType, declaredMethod, declarationTarget,
-                        SPRING_DATA_CONFIDENCE, List.of("extends " + supertype)));
+                        List.of("extends " + supertype)));
     }
 
     private Optional<EvidenceMatch> matchDataAccessWithoutEvidence(
@@ -91,16 +87,16 @@ public final class DataAccessEvidence {
                 .findFirst()
                 .map(annotation -> matched(
                         ResolutionStrategy.DATA_ACCESS_WITHOUT_EVIDENCE, declaringType, declaredMethod,
-                        declarationTarget, WITHOUT_EVIDENCE_CONFIDENCE,
+                        declarationTarget,
                         List.of("@" + annotation + " without SQL or known supertype")));
     }
 
     private static EvidenceMatch matched(
             ResolutionStrategy strategy, ClassMetadata declaringType, MethodSignature declaredMethod,
-            MethodTarget declarationTarget, double confidence, List<String> evidence) {
+            MethodTarget declarationTarget, List<String> evidence) {
         return new EvidenceMatch(
                 strategy, opaqueSymbolOf(declaringType, declaredMethod), Optional.of(declarationTarget),
-                confidence, evidence);
+                evidence);
     }
 
     private static String opaqueSymbolOf(ClassMetadata declaringType, MethodSignature declaredMethod) {

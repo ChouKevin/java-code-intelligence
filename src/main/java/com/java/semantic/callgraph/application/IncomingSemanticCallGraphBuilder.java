@@ -60,7 +60,7 @@ public final class IncomingSemanticCallGraphBuilder {
                     .comparingInt(SemanticPosition::line)
                     .thenComparingInt(SemanticPosition::character));
 
-    private static final Set<ResolutionStrategy> HIGH_CONFIDENCE_OPAQUE_DATA_ACCESS = Set.of(
+    private static final Set<ResolutionStrategy> OPAQUE_DATA_ACCESS_RELABELING_STRATEGIES = Set.of(
             ResolutionStrategy.MYBATIS_MAPPER, ResolutionStrategy.SPRING_DATA_REPOSITORY);
 
     private final JavaSemanticService semanticService;
@@ -225,10 +225,10 @@ public final class IncomingSemanticCallGraphBuilder {
     }
 
     /**
-     * 將指向資料存取介面（高信心不透明）的 UNRESOLVED 前向關係，重標為指向該介面方法的 LOCAL 邊
+     * 將指向資料存取介面（具名不透明資料存取策略）的 UNRESOLVED 前向關係，重標為指向該介面方法的 LOCAL 邊
      * <p>
      * 讓 incoming 與 outgoing 一致地依證據接受不透明資料存取呼叫者；僅
-     * {@code MYBATIS_MAPPER} 與 {@code SPRING_DATA_REPOSITORY} 這類高信心證據會被接受，
+     * {@code MYBATIS_MAPPER} 與 {@code SPRING_DATA_REPOSITORY} 的具名策略證據會被接受，
      * {@code DATA_ACCESS_WITHOUT_EVIDENCE} 或無證據維持原樣，交由既有 fail-closed 拒絕路徑
      */
     private List<DirectCallRelationship> relabelOpaqueDataAccessCallers(
@@ -236,7 +236,7 @@ public final class IncomingSemanticCallGraphBuilder {
             BuildState state,
             MethodTarget calleeTarget,
             List<DirectCallRelationship> relationships) {
-        Optional<EvidenceMatch> match = highConfidenceDataAccessEvidence(index, calleeTarget);
+        Optional<EvidenceMatch> match = opaqueDataAccessRelabelingEvidence(index, calleeTarget);
         Optional<SemanticMethod> calleeMethod = state.semanticMethod(calleeTarget);
         if (match.isEmpty() || calleeMethod.isEmpty()) {
             return relationships;
@@ -248,7 +248,7 @@ public final class IncomingSemanticCallGraphBuilder {
             if (isOpaqueDataAccessCall(relationship, calleeTarget)) {
                 relabeled.add(DirectCallRelationship.local(
                         calleeTarget, semanticMethod, relationship.callSite(), relationship.expression(),
-                        evidenceMatch.strategy(), evidenceMatch.confidence(), evidenceMatch.evidence()));
+                        evidenceMatch.strategy(), evidenceMatch.evidence()));
             } else {
                 relabeled.add(relationship);
             }
@@ -261,7 +261,7 @@ public final class IncomingSemanticCallGraphBuilder {
                 && relationship.declarationTarget().filter(calleeTarget::equals).isPresent();
     }
 
-    private Optional<EvidenceMatch> highConfidenceDataAccessEvidence(
+    private Optional<EvidenceMatch> opaqueDataAccessRelabelingEvidence(
             RepositorySyntaxIndex index, MethodTarget calleeTarget) {
         Optional<ClassMetadata> declaringType = index.classMetadata(calleeTarget);
         Optional<MethodSignature> declaredMethod = index.method(calleeTarget);
@@ -269,7 +269,7 @@ public final class IncomingSemanticCallGraphBuilder {
             return Optional.empty();
         }
         return dataAccessEvidence.evaluate(declaringType.orElseThrow(), declaredMethod.orElseThrow(), calleeTarget)
-                .filter(match -> HIGH_CONFIDENCE_OPAQUE_DATA_ACCESS.contains(match.strategy()));
+                .filter(match -> OPAQUE_DATA_ACCESS_RELABELING_STRATEGIES.contains(match.strategy()));
     }
 
     private CanonicalCallers canonicalCallers(
@@ -619,7 +619,6 @@ public final class IncomingSemanticCallGraphBuilder {
                     range,
                     relationship.expression(),
                     relationship.strategy(),
-                    relationship.confidence(),
                     relationship.evidence()));
         }
 

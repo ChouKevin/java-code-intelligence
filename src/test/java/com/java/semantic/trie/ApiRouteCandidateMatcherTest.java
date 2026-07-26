@@ -9,13 +9,15 @@ class ApiRouteCandidateMatcherTest {
 
     @ParameterizedTest(name = "{0}")
     @CsvSource({
-            "'static positional', /orders/42, /orders/{*}, 12",
-            "'same length', /orders/42, /archive/orders, 7",
-            "'no static segment', /orders/42, /users/{*}, -1",
-            "'wildcards only', /orders/42, /{*}/{*}, -1"
+            "'static positional', /orders/42, /orders/{*}, SHARED_STATIC_SEGMENT|POSITIONAL_STATIC_SEGMENT|SAME_SEGMENT_COUNT",
+            "'same length', /orders/42, /archive/orders, SHARED_STATIC_SEGMENT|SAME_SEGMENT_COUNT",
+            "'no static segment', /orders/42, /users/{*}, SAME_SEGMENT_COUNT",
+            "'wildcards only', /orders/42, /{*}/{*}, SAME_SEGMENT_COUNT"
     })
-    void should_score_route_candidate(
-            String caseName, String route, String candidate, int expectedScore) {
-        assertThat(ApiRouteCandidateMatcher.score(route, candidate)).isEqualTo(expectedScore);
+    void should_describe_route_candidate_structure(
+            String caseName, String route, String candidate, String expectedReasons) {
+        assertThat(ApiRouteCandidateMatcher.suggestionReasons(route, candidate))
+                .extracting(Enum::name)
+                .containsExactly(expectedReasons.split("\\|"));
     }
 }

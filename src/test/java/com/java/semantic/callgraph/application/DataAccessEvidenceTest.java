@@ -34,7 +34,6 @@ class DataAccessEvidenceTest {
         assertThat(match).isPresent();
         assertThat(match.orElseThrow().strategy()).isEqualTo(ResolutionStrategy.MYBATIS_MAPPER);
         assertThat(match.orElseThrow().opaqueSymbol()).isEqualTo("com.example.OrderMapper#selectOrder(String)");
-        assertThat(match.orElseThrow().confidence()).isEqualTo(1.0d);
         assertThat(match.orElseThrow().evidence())
                 .containsExactly("mapper SQL: select * from orders where id = #{id}");
         assertThat(match.orElseThrow().declarationTarget()).contains(declarationTarget);
@@ -55,7 +54,6 @@ class DataAccessEvidenceTest {
         assertThat(match).isPresent();
         assertThat(match.orElseThrow().strategy()).isEqualTo(ResolutionStrategy.MYBATIS_MAPPER);
         assertThat(match.orElseThrow().opaqueSymbol()).isEqualTo("com.example.HybridMapper#selectOrder(String)");
-        assertThat(match.orElseThrow().confidence()).isEqualTo(1.0d);
         assertThat(match.orElseThrow().evidence())
                 .containsExactly("mapper SQL: select * from orders where id = #{id}");
         assertThat(match.orElseThrow().declarationTarget()).contains(declarationTarget);
@@ -74,7 +72,6 @@ class DataAccessEvidenceTest {
         assertThat(match).isPresent();
         assertThat(match.orElseThrow().strategy()).isEqualTo(ResolutionStrategy.SPRING_DATA_REPOSITORY);
         assertThat(match.orElseThrow().opaqueSymbol()).isEqualTo("com.example.OrderRepository#findById(Long)");
-        assertThat(match.orElseThrow().confidence()).isEqualTo(1.0d);
         assertThat(match.orElseThrow().evidence()).containsExactly("extends JpaRepository");
         assertThat(match.orElseThrow().declarationTarget()).contains(declarationTarget);
     }
@@ -107,7 +104,6 @@ class DataAccessEvidenceTest {
         assertThat(match).isPresent();
         assertThat(match.orElseThrow().strategy()).isEqualTo(ResolutionStrategy.DATA_ACCESS_WITHOUT_EVIDENCE);
         assertThat(match.orElseThrow().opaqueSymbol()).isEqualTo("com.example.PaymentMapper#insertPayment(Payment)");
-        assertThat(match.orElseThrow().confidence()).isEqualTo(0.5d);
         assertThat(match.orElseThrow().evidence())
                 .containsExactly("@Mapper without SQL or known supertype");
         assertThat(match.orElseThrow().declarationTarget()).contains(declarationTarget);

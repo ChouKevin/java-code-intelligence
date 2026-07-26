@@ -21,7 +21,7 @@ class ApiRouteCandidateTest {
             "1111111111111111111111111111111111111111";
 
     @Test
-    void should_preserve_every_field_when_candidate_is_mapped_from_entry_point_ref() {
+    void should_preserve_every_field_when_candidate_is_mapped_from_route_match() {
         ApiEntryPointRef ref = new ApiEntryPointRef(
                 "repo-a",
                 REVISION,
@@ -32,7 +32,9 @@ class ApiRouteCandidateTest {
                 "/orders/{*}",
                 unresolved());
 
-        ApiRouteCandidate candidate = ApiRouteCandidate.from(ref);
+        ApiRouteCandidate candidate = ApiRouteCandidate.from(new ApiRouteMatch(
+                ref,
+                List.of(ApiRouteMatchReason.TEMPLATE_MATCH, ApiRouteMatchReason.HTTP_METHOD_MATCH)));
 
         assertThat(candidate).isEqualTo(new ApiRouteCandidate(
                 "repo-a",
@@ -42,7 +44,8 @@ class ApiRouteCandidateTest {
                 "com.example.orders",
                 "OrderController",
                 "findOrder",
-                unresolved()));
+                unresolved(),
+                List.of(ApiRouteMatchReason.TEMPLATE_MATCH, ApiRouteMatchReason.HTTP_METHOD_MATCH)));
     }
 
     @Test
@@ -76,8 +79,8 @@ class ApiRouteCandidateTest {
 
         service.reload(snapshot, new RepositorySyntax(List.of(entryPointClass), List.of()));
 
-        ApiEntryPointRef ref = service.lookup("/orders/123", "GET").orElseThrow();
-        ApiRouteCandidate candidate = ApiRouteCandidate.from(ref);
+        ApiRouteMatch match = service.lookupMatches("/orders/123", "GET", "").matches().getFirst();
+        ApiRouteCandidate candidate = ApiRouteCandidate.from(match);
 
         assertThat(candidate.analysisTarget()).isSameAs(resolution);
         assertThat(candidate.analysisTarget().target()).get().isSameAs(target);

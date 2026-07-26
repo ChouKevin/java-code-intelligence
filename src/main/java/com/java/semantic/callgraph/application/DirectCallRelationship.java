@@ -22,7 +22,6 @@ record DirectCallRelationship(
         SemanticRange callSite,
         String expression,
         ResolutionStrategy strategy,
-        double confidence,
         List<String> evidence,
         List<MethodTarget> candidates,
         Optional<SyntaxInvocation> invocation,
@@ -36,8 +35,6 @@ record DirectCallRelationship(
         callSite = Objects.requireNonNull(callSite, "callSite is required");
         Assert.hasText(expression, "expression is required");
         strategy = Objects.requireNonNull(strategy, "strategy is required");
-        Assert.isTrue(confidence >= 0.0d && confidence <= 1.0d,
-                "confidence must be between zero and one");
         evidence = List.copyOf(Objects.requireNonNull(evidence, "evidence is required"));
         candidates = List.copyOf(Objects.requireNonNull(candidates, "candidates are required"));
         invocation = Objects.requireNonNull(invocation, "invocation is required");
@@ -51,7 +48,6 @@ record DirectCallRelationship(
             SemanticRange callSite,
             String expression,
             ResolutionStrategy strategy,
-            double confidence,
             List<String> evidence) {
         return new DirectCallRelationship(
                 Status.LOCAL,
@@ -61,7 +57,6 @@ record DirectCallRelationship(
                 callSite,
                 expression,
                 strategy,
-                confidence,
                 evidence,
                 List.of(),
                 Optional.empty(),
@@ -82,7 +77,6 @@ record DirectCallRelationship(
                 callSite,
                 expression,
                 ResolutionStrategy.EXTERNAL_LIBRARY,
-                1.0d,
                 evidence,
                 List.of(),
                 Optional.empty(),
@@ -93,7 +87,6 @@ record DirectCallRelationship(
             SemanticRange callSite,
             String expression,
             ResolutionStrategy strategy,
-            double confidence,
             List<MethodTarget> candidates) {
         return new DirectCallRelationship(
                 Status.AMBIGUOUS,
@@ -103,7 +96,6 @@ record DirectCallRelationship(
                 callSite,
                 expression,
                 strategy,
-                confidence,
                 List.of(),
                 candidates,
                 Optional.empty(),
@@ -113,16 +105,14 @@ record DirectCallRelationship(
     static DirectCallRelationship unresolved(
             SemanticRange callSite,
             String expression,
-            ResolutionStrategy strategy,
-            double confidence) {
-        return unresolved(callSite, expression, strategy, confidence, Optional.empty(), Optional.empty());
+            ResolutionStrategy strategy) {
+        return unresolved(callSite, expression, strategy, Optional.empty(), Optional.empty());
     }
 
     static DirectCallRelationship unresolved(
             SemanticRange callSite,
             String expression,
             ResolutionStrategy strategy,
-            double confidence,
             Optional<SyntaxInvocation> invocation,
             Optional<MethodTarget> declarationTarget) {
         return new DirectCallRelationship(
@@ -133,7 +123,6 @@ record DirectCallRelationship(
                 callSite,
                 expression,
                 strategy,
-                confidence,
                 List.of(),
                 List.of(),
                 invocation,

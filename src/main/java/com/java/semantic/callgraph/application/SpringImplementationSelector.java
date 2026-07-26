@@ -46,7 +46,7 @@ public final class SpringImplementationSelector {
 
     private ImplementationSelection.Selected selected(
             ImplementationCandidate candidate, ResolutionStrategy strategy) {
-        return new ImplementationSelection.Selected(candidate, strategy, 1.0d);
+        return new ImplementationSelection.Selected(candidate, strategy);
     }
 
     private ImplementationSelection.Ambiguous ambiguous(List<ImplementationCandidate> candidates) {

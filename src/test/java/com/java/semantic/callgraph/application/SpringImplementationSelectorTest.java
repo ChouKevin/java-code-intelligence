@@ -50,7 +50,7 @@ class SpringImplementationSelectorTest {
                 .select(invocation(""), List.of(fallback, primary));
 
         assertThat(selection).isEqualTo(new ImplementationSelection.Selected(
-                primary, ResolutionStrategy.SPRING_BEAN_BY_PRIMARY, 1.0d));
+                primary, ResolutionStrategy.SPRING_BEAN_BY_PRIMARY));
     }
 
     @Test
@@ -61,7 +61,7 @@ class SpringImplementationSelectorTest {
                 .select(invocation(""), List.of(defaultCandidate));
 
         assertThat(selection).isEqualTo(new ImplementationSelection.Selected(
-                defaultCandidate, ResolutionStrategy.SPRING_SINGLE_IMPLEMENTATION, 1.0d));
+                defaultCandidate, ResolutionStrategy.SPRING_SINGLE_IMPLEMENTATION));
     }
 
     @Test

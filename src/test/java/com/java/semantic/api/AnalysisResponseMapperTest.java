@@ -58,7 +58,6 @@ class AnalysisResponseMapperTest {
                                 callSite,
                                 "place(orderId)",
                                 ResolutionStrategy.LOMBOK_GENERATED,
-                                1.0d,
                                 List.of("lombok-generated-accessor")),
                         new GraphEdge(
                                 jdtCaller,
@@ -66,7 +65,6 @@ class AnalysisResponseMapperTest {
                                 callSite,
                                 "place(orderId)",
                                 ResolutionStrategy.JDT_CALL_HIERARCHY,
-                                1.0d,
                                 List.of("jdt-call-hierarchy"))),
                 List.of(),
                 List.of());

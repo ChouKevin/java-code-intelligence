@@ -26,7 +26,11 @@ class ApiRouteCandidateResponseTest {
     private static Stream<Arguments> missingRequiredValues() {
         return Stream.of(
                 Arguments.of("missing analysis target", (Executable) () -> new ApiRouteCandidateResponse(
-                        "repo", "revision", "GET", "/orders", "com.example", "OrderController", "find", null)),
+                        "repo", "revision", "GET", "/orders", "com.example", "OrderController", "find", null,
+                        List.of())),
+                Arguments.of("missing match reasons", (Executable) () -> new ApiRouteCandidateResponse(
+                        "repo", "revision", "GET", "/orders", "com.example", "OrderController", "find",
+                        new MethodTargetResolutionResponse("UNRESOLVED", null, List.of(), "NOT_FOUND"), null)),
                 Arguments.of("missing status", (Executable) () -> new MethodTargetResolutionResponse(
                         null, null, List.of(), "")),
                 Arguments.of("missing reason code", (Executable) () -> new MethodTargetResolutionResponse(

@@ -114,7 +114,6 @@ public final class SemanticCallGraphBuilder {
                     relationship.target().orElseThrow(),
                     relationship,
                     relationship.strategy(),
-                    relationship.confidence(),
                     relationship.semanticMethod().orElseThrow());
         } else if (DirectCallRelationship.Status.EXTERNAL.equals(relationship.status())) {
             state.addExternalEdge(callerTarget, relationship.externalSymbol().orElseThrow(), relationship);
@@ -162,8 +161,7 @@ public final class SemanticCallGraphBuilder {
                     callerTarget,
                     relationship.target().orElseThrow(),
                     relationship,
-                    relationship.strategy(),
-                    relationship.confidence());
+                    relationship.strategy());
         } else if (DirectCallRelationship.Status.EXTERNAL.equals(relationship.status())) {
             state.addExternalEdge(callerTarget, relationship.externalSymbol().orElseThrow(), relationship);
         } else if (DirectCallRelationship.Status.AMBIGUOUS.equals(relationship.status())) {
@@ -237,21 +235,19 @@ public final class SemanticCallGraphBuilder {
                 MethodTarget target,
                 DirectCallRelationship relationship,
                 ResolutionStrategy strategy,
-                double confidence,
                 SemanticMethod semanticMethod) {
             LocalNode callee = localNodes.computeIfAbsent(target,
                     ignored -> LocalNode.full(traversalState.localNodeId(target), target, 1, requestedDepth));
             semanticMethods.putIfAbsent(target, semanticMethod);
-            addEdge(caller, callee.nodeId(), relationship, strategy, confidence);
+            addEdge(caller, callee.nodeId(), relationship, strategy);
         }
 
         void addDepthTwoEdge(
                 MethodTarget caller,
                 MethodTarget target,
                 DirectCallRelationship relationship,
-                ResolutionStrategy strategy,
-                double confidence) {
-            pendingDepthTwo.add(new PendingDepthTwoEdge(caller, target, relationship, strategy, confidence));
+                ResolutionStrategy strategy) {
+            pendingDepthTwo.add(new PendingDepthTwoEdge(caller, target, relationship, strategy));
         }
 
         void hydrateDepthTwo() {
@@ -276,13 +272,13 @@ public final class SemanticCallGraphBuilder {
             }
             for (PendingDepthTwoEdge pending : pendingDepthTwo) {
                 LocalNode target = localNodes.get(pending.target());
-                addEdge(pending.caller(), target.nodeId(), pending.relationship(), pending.strategy(), pending.confidence());
+                addEdge(pending.caller(), target.nodeId(), pending.relationship(), pending.strategy());
             }
         }
 
         void addExternalEdge(MethodTarget caller, String symbol, DirectCallRelationship relationship) {
             CallNodeId nodeId = externalNodes.computeIfAbsent(symbol, traversalState::externalNodeId);
-            addEdge(caller, nodeId, relationship, ResolutionStrategy.EXTERNAL_LIBRARY, 1.0d);
+            addEdge(caller, nodeId, relationship, ResolutionStrategy.EXTERNAL_LIBRARY);
         }
 
         void addUnresolved(MethodTarget caller, DirectCallRelationship relationship) {
@@ -359,7 +355,7 @@ public final class SemanticCallGraphBuilder {
             CallNodeId nodeId = match.declarationTarget()
                     .map(this::opaqueLocalNodeId)
                     .orElseGet(() -> opaqueExternalNodeId(match.opaqueSymbol()));
-            addEdge(caller, nodeId, relationship, match.strategy(), match.confidence(), match.evidence());
+            addEdge(caller, nodeId, relationship, match.strategy(), match.evidence());
         }
 
         private CallNodeId opaqueLocalNodeId(MethodTarget target) {
@@ -504,9 +500,8 @@ public final class SemanticCallGraphBuilder {
                 MethodTarget caller,
                 CallNodeId callee,
                 DirectCallRelationship relationship,
-                ResolutionStrategy strategy,
-                double confidence) {
-            addEdge(caller, callee, relationship, strategy, confidence, relationship.evidence());
+                ResolutionStrategy strategy) {
+            addEdge(caller, callee, relationship, strategy, relationship.evidence());
         }
 
         private void addEdge(
@@ -514,7 +509,6 @@ public final class SemanticCallGraphBuilder {
                 CallNodeId callee,
                 DirectCallRelationship relationship,
                 ResolutionStrategy strategy,
-                double confidence,
                 List<String> evidence) {
             CallNodeId callerId = localNodes.get(caller).nodeId();
             CallSiteRange range = callSite(caller, relationship.callSite());
@@ -522,7 +516,7 @@ public final class SemanticCallGraphBuilder {
             if (!edgeKeys.add(key)) {
                 return;
             }
-            edges.add(new GraphEdge(callerId, callee, range, relationship.expression(), strategy, confidence, evidence));
+            edges.add(new GraphEdge(callerId, callee, range, relationship.expression(), strategy, evidence));
         }
 
         private CallSiteRange callSite(MethodTarget caller, SemanticRange range) {
@@ -541,8 +535,7 @@ public final class SemanticCallGraphBuilder {
                 MethodTarget caller,
                 MethodTarget target,
                 DirectCallRelationship relationship,
-                ResolutionStrategy strategy,
-                double confidence) {
+                ResolutionStrategy strategy) {
         }
 
         private record LocalNode(

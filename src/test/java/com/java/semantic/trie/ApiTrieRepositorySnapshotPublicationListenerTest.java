@@ -58,12 +58,12 @@ class ApiTrieRepositorySnapshotPublicationListenerTest {
         ApiTrieRepositorySnapshotPublicationListener listener = listener(trie);
 
         listener.beforeMutation(newSnapshot.repositoryId());
-        assertThat(trie.lookupCandidates("/old", "GET", "")).isEmpty();
+        assertThat(refs(trie.lookupMatches("/old", "GET", ""))).isEmpty();
 
         listener.afterPublication(newSnapshot);
 
-        assertThat(trie.lookupCandidates("/unfiltered", "GET", "")).isEmpty();
-        assertThat(trie.lookupCandidates("/new", "GET", ""))
+        assertThat(refs(trie.lookupMatches("/unfiltered", "GET", ""))).isEmpty();
+        assertThat(refs(trie.lookupMatches("/new", "GET", "")))
                 .singleElement()
                 .extracting(ApiEntryPointRef::analyzedRevision)
                 .isEqualTo(SHA_TWO.value());
@@ -83,8 +83,8 @@ class ApiTrieRepositorySnapshotPublicationListenerTest {
 
         listener.beforePublication(orders.repositoryId());
 
-        assertThat(trie.lookupCandidates("/old", "GET", "")).isEmpty();
-        assertThat(trie.lookupCandidates("/catalog", "GET", ""))
+        assertThat(refs(trie.lookupMatches("/old", "GET", ""))).isEmpty();
+        assertThat(refs(trie.lookupMatches("/catalog", "GET", "")))
                 .singleElement()
                 .extracting(ApiEntryPointRef::repoId, ApiEntryPointRef::analyzedRevision)
                 .containsExactly("catalog", SHA_TWO.value());
@@ -104,8 +104,8 @@ class ApiTrieRepositorySnapshotPublicationListenerTest {
 
         assertThatThrownBy(() -> listener.afterPublication(newSnapshot)).isSameAs(failure);
 
-        assertThat(trie.lookupCandidates("/old", "GET", "")).isEmpty();
-        assertThat(trie.lookupCandidates("/new", "GET", "")).isEmpty();
+        assertThat(refs(trie.lookupMatches("/old", "GET", ""))).isEmpty();
+        assertThat(refs(trie.lookupMatches("/new", "GET", ""))).isEmpty();
         verifyNoInteractions(filter);
     }
 
@@ -126,8 +126,8 @@ class ApiTrieRepositorySnapshotPublicationListenerTest {
 
         assertThatThrownBy(() -> listener.afterPublication(newSnapshot)).isSameAs(failure);
 
-        assertThat(trie.lookupCandidates("/old", "GET", "")).isEmpty();
-        assertThat(trie.lookupCandidates("/new", "GET", "")).isEmpty();
+        assertThat(refs(trie.lookupMatches("/old", "GET", ""))).isEmpty();
+        assertThat(refs(trie.lookupMatches("/new", "GET", ""))).isEmpty();
     }
 
     @Test
@@ -165,16 +165,20 @@ class ApiTrieRepositorySnapshotPublicationListenerTest {
 
         assertThatThrownBy(() -> listener.afterPublication(ordersNew)).isSameAs(failure);
 
-        assertThat(trie.lookupCandidates("/shared", "GET", ""))
+        assertThat(refs(trie.lookupMatches("/shared", "GET", "")))
                 .singleElement()
                 .extracting(ApiEntryPointRef::repoId, ApiEntryPointRef::analyzedRevision)
                 .containsExactly("catalog", SHA_ONE.value());
-        assertThat(trie.lookupCandidates("/shared", "GET", "orders")).isEmpty();
+        assertThat(refs(trie.lookupMatches("/shared", "GET", "orders"))).isEmpty();
     }
 
     private ApiTrieRepositorySnapshotPublicationListener listener(ApiTrieService trie) {
         return new ApiTrieRepositorySnapshotPublicationListener(
                 trie, syntaxExtractionService, filter);
+    }
+
+    private static List<ApiEntryPointRef> refs(ApiRouteMatchBatch batch) {
+        return batch.matches().stream().map(ApiRouteMatch::ref).toList();
     }
 
     private static RepositorySnapshot snapshot(String repoId, RepositoryRevision revision) {

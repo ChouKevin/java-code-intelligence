@@ -1,5 +1,8 @@
 package com.java.semantic.api.dto;
 
+import com.java.semantic.trie.ApiRouteMatchReason;
+
+import java.util.List;
 import java.util.Objects;
 
 public record ApiRouteCandidateResponse(
@@ -10,9 +13,12 @@ public record ApiRouteCandidateResponse(
         String packageName,
         String className,
         String methodName,
-        MethodTargetResolutionResponse analysisTarget) {
+        MethodTargetResolutionResponse analysisTarget,
+        List<ApiRouteMatchReason> matchReasons) {
 
     public ApiRouteCandidateResponse {
         analysisTarget = Objects.requireNonNull(analysisTarget, "analysisTarget is required");
+        matchReasons = List.copyOf(Objects.requireNonNull(matchReasons, "matchReasons are required"));
     }
+
 }

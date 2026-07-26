@@ -36,67 +36,46 @@ class ApiRouteApplicationServiceTest {
     }
 
     @Test
-    void should_map_lookup_refs_by_named_accessors_and_preserve_candidate_revision() {
-        ApiEntryPointRef ref = new ApiEntryPointRef(
-                "orders",
-                SHA_ONE.value(),
-                "com.acme.order",
-                "OrderController",
-                "getOrder",
-                "GET",
-                "/orders/{*}",
-                unresolved());
-        when(apiTrieService.lookupCandidates("/orders/42", "GET", "orders"))
-                .thenReturn(List.of(ref));
+    void should_preserve_lookup_match_reasons_and_observations() {
+        ApiEntryPointRef ref = ref("orders", SHA_ONE.value(), "OrderController", "/orders/{id}");
+        ApiRouteMatchBatch batch = new ApiRouteMatchBatch(
+                List.of(new ApiRouteMatch(ref, List.of(
+                        ApiRouteMatchReason.TEMPLATE_MATCH,
+                        ApiRouteMatchReason.HTTP_METHOD_MATCH))),
+                List.of());
+        when(apiTrieService.lookupMatches("/orders/42", "GET", "orders")).thenReturn(batch);
 
-        List<ApiRouteCandidate> candidates = service.lookup(
+        assertThat(service.lookupMatches(
                 "/orders/42",
                 Optional.of("GET"),
-                Optional.of(RepositoryId.of("orders")));
-
-        assertThat(candidates).containsExactly(new ApiRouteCandidate(
-                "orders",
-                SHA_ONE.value(),
-                "GET",
-                "/orders/{*}",
-                "com.acme.order",
-                "OrderController",
-                "getOrder",
-                unresolved()));
-    }
-
-    @Test
-    void should_return_empty_list_when_trie_has_no_lookup_candidate() {
-        when(apiTrieService.lookupCandidates("/missing", "", "")).thenReturn(List.of());
-
-        assertThat(service.lookup("/missing", Optional.empty(), Optional.empty())).isEmpty();
+                Optional.of(RepositoryId.of("orders"))))
+                .isSameAs(batch);
+        verify(apiTrieService).lookupMatches("/orders/42", "GET", "orders");
     }
 
     @ParameterizedTest
     @ValueSource(ints = {0, 21})
     void should_reject_suggestion_limit_outside_contract(int limit) {
-        assertThatThrownBy(() -> service.suggest(
+        assertThatThrownBy(() -> service.suggestMatches(
                 "/orders", Optional.empty(), Optional.empty(), limit))
                 .isInstanceOf(IllegalArgumentException.class);
     }
 
     @Test
-    void should_forward_optional_method_scope_and_limit_to_suggest_without_reordering() {
-        ApiEntryPointRef first = ref("orders", SHA_ONE.value(), "FirstController", "/orders/{id}");
-        ApiEntryPointRef second = ref("orders", SHA_ONE.value(), "SecondController", "/orders/{*}");
-        when(apiTrieService.suggestCandidates("/order/42", "POST", "orders", 2))
-                .thenReturn(List.of(first, second));
+    void should_preserve_suggestion_truncation_observation() {
+        ApiRouteMatchBatch batch = new ApiRouteMatchBatch(
+                List.of(),
+                List.of(new ApiRouteObservation(
+                        ApiRouteObservationCode.TRUNCATED_CANDIDATES,
+                        "route candidates were truncated by the requested limit")));
+        when(apiTrieService.suggestMatches("/order/42", "POST", "orders", 2)).thenReturn(batch);
 
-        List<ApiRouteCandidate> result = service.suggest(
+        assertThat(service.suggestMatches(
                 "/order/42",
                 Optional.of("POST"),
                 Optional.of(RepositoryId.of("orders")),
-                2);
-
-        assertThat(result).containsExactly(
-                ApiRouteCandidate.from(first),
-                ApiRouteCandidate.from(second));
-        verify(apiTrieService).suggestCandidates("/order/42", "POST", "orders", 2);
+                2)).isSameAs(batch);
+        verify(apiTrieService).suggestMatches("/order/42", "POST", "orders", 2);
     }
 
     private static ApiEntryPointRef ref(

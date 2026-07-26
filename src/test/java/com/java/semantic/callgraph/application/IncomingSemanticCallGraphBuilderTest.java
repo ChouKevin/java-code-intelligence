@@ -489,7 +489,7 @@ class IncomingSemanticCallGraphBuilderTest {
     }
 
     @Test
-    void should_reject_a_data_access_root_caller_without_high_confidence_evidence() {
+    void should_reject_a_data_access_root_caller_without_a_supported_opaque_data_access_strategy() {
         MethodTarget daoTarget = target("AuditDao", "latest");
         MethodTarget callerTarget = target("OrderService", "reconcile");
         SemanticMethod dao = incomingMethod(daoTarget, 10);

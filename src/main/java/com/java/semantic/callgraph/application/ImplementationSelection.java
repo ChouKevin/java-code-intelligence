@@ -3,7 +3,6 @@ package com.java.semantic.callgraph.application;
 import com.java.semantic.callgraph.domain.ResolutionStrategy;
 import com.java.semantic.identity.MethodTarget;
 import org.springframework.util.Assert;
-
 import java.util.List;
 import java.util.Objects;
 
@@ -12,14 +11,11 @@ public sealed interface ImplementationSelection permits ImplementationSelection.
 
     record Selected(
             ImplementationCandidate candidate,
-            ResolutionStrategy strategy,
-            double confidence) implements ImplementationSelection {
+            ResolutionStrategy strategy) implements ImplementationSelection {
 
         public Selected {
             candidate = Objects.requireNonNull(candidate, "candidate is required");
             strategy = Objects.requireNonNull(strategy, "strategy is required");
-            Assert.isTrue(confidence >= 0.0d && confidence <= 1.0d,
-                    "confidence must be between zero and one");
         }
     }
 

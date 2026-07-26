@@ -107,8 +107,7 @@ public final class DirectCallRelationshipResolver {
                 DirectCallRelationship relationship = DirectCallRelationship.unresolved(
                         callSite,
                         invocation.expression(),
-                        ResolutionStrategy.JDT_DEFINITION_FALLBACK,
-                        confidence(ResolutionStrategy.JDT_DEFINITION_FALLBACK));
+                        ResolutionStrategy.JDT_DEFINITION_FALLBACK);
                 relationships.add(relationship);
                 failures.add(new ResolutionFailure(exception, relationship));
             }
@@ -138,8 +137,7 @@ public final class DirectCallRelationshipResolver {
                 invocations(snapshot, index, caller), callSite);
         if (!invocation.isPresent()) {
             return DirectCallRelationship.unresolved(
-                    callSite, "semantic call", ResolutionStrategy.JDT_DEFINITION_FALLBACK,
-                    confidence(ResolutionStrategy.JDT_DEFINITION_FALLBACK));
+                    callSite, "semantic call", ResolutionStrategy.JDT_DEFINITION_FALLBACK);
         }
         SyntaxInvocation resolvedInvocation = invocation.orElseThrow();
         return resolveInvocation(
@@ -232,7 +230,6 @@ public final class DirectCallRelationshipResolver {
                         relationshipCallSite,
                         invocation.expression(),
                         ResolutionStrategy.JDT_DEFINITION_FALLBACK,
-                        confidence(ResolutionStrategy.JDT_DEFINITION_FALLBACK),
                         candidates);
             }
         }
@@ -240,7 +237,6 @@ public final class DirectCallRelationshipResolver {
                 relationshipCallSite,
                 invocation.expression(),
                 ResolutionStrategy.JDT_DEFINITION_FALLBACK,
-                confidence(ResolutionStrategy.JDT_DEFINITION_FALLBACK),
                 Optional.of(invocation),
                 Optional.empty());
     }
@@ -262,7 +258,7 @@ public final class DirectCallRelationshipResolver {
             log.debug("phase=callgraph-resolution outcome=unresolved reason=semantic-target-missing callerTargetId={}",
                     MethodTargetDiagnosticId.from(callerTarget));
             return DirectCallRelationship.unresolved(
-                    callSite, expression, strategy, confidence(strategy), Optional.of(invocation), Optional.empty());
+                    callSite, expression, strategy, Optional.of(invocation), Optional.empty());
         }
         SemanticMethod semanticTarget = call.target().orElseThrow();
         Optional<MethodTarget> target = targetFor(snapshot, index, semanticTarget);
@@ -270,12 +266,12 @@ public final class DirectCallRelationshipResolver {
             log.debug("phase=callgraph-resolution outcome=unresolved reason=syntax-index-miss callerTargetId={}",
                     MethodTargetDiagnosticId.from(callerTarget));
             return DirectCallRelationship.unresolved(
-                    callSite, expression, strategy, confidence(strategy), Optional.of(invocation), Optional.empty());
+                    callSite, expression, strategy, Optional.of(invocation), Optional.empty());
         }
         MethodTarget localTarget = target.orElseThrow();
         if (!interfaceDeclaration(index, localTarget)) {
             return DirectCallRelationship.local(
-                    localTarget, semanticTarget, callSite, expression, strategy, confidence(strategy), evidence);
+                    localTarget, semanticTarget, callSite, expression, strategy, evidence);
         }
         return selectImplementation(
                 snapshot, index, callerTarget, callSite, expression, strategy, semanticTarget, localTarget, invocation, evidence);
@@ -305,7 +301,7 @@ public final class DirectCallRelationshipResolver {
         } catch (RuntimeException exception) {
             throw new ResolutionFailure(
                     exception,
-                    DirectCallRelationship.unresolved(callSite, expression, strategy, confidence(strategy)));
+                    DirectCallRelationship.unresolved(callSite, expression, strategy));
         }
         List<ImplementationCandidate> distinct = candidates.stream()
                 .collect(Collectors.toMap(
@@ -318,13 +314,13 @@ public final class DirectCallRelationshipResolver {
                 .toList();
         if (CollectionUtils.isEmpty(distinct)) {
             return DirectCallRelationship.unresolved(
-                    callSite, expression, strategy, confidence(strategy),
+                    callSite, expression, strategy,
                     Optional.of(invocation), Optional.of(declarationTarget));
         }
         ImplementationSelection selection = implementationSelector.select(invocation, distinct);
         if (selection instanceof ImplementationSelection.Ambiguous ambiguous) {
             return DirectCallRelationship.ambiguous(
-                    callSite, expression, strategy, confidence(strategy), ambiguous.candidates());
+                    callSite, expression, strategy, ambiguous.candidates());
         }
         ImplementationSelection.Selected selected = (ImplementationSelection.Selected) selection;
         return DirectCallRelationship.local(
@@ -333,7 +329,6 @@ public final class DirectCallRelationshipResolver {
                 callSite,
                 expression,
                 selected.strategy(),
-                selected.confidence(),
                 evidence);
     }
 
@@ -436,10 +431,6 @@ public final class DirectCallRelationshipResolver {
         return new SyntaxRange(
                 new SyntaxPosition(range.start().line(), range.start().character()),
                 new SyntaxPosition(range.end().line(), range.end().character()));
-    }
-
-    private static double confidence(ResolutionStrategy strategy) {
-        return ResolutionStrategy.JDT_CALL_HIERARCHY.equals(strategy) ? 1.0d : 0.9d;
     }
 
     private static int compareParameters(List<String> left, List<String> right) {

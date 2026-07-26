@@ -650,7 +650,6 @@ class SemanticCallGraphBuilderTest {
         assertThat(fragment.edges()).singleElement().satisfies(edge -> {
             assertThat(edge.resolutionStrategy()).isEqualTo(
                     com.java.semantic.callgraph.domain.ResolutionStrategy.DATA_ACCESS_WITHOUT_EVIDENCE);
-            assertThat(edge.confidence()).isEqualTo(0.5d);
         });
         assertThat(fragment.nodes()).filteredOn(node -> node.target().filter(mapperTarget::equals).isPresent())
                 .singleElement().satisfies(node -> {

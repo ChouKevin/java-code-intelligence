@@ -84,7 +84,6 @@ class DirectCallRelationshipResolverTest {
             assertThat(relationship.target()).contains(localTarget);
             assertThat(relationship.semanticMethod()).contains(local);
             assertThat(relationship.strategy()).isEqualTo(ResolutionStrategy.JDT_CALL_HIERARCHY);
-            assertThat(relationship.confidence()).isEqualTo(1.0d);
             assertThat(relationship.evidence()).containsExactly("work()");
         });
     }
@@ -141,7 +140,6 @@ class DirectCallRelationshipResolverTest {
         assertThat(relationships).singleElement().satisfies(relationship -> {
             assertThat(relationship.status()).isEqualTo(DirectCallRelationship.Status.LOCAL);
             assertThat(relationship.strategy()).isEqualTo(ResolutionStrategy.JDT_DEFINITION_FALLBACK);
-            assertThat(relationship.confidence()).isEqualTo(0.9d);
             assertThat(relationship.expression()).isEqualTo("worker.work()");
             assertThat(relationship.evidence()).containsExactly("work()");
         });

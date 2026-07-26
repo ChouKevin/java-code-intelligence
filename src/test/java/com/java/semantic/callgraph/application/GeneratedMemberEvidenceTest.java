@@ -38,7 +38,6 @@ class GeneratedMemberEvidenceTest {
         assertThat(match).isPresent();
         assertThat(match.orElseThrow().strategy()).isEqualTo(ResolutionStrategy.LOMBOK_GENERATED);
         assertThat(match.orElseThrow().opaqueSymbol()).isEqualTo("com.example.Order#getTotal()");
-        assertThat(match.orElseThrow().confidence()).isEqualTo(1.0d);
     }
 
     @Test
@@ -70,7 +69,6 @@ class GeneratedMemberEvidenceTest {
             assertThat(match).isPresent();
             assertThat(match.orElseThrow().strategy()).isEqualTo(ResolutionStrategy.LOMBOK_GENERATED);
             assertThat(match.orElseThrow().opaqueSymbol()).isEqualTo(expectedSymbol.orElseThrow());
-            assertThat(match.orElseThrow().confidence()).isEqualTo(1.0d);
         } else {
             assertThat(match).isEmpty();
         }

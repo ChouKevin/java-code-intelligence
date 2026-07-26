@@ -12,7 +12,6 @@ public record GraphEdge(
         CallSiteRange callSite,
         String callExpression,
         ResolutionStrategy resolutionStrategy,
-        double confidence,
         List<String> evidence) {
 
     public GraphEdge {
@@ -21,8 +20,6 @@ public record GraphEdge(
         callSite = Objects.requireNonNull(callSite, "callSite is required");
         Assert.hasText(callExpression, "callExpression is required");
         resolutionStrategy = Objects.requireNonNull(resolutionStrategy, "resolutionStrategy is required");
-        Assert.isTrue(confidence >= 0.0d && confidence <= 1.0d,
-                "confidence must be between zero and one");
         evidence = List.copyOf(Objects.requireNonNull(evidence, "evidence is required"));
     }
 }

@@ -1,5 +1,6 @@
 package com.java.semantic.trie;
 
+import java.util.List;
 import java.util.Objects;
 
 import com.java.semantic.syntax.domain.MethodTargetResolution;
@@ -13,14 +14,17 @@ public record ApiRouteCandidate(
         String packageName,
         String className,
         String methodName,
-        MethodTargetResolution analysisTarget) {
+        MethodTargetResolution analysisTarget,
+        List<ApiRouteMatchReason> matchReasons) {
 
     public ApiRouteCandidate {
         analysisTarget = Objects.requireNonNull(analysisTarget, "analysisTarget is required");
+        matchReasons = List.copyOf(Objects.requireNonNull(matchReasons, "matchReasons are required"));
     }
 
-    public static ApiRouteCandidate from(ApiEntryPointRef ref) {
-        Objects.requireNonNull(ref, "ref is required");
+    public static ApiRouteCandidate from(ApiRouteMatch match) {
+        Objects.requireNonNull(match, "match is required");
+        ApiEntryPointRef ref = match.ref();
         return new ApiRouteCandidate(
                 ref.repoId(),
                 ref.analyzedRevision(),
@@ -29,6 +33,7 @@ public record ApiRouteCandidate(
                 ref.packageName(),
                 ref.className(),
                 ref.methodName(),
-                ref.analysisTarget());
+                ref.analysisTarget(),
+                match.matchReasons());
     }
 }

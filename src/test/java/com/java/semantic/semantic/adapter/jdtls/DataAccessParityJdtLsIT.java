@@ -157,7 +157,6 @@ class DataAccessParityJdtLsIT {
                 .filteredOn(edge -> ResolutionStrategy.DATA_ACCESS_WITHOUT_EVIDENCE.equals(edge.resolutionStrategy()))
                 .singleElement()
                 .satisfies(edge -> {
-                    assertThat(edge.confidence()).isEqualTo(0.5d);
                     GraphNode callee = nodeById(fragment, edge.calleeNodeId());
                     assertThat(callee.target().orElseThrow().className()).isEqualTo("AuditDao");
                 });

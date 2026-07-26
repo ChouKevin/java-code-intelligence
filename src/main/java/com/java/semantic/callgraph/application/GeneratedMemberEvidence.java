@@ -24,8 +24,6 @@ import org.springframework.util.StringUtils;
  */
 public final class GeneratedMemberEvidence {
 
-    private static final double CONFIDENCE = 1.0d;
-
     private static final Set<String> GETTER_ANNOTATIONS = Set.of("Data", "Getter", "Value");
     private static final Set<String> SETTER_ANNOTATIONS = Set.of("Data", "Setter");
     private static final Set<String> OBJECT_METHOD_ANNOTATIONS = Set.of("Data", "Value");
@@ -220,7 +218,7 @@ public final class GeneratedMemberEvidence {
         String suffix = field.map(matchedField -> " for field " + matchedField).orElse("");
         List<String> generatedEvidence = List.of("@" + annotation + " generated " + rule + suffix);
         return new EvidenceMatch(ResolutionStrategy.LOMBOK_GENERATED, opaqueSymbol, Optional.empty(),
-                CONFIDENCE, generatedEvidence);
+                generatedEvidence);
     }
 
     /**

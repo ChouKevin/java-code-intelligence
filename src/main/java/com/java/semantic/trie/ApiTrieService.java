@@ -22,7 +22,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Optional;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 
@@ -82,25 +81,22 @@ public class ApiTrieService {
                 snapshot.entriesByRepo(), repositoryId.value())));
     }
 
-    public List<ApiEntryPointRef> lookupCandidates(
-            String apiPath,
-            String httpMethod,
-            String repoScope) {
+    public ApiRouteMatchBatch lookupMatches(String apiPath, String httpMethod, String repoScope) {
         NormalizedApiPath normalized = ApiPathNormalizer.normalize(apiPath, httpMethod);
-        TrieState snapshot = current.get();
-        return search(
-                snapshot.root(),
+        List<ApiRouteMatch> matches = search(
+                current.get().root(),
                 splitPath(normalized.path()),
                 0,
                 normalized.httpMethod(),
-                repoScope);
+                repoScope).stream()
+                .map(ref -> new ApiRouteMatch(
+                        ref,
+                        ApiRouteCandidateMatcher.lookupReasons(normalized.path(), normalized.httpMethod(), ref)))
+                .toList();
+        return new ApiRouteMatchBatch(matches, List.of());
     }
 
-    public Optional<ApiEntryPointRef> lookup(String apiPath, String httpMethod) {
-        return lookupCandidates(apiPath, httpMethod, "").stream().findFirst();
-    }
-
-    public List<ApiEntryPointRef> suggestCandidates(
+    public ApiRouteMatchBatch suggestMatches(
             String apiPath,
             String httpMethod,
             String repoScope,
@@ -109,19 +105,25 @@ public class ApiTrieService {
             throw new IllegalArgumentException("limit must be greater than zero");
         }
         NormalizedApiPath normalized = ApiPathNormalizer.normalize(apiPath, httpMethod);
-        return current.get().entriesByRepo().values().stream()
+        List<ApiRouteMatch> bounded = current.get().entriesByRepo().values().stream()
                 .flatMap(List::stream)
                 .filter(ref -> matchesScope(ref, repoScope))
                 .filter(ref -> matchesSuggestionMethod(ref, normalized.httpMethod()))
-                .map(ref -> new ScoredRoute(
+                .map(ref -> new ApiRouteMatch(
                         ref,
-                        ApiRouteCandidateMatcher.score(normalized.path(), ref.routeTemplate())))
-                .filter(scored -> scored.score() >= 0)
-                .sorted(Comparator.comparingInt(ScoredRoute::score).reversed()
-                        .thenComparing(ScoredRoute::ref, CANDIDATE_COMPARATOR))
-                .limit(limit)
-                .map(ScoredRoute::ref)
+                        ApiRouteCandidateMatcher.suggestionReasons(normalized.path(), ref.routeTemplate())))
+                .filter(match -> match.matchReasons().contains(ApiRouteMatchReason.SHARED_STATIC_SEGMENT))
+                .sorted(Comparator.comparing(ApiRouteMatch::ref, CANDIDATE_COMPARATOR))
+                .limit(limit + 1L)
                 .toList();
+        boolean truncated = bounded.size() > limit;
+        List<ApiRouteMatch> matches = bounded.stream().limit(limit).toList();
+        List<ApiRouteObservation> observations = truncated
+                ? List.of(new ApiRouteObservation(
+                        ApiRouteObservationCode.TRUNCATED_CANDIDATES,
+                        "route candidates were truncated by the requested limit"))
+                : List.of();
+        return new ApiRouteMatchBatch(matches, observations);
     }
 
     private List<ApiEntryPointRef> extractRefs(
@@ -354,9 +356,6 @@ public class ApiTrieService {
     }
 
     private record RouteKey(String repoId, String httpMethod, String routeTemplate) {
-    }
-
-    private record ScoredRoute(ApiEntryPointRef ref, int score) {
     }
 
     private record TrieState(ApiTrieNode root, Map<String, List<ApiEntryPointRef>> entriesByRepo) {

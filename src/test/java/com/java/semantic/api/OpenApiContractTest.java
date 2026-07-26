@@ -196,7 +196,7 @@ class OpenApiContractTest {
         assertClosedObject(edge);
         assertExactPropertiesAndRequired(edge,
                 "callerNodeId", "calleeNodeId", "callSite", "callExpression", "resolutionStrategy", "category",
-                "confidence", "evidence");
+                "evidence");
         assertThat(edge.get("description")).asString().contains("caller", "callee");
         assertRequiredNonNullableArray(edge, "evidence");
         assertThat(schema(properties(edge), "evidence").get("description"))
@@ -453,14 +453,14 @@ class OpenApiContractTest {
                 new PositionResponse(0, 1));
         List<String> evidence = new ArrayList<>();
         GraphEdgeResponse edge = new GraphEdgeResponse(
-                "caller", "callee", range, "call()", "JDT", "RESOLVED_ANALYZABLE", 1.0, evidence);
+                "caller", "callee", range, "call()", "JDT", "RESOLVED_ANALYZABLE", evidence);
         evidence.add("mutated");
         assertThat(edge.evidence()).isEmpty();
         assertThatThrownBy(() -> new GraphEdgeResponse(
-                "caller", "callee", range, "call()", "JDT", "RESOLVED_ANALYZABLE", 1.0, null))
+                "caller", "callee", range, "call()", "JDT", "RESOLVED_ANALYZABLE", null))
                 .isInstanceOf(NullPointerException.class);
         assertThatThrownBy(() -> new GraphEdgeResponse(
-                "caller", "callee", range, "call()", "JDT", null, 1.0, evidence))
+                "caller", "callee", range, "call()", "JDT", null, evidence))
                 .isInstanceOf(NullPointerException.class);
 
         List<MethodTargetResponse> candidates = new ArrayList<>();
@@ -659,14 +659,44 @@ class OpenApiContractTest {
         Map<String, Object> candidate = schema(schemas, "ApiRouteCandidateResponse");
         assertExactPropertiesAndRequired(candidate,
                 "repoId", "analyzedRevision", "httpMethod", "routeTemplate",
-                "packageName", "className", "methodName");
+                "packageName", "className", "methodName", "analysisTarget", "matchReasons");
         assertThat(schema(properties(candidate), "analyzedRevision"))
                 .containsEntry("pattern", REVISION_PATTERN);
+        assertThat(schema(properties(candidate), "analysisTarget"))
+                .isEqualTo(Map.of("$ref", "#/components/schemas/MethodTargetResolutionResponse"));
+        assertThat(list(schema(schema(properties(candidate), "matchReasons"), "items").get("enum")))
+                .containsExactly(
+                        "EXACT_NORMALIZED_PATH",
+                        "TEMPLATE_MATCH",
+                        "HTTP_METHOD_MATCH",
+                        "SHARED_STATIC_SEGMENT",
+                        "POSITIONAL_STATIC_SEGMENT",
+                        "SAME_SEGMENT_COUNT");
+
+        Map<String, Object> targetResolution = schema(schemas, "MethodTargetResolutionResponse");
+        assertClosedObject(targetResolution);
+        assertExactProperties(targetResolution, "status", "target", "candidates", "reasonCode");
+        assertThat(required(targetResolution)).containsExactlyInAnyOrder("status", "candidates", "reasonCode");
+        assertThat(list(schema(properties(targetResolution), "status").get("enum")))
+                .containsExactly("RESOLVED", "UNRESOLVED", "AMBIGUOUS");
+        assertNullableReference(properties(targetResolution), "target", "MethodTarget");
+        assertRequiredNonNullableArray(targetResolution, "candidates");
+        assertThat(schema(schema(properties(targetResolution), "candidates"), "items"))
+                .isEqualTo(Map.of("$ref", "#/components/schemas/MethodTarget"));
+        assertThat(schema(properties(targetResolution), "reasonCode"))
+                .isEqualTo(Map.of("type", "string"));
 
         Map<String, Object> routeResponse = schema(schemas, "ApiRouteCandidatesResponse");
-        assertExactPropertiesAndRequired(routeResponse, "candidates");
+        assertExactPropertiesAndRequired(routeResponse, "candidates", "observations");
         assertThat(schema(schema(properties(routeResponse), "candidates"), "items"))
                 .isEqualTo(Map.of("$ref", "#/components/schemas/ApiRouteCandidateResponse"));
+        assertThat(schema(schema(properties(routeResponse), "observations"), "items"))
+                .isEqualTo(Map.of("$ref", "#/components/schemas/ApiRouteObservationResponse"));
+
+        Map<String, Object> observation = schema(schemas, "ApiRouteObservationResponse");
+        assertExactPropertiesAndRequired(observation, "code", "description");
+        assertThat(list(schema(properties(observation), "code").get("enum")))
+                .containsExactly("TRUNCATED_CANDIDATES");
 
         Map<String, Object> method = schema(schemas, "EntryPointMethodResponse");
         assertThat(method.get("oneOf")).isEqualTo(List.of(
@@ -678,6 +708,18 @@ class OpenApiContractTest {
                 entry("API", "#/components/schemas/ApiEntryPointMethodResponse"),
                 entry("MQ", "#/components/schemas/MqEntryPointMethodResponse"),
                 entry("SCHEDULE", "#/components/schemas/ScheduleEntryPointMethodResponse"));
+        assertEntryPointMethodAnalysisTarget(
+                schemas,
+                "ApiEntryPointMethodResponse",
+                "name", "description", "type", "apiUrl", "httpMethods", "swaggerDescriptions", "analysisTarget");
+        assertEntryPointMethodAnalysisTarget(
+                schemas,
+                "MqEntryPointMethodResponse",
+                "name", "description", "type", "broker", "destinations", "analysisTarget");
+        assertEntryPointMethodAnalysisTarget(
+                schemas,
+                "ScheduleEntryPointMethodResponse",
+                "name", "description", "type", "triggerKind", "triggerValue", "analysisTarget");
 
         Map<String, Object> entryPoint = schema(schemas, "EntryPointClassResponse");
         assertExactProperties(entryPoint,
@@ -735,6 +777,14 @@ class OpenApiContractTest {
     private void assertExactPropertiesAndRequired(Map<String, Object> schema, String... names) {
         assertExactProperties(schema, names);
         assertThat(required(schema)).containsExactlyInAnyOrderElementsOf(List.of(names));
+    }
+
+    private void assertEntryPointMethodAnalysisTarget(
+            Map<String, Object> schemas, String schemaName, String... propertyNames) {
+        Map<String, Object> response = schema(schemas, schemaName);
+        assertExactPropertiesAndRequired(response, propertyNames);
+        assertThat(schema(properties(response), "analysisTarget"))
+                .isEqualTo(Map.of("$ref", "#/components/schemas/MethodTargetResolutionResponse"));
     }
 
     private void assertExactProperties(Map<String, Object> schema, String... names) {

@@ -313,7 +313,6 @@ class AnalysisControllerTest {
                         new CallSiteRange(CALLER_TARGET.sourceFile(), 12, 3, 12, 15),
                         "place(orderId)",
                         ResolutionStrategy.JDT_CALL_HIERARCHY,
-                        1.0d,
                         List.of("incoming-call-hierarchy"))),
                 List.of(new GraphWarning(
                         "DESCENDANT_CALL_AMBIGUOUS",

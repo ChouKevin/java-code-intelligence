@@ -96,7 +96,6 @@ public final class AnalysisResponseMapper {
                 edge.callExpression(),
                 resolutionStrategy(edge.resolutionStrategy()),
                 ResolutionStrategyPartition.categoryOf(edge.resolutionStrategy()).name(),
-                edge.confidence(),
                 edge.evidence());
     }
 

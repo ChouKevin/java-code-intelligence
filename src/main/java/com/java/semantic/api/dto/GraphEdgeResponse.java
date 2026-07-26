@@ -11,7 +11,6 @@ public record GraphEdgeResponse(
         String callExpression,
         String resolutionStrategy,
         String category,
-        double confidence,
         List<String> evidence) {
 
     public GraphEdgeResponse {

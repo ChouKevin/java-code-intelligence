@@ -445,6 +445,30 @@ components:
             type: string
             minLength: 1
             pattern: '.*\S.*'
+    MethodTargetResolutionResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - status
+        - candidates
+        - reasonCode
+      properties:
+        status:
+          type: string
+          enum:
+            - RESOLVED
+            - UNRESOLVED
+            - AMBIGUOUS
+        target:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/MethodTarget'
+        candidates:
+          type: array
+          items:
+            $ref: '#/components/schemas/MethodTarget'
+        reasonCode:
+          type: string
     ApiRouteLookupRequest:
       type: object
       required:
@@ -620,7 +644,6 @@ components:
         - callExpression
         - resolutionStrategy
         - category
-        - confidence
         - evidence
       properties:
         callerNodeId:
@@ -673,9 +696,6 @@ components:
             RESOLVED_ANALYZABLE: target is proven and expandable; safe to traverse further or use as a re-root.
             RESOLVED_OPAQUE: target is proven but a terminal; never expandable and never a re-root.
             UNRESOLVED_GUESS: target is unverified; treat as a guess, not a proven fact.
-        confidence:
-          type: number
-          format: double
         evidence:
           type: array
           items:
@@ -813,6 +833,7 @@ components:
             $ref: '#/components/schemas/GraphError'
     ApiRouteCandidateResponse:
       type: object
+      additionalProperties: false
       required:
         - repoId
         - analyzedRevision
@@ -821,6 +842,8 @@ components:
         - packageName
         - className
         - methodName
+        - analysisTarget
+        - matchReasons
       properties:
         repoId:
           type: string
@@ -837,15 +860,47 @@ components:
           type: string
         methodName:
           type: string
+        analysisTarget:
+          $ref: '#/components/schemas/MethodTargetResolutionResponse'
+        matchReasons:
+          type: array
+          items:
+            type: string
+            enum:
+              - EXACT_NORMALIZED_PATH
+              - TEMPLATE_MATCH
+              - HTTP_METHOD_MATCH
+              - SHARED_STATIC_SEGMENT
+              - POSITIONAL_STATIC_SEGMENT
+              - SAME_SEGMENT_COUNT
     ApiRouteCandidatesResponse:
       type: object
+      additionalProperties: false
       required:
         - candidates
+        - observations
       properties:
         candidates:
           type: array
           items:
             $ref: '#/components/schemas/ApiRouteCandidateResponse'
+        observations:
+          type: array
+          items:
+            $ref: '#/components/schemas/ApiRouteObservationResponse'
+    ApiRouteObservationResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - code
+        - description
+      properties:
+        code:
+          type: string
+          enum:
+            - TRUNCATED_CANDIDATES
+        description:
+          type: string
     EntryPointsResponse:
       type: object
       required:
@@ -908,6 +963,7 @@ components:
         - apiUrl
         - httpMethods
         - swaggerDescriptions
+        - analysisTarget
       properties:
         name:
           type: string
@@ -927,6 +983,8 @@ components:
           type: array
           items:
             type: string
+        analysisTarget:
+          $ref: '#/components/schemas/MethodTargetResolutionResponse'
     MqEntryPointMethodResponse:
       type: object
       required:
@@ -935,6 +993,7 @@ components:
         - type
         - broker
         - destinations
+        - analysisTarget
       properties:
         name:
           type: string
@@ -953,6 +1012,8 @@ components:
           type: array
           items:
             type: string
+        analysisTarget:
+          $ref: '#/components/schemas/MethodTargetResolutionResponse'
     ScheduleEntryPointMethodResponse:
       type: object
       required:
@@ -961,6 +1022,7 @@ components:
         - type
         - triggerKind
         - triggerValue
+        - analysisTarget
       properties:
         name:
           type: string
@@ -980,6 +1042,8 @@ components:
             - UNSPECIFIED
         triggerValue:
           type: string
+        analysisTarget:
+          $ref: '#/components/schemas/MethodTargetResolutionResponse'
     RepositoryStatusResponse:
       type: object
       required:

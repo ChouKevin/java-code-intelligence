@@ -25,8 +25,9 @@ class TargetProofConstructorContractTest {
                     .singleElement()
                     .satisfies(constructor -> {
                     Class<?>[] parameterTypes = constructor.getParameterTypes();
-                    assertThat(parameterTypes[parameterTypes.length - 1])
-                            .isEqualTo(MethodTargetResolution.class);
+                    assertThat(constructor.getParameterCount())
+                            .isEqualTo(targetProofType.getRecordComponents().length);
+                    assertThat(parameterTypes).contains(MethodTargetResolution.class);
                 });
         }
 

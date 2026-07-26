@@ -32,7 +32,7 @@ public final class ApiRouteController {
     @PostMapping("/lookup")
     public ApiRouteCandidatesResponse lookup(
             @Valid @RequestBody ApiRouteLookupRequest request) {
-        return mapper.toResponse(service.lookup(
+        return mapper.toResponse(service.lookupMatches(
                 request.apiPath(),
                 optionalText(request.httpMethod()),
                 optionalRepository(request.repoScope())));
@@ -41,7 +41,7 @@ public final class ApiRouteController {
     @PostMapping("/suggest")
     public ApiRouteCandidatesResponse suggest(
             @Valid @RequestBody ApiRouteSuggestRequest request) {
-        return mapper.toResponse(service.suggest(
+        return mapper.toResponse(service.suggestMatches(
                 request.apiPath(),
                 optionalText(request.httpMethod()),
                 optionalRepository(request.repoScope()),
