@@ -11,6 +11,7 @@ import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
 import org.slf4j.MDC;
 
+import java.util.Optional;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -48,7 +49,8 @@ class ApiSecurityConfigTest {
         ApiSecurityProperties properties = new ApiSecurityProperties();
         properties.setApiToken("configured");
 
-        ChainResult result = invoke(config, properties, "valid.request-42");
+        ChainResult result = invoke(
+                config, properties, "POST", "/v1/discovery/event-listeners", "valid.request-42");
 
         assertThat(result.response().getStatus()).isEqualTo(401);
         assertThat(result.response().getHeader(RequestCorrelationFilter.REQUEST_ID_HEADER))
@@ -61,11 +63,25 @@ class ApiSecurityConfigTest {
     }
 
     @Test
+    void should_reject_incorrect_token_for_event_listener_discovery() throws Exception {
+        ApiSecurityConfig config = new ApiSecurityConfig();
+        ApiSecurityProperties properties = new ApiSecurityProperties();
+        properties.setApiToken("configured");
+
+        ChainResult result = invoke(
+                config, properties, "POST", "/v1/discovery/event-listeners", "valid.request-42", "incorrect");
+
+        assertThat(result.response().getStatus()).isEqualTo(401);
+        assertThat(result.downstreamInvoked()).isFalse();
+    }
+
+    @Test
     void should_correlate_before_rejecting_when_authentication_is_disabled() throws Exception {
         ApiSecurityConfig config = new ApiSecurityConfig();
         ApiSecurityProperties properties = new ApiSecurityProperties();
 
-        ChainResult result = invoke(config, properties, "not valid request id");
+        ChainResult result = invoke(
+                config, properties, "POST", "/v1/discovery/event-listeners", "not valid request id");
 
         String requestId = result.response().getHeader(RequestCorrelationFilter.REQUEST_ID_HEADER);
         assertThat(result.response().getStatus()).isEqualTo(403);
@@ -77,12 +93,29 @@ class ApiSecurityConfigTest {
         assertThat(MDC.get("requestId")).isNull();
     }
 
-    private ChainResult invoke(ApiSecurityConfig config, ApiSecurityProperties properties, String suppliedRequestId)
+    private ChainResult invoke(
+            ApiSecurityConfig config,
+            ApiSecurityProperties properties,
+            String method,
+            String path,
+            String suppliedRequestId)
+            throws Exception {
+        return invoke(config, properties, method, path, suppliedRequestId, null);
+    }
+
+    private ChainResult invoke(
+            ApiSecurityConfig config,
+            ApiSecurityProperties properties,
+            String method,
+            String path,
+            String suppliedRequestId,
+            String apiToken)
             throws Exception {
         RequestCorrelationFilter correlation = config.requestCorrelationFilter().getFilter();
         ApiTokenFilter token = config.apiTokenFilter(properties).getFilter();
-        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/v1/repositories");
+        MockHttpServletRequest request = new MockHttpServletRequest(method, path);
         request.addHeader(RequestCorrelationFilter.REQUEST_ID_HEADER, suppliedRequestId);
+        Optional.ofNullable(apiToken).ifPresent(value -> request.addHeader(ApiTokenFilter.API_TOKEN_HEADER, value));
         MockHttpServletResponse response = new MockHttpServletResponse();
         AtomicBoolean downstreamInvoked = new AtomicBoolean();
         FilterChain authenticationChain = (chainedRequest, chainedResponse) -> token.doFilter(

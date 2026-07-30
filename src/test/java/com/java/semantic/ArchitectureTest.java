@@ -250,6 +250,7 @@ class ArchitectureTest {
         classes()
                 .that().haveSimpleName("SemanticAnalysisApplicationService")
                 .or().haveSimpleName("EntryPointDiscoveryApplicationService")
+                .or().haveSimpleName("EventListenerDiscoveryApplicationService")
                 .should().callMethod(
                         RepositoryApplicationService.class,
                         "withSnapshot",

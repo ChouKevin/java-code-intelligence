@@ -23,14 +23,14 @@ public final class RepositorySyntaxIndex {
 
     private static final Comparator<ClassMetadata> CLASS_ORDER = Comparator
             .comparing(ClassMetadata::fullyQualifiedName)
-            .thenComparing(ClassMetadata::filePath)
+            .thenComparing(ClassMetadata::sourceFile)
             .thenComparingInt(metadata -> metadata.range().start().line())
             .thenComparingInt(metadata -> metadata.range().start().character())
             .thenComparing(metadata -> metadata.source().text());
 
     private static final Comparator<IndexedMethod> METHOD_ORDER = Comparator
             .comparing((IndexedMethod indexed) -> indexed.metadata().fullyQualifiedName())
-            .thenComparing(indexed -> indexed.metadata().filePath())
+            .thenComparing(indexed -> indexed.metadata().sourceFile())
             .thenComparingInt(indexed -> indexed.method().range().start().line())
             .thenComparingInt(indexed -> indexed.method().range().start().character())
             .thenComparingInt(indexed -> indexed.method().range().end().line())

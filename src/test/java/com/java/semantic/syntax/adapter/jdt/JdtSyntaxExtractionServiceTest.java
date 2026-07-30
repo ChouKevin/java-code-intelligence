@@ -16,6 +16,11 @@ import com.java.semantic.syntax.domain.ClassMetadata;
 import com.java.semantic.syntax.domain.RepositorySyntax;
 import com.java.semantic.syntax.domain.SyntaxInvocation;
 import com.java.semantic.syntax.domain.SyntaxPosition;
+import com.java.semantic.syntax.application.AnnotationMatchKind;
+import com.java.semantic.syntax.application.EventListenerDiscoveryPage;
+import com.java.semantic.syntax.application.EventListenerDiscoveryPolicy;
+import com.java.semantic.syntax.application.ListenerAnnotationEvidence;
+import com.java.semantic.syntax.application.ListenerAnnotationKind;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -30,6 +35,60 @@ class JdtSyntaxExtractionServiceTest {
     private static final String RESTRICTED_JAVA_PATH = "RESTRICTED_JAVA_PATH_SENTINEL";
     private static final String RESTRICTED_XML_PATH = "RESTRICTED_XML_PATH_SENTINEL";
     private static final String RESTRICTED_THROWABLE = "RESTRICTED_THROWABLE_SENTINEL";
+
+    @Test
+    void should_feed_unbound_spring_listener_annotation_and_canonical_target_into_discovery(@TempDir Path tempDir)
+            throws IOException {
+        Path repositoryRoot = tempDir.resolve("event-service");
+        Path sourceRoot = repositoryRoot.resolve("src/main/java/com/example");
+        Files.createDirectories(sourceRoot);
+        Files.writeString(sourceRoot.resolve("OrderPlaced.java"), """
+                package com.example;
+
+                class OrderPlaced {
+                }
+                """);
+        Files.writeString(sourceRoot.resolve("EventConsumer.java"), """
+                package com.example;
+
+                import org.springframework.context.event.EventListener;
+
+                class EventConsumer {
+                    @EventListener
+                    void consume(OrderPlaced event) {
+                    }
+                }
+                """);
+
+        RepositorySyntax syntax = new JdtSyntaxExtractionService().extract(repositoryRoot);
+        ClassMetadata eventConsumer = syntax.classes().stream()
+                .filter(metadata -> "com.example.EventConsumer".equals(metadata.fullyQualifiedName()))
+                .findFirst()
+                .orElseThrow();
+        ClassMetadata.MethodSignature consume = eventConsumer.methods().stream()
+                .filter(method -> "consume".equals(method.name()))
+                .findFirst()
+                .orElseThrow();
+        EventListenerDiscoveryPage discovery = new EventListenerDiscoveryPolicy().discover(
+                syntax, "com.example.OrderPlaced", 0, 50);
+
+        assertThat(consume.annotationEvidence()).singleElement().satisfies(annotation -> {
+            assertThat(annotation.writtenName()).isEqualTo("EventListener");
+            assertThat(annotation.resolvedType()).isEmpty();
+        });
+        assertThat(consume.analysisTarget().target()).hasValueSatisfying(target -> {
+            assertThat(target.parameterTypes()).containsExactly("com.example.OrderPlaced");
+            assertThat(target.sourceFile()).isEqualTo("src/main/java/com/example/EventConsumer.java");
+        });
+        assertThat(eventConsumer.sourceFile()).isEqualTo("src/main/java/com/example/EventConsumer.java");
+        assertThat(discovery.candidates().candidates()).singleElement().satisfies(candidate -> {
+            assertThat(candidate.target()).isEqualTo(consume.analysisTarget().target().orElseThrow());
+            assertThat(candidate.sourceLocation().sourceFile())
+                    .isEqualTo("src/main/java/com/example/EventConsumer.java");
+            assertThat(candidate.annotationEvidence()).containsExactly(new ListenerAnnotationEvidence(
+                    ListenerAnnotationKind.EVENT_LISTENER, AnnotationMatchKind.WRITTEN_NAME));
+        });
+    }
 
     @Test
     void should_still_return_the_other_files_when_one_source_file_fails_to_extract(@TempDir Path tempDir)

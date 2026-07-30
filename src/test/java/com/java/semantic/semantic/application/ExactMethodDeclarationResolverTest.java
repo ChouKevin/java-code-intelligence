@@ -201,7 +201,7 @@ class ExactMethodDeclarationResolverTest {
                 method.bodyTypeReferences(), method.namePosition(), resolution,
                 method.executableDeclaration(), method.overridableDeclaration());
         return new ClassMetadata(
-                metadata.className(), metadata.packageName(), metadata.fullyQualifiedName(), metadata.filePath(),
+                metadata.className(), metadata.packageName(), metadata.fullyQualifiedName(), metadata.sourceFile(),
                 metadata.kind(), metadata.isAbstract(), metadata.implementedTypes(), metadata.extendedTypes(),
                 metadata.annotations(), metadata.imports(), metadata.fields(), List.of(replacement),
                 metadata.hasFluentAccessors(), metadata.hasChainedAccessors(), metadata.profiles(), metadata.range(),

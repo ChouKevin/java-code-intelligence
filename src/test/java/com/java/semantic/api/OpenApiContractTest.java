@@ -45,6 +45,7 @@ class OpenApiContractTest {
     private static final String SOURCE_FILE_PATTERN = "^[^\\u0000-\\u001F\\u007F-\\u009F]*[^\\u0000-\\u0020\\u007F-\\u009F\\u1680\\u2000-\\u2006\\u2008-\\u200A\\u2028-\\u2029\\u205F\\u3000][^\\u0000-\\u001F\\u007F-\\u009F]*$";
     private static final String CLASS_NAME_PATTERN = "^[\\p{L}\\p{Nl}\\p{Sc}\\p{Pc}][\\p{L}\\p{Nl}\\p{Sc}\\p{Pc}\\p{Mn}\\p{Mc}\\p{Nd}]*(?:\\.[\\p{L}\\p{Nl}\\p{Sc}\\p{Pc}][\\p{L}\\p{Nl}\\p{Sc}\\p{Pc}\\p{Mn}\\p{Mc}\\p{Nd}]*)*$";
     private static final String METHOD_NAME_PATTERN = "^[\\p{L}\\p{Nl}\\p{Sc}\\p{Pc}][\\p{L}\\p{Nl}\\p{Sc}\\p{Pc}\\p{Mn}\\p{Mc}\\p{Nd}]*$";
+    private static final String EVENT_TYPE_PATTERN = "^(?:[\\p{L}_][\\p{L}\\p{N}_]*\\.)+[\\p{L}_][\\p{L}\\p{N}_]*(?:\\[\\])*$";
 
     private Map<String, Object> document;
 
@@ -71,7 +72,8 @@ class OpenApiContractTest {
                 "/v1/analyses/call-graphs/outgoing",
                 "/v1/analyses/call-graphs/incoming",
                 "/v1/api-routes/lookup",
-                "/v1/api-routes/suggest"));
+                "/v1/api-routes/suggest",
+                "/v1/discovery/event-listeners"));
         assertThat(paths.keySet()).doesNotContain(
                 "/v1/analyses/call-graph",
                 "/v1/analyses/call-graph/flatten",
@@ -93,6 +95,86 @@ class OpenApiContractTest {
         assertRequiredRequestBody(
                 operation(paths, "/v1/analyses/call-graphs/incoming", "post"),
                 "#/components/schemas/AnalyzeIncomingCallGraphRequest");
+    }
+
+    @Test
+    void should_describe_closed_revision_bound_event_listener_discovery_contract() {
+        Map<String, Object> paths = map(document.get("paths"));
+        Map<String, Object> schemas = schemas();
+
+        assertThat(map(paths.get("/v1/discovery/event-listeners"))).containsOnlyKeys("post");
+        Map<String, Object> operation = operation(paths, "/v1/discovery/event-listeners", "post");
+        assertThat(operation.get("operationId")).isEqualTo("discoverEventListeners");
+        assertRequiredRequestBody(operation, "#/components/schemas/DiscoverEventListenersRequest");
+        assertResponseCodes(operation, "200", "400", "401", "403", "404", "409", "500");
+        assertThat(map(map(operation.get("responses")).get("200")))
+                .isEqualTo(Map.of("$ref", "#/components/responses/EventListenerDiscovery"));
+
+        Map<String, Object> request = schema(schemas, "DiscoverEventListenersRequest");
+        assertClosedObject(request);
+        assertExactProperties(request, "repoId", "eventType", "expectedRevision", "offset", "limit");
+        assertThat(required(request)).containsExactlyInAnyOrder("repoId", "eventType", "expectedRevision");
+        assertThat(schema(properties(request), "repoId")).containsOnly(
+                entry("type", "string"),
+                entry("minLength", 1),
+                entry("pattern", "^[a-z0-9][a-z0-9._-]{0,63}$"));
+        assertThat(schema(properties(request), "eventType")).contains(
+                entry("maxLength", 1024), entry("pattern", EVENT_TYPE_PATTERN));
+        assertThat(schema(properties(request), "expectedRevision")).containsEntry("pattern", REVISION_PATTERN);
+        assertThat(schema(properties(request), "offset")).contains(
+                entry("default", 0), entry("minimum", 0));
+        assertThat(schema(properties(request), "limit")).contains(
+                entry("default", 50), entry("minimum", 1), entry("maximum", 100));
+
+        Map<String, Object> response = schema(schemas, "DiscoverEventListenersResponse");
+        assertClosedObject(response);
+        assertExactPropertiesAndRequired(response,
+                "repoId", "analyzedRevision", "requestedEventType", "candidates", "page", "observationSummaries");
+        assertThat(schema(properties(response), "candidates"))
+                .containsEntry("type", "array")
+                .containsEntry("items", Map.of("$ref", "#/components/schemas/EventListenerCandidateResponse"));
+        assertThat(schema(properties(response), "page"))
+                .isEqualTo(Map.of("$ref", "#/components/schemas/CandidatePageResponse"));
+        assertThat(schema(properties(response), "observationSummaries"))
+                .containsEntry("type", "array")
+                .containsEntry("items", Map.of("$ref", "#/components/schemas/ListenerObservationSummaryResponse"));
+
+        Map<String, Object> candidate = schema(schemas, "EventListenerCandidateResponse");
+        assertClosedObject(candidate);
+        assertExactPropertiesAndRequired(candidate, "target", "listenerAnnotations", "sourceRange");
+        assertThat(schema(properties(candidate), "target"))
+                .isEqualTo(Map.of("$ref", "#/components/schemas/MethodTarget"));
+        assertThat(schema(properties(candidate), "listenerAnnotations"))
+                .containsEntry("minItems", 1)
+                .containsEntry("items", Map.of("$ref", "#/components/schemas/ListenerAnnotationEvidenceResponse"));
+        assertThat(schema(properties(candidate), "sourceRange"))
+                .isEqualTo(Map.of("$ref", "#/components/schemas/SourceRange"));
+
+        Map<String, Object> page = schema(schemas, "CandidatePageResponse");
+        assertClosedObject(page);
+        assertExactPropertiesAndRequired(page, "offset", "limit", "returnedCount", "totalCount", "hasMore");
+
+        Map<String, Object> annotation = schema(schemas, "ListenerAnnotationEvidenceResponse");
+        assertClosedObject(annotation);
+        assertExactPropertiesAndRequired(annotation, "kind", "matchKind");
+        assertThat(schema(properties(annotation), "kind"))
+                .isEqualTo(Map.of("$ref", "#/components/schemas/ListenerAnnotationKind"));
+        assertThat(schema(properties(annotation), "matchKind"))
+                .isEqualTo(Map.of("$ref", "#/components/schemas/AnnotationMatchKind"));
+        assertThat(list(schema(schemas, "ListenerAnnotationKind").get("enum")))
+                .containsExactly("EVENT_LISTENER", "TRANSACTIONAL_EVENT_LISTENER");
+        assertThat(list(schema(schemas, "AnnotationMatchKind").get("enum")))
+                .containsExactly("RESOLVED_IDENTITY", "WRITTEN_NAME");
+
+        Map<String, Object> observation = schema(schemas, "ListenerObservationSummaryResponse");
+        assertClosedObject(observation);
+        assertExactPropertiesAndRequired(observation, "code", "totalCount", "samples");
+        assertThat(schema(properties(observation), "code"))
+                .isEqualTo(Map.of("$ref", "#/components/schemas/ListenerObservationCode"));
+        assertThat(list(schema(schemas, "ListenerObservationCode").get("enum")))
+                .containsExactly("LISTENER_TARGET_UNRESOLVED");
+        assertThat(schema(properties(observation), "samples"))
+                .contains(entry("maxItems", 5), entry("items", Map.of("$ref", "#/components/schemas/SourceRange")));
     }
 
     @Test
@@ -261,7 +343,9 @@ class OpenApiContractTest {
         assertRequiredNonNullableArray(response, "warnings");
         assertRequiredNonNullableArray(response, "errors");
 
-        assertThat(schemas.keySet()).noneMatch(name -> name.matches(".*(Flattened|Recursive|Cursor|Page|Session|AnalysisStatus).*"));
+        assertThat(schemas.keySet()).noneMatch(name -> name.matches(".*(Flattened|Recursive|Cursor|Session|AnalysisStatus).*"));
+        assertThat(schemas.keySet().stream().filter(name -> name.contains("Page")).toList())
+                .containsExactly("CandidatePageResponse");
     }
 
     @Test
@@ -572,6 +656,7 @@ class OpenApiContractTest {
                 .containsOnlyKeys("parameters", "get");
         assertThat(map(paths.get("/v1/api-routes/lookup"))).containsOnlyKeys("post");
         assertThat(map(paths.get("/v1/api-routes/suggest"))).containsOnlyKeys("post");
+        assertThat(map(paths.get("/v1/discovery/event-listeners"))).containsOnlyKeys("post");
 
         assertResponseCodes(operation(paths, "/v1/repositories", "get"), "200", "401", "403", "409");
         assertResponseCodes(operation(paths, "/v1/repositories/{repoId}", "get"),
@@ -586,6 +671,8 @@ class OpenApiContractTest {
                 "200", "400", "401", "403", "404", "409", "500");
         assertResponseCodes(operation(paths, "/v1/api-routes/lookup", "post"), "200", "400", "401", "403", "500");
         assertResponseCodes(operation(paths, "/v1/api-routes/suggest", "post"), "200", "400", "401", "403", "500");
+        assertResponseCodes(operation(paths, "/v1/discovery/event-listeners", "post"),
+                "200", "400", "401", "403", "404", "409", "500");
     }
 
     @Test
@@ -603,6 +690,9 @@ class OpenApiContractTest {
         assertRequiredRequestBody(
                 operation(paths, "/v1/api-routes/suggest", "post"),
                 "#/components/schemas/ApiRouteSuggestRequest");
+        assertRequiredRequestBody(
+                operation(paths, "/v1/discovery/event-listeners", "post"),
+                "#/components/schemas/DiscoverEventListenersRequest");
 
         Map<String, Object> entryPointOperation = operation(
                 paths, "/v1/repositories/{repoId}/entry-points", "get");

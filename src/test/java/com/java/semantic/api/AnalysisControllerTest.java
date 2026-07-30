@@ -1,5 +1,7 @@
 package com.java.semantic.api;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.java.semantic.api.security.ApiTokenFilter;
 import com.java.semantic.callgraph.domain.CallNodeId;
 import com.java.semantic.callgraph.domain.CallSiteRange;
@@ -19,6 +21,16 @@ import com.java.semantic.identity.MethodTarget;
 import com.java.semantic.repository.domain.RepositoryId;
 import com.java.semantic.repository.domain.RepositoryRevision;
 import com.java.semantic.semantic.application.SemanticAnalysisApplicationService;
+import com.java.semantic.syntax.application.AnnotationMatchKind;
+import com.java.semantic.syntax.application.CandidatePage;
+import com.java.semantic.syntax.application.EventListenerCandidate;
+import com.java.semantic.syntax.application.EventListenerDiscoveryApplicationService;
+import com.java.semantic.syntax.application.EventListenerDiscoveryPage;
+import com.java.semantic.syntax.application.ListenerAnnotationEvidence;
+import com.java.semantic.syntax.application.ListenerAnnotationKind;
+import com.java.semantic.syntax.application.ListenerSourceLocation;
+import com.java.semantic.syntax.application.RevisionBoundEventListenerDiscovery;
+import com.java.semantic.syntax.domain.SyntaxPosition;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
@@ -44,6 +56,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 class AnalysisControllerTest {
 
     private static final String TOKEN = "test-token";
+    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
     private static final RepositoryRevision REVISION = RepositoryRevision.ofSha("1".repeat(40));
     private static final MethodTarget TARGET = new MethodTarget(
             "src/main/java/com/acme/OrderService.java", "com.acme", "OrderService", "place", List.of());
@@ -53,12 +66,18 @@ class AnalysisControllerTest {
             "src/main/java/com/acme/AlphaOrderService.java", "com.acme", "AlphaOrderService", "place", List.of());
     private static final MethodTarget AMBIGUOUS_ZETA = new MethodTarget(
             "src/main/java/com/acme/ZetaOrderService.java", "com.acme", "ZetaOrderService", "place", List.of());
+    private static final MethodTarget DISCOVERED_TARGET = new MethodTarget(
+            "src/main/java/com/acme/OrderListener.java", "com.acme", "OrderListener", "onOrder",
+            List.of("com.acme.OrderPlaced"));
 
     @Autowired
     private MockMvc mockMvc;
 
     @MockitoBean
     private SemanticAnalysisApplicationService semanticAnalysisApplicationService;
+
+    @MockitoBean
+    private EventListenerDiscoveryApplicationService eventListenerDiscoveryApplicationService;
 
     @Test
     void should_map_only_the_outgoing_graph_contract() throws Exception {
@@ -288,6 +307,47 @@ class AnalysisControllerTest {
                 RepositoryId.of("orders"), REVISION, TARGET, 2);
     }
 
+    @Test
+    void should_accept_an_unmodified_discovery_target_for_outgoing_analysis() throws Exception {
+        given(eventListenerDiscoveryApplicationService.discover(any())).willReturn(discoveryResult());
+        given(semanticAnalysisApplicationService.analyzeOutgoing(
+                eq(RepositoryId.of("orders")), eq(REVISION), eq(DISCOVERED_TARGET), eq(2))).willReturn(fragment());
+
+        String discoveryResponse = mockMvc.perform(post("/v1/discovery/event-listeners")
+                        .header(ApiTokenFilter.API_TOKEN_HEADER, TOKEN)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "repoId":"orders",
+                                  "eventType":"com.acme.OrderPlaced",
+                                  "expectedRevision":"1111111111111111111111111111111111111111"
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+        JsonNode discovery = OBJECT_MAPPER.readTree(discoveryResponse);
+        String discoveredTarget = OBJECT_MAPPER.writeValueAsString(discovery.path("candidates").get(0).path("target"));
+
+        mockMvc.perform(post("/v1/analyses/call-graphs/outgoing")
+                        .header(ApiTokenFilter.API_TOKEN_HEADER, TOKEN)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "repoId":"%s",
+                                  "expectedRevision":"%s",
+                                  "depth":2,
+                                  "target":%s
+                                }
+                                """.formatted(
+                                discovery.path("repoId").asText(),
+                                discovery.path("analyzedRevision").asText(),
+                                discoveredTarget)))
+                .andExpect(status().isOk());
+
+        then(semanticAnalysisApplicationService).should().analyzeOutgoing(
+                RepositoryId.of("orders"), REVISION, DISCOVERED_TARGET, 2);
+    }
+
     private OutgoingGraphFragment fragment() {
         return new OutgoingGraphFragment(
                 GraphAnalysisStatus.SUCCESS,
@@ -322,6 +382,23 @@ class AnalysisControllerTest {
                         Optional.of(new CallSiteRange(CALLER_TARGET.sourceFile(), 12, 3, 12, 15)),
                         List.of(AMBIGUOUS_ALPHA, AMBIGUOUS_ZETA))),
                 List.of());
+    }
+
+    private RevisionBoundEventListenerDiscovery discoveryResult() {
+        ListenerSourceLocation sourceLocation = new ListenerSourceLocation(
+                DISCOVERED_TARGET.sourceFile(), new SyntaxPosition(6, 4), new SyntaxPosition(8, 5));
+        EventListenerCandidate candidate = new EventListenerCandidate(
+                DISCOVERED_TARGET,
+                sourceLocation,
+                List.of(new ListenerAnnotationEvidence(
+                        ListenerAnnotationKind.EVENT_LISTENER, AnnotationMatchKind.RESOLVED_IDENTITY)));
+        return new RevisionBoundEventListenerDiscovery(
+                RepositoryId.of("orders"),
+                REVISION,
+                "com.acme.OrderPlaced",
+                new EventListenerDiscoveryPage(
+                        new CandidatePage(List.of(candidate), 0, 50, 1, 1, false),
+                        List.of()));
     }
 
     private CallNodeId root() {

@@ -84,6 +84,7 @@ class ClassMetadataExtractorTest {
         MethodSignature abstractMethod = methodOf(List.of(metadata), "com.example.FlagFixture", "abstractMethod");
         MethodSignature unresolved = methodOf(List.of(metadata), "com.example.FlagFixture", "unresolved");
 
+        assertThat(metadata.sourceFile()).isEqualTo("src/main/java/com/example/FlagFixture.java");
         assertThat(open.source().text()).isEqualTo("""
                 void /* 😀 */ open(String text) {
                         String emoji = "😀";

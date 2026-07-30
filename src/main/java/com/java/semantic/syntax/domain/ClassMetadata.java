@@ -10,7 +10,7 @@ import java.util.Optional;
  * @param className          巢狀名稱，例如 Outer.Inner
  * @param packageName        套件名稱
  * @param fullyQualifiedName packageName 與 className 組合，巢狀型別含外層名稱
- * @param filePath           source root 之下的檔案相對路徑
+ * @param sourceFile         儲存庫根目錄下的檔案相對路徑，與 MethodTarget.sourceFile 語意一致
  * @param kind               型別種類
  * @param isAbstract         是否為抽象類別
  * @param implementedTypes   直接實作的介面，簡單名稱
@@ -31,7 +31,7 @@ public record ClassMetadata(
         String className,
         String packageName,
         String fullyQualifiedName,
-        String filePath,
+        String sourceFile,
         TypeKind kind,
         boolean isAbstract,
         List<String> implementedTypes,
@@ -63,14 +63,14 @@ public record ClassMetadata(
         annotationEvidence = List.copyOf(annotationEvidence);
     }
 
-    /** 保留舊 metadata 建構子；舊資料沒有已解析的註解 identity。 */
+    /** 保留舊 metadata 建構子；舊資料沒有已解析的註解 identity */
     public ClassMetadata(
-            String className, String packageName, String fullyQualifiedName, String filePath, TypeKind kind,
+            String className, String packageName, String fullyQualifiedName, String sourceFile, TypeKind kind,
             boolean isAbstract, List<String> implementedTypes, List<String> extendedTypes,
             List<String> annotations, List<String> imports, List<FieldInfo> fields, List<MethodSignature> methods,
             boolean hasFluentAccessors, boolean hasChainedAccessors, List<String> profiles, SyntaxRange range,
             SourceSlice source, boolean primary, List<String> beanQualifiers) {
-        this(className, packageName, fullyQualifiedName, filePath, kind, isAbstract, implementedTypes, extendedTypes,
+        this(className, packageName, fullyQualifiedName, sourceFile, kind, isAbstract, implementedTypes, extendedTypes,
                 annotations, imports, fields, methods, hasFluentAccessors, hasChainedAccessors, profiles, range,
                 source, primary, beanQualifiers, List.of());
     }

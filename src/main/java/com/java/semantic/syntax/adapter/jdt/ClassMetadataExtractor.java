@@ -73,7 +73,7 @@ final class ClassMetadataExtractor {
                 className,
                 packageName,
                 fullyQualifiedName,
-                parsed.source().relativePath(),
+                parsed.source().repositoryRelativePath(),
                 kindOf(type),
                 isAbstract(type),
                 implementedTypesOf(type),
