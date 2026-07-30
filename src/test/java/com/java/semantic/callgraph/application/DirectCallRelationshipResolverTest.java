@@ -12,7 +12,7 @@ import com.java.semantic.semantic.domain.SemanticCallSite;
 import com.java.semantic.semantic.domain.SemanticCallStatus;
 import com.java.semantic.semantic.domain.SemanticDeclarationAnchor;
 import com.java.semantic.semantic.domain.SemanticIncomingCallResult;
-import com.java.semantic.semantic.domain.SemanticLocation;
+import com.java.semantic.semantic.domain.SemanticImplementationResult;
 import com.java.semantic.semantic.domain.SemanticMethod;
 import com.java.semantic.semantic.domain.SemanticPosition;
 import com.java.semantic.semantic.domain.SemanticRange;
@@ -445,26 +445,9 @@ class DirectCallRelationshipResolverTest {
         });
     }
 
-    @Test
-    void should_preserve_source_qualified_canonical_target_identity() {
-        MethodTarget callerTarget = target("Root", "run");
-        MethodTarget canonicalTarget = new MethodTarget(
-                "src/main/java/com/example/Port.java", "com.example", "Port", "handle", List.of("com.example.Request"));
-        SemanticMethod caller = outgoingMethod(callerTarget, 0);
-        SemanticRange declarationRange = new SemanticRange(new SemanticPosition(0, 0), new SemanticPosition(5, 0));
-        SemanticMethod semanticMethod = new SemanticMethod(
-                "com.example", "Port", "handle", List.of("Request"), "void",
-                new SemanticLocation("file:///fixture/src/main/java/com/example/Port.java", declarationRange, declarationRange));
-
-        Optional<MethodTarget> resolved = resolver(new FakeSemanticService()).targetFor(
-                SNAPSHOT, index(type(callerTarget), type(canonicalTarget)), semanticMethod);
-
-        assertThat(resolved).contains(canonicalTarget);
-        assertThat(caller).isNotNull();
-    }
-
     private static DirectCallRelationshipResolver resolver(JavaSemanticService semanticService) {
-        return new DirectCallRelationshipResolver(semanticService, new SpringImplementationSelector());
+        return new DirectCallRelationshipResolver(
+                semanticService, new SpringImplementationSelector(), new CanonicalTargetProjection());
     }
 
     private static RepositorySyntaxIndex index(ClassMetadata... types) {
@@ -499,7 +482,7 @@ class DirectCallRelationshipResolverTest {
                 target.methodName(), target.parameterTypes(), List.of(), null, null, 1, 6,
                 methodRange, new SourceSlice(methodRange, "void " + target.methodName() + "() {}"),
                 List.<TypeReference>of(), Optional.empty(), invocations, List.of(), List.of(), methodRange.start(),
-                MethodTargetResolution.resolved(target), executableDeclaration, true);
+                MethodTargetResolution.resolved(target), executableDeclaration, !executableDeclaration, true);
         return new ClassMetadata(
                 target.className(), target.packageName(), target.packageName() + "." + target.className(),
                 target.sourceFile(), kind, false, List.of(), List.of(), List.of(), List.of(), List.of(),
@@ -610,12 +593,12 @@ class DirectCallRelationshipResolverTest {
         }
 
         @Override
-        public List<SemanticMethod> implementations(RepositorySnapshot snapshot, SemanticMethod method) {
+        public SemanticImplementationResult implementations(RepositorySnapshot snapshot, SemanticMethod method) {
             implementationQueries.add(method);
             if (failingImplementations.contains(method)) {
                 throw new IllegalStateException("planned implementation query failure");
             }
-            return implementations.getOrDefault(method, List.of());
+            return new SemanticImplementationResult(implementations.getOrDefault(method, List.of()), List.of());
         }
     }
 }

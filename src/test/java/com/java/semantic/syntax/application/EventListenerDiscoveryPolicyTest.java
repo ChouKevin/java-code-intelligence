@@ -296,14 +296,14 @@ class EventListenerDiscoveryPolicyTest {
         return new MethodSignature(name, List.of("DifferentReference"), List.of(), "", null, 3, 4,
                 range(), new SourceSlice(range(), ""),
                 List.of(new TypeReference(EVENT_TYPE, EVENT_TYPE, List.of(), false)), Optional.empty(), List.of(),
-                annotations, List.of(), new SyntaxPosition(2, 4), targetResolution, true, false);
+                annotations, List.of(), new SyntaxPosition(2, 4), targetResolution, true, false, false);
     }
 
     private static MethodSignature unresolvedMethod(String name) {
         return new MethodSignature(name, List.of(), List.of(), "", null, 3, 4,
                 range(), new SourceSlice(range(), ""), List.of(), Optional.empty(), List.of(), eventListener(),
                 List.of(), new SyntaxPosition(2, 4), MethodTargetResolution.unresolved("BINDING_UNAVAILABLE"),
-                true, false);
+                true, false, false);
     }
 
     private static SyntaxRange range() {

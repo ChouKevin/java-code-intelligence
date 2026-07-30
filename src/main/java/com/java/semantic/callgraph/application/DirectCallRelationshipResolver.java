@@ -50,13 +50,19 @@ public final class DirectCallRelationshipResolver {
 
     private final JavaSemanticService semanticService;
     private final SpringImplementationSelector implementationSelector;
+    private final CanonicalTargetProjection canonicalTargetProjection;
+    private final ImplementationCandidateFactory candidateFactory;
 
     public DirectCallRelationshipResolver(
             JavaSemanticService semanticService,
-            SpringImplementationSelector implementationSelector) {
+            SpringImplementationSelector implementationSelector,
+            CanonicalTargetProjection canonicalTargetProjection) {
         this.semanticService = Objects.requireNonNull(semanticService, "semanticService is required");
         this.implementationSelector = Objects.requireNonNull(
                 implementationSelector, "implementationSelector is required");
+        this.canonicalTargetProjection = Objects.requireNonNull(
+                canonicalTargetProjection, "canonicalTargetProjection is required");
+        this.candidateFactory = new ImplementationCandidateFactory();
     }
 
     List<DirectCallRelationship> resolveAll(
@@ -181,21 +187,6 @@ public final class DirectCallRelationshipResolver {
                 : Optional.empty();
     }
 
-    Optional<MethodTarget> targetFor(
-            RepositorySnapshot snapshot,
-            RepositorySyntaxIndex index,
-            SemanticMethod method) {
-        Optional<String> sourceFile = snapshot.relativeSourceFile(method.location().uri());
-        return sourceFile.flatMap(file -> index.target(
-                        file,
-                        method.packageName(),
-                        method.className(),
-                        method.methodName(),
-                        method.parameterTypes())
-                .or(() -> index.method(file, syntaxRange(method.location().range()))
-                        .flatMap(signature -> signature.analysisTarget().target())));
-    }
-
     private DirectCallRelationship resolveInvocation(
             RepositorySnapshot snapshot,
             RepositorySyntaxIndex index,
@@ -221,7 +212,7 @@ public final class DirectCallRelationshipResolver {
         }
         if (SemanticCallResolutionStatus.AMBIGUOUS.equals(resolution.status())) {
             List<MethodTarget> candidates = resolution.candidates().stream()
-                    .map(candidate -> targetFor(snapshot, index, candidate))
+                    .map(candidate -> canonicalTargetProjection.project(snapshot, index, candidate))
                     .flatMap(Optional::stream)
                     .sorted(TARGET_ORDER)
                     .toList();
@@ -261,7 +252,7 @@ public final class DirectCallRelationshipResolver {
                     callSite, expression, strategy, Optional.of(invocation), Optional.empty());
         }
         SemanticMethod semanticTarget = call.target().orElseThrow();
-        Optional<MethodTarget> target = targetFor(snapshot, index, semanticTarget);
+        Optional<MethodTarget> target = canonicalTargetProjection.project(snapshot, index, semanticTarget);
         if (!target.isPresent()) {
             log.debug("phase=callgraph-resolution outcome=unresolved reason=syntax-index-miss callerTargetId={}",
                     MethodTargetDiagnosticId.from(callerTarget));
@@ -293,8 +284,8 @@ public final class DirectCallRelationshipResolver {
             candidates.add(candidate(index, declarationMethod, declarationTarget));
         }
         try {
-            for (SemanticMethod implementation : semanticService.implementations(snapshot, declarationMethod)) {
-                targetFor(snapshot, index, implementation)
+            for (SemanticMethod implementation : semanticService.implementations(snapshot, declarationMethod).methods()) {
+                canonicalTargetProjection.project(snapshot, index, implementation)
                         .map(target -> candidate(index, implementation, target))
                         .ifPresent(candidates::add);
             }
@@ -360,7 +351,7 @@ public final class DirectCallRelationshipResolver {
             RepositorySnapshot snapshot,
             RepositorySyntaxIndex index,
             SemanticMethod caller) {
-        return targetFor(snapshot, index, caller)
+        return canonicalTargetProjection.project(snapshot, index, caller)
                 .flatMap(index::method)
                 .map(MethodSignature::invocations)
                 .orElse(List.of());
@@ -382,13 +373,8 @@ public final class DirectCallRelationshipResolver {
             RepositorySyntaxIndex index,
             SemanticMethod method,
             MethodTarget target) {
-        Optional<ClassMetadata> metadata = index.classMetadata(target);
-        return new ImplementationCandidate(
-                method,
-                target,
-                metadata.map(ClassMetadata::primary).orElse(false),
-                metadata.map(ClassMetadata::beanQualifiers).orElse(List.of()),
-                metadata.map(ClassMetadata::profiles).orElse(List.of()));
+        return candidateFactory.create(index, method, target)
+                .orElseGet(() -> new ImplementationCandidate(method, target, false, List.of(), List.of()));
     }
 
     private String externalSymbol(SemanticCall call, SemanticRange callSite, MethodTarget callerTarget) {

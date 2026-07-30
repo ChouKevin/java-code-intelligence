@@ -251,6 +251,7 @@ class ArchitectureTest {
                 .that().haveSimpleName("SemanticAnalysisApplicationService")
                 .or().haveSimpleName("EntryPointDiscoveryApplicationService")
                 .or().haveSimpleName("EventListenerDiscoveryApplicationService")
+                .or().haveSimpleName("MethodImplementationDiscoveryApplicationService")
                 .should().callMethod(
                         RepositoryApplicationService.class,
                         "withSnapshot",

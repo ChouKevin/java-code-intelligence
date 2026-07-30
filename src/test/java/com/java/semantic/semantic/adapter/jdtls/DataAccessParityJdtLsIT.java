@@ -2,6 +2,7 @@ package com.java.semantic.semantic.adapter.jdtls;
 
 import com.java.semantic.api.AnalysisResponseMapper;
 import com.java.semantic.api.dto.GraphEdgeResponse;
+import com.java.semantic.callgraph.application.CanonicalTargetProjection;
 import com.java.semantic.callgraph.application.DirectCallRelationshipResolver;
 import com.java.semantic.callgraph.application.IncomingSemanticCallGraphBuilder;
 import com.java.semantic.callgraph.application.SemanticCallGraphBuilder;
@@ -179,7 +180,8 @@ class DataAccessParityJdtLsIT {
         SemanticDeclarationAnchor anchor = new ExactMethodDeclarationResolver().resolve(syntax, mapperTarget);
         SemanticMethod mapperRoot = service.resolveExactMethod(snapshot, anchor);
         IncomingSemanticCallGraphBuilder incomingBuilder = new IncomingSemanticCallGraphBuilder(
-                service, new DirectCallRelationshipResolver(service, new SpringImplementationSelector()));
+                service, new DirectCallRelationshipResolver(
+                        service, new SpringImplementationSelector(), new CanonicalTargetProjection()));
 
         IncomingGraphFragment fragment = incomingBuilder.build(
                 snapshot, syntax, mapperTarget, mapperRoot, 1, DEPTH_TWO_NODE_BUDGET);

@@ -65,20 +65,31 @@ public final class IncomingSemanticCallGraphBuilder {
 
     private final JavaSemanticService semanticService;
     private final DirectCallRelationshipResolver relationshipResolver;
+    private final CanonicalTargetProjection canonicalTargetProjection;
     private final DataAccessEvidence dataAccessEvidence;
 
     public IncomingSemanticCallGraphBuilder(
             JavaSemanticService semanticService,
             DirectCallRelationshipResolver relationshipResolver) {
-        this(semanticService, relationshipResolver, new DataAccessEvidence());
+        this(semanticService, relationshipResolver, new CanonicalTargetProjection(), new DataAccessEvidence());
     }
 
     public IncomingSemanticCallGraphBuilder(
             JavaSemanticService semanticService,
             DirectCallRelationshipResolver relationshipResolver,
             DataAccessEvidence dataAccessEvidence) {
+        this(semanticService, relationshipResolver, new CanonicalTargetProjection(), dataAccessEvidence);
+    }
+
+    public IncomingSemanticCallGraphBuilder(
+            JavaSemanticService semanticService,
+            DirectCallRelationshipResolver relationshipResolver,
+            CanonicalTargetProjection canonicalTargetProjection,
+            DataAccessEvidence dataAccessEvidence) {
         this.semanticService = Objects.requireNonNull(semanticService, "semanticService is required");
         this.relationshipResolver = Objects.requireNonNull(relationshipResolver, "relationshipResolver is required");
+        this.canonicalTargetProjection = Objects.requireNonNull(
+                canonicalTargetProjection, "canonicalTargetProjection is required");
         this.dataAccessEvidence = Objects.requireNonNull(dataAccessEvidence, "dataAccessEvidence is required");
     }
 
@@ -279,7 +290,7 @@ public final class IncomingSemanticCallGraphBuilder {
         Map<MethodTarget, IncomingCaller> callers = new LinkedHashMap<>();
         int rejectedCount = 0;
         for (SemanticIncomingCall call : calls) {
-            Optional<MethodTarget> target = relationshipResolver.targetFor(snapshot, index, call.caller());
+            Optional<MethodTarget> target = canonicalTargetProjection.project(snapshot, index, call.caller());
             if (target.isPresent()) {
                 MethodTarget callerTarget = target.orElseThrow();
                 callers.merge(

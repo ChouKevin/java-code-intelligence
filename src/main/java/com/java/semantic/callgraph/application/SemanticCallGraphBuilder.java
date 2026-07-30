@@ -54,7 +54,7 @@ public final class SemanticCallGraphBuilder {
     public SemanticCallGraphBuilder(
             JavaSemanticService semanticService,
             SpringImplementationSelector implementationSelector) {
-        this(new DirectCallRelationshipResolver(semanticService, implementationSelector),
+        this(new DirectCallRelationshipResolver(semanticService, implementationSelector, new CanonicalTargetProjection()),
                 new GeneratedMemberEvidence(), new DataAccessEvidence());
     }
 

@@ -1,0 +1,104 @@
+package com.java.semantic.callgraph.application;
+
+import com.java.semantic.identity.MethodTarget;
+import com.java.semantic.repository.domain.RepositoryId;
+import com.java.semantic.repository.domain.RepositoryRevision;
+import com.java.semantic.repository.domain.RepositorySnapshot;
+import com.java.semantic.semantic.domain.SemanticLocation;
+import com.java.semantic.semantic.domain.SemanticMethod;
+import com.java.semantic.semantic.domain.SemanticPosition;
+import com.java.semantic.semantic.domain.SemanticRange;
+import com.java.semantic.syntax.domain.ClassMetadata;
+import com.java.semantic.syntax.domain.ClassMetadata.MethodSignature;
+import com.java.semantic.syntax.domain.MethodTargetResolution;
+import com.java.semantic.syntax.domain.RepositorySyntax;
+import com.java.semantic.syntax.domain.SourceSlice;
+import com.java.semantic.syntax.domain.SyntaxPosition;
+import com.java.semantic.syntax.domain.SyntaxRange;
+import com.java.semantic.syntax.domain.TypeReference;
+import org.junit.jupiter.api.Test;
+
+import java.nio.file.Path;
+import java.util.List;
+import java.util.Optional;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+class CanonicalTargetProjectionTest {
+
+    private static final RepositorySnapshot SNAPSHOT = new RepositorySnapshot(
+            RepositoryId.of("orders"), Path.of("/fixture"), RepositoryRevision.fixture());
+
+    private final CanonicalTargetProjection projection = new CanonicalTargetProjection();
+
+    @Test
+    void should_project_the_exact_repository_metadata_identity() {
+        String sourceFile = "src/main/java/com/example/Port.java";
+        MethodTarget exactTarget = target(sourceFile, "Port", "handle", List.of("Request"));
+        MethodTarget rangeTarget = target(sourceFile, "FallbackPort", "fallback", List.of());
+        SemanticMethod method = semanticMethod(
+                "file:///fixture/src/main/java/com/example/Port.java", "Port", "handle", List.of("Request"));
+        SyntaxRange exactTargetRange = new SyntaxRange(new SyntaxPosition(4, 1), new SyntaxPosition(4, 4));
+
+        Optional<MethodTarget> projected = projection.project(
+                SNAPSHOT, index(type(exactTarget, exactTargetRange), type(rangeTarget)), method);
+
+        assertThat(projected).contains(exactTarget);
+    }
+
+    @Test
+    void should_fall_back_to_the_range_resolved_analysis_target_after_an_exact_identity_miss() {
+        MethodTarget target = target(
+                "src/main/java/com/example/Port.java", "Port", "handle", List.of("com.example.Request"));
+        SemanticMethod method = semanticMethod(
+                "file:///fixture/src/main/java/com/example/Port.java", "Port", "handle", List.of("Request"));
+
+        Optional<MethodTarget> projected = projection.project(SNAPSHOT, index(type(target)), method);
+
+        assertThat(projected).contains(target);
+    }
+
+    @Test
+    void should_return_empty_when_exact_identity_and_declaration_range_cannot_be_resolved() {
+        SemanticMethod method = semanticMethod(
+                "file:///fixture/src/main/java/com/example/Missing.java", "Missing", "handle", List.of("Request"));
+        MethodTarget indexedTarget = target("src/main/java/com/example/Port.java", "Port", "handle", List.of("Request"));
+
+        Optional<MethodTarget> projected = projection.project(SNAPSHOT, index(type(indexedTarget)), method);
+
+        assertThat(projected).isEmpty();
+    }
+
+    private static RepositorySyntaxIndex index(ClassMetadata... types) {
+        return new RepositorySyntaxIndex(SNAPSHOT.repositoryId().value(), new RepositorySyntax(List.of(), List.of(types)));
+    }
+
+    private static MethodTarget target(String sourceFile, String className, String methodName, List<String> parameterTypes) {
+        return new MethodTarget(sourceFile, "com.example", className, methodName, parameterTypes);
+    }
+
+    private static SemanticMethod semanticMethod(
+            String uri, String className, String methodName, List<String> parameterTypes) {
+        SemanticRange range = new SemanticRange(new SemanticPosition(1, 0), new SemanticPosition(4, 0));
+        return new SemanticMethod(
+                "com.example", className, methodName, parameterTypes, "void", new SemanticLocation(uri, range, range));
+    }
+
+    private static ClassMetadata type(MethodTarget target) {
+        return type(target, new SyntaxRange(new SyntaxPosition(1, 0), new SyntaxPosition(4, 0)));
+    }
+
+    private static ClassMetadata type(MethodTarget target, SyntaxRange methodRange) {
+        MethodSignature method = new MethodSignature(
+                target.methodName(), target.parameterTypes(), List.of(), null, null, 2, 5,
+                methodRange, new SourceSlice(methodRange, "void " + target.methodName() + "() {}"),
+                List.<TypeReference>of(), Optional.empty(), List.of(), List.of(), List.of(), methodRange.start(),
+                MethodTargetResolution.resolved(target), true, false, true);
+        SyntaxRange typeRange = new SyntaxRange(new SyntaxPosition(0, 0), new SyntaxPosition(5, 0));
+        return new ClassMetadata(
+                target.className(), target.packageName(), target.packageName() + "." + target.className(),
+                target.sourceFile(), ClassMetadata.TypeKind.CLASS, false,
+                List.of(), List.of(), List.of(), List.of(), List.of(), List.of(method), false, false, List.of(), typeRange,
+                new SourceSlice(typeRange, "class " + target.className() + " {}"), false, List.of());
+    }
+}

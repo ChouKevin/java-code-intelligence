@@ -1,13 +1,16 @@
 package com.java.semantic.config;
 
+import com.java.semantic.callgraph.application.CanonicalTargetProjection;
 import com.java.semantic.callgraph.application.DataAccessEvidence;
 import com.java.semantic.callgraph.application.DirectCallRelationshipResolver;
 import com.java.semantic.callgraph.application.GeneratedMemberEvidence;
 import com.java.semantic.callgraph.application.IncomingSemanticCallGraphBuilder;
+import com.java.semantic.callgraph.application.ImplementationCandidateFactory;
 import com.java.semantic.callgraph.application.SemanticCallGraphBuilder;
 import com.java.semantic.callgraph.application.SpringImplementationSelector;
 import com.java.semantic.callgraph.domain.ReadPolicy;
 import com.java.semantic.repository.application.RepositoryApplicationService;
+import com.java.semantic.semantic.application.MethodImplementationDiscoveryApplicationService;
 import com.java.semantic.semantic.application.SemanticAnalysisApplicationService;
 import com.java.semantic.semantic.application.ExactMethodDeclarationResolver;
 import com.java.semantic.semantic.domain.JavaSemanticService;
@@ -18,7 +21,12 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 @Configuration
-@EnableConfigurationProperties({IncomingGraphProperties.class, OutgoingGraphProperties.class, ReadPolicyProperties.class})
+@EnableConfigurationProperties({
+        IncomingGraphProperties.class,
+        OutgoingGraphProperties.class,
+        ReadPolicyProperties.class,
+        ImplementationDiscoveryProperties.class
+})
 public class SemanticAnalysisConfiguration {
 
     @Bean
@@ -30,7 +38,8 @@ public class SemanticAnalysisConfiguration {
     @ConditionalOnBean(JavaSemanticService.class)
     public DirectCallRelationshipResolver directCallRelationshipResolver(
             JavaSemanticService semanticService) {
-        return new DirectCallRelationshipResolver(semanticService, new SpringImplementationSelector());
+        return new DirectCallRelationshipResolver(
+                semanticService, new SpringImplementationSelector(), new CanonicalTargetProjection());
     }
 
     @Bean
@@ -45,7 +54,32 @@ public class SemanticAnalysisConfiguration {
     public IncomingSemanticCallGraphBuilder incomingSemanticCallGraphBuilder(
             JavaSemanticService semanticService,
             DirectCallRelationshipResolver relationshipResolver) {
-        return new IncomingSemanticCallGraphBuilder(semanticService, relationshipResolver, new DataAccessEvidence());
+        return new IncomingSemanticCallGraphBuilder(
+                semanticService,
+                relationshipResolver,
+                new CanonicalTargetProjection(),
+                new DataAccessEvidence());
+    }
+
+    @Bean
+    @ConditionalOnBean({
+            RepositoryApplicationService.class,
+            SyntaxExtractionService.class,
+            JavaSemanticService.class
+    })
+    public MethodImplementationDiscoveryApplicationService methodImplementationDiscoveryApplicationService(
+            RepositoryApplicationService repositoryApplicationService,
+            SyntaxExtractionService syntaxExtractionService,
+            JavaSemanticService semanticService,
+            ImplementationDiscoveryProperties properties) {
+        return new MethodImplementationDiscoveryApplicationService(
+                repositoryApplicationService,
+                syntaxExtractionService,
+                new ExactMethodDeclarationResolver(),
+                semanticService,
+                new CanonicalTargetProjection(),
+                new ImplementationCandidateFactory(),
+                properties.candidateLimit());
     }
 
     @Bean

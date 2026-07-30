@@ -97,7 +97,7 @@ class CallSiteResolutionJdtLsIT {
 
             SemanticMethod workerMethod = resolveExactMethod(
                     service, snapshot, root, "Worker", "work", List.of("String"));
-            assertThat(service.implementations(snapshot, workerMethod))
+            assertThat(service.implementations(snapshot, workerMethod).methods())
                     .singleElement()
                     .satisfies(implementation -> {
                         assertMethod(implementation, "WorkerImpl", "work", List.of("String"));

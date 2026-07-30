@@ -6,7 +6,7 @@ import com.java.semantic.semantic.domain.SemanticMethod;
 import java.util.List;
 import java.util.Objects;
 
-/** A syntax-proven implementation candidate with only selection-relevant Spring metadata. */
+/** 由語法證實的 implementation resolution 與 discovery metadata，供後續 selection 使用 */
 public record ImplementationCandidate(
         SemanticMethod method,
         MethodTarget target,

@@ -96,6 +96,7 @@ public record ClassMetadata(
      * @param returnType  保留泛型與 binding 的回傳型別，建構子為空
      * @param invocations 方法內的呼叫語法證據
      * @param bodyTypeReferences 方法本體與 annotation member 的 binding 已證實型別 identity
+     * @param abstractDeclaration 是否具備 abstract 宣告語意：明確 abstract，或可覆寫且無 method body 的 interface method
      */
     public record MethodSignature(
             String name,
@@ -115,6 +116,7 @@ public record ClassMetadata(
             SyntaxPosition namePosition,
             MethodTargetResolution analysisTarget,
             boolean executableDeclaration,
+            boolean abstractDeclaration,
             boolean overridableDeclaration) {
 
         public MethodSignature {

@@ -10,6 +10,7 @@ import com.java.semantic.repository.application.RepositoryNotFoundException;
 import com.java.semantic.repository.application.RepositoryNotReadyException;
 import com.java.semantic.repository.application.RepositoryRevisionMismatchException;
 import com.java.semantic.repository.domain.InvalidRepositoryIdException;
+import com.java.semantic.semantic.application.ImplementationTargetUnsupportedException;
 import com.java.semantic.semantic.domain.SemanticBindingAmbiguousException;
 import com.java.semantic.semantic.domain.SemanticBindingUnresolvedException;
 import com.java.semantic.semantic.domain.SemanticEngineNotReadyException;
@@ -86,6 +87,18 @@ public class ApiExceptionHandler {
                 HttpStatus.UNPROCESSABLE_ENTITY,
                 "SEMANTIC_TARGET_NOT_FOUND",
                 "exact semantic target was not found",
+                exception.target(),
+                request);
+    }
+
+    @ExceptionHandler(ImplementationTargetUnsupportedException.class)
+    public ResponseEntity<ApiErrorResponse> implementationTargetUnsupported(
+            ImplementationTargetUnsupportedException exception,
+            HttpServletRequest request) {
+        return targetResponse(
+                HttpStatus.UNPROCESSABLE_ENTITY,
+                "IMPLEMENTATION_TARGET_UNSUPPORTED",
+                "requested method does not support implementation discovery",
                 exception.target(),
                 request);
     }

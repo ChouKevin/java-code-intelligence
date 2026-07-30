@@ -14,6 +14,8 @@ import com.java.semantic.semantic.domain.SemanticCallStatus;
 import com.java.semantic.semantic.domain.SemanticEngineNotReadyException;
 import com.java.semantic.semantic.domain.SemanticEngineStartFailedException;
 import com.java.semantic.semantic.domain.SemanticIncomingCallResult;
+import com.java.semantic.semantic.domain.SemanticImplementationIssueReason;
+import com.java.semantic.semantic.domain.SemanticImplementationResult;
 import com.java.semantic.semantic.domain.SemanticLocation;
 import com.java.semantic.semantic.domain.SemanticMethod;
 import com.java.semantic.semantic.domain.SemanticPosition;
@@ -966,21 +968,26 @@ class Lsp4jJavaSemanticServiceTest {
     }
 
     @Test
-    void should_resolve_implementations_from_location_results() throws IOException {
+    void should_preserve_a_local_conversion_issue_alongside_a_resolved_implementation() throws IOException {
         String interfaceUri = sourceFile("PaymentGateway");
         String implUri = writeClassFile("com/example/generic/StripeGateway.java", PACKAGE, "StripeGateway");
+        String malformedUri = writeClassFile("com/example/generic/MalformedGateway.java", PACKAGE, "MalformedGateway");
         SemanticMethod method = methodAt(interfaceUri, 4, 9);
-        server.implementationResponse = Either.forLeft(List.of(location(implUri, 8, 16, 8, 22)));
+        server.implementationResponse = Either.forLeft(List.of(
+                location(implUri, 8, 16, 8, 22),
+                location(malformedUri, 8, 16, 8, 22)));
         server.documentSymbols.put(implUri, List.of(Either.forRight(
                 classSymbol("StripeGateway", method("charge(Order)", " : void", 8, 16, 8, 22)))));
 
-        List<SemanticMethod> implementations = service.implementations(snapshot, method);
+        SemanticImplementationResult implementations = service.implementations(snapshot, method);
 
-        assertThat(implementations).hasSize(1);
-        assertThat(implementations.getFirst().className()).isEqualTo("StripeGateway");
-        assertThat(implementations.getFirst().methodName()).isEqualTo("charge");
-        assertThat(implementations.getFirst().packageName()).isEqualTo(PACKAGE);
-        assertThat(implementations.getFirst().location().uri()).isEqualTo(implUri);
+        assertThat(implementations.methods()).singleElement().satisfies(resolved -> {
+            assertThat(resolved.className()).isEqualTo("StripeGateway");
+            assertThat(resolved.methodName()).isEqualTo("charge");
+            assertThat(resolved.packageName()).isEqualTo(PACKAGE);
+            assertThat(resolved.location().uri()).isEqualTo(implUri);
+        });
+        assertThat(implementations.issues()).containsExactly(SemanticImplementationIssueReason.LOCAL_CONVERSION_FAILED);
     }
 
     @Test
@@ -992,21 +999,67 @@ class Lsp4jJavaSemanticServiceTest {
         server.documentSymbols.put(implUri, List.of(Either.forRight(
                 classSymbol("PaypalGateway", method("charge(Order)", " : void", 8, 16, 8, 22)))));
 
-        List<SemanticMethod> implementations = service.implementations(snapshot, method);
+        SemanticImplementationResult implementations = service.implementations(snapshot, method);
 
-        assertThat(implementations).extracting(SemanticMethod::className).containsExactly("PaypalGateway");
+        assertThat(implementations.methods()).extracting(SemanticMethod::className).containsExactly("PaypalGateway");
+        assertThat(implementations.issues()).isEmpty();
     }
 
     @Test
-    void should_skip_external_implementations() throws IOException {
+    void should_preserve_an_external_issue_alongside_a_resolved_local_implementation() throws IOException {
         String interfaceUri = sourceFile("PaymentGateway");
+        String implUri = writeClassFile("com/example/generic/StripeGateway.java", PACKAGE, "StripeGateway");
         SemanticMethod method = methodAt(interfaceUri, 4, 9);
         server.implementationResponse = Either.forLeft(List.of(
+                location(implUri, 8, 16, 8, 22),
                 new Location("jdt://contents/Library.class", range(1, 1, 1, 5))));
+        server.documentSymbols.put(implUri, List.of(Either.forRight(
+                classSymbol("StripeGateway", method("charge(Order)", " : void", 8, 16, 8, 22)))));
 
-        List<SemanticMethod> implementations = service.implementations(snapshot, method);
+        SemanticImplementationResult implementations = service.implementations(snapshot, method);
 
-        assertThat(implementations).containsExactly();
+        assertThat(implementations.methods()).extracting(SemanticMethod::className).containsExactly("StripeGateway");
+        assertThat(implementations.issues()).containsExactly(SemanticImplementationIssueReason.EXTERNAL_TARGET);
+    }
+
+    @Test
+    void should_deduplicate_valid_invalid_and_external_implementation_locations() throws IOException {
+        String interfaceUri = sourceFile("PaymentGateway");
+        String implUri = writeClassFile("com/example/generic/StripeGateway.java", PACKAGE, "StripeGateway");
+        String malformedUri = writeClassFile("com/example/generic/MalformedGateway.java", PACKAGE, "MalformedGateway");
+        Location valid = location(implUri, 8, 16, 8, 22);
+        Location malformed = location(malformedUri, 8, 16, 8, 22);
+        Location external = new Location("jdt://contents/Library.class", range(1, 1, 1, 5));
+        SemanticMethod method = methodAt(interfaceUri, 4, 9);
+        server.implementationResponse = Either.forLeft(List.of(
+                valid, malformed, external, valid, malformed, external));
+        server.documentSymbols.put(implUri, List.of(Either.forRight(
+                classSymbol("StripeGateway", method("charge(Order)", " : void", 8, 16, 8, 22)))));
+
+        SemanticImplementationResult implementations = service.implementations(snapshot, method);
+
+        assertThat(implementations.methods()).extracting(SemanticMethod::className).containsExactly("StripeGateway");
+        assertThat(implementations.issues()).containsExactly(
+                SemanticImplementationIssueReason.LOCAL_CONVERSION_FAILED,
+                SemanticImplementationIssueReason.EXTERNAL_TARGET);
+    }
+
+    @Test
+    void should_rethrow_normalized_timeout_instead_of_marking_implementation_conversion_failed()
+            throws IOException {
+        String interfaceUri = sourceFile("PaymentGateway");
+        String implUri = writeClassFile("com/example/generic/StripeGateway.java", PACKAGE, "StripeGateway");
+        SemanticMethod method = methodAt(interfaceUri, 4, 9);
+        server.implementationResponse = Either.forLeft(List.of(location(implUri, 8, 16, 8, 22)));
+        server.hangingDocumentSymbolUris.add(implUri);
+        service = new Lsp4jJavaSemanticService(
+                new FakeWorkspaceManager(session(server, Duration.ofMillis(50))));
+
+        Throwable failure = catchThrowable(() -> service.implementations(snapshot, method));
+
+        assertThat(failure).isExactlyInstanceOf(SemanticRequestTimeoutException.class)
+                .hasNoCause();
+        assertThat(failure.getSuppressed()).isEmpty();
     }
 
     private SemanticMethod methodAt(String uri, int line, int character) {

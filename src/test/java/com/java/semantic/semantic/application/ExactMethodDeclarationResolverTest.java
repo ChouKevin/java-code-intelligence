@@ -199,7 +199,7 @@ class ExactMethodDeclarationResolverTest {
                 method.startLine(), method.endLine(), method.range(), method.source(),
                 method.parameterTypeReferences(), method.returnType(), method.invocations(), method.annotationEvidence(),
                 method.bodyTypeReferences(), method.namePosition(), resolution,
-                method.executableDeclaration(), method.overridableDeclaration());
+                method.executableDeclaration(), method.abstractDeclaration(), method.overridableDeclaration());
         return new ClassMetadata(
                 metadata.className(), metadata.packageName(), metadata.fullyQualifiedName(), metadata.sourceFile(),
                 metadata.kind(), metadata.isAbstract(), metadata.implementedTypes(), metadata.extendedTypes(),

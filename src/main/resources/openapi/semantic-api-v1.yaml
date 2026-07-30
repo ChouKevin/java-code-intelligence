@@ -266,6 +266,38 @@ paths:
           $ref: '#/components/responses/Conflict'
         '500':
           $ref: '#/components/responses/MutationFailed'
+  /v1/discovery/method-implementations:
+    post:
+      operationId: discoverMethodImplementations
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DiscoverMethodImplementationsRequest'
+      responses:
+        '200':
+          $ref: '#/components/responses/MethodImplementationDiscovery'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/AuthDisabled'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/MutationFailed'
+        '502':
+          $ref: '#/components/responses/BadGateway'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+        '504':
+          $ref: '#/components/responses/GatewayTimeout'
 components:
   securitySchemes:
     ApiToken:
@@ -317,6 +349,12 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/DiscoverEventListenersResponse'
+    MethodImplementationDiscovery:
+      description: Revision-bound method implementation discovery candidates and resolution summary
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/DiscoverMethodImplementationsResponse'
     BadRequest:
       description: Invalid repository id or request
       content:
@@ -592,6 +630,124 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/ListenerObservationSummaryResponse'
+    DiscoverMethodImplementationsRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - repoId
+        - expectedRevision
+        - declarationTarget
+      properties:
+        repoId:
+          type: string
+          minLength: 1
+          pattern: '^[a-z0-9][a-z0-9._-]{0,63}$'
+        expectedRevision:
+          type: string
+          minLength: 1
+          pattern: '^[0-9a-f]{40}$|^FIXTURE$'
+        declarationTarget:
+          $ref: '#/components/schemas/MethodTarget'
+    DiscoverMethodImplementationsResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - repoId
+        - revision
+        - requestedTarget
+        - candidates
+        - limits
+        - resolution
+      properties:
+        repoId:
+          type: string
+        revision:
+          type: string
+          pattern: '^[0-9a-f]{40}$|^FIXTURE$'
+        requestedTarget:
+          $ref: '#/components/schemas/MethodTarget'
+        candidates:
+          type: array
+          items:
+            $ref: '#/components/schemas/MethodImplementationCandidateResponse'
+        limits:
+          $ref: '#/components/schemas/MethodImplementationLimitsResponse'
+        resolution:
+          $ref: '#/components/schemas/MethodImplementationResolutionResponse'
+    MethodImplementationCandidateResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - target
+        - primary
+        - qualifiers
+        - profiles
+      properties:
+        target:
+          $ref: '#/components/schemas/MethodTarget'
+        primary:
+          type: boolean
+        qualifiers:
+          type: array
+          items:
+            type: string
+        profiles:
+          type: array
+          items:
+            type: string
+    MethodImplementationLimitsResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - candidateLimit
+        - returnedCount
+        - totalCount
+        - truncated
+      properties:
+        candidateLimit:
+          type: integer
+          minimum: 1
+        returnedCount:
+          type: integer
+          minimum: 0
+        totalCount:
+          type: integer
+          minimum: 0
+        truncated:
+          type: boolean
+    MethodImplementationResolutionResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - status
+        - issueSummaries
+      properties:
+        status:
+          type: string
+          enum:
+            - COMPLETE
+            - PARTIAL
+        issueSummaries:
+          type: array
+          items:
+            $ref: '#/components/schemas/SemanticImplementationIssueSummaryResponse'
+    SemanticImplementationIssueSummaryResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - code
+        - count
+      properties:
+        code:
+          type: string
+          enum:
+            - LOCAL_CONVERSION_FAILED
+            - EXTERNAL_TARGET
+            - CANONICAL_TARGET_UNRESOLVED
+            - NON_EXECUTABLE_TARGET
+        count:
+          type: integer
+          minimum: 1
     CandidatePageResponse:
       type: object
       additionalProperties: false
@@ -1262,6 +1418,7 @@ components:
             - SEMANTIC_BINDING_AMBIGUOUS
             - SEMANTIC_TARGET_NOT_FOUND
             - SEMANTIC_BINDING_UNRESOLVED
+            - IMPLEMENTATION_TARGET_UNSUPPORTED
             - SEMANTIC_PROTOCOL_ERROR
             - SEMANTIC_ENGINE_START_FAILED
             - SEMANTIC_REQUEST_TIMEOUT

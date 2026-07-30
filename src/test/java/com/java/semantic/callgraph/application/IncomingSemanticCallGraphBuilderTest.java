@@ -18,6 +18,7 @@ import com.java.semantic.semantic.domain.SemanticDeclarationAnchor;
 import com.java.semantic.semantic.domain.SemanticIncomingCall;
 import com.java.semantic.semantic.domain.SemanticIncomingCallIssue;
 import com.java.semantic.semantic.domain.SemanticIncomingCallResult;
+import com.java.semantic.semantic.domain.SemanticImplementationResult;
 import com.java.semantic.semantic.domain.SemanticMethod;
 import com.java.semantic.semantic.domain.SemanticPosition;
 import com.java.semantic.semantic.domain.SemanticProtocolException;
@@ -516,7 +517,7 @@ class IncomingSemanticCallGraphBuilderTest {
                 target.methodName(), target.parameterTypes(), List.of(), sql, sqlSource, 1, 6,
                 range, new SourceSlice(range, target.methodName() + "();"), List.<TypeReference>of(),
                 Optional.empty(), List.of(), List.of(), List.of(), range.start(),
-                MethodTargetResolution.resolved(target), false, true);
+                MethodTargetResolution.resolved(target), false, true, true);
         return new ClassMetadata(
                 target.className(), target.packageName(), target.packageName() + "." + target.className(),
                 target.sourceFile(), ClassMetadata.TypeKind.INTERFACE, false,
@@ -526,7 +527,9 @@ class IncomingSemanticCallGraphBuilderTest {
 
     private static IncomingSemanticCallGraphBuilder builder(FakeSemanticService semanticService) {
         return new IncomingSemanticCallGraphBuilder(
-                semanticService, new DirectCallRelationshipResolver(semanticService, new SpringImplementationSelector()));
+                semanticService,
+                new DirectCallRelationshipResolver(
+                        semanticService, new SpringImplementationSelector(), new CanonicalTargetProjection()));
     }
 
     private static RepositorySyntax syntax(MethodTarget... targets) {
@@ -545,7 +548,7 @@ class IncomingSemanticCallGraphBuilderTest {
                 target.methodName(), target.parameterTypes(), List.of(), null, null, 1, 6,
                 range, new SourceSlice(range, "void " + target.methodName() + "() {}"), List.<TypeReference>of(),
                 Optional.empty(), invocations, List.of(), List.of(), range.start(),
-                MethodTargetResolution.resolved(target), true, true);
+                MethodTargetResolution.resolved(target), true, false, true);
         return new ClassMetadata(
                 target.className(), target.packageName(), target.packageName() + "." + target.className(),
                 target.sourceFile(), ClassMetadata.TypeKind.CLASS, false,
@@ -561,7 +564,7 @@ class IncomingSemanticCallGraphBuilderTest {
                 target.methodName(), target.parameterTypes(), List.of("Async"), null, null, 1, 6,
                 range, new SourceSlice(range, "@Async\nvoid " + target.methodName() + "() {}"),
                 List.<TypeReference>of(), Optional.empty(), invocations, List.of(), List.of(), range.start(),
-                MethodTargetResolution.resolved(target), true, true);
+                MethodTargetResolution.resolved(target), true, false, true);
         return new ClassMetadata(
                 target.className(), target.packageName(), target.packageName() + "." + target.className(),
                 target.sourceFile(), ClassMetadata.TypeKind.CLASS, false,
@@ -575,7 +578,7 @@ class IncomingSemanticCallGraphBuilderTest {
                 target.methodName(), target.parameterTypes(), List.of(), null, null, 1, 6,
                 range, new SourceSlice(range, "void " + target.methodName() + "() {}"), List.<TypeReference>of(),
                 Optional.empty(), List.of(), List.of(), List.of(), range.start(),
-                MethodTargetResolution.resolved(target), false, true);
+                MethodTargetResolution.resolved(target), false, true, true);
         return new ClassMetadata(
                 target.className(), target.packageName(), target.packageName() + "." + target.className(),
                 target.sourceFile(), ClassMetadata.TypeKind.INTERFACE, false,
@@ -671,11 +674,11 @@ class IncomingSemanticCallGraphBuilderTest {
         }
 
         @Override
-        public List<SemanticMethod> implementations(RepositorySnapshot snapshot, SemanticMethod method) {
+        public SemanticImplementationResult implementations(RepositorySnapshot snapshot, SemanticMethod method) {
             Optional.ofNullable(implementationFailures.get(method)).ifPresent(exception -> {
                 throw exception;
             });
-            return List.of();
+            return new SemanticImplementationResult(List.of(), List.of());
         }
     }
 }

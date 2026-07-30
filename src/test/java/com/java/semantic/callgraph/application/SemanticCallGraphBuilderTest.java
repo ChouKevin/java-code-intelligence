@@ -16,6 +16,7 @@ import com.java.semantic.semantic.domain.SemanticCallSite;
 import com.java.semantic.semantic.domain.SemanticCallStatus;
 import com.java.semantic.semantic.domain.SemanticDeclarationAnchor;
 import com.java.semantic.semantic.domain.SemanticIncomingCallResult;
+import com.java.semantic.semantic.domain.SemanticImplementationResult;
 import com.java.semantic.semantic.domain.SemanticLocation;
 import com.java.semantic.semantic.domain.SemanticMethod;
 import com.java.semantic.semantic.domain.SemanticPosition;
@@ -694,7 +695,7 @@ class SemanticCallGraphBuilderTest {
                 target.methodName(), target.parameterTypes(), List.of(), sql, sqlSource, 1, 6,
                 methodRange, new SourceSlice(methodRange, target.methodName() + "();"),
                 List.<TypeReference>of(), Optional.empty(), List.of(), List.of(), List.of(), methodRange.start(),
-                MethodTargetResolution.resolved(target), false, false);
+                MethodTargetResolution.resolved(target), false, true, false);
         return new ClassMetadata(
                 target.className(), target.packageName(), target.packageName() + "." + target.className(),
                 target.sourceFile(), ClassMetadata.TypeKind.INTERFACE, false,
@@ -768,7 +769,7 @@ class SemanticCallGraphBuilderTest {
                 target.methodName(), target.parameterTypes(), List.of("Async"), null, null, 1, 6,
                 range, new SourceSlice(range, "@Async\nvoid " + target.methodName() + "() {}"),
                 List.<TypeReference>of(), Optional.empty(), List.of(), List.of(), List.of(), range.start(),
-                MethodTargetResolution.resolved(target), true, true);
+                MethodTargetResolution.resolved(target), true, false, true);
     }
 
     private static ClassMetadata type(MethodTarget target, ClassMetadata.TypeKind kind, boolean executableDeclaration) {
@@ -814,7 +815,7 @@ class SemanticCallGraphBuilderTest {
                 target.methodName(), target.parameterTypes(), List.of(), null, null, 1, 6,
                 range, new SourceSlice(range, sourceText),
                 List.<TypeReference>of(), Optional.empty(), invocations, List.of(), List.of(), range.start(),
-                MethodTargetResolution.resolved(target), executableDeclaration, true);
+                MethodTargetResolution.resolved(target), executableDeclaration, !executableDeclaration, true);
     }
 
     private static SemanticCall externalCall(String rawSignature, int line) {
@@ -916,11 +917,11 @@ class SemanticCallGraphBuilderTest {
         }
 
         @Override
-        public List<SemanticMethod> implementations(RepositorySnapshot snapshot, SemanticMethod method) {
+        public SemanticImplementationResult implementations(RepositorySnapshot snapshot, SemanticMethod method) {
             if (failingImplementations.containsKey(method)) {
                 throw failingImplementations.get(method);
             }
-            return implementations.getOrDefault(method, List.of());
+            return new SemanticImplementationResult(implementations.getOrDefault(method, List.of()), List.of());
         }
     }
 }

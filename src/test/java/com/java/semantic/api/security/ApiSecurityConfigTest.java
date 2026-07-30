@@ -5,6 +5,8 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.FilterChain;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.core.Ordered;
 import org.springframework.mock.web.MockHttpServletRequest;
@@ -43,14 +45,17 @@ class ApiSecurityConfigTest {
         assertThat(registration.getFilter()).isInstanceOf(RequestCorrelationFilter.class);
     }
 
-    @Test
-    void should_correlate_before_rejecting_an_unauthorized_request() throws Exception {
+    @ParameterizedTest
+    @ValueSource(strings = {
+            "/v1/discovery/event-listeners",
+            "/v1/discovery/method-implementations"
+    })
+    void should_correlate_before_rejecting_an_unauthorized_request(String path) throws Exception {
         ApiSecurityConfig config = new ApiSecurityConfig();
         ApiSecurityProperties properties = new ApiSecurityProperties();
         properties.setApiToken("configured");
 
-        ChainResult result = invoke(
-                config, properties, "POST", "/v1/discovery/event-listeners", "valid.request-42");
+        ChainResult result = invoke(config, properties, "POST", path, "valid.request-42");
 
         assertThat(result.response().getStatus()).isEqualTo(401);
         assertThat(result.response().getHeader(RequestCorrelationFilter.REQUEST_ID_HEADER))
@@ -62,14 +67,17 @@ class ApiSecurityConfigTest {
         assertThat(MDC.get("requestId")).isNull();
     }
 
-    @Test
-    void should_reject_incorrect_token_for_event_listener_discovery() throws Exception {
+    @ParameterizedTest
+    @ValueSource(strings = {
+            "/v1/discovery/event-listeners",
+            "/v1/discovery/method-implementations"
+    })
+    void should_reject_incorrect_token_for_discovery_endpoint(String path) throws Exception {
         ApiSecurityConfig config = new ApiSecurityConfig();
         ApiSecurityProperties properties = new ApiSecurityProperties();
         properties.setApiToken("configured");
 
-        ChainResult result = invoke(
-                config, properties, "POST", "/v1/discovery/event-listeners", "valid.request-42", "incorrect");
+        ChainResult result = invoke(config, properties, "POST", path, "valid.request-42", "incorrect");
 
         assertThat(result.response().getStatus()).isEqualTo(401);
         assertThat(result.downstreamInvoked()).isFalse();

@@ -154,7 +154,7 @@ class DataAccessEvidenceTest {
         return new MethodSignature(
                 name, paramTypes, List.of(), sql, sqlSource, 1, 2, range,
                 new SourceSlice(range, name + "();"), List.of(), Optional.empty(), List.of(), List.of(),
-                List.of(), range.start(), MethodTargetResolution.unresolved("test-fixture"), true, true);
+                List.of(), range.start(), MethodTargetResolution.unresolved("test-fixture"), true, false, true);
     }
 
     private static MethodTarget target(String className, String methodName) {

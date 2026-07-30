@@ -73,7 +73,8 @@ class OpenApiContractTest {
                 "/v1/analyses/call-graphs/incoming",
                 "/v1/api-routes/lookup",
                 "/v1/api-routes/suggest",
-                "/v1/discovery/event-listeners"));
+                "/v1/discovery/event-listeners",
+                "/v1/discovery/method-implementations"));
         assertThat(paths.keySet()).doesNotContain(
                 "/v1/analyses/call-graph",
                 "/v1/analyses/call-graph/flatten",
@@ -175,6 +176,83 @@ class OpenApiContractTest {
                 .containsExactly("LISTENER_TARGET_UNRESOLVED");
         assertThat(schema(properties(observation), "samples"))
                 .contains(entry("maxItems", 5), entry("items", Map.of("$ref", "#/components/schemas/SourceRange")));
+    }
+
+    @Test
+    void should_describe_closed_revision_bound_method_implementation_discovery_contract() {
+        Map<String, Object> paths = map(document.get("paths"));
+        Map<String, Object> schemas = schemas();
+
+        assertThat(map(paths.get("/v1/discovery/method-implementations"))).containsOnlyKeys("post");
+        Map<String, Object> operation = operation(paths, "/v1/discovery/method-implementations", "post");
+        assertThat(operation.get("operationId")).isEqualTo("discoverMethodImplementations");
+        assertRequiredRequestBody(operation, "#/components/schemas/DiscoverMethodImplementationsRequest");
+        assertResponseCodes(operation, "200", "400", "401", "403", "404", "409", "422", "500", "502", "503", "504");
+        assertThat(map(map(operation.get("responses")).get("200")))
+                .isEqualTo(Map.of("$ref", "#/components/responses/MethodImplementationDiscovery"));
+        assertThat(map(map(operation.get("responses")).get("422")))
+                .isEqualTo(Map.of("$ref", "#/components/responses/UnprocessableEntity"));
+
+        Map<String, Object> request = schema(schemas, "DiscoverMethodImplementationsRequest");
+        assertClosedObject(request);
+        assertExactPropertiesAndRequired(request, "repoId", "expectedRevision", "declarationTarget");
+        assertThat(schema(properties(request), "repoId")).containsOnly(
+                entry("type", "string"),
+                entry("minLength", 1),
+                entry("pattern", "^[a-z0-9][a-z0-9._-]{0,63}$"));
+        assertThat(schema(properties(request), "expectedRevision")).containsEntry("pattern", REVISION_PATTERN);
+        assertThat(schema(properties(request), "declarationTarget"))
+                .isEqualTo(Map.of("$ref", "#/components/schemas/MethodTarget"));
+        assertThat(properties(request)).doesNotContainKeys("offset", "limit", "page", "cursor");
+
+        Map<String, Object> response = schema(schemas, "DiscoverMethodImplementationsResponse");
+        assertClosedObject(response);
+        assertExactPropertiesAndRequired(response,
+                "repoId", "revision", "requestedTarget", "candidates", "limits", "resolution");
+        assertThat(schema(properties(response), "revision")).containsEntry("pattern", REVISION_PATTERN);
+        assertThat(schema(properties(response), "requestedTarget"))
+                .isEqualTo(Map.of("$ref", "#/components/schemas/MethodTarget"));
+        assertThat(schema(schema(properties(response), "candidates"), "items"))
+                .isEqualTo(Map.of("$ref", "#/components/schemas/MethodImplementationCandidateResponse"));
+        assertThat(schema(properties(response), "limits"))
+                .isEqualTo(Map.of("$ref", "#/components/schemas/MethodImplementationLimitsResponse"));
+        assertThat(schema(properties(response), "resolution"))
+                .isEqualTo(Map.of("$ref", "#/components/schemas/MethodImplementationResolutionResponse"));
+
+        Map<String, Object> candidate = schema(schemas, "MethodImplementationCandidateResponse");
+        assertClosedObject(candidate);
+        assertExactPropertiesAndRequired(candidate, "target", "primary", "qualifiers", "profiles");
+        assertThat(schema(properties(candidate), "target"))
+                .isEqualTo(Map.of("$ref", "#/components/schemas/MethodTarget"));
+        assertThat(schema(schema(properties(candidate), "qualifiers"), "items"))
+                .isEqualTo(Map.of("type", "string"));
+        assertThat(schema(schema(properties(candidate), "profiles"), "items"))
+                .isEqualTo(Map.of("type", "string"));
+
+        Map<String, Object> limits = schema(schemas, "MethodImplementationLimitsResponse");
+        assertClosedObject(limits);
+        assertExactPropertiesAndRequired(limits, "candidateLimit", "returnedCount", "totalCount", "truncated");
+
+        Map<String, Object> resolution = schema(schemas, "MethodImplementationResolutionResponse");
+        assertClosedObject(resolution);
+        assertExactPropertiesAndRequired(resolution, "status", "issueSummaries");
+        assertThat(list(schema(properties(resolution), "status").get("enum")))
+                .containsExactly("COMPLETE", "PARTIAL");
+        assertThat(schema(schema(properties(resolution), "issueSummaries"), "items"))
+                .isEqualTo(Map.of("$ref", "#/components/schemas/SemanticImplementationIssueSummaryResponse"));
+
+        Map<String, Object> summary = schema(schemas, "SemanticImplementationIssueSummaryResponse");
+        assertClosedObject(summary);
+        assertExactPropertiesAndRequired(summary, "code", "count");
+        assertThat(list(schema(properties(summary), "code").get("enum"))).containsExactly(
+                "LOCAL_CONVERSION_FAILED",
+                "EXTERNAL_TARGET",
+                "CANONICAL_TARGET_UNRESOLVED",
+                "NON_EXECUTABLE_TARGET");
+
+        Map<String, Object> error = schema(schemas, "ApiErrorResponse");
+        assertThat(list(schema(properties(error), "errorCode").get("enum")))
+                .contains("IMPLEMENTATION_TARGET_UNSUPPORTED");
     }
 
     @Test
@@ -364,6 +442,7 @@ class OpenApiContractTest {
                 "SEMANTIC_BINDING_AMBIGUOUS",
                 "SEMANTIC_TARGET_NOT_FOUND",
                 "SEMANTIC_BINDING_UNRESOLVED",
+                "IMPLEMENTATION_TARGET_UNSUPPORTED",
                 "SEMANTIC_PROTOCOL_ERROR",
                 "SEMANTIC_ENGINE_START_FAILED",
                 "SEMANTIC_REQUEST_TIMEOUT",
@@ -657,6 +736,7 @@ class OpenApiContractTest {
         assertThat(map(paths.get("/v1/api-routes/lookup"))).containsOnlyKeys("post");
         assertThat(map(paths.get("/v1/api-routes/suggest"))).containsOnlyKeys("post");
         assertThat(map(paths.get("/v1/discovery/event-listeners"))).containsOnlyKeys("post");
+        assertThat(map(paths.get("/v1/discovery/method-implementations"))).containsOnlyKeys("post");
 
         assertResponseCodes(operation(paths, "/v1/repositories", "get"), "200", "401", "403", "409");
         assertResponseCodes(operation(paths, "/v1/repositories/{repoId}", "get"),
@@ -673,6 +753,8 @@ class OpenApiContractTest {
         assertResponseCodes(operation(paths, "/v1/api-routes/suggest", "post"), "200", "400", "401", "403", "500");
         assertResponseCodes(operation(paths, "/v1/discovery/event-listeners", "post"),
                 "200", "400", "401", "403", "404", "409", "500");
+        assertResponseCodes(operation(paths, "/v1/discovery/method-implementations", "post"),
+                "200", "400", "401", "403", "404", "409", "422", "500", "502", "503", "504");
     }
 
     @Test
@@ -693,6 +775,9 @@ class OpenApiContractTest {
         assertRequiredRequestBody(
                 operation(paths, "/v1/discovery/event-listeners", "post"),
                 "#/components/schemas/DiscoverEventListenersRequest");
+        assertRequiredRequestBody(
+                operation(paths, "/v1/discovery/method-implementations", "post"),
+                "#/components/schemas/DiscoverMethodImplementationsRequest");
 
         Map<String, Object> entryPointOperation = operation(
                 paths, "/v1/repositories/{repoId}/entry-points", "get");

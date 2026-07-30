@@ -12,6 +12,7 @@ import com.java.semantic.semantic.domain.SemanticCallSite;
 import com.java.semantic.semantic.domain.SemanticDeclarationAnchor;
 import com.java.semantic.semantic.domain.SemanticIncomingCall;
 import com.java.semantic.semantic.domain.SemanticIncomingCallResult;
+import com.java.semantic.semantic.domain.SemanticImplementationResult;
 import com.java.semantic.semantic.domain.SemanticMethod;
 import com.java.semantic.semantic.domain.SemanticPosition;
 import com.java.semantic.semantic.domain.SemanticRange;
@@ -57,7 +58,8 @@ class DirectionalCallGraphParityTest {
                 semantic, new SpringImplementationSelector())
                 .build(SNAPSHOT, syntax, callerTarget, caller, 1, 0);
         com.java.semantic.callgraph.domain.IncomingGraphFragment incoming = new IncomingSemanticCallGraphBuilder(
-                semantic, new DirectCallRelationshipResolver(semantic, new SpringImplementationSelector()))
+                semantic, new DirectCallRelationshipResolver(
+                        semantic, new SpringImplementationSelector(), new CanonicalTargetProjection()))
                 .build(SNAPSHOT, syntax, stringTarget, stringTargetMethod, 1, 0);
 
         assertThat(normalize(outgoing.edges(), outgoing.nodes())).containsExactlyElementsOf(normalize(incoming.edges(), incoming.nodes()));
@@ -86,7 +88,7 @@ class DirectionalCallGraphParityTest {
                 target.methodName(), target.parameterTypes(), List.of(), null, null, 1, 6,
                 range, new SourceSlice(range, "void " + target.methodName() + "() {}"), List.<TypeReference>of(),
                 Optional.empty(), invocations, List.of(), List.of(), range.start(),
-                MethodTargetResolution.resolved(target), true, true);
+                MethodTargetResolution.resolved(target), true, false, true);
         return new ClassMetadata(
                 target.className(), target.packageName(), target.packageName() + "." + target.className(),
                 target.sourceFile(), ClassMetadata.TypeKind.CLASS, false,
@@ -138,8 +140,8 @@ class DirectionalCallGraphParityTest {
         }
 
         @Override
-        public List<SemanticMethod> implementations(RepositorySnapshot snapshot, SemanticMethod method) {
-            return List.of();
+        public SemanticImplementationResult implementations(RepositorySnapshot snapshot, SemanticMethod method) {
+            return new SemanticImplementationResult(List.of(), List.of());
         }
 
         private SemanticCall call() {

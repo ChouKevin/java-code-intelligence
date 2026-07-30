@@ -14,6 +14,8 @@ import com.java.semantic.semantic.domain.SemanticEngineException;
 import com.java.semantic.semantic.domain.SemanticIncomingCall;
 import com.java.semantic.semantic.domain.SemanticIncomingCallIssue;
 import com.java.semantic.semantic.domain.SemanticIncomingCallResult;
+import com.java.semantic.semantic.domain.SemanticImplementationIssueReason;
+import com.java.semantic.semantic.domain.SemanticImplementationResult;
 import com.java.semantic.semantic.domain.SemanticLocation;
 import com.java.semantic.semantic.domain.SemanticMethod;
 import com.java.semantic.semantic.domain.SemanticPosition;
@@ -290,12 +292,12 @@ public class Lsp4jJavaSemanticService implements JavaSemanticService {
     }
 
     @Override
-    public List<SemanticMethod> implementations(RepositorySnapshot snapshot, SemanticMethod method) {
+    public SemanticImplementationResult implementations(RepositorySnapshot snapshot, SemanticMethod method) {
         return JdtLsSemanticExceptionNormalizer.normalize(
                 () -> implementationsInternal(snapshot, method));
     }
 
-    private List<SemanticMethod> implementationsInternal(
+    private SemanticImplementationResult implementationsInternal(
             RepositorySnapshot snapshot, SemanticMethod method) {
         Assert.notNull(snapshot, "snapshot is required");
         Assert.notNull(method, "method is required");
@@ -308,14 +310,29 @@ public class Lsp4jJavaSemanticService implements JavaSemanticService {
                     server -> server.getTextDocumentService()
                             .implementation(new ImplementationParams(new TextDocumentIdentifier(uri), namePosition)));
             Map<String, SemanticMethod> deduped = new LinkedHashMap<>();
-            for (TargetLocation target : implementationTargets(response)) {
+            List<SemanticImplementationIssueReason> issues = new ArrayList<>();
+            for (TargetLocation target : implementationTargets(response).stream().distinct().toList()) {
                 if (isExternal(target.uri(), snapshot)) {
+                    issues.add(SemanticImplementationIssueReason.EXTERNAL_TARGET);
                     continue;
                 }
-                resolveImplementation(session, snapshot, target)
-                        .ifPresent(resolved -> deduped.putIfAbsent(dedupeKey(resolved.location()), resolved));
+                try {
+                    Optional<SemanticMethod> resolved = resolveImplementation(session, snapshot, target);
+                    if (resolved.isPresent()) {
+                        SemanticMethod semanticMethod = resolved.orElseThrow();
+                        deduped.putIfAbsent(dedupeKey(semanticMethod.location()), semanticMethod);
+                    } else {
+                        issues.add(SemanticImplementationIssueReason.LOCAL_CONVERSION_FAILED);
+                    }
+                } catch (RuntimeException exception) {
+                    JdtLsSemanticExceptionNormalizer.rethrowIfEngineFailure(exception);
+                    log.debug("phase=jdtls-implementation outcome=conversion-failed repoId={} exceptionType={}",
+                            session.repositoryId().value(),
+                            exception.getClass().getSimpleName());
+                    issues.add(SemanticImplementationIssueReason.LOCAL_CONVERSION_FAILED);
+                }
             }
-            return List.copyOf(deduped.values());
+            return new SemanticImplementationResult(List.copyOf(deduped.values()), issues);
         }));
     }
 

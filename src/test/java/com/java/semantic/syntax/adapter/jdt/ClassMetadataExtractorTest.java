@@ -1,5 +1,6 @@
 package com.java.semantic.syntax.adapter.jdt;
 
+import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
@@ -68,6 +69,8 @@ class ClassMetadataExtractorTest {
 
                     abstract void abstractMethod();
 
+                    native void nativeMethod();
+
                     void unresolved(MissingDependency dependency) {
                     }
                 }
@@ -82,6 +85,7 @@ class ClassMetadataExtractorTest {
                 .findFirst()
                 .orElseThrow();
         MethodSignature abstractMethod = methodOf(List.of(metadata), "com.example.FlagFixture", "abstractMethod");
+        MethodSignature nativeMethod = methodOf(List.of(metadata), "com.example.FlagFixture", "nativeMethod");
         MethodSignature unresolved = methodOf(List.of(metadata), "com.example.FlagFixture", "unresolved");
 
         assertThat(metadata.sourceFile()).isEqualTo("src/main/java/com/example/FlagFixture.java");
@@ -101,10 +105,13 @@ class ClassMetadataExtractorTest {
         assertThat(open.overridableDeclaration()).isTrue();
         assertThat(constructor.overridableDeclaration()).isFalse();
         assertThat(metadata.methods().stream().filter(method -> method.name().endsWith("Method"))
-                .filter(method -> !"abstractMethod".equals(method.name())))
+                .filter(MethodSignature::executableDeclaration))
                 .allSatisfy(method -> assertThat(method.overridableDeclaration()).isFalse());
         assertThat(abstractMethod.executableDeclaration()).isFalse();
+        assertThat(abstractMethod.abstractDeclaration()).isTrue();
         assertThat(abstractMethod.overridableDeclaration()).isTrue();
+        assertThat(nativeMethod.executableDeclaration()).isFalse();
+        assertThat(nativeMethod.abstractDeclaration()).isFalse();
 
         RepositorySyntaxIndex index = new RepositorySyntaxIndex(
                 "orders", new RepositorySyntax(List.of(), List.of(metadata)));
@@ -172,6 +179,45 @@ class ClassMetadataExtractorTest {
         assertThat(methodOf(metadata, "com.example.RecordFixture", "open").overridableDeclaration()).isFalse();
         assertThat(methodOf(metadata, "com.example.OrdinaryFixture", "open").overridableDeclaration()).isTrue();
         assertThat(methodOf(metadata, "com.example.EnumFixture", "open").overridableDeclaration()).isTrue();
+    }
+
+    @Test
+    void should_mark_bodyless_overridable_interface_methods_as_abstract_declarations(@TempDir Path tempDir)
+            throws IOException {
+        Path repositoryRoot = tempDir.resolve("interface-declarations");
+        Path sourceRoot = repositoryRoot.resolve("src/main/java/com/example");
+        Files.createDirectories(sourceRoot);
+        Files.writeString(sourceRoot.resolve("InterfaceDeclarations.java"), """
+                package com.example;
+
+                interface Port {
+                    void handle();
+
+                    default void defaultHandle() {
+                    }
+
+                    static void staticHandle() {
+                    }
+
+                    private void privateHandle() {
+                    }
+                }
+
+                abstract class AbstractPort {
+                    abstract void explicitHandle();
+
+                    native void nativeHandle();
+                }
+                """);
+
+        List<ClassMetadata> metadata = new JdtSyntaxExtractionService().extract(repositoryRoot).classes();
+
+        assertThat(methodOf(metadata, "com.example.Port", "handle").abstractDeclaration()).isTrue();
+        assertThat(methodOf(metadata, "com.example.Port", "defaultHandle").abstractDeclaration()).isFalse();
+        assertThat(methodOf(metadata, "com.example.Port", "staticHandle").abstractDeclaration()).isFalse();
+        assertThat(methodOf(metadata, "com.example.Port", "privateHandle").abstractDeclaration()).isFalse();
+        assertThat(methodOf(metadata, "com.example.AbstractPort", "explicitHandle").abstractDeclaration()).isTrue();
+        assertThat(methodOf(metadata, "com.example.AbstractPort", "nativeHandle").abstractDeclaration()).isFalse();
     }
 
     // --- 呼叫圖語法證據 ---

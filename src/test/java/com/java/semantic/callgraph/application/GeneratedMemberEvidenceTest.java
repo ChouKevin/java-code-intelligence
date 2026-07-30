@@ -166,7 +166,7 @@ class GeneratedMemberEvidenceTest {
         return new MethodSignature(
                 name, paramTypes, List.of(), null, null, 1, 2, range,
                 new SourceSlice(range, "void " + name + "() {}"), List.of(), Optional.empty(), List.of(), List.of(),
-                List.of(), range.start(), MethodTargetResolution.unresolved("test-fixture"), true, true);
+                List.of(), range.start(), MethodTargetResolution.unresolved("test-fixture"), true, false, true);
     }
 
     private static SyntaxInvocation invocation(InvocationKind kind, String expression, String receiverDeclaration) {

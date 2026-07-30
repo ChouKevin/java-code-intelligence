@@ -211,6 +211,7 @@ final class ClassMetadataExtractor {
                     slices.range(method.getName()).start(),
                     analysisTargetOf.apply(method),
                     Objects.nonNull(method.getBody()),
+                    isAbstractDeclaration(type, method),
                     isOverridableDeclaration(type, method)));
         }
         return List.copyOf(methods);
@@ -228,6 +229,16 @@ final class ClassMetadataExtractor {
             }
         }
         return true;
+    }
+
+    private static boolean isAbstractDeclaration(AbstractTypeDeclaration enclosingType, MethodDeclaration method) {
+        if (Modifier.isNative(method.getModifiers())) {
+            return false;
+        }
+        return Modifier.isAbstract(method.getModifiers())
+                || (SourceTypes.isInterface(enclosingType)
+                && Objects.isNull(method.getBody())
+                && isOverridableDeclaration(enclosingType, method));
     }
 
     private static boolean isExplicitlyFinalClass(AbstractTypeDeclaration type) {
