@@ -1,14 +1,17 @@
 package com.java.semantic.api.dto;
 
+import com.java.semantic.api.monitoring.ApiMonitoringField;
+import com.java.semantic.api.monitoring.ApiMonitoringMode;
+
 import java.util.List;
 
 public record EntryPointClassResponse(
-        String className,
-        String packageName,
-        String packagePath,
-        String description,
-        List<String> basePaths,
-        List<EntryPointMethodResponse> methods) {
+        @ApiMonitoringField(ApiMonitoringMode.VALUE) String className,
+        @ApiMonitoringField(ApiMonitoringMode.VALUE) String packageName,
+        @ApiMonitoringField(ApiMonitoringMode.VALUE) String packagePath,
+        @ApiMonitoringField(ApiMonitoringMode.SIZE) String description,
+        @ApiMonitoringField(ApiMonitoringMode.SIZE) List<String> basePaths,
+        @ApiMonitoringField(ApiMonitoringMode.SIZE) List<EntryPointMethodResponse> methods) {
 
     public EntryPointClassResponse {
         basePaths = List.copyOf(basePaths);

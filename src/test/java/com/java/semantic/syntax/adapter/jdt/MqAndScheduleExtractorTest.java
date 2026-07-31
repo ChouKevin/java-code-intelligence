@@ -1,15 +1,20 @@
 package com.java.semantic.syntax.adapter.jdt;
 
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.List;
 
 import com.java.semantic.identity.MethodTarget;
 import com.java.semantic.syntax.domain.EntryPointClass;
 import com.java.semantic.syntax.domain.MqBroker;
 import com.java.semantic.syntax.domain.MqEntryPoint;
+import com.java.semantic.syntax.domain.RepositorySyntax;
 import com.java.semantic.syntax.domain.ScheduleEntryPoint;
 import com.java.semantic.syntax.domain.ScheduleTriggerKind;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -112,6 +117,43 @@ class MqAndScheduleExtractorTest {
 
         assertThat(entry.triggerKind()).isEqualTo(ScheduleTriggerKind.JOB_HANDLER);
         assertThat(entry.triggerValue()).isEqualTo("settleHandler");
+    }
+
+    @Test
+    void should_preserve_unresolved_typed_entry_point_metadata_without_raw_constant_names(@TempDir Path tempDir)
+            throws IOException {
+        Path sourceFile = tempDir.resolve("src/main/java/com/example/Orders.java");
+        Files.createDirectories(sourceFile.getParent());
+        Files.writeString(sourceFile, """
+                package com.example;
+
+                import org.springframework.kafka.annotation.KafkaListener;
+                import org.springframework.scheduling.annotation.Scheduled;
+
+                class Orders {
+                    @KafkaListener(topics = ExternalTopics.ORDERS)
+                    void listen() { }
+
+                    @Scheduled(cron = ExternalSchedules.CRON)
+                    void run() { }
+                }
+                """);
+
+        RepositorySyntax syntax = new JdtSyntaxExtractionService().extract(tempDir);
+        MqEntryPoint mq = syntax.entryPoints().getFirst().methods().stream()
+                .filter(MqEntryPoint.class::isInstance)
+                .map(MqEntryPoint.class::cast)
+                .findFirst()
+                .orElseThrow();
+        ScheduleEntryPoint schedule = syntax.entryPoints().getFirst().methods().stream()
+                .filter(ScheduleEntryPoint.class::isInstance)
+                .map(ScheduleEntryPoint.class::cast)
+                .findFirst()
+                .orElseThrow();
+
+        assertThat(mq.destinations()).isEmpty();
+        assertThat(schedule.triggerKind()).isEqualTo(ScheduleTriggerKind.CRON);
+        assertThat(schedule.triggerValue()).isEmpty();
     }
 
     private List<String> destinationsOf(String className) {

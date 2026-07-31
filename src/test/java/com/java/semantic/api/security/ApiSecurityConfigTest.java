@@ -1,6 +1,7 @@
 package com.java.semantic.api.security;
 
 import com.java.semantic.api.RequestCorrelationFilter;
+import com.java.semantic.api.ApiMonitoringFilter;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.FilterChain;
@@ -30,7 +31,7 @@ class ApiSecurityConfigTest {
         FilterRegistrationBean<ApiTokenFilter> registration = config.apiTokenFilter(properties);
 
         assertThat(registration.getUrlPatterns()).containsExactly("/*");
-        assertThat(registration.getOrder()).isEqualTo(Ordered.HIGHEST_PRECEDENCE + 1);
+        assertThat(registration.getOrder()).isEqualTo(Ordered.HIGHEST_PRECEDENCE + 2);
         assertThat(registration.getFilter()).isInstanceOf(ApiTokenFilter.class);
     }
 
@@ -43,6 +44,17 @@ class ApiSecurityConfigTest {
         assertThat(registration.getUrlPatterns()).containsExactly("/*");
         assertThat(registration.getOrder()).isEqualTo(Ordered.HIGHEST_PRECEDENCE);
         assertThat(registration.getFilter()).isInstanceOf(RequestCorrelationFilter.class);
+    }
+
+    @Test
+    void should_register_monitoring_between_correlation_and_token_authentication() {
+        ApiSecurityConfig config = new ApiSecurityConfig();
+
+        FilterRegistrationBean<ApiMonitoringFilter> registration = config.apiMonitoringFilter();
+
+        assertThat(registration.getUrlPatterns()).containsExactly("/*");
+        assertThat(registration.getOrder()).isEqualTo(Ordered.HIGHEST_PRECEDENCE + 1);
+        assertThat(registration.getFilter()).isInstanceOf(ApiMonitoringFilter.class);
     }
 
     @ParameterizedTest

@@ -8,12 +8,17 @@ import com.java.semantic.identity.MethodTarget;
 import com.java.semantic.repository.application.RepositoryApplicationService;
 import com.java.semantic.repository.domain.RepositorySnapshot;
 import com.java.semantic.semantic.domain.JavaSemanticService;
+import com.java.semantic.semantic.domain.SemanticBindingAmbiguousException;
 import com.java.semantic.semantic.domain.SemanticDeclarationAnchor;
 import com.java.semantic.semantic.domain.SemanticImplementationIssueReason;
 import com.java.semantic.semantic.domain.SemanticImplementationResult;
 import com.java.semantic.semantic.domain.SemanticMethod;
+import com.java.semantic.semantic.domain.SemanticPosition;
+import com.java.semantic.semantic.domain.SemanticTargetNotFoundException;
+import com.java.semantic.syntax.domain.CanonicalMethodDeclarationResolver;
 import com.java.semantic.syntax.domain.ClassMetadata;
 import com.java.semantic.syntax.domain.ClassMetadata.MethodSignature;
+import com.java.semantic.syntax.domain.MethodTargetResolution;
 import com.java.semantic.syntax.domain.RepositorySyntax;
 import com.java.semantic.syntax.domain.SyntaxExtractionService;
 
@@ -39,7 +44,7 @@ public final class MethodImplementationDiscoveryApplicationService {
 
     private final RepositoryApplicationService repositoryApplicationService;
     private final SyntaxExtractionService syntaxExtractionService;
-    private final ExactMethodDeclarationResolver declarationResolver;
+    private final CanonicalMethodDeclarationResolver declarationResolver;
     private final JavaSemanticService semanticService;
     private final CanonicalTargetProjection canonicalTargetProjection;
     private final ImplementationCandidateFactory candidateFactory;
@@ -48,7 +53,7 @@ public final class MethodImplementationDiscoveryApplicationService {
     public MethodImplementationDiscoveryApplicationService(
             RepositoryApplicationService repositoryApplicationService,
             SyntaxExtractionService syntaxExtractionService,
-            ExactMethodDeclarationResolver declarationResolver,
+            CanonicalMethodDeclarationResolver declarationResolver,
             JavaSemanticService semanticService,
             CanonicalTargetProjection canonicalTargetProjection,
             ImplementationCandidateFactory candidateFactory,
@@ -81,7 +86,8 @@ public final class MethodImplementationDiscoveryApplicationService {
             MethodImplementationDiscoveryQuery query) {
         RepositorySyntax syntax = syntaxExtractionService.extract(snapshot.root());
         RepositorySyntaxIndex index = new RepositorySyntaxIndex(snapshot.repositoryId().value(), syntax);
-        SemanticDeclarationAnchor anchor = declarationResolver.resolve(syntax, query.declarationTarget());
+        MethodTargetResolution resolution = declarationResolver.resolve(syntax, query.declarationTarget());
+        SemanticDeclarationAnchor anchor = declarationAnchor(syntax, query.declarationTarget(), resolution);
         assertEligible(index, query.declarationTarget());
         SemanticMethod declaration = semanticService.resolveExactMethod(snapshot, anchor);
         SemanticImplementationResult implementationResult = semanticService.implementations(snapshot, declaration);
@@ -120,6 +126,24 @@ public final class MethodImplementationDiscoveryApplicationService {
         if (!abstractInterfaceMethod && !abstractClassMethod) {
             throw new ImplementationTargetUnsupportedException(target);
         }
+    }
+
+    private SemanticDeclarationAnchor declarationAnchor(
+            RepositorySyntax syntax,
+            MethodTarget target,
+            MethodTargetResolution resolution) {
+        return switch (resolution.status()) {
+            case RESOLVED -> syntax.classes().stream()
+                    .flatMap(metadata -> metadata.methods().stream())
+                    .filter(method -> method.analysisTarget().target().filter(target::equals).isPresent())
+                    .map(method -> new SemanticDeclarationAnchor(
+                            target,
+                            new SemanticPosition(method.namePosition().line(), method.namePosition().character())))
+                    .findFirst()
+                    .orElseThrow(() -> new SemanticTargetNotFoundException(target));
+            case UNRESOLVED -> throw new SemanticTargetNotFoundException(target);
+            case AMBIGUOUS -> throw new SemanticBindingAmbiguousException(target, resolution.candidates());
+        };
     }
 
     private CandidateProjection projectCandidates(

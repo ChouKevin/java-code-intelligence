@@ -1,6 +1,7 @@
 package com.java.semantic.api;
 
 import com.java.semantic.api.dto.ApiErrorResponse;
+import com.java.semantic.api.dto.ConceptKindUnavailableResponse;
 import com.java.semantic.api.dto.MethodTargetResponse;
 import com.java.semantic.identity.MethodTarget;
 import com.java.semantic.repository.application.ImmutableFixtureException;
@@ -18,6 +19,9 @@ import com.java.semantic.semantic.domain.SemanticEngineStartFailedException;
 import com.java.semantic.semantic.domain.SemanticProtocolException;
 import com.java.semantic.semantic.domain.SemanticRequestTimeoutException;
 import com.java.semantic.semantic.domain.SemanticTargetNotFoundException;
+import com.java.semantic.syntax.application.ExactContentApplicationService.ExactContentNotFoundException;
+import com.java.semantic.syntax.application.ConceptKindUnavailableException;
+import com.java.semantic.syntax.application.TypeMemberTypeNotFoundException;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -47,6 +51,20 @@ public class ApiExceptionHandler {
     @ExceptionHandler(RepositoryNotFoundException.class)
     public ResponseEntity<ApiErrorResponse> repositoryNotFound(HttpServletRequest request) {
         return response(HttpStatus.NOT_FOUND, "REPOSITORY_NOT_FOUND", "repository is not configured", request);
+    }
+
+    @ExceptionHandler({ExactContentHttpNotFoundException.class, ExactContentNotFoundException.class})
+    public ResponseEntity<ApiErrorResponse> exactContentNotFound(HttpServletRequest request) {
+        return response(
+                HttpStatus.NOT_FOUND,
+                "EXACT_CONTENT_NOT_FOUND",
+                "exact content was not found",
+                request);
+    }
+
+    @ExceptionHandler(TypeMemberTypeNotFoundException.class)
+    public ResponseEntity<ApiErrorResponse> typeMemberTypeNotFound(HttpServletRequest request) {
+        return response(HttpStatus.NOT_FOUND, "TYPE_MEMBER_TYPE_NOT_FOUND", "type was not found", request);
     }
 
     @ExceptionHandler({RepositoryBusyException.class, RepositoryNotReadyException.class})
@@ -155,6 +173,18 @@ public class ApiExceptionHandler {
     @ExceptionHandler(IllegalArgumentException.class)
     public ResponseEntity<ApiErrorResponse> invalidArgument(HttpServletRequest request) {
         return response(HttpStatus.BAD_REQUEST, "REQUEST_INVALID", "request body is invalid", request);
+    }
+
+    @ExceptionHandler(ConceptKindUnavailableException.class)
+    public ResponseEntity<ConceptKindUnavailableResponse> conceptKindUnavailable(
+            ConceptKindUnavailableException exception,
+            HttpServletRequest request) {
+        return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY).body(new ConceptKindUnavailableResponse(
+                "CONCEPT_KIND_UNAVAILABLE",
+                "requested concept kind is not active",
+                exception.unavailableKinds().stream().map(Enum::name).toList(),
+                exception.supportedKinds().stream().map(Enum::name).toList(),
+                requestId(request)));
     }
 
     @ExceptionHandler(Exception.class)

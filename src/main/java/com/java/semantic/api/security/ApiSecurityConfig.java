@@ -1,6 +1,7 @@
 package com.java.semantic.api.security;
 
 import com.java.semantic.api.RequestCorrelationFilter;
+import com.java.semantic.api.ApiMonitoringFilter;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.context.annotation.Bean;
@@ -22,11 +23,20 @@ public class ApiSecurityConfig {
     }
 
     @Bean
+    public FilterRegistrationBean<ApiMonitoringFilter> apiMonitoringFilter() {
+        FilterRegistrationBean<ApiMonitoringFilter> registration =
+                new FilterRegistrationBean<>(new ApiMonitoringFilter());
+        registration.addUrlPatterns("/*");
+        registration.setOrder(Ordered.HIGHEST_PRECEDENCE + 1);
+        return registration;
+    }
+
+    @Bean
     public FilterRegistrationBean<ApiTokenFilter> apiTokenFilter(ApiSecurityProperties properties) {
         FilterRegistrationBean<ApiTokenFilter> registration =
                 new FilterRegistrationBean<>(new ApiTokenFilter(properties));
         registration.addUrlPatterns("/*");
-        registration.setOrder(Ordered.HIGHEST_PRECEDENCE + 1);
+        registration.setOrder(Ordered.HIGHEST_PRECEDENCE + 2);
         return registration;
     }
 }

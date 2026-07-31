@@ -1,5 +1,8 @@
 package com.java.semantic.api.dto;
 
+import com.java.semantic.api.monitoring.ApiMonitoringField;
+import com.java.semantic.api.monitoring.ApiMonitoringMode;
+
 import com.fasterxml.jackson.annotation.JsonAnySetter;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.java.semantic.identity.MethodTarget;
@@ -14,23 +17,23 @@ import java.util.Objects;
 /** Validated API input for one exact, source-qualified method target. */
 @JsonIgnoreProperties(ignoreUnknown = false)
 public record MethodTargetRequest(
-        @NotBlank
+        @ApiMonitoringField(ApiMonitoringMode.VALUE) @NotBlank
         @Size(max = 1024)
         @Pattern(regexp = "[^\\p{javaISOControl}]+")
         String sourceFile,
-        String packageName,
-        @NotBlank
+        @ApiMonitoringField(ApiMonitoringMode.VALUE) String packageName,
+        @ApiMonitoringField(ApiMonitoringMode.VALUE) @NotBlank
         @Size(max = 255)
         @Pattern(regexp = "[\\p{L}\\p{Nl}\\p{Sc}\\p{Pc}][\\p{L}\\p{Nl}\\p{Sc}\\p{Pc}\\p{Mn}\\p{Mc}\\p{Nd}]*"
                 + "(?:\\.[\\p{L}\\p{Nl}\\p{Sc}\\p{Pc}]"
                 + "[\\p{L}\\p{Nl}\\p{Sc}\\p{Pc}\\p{Mn}\\p{Mc}\\p{Nd}]*)*")
         String className,
-        @NotBlank
+        @ApiMonitoringField(ApiMonitoringMode.VALUE) @NotBlank
         @Size(max = 255)
         @Pattern(regexp = "[\\p{L}\\p{Nl}\\p{Sc}\\p{Pc}]"
                 + "[\\p{L}\\p{Nl}\\p{Sc}\\p{Pc}\\p{Mn}\\p{Mc}\\p{Nd}]*")
         String methodName,
-        @NotNull List<@NotBlank String> parameterTypes) {
+        @ApiMonitoringField(ApiMonitoringMode.SIZE) @NotNull List<@NotBlank String> parameterTypes) {
 
     public MethodTargetRequest {
         packageName = Objects.requireNonNull(packageName, "packageName is required");

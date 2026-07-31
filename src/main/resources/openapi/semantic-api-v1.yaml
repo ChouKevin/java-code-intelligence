@@ -298,6 +298,206 @@ paths:
           $ref: '#/components/responses/ServiceUnavailable'
         '504':
           $ref: '#/components/responses/GatewayTimeout'
+  /v1/discovery/concepts:
+    post:
+      operationId: discoverConcepts
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DiscoverConceptsRequest'
+      responses:
+        '200':
+          $ref: '#/components/responses/ConceptDiscovery'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/AuthDisabled'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ConceptKindUnavailable'
+        '500':
+          $ref: '#/components/responses/MutationFailed'
+  /v1/discovery/type-members:
+    post:
+      operationId: discoverTypeMembers
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DiscoverTypeMembersRequest'
+      responses:
+        '200':
+          $ref: '#/components/responses/TypeMemberDiscovery'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/AuthDisabled'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/MutationFailed'
+  /v1/discovery/method-source:
+    post:
+      operationId: getMethodSource
+      description: Returns exact method source for one canonical five-field MethodTarget
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GetMethodSourceRequest'
+      responses:
+        '200':
+          $ref: '#/components/responses/ExactContent'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/AuthDisabled'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/MutationFailed'
+  /v1/discovery/method-sql:
+    post:
+      operationId: getMethodSql
+      description: Returns every legal mapper statement variant for one canonical method identity
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GetMapperStatementRequest'
+      responses:
+        '200':
+          $ref: '#/components/responses/ExactContent'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/AuthDisabled'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/MutationFailed'
+  /v1/discovery/mapper-sql-fragment:
+    post:
+      operationId: getMapperFragment
+      description: Returns exact serialized mapper XML for one indexed fragment identity
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GetMapperFragmentRequest'
+      responses:
+        '200':
+          $ref: '#/components/responses/ExactContent'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/AuthDisabled'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/MutationFailed'
+  /v1/discovery/method-source-segment:
+    post:
+      operationId: getMethodSourceSegment
+      description: Statelessly reconstructs exact method source and validates contentRef before returning one Unicode-safe segment
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GetMethodSourceSegmentRequest'
+      responses:
+        '200':
+          $ref: '#/components/responses/ExactContentSegment'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/AuthDisabled'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/MutationFailed'
+  /v1/discovery/method-sql-segment:
+    post:
+      operationId: getMethodSqlSegment
+      description: Statelessly reconstructs mapper statement evidence and validates contentRef before returning one Unicode-safe segment
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GetMapperStatementSegmentRequest'
+      responses:
+        '200':
+          $ref: '#/components/responses/ExactContentSegment'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/AuthDisabled'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/MutationFailed'
+  /v1/discovery/mapper-fragment-segment:
+    post:
+      operationId: getMapperFragmentSegment
+      description: Statelessly reconstructs mapper fragment XML and validates contentRef before returning one Unicode-safe segment
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GetMapperFragmentSegmentRequest'
+      responses:
+        '200':
+          $ref: '#/components/responses/ExactContentSegment'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/AuthDisabled'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/MutationFailed'
 components:
   securitySchemes:
     ApiToken:
@@ -355,6 +555,36 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/DiscoverMethodImplementationsResponse'
+    ConceptDiscovery:
+      description: Revision-bound structured concept discovery candidates and recovery guidance
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/DiscoverConceptsResponse'
+    ConceptKindUnavailable:
+      description: Requested concept kind is declared but inactive in this composition
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ConceptKindUnavailableResponse'
+    TypeMemberDiscovery:
+      description: Revision-bound combined type member discovery page
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/DiscoverTypeMembersResponse'
+    ExactContent:
+      description: Revision-bound exact source or mapper evidence without inline truncation
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ExactContentResponse'
+    ExactContentSegment:
+      description: One Unicode code-point-safe exact content segment with typed stateless continuation
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ExactContentSegmentResponse'
     BadRequest:
       description: Invalid repository id or request
       content:
@@ -476,6 +706,180 @@ components:
           maximum: 2
         target:
           $ref: '#/components/schemas/MethodTarget'
+    GetMethodSourceRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - repoId
+        - expectedRevision
+        - target
+      properties:
+        repoId:
+          type: string
+          minLength: 1
+          pattern: '^[a-z0-9][a-z0-9._-]{0,63}$'
+        expectedRevision:
+          type: string
+          minLength: 1
+          pattern: '^[0-9a-f]{40}$|^FIXTURE$'
+        target:
+          $ref: '#/components/schemas/MethodTarget'
+    GetMapperStatementRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - repoId
+        - expectedRevision
+        - target
+      properties:
+        repoId:
+          type: string
+          minLength: 1
+          pattern: '^[a-z0-9][a-z0-9._-]{0,63}$'
+        expectedRevision:
+          type: string
+          minLength: 1
+          pattern: '^[0-9a-f]{40}$|^FIXTURE$'
+        target:
+          $ref: '#/components/schemas/MethodTarget'
+    GetMapperFragmentRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - repoId
+        - expectedRevision
+        - fragmentIdentity
+      properties:
+        repoId:
+          type: string
+          minLength: 1
+          pattern: '^[a-z0-9][a-z0-9._-]{0,63}$'
+        expectedRevision:
+          type: string
+          minLength: 1
+          pattern: '^[0-9a-f]{40}$|^FIXTURE$'
+        fragmentIdentity:
+          $ref: '#/components/schemas/MapperFragmentIdentityRequest'
+    GetMethodSourceSegmentRequest:
+      type: object
+      additionalProperties: false
+      description: Stateless continuation carrying the original exact method authority; contentRef is consistency validation, not a lookup key
+      required:
+        - repoId
+        - expectedRevision
+        - target
+        - contentRef
+        - segmentIndex
+      properties:
+        repoId:
+          type: string
+          minLength: 1
+          pattern: '^[a-z0-9][a-z0-9._-]{0,63}$'
+        expectedRevision:
+          type: string
+          minLength: 1
+          pattern: '^[0-9a-f]{40}$|^FIXTURE$'
+        target:
+          $ref: '#/components/schemas/MethodTarget'
+        contentRef:
+          type: string
+          minLength: 1
+          maxLength: 128
+          pattern: '^[^\u0000-\u001F\u007F-\u009F]+$'
+        segmentIndex:
+          type: integer
+          minimum: 0
+    GetMapperStatementSegmentRequest:
+      type: object
+      additionalProperties: false
+      description: Stateless continuation carrying the original exact mapper method authority; contentRef is consistency validation, not a lookup key
+      required:
+        - repoId
+        - expectedRevision
+        - target
+        - contentRef
+        - segmentIndex
+      properties:
+        repoId:
+          type: string
+          minLength: 1
+          pattern: '^[a-z0-9][a-z0-9._-]{0,63}$'
+        expectedRevision:
+          type: string
+          minLength: 1
+          pattern: '^[0-9a-f]{40}$|^FIXTURE$'
+        target:
+          $ref: '#/components/schemas/MethodTarget'
+        contentRef:
+          type: string
+          minLength: 1
+          maxLength: 128
+          pattern: '^[^\u0000-\u001F\u007F-\u009F]+$'
+        segmentIndex:
+          type: integer
+          minimum: 0
+    GetMapperFragmentSegmentRequest:
+      type: object
+      additionalProperties: false
+      description: Stateless continuation carrying the original exact fragment authority; contentRef is consistency validation, not a lookup key
+      required:
+        - repoId
+        - expectedRevision
+        - fragmentIdentity
+        - contentRef
+        - segmentIndex
+      properties:
+        repoId:
+          type: string
+          minLength: 1
+          pattern: '^[a-z0-9][a-z0-9._-]{0,63}$'
+        expectedRevision:
+          type: string
+          minLength: 1
+          pattern: '^[0-9a-f]{40}$|^FIXTURE$'
+        fragmentIdentity:
+          $ref: '#/components/schemas/MapperFragmentIdentityRequest'
+        contentRef:
+          type: string
+          minLength: 1
+          maxLength: 128
+          pattern: '^[^\u0000-\u001F\u007F-\u009F]+$'
+        segmentIndex:
+          type: integer
+          minimum: 0
+    MapperFragmentIdentityRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - namespace
+        - fragmentId
+        - resourcePath
+        - documentOrdinal
+        - representation
+      properties:
+        namespace:
+          type: string
+          minLength: 1
+          maxLength: 1024
+          pattern: '^[^\u0000-\u001F\u007F-\u009F]+$'
+        fragmentId:
+          type: string
+          minLength: 1
+          maxLength: 255
+          pattern: '^[^\u0000-\u001F\u007F-\u009F]+$'
+        resourcePath:
+          type: string
+          minLength: 1
+          maxLength: 1024
+          pattern: '^[^\u0000-\u001F\u007F-\u009F]+$'
+          description: Repository-relative mapper resource path
+        documentOrdinal:
+          type: integer
+          minimum: 0
+        representation:
+          type: string
+          enum:
+            - MAPPER_XML_ELEMENT
     MethodTarget:
       type: object
       additionalProperties: false
@@ -748,6 +1152,1182 @@ components:
         count:
           type: integer
           minimum: 1
+    DiscoverConceptsRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - operator
+        - repoId
+        - expectedRevision
+        - terms
+        - kinds
+      properties:
+        operator:
+          type: string
+          enum:
+            - ALL
+        repoId:
+          type: string
+          minLength: 1
+          pattern: '^[a-z0-9][a-z0-9._-]{0,63}$'
+        expectedRevision:
+          type: string
+          minLength: 1
+          pattern: '^[0-9a-f]{40}$|^FIXTURE$'
+        terms:
+          type: array
+          minItems: 1
+          maxItems: 4
+          items:
+            $ref: '#/components/schemas/ConceptSearchTerm'
+        kinds:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items:
+            $ref: '#/components/schemas/ConceptKind'
+        packagePrefix:
+          type: string
+          minLength: 1
+          maxLength: 255
+          pattern: '.*\S.*'
+        offset:
+          type: integer
+          default: 0
+          minimum: 0
+        limit:
+          type: integer
+          default: 50
+          minimum: 1
+          maximum: 100
+    ConceptSearchTerm:
+      type: object
+      additionalProperties: false
+      required:
+        - value
+        - matchMode
+      properties:
+        value:
+          type: string
+          minLength: 2
+          maxLength: 128
+          pattern: '.*\S.*'
+        matchMode:
+          $ref: '#/components/schemas/ConceptMatchMode'
+    ConceptKind:
+      type: string
+      enum:
+        - TYPE
+        - METHOD
+        - FIELD
+        - ANNOTATION_USAGE
+        - TYPE_USAGE
+        - API_ROUTE
+        - MQ_DESTINATION
+        - SCHEDULE
+        - MAPPER_STATEMENT
+        - SQL_IDENTIFIER
+        - CONFIGURATION_KEY
+        - OUTBOUND_API
+        - MQ_PUBLISHER
+        - ERROR_CONTRACT
+        - ENUM_CONSTANT
+    ConceptMatchMode:
+      type: string
+      enum:
+        - TOKEN_EXACT
+        - TOKEN_PREFIX
+        - CANONICAL_EXACT
+    DiscoverConceptsResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - repoId
+        - analyzedRevision
+        - normalizedTerms
+        - searchedKinds
+        - supportedKinds
+        - limitations
+        - candidates
+        - page
+        - coverage
+        - issueSummaries
+        - availableFollowUps
+        - unavailableFollowUps
+      properties:
+        repoId:
+          type: string
+        analyzedRevision:
+          type: string
+          pattern: '^[0-9a-f]{40}$|^FIXTURE$'
+        normalizedTerms:
+          type: array
+          items:
+            type: string
+        searchedKinds:
+          type: array
+          items:
+            $ref: '#/components/schemas/ConceptKind'
+        supportedKinds:
+          type: array
+          items:
+            $ref: '#/components/schemas/ConceptKind'
+        limitations:
+          type: array
+          items:
+            type: string
+            enum:
+              - SOURCE_BODY_NOT_SEARCHED
+        candidates:
+          type: array
+          items:
+            $ref: '#/components/schemas/ConceptCandidateResponse'
+        page:
+          $ref: '#/components/schemas/ConceptPageResponse'
+        coverage:
+          $ref: '#/components/schemas/ConceptCoverageResponse'
+        issueSummaries:
+          type: array
+          items:
+            $ref: '#/components/schemas/ConceptIssueSummaryResponse'
+        availableFollowUps:
+          type: array
+          items:
+            $ref: '#/components/schemas/DiscoveryFollowUpResponse'
+        unavailableFollowUps:
+          type: array
+          items:
+            $ref: '#/components/schemas/UnavailableDiscoveryFollowUpResponse'
+    ConceptCandidateResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - kind
+        - canonicalValue
+        - displayValue
+        - matchedTerms
+        - packageName
+        - authority
+        - evidence
+        - availableFollowUps
+      properties:
+        kind:
+          $ref: '#/components/schemas/ConceptKind'
+        canonicalValue:
+          type: string
+        displayValue:
+          type: string
+        matchedTerms:
+          type: array
+          items:
+            type: string
+        packageName:
+          type: string
+        declaringType:
+          type: string
+          nullable: true
+        authority:
+          type: string
+          enum:
+            - SYNTAX_RESOLVED
+            - SYNTAX_DECLARED
+            - FRAMEWORK_METADATA
+            - WRITTEN_NAME_FALLBACK
+            - METADATA_VALUE_UNRESOLVED
+        subject:
+          type: string
+          nullable: true
+        target:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/MethodTarget'
+        mapperStatementMapping:
+          $ref: '#/components/schemas/MapperStatementMappingResponse'
+        evidence:
+          type: array
+          items:
+            $ref: '#/components/schemas/ConceptEvidenceResponse'
+        availableFollowUps:
+          type: array
+          items:
+            $ref: '#/components/schemas/ConceptCandidateFollowUpResponse'
+    MapperStatementMappingResponse:
+      description: Mapper statement identity and state-specific complete method mappings from typed syntax evidence
+      oneOf:
+        - $ref: '#/components/schemas/ResolvedMapperStatementMappingResponse'
+        - $ref: '#/components/schemas/AmbiguousMapperStatementMappingResponse'
+        - $ref: '#/components/schemas/UnresolvedMapperStatementMappingResponse'
+      discriminator:
+        propertyName: status
+        mapping:
+          RESOLVED: '#/components/schemas/ResolvedMapperStatementMappingResponse'
+          AMBIGUOUS: '#/components/schemas/AmbiguousMapperStatementMappingResponse'
+          UNRESOLVED: '#/components/schemas/UnresolvedMapperStatementMappingResponse'
+    ResolvedMapperStatementMappingResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - namespace
+        - statementId
+        - status
+        - candidates
+      properties:
+        namespace:
+          type: string
+        statementId:
+          type: string
+        status:
+          type: string
+          enum:
+            - RESOLVED
+        candidates:
+          type: array
+          minItems: 1
+          maxItems: 1
+          uniqueItems: true
+          items:
+            $ref: '#/components/schemas/MapperSqlMethodCandidateResponse'
+    AmbiguousMapperStatementMappingResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - namespace
+        - statementId
+        - status
+        - candidates
+      properties:
+        namespace:
+          type: string
+        statementId:
+          type: string
+        status:
+          type: string
+          enum:
+            - AMBIGUOUS
+        candidates:
+          type: array
+          minItems: 2
+          uniqueItems: true
+          items:
+            $ref: '#/components/schemas/MapperSourceMethodCandidateResponse'
+    UnresolvedMapperStatementMappingResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - namespace
+        - statementId
+        - status
+        - reason
+        - candidates
+      properties:
+        namespace:
+          type: string
+        statementId:
+          type: string
+        status:
+          type: string
+          enum:
+            - UNRESOLVED
+        reason:
+          type: string
+          enum:
+            - INCOMPLETE_METHOD_RESOLUTION
+        candidates:
+          type: array
+          uniqueItems: true
+          items:
+            $ref: '#/components/schemas/MapperSourceMethodCandidateResponse'
+    MapperSqlMethodCandidateResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - target
+        - availableFollowUps
+      properties:
+        target:
+          $ref: '#/components/schemas/MethodTarget'
+        availableFollowUps:
+          type: array
+          minItems: 1
+          maxItems: 1
+          items:
+            allOf:
+              - $ref: '#/components/schemas/ConceptCandidateFollowUpResponse'
+              - type: object
+                properties:
+                  operation:
+                    type: string
+                    enum:
+                      - GET_METHOD_SQL
+                  api:
+                    allOf:
+                      - $ref: '#/components/schemas/DiscoveryFollowUpApiResponse'
+                      - type: object
+                        properties:
+                          path:
+                            type: string
+                            enum:
+                              - /v1/discovery/method-sql
+                          operationId:
+                            type: string
+                            enum:
+                              - getMethodSql
+                  request:
+                    $ref: '#/components/schemas/MethodTargetFollowUpRequestResponse'
+    MapperSourceMethodCandidateResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - target
+        - availableFollowUps
+      properties:
+        target:
+          $ref: '#/components/schemas/MethodTarget'
+        availableFollowUps:
+          type: array
+          minItems: 1
+          maxItems: 1
+          items:
+            allOf:
+              - $ref: '#/components/schemas/ConceptCandidateFollowUpResponse'
+              - type: object
+                properties:
+                  operation:
+                    type: string
+                    enum:
+                      - GET_METHOD_SOURCE
+                  api:
+                    allOf:
+                      - $ref: '#/components/schemas/DiscoveryFollowUpApiResponse'
+                      - type: object
+                        properties:
+                          path:
+                            type: string
+                            enum:
+                              - /v1/discovery/method-source
+                          operationId:
+                            type: string
+                            enum:
+                              - getMethodSource
+                  request:
+                    $ref: '#/components/schemas/MethodTargetFollowUpRequestResponse'
+    ConceptEvidenceResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - kind
+      properties:
+        kind:
+          $ref: '#/components/schemas/ConceptKind'
+        subject:
+          type: string
+          nullable: true
+        target:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/MethodTarget'
+        resourcePath:
+          type: string
+        databaseId:
+          type: string
+          nullable: true
+        documentOrdinal:
+          type: integer
+          minimum: 0
+        representation:
+          type: string
+          enum:
+            - MAPPER_XML_ELEMENT
+            - ANNOTATION_SQL_TEXT
+    ConceptPageResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - offset
+        - limit
+        - returnedCount
+        - totalCount
+        - hasMore
+      properties:
+        offset:
+          type: integer
+          minimum: 0
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 100
+        returnedCount:
+          type: integer
+          minimum: 0
+        totalCount:
+          type: integer
+          minimum: 0
+        hasMore:
+          type: boolean
+    ConceptCoverageResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - status
+        - scannedFileCount
+        - extractedFileCount
+        - syntaxFailedFileCount
+      properties:
+        status:
+          type: string
+          enum:
+            - COMPLETE
+            - PARTIAL
+        scannedFileCount:
+          type: integer
+          minimum: 0
+        extractedFileCount:
+          type: integer
+          minimum: 0
+        syntaxFailedFileCount:
+          type: integer
+          minimum: 0
+    ConceptIssueSummaryResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - reason
+        - count
+      properties:
+        reason:
+          type: string
+          enum:
+            - MQ_DESTINATION_UNRESOLVED
+            - SCHEDULE_TRIGGER_VALUE_UNRESOLVED
+        count:
+          type: integer
+          minimum: 1
+    UnavailableDiscoveryFollowUpResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - reason
+        - recommendedAction
+      properties:
+        reason:
+          type: string
+          enum:
+            - NO_MATCHING_STRUCTURED_CONCEPT
+            - SEARCH_INCOMPLETE
+        recommendedAction:
+          type: string
+          enum:
+            - REFINE_TERMS_KINDS_OR_PACKAGE_FILTERS
+            - FIX_SOURCE_OR_RETRY
+    DiscoverTypeMembersRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - repoId
+        - expectedRevision
+        - sourceFile
+        - fullyQualifiedName
+        - memberKinds
+      properties:
+        repoId:
+          type: string
+          minLength: 1
+          pattern: '^[a-z0-9][a-z0-9._-]{0,63}$'
+        expectedRevision:
+          type: string
+          minLength: 1
+          pattern: '^[0-9a-f]{40}$|^FIXTURE$'
+        sourceFile:
+          type: string
+          minLength: 1
+          maxLength: 1024
+          pattern: '^[^\u0000-\u001F\u007F-\u009F]*[^\u0000-\u0020\u007F-\u009F\u1680\u2000-\u2006\u2008-\u200A\u2028-\u2029\u205F\u3000][^\u0000-\u001F\u007F-\u009F]*$'
+          description: Repository-relative source path. The server additionally enforces normalized path segments.
+        fullyQualifiedName:
+          type: string
+          minLength: 1
+          maxLength: 1024
+          pattern: '.*\S.*'
+        memberKinds:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/TypeMemberKind'
+        namePrefix:
+          type: string
+          nullable: true
+          maxLength: 255
+        offset:
+          type: integer
+          default: 0
+          minimum: 0
+        limit:
+          type: integer
+          default: 50
+          minimum: 1
+          maximum: 100
+    TypeMemberKind:
+      type: string
+      enum:
+        - METHOD
+        - FIELD
+    DiscoverTypeMembersResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - repoId
+        - analyzedRevision
+        - sourceFile
+        - fullyQualifiedName
+        - typeKind
+        - annotations
+        - implementedTypes
+        - extendedTypes
+        - members
+        - page
+        - coverage
+        - availableFollowUps
+      properties:
+        repoId:
+          type: string
+        analyzedRevision:
+          type: string
+          pattern: '^[0-9a-f]{40}$|^FIXTURE$'
+        sourceFile:
+          type: string
+        fullyQualifiedName:
+          type: string
+        typeKind:
+          type: string
+        annotations:
+          type: array
+          items:
+            type: string
+        implementedTypes:
+          type: array
+          items:
+            type: string
+        extendedTypes:
+          type: array
+          items:
+            type: string
+        members:
+          type: array
+          items:
+            $ref: '#/components/schemas/TypeMemberResponse'
+        page:
+          $ref: '#/components/schemas/ConceptPageResponse'
+        coverage:
+          $ref: '#/components/schemas/ConceptCoverageResponse'
+        availableFollowUps:
+          type: array
+          items:
+            $ref: '#/components/schemas/DiscoveryFollowUpResponse'
+    TypeMemberResponse:
+      oneOf:
+        - $ref: '#/components/schemas/MethodTypeMemberResponse'
+        - $ref: '#/components/schemas/FieldTypeMemberResponse'
+      discriminator:
+        propertyName: kind
+        mapping:
+          METHOD: '#/components/schemas/MethodTypeMemberResponse'
+          FIELD: '#/components/schemas/FieldTypeMemberResponse'
+    MethodTypeMemberResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - kind
+        - target
+        - availableFollowUps
+      properties:
+        kind:
+          type: string
+          enum:
+            - METHOD
+        target:
+          $ref: '#/components/schemas/MethodTarget'
+        availableFollowUps:
+          type: array
+          items:
+            $ref: '#/components/schemas/DiscoveryFollowUpResponse'
+    FieldTypeMemberResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - kind
+        - fieldName
+        - writtenType
+        - annotations
+        - limitations
+        - availableFollowUps
+      properties:
+        kind:
+          type: string
+          enum:
+            - FIELD
+        fieldName:
+          type: string
+        writtenType:
+          type: string
+        resolvedType:
+          type: string
+          nullable: true
+        annotations:
+          type: array
+          items:
+            type: string
+        limitations:
+          type: array
+          items:
+            type: string
+            enum:
+              - FIELD_USAGE_NOT_INDEXED
+        availableFollowUps:
+          type: array
+          items:
+            $ref: '#/components/schemas/DiscoveryFollowUpResponse'
+    ExactContentResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - repoId
+        - analyzedRevision
+        - variants
+      properties:
+        repoId:
+          type: string
+        analyzedRevision:
+          type: string
+          pattern: '^[0-9a-f]{40}$|^FIXTURE$'
+        variants:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/ExactContentVariantResponse'
+    ExactContentVariantResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - utf8ByteCount
+        - segmentCount
+        - includeResolutions
+        - availableFollowUps
+      properties:
+        statementIdentity:
+          $ref: '#/components/schemas/MapperStatementIdentityResponse'
+        fragmentIdentity:
+          $ref: '#/components/schemas/MapperFragmentIdentityResponse'
+        content:
+          type: string
+          description: Complete untruncated source, mapper XML, or annotation SQL content
+        contentRef:
+          type: string
+          description: Opaque deterministic consistency reference emitted only for oversized content
+        utf8ByteCount:
+          type: integer
+          minimum: 0
+        segmentCount:
+          type: integer
+          minimum: 0
+        includeResolutions:
+          type: array
+          description: Ordered include resolutions derived from typed mapper evidence
+          items:
+            $ref: '#/components/schemas/MapperIncludeResolutionResponse'
+        availableFollowUps:
+          type: array
+          items:
+            $ref: '#/components/schemas/DiscoveryFollowUpResponse'
+      allOf:
+        - oneOf:
+            - not:
+                anyOf:
+                  - required:
+                      - statementIdentity
+                  - required:
+                      - fragmentIdentity
+              properties:
+                includeResolutions:
+                  maxItems: 0
+            - required:
+                - statementIdentity
+              not:
+                required:
+                  - fragmentIdentity
+            - required:
+                - fragmentIdentity
+              not:
+                required:
+                  - statementIdentity
+              properties:
+                includeResolutions:
+                  maxItems: 0
+        - oneOf:
+            - required:
+                - content
+              not:
+                required:
+                  - contentRef
+              properties:
+                segmentCount:
+                  enum:
+                    - 0
+                availableFollowUps:
+                  maxItems: 0
+            - required:
+                - contentRef
+              not:
+                required:
+                  - content
+              properties:
+                segmentCount:
+                  minimum: 1
+                availableFollowUps:
+                  minItems: 1
+                  maxItems: 1
+    MapperIncludeResolutionResponse:
+      type: object
+      additionalProperties: false
+      description: Complete executable fragment candidates are retained for ambiguous typed include evidence
+      required:
+        - refId
+        - status
+        - availableFollowUps
+      properties:
+        refId:
+          type: string
+        status:
+          type: string
+          enum:
+            - RESOLVED
+            - AMBIGUOUS
+            - UNRESOLVED
+        availableFollowUps:
+          type: array
+          items:
+            $ref: '#/components/schemas/DiscoveryFollowUpResponse'
+    MapperStatementIdentityResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - namespace
+        - statementId
+        - resourcePath
+        - documentOrdinal
+        - representation
+      properties:
+        namespace:
+          type: string
+        statementId:
+          type: string
+        resourcePath:
+          type: string
+          description: Repository-relative mapper or Java source path
+        databaseId:
+          type: string
+        documentOrdinal:
+          type: integer
+          minimum: 0
+        representation:
+          type: string
+          enum:
+            - MAPPER_XML_ELEMENT
+            - ANNOTATION_SQL_TEXT
+    MapperFragmentIdentityResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - namespace
+        - fragmentId
+        - resourcePath
+        - documentOrdinal
+        - representation
+      properties:
+        namespace:
+          type: string
+        fragmentId:
+          type: string
+        resourcePath:
+          type: string
+          description: Repository-relative mapper resource path
+        documentOrdinal:
+          type: integer
+          minimum: 0
+        representation:
+          type: string
+          enum:
+            - MAPPER_XML_ELEMENT
+    ExactContentSegmentResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - contentRef
+        - segmentIndex
+        - segmentCount
+        - utf8ByteCount
+        - content
+      properties:
+        contentRef:
+          type: string
+        segmentIndex:
+          type: integer
+          minimum: 0
+        segmentCount:
+          type: integer
+          minimum: 1
+        utf8ByteCount:
+          type: integer
+          minimum: 0
+        content:
+          type: string
+          description: Complete Unicode code-point-safe segment without truncation
+        nextSegmentFollowUp:
+          $ref: '#/components/schemas/DiscoveryFollowUpResponse'
+    ConceptCandidateFollowUpResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - operation
+        - api
+        - request
+      properties:
+        operation:
+          type: string
+          enum:
+            - GET_METHOD_SOURCE
+            - GET_METHOD_SQL
+            - ANALYZE_OUTGOING_CALL_GRAPH
+            - ANALYZE_INCOMING_CALL_GRAPH
+            - DISCOVER_METHOD_IMPLEMENTATIONS
+            - DISCOVER_CONCEPTS
+            - GET_TYPE_MEMBERS
+            - GET_NEXT_PAGE
+        api:
+          $ref: '#/components/schemas/DiscoveryFollowUpApiResponse'
+        request:
+          $ref: '#/components/schemas/ConceptCandidateFollowUpRequestResponse'
+    DiscoveryFollowUpResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - operation
+        - api
+        - request
+      properties:
+        operation:
+          type: string
+          enum:
+            - GET_METHOD_SOURCE
+            - GET_METHOD_SQL
+            - GET_MAPPER_FRAGMENT
+            - GET_METHOD_SOURCE_SEGMENT
+            - GET_METHOD_SQL_SEGMENT
+            - GET_MAPPER_FRAGMENT_SEGMENT
+            - ANALYZE_OUTGOING_CALL_GRAPH
+            - ANALYZE_INCOMING_CALL_GRAPH
+            - DISCOVER_METHOD_IMPLEMENTATIONS
+            - DISCOVER_CONCEPTS
+            - GET_TYPE_MEMBERS
+            - GET_NEXT_PAGE
+        api:
+          $ref: '#/components/schemas/DiscoveryFollowUpApiResponse'
+        request:
+          $ref: '#/components/schemas/DiscoveryFollowUpRequestResponse'
+    DiscoveryFollowUpApiResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - method
+        - path
+        - operationId
+      properties:
+        method:
+          type: string
+          enum:
+            - POST
+        path:
+          type: string
+        operationId:
+          type: string
+    ConceptCandidateFollowUpRequestResponse:
+      oneOf:
+        - $ref: '#/components/schemas/MethodTargetFollowUpRequestResponse'
+        - $ref: '#/components/schemas/AnalyzeCallGraphRequestResponse'
+        - $ref: '#/components/schemas/DiscoverMethodImplementationsRequestResponse'
+        - $ref: '#/components/schemas/DiscoverConceptsRequestResponse'
+        - $ref: '#/components/schemas/GetTypeMembersRequestResponse'
+        - $ref: '#/components/schemas/DiscoverTypeMembersRequestResponse'
+    DiscoveryFollowUpRequestResponse:
+      oneOf:
+        - $ref: '#/components/schemas/MethodTargetFollowUpRequestResponse'
+        - $ref: '#/components/schemas/GetMapperFragmentRequestResponse'
+        - $ref: '#/components/schemas/GetMethodSourceSegmentRequestResponse'
+        - $ref: '#/components/schemas/GetMapperStatementSegmentRequestResponse'
+        - $ref: '#/components/schemas/GetMapperFragmentSegmentRequestResponse'
+        - $ref: '#/components/schemas/AnalyzeCallGraphRequestResponse'
+        - $ref: '#/components/schemas/DiscoverMethodImplementationsRequestResponse'
+        - $ref: '#/components/schemas/DiscoverConceptsRequestResponse'
+        - $ref: '#/components/schemas/GetTypeMembersRequestResponse'
+        - $ref: '#/components/schemas/DiscoverTypeMembersRequestResponse'
+    MethodTargetFollowUpRequestResponse:
+      type: object
+      additionalProperties: false
+      description: Shared complete five-field method authority for method source and mapper statement SQL follow-ups
+      required:
+        - repoId
+        - expectedRevision
+        - target
+      properties:
+        repoId:
+          type: string
+        expectedRevision:
+          type: string
+          pattern: '^[0-9a-f]{40}$|^FIXTURE$'
+        target:
+          $ref: '#/components/schemas/MethodTarget'
+    GetMapperFragmentRequestResponse:
+      type: object
+      additionalProperties: false
+      description: Complete stateless mapper fragment request projected from typed mapper evidence
+      required:
+        - repoId
+        - expectedRevision
+        - fragmentIdentity
+      properties:
+        repoId:
+          type: string
+        expectedRevision:
+          type: string
+          pattern: '^[0-9a-f]{40}$|^FIXTURE$'
+        fragmentIdentity:
+          $ref: '#/components/schemas/MapperFragmentIdentityResponse'
+    GetMethodSourceSegmentRequestResponse:
+      type: object
+      additionalProperties: false
+      description: Complete stateless source segment request projection; contentRef is consistency validation, not a lookup key
+      required:
+        - repoId
+        - expectedRevision
+        - target
+        - contentRef
+        - segmentIndex
+      properties:
+        repoId:
+          type: string
+        expectedRevision:
+          type: string
+          pattern: '^[0-9a-f]{40}$|^FIXTURE$'
+        target:
+          $ref: '#/components/schemas/MethodTarget'
+        contentRef:
+          type: string
+        segmentIndex:
+          type: integer
+          minimum: 0
+    GetMapperStatementSegmentRequestResponse:
+      type: object
+      additionalProperties: false
+      description: Complete stateless mapper statement segment request projection; contentRef is consistency validation, not a lookup key
+      required:
+        - repoId
+        - expectedRevision
+        - target
+        - contentRef
+        - segmentIndex
+      properties:
+        repoId:
+          type: string
+        expectedRevision:
+          type: string
+          pattern: '^[0-9a-f]{40}$|^FIXTURE$'
+        target:
+          $ref: '#/components/schemas/MethodTarget'
+        contentRef:
+          type: string
+        segmentIndex:
+          type: integer
+          minimum: 0
+    GetMapperFragmentSegmentRequestResponse:
+      type: object
+      additionalProperties: false
+      description: Complete stateless mapper fragment segment request projection; contentRef is consistency validation, not a lookup key
+      required:
+        - repoId
+        - expectedRevision
+        - fragmentIdentity
+        - contentRef
+        - segmentIndex
+      properties:
+        repoId:
+          type: string
+        expectedRevision:
+          type: string
+          pattern: '^[0-9a-f]{40}$|^FIXTURE$'
+        fragmentIdentity:
+          $ref: '#/components/schemas/MapperFragmentIdentityResponse'
+        contentRef:
+          type: string
+        segmentIndex:
+          type: integer
+          minimum: 0
+    AnalyzeCallGraphRequestResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - repoId
+        - expectedRevision
+        - depth
+        - target
+      properties:
+        repoId:
+          type: string
+        expectedRevision:
+          type: string
+          pattern: '^[0-9a-f]{40}$|^FIXTURE$'
+        depth:
+          type: integer
+          minimum: 1
+          maximum: 2
+        target:
+          $ref: '#/components/schemas/MethodTarget'
+    DiscoverMethodImplementationsRequestResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - repoId
+        - expectedRevision
+        - declarationTarget
+      properties:
+        repoId:
+          type: string
+        expectedRevision:
+          type: string
+          pattern: '^[0-9a-f]{40}$|^FIXTURE$'
+        declarationTarget:
+          $ref: '#/components/schemas/MethodTarget'
+    DiscoverConceptsRequestResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - operator
+        - repoId
+        - expectedRevision
+        - terms
+        - kinds
+        - offset
+        - limit
+      properties:
+        operator:
+          type: string
+          enum:
+            - ALL
+        repoId:
+          type: string
+        expectedRevision:
+          type: string
+          pattern: '^[0-9a-f]{40}$|^FIXTURE$'
+        terms:
+          type: array
+          items:
+            $ref: '#/components/schemas/ConceptTermResponse'
+        kinds:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items:
+            $ref: '#/components/schemas/ConceptKind'
+        packagePrefix:
+          type: string
+        offset:
+          type: integer
+          minimum: 0
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 100
+    ConceptTermResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - value
+        - matchMode
+      properties:
+        value:
+          type: string
+        matchMode:
+          $ref: '#/components/schemas/ConceptMatchMode'
+    GetTypeMembersRequestResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - repoId
+        - expectedRevision
+        - sourceFile
+        - fullyQualifiedName
+        - memberKinds
+        - offset
+        - limit
+      properties:
+        repoId:
+          type: string
+        expectedRevision:
+          type: string
+          pattern: '^[0-9a-f]{40}$|^FIXTURE$'
+        sourceFile:
+          type: string
+          description: Repository-relative source path.
+        fullyQualifiedName:
+          type: string
+        memberKinds:
+          type: array
+          items:
+            $ref: '#/components/schemas/TypeMemberKind'
+        namePrefix:
+          type: string
+          nullable: true
+        offset:
+          type: integer
+          minimum: 0
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 100
+    DiscoverTypeMembersRequestResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - repoId
+        - expectedRevision
+        - sourceFile
+        - fullyQualifiedName
+        - memberKinds
+        - offset
+        - limit
+      properties:
+        repoId:
+          type: string
+        expectedRevision:
+          type: string
+          pattern: '^[0-9a-f]{40}$|^FIXTURE$'
+        sourceFile:
+          type: string
+          description: Repository-relative source path.
+        fullyQualifiedName:
+          type: string
+        memberKinds:
+          type: array
+          items:
+            $ref: '#/components/schemas/TypeMemberKind'
+        namePrefix:
+          type: string
+          nullable: true
+        offset:
+          type: integer
+          minimum: 0
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 100
     CandidatePageResponse:
       type: object
       additionalProperties: false
@@ -1399,6 +2979,33 @@ components:
           pattern: '^[0-9a-f]{40}$|^FIXTURE$'
         cloned:
           type: boolean
+    ConceptKindUnavailableResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - errorCode
+        - message
+        - unavailableKinds
+        - supportedKinds
+        - requestId
+      properties:
+        errorCode:
+          type: string
+          enum:
+            - CONCEPT_KIND_UNAVAILABLE
+        message:
+          type: string
+        unavailableKinds:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/ConceptKind'
+        supportedKinds:
+          type: array
+          items:
+            $ref: '#/components/schemas/ConceptKind'
+        requestId:
+          type: string
     ApiErrorResponse:
       type: object
       additionalProperties: false
@@ -1417,6 +3024,8 @@ components:
             - REPOSITORY_REVISION_MISMATCH
             - SEMANTIC_BINDING_AMBIGUOUS
             - SEMANTIC_TARGET_NOT_FOUND
+            - EXACT_CONTENT_NOT_FOUND
+            - TYPE_MEMBER_TYPE_NOT_FOUND
             - SEMANTIC_BINDING_UNRESOLVED
             - IMPLEMENTATION_TARGET_UNSUPPORTED
             - SEMANTIC_PROTOCOL_ERROR

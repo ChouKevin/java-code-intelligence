@@ -12,13 +12,16 @@ import com.java.semantic.repository.domain.RepositoryId;
 import com.java.semantic.repository.domain.RepositoryRevision;
 import com.java.semantic.repository.domain.RepositorySnapshot;
 import com.java.semantic.semantic.domain.JavaSemanticService;
-import com.java.semantic.semantic.domain.SemanticDeclarationAnchor;
 import com.java.semantic.semantic.domain.SemanticLocation;
 import com.java.semantic.semantic.domain.SemanticMethod;
 import com.java.semantic.semantic.domain.SemanticPosition;
 import com.java.semantic.semantic.domain.SemanticRange;
+import com.java.semantic.syntax.domain.CanonicalMethodDeclarationResolver;
+import com.java.semantic.syntax.domain.ClassMetadata;
+import com.java.semantic.syntax.domain.MethodTargetResolution;
 import com.java.semantic.syntax.domain.RepositorySyntax;
 import com.java.semantic.syntax.domain.SyntaxExtractionService;
+import com.java.semantic.syntax.domain.SyntaxPosition;
 import com.java.semantic.support.ConcurrencyTestSupport;
 import org.junit.jupiter.api.Test;
 
@@ -51,15 +54,15 @@ class SemanticAnalysisConcurrencyTest {
         MethodTarget secondTarget = target("Second.java", "Second");
         RepositorySnapshot firstSnapshot = new RepositorySnapshot(firstId, Path.of("/first"), firstRevision);
         RepositorySnapshot secondSnapshot = new RepositorySnapshot(secondId, Path.of("/second"), secondRevision);
-        RepositorySyntax firstSyntax = RepositorySyntax.empty();
-        RepositorySyntax secondSyntax = RepositorySyntax.empty();
+        RepositorySyntax firstSyntax = syntax(firstTarget);
+        RepositorySyntax secondSyntax = syntax(secondTarget);
         SemanticMethod firstMethod = method(firstTarget, "/first");
         SemanticMethod secondMethod = method(secondTarget, "/second");
         OutgoingGraphFragment firstResult = mock(OutgoingGraphFragment.class);
         OutgoingGraphFragment secondResult = mock(OutgoingGraphFragment.class);
         RepositoryApplicationService repositories = mock(RepositoryApplicationService.class);
         SyntaxExtractionService syntax = mock(SyntaxExtractionService.class);
-        ExactMethodDeclarationResolver resolver = mock(ExactMethodDeclarationResolver.class);
+        CanonicalMethodDeclarationResolver resolver = mock(CanonicalMethodDeclarationResolver.class);
         JavaSemanticService semantic = mock(JavaSemanticService.class);
         SemanticCallGraphBuilder builder = mock(SemanticCallGraphBuilder.class);
         IncomingSemanticCallGraphBuilder incomingBuilder = mock(IncomingSemanticCallGraphBuilder.class);
@@ -76,10 +79,8 @@ class SemanticAnalysisConcurrencyTest {
         });
         when(syntax.extract(firstSnapshot.root())).thenReturn(firstSyntax);
         when(syntax.extract(secondSnapshot.root())).thenReturn(secondSyntax);
-        when(resolver.resolve(firstSyntax, firstTarget)).thenReturn(new SemanticDeclarationAnchor(
-                firstTarget, new SemanticPosition(0, 0)));
-        when(resolver.resolve(secondSyntax, secondTarget)).thenReturn(new SemanticDeclarationAnchor(
-                secondTarget, new SemanticPosition(0, 0)));
+        when(resolver.resolve(firstSyntax, firstTarget)).thenReturn(MethodTargetResolution.resolved(firstTarget));
+        when(resolver.resolve(secondSyntax, secondTarget)).thenReturn(MethodTargetResolution.resolved(secondTarget));
         when(semantic.resolveExactMethod(eq(firstSnapshot), any())).thenReturn(firstMethod);
         when(semantic.resolveExactMethod(eq(secondSnapshot), any())).thenReturn(secondMethod);
         when(builder.build(firstSnapshot, firstSyntax, firstTarget, firstMethod, 2, 7)).thenReturn(firstResult);
@@ -114,15 +115,15 @@ class SemanticAnalysisConcurrencyTest {
         MethodTarget secondTarget = target("Second.java", "Second");
         RepositorySnapshot firstSnapshot = new RepositorySnapshot(firstId, Path.of("/first"), firstRevision);
         RepositorySnapshot secondSnapshot = new RepositorySnapshot(secondId, Path.of("/second"), secondRevision);
-        RepositorySyntax firstSyntax = RepositorySyntax.empty();
-        RepositorySyntax secondSyntax = RepositorySyntax.empty();
+        RepositorySyntax firstSyntax = syntax(firstTarget);
+        RepositorySyntax secondSyntax = syntax(secondTarget);
         SemanticMethod firstMethod = method(firstTarget, "/first");
         SemanticMethod secondMethod = method(secondTarget, "/second");
         IncomingGraphFragment firstResult = mock(IncomingGraphFragment.class);
         IncomingGraphFragment secondResult = mock(IncomingGraphFragment.class);
         RepositoryApplicationService repositories = mock(RepositoryApplicationService.class);
         SyntaxExtractionService syntax = mock(SyntaxExtractionService.class);
-        ExactMethodDeclarationResolver resolver = mock(ExactMethodDeclarationResolver.class);
+        CanonicalMethodDeclarationResolver resolver = mock(CanonicalMethodDeclarationResolver.class);
         JavaSemanticService semantic = mock(JavaSemanticService.class);
         SemanticCallGraphBuilder outgoingBuilder = mock(SemanticCallGraphBuilder.class);
         IncomingSemanticCallGraphBuilder incomingBuilder = mock(IncomingSemanticCallGraphBuilder.class);
@@ -139,10 +140,8 @@ class SemanticAnalysisConcurrencyTest {
         });
         when(syntax.extract(firstSnapshot.root())).thenReturn(firstSyntax);
         when(syntax.extract(secondSnapshot.root())).thenReturn(secondSyntax);
-        when(resolver.resolve(firstSyntax, firstTarget)).thenReturn(new SemanticDeclarationAnchor(
-                firstTarget, new SemanticPosition(0, 0)));
-        when(resolver.resolve(secondSyntax, secondTarget)).thenReturn(new SemanticDeclarationAnchor(
-                secondTarget, new SemanticPosition(0, 0)));
+        when(resolver.resolve(firstSyntax, firstTarget)).thenReturn(MethodTargetResolution.resolved(firstTarget));
+        when(resolver.resolve(secondSyntax, secondTarget)).thenReturn(MethodTargetResolution.resolved(secondTarget));
         when(semantic.resolveExactMethod(eq(firstSnapshot), any())).thenReturn(firstMethod);
         when(semantic.resolveExactMethod(eq(secondSnapshot), any())).thenReturn(secondMethod);
         when(incomingBuilder.build(firstSnapshot, firstSyntax, firstTarget, firstMethod, 2, 11)).thenReturn(firstResult);
@@ -175,5 +174,16 @@ class SemanticAnalysisConcurrencyTest {
         SemanticRange range = new SemanticRange(new SemanticPosition(0, 0), new SemanticPosition(1, 0));
         return new SemanticMethod(target.packageName(), target.className(), target.methodName(), target.parameterTypes(),
                 "void", new SemanticLocation("file://" + root + "/" + target.sourceFile(), range, range));
+    }
+
+    private static RepositorySyntax syntax(MethodTarget target) {
+        RepositorySyntax syntax = mock(RepositorySyntax.class);
+        ClassMetadata metadata = mock(ClassMetadata.class);
+        ClassMetadata.MethodSignature method = mock(ClassMetadata.MethodSignature.class);
+        when(syntax.classes()).thenReturn(List.of(metadata));
+        when(metadata.methods()).thenReturn(List.of(method));
+        when(method.analysisTarget()).thenReturn(MethodTargetResolution.resolved(target));
+        when(method.namePosition()).thenReturn(new SyntaxPosition(0, 0));
+        return syntax;
     }
 }

@@ -10,7 +10,7 @@ import com.java.semantic.identity.MethodTarget;
 import org.springframework.util.Assert;
 import org.springframework.util.StringUtils;
 
-/** Validated outcome of resolving one declared method to a canonical target. */
+/** 驗證單一方法宣告解析為 canonical 目標的結果 */
 public record MethodTargetResolution(
         AnalysisTargetStatus status,
         Optional<MethodTarget> target,

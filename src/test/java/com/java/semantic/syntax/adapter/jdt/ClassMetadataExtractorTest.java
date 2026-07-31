@@ -42,6 +42,35 @@ class ClassMetadataExtractorTest {
             Path.of("src/test/resources/fixtures/syntax-evidence")).classes();
 
     @Test
+    void should_classify_interface_superinterfaces_as_extended_types(@TempDir Path tempDir) throws IOException {
+        Path repositoryRoot = tempDir.resolve("interface-inheritance");
+        Path sourceRoot = repositoryRoot.resolve("src/main/java/com/example");
+        Files.createDirectories(sourceRoot);
+        Files.writeString(sourceRoot.resolve("Inheritance.java"), """
+                package com.example;
+
+                interface Parent {
+                }
+
+                interface Child extends Parent {
+                }
+                """);
+
+        List<ClassMetadata> metadata = new JdtSyntaxExtractionService().extract(repositoryRoot).classes();
+        ClassMetadata child = metadata.stream()
+                .filter(candidate -> candidate.fullyQualifiedName().equals("com.example.Child"))
+                .findFirst()
+                .orElseThrow();
+
+        assertThat(child.implementedTypes()).isEmpty();
+        assertThat(child.extendedTypes()).containsExactly("Parent");
+        assertThat(child.implementedTypeReferences()).isEmpty();
+        assertThat(child.extendedTypeReferences())
+                .extracting(TypeReference::resolvedType)
+                .containsExactly("com.example.Parent");
+    }
+
+    @Test
     void should_capture_full_method_declarations_utf16_name_positions_and_declaration_flags(@TempDir Path tempDir)
             throws java.io.IOException {
         Path repositoryRoot = tempDir.resolve("order-service");

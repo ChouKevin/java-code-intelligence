@@ -1,14 +1,7 @@
-package com.java.semantic.semantic.application;
+package com.java.semantic.syntax.domain;
 
 import com.java.semantic.identity.MethodTarget;
-import com.java.semantic.semantic.domain.SemanticBindingAmbiguousException;
-import com.java.semantic.semantic.domain.SemanticDeclarationAnchor;
-import com.java.semantic.semantic.domain.SemanticTargetNotFoundException;
 import com.java.semantic.syntax.adapter.jdt.JdtSyntaxExtractionService;
-import com.java.semantic.syntax.domain.AnalysisTargetStatus;
-import com.java.semantic.syntax.domain.ClassMetadata;
-import com.java.semantic.syntax.domain.MethodTargetResolution;
-import com.java.semantic.syntax.domain.RepositorySyntax;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -21,13 +14,16 @@ import java.util.Optional;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-class ExactMethodDeclarationResolverTest {
+/** 驗證 canonical 方法宣告解析器只依賴語法層的完整目標證明 */
+class CanonicalMethodDeclarationResolverTest {
+
+    private static final String TARGET_NOT_FOUND = "TARGET_NOT_FOUND";
 
     @TempDir
     Path repositoryRoot;
 
     @Test
-    void should_anchor_only_the_requested_complete_target_when_same_simple_signature_exists_in_another_file()
+    void should_resolve_only_the_requested_complete_target_when_same_simple_signature_exists_in_another_file()
             throws IOException {
         writeSource("alpha/First.java", """
                 package com.example.alpha;
@@ -42,22 +38,18 @@ class ExactMethodDeclarationResolverTest {
                 }
                 """);
         RepositorySyntax syntax = new JdtSyntaxExtractionService().extract(repositoryRoot);
-        MethodTarget requested = syntax.classes().stream()
-                .filter(metadata -> "First".equals(metadata.className()))
-                .flatMap(metadata -> metadata.methods().stream())
-                .map(method -> method.analysisTarget().target().orElseThrow())
-                .findFirst()
-                .orElseThrow();
+        MethodTarget requested = targetOf(syntax, "First", "same");
 
-        SemanticDeclarationAnchor anchor = new ExactMethodDeclarationResolver().resolve(syntax, requested);
+        MethodTargetResolution resolution = new CanonicalMethodDeclarationResolver().resolve(syntax, requested);
 
-        assertThat(anchor.target()).isEqualTo(requested);
-        assertThat(anchor.namePosition().line()).isEqualTo(2);
-        assertThat(anchor.namePosition().character()).isEqualTo(16);
+        assertThat(resolution.status()).isEqualTo(AnalysisTargetStatus.RESOLVED);
+        assertThat(resolution.target()).contains(requested);
+        assertThat(resolution.candidates()).isEmpty();
+        assertThat(resolution.reasonCode()).isEmpty();
     }
 
     @Test
-    void should_reject_a_wrong_normalized_source_before_any_jdt_request() throws IOException {
+    void should_return_unresolved_when_the_normalized_source_does_not_match() throws IOException {
         writeSource("alpha/First.java", """
                 package com.example.alpha;
                 public class First {
@@ -65,12 +57,7 @@ class ExactMethodDeclarationResolverTest {
                 }
                 """);
         RepositorySyntax syntax = new JdtSyntaxExtractionService().extract(repositoryRoot);
-        MethodTarget actual = syntax.classes().stream()
-                .filter(metadata -> "First".equals(metadata.className()))
-                .flatMap(metadata -> metadata.methods().stream())
-                .map(method -> method.analysisTarget().target().orElseThrow())
-                .findFirst()
-                .orElseThrow();
+        MethodTarget actual = targetOf(syntax, "First", "same");
         MethodTarget requested = new MethodTarget(
                 "src/main/java/alpha/Elsewhere.java",
                 actual.packageName(),
@@ -78,18 +65,22 @@ class ExactMethodDeclarationResolverTest {
                 actual.methodName(),
                 actual.parameterTypes());
 
-        assertThatThrownBy(() -> new ExactMethodDeclarationResolver().resolve(syntax, requested))
-                .isInstanceOf(SemanticTargetNotFoundException.class);
+        MethodTargetResolution resolution = new CanonicalMethodDeclarationResolver().resolve(syntax, requested);
+
+        assertThat(resolution.status()).isEqualTo(AnalysisTargetStatus.UNRESOLVED);
+        assertThat(resolution.target()).isEmpty();
+        assertThat(resolution.candidates()).isEmpty();
+        assertThat(resolution.reasonCode()).isEqualTo(TARGET_NOT_FOUND);
     }
 
     @Test
-    void should_filter_by_source_package_nested_class_and_method_before_anchoring() throws IOException {
+    void should_resolve_by_source_package_nested_class_method_and_array_parameters() throws IOException {
         writeSource("selected/Outer.java", """
                 package com.example.selected;
                 class Outer {
                     class Inner {
-                        void selected(String value) { }
-                        void ignored(String value) { }
+                        void selected(String[] value) { }
+                        void ignored(String[] value) { }
                     }
                 }
                 """);
@@ -97,7 +88,7 @@ class ExactMethodDeclarationResolverTest {
                 package com.example.other;
                 class Outer {
                     class Inner {
-                        void selected(String value) { }
+                        void selected(String[] value) { }
                     }
                 }
                 """);
@@ -111,14 +102,15 @@ class ExactMethodDeclarationResolverTest {
                 .findFirst()
                 .orElseThrow();
 
-        SemanticDeclarationAnchor anchor = new ExactMethodDeclarationResolver().resolve(syntax, requested);
+        MethodTargetResolution resolution = new CanonicalMethodDeclarationResolver().resolve(syntax, requested);
 
-        assertThat(anchor.target()).isEqualTo(requested);
-        assertThat(anchor.namePosition()).isEqualTo(new com.java.semantic.semantic.domain.SemanticPosition(3, 13));
+        assertThat(requested.parameterTypes()).containsExactly("java.lang.String[]");
+        assertThat(resolution.status()).isEqualTo(AnalysisTargetStatus.RESOLVED);
+        assertThat(resolution.target()).contains(requested);
     }
 
     @Test
-    void should_retain_complete_sorted_candidates_from_duplicate_fqn_module_proof() throws IOException {
+    void should_retain_complete_ordered_unique_candidates_from_duplicate_fqn_module_proof() throws IOException {
         Files.writeString(repositoryRoot.resolve("pom.xml"), """
                 <project>
                     <packaging>pom</packaging>
@@ -149,16 +141,18 @@ class ExactMethodDeclarationResolverTest {
                 Optional.empty(),
                 List.of(alternate, requested),
                 "DUPLICATE_FQN_PROOF");
-        RepositorySyntax syntax = new RepositorySyntax(
-                List.of(), List.of(withResolution(moduleA, ambiguous)));
+        RepositorySyntax syntax = new RepositorySyntax(List.of(), List.of(withResolution(moduleA, ambiguous)));
 
-        assertThatThrownBy(() -> new ExactMethodDeclarationResolver().resolve(syntax, requested))
-                .isInstanceOfSatisfying(SemanticBindingAmbiguousException.class, exception ->
-                        assertThat(exception.candidates()).containsExactly(requested, alternate));
+        MethodTargetResolution resolution = new CanonicalMethodDeclarationResolver().resolve(syntax, requested);
+
+        assertThat(resolution.status()).isEqualTo(AnalysisTargetStatus.AMBIGUOUS);
+        assertThat(resolution.target()).isEmpty();
+        assertThat(resolution.candidates()).containsExactly(requested, alternate);
+        assertThat(resolution.reasonCode()).isEqualTo("DUPLICATE_FQN_PROOF");
     }
 
     @Test
-    void should_reject_duplicate_exact_declarations_with_their_actual_canonical_proofs() throws IOException {
+    void should_reject_duplicate_metadata_with_the_same_exact_proof() throws IOException {
         writeSource("alpha/First.java", """
                 package com.example.alpha;
                 public class First {
@@ -170,9 +164,21 @@ class ExactMethodDeclarationResolverTest {
         MethodTarget requested = metadata.methods().getFirst().analysisTarget().target().orElseThrow();
         RepositorySyntax syntax = new RepositorySyntax(List.of(), List.of(metadata, metadata));
 
-        assertThatThrownBy(() -> new ExactMethodDeclarationResolver().resolve(syntax, requested))
-                .isInstanceOfSatisfying(SemanticBindingAmbiguousException.class, exception ->
-                        assertThat(exception.candidates()).containsExactly(requested, requested));
+        assertThatThrownBy(() -> new CanonicalMethodDeclarationResolver().resolve(syntax, requested))
+                .isInstanceOfSatisfying(DuplicateMethodDeclarationProofException.class, exception -> {
+                    assertThat(exception.target()).isEqualTo(requested);
+                    assertThat(exception.proofCount()).isEqualTo(2);
+                });
+    }
+
+    private MethodTarget targetOf(RepositorySyntax syntax, String className, String methodName) {
+        return syntax.classes().stream()
+                .filter(metadata -> className.equals(metadata.className()))
+                .flatMap(metadata -> metadata.methods().stream())
+                .filter(method -> methodName.equals(method.name()))
+                .map(method -> method.analysisTarget().target().orElseThrow())
+                .findFirst()
+                .orElseThrow();
     }
 
     private void writeSource(String relativePath, String source) throws IOException {

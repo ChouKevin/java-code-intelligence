@@ -1,5 +1,8 @@
 package com.java.semantic.api.dto;
 
+import com.java.semantic.api.monitoring.ApiMonitoringField;
+import com.java.semantic.api.monitoring.ApiMonitoringMode;
+
 import org.springframework.util.Assert;
 
 import java.util.Objects;
@@ -7,11 +10,11 @@ import java.util.Set;
 
 /** Traversal limits and coverage for one outgoing graph fragment. */
 public record GraphTraversalResponse(
-        int requestedDepth,
-        int expandedNodeCount,
-        int nodeBudget,
-        boolean rootDirectCallsComplete,
-        String limitReason) {
+        @ApiMonitoringField(ApiMonitoringMode.VALUE) int requestedDepth,
+        @ApiMonitoringField(ApiMonitoringMode.VALUE) int expandedNodeCount,
+        @ApiMonitoringField(ApiMonitoringMode.VALUE) int nodeBudget,
+        @ApiMonitoringField(ApiMonitoringMode.VALUE) boolean rootDirectCallsComplete,
+        @ApiMonitoringField(ApiMonitoringMode.VALUE) String limitReason) {
 
     private static final Set<String> LIMIT_REASONS = Set.of("NONE", "NODE_BUDGET");
 

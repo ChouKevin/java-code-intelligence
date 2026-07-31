@@ -2,6 +2,7 @@ package com.java.semantic.api.security;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.java.semantic.api.RequestCorrelationFilter;
+import com.java.semantic.api.ApiMonitoringContext;
 import com.java.semantic.api.dto.ApiErrorResponse;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
@@ -63,6 +64,7 @@ public class ApiTokenFilter extends OncePerRequestFilter {
             String errorCode,
             String message)
             throws IOException {
+        ApiMonitoringContext.find(request).ifPresent(context -> context.recordErrorCode(errorCode));
         response.setStatus(status.value());
         response.setContentType(MediaType.APPLICATION_JSON_VALUE);
         String requestId = Objects.toString(

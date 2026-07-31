@@ -15,8 +15,13 @@ import com.java.semantic.repository.domain.RepositoryId;
 import com.java.semantic.repository.domain.RepositoryRevision;
 import com.java.semantic.repository.domain.RepositorySnapshot;
 import com.java.semantic.semantic.domain.JavaSemanticService;
+import com.java.semantic.semantic.domain.SemanticBindingAmbiguousException;
 import com.java.semantic.semantic.domain.SemanticDeclarationAnchor;
 import com.java.semantic.semantic.domain.SemanticMethod;
+import com.java.semantic.semantic.domain.SemanticPosition;
+import com.java.semantic.semantic.domain.SemanticTargetNotFoundException;
+import com.java.semantic.syntax.domain.CanonicalMethodDeclarationResolver;
+import com.java.semantic.syntax.domain.MethodTargetResolution;
 import com.java.semantic.syntax.domain.RepositorySyntax;
 import com.java.semantic.syntax.domain.SyntaxExtractionService;
 import lombok.extern.slf4j.Slf4j;
@@ -33,7 +38,7 @@ public final class SemanticAnalysisApplicationService {
 
     private final RepositoryApplicationService repositoryApplicationService;
     private final SyntaxExtractionService syntaxExtractionService;
-    private final ExactMethodDeclarationResolver declarationResolver;
+    private final CanonicalMethodDeclarationResolver declarationResolver;
     private final JavaSemanticService semanticService;
     private final SemanticCallGraphBuilder outgoingBuilder;
     private final IncomingSemanticCallGraphBuilder incomingBuilder;
@@ -43,7 +48,7 @@ public final class SemanticAnalysisApplicationService {
     public SemanticAnalysisApplicationService(
             RepositoryApplicationService repositoryApplicationService,
             SyntaxExtractionService syntaxExtractionService,
-            ExactMethodDeclarationResolver declarationResolver,
+            CanonicalMethodDeclarationResolver declarationResolver,
             JavaSemanticService semanticService,
             SemanticCallGraphBuilder outgoingBuilder,
             IncomingSemanticCallGraphBuilder incomingBuilder,
@@ -140,9 +145,28 @@ public final class SemanticAnalysisApplicationService {
             int depthTwoNodeBudget,
             GraphFragmentBuilder<T> graphBuilder) {
         RepositorySyntax syntax = syntaxExtractionService.extract(snapshot.root());
-        SemanticDeclarationAnchor anchor = declarationResolver.resolve(syntax, target);
+        MethodTargetResolution resolution = declarationResolver.resolve(syntax, target);
+        SemanticDeclarationAnchor anchor = declarationAnchor(syntax, target, resolution);
         SemanticMethod root = semanticService.resolveExactMethod(snapshot, anchor);
         return graphBuilder.build(snapshot, syntax, target, root, depth, depthTwoNodeBudget);
+    }
+
+    private SemanticDeclarationAnchor declarationAnchor(
+            RepositorySyntax syntax,
+            MethodTarget target,
+            MethodTargetResolution resolution) {
+        return switch (resolution.status()) {
+            case RESOLVED -> syntax.classes().stream()
+                    .flatMap(metadata -> metadata.methods().stream())
+                    .filter(method -> method.analysisTarget().target().filter(target::equals).isPresent())
+                    .map(method -> new SemanticDeclarationAnchor(
+                            target,
+                            new SemanticPosition(method.namePosition().line(), method.namePosition().character())))
+                    .findFirst()
+                    .orElseThrow(() -> new SemanticTargetNotFoundException(target));
+            case UNRESOLVED -> throw new SemanticTargetNotFoundException(target);
+            case AMBIGUOUS -> throw new SemanticBindingAmbiguousException(target, resolution.candidates());
+        };
     }
 
     private long elapsedMillis(long startedAt) {

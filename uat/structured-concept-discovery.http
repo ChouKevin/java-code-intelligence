@@ -1,0 +1,320 @@
+@baseUrl = http://localhost:8080
+@apiToken = {{$processEnv SEMANTIC_API_TOKEN}}
+@repoId = replace-with-repository-id
+@revision = replace-with-fixed-currentRevision
+@typeSourceFile = replace-with-returned-repository-relative-sourceFile
+@typeFullyQualifiedName = replace-with-returned-fullyQualifiedName
+@targetSourceFile = replace-with-returned-repository-relative-sourceFile
+@targetPackageName = replace-with-returned-packageName
+@targetClassName = replace-with-returned-className
+@targetMethodName = replace-with-returned-methodName
+@targetParameterTypes = []
+@mapperStatementTerm = replace-with-known-mapper-statement-id
+
+### Capture a revision before every UAT sequence.
+### Manually copy response.currentRevision into @revision above; all following requests must keep it unchanged.
+GET {{baseUrl}}/v1/repositories/{{repoId}}
+X-Api-Token: {{apiToken}}
+
+### Stable concept page 1: order* is TOKEN_PREFIX, not a generic source-body search.
+POST {{baseUrl}}/v1/discovery/concepts
+X-Api-Token: {{apiToken}}
+Content-Type: application/json
+
+{
+  "operator": "ALL",
+  "repoId": "{{repoId}}",
+  "expectedRevision": "{{revision}}",
+  "terms": [
+    {
+      "value": "order*",
+      "matchMode": "TOKEN_PREFIX"
+    }
+  ],
+  "kinds": ["TYPE", "METHOD", "FIELD", "ANNOTATION_USAGE", "TYPE_USAGE", "API_ROUTE", "MQ_DESTINATION", "SCHEDULE"],
+  "offset": 0,
+  "limit": 2
+}
+
+### Stable concept page 2: retain the exact revision, terms, kinds, packagePrefix, and limit; advance only offset.
+POST {{baseUrl}}/v1/discovery/concepts
+X-Api-Token: {{apiToken}}
+Content-Type: application/json
+
+{
+  "operator": "ALL",
+  "repoId": "{{repoId}}",
+  "expectedRevision": "{{revision}}",
+  "terms": [
+    {
+      "value": "order*",
+      "matchMode": "TOKEN_PREFIX"
+    }
+  ],
+  "kinds": ["TYPE", "METHOD", "FIELD", "ANNOTATION_USAGE", "TYPE_USAGE", "API_ROUTE", "MQ_DESTINATION", "SCHEDULE"],
+  "offset": 2,
+  "limit": 2
+}
+
+### Refine the same search by kind and package. The response must still report the fixed analyzedRevision.
+POST {{baseUrl}}/v1/discovery/concepts
+X-Api-Token: {{apiToken}}
+Content-Type: application/json
+
+{
+  "operator": "ALL",
+  "repoId": "{{repoId}}",
+  "expectedRevision": "{{revision}}",
+  "terms": [
+    {
+      "value": "order*",
+      "matchMode": "TOKEN_PREFIX"
+    }
+  ],
+  "kinds": ["TYPE", "METHOD"],
+  "packagePrefix": "replace.with.relevant.package",
+  "offset": 0,
+  "limit": 50
+}
+
+### Query framework entry-point concepts separately for MQ and schedules.
+POST {{baseUrl}}/v1/discovery/concepts
+X-Api-Token: {{apiToken}}
+Content-Type: application/json
+
+{
+  "operator": "ALL",
+  "repoId": "{{repoId}}",
+  "expectedRevision": "{{revision}}",
+  "terms": [
+    {
+      "value": "order*",
+      "matchMode": "TOKEN_PREFIX"
+    }
+  ],
+  "kinds": ["MQ_DESTINATION", "SCHEDULE"],
+  "offset": 0,
+  "limit": 50
+}
+
+### Type member combined-window check.
+### Select a returned TYPE candidate with more than 100 combined METHOD and FIELD members, then manually copy
+### its sourceFile and canonical fullyQualifiedName into @typeSourceFile and @typeFullyQualifiedName.
+POST {{baseUrl}}/v1/discovery/type-members
+X-Api-Token: {{apiToken}}
+Content-Type: application/json
+
+{
+  "operator": "ALL",
+  "repoId": "{{repoId}}",
+  "expectedRevision": "{{revision}}",
+  "sourceFile": "{{typeSourceFile}}",
+  "fullyQualifiedName": "{{typeFullyQualifiedName}}",
+  "memberKinds": ["METHOD", "FIELD"],
+  "offset": 0,
+  "limit": 100
+}
+
+> {%
+  const method = response.body.members.find(member => member.kind === "METHOD");
+  if (method) {
+    const source = method.availableFollowUps.find(item => item.operation === "GET_METHOD_SOURCE");
+    const implementations = method.availableFollowUps.find(
+      item => item.operation === "DISCOVER_METHOD_IMPLEMENTATIONS");
+    if (source) {
+      client.global.set("exactMethodSourceRequest", JSON.stringify(source.request));
+    }
+    if (implementations) {
+      client.global.set("implementationDiscoveryRequest", JSON.stringify(implementations.request));
+    }
+  }
+%}
+
+### Exact method source from the complete GET_METHOD_SOURCE projection captured above.
+POST {{baseUrl}}/v1/discovery/method-source
+X-Api-Token: {{apiToken}}
+Content-Type: application/json
+
+{{exactMethodSourceRequest}}
+
+> {%
+  const variant = response.body.variants[0];
+  const next = variant.availableFollowUps.find(
+    item => item.operation === "GET_METHOD_SOURCE_SEGMENT");
+  if (next) {
+    client.global.set("sourceSegmentRequest", JSON.stringify(next.request));
+  }
+%}
+
+### Oversized source only: execute the complete stateless segment projection and repeat with nextSegmentFollowUp.request.
+### Skip this request when the exact source was inline and had no GET_METHOD_SOURCE_SEGMENT follow-up.
+POST {{baseUrl}}/v1/discovery/method-source-segment
+X-Api-Token: {{apiToken}}
+Content-Type: application/json
+
+{{sourceSegmentRequest}}
+
+### Type member continuation: retain the same canonical fullyQualifiedName and fixed revision.
+POST {{baseUrl}}/v1/discovery/type-members
+X-Api-Token: {{apiToken}}
+Content-Type: application/json
+
+{
+  "repoId": "{{repoId}}",
+  "expectedRevision": "{{revision}}",
+  "sourceFile": "{{typeSourceFile}}",
+  "fullyQualifiedName": "{{typeFullyQualifiedName}}",
+  "memberKinds": ["METHOD", "FIELD"],
+  "offset": 100,
+  "limit": 100
+}
+
+### Discover implementations from the complete method-member follow-up captured above.
+POST {{baseUrl}}/v1/discovery/method-implementations
+X-Api-Token: {{apiToken}}
+Content-Type: application/json
+
+{{implementationDiscoveryRequest}}
+
+> {%
+  const implementation = response.body.candidates[0];
+  if (implementation) {
+    client.global.set("implementationOutgoingGraphRequest", JSON.stringify({
+      repoId: response.body.repoId,
+      expectedRevision: response.body.revision,
+      depth: 2,
+      target: implementation.target
+    }));
+  }
+%}
+
+### Implementation -> outgoing graph handoff; the returned implementation target is passed unchanged.
+POST {{baseUrl}}/v1/analyses/call-graphs/outgoing
+X-Api-Token: {{apiToken}}
+Content-Type: application/json
+
+{{implementationOutgoingGraphRequest}}
+
+### Discover a mapper statement by structured identity term, never by literal/source-body search.
+POST {{baseUrl}}/v1/discovery/concepts
+X-Api-Token: {{apiToken}}
+Content-Type: application/json
+
+{
+  "repoId": "{{repoId}}",
+  "expectedRevision": "{{revision}}",
+  "terms": [
+    {
+      "value": "{{mapperStatementTerm}}",
+      "matchMode": "TOKEN_EXACT"
+    }
+  ],
+  "kinds": ["MAPPER_STATEMENT"],
+  "offset": 0,
+  "limit": 50
+}
+
+> {%
+  const mapper = response.body.candidates.find(
+    candidate => candidate.kind === "MAPPER_STATEMENT"
+      && candidate.mapperStatementMapping?.status === "RESOLVED");
+  if (mapper) {
+    const mappedMethod = mapper.mapperStatementMapping.candidates[0];
+    const methodSql = mappedMethod.availableFollowUps.find(
+      item => item.operation === "GET_METHOD_SQL");
+    if (methodSql) {
+      client.global.set("mapperStatementRequest", JSON.stringify(methodSql.request));
+    }
+  }
+%}
+
+### Fetch every legal XML/annotation statement variant for the mapped MethodTarget.
+POST {{baseUrl}}/v1/discovery/method-sql
+X-Api-Token: {{apiToken}}
+Content-Type: application/json
+
+{{mapperStatementRequest}}
+
+> {%
+  const variants = response.body.variants;
+  const include = variants
+    .flatMap(variant => variant.includeResolutions)
+    .find(resolution =>
+      (resolution.status === "RESOLVED" || resolution.status === "AMBIGUOUS")
+      && resolution.availableFollowUps.length > 0);
+  const segmented = variants.find(
+    variant => variant.availableFollowUps.some(item => item.operation === "GET_METHOD_SQL_SEGMENT"));
+  if (include) {
+    const fragment = include.availableFollowUps.find(
+      item => item.operation === "GET_MAPPER_FRAGMENT");
+    client.global.set("mapperFragmentRequest", JSON.stringify(fragment.request));
+  }
+  if (segmented) {
+    const segment = segmented.availableFollowUps.find(
+      item => item.operation === "GET_METHOD_SQL_SEGMENT");
+    client.global.set("statementSegmentRequest", JSON.stringify(segment.request));
+  }
+%}
+
+### Follow the first resolved or ambiguous include using the complete request emitted by the statement response.
+### No fragment identity is supplied or reconstructed by the operator; for AMBIGUOUS, run every emitted follow-up.
+POST {{baseUrl}}/v1/discovery/mapper-sql-fragment
+X-Api-Token: {{apiToken}}
+Content-Type: application/json
+
+{{mapperFragmentRequest}}
+
+> {%
+  const variant = response.body.variants[0];
+  const next = variant.availableFollowUps.find(
+    item => item.operation === "GET_MAPPER_FRAGMENT_SEGMENT");
+  if (next) {
+    client.global.set("fragmentSegmentRequest", JSON.stringify(next.request));
+  }
+%}
+
+### Oversized statement only: execute this request, then repeat with nextSegmentFollowUp.request.
+### Repeat the sequence for every statement variant that emitted GET_METHOD_SQL_SEGMENT.
+POST {{baseUrl}}/v1/discovery/method-sql-segment
+X-Api-Token: {{apiToken}}
+Content-Type: application/json
+
+{{statementSegmentRequest}}
+
+### Oversized fragment only: execute this request, then repeat with nextSegmentFollowUp.request.
+POST {{baseUrl}}/v1/discovery/mapper-fragment-segment
+X-Api-Token: {{apiToken}}
+Content-Type: application/json
+
+{{fragmentSegmentRequest}}
+
+### Compare evidence semantics.
+### Confirm the outgoing graph SQL is normalized while method-sql and mapper-sql-fragment remain exact raw evidence.
+### Confirm inline content is complete; oversized content has no inline prefix and uses only its typed segment follow-up.
+
+### Partial extraction coverage.
+### Run this against a representative repository/revision containing a known syntax-failed production Java file.
+### Expect coverage.status=PARTIAL. If there are zero candidates, expect SEARCH_INCOMPLETE and FIX_SOURCE_OR_RETRY.
+POST {{baseUrl}}/v1/discovery/concepts
+X-Api-Token: {{apiToken}}
+Content-Type: application/json
+
+{
+  "operator": "ALL",
+  "repoId": "{{repoId}}",
+  "expectedRevision": "{{revision}}",
+  "terms": [
+    {
+      "value": "order*",
+      "matchMode": "TOKEN_PREFIX"
+    }
+  ],
+  "kinds": ["TYPE", "METHOD"],
+  "offset": 0,
+  "limit": 50
+}
+
+### Monitoring log checks (manual; no request body, token, source, SQL/XML, or configuration content is logged).
+### Search http_api_completed entries for this sequence. Confirm sourceFile is repository-relative when present.
+### `rg 'http_api_completed' <service-log> | rg '(source=|sql=|xml=|config=|/home/|[A-Za-z]:\\\\)'` must return no lines.
+### Also confirm monitoring fields contain no source/XML/SQL/config body text, absolute host path, or API token value.

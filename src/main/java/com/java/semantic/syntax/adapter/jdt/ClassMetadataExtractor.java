@@ -90,7 +90,9 @@ final class ClassMetadataExtractor {
                 slices.slice(type),
                 AnnotationReader.isPresent(type, PRIMARY),
                 qualifierValuesOf(type),
-                annotationEvidenceOf(type));
+                annotationEvidenceOf(type),
+                implementedTypeReferencesOf(type, slices),
+                extendedTypeReferencesOf(type, slices));
     }
 
     // --- 型別形狀 ---
@@ -122,6 +124,9 @@ final class ClassMetadataExtractor {
             return simpleNamesOf(enumDeclaration.superInterfaceTypes());
         }
         if (type instanceof TypeDeclaration typeDeclaration) {
+            if (typeDeclaration.isInterface()) {
+                return List.of();
+            }
             return simpleNamesOf(typeDeclaration.superInterfaceTypes());
         }
         return List.of();
@@ -129,10 +134,50 @@ final class ClassMetadataExtractor {
 
     private static List<String> extendedTypesOf(AbstractTypeDeclaration type) {
         if (type instanceof TypeDeclaration typeDeclaration && !(type instanceof RecordDeclaration)) {
+            if (typeDeclaration.isInterface()) {
+                return simpleNamesOf(typeDeclaration.superInterfaceTypes());
+            }
             Type superclass = typeDeclaration.getSuperclassType();
             return Objects.isNull(superclass) ? List.of() : List.of(TypeNames.simpleNameOf(superclass));
         }
         return List.of();
+    }
+
+    private static List<TypeReference> implementedTypeReferencesOf(
+            AbstractTypeDeclaration type,
+            SourceSlices slices) {
+        List<TypeReference> references = new ArrayList<>();
+        if (type instanceof RecordDeclaration record) {
+            addTypeReferences(references, record.superInterfaceTypes(), slices);
+        } else if (type instanceof EnumDeclaration enumDeclaration) {
+            addTypeReferences(references, enumDeclaration.superInterfaceTypes(), slices);
+        } else if (type instanceof TypeDeclaration typeDeclaration) {
+            if (!typeDeclaration.isInterface()) {
+                addTypeReferences(references, typeDeclaration.superInterfaceTypes(), slices);
+            }
+        }
+        return List.copyOf(references);
+    }
+
+    private static List<TypeReference> extendedTypeReferencesOf(
+            AbstractTypeDeclaration type,
+            SourceSlices slices) {
+        if (type instanceof TypeDeclaration typeDeclaration && !(type instanceof RecordDeclaration)) {
+            if (typeDeclaration.isInterface()) {
+                List<TypeReference> references = new ArrayList<>();
+                addTypeReferences(references, typeDeclaration.superInterfaceTypes(), slices);
+                return List.copyOf(references);
+            }
+            Type superclass = typeDeclaration.getSuperclassType();
+            return Objects.nonNull(superclass) ? List.of(typeReferenceOf(superclass, slices)) : List.of();
+        }
+        return List.of();
+    }
+
+    private static void addTypeReferences(List<TypeReference> references, List<?> types, SourceSlices slices) {
+        for (Object type : types) {
+            references.add(typeReferenceOf((Type) type, slices));
+        }
     }
 
     private static List<String> simpleNamesOf(List<?> types) {
@@ -188,9 +233,12 @@ final class ClassMetadataExtractor {
 
             // annotation SQL 優先於 XML，判準是「有沒有 @Select 之類的註解」而非解析出的字串是否為空
             Optional<Annotation> sqlAnnotation = AnnotationReader.findAny(method, SQL_ANNOTATIONS);
-            String sql = sqlAnnotation
+            Optional<String> resolvedAnnotationSql = sqlAnnotation
                     .map(annotation -> String.join(" ", AnnotationReader.stringValues(annotation, "value")))
-                    .orElseGet(() -> sqlIndex.find(fullyQualifiedName, name).orElse(null));
+                    .filter(StringUtils::hasText);
+            String sql = sqlAnnotation.isPresent()
+                    ? resolvedAnnotationSql.orElse(null)
+                    : sqlIndex.find(fullyQualifiedName, name).orElse(null);
             SqlSource sqlSource = sqlSourceOf(sqlAnnotation.isPresent(), sql);
 
             methods.add(new MethodSignature(

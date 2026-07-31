@@ -199,7 +199,7 @@ final class AnnotationReader {
      * 解析成字串
      * <p>
      * 先問 JDT 的編譯期常量，字面值、跨檔案常量與 "a" + "b" 的摺疊都由這一步涵蓋
-     * 解析不出來時退回原始碼中寫出的名稱，仍走型別化節點，不經過任何 printer
+     * 解析不出來時不猜測原始碼寫法，呼叫端只能使用 JDT 已證實的編譯期值
      */
     private static Optional<String> resolveString(Expression expression) {
         Object constant = expression.resolveConstantExpressionValue();
@@ -210,10 +210,7 @@ final class AnnotationReader {
             String value = literal.getLiteralValue();
             return StringUtils.hasText(value) ? Optional.of(value) : Optional.empty();
         }
-        if (Objects.nonNull(constant)) {
-            return Optional.of(String.valueOf(constant));
-        }
-        return writtenNameOf(expression);
+        return Optional.empty();
     }
 
     private static List<String> resolveEnumConstants(Expression expression) {
@@ -225,16 +222,6 @@ final class AnnotationReader {
             return List.copyOf(names);
         }
         return lastSegmentOf(expression).map(List::of).orElseGet(List::of);
-    }
-
-    private static Optional<String> writtenNameOf(Expression expression) {
-        if (expression instanceof Name name) {
-            return Optional.of(name.getFullyQualifiedName());
-        }
-        if (expression instanceof FieldAccess fieldAccess) {
-            return Optional.of(fieldAccess.getName().getIdentifier());
-        }
-        return Optional.empty();
     }
 
     private static Optional<String> lastSegmentOf(Expression expression) {

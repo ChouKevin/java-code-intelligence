@@ -26,6 +26,9 @@ import java.util.Optional;
  * @param source             型別宣告的完整原始碼
  * @param primary            是否標註 @Primary
  * @param beanQualifiers     型別宣告的 bean qualifier
+ * @param annotationEvidence 已解析的類別 annotation identity 證據
+ * @param implementedTypeReferences 直接實作介面且保留 binding 的型別證據
+ * @param extendedTypeReferences 直接繼承型別且保留 binding 的型別證據
  */
 public record ClassMetadata(
         String className,
@@ -47,7 +50,9 @@ public record ClassMetadata(
         SourceSlice source,
         boolean primary,
         List<String> beanQualifiers,
-        List<AnnotationEvidence> annotationEvidence) {
+        List<AnnotationEvidence> annotationEvidence,
+        List<TypeReference> implementedTypeReferences,
+        List<TypeReference> extendedTypeReferences) {
 
     public ClassMetadata {
         implementedTypes = List.copyOf(implementedTypes);
@@ -61,6 +66,8 @@ public record ClassMetadata(
         Objects.requireNonNull(source, "source is required");
         beanQualifiers = List.copyOf(beanQualifiers);
         annotationEvidence = List.copyOf(annotationEvidence);
+        implementedTypeReferences = List.copyOf(implementedTypeReferences);
+        extendedTypeReferences = List.copyOf(extendedTypeReferences);
     }
 
     /** 保留舊 metadata 建構子；舊資料沒有已解析的註解 identity */
@@ -72,7 +79,20 @@ public record ClassMetadata(
             SourceSlice source, boolean primary, List<String> beanQualifiers) {
         this(className, packageName, fullyQualifiedName, sourceFile, kind, isAbstract, implementedTypes, extendedTypes,
                 annotations, imports, fields, methods, hasFluentAccessors, hasChainedAccessors, profiles, range,
-                source, primary, beanQualifiers, List.of());
+                source, primary, beanQualifiers, List.of(), List.of(), List.of());
+    }
+
+    /** 保留 annotation metadata 建構子；supertype binding 證據尚未提供時為空 */
+    public ClassMetadata(
+            String className, String packageName, String fullyQualifiedName, String sourceFile, TypeKind kind,
+            boolean isAbstract, List<String> implementedTypes, List<String> extendedTypes,
+            List<String> annotations, List<String> imports, List<FieldInfo> fields, List<MethodSignature> methods,
+            boolean hasFluentAccessors, boolean hasChainedAccessors, List<String> profiles, SyntaxRange range,
+            SourceSlice source, boolean primary, List<String> beanQualifiers,
+            List<AnnotationEvidence> annotationEvidence) {
+        this(className, packageName, fullyQualifiedName, sourceFile, kind, isAbstract, implementedTypes, extendedTypes,
+                annotations, imports, fields, methods, hasFluentAccessors, hasChainedAccessors, profiles, range,
+                source, primary, beanQualifiers, annotationEvidence, List.of(), List.of());
     }
 
     /** 型別種類 */

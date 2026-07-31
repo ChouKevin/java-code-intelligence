@@ -1,60 +1,62 @@
-package com.java.semantic.semantic.application;
+package com.java.semantic.syntax.domain;
 
 import com.java.semantic.identity.MethodTarget;
-import com.java.semantic.semantic.domain.SemanticBindingAmbiguousException;
-import com.java.semantic.semantic.domain.SemanticDeclarationAnchor;
-import com.java.semantic.semantic.domain.SemanticPosition;
-import com.java.semantic.semantic.domain.SemanticTargetNotFoundException;
-import com.java.semantic.syntax.domain.AnalysisTargetStatus;
-import com.java.semantic.syntax.domain.ClassMetadata;
-import com.java.semantic.syntax.domain.MethodTargetResolution;
-import com.java.semantic.syntax.domain.RepositorySyntax;
 
 import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 
-/** Resolves a declaration only from the syntax extractor's canonical target proof. */
-public final class ExactMethodDeclarationResolver {
+/** 從語法抽取結果解析完整方法目標的 canonical 宣告結果 */
+public final class CanonicalMethodDeclarationResolver {
 
+    private static final String TARGET_NOT_FOUND = "TARGET_NOT_FOUND";
     private static final Comparator<MethodTarget> TARGET_ORDER = Comparator
             .comparing(MethodTarget::sourceFile)
             .thenComparing(MethodTarget::packageName)
             .thenComparing(MethodTarget::className)
             .thenComparing(MethodTarget::methodName)
-            .thenComparing(MethodTarget::parameterTypes, ExactMethodDeclarationResolver::compareParameters);
+            .thenComparing(MethodTarget::parameterTypes, CanonicalMethodDeclarationResolver::compareParameters);
 
-    public SemanticDeclarationAnchor resolve(RepositorySyntax syntax, MethodTarget target) {
+    /** 依完整的 repository 相對方法目標回傳唯一、未解析或歧義的語法證明 */
+    public MethodTargetResolution resolve(RepositorySyntax syntax, MethodTarget target) {
         Objects.requireNonNull(syntax, "syntax is required");
         Objects.requireNonNull(target, "target is required");
         List<Declaration> declarations = declarationsFor(syntax, target);
-        List<MethodTarget> ambiguousCandidates = declarations.stream()
+        List<MethodTargetResolution> ambiguousProofs = declarations.stream()
                 .map(Declaration::resolution)
                 .filter(resolution -> AnalysisTargetStatus.AMBIGUOUS.equals(resolution.status()))
                 .filter(resolution -> resolution.candidates().contains(target))
+                .toList();
+        List<MethodTarget> ambiguousCandidates = ambiguousProofs.stream()
                 .flatMap(resolution -> resolution.candidates().stream())
                 .distinct()
                 .sorted(TARGET_ORDER)
                 .toList();
         if (ambiguousCandidates.size() > 1) {
-            throw new SemanticBindingAmbiguousException(target, ambiguousCandidates);
+            String reasonCode = ambiguousProofs.stream()
+                    .map(MethodTargetResolution::reasonCode)
+                    .findFirst()
+                    .orElseThrow();
+            return new MethodTargetResolution(
+                    AnalysisTargetStatus.AMBIGUOUS,
+                    Optional.empty(),
+                    ambiguousCandidates,
+                    reasonCode);
         }
-        List<Declaration> exact = declarations.stream()
-                .filter(declaration -> AnalysisTargetStatus.RESOLVED.equals(declaration.resolution().status()))
-                .filter(declaration -> declaration.resolution().target().filter(target::equals).isPresent())
+        List<MethodTarget> exactTargets = declarations.stream()
+                .map(Declaration::resolution)
+                .filter(resolution -> AnalysisTargetStatus.RESOLVED.equals(resolution.status()))
+                .flatMap(resolution -> resolution.target().stream())
+                .filter(target::equals)
                 .toList();
-        if (exact.isEmpty()) {
-            throw new SemanticTargetNotFoundException(target);
+        if (exactTargets.size() > 1) {
+            throw new DuplicateMethodDeclarationProofException(target, exactTargets.size());
         }
-        if (exact.size() > 1) {
-            List<MethodTarget> candidates = exact.stream()
-                    .map(declaration -> declaration.resolution().target().orElseThrow())
-                    .toList();
-            throw new SemanticBindingAmbiguousException(target, candidates);
+        if (exactTargets.size() == 1) {
+            return MethodTargetResolution.resolved(exactTargets.getFirst());
         }
-        ClassMetadata.MethodSignature method = exact.getFirst().method();
-        return new SemanticDeclarationAnchor(
-                target, new SemanticPosition(method.namePosition().line(), method.namePosition().character()));
+        return MethodTargetResolution.unresolved(TARGET_NOT_FOUND);
     }
 
     private List<Declaration> declarationsFor(RepositorySyntax syntax, MethodTarget target) {

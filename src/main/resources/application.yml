@@ -9,6 +9,10 @@ semantic:
       forbidden-packages: []
       forbidden-classes: []
       forbidden-methods: []
+  discovery:
+    exact-content:
+      inline-utf8-bytes: ${EXACT_CONTENT_INLINE_UTF8_BYTES:32768}
+      segment-utf8-bytes: ${EXACT_CONTENT_SEGMENT_UTF8_BYTES:32768}
   api:
     api-token: ${SEMANTIC_API_TOKEN:}
   jdtls:

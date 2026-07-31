@@ -10,10 +10,13 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Optional;
 import java.util.stream.Collectors;
 
 import com.java.semantic.syntax.domain.ClassMetadata;
 import com.java.semantic.syntax.domain.RepositorySyntax;
+import com.java.semantic.syntax.domain.SourceExtractionOutcome;
+import com.java.semantic.syntax.domain.SourceExtractionStatus;
 import com.java.semantic.syntax.domain.SyntaxInvocation;
 import com.java.semantic.syntax.domain.SyntaxPosition;
 import com.java.semantic.syntax.application.AnnotationMatchKind;
@@ -27,14 +30,54 @@ import org.junit.jupiter.api.io.TempDir;
 import org.slf4j.LoggerFactory;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-/** 逐檔隔離：單一檔案抽取失敗不得讓整個 repository 掃出零筆 */
+/** 逐檔隔離：單一檔案的語法失敗不得讓整個 repository 掃出零筆 */
 class JdtSyntaxExtractionServiceTest {
 
     private static final String HOSTILE_CLASS = "Hostile";
+    private static final Path EXTRACTION_COVERAGE_FIXTURE =
+            Path.of("src/test/resources/fixtures/syntax-extraction-coverage");
     private static final String RESTRICTED_JAVA_PATH = "RESTRICTED_JAVA_PATH_SENTINEL";
     private static final String RESTRICTED_XML_PATH = "RESTRICTED_XML_PATH_SENTINEL";
     private static final String RESTRICTED_THROWABLE = "RESTRICTED_THROWABLE_SENTINEL";
+
+    @Test
+    void should_require_reason_code_only_for_syntax_failures() {
+        assertThatThrownBy(() -> new SourceExtractionOutcome(
+                "src/main/java/Example.java", SourceExtractionStatus.EXTRACTED, Optional.of("JDT_SYNTAX_PROBLEM")))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> new SourceExtractionOutcome(
+                "src/main/java/Example.java", SourceExtractionStatus.SYNTAX_FAILED, Optional.empty()))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void should_report_syntax_coverage_without_discarding_metadata_from_valid_sources() {
+        RepositorySyntax syntax = new JdtSyntaxExtractionService().extract(EXTRACTION_COVERAGE_FIXTURE);
+
+        assertThat(syntax.extractionOutcomes()).satisfiesExactly(
+                outcome -> {
+                    assertThat(outcome.sourceFile())
+                            .isEqualTo("src/main/java/com/example/coverage/ExtractedType.java");
+                    assertThat(outcome.status()).isEqualTo(SourceExtractionStatus.EXTRACTED);
+                    assertThat(outcome.reasonCode()).isEmpty();
+                },
+                outcome -> {
+                    assertThat(outcome.sourceFile())
+                            .isEqualTo("src/main/java/com/example/coverage/SyntaxBroken.java");
+                    assertThat(outcome.status()).isEqualTo(SourceExtractionStatus.SYNTAX_FAILED);
+                    assertThat(outcome.reasonCode()).hasValue("JDT_SYNTAX_PROBLEM");
+                },
+                outcome -> {
+                    assertThat(outcome.sourceFile())
+                            .isEqualTo("src/main/java/com/example/coverage/TypeLess.java");
+                    assertThat(outcome.status()).isEqualTo(SourceExtractionStatus.EXTRACTED);
+                    assertThat(outcome.reasonCode()).isEmpty();
+                });
+        assertThat(syntax.classes()).extracting(ClassMetadata::fullyQualifiedName)
+                .containsExactly("com.example.coverage.ExtractedType");
+    }
 
     @Test
     void should_feed_unbound_spring_listener_annotation_and_canonical_target_into_discovery(@TempDir Path tempDir)
@@ -91,28 +134,6 @@ class JdtSyntaxExtractionServiceTest {
     }
 
     @Test
-    void should_still_return_the_other_files_when_one_source_file_fails_to_extract(@TempDir Path tempDir)
-            throws IOException {
-        Path repositoryRoot = tempDir.resolve("order-service");
-        Path sourceRoot = repositoryRoot.resolve("src/main/java/com/example");
-        Files.createDirectories(sourceRoot);
-        Files.writeString(sourceRoot.resolve("Hostile.java"),
-                "package com.example; public class Hostile { public String boom() { return \"\"; } }");
-        Files.writeString(sourceRoot.resolve("Healthy.java"),
-                "package com.example; public class Healthy { public String ok() { return \"\"; } }");
-        Files.writeString(sourceRoot.resolve("AlsoHealthy.java"),
-                "package com.example; public class AlsoHealthy { public String ok() { return \"\"; } }");
-
-        RepositorySyntax syntax = new JdtSyntaxExtractionService(new ExplodingSourceSyntaxExtractor())
-                .extract(repositoryRoot);
-
-        assertThat(syntax.classes())
-                .as("一個檔案拋例外時，其餘檔案的結果必須留下，否則整個 repo 靜默變成零筆")
-                .extracting(ClassMetadata::fullyQualifiedName)
-                .containsExactly("com.example.AlsoHealthy", "com.example.Healthy");
-    }
-
-    @Test
     void should_return_every_file_when_no_source_file_fails_to_extract(@TempDir Path tempDir) throws IOException {
         Path repositoryRoot = tempDir.resolve("order-service");
         Path sourceRoot = repositoryRoot.resolve("src/main/java/com/example");
@@ -120,8 +141,7 @@ class JdtSyntaxExtractionServiceTest {
         Files.writeString(sourceRoot.resolve("Healthy.java"),
                 "package com.example; public class Healthy { public String ok() { return \"\"; } }");
 
-        RepositorySyntax syntax = new JdtSyntaxExtractionService(new ExplodingSourceSyntaxExtractor())
-                .extract(repositoryRoot);
+        RepositorySyntax syntax = new JdtSyntaxExtractionService().extract(repositoryRoot);
 
         assertThat(syntax.classes())
                 .extracting(ClassMetadata::fullyQualifiedName)
@@ -239,8 +259,14 @@ class JdtSyntaxExtractionServiceTest {
         Path resourceRoot = repositoryRoot.resolve("src/main/resources/mappers");
         Files.createDirectories(sourceRoot);
         Files.createDirectories(resourceRoot);
-        Files.writeString(sourceRoot.resolve(HOSTILE_CLASS + RESTRICTED_JAVA_PATH + ".java"),
-                "package com.example; class HostileRestricted {} ");
+        Files.writeString(sourceRoot.resolve(HOSTILE_CLASS + RESTRICTED_JAVA_PATH + ".java"), """
+                package com.example;
+
+                class HostileRestricted {
+                    void missingParameterType( {
+                    }
+                }
+                """);
         Files.writeString(resourceRoot.resolve(RESTRICTED_XML_PATH + ".xml"),
                 "<mapper namespace=\"restricted\"><select id=\"broken\">" + RESTRICTED_THROWABLE);
 
@@ -249,9 +275,9 @@ class JdtSyntaxExtractionServiceTest {
         ListAppender<ILoggingEvent> syntaxAppender = appender(syntaxLogger);
         ListAppender<ILoggingEvent> xmlAppender = appender(xmlLogger);
         try {
-            new JdtSyntaxExtractionService(new ExplodingSourceSyntaxExtractor()).extract(repositoryRoot);
+            new JdtSyntaxExtractionService().extract(repositoryRoot);
 
-            assertSafeFailureEvents(syntaxAppender.list, "JAVA_SYNTAX_EXTRACTION_FAILED");
+            assertSafeFailureEvents(syntaxAppender.list, "JDT_SYNTAX_PROBLEM");
             assertSafeFailureEvents(xmlAppender.list, "MAPPER_XML_PARSE_FAILED");
         } finally {
             detach(syntaxLogger, syntaxAppender);
@@ -260,31 +286,17 @@ class JdtSyntaxExtractionServiceTest {
     }
 
     @Test
-    void should_log_unexpected_per_source_failures_at_error_without_raw_source_data(@TempDir Path tempDir)
+    void should_propagate_non_parser_source_extraction_failures(@TempDir Path tempDir)
             throws IOException {
         Path repositoryRoot = tempDir.resolve("order-service");
         Path sourceRoot = repositoryRoot.resolve("src/main/java/com/example");
         Files.createDirectories(sourceRoot);
         Files.writeString(sourceRoot.resolve(HOSTILE_CLASS + ".java"),
                 "package com.example; class Hostile {} ");
-        Logger logger = (Logger) LoggerFactory.getLogger(JdtSyntaxExtractionService.class);
-        ListAppender<ILoggingEvent> appender = appender(logger);
-        try {
-            new JdtSyntaxExtractionService(new UnexpectedExplodingSourceSyntaxExtractor()).extract(repositoryRoot);
-
-            List<ILoggingEvent> failures = appender.list.stream()
-                    .filter(event -> event.getFormattedMessage().contains("JAVA_SYNTAX_EXTRACTION_FAILED"))
-                    .toList();
-            assertThat(failures).singleElement().satisfies(event -> {
-                assertThat(event.getLevel()).isEqualTo(Level.ERROR);
-                assertThat(event.getFormattedMessage())
-                        .contains("exceptionType=IllegalStateException")
-                        .doesNotContain("RESTRICTED_UNEXPECTED_SOURCE_SENTINEL", repositoryRoot.toString());
-                assertThat(event.getThrowableProxy()).isNull();
-            });
-        } finally {
-            detach(logger, appender);
-        }
+        assertThatThrownBy(() -> new JdtSyntaxExtractionService(new UnexpectedExplodingSourceSyntaxExtractor())
+                .extract(repositoryRoot))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("RESTRICTED_UNEXPECTED_SOURCE_SENTINEL");
     }
 
     @Test
@@ -391,22 +403,6 @@ class JdtSyntaxExtractionServiceTest {
                     .doesNotContain(RESTRICTED_JAVA_PATH, RESTRICTED_XML_PATH, RESTRICTED_THROWABLE);
             assertThat(event.getThrowableProxy()).isNull();
         });
-    }
-
-    /**
-     * 模擬 recovered node 打到 UnsupportedTypeFormException 或 bodyDeclarations 的未檢查轉型
-     * <p>
-     * setStatementsRecovery(true) 會產出這段程式碼沒見過的節點形狀，失敗類別是真實的
-     */
-    private static final class ExplodingSourceSyntaxExtractor extends SourceSyntaxExtractor {
-
-        @Override
-        SourceSyntax extractFrom(ParsedSource parsed, MapperXmlSqlExtractor.SqlIndex sqlIndex) {
-            if (parsed.source().relativePath().contains(HOSTILE_CLASS)) {
-                throw new UnsupportedTypeFormException(RESTRICTED_THROWABLE);
-            }
-            return super.extractFrom(parsed, sqlIndex);
-        }
     }
 
     private static final class UnexpectedExplodingSourceSyntaxExtractor extends SourceSyntaxExtractor {

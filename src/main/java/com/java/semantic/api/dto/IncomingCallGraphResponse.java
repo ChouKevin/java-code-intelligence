@@ -1,18 +1,21 @@
 package com.java.semantic.api.dto;
 
+import com.java.semantic.api.monitoring.ApiMonitoringField;
+import com.java.semantic.api.monitoring.ApiMonitoringMode;
+
 import java.util.List;
 import java.util.Objects;
 
 /** Normalized, bounded incoming call-graph response. */
 public record IncomingCallGraphResponse(
-        String status,
-        String analyzedRevision,
-        String rootNodeId,
-        GraphTraversalResponse traversal,
-        List<GraphNodeResponse> nodes,
-        List<GraphEdgeResponse> edges,
-        List<GraphWarningResponse> warnings,
-        List<GraphErrorResponse> errors) {
+        @ApiMonitoringField(ApiMonitoringMode.VALUE) String status,
+        @ApiMonitoringField(ApiMonitoringMode.VALUE) String analyzedRevision,
+        @ApiMonitoringField(ApiMonitoringMode.VALUE) String rootNodeId,
+        @ApiMonitoringField(ApiMonitoringMode.NESTED) GraphTraversalResponse traversal,
+        @ApiMonitoringField(ApiMonitoringMode.SIZE) List<GraphNodeResponse> nodes,
+        @ApiMonitoringField(ApiMonitoringMode.SIZE) List<GraphEdgeResponse> edges,
+        @ApiMonitoringField(ApiMonitoringMode.SIZE) List<GraphWarningResponse> warnings,
+        @ApiMonitoringField(ApiMonitoringMode.SIZE) List<GraphErrorResponse> errors) {
 
     public IncomingCallGraphResponse {
         status = Objects.requireNonNull(status, "status is required");

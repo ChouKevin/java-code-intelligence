@@ -17,8 +17,15 @@ import com.java.semantic.semantic.domain.SemanticLocation;
 import com.java.semantic.semantic.domain.SemanticMethod;
 import com.java.semantic.semantic.domain.SemanticPosition;
 import com.java.semantic.semantic.domain.SemanticRange;
+import com.java.semantic.syntax.domain.CanonicalMethodDeclarationResolver;
+import com.java.semantic.syntax.domain.ClassMetadata;
+import com.java.semantic.syntax.domain.MethodTargetResolution;
 import com.java.semantic.syntax.domain.RepositorySyntax;
+import com.java.semantic.syntax.domain.SourceSlice;
 import com.java.semantic.syntax.domain.SyntaxExtractionService;
+import com.java.semantic.syntax.domain.SyntaxPosition;
+import com.java.semantic.syntax.domain.SyntaxRange;
+import com.java.semantic.syntax.domain.TypeReference;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.api.io.TempDir;
@@ -27,6 +34,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.nio.file.Path;
+import java.util.List;
 import java.util.Optional;
 import java.util.function.Function;
 
@@ -59,7 +67,7 @@ class SemanticAnalysisApplicationServiceTest {
         RepositoryRevision revision = RepositoryRevision.fixture();
         RepositorySnapshot snapshot = new RepositorySnapshot(repositoryId, root, revision);
         MethodTarget target = new MethodTarget("OrderService.java", "com.acme", "OrderService", "place", java.util.List.of());
-        RepositorySyntax syntax = RepositorySyntax.empty();
+        RepositorySyntax syntax = syntax(target);
         SemanticMethod method = new SemanticMethod(
                 "com.acme", "OrderService", "place", java.util.List.of(), "void",
                 new SemanticLocation(root.resolve("OrderService.java").toUri().toString(),
@@ -72,9 +80,8 @@ class SemanticAnalysisApplicationServiceTest {
                     return operation.apply(snapshot);
                 });
         when(syntaxExtractionService.extract(root)).thenReturn(syntax);
-        ExactMethodDeclarationResolver declarationResolver = mock(ExactMethodDeclarationResolver.class);
-        when(declarationResolver.resolve(syntax, target)).thenReturn(new SemanticDeclarationAnchor(
-                target, new SemanticPosition(0, 0)));
+        CanonicalMethodDeclarationResolver declarationResolver = mock(CanonicalMethodDeclarationResolver.class);
+        when(declarationResolver.resolve(syntax, target)).thenReturn(MethodTargetResolution.resolved(target));
         when(semanticService.resolveExactMethod(eq(snapshot), any(SemanticDeclarationAnchor.class))).thenReturn(method);
         when(builder.build(eq(snapshot), eq(syntax), eq(target), eq(method), eq(2), eq(7))).thenReturn(null);
 
@@ -102,7 +109,7 @@ class SemanticAnalysisApplicationServiceTest {
         RepositoryRevision revision = RepositoryRevision.fixture();
         RepositorySnapshot snapshot = new RepositorySnapshot(repositoryId, root, revision);
         MethodTarget target = new MethodTarget("OrderService.java", "com.acme", "OrderService", "place", java.util.List.of());
-        RepositorySyntax syntax = RepositorySyntax.empty();
+        RepositorySyntax syntax = syntax(target);
         SemanticMethod method = new SemanticMethod(
                 "com.acme", "OrderService", "place", java.util.List.of(), "void",
                 new SemanticLocation(root.resolve("OrderService.java").toUri().toString(),
@@ -116,9 +123,8 @@ class SemanticAnalysisApplicationServiceTest {
                     return operation.apply(snapshot);
                 });
         when(syntaxExtractionService.extract(root)).thenReturn(syntax);
-        ExactMethodDeclarationResolver declarationResolver = mock(ExactMethodDeclarationResolver.class);
-        when(declarationResolver.resolve(syntax, target)).thenReturn(new SemanticDeclarationAnchor(
-                target, new SemanticPosition(0, 0)));
+        CanonicalMethodDeclarationResolver declarationResolver = mock(CanonicalMethodDeclarationResolver.class);
+        when(declarationResolver.resolve(syntax, target)).thenReturn(MethodTargetResolution.resolved(target));
         when(semanticService.resolveExactMethod(eq(snapshot), any(SemanticDeclarationAnchor.class))).thenReturn(method);
         when(incomingBuilder.build(eq(snapshot), eq(syntax), eq(target), eq(method), eq(2), eq(11))).thenReturn(result);
 
@@ -139,5 +145,50 @@ class SemanticAnalysisApplicationServiceTest {
         calls.verify(syntaxExtractionService).extract(root);
         calls.verify(semanticService).resolveExactMethod(eq(snapshot), any(SemanticDeclarationAnchor.class));
         calls.verify(incomingBuilder).build(snapshot, syntax, target, method, 2, 11);
+    }
+
+    private RepositorySyntax syntax(MethodTarget target) {
+        SyntaxRange range = new SyntaxRange(new SyntaxPosition(0, 0), new SyntaxPosition(1, 0));
+        ClassMetadata.MethodSignature method = new ClassMetadata.MethodSignature(
+                target.methodName(),
+                target.parameterTypes(),
+                List.of(),
+                null,
+                null,
+                1,
+                1,
+                range,
+                new SourceSlice(range, "void place() {}"),
+                List.<TypeReference>of(),
+                Optional.empty(),
+                List.of(),
+                List.of(),
+                List.of(),
+                range.start(),
+                MethodTargetResolution.resolved(target),
+                true,
+                false,
+                true);
+        ClassMetadata metadata = new ClassMetadata(
+                target.className(),
+                target.packageName(),
+                target.packageName() + "." + target.className(),
+                target.sourceFile(),
+                ClassMetadata.TypeKind.CLASS,
+                false,
+                List.of(),
+                List.of(),
+                List.of(),
+                List.of(),
+                List.of(),
+                List.of(method),
+                false,
+                false,
+                List.of(),
+                range,
+                new SourceSlice(range, "class OrderService {}"),
+                false,
+                List.of());
+        return new RepositorySyntax(List.of(), List.of(metadata));
     }
 }

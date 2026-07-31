@@ -17,6 +17,7 @@ import com.java.semantic.semantic.domain.SemanticMethod;
 import com.java.semantic.semantic.domain.SemanticPosition;
 import com.java.semantic.semantic.domain.SemanticRange;
 import com.java.semantic.syntax.adapter.jdt.JdtSyntaxExtractionService;
+import com.java.semantic.syntax.domain.CanonicalMethodDeclarationResolver;
 import com.java.semantic.syntax.domain.ClassMetadata;
 import com.java.semantic.syntax.domain.ClassMetadata.MethodSignature;
 import com.java.semantic.syntax.domain.MethodTargetResolution;
@@ -198,7 +199,7 @@ class MethodImplementationDiscoveryApplicationServiceTest {
         MethodImplementationDiscoveryApplicationService service = new MethodImplementationDiscoveryApplicationService(
                 repository,
                 syntaxExtraction,
-                new ExactMethodDeclarationResolver(),
+                new CanonicalMethodDeclarationResolver(),
                 semantic,
                 new CanonicalTargetProjection(),
                 new ImplementationCandidateFactory(),
@@ -345,7 +346,7 @@ class MethodImplementationDiscoveryApplicationServiceTest {
         MethodImplementationDiscoveryApplicationService service = new MethodImplementationDiscoveryApplicationService(
                 repository,
                 syntaxExtraction,
-                new ExactMethodDeclarationResolver(),
+                new CanonicalMethodDeclarationResolver(),
                 semantic,
                 new CanonicalTargetProjection(),
                 new ImplementationCandidateFactory(),
@@ -396,7 +397,7 @@ class MethodImplementationDiscoveryApplicationServiceTest {
         return new MethodImplementationDiscoveryApplicationService(
                 fixture.repository,
                 fixture.syntaxExtraction,
-                new ExactMethodDeclarationResolver(),
+                new CanonicalMethodDeclarationResolver(),
                 fixture.semantic,
                 new CanonicalTargetProjection(),
                 factory,

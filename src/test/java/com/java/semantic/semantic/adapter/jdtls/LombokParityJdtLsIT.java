@@ -15,11 +15,13 @@ import com.java.semantic.identity.MethodTarget;
 import com.java.semantic.repository.domain.RepositoryId;
 import com.java.semantic.repository.domain.RepositoryRevision;
 import com.java.semantic.repository.domain.RepositorySnapshot;
-import com.java.semantic.semantic.application.ExactMethodDeclarationResolver;
 import com.java.semantic.semantic.domain.SemanticDeclarationAnchor;
 import com.java.semantic.semantic.domain.SemanticMethod;
+import com.java.semantic.semantic.domain.SemanticPosition;
 import com.java.semantic.semantic.domain.SemanticTargetNotFoundException;
 import com.java.semantic.syntax.adapter.jdt.JdtSyntaxExtractionService;
+import com.java.semantic.syntax.domain.AnalysisTargetStatus;
+import com.java.semantic.syntax.domain.CanonicalMethodDeclarationResolver;
 import com.java.semantic.syntax.domain.RepositorySyntax;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Tag;
@@ -204,10 +206,8 @@ class LombokParityJdtLsIT {
         MethodTarget generatedRoot = new MethodTarget(
                 "src/main/java/com/example/lombokgen/Order.java", PACKAGE, "Order", "getTotal", List.of());
 
-        assertThatThrownBy(() -> new ExactMethodDeclarationResolver().resolve(syntax, generatedRoot))
-                .isInstanceOf(SemanticTargetNotFoundException.class)
-                .satisfies(exception ->
-                        assertThat(((SemanticTargetNotFoundException) exception).target()).isEqualTo(generatedRoot));
+        assertThat(new CanonicalMethodDeclarationResolver().resolve(syntax, generatedRoot).status())
+                .isEqualTo(AnalysisTargetStatus.UNRESOLVED);
     }
 
     private void assertSingleLombokGeneratedEdge(OutgoingGraphFragment fragment, String externalSymbol) {
@@ -248,9 +248,23 @@ class LombokParityJdtLsIT {
             String methodName,
             List<String> parameterTypes) {
         MethodTarget target = methodTarget(syntax, className, methodName, parameterTypes);
-        SemanticDeclarationAnchor anchor = new ExactMethodDeclarationResolver().resolve(syntax, target);
+        SemanticDeclarationAnchor anchor = anchor(syntax, target);
         SemanticMethod root = service.resolveExactMethod(snapshot, anchor);
         return builder.build(snapshot, syntax, target, root, OUTGOING_DEPTH, DEPTH_TWO_NODE_BUDGET);
+    }
+
+    private SemanticDeclarationAnchor anchor(RepositorySyntax syntax, MethodTarget target) {
+        MethodTarget resolved = new CanonicalMethodDeclarationResolver().resolve(syntax, target)
+                .target()
+                .orElseThrow(() -> new AssertionError("missing canonical method declaration"));
+        return syntax.classes().stream()
+                .flatMap(metadata -> metadata.methods().stream())
+                .filter(method -> method.analysisTarget().target().filter(resolved::equals).isPresent())
+                .map(method -> new SemanticDeclarationAnchor(
+                        resolved,
+                        new SemanticPosition(method.namePosition().line(), method.namePosition().character())))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("missing canonical method declaration position"));
     }
 
     private MethodTarget methodTarget(

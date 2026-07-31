@@ -92,6 +92,10 @@ final class ScheduleExtractor {
             if (value.isPresent()) {
                 return new ScheduleEntryPoint(name, description, trigger.kind(), value.get(), analysisTargetOf.apply(method));
             }
+            if (AnnotationReader.hasAttribute(scheduled, trigger.attribute())) {
+                return new ScheduleEntryPoint(
+                        name, description, trigger.kind(), "", analysisTargetOf.apply(method));
+            }
         }
         return new ScheduleEntryPoint(
                 name, description, ScheduleTriggerKind.UNSPECIFIED, "", analysisTargetOf.apply(method));

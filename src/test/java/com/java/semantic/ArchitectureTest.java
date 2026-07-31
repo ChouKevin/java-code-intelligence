@@ -2,6 +2,11 @@ package com.java.semantic;
 
 import com.java.semantic.repository.application.RepositoryApplicationService;
 import com.java.semantic.repository.domain.RepositoryId;
+import com.java.semantic.api.monitoring.ApiMonitoringField;
+import com.java.semantic.syntax.application.ConceptDiscoveryApplicationService;
+import com.java.semantic.syntax.application.ExactContentApplicationService;
+import com.java.semantic.syntax.application.TypeMemberDiscoveryApplicationService;
+import com.tngtech.archunit.core.domain.JavaClass;
 import com.tngtech.archunit.core.domain.JavaClasses;
 import com.tngtech.archunit.core.importer.ClassFileImporter;
 import com.tngtech.archunit.core.importer.ImportOption;
@@ -10,11 +15,16 @@ import org.junit.jupiter.api.Test;
 import org.springframework.stereotype.Controller;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.lang.reflect.RecordComponent;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.function.Function;
 
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.classes;
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
+import static org.assertj.core.api.Assertions.assertThat;
 
 class ArchitectureTest {
 
@@ -46,6 +56,33 @@ class ArchitectureTest {
                 .as("no Path/File/URI may cross the HTTP API")
                 .allowEmptyShould(false)
                 .check(classes);
+    }
+
+    @Test
+    void should_require_explicit_monitoring_on_every_api_dto_record_component() {
+        List<String> violations = new ArrayList<>();
+        classes.stream()
+                .map(JavaClass::getName)
+                .filter(name -> name.startsWith("com.java.semantic.api.dto."))
+                .map(ArchitectureTest::loadClass)
+                .filter(Class::isRecord)
+                .forEach(type -> {
+                    for (RecordComponent component : type.getRecordComponents()) {
+                        if (Objects.isNull(component.getAnnotation(ApiMonitoringField.class))) {
+                            violations.add(type.getSimpleName() + "." + component.getName());
+                        }
+                    }
+                });
+
+        assertThat(violations).isEmpty();
+    }
+
+    private static Class<?> loadClass(String className) {
+        try {
+            return Class.forName(className);
+        } catch (ClassNotFoundException exception) {
+            throw new IllegalStateException("compiled architecture class is unavailable", exception);
+        }
     }
 
     @Test
@@ -96,6 +133,20 @@ class ArchitectureTest {
                 .that().resideInAPackage("..syntax.domain..")
                 .should().dependOnClassesThat().resideInAnyPackage("org.eclipse.jdt..", "org.eclipse.lsp4j..")
                 .as("the syntax extraction results the API and callers consume must stay free of JDT types")
+                .allowEmptyShould(false)
+                .check(classes);
+    }
+
+    @Test
+    void should_keep_canonical_method_declaration_resolution_neutral() {
+        noClasses()
+                .that().haveSimpleName("CanonicalMethodDeclarationResolver")
+                .should().dependOnClassesThat().resideInAnyPackage(
+                        "..semantic.application..",
+                        "..semantic.adapter.jdtls..",
+                        "..callgraph.application..",
+                        "..api.dto..")
+                .as("canonical declaration resolution must stay reusable from syntax consumers")
                 .allowEmptyShould(false)
                 .check(classes);
     }
@@ -252,6 +303,9 @@ class ArchitectureTest {
                 .or().haveSimpleName("EntryPointDiscoveryApplicationService")
                 .or().haveSimpleName("EventListenerDiscoveryApplicationService")
                 .or().haveSimpleName("MethodImplementationDiscoveryApplicationService")
+                .or().areAssignableTo(ConceptDiscoveryApplicationService.class)
+                .or().areAssignableTo(ExactContentApplicationService.class)
+                .or().areAssignableTo(TypeMemberDiscoveryApplicationService.class)
                 .should().callMethod(
                         RepositoryApplicationService.class,
                         "withSnapshot",

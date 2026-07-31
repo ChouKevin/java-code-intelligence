@@ -17,13 +17,15 @@ import com.java.semantic.repository.domain.RepositoryId;
 import com.java.semantic.repository.domain.RepositoryRevision;
 import com.java.semantic.repository.domain.RepositorySnapshot;
 import com.java.semantic.semantic.domain.JavaSemanticService;
-import com.java.semantic.semantic.domain.SemanticDeclarationAnchor;
 import com.java.semantic.semantic.domain.SemanticBindingAmbiguousException;
 import com.java.semantic.semantic.domain.SemanticBindingUnresolvedException;
-import com.java.semantic.semantic.domain.SemanticPosition;
 import com.java.semantic.semantic.domain.SemanticRequestTimeoutException;
+import com.java.semantic.syntax.domain.CanonicalMethodDeclarationResolver;
+import com.java.semantic.syntax.domain.ClassMetadata;
+import com.java.semantic.syntax.domain.MethodTargetResolution;
 import com.java.semantic.syntax.domain.RepositorySyntax;
 import com.java.semantic.syntax.domain.SyntaxExtractionService;
+import com.java.semantic.syntax.domain.SyntaxPosition;
 import org.junit.jupiter.api.Test;
 import org.slf4j.LoggerFactory;
 
@@ -54,7 +56,7 @@ class SemanticAnalysisLoggingTest {
         RepositorySnapshot snapshot = new RepositorySnapshot(repositoryId, Path.of("safe-root"), revision);
         RepositoryApplicationService repositories = mock(RepositoryApplicationService.class);
         SyntaxExtractionService syntax = mock(SyntaxExtractionService.class);
-        ExactMethodDeclarationResolver resolver = mock(ExactMethodDeclarationResolver.class);
+        CanonicalMethodDeclarationResolver resolver = mock(CanonicalMethodDeclarationResolver.class);
         JavaSemanticService semantic = mock(JavaSemanticService.class);
         SemanticCallGraphBuilder builder = mock(SemanticCallGraphBuilder.class);
         IncomingSemanticCallGraphBuilder incomingBuilder = mock(IncomingSemanticCallGraphBuilder.class);
@@ -69,10 +71,9 @@ class SemanticAnalysisLoggingTest {
                 Function<RepositorySnapshot, OutgoingGraphFragment> operation = invocation.getArgument(2);
                 return operation.apply(snapshot);
             });
-            RepositorySyntax repositorySyntax = RepositorySyntax.empty();
+            RepositorySyntax repositorySyntax = syntax(target);
             when(syntax.extract(snapshot.root())).thenReturn(repositorySyntax);
-            when(resolver.resolve(repositorySyntax, target)).thenReturn(new SemanticDeclarationAnchor(
-                    target, new SemanticPosition(0, 0)));
+            when(resolver.resolve(repositorySyntax, target)).thenReturn(MethodTargetResolution.resolved(target));
             when(semantic.resolveExactMethod(eq(snapshot), any())).thenReturn(mock());
             when(builder.build(any(), any(), any(), any(), eq(2), eq(7))).thenReturn(result);
 
@@ -161,7 +162,7 @@ class SemanticAnalysisLoggingTest {
         RepositorySnapshot snapshot = new RepositorySnapshot(repositoryId, Path.of("safe-root"), revision);
         RepositoryApplicationService repositories = mock(RepositoryApplicationService.class);
         SyntaxExtractionService syntax = mock(SyntaxExtractionService.class);
-        ExactMethodDeclarationResolver resolver = mock(ExactMethodDeclarationResolver.class);
+        CanonicalMethodDeclarationResolver resolver = mock(CanonicalMethodDeclarationResolver.class);
         JavaSemanticService semantic = mock(JavaSemanticService.class);
         SemanticCallGraphBuilder builder = mock(SemanticCallGraphBuilder.class);
         IncomingSemanticCallGraphBuilder incomingBuilder = mock(IncomingSemanticCallGraphBuilder.class);
@@ -176,10 +177,9 @@ class SemanticAnalysisLoggingTest {
                 Function<RepositorySnapshot, OutgoingGraphFragment> operation = invocation.getArgument(2);
                 return operation.apply(snapshot);
             });
-            RepositorySyntax repositorySyntax = RepositorySyntax.empty();
+            RepositorySyntax repositorySyntax = syntax(target);
             when(syntax.extract(snapshot.root())).thenReturn(repositorySyntax);
-            when(resolver.resolve(repositorySyntax, target)).thenReturn(new SemanticDeclarationAnchor(
-                    target, new SemanticPosition(0, 0)));
+            when(resolver.resolve(repositorySyntax, target)).thenReturn(MethodTargetResolution.resolved(target));
             when(semantic.resolveExactMethod(eq(snapshot), any())).thenReturn(mock());
             when(builder.build(any(), any(), any(), any(), eq(2), eq(7))).thenReturn(result);
 
@@ -211,7 +211,7 @@ class SemanticAnalysisLoggingTest {
         RepositorySnapshot snapshot = new RepositorySnapshot(repositoryId, Path.of("safe-root"), revision);
         RepositoryApplicationService repositories = mock(RepositoryApplicationService.class);
         SyntaxExtractionService syntax = mock(SyntaxExtractionService.class);
-        ExactMethodDeclarationResolver resolver = mock(ExactMethodDeclarationResolver.class);
+        CanonicalMethodDeclarationResolver resolver = mock(CanonicalMethodDeclarationResolver.class);
         JavaSemanticService semantic = mock(JavaSemanticService.class);
         SemanticCallGraphBuilder outgoingBuilder = mock(SemanticCallGraphBuilder.class);
         IncomingSemanticCallGraphBuilder incomingBuilder = mock(IncomingSemanticCallGraphBuilder.class);
@@ -228,10 +228,9 @@ class SemanticAnalysisLoggingTest {
                 Function<RepositorySnapshot, IncomingGraphFragment> operation = invocation.getArgument(2);
                 return operation.apply(snapshot);
             });
-            RepositorySyntax repositorySyntax = RepositorySyntax.empty();
+            RepositorySyntax repositorySyntax = syntax(target);
             when(syntax.extract(snapshot.root())).thenReturn(repositorySyntax);
-            when(resolver.resolve(repositorySyntax, target)).thenReturn(new SemanticDeclarationAnchor(
-                    target, new SemanticPosition(0, 0)));
+            when(resolver.resolve(repositorySyntax, target)).thenReturn(MethodTargetResolution.resolved(target));
             when(semantic.resolveExactMethod(eq(snapshot), any())).thenReturn(mock());
             when(incomingBuilder.build(any(), any(), any(), any(), eq(2), eq(11)))
                     .thenReturn(success, partial);
@@ -339,12 +338,23 @@ class SemanticAnalysisLoggingTest {
         return new SemanticAnalysisApplicationService(
                 repositories,
                 mock(SyntaxExtractionService.class),
-                mock(ExactMethodDeclarationResolver.class),
+                mock(CanonicalMethodDeclarationResolver.class),
                 mock(JavaSemanticService.class),
                 mock(SemanticCallGraphBuilder.class),
                 mock(IncomingSemanticCallGraphBuilder.class),
                 new OutgoingGraphProperties(7),
                 new IncomingGraphProperties(11));
+    }
+
+    private RepositorySyntax syntax(MethodTarget target) {
+        RepositorySyntax syntax = mock(RepositorySyntax.class);
+        ClassMetadata metadata = mock(ClassMetadata.class);
+        ClassMetadata.MethodSignature method = mock(ClassMetadata.MethodSignature.class);
+        when(syntax.classes()).thenReturn(List.of(metadata));
+        when(metadata.methods()).thenReturn(List.of(method));
+        when(method.analysisTarget()).thenReturn(MethodTargetResolution.resolved(target));
+        when(method.namePosition()).thenReturn(new SyntaxPosition(0, 0));
+        return syntax;
     }
 
     private enum Direction {
