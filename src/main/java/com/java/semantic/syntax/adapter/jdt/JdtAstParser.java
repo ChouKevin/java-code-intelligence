@@ -14,6 +14,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.function.Consumer;
+import java.util.concurrent.atomic.AtomicReference;
 
 import org.eclipse.jdt.core.JavaCore;
 import org.eclipse.jdt.core.dom.AbstractTypeDeclaration;
@@ -41,22 +42,32 @@ class JdtAstParser {
 
     private final String[] sourcepathEntries;
 
+    private final List<Path> sourceRoots;
+
     JdtAstParser(List<Path> sourceRoots) {
-        this.sourcepathEntries = sourceRoots.stream()
+        this.sourceRoots = sourceRoots.stream()
                 .map(this::realPath)
-                .map(Path::toString)
                 .distinct()
                 .sorted()
+                .toList();
+        this.sourcepathEntries = this.sourceRoots.stream()
+                .map(Path::toString)
                 .toArray(String[]::new);
     }
 
     /** 批次解析，所有檔案共用同一組 binding 環境，跨檔案常量因此解析得出來 */
     void parse(List<SourceFile> files, Consumer<ParsedSource> consumer) {
+        parseWithContext(files, consumer);
+    }
+
+    /** 批次解析並保留每個檔案實際使用的 sourcepath partition */
+    JdtParseContext parseWithContext(List<SourceFile> files, Consumer<ParsedSource> consumer) {
         if (CollectionUtils.isEmpty(files)) {
-            return;
+            return new JdtParseContext(sourceRoots, List.of(), Set.of(), Map.of());
         }
 
         Set<String> collidingRootPaths = collidingRootPaths(files);
+        Map<String, List<String>> sourcepathEntriesBySourceFile = new LinkedHashMap<>();
         Map<String, List<SourceFile>> filesByRoot = new LinkedHashMap<>();
         for (SourceFile file : files) {
             filesByRoot.computeIfAbsent(file.sourceRoot().toString(), ignored -> new ArrayList<>()).add(file);
@@ -64,13 +75,42 @@ class JdtAstParser {
         List<SourceFile> filesOutsideCollidingRoots = new ArrayList<>();
         for (Map.Entry<String, List<SourceFile>> rootFiles : filesByRoot.entrySet()) {
             if (collidingRootPaths.contains(rootFiles.getKey())) {
-                parseBatch(rootFiles.getValue(), sourcepathEntriesForCollidingRoot(
-                        rootFiles.getKey(), collidingRootPaths), consumer);
+                String[] selectedEntries = sourcepathEntriesForCollidingRoot(
+                        rootFiles.getKey(), collidingRootPaths);
+                rememberPartition(rootFiles.getValue(), selectedEntries, sourcepathEntriesBySourceFile);
+                parseBatch(rootFiles.getValue(), selectedEntries, consumer);
             } else {
                 filesOutsideCollidingRoots.addAll(rootFiles.getValue());
             }
         }
-        parseBatch(filesOutsideCollidingRoots, sourcepathEntriesExcluding(collidingRootPaths), consumer);
+        String[] nonCollidingEntries = sourcepathEntriesExcluding(collidingRootPaths);
+        rememberPartition(filesOutsideCollidingRoots, nonCollidingEntries, sourcepathEntriesBySourceFile);
+        parseBatch(filesOutsideCollidingRoots, nonCollidingEntries, consumer);
+        return new JdtParseContext(
+                sourceRoots, files, collidingRootPaths, sourcepathEntriesBySourceFile);
+    }
+
+    /** 使用 request batch 的原始 partition 重解析唯一選定檔案 */
+    ParsedSource parseSelected(SourceFile sourceFile, JdtParseContext context) {
+        AtomicReference<ParsedSource> selected = new AtomicReference<>();
+        List<String> sourcepath = context.sourcepathEntriesFor(sourceFile);
+        parseBatch(List.of(sourceFile), sourcepath.toArray(String[]::new), selected::set);
+        ParsedSource parsed = selected.get();
+        if (Objects.isNull(parsed)) {
+            throw new IllegalStateException("selected source was not parsed");
+        }
+        return parsed;
+    }
+
+    private void rememberPartition(
+            List<SourceFile> files,
+            String[] selectedEntries,
+            Map<String, List<String>> sourcepathEntriesBySourceFile) {
+        List<String> entries = List.of(selectedEntries);
+        for (SourceFile file : files) {
+            sourcepathEntriesBySourceFile.put(
+                    file.path().toAbsolutePath().normalize().toString(), entries);
+        }
     }
 
     private void parseBatch(List<SourceFile> files, String[] sourcepathEntries, Consumer<ParsedSource> consumer) {

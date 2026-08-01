@@ -7,10 +7,10 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.function.Function;
 
-import com.java.semantic.syntax.domain.ClassMetadata;
 import com.java.semantic.syntax.domain.EntryPointClass;
 import com.java.semantic.syntax.domain.EntryPointMethod;
 import com.java.semantic.syntax.domain.MethodTargetResolution;
+import com.java.semantic.syntax.domain.SourceTypeMetadata;
 
 import org.eclipse.jdt.core.dom.ASTNode;
 import org.eclipse.jdt.core.dom.AbstractTypeDeclaration;
@@ -41,16 +41,16 @@ class SourceSyntaxExtractor {
         boolean skipEntryPoints = types.stream().anyMatch(ApiExtractor::isControllerAdvice);
 
         List<EntryPointClass> entryPoints = new ArrayList<>();
-        List<ClassMetadata> classes = new ArrayList<>();
+        List<SourceTypeMetadata> sourceTypes = new ArrayList<>();
         for (AbstractTypeDeclaration type : types) {
             if (!skipEntryPoints) {
                 toEntryPointClass(parsed, type, analysisTargetOf).ifPresent(entryPoints::add);
             }
             if (SourceTypes.isMetadataCandidate(type)) {
-                classes.add(ClassMetadataExtractor.extract(parsed, type, sqlIndex, analysisTargetOf));
+                sourceTypes.add(SourceTypeMetadataExtractor.extract(parsed, type, sqlIndex, analysisTargetOf));
             }
         }
-        return new SourceSyntax(List.copyOf(entryPoints), List.copyOf(classes));
+        return new SourceSyntax(List.copyOf(entryPoints), List.copyOf(sourceTypes));
     }
 
     private Optional<EntryPointClass> toEntryPointClass(

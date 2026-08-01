@@ -4,10 +4,8 @@ import com.java.semantic.api.dto.DiscoverMethodImplementationsResponse;
 import com.java.semantic.api.dto.MethodImplementationCandidateResponse;
 import com.java.semantic.api.dto.MethodImplementationLimitsResponse;
 import com.java.semantic.api.dto.MethodImplementationResolutionResponse;
-import com.java.semantic.api.dto.MethodTargetResponse;
 import com.java.semantic.api.dto.SemanticImplementationIssueSummaryResponse;
 import com.java.semantic.callgraph.application.ImplementationCandidate;
-import com.java.semantic.identity.MethodTarget;
 import com.java.semantic.semantic.application.MethodImplementationIssueReason;
 import com.java.semantic.semantic.application.MethodImplementationLimits;
 import com.java.semantic.semantic.application.RevisionBoundMethodImplementations;
@@ -28,7 +26,7 @@ public final class MethodImplementationDiscoveryResponseMapper {
         return new DiscoverMethodImplementationsResponse(
                 discovery.repositoryId().value(),
                 discovery.revision().value(),
-                target(discovery.requestedTarget()),
+                MethodTargetHttpMapper.toResponse(discovery.requestedTarget()),
                 discovery.candidates().stream().map(this::candidate).toList(),
                 limits(discovery.limits()),
                 resolution(discovery.issues()));
@@ -36,7 +34,7 @@ public final class MethodImplementationDiscoveryResponseMapper {
 
     private MethodImplementationCandidateResponse candidate(ImplementationCandidate candidate) {
         return new MethodImplementationCandidateResponse(
-                target(candidate.target()),
+                MethodTargetHttpMapper.toResponse(candidate.target()),
                 candidate.primary(),
                 candidate.qualifiers(),
                 candidate.profiles());
@@ -67,12 +65,4 @@ public final class MethodImplementationDiscoveryResponseMapper {
         return new MethodImplementationResolutionResponse(status, summaries);
     }
 
-    private MethodTargetResponse target(MethodTarget target) {
-        return new MethodTargetResponse(
-                target.sourceFile(),
-                target.packageName(),
-                target.className(),
-                target.methodName(),
-                target.parameterTypes());
-    }
 }

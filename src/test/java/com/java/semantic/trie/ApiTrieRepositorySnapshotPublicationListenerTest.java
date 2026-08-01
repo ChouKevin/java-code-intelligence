@@ -1,6 +1,8 @@
 package com.java.semantic.trie;
 
+import com.java.semantic.identity.JavaTypeIdentity;
 import com.java.semantic.identity.MethodTarget;
+import com.java.semantic.identity.SourceTypeIdentity;
 import com.java.semantic.repository.domain.RepositoryId;
 import com.java.semantic.repository.domain.RepositoryRevision;
 import com.java.semantic.repository.domain.RepositorySnapshot;
@@ -204,11 +206,11 @@ class ApiTrieRepositorySnapshotPublicationListenerTest {
                 List.of(httpMethod),
                 List.of(),
                 MethodTargetResolution.resolved(new MethodTarget(
-                        "src/main/java/com/example/" + className + ".java",
-                        "com.example",
-                        className,
-                        methodName,
-                        List.of()))));
+                new SourceTypeIdentity(
+                        new JavaTypeIdentity("com.example", className),
+                        "src/main/java/com/example/" + className + ".java"),
+                methodName,
+                List.of()))));
         return new EntryPointClass(
                 className,
                 "com.example",

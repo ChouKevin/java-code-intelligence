@@ -8,9 +8,6 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 
-import com.java.semantic.syntax.domain.ClassMetadata;
-import com.java.semantic.syntax.domain.ClassMetadata.MethodSignature;
-import com.java.semantic.syntax.domain.ClassMetadata.SqlSource;
 import com.java.semantic.syntax.domain.EntryPointClass;
 import com.java.semantic.syntax.domain.MapperEvidenceIndex;
 import com.java.semantic.syntax.domain.MapperEvidenceRepresentation;
@@ -20,6 +17,9 @@ import com.java.semantic.syntax.domain.RepositorySyntax;
 import com.java.semantic.syntax.domain.SourceExtractionOutcome;
 import com.java.semantic.syntax.domain.SyntaxExtractionException;
 import com.java.semantic.syntax.domain.SyntaxExtractionService;
+import com.java.semantic.syntax.domain.SourceMethodMetadata;
+import com.java.semantic.syntax.domain.SourceTypeMetadata;
+import com.java.semantic.syntax.domain.SqlSourceKind;
 
 import org.eclipse.jdt.core.compiler.IProblem;
 import org.springframework.stereotype.Service;
@@ -65,7 +65,7 @@ public class JdtSyntaxExtractionService implements SyntaxExtractionService {
                     repositoryRoot, sourceRootLocator.resourceRootsOf(repositoryRoot));
 
             List<EntryPointClass> entryPoints = new ArrayList<>();
-            List<ClassMetadata> classes = new ArrayList<>();
+            List<SourceTypeMetadata> sourceTypes = new ArrayList<>();
             List<SourceExtractionOutcome> extractionOutcomes = new ArrayList<>();
 
             new JdtAstParser(sourceRoots).parse(files, parsed -> {
@@ -77,18 +77,19 @@ public class JdtSyntaxExtractionService implements SyntaxExtractionService {
                 }
                 SourceSyntax extracted = sourceSyntaxExtractor.extractFrom(parsed, mapperExtraction.sqlIndex());
                 entryPoints.addAll(extracted.entryPoints());
-                classes.addAll(extracted.classes());
+                sourceTypes.addAll(extracted.sourceTypes());
                 extractionOutcomes.add(SourceExtractionOutcome.extracted(parsed.source().repositoryRelativePath()));
             });
 
             entryPoints.sort(Comparator.comparing(EntryPointClass::packagePath)
                     .thenComparing(EntryPointClass::className));
-            classes.sort(Comparator.comparing(ClassMetadata::fullyQualifiedName));
-            MapperEvidenceIndex mapperEvidenceIndex = withAnnotationSqlEvidence(mapperExtraction.evidenceIndex(), classes);
+            sourceTypes.sort(Comparator.comparing(metadata -> metadata.declaration().identity().fullyQualifiedName()));
+            MapperEvidenceIndex mapperEvidenceIndex = withAnnotationSqlEvidence(
+                    mapperExtraction.evidenceIndex(), sourceTypes);
 
             log.info("phase=syntax-extraction outcome=completed sourceFileCount={} classCount={} entryPointCount={}",
-                    files.size(), classes.size(), entryPoints.size());
-            return new RepositorySyntax(entryPoints, classes, extractionOutcomes, Optional.of(mapperEvidenceIndex));
+                    files.size(), sourceTypes.size(), entryPoints.size());
+            return new RepositorySyntax(entryPoints, sourceTypes, extractionOutcomes, Optional.of(mapperEvidenceIndex));
         } catch (UncheckedIOException exception) {
             log.warn("Syntax extraction failed category={} exceptionType={}",
                     "REPOSITORY_SYNTAX_EXTRACTION_FAILED", exception.getClass().getSimpleName());
@@ -103,19 +104,20 @@ public class JdtSyntaxExtractionService implements SyntaxExtractionService {
 
     private MapperEvidenceIndex withAnnotationSqlEvidence(
             MapperEvidenceIndex xmlEvidenceIndex,
-            List<ClassMetadata> classes) {
+            List<SourceTypeMetadata> sourceTypes) {
         List<MapperStatementEvidence> statements = new ArrayList<>(xmlEvidenceIndex.statements());
-        for (ClassMetadata metadata : classes) {
-            List<MethodSignature> methods = metadata.methods();
+        for (SourceTypeMetadata metadata : sourceTypes) {
+            List<SourceMethodMetadata> methods = metadata.members().methods();
             for (int documentOrdinal = 0; documentOrdinal < methods.size(); documentOrdinal++) {
-                MethodSignature method = methods.get(documentOrdinal);
-                if (method.sqlSource() != SqlSource.ANNOTATION || Objects.isNull(method.sql())) {
+                SourceMethodMetadata method = methods.get(documentOrdinal);
+                if (method.sqlSource() != SqlSourceKind.ANNOTATION || Objects.isNull(method.sql())) {
                     continue;
                 }
                 MapperStatementIdentity identity = new MapperStatementIdentity(
-                        metadata.fullyQualifiedName(),
+                        metadata.declaration().identity().fullyQualifiedName(),
                         method.name(),
-                        method.analysisTarget().target().map(target -> target.sourceFile()).orElse(metadata.sourceFile()),
+                        method.analysisTarget().target().map(target -> target.sourceFile())
+                                .orElse(metadata.declaration().identity().sourceFile()),
                         Optional.empty(),
                         documentOrdinal,
                         MapperEvidenceRepresentation.ANNOTATION_SQL_TEXT);

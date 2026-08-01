@@ -2,7 +2,7 @@ package com.java.semantic.callgraph.application;
 
 import com.java.semantic.identity.MethodTarget;
 import com.java.semantic.semantic.domain.SemanticMethod;
-import com.java.semantic.syntax.domain.ClassMetadata;
+import com.java.semantic.syntax.domain.SourceTypeMetadata;
 
 import java.util.List;
 import java.util.Objects;
@@ -18,15 +18,15 @@ public final class ImplementationCandidateFactory {
         Objects.requireNonNull(index, "index is required");
         Objects.requireNonNull(method, "method is required");
         Objects.requireNonNull(target, "target is required");
-        return index.classMetadata(target).map(metadata -> candidate(method, target, metadata));
+        return index.sourceType(target).map(metadata -> candidate(method, target, metadata));
     }
 
-    private ImplementationCandidate candidate(SemanticMethod method, MethodTarget target, ClassMetadata metadata) {
+    private ImplementationCandidate candidate(SemanticMethod method, MethodTarget target, SourceTypeMetadata metadata) {
         return new ImplementationCandidate(
                 method,
                 target,
-                metadata.primary(),
-                metadata.beanQualifiers(),
-                metadata.profiles());
+                metadata.frameworkFacts().primary(),
+                metadata.frameworkFacts().beanQualifiers(),
+                metadata.frameworkFacts().profiles());
     }
 }

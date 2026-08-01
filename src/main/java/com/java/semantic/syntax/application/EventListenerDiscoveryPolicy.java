@@ -1,12 +1,13 @@
 package com.java.semantic.syntax.application;
 
 import com.java.semantic.identity.MethodTarget;
+import com.java.semantic.identity.JavaTypeIdentity;
 import com.java.semantic.syntax.domain.AnalysisTargetStatus;
 import com.java.semantic.syntax.domain.AnnotationEvidence;
-import com.java.semantic.syntax.domain.ClassMetadata;
 import com.java.semantic.syntax.domain.MethodTargetResolution;
 import com.java.semantic.syntax.domain.RepositorySyntax;
-import com.java.semantic.syntax.domain.ResolvedTypeIdentity;
+import com.java.semantic.syntax.domain.SourceMethodMetadata;
+import com.java.semantic.syntax.domain.SourceTypeMetadata;
 
 import org.springframework.util.Assert;
 import org.springframework.util.CollectionUtils;
@@ -40,12 +41,12 @@ public final class EventListenerDiscoveryPolicy {
             .thenComparing(MethodTarget::methodName)
             .thenComparing(MethodTarget::parameterTypes, EventListenerDiscoveryPolicy::compareParameterTypes);
 
-    private static final Comparator<ListenerSourceLocation> SOURCE_LOCATION_ORDER = Comparator
-            .comparing(ListenerSourceLocation::sourceFile)
-            .thenComparingInt(location -> location.start().line())
-            .thenComparingInt(location -> location.start().character())
-            .thenComparingInt(location -> location.end().line())
-            .thenComparingInt(location -> location.end().character());
+    private static final Comparator<SourceRange> SOURCE_RANGE_ORDER = Comparator
+            .comparing(SourceRange::sourceFile)
+            .thenComparingInt(value -> value.range().start().line())
+            .thenComparingInt(value -> value.range().start().character())
+            .thenComparingInt(value -> value.range().end().line())
+            .thenComparingInt(value -> value.range().end().character());
 
     /**
      * 外部 Spring annotation 通常沒有 binary classpath binding，因此只在 binding 缺席時使用原始寫法退回比對
@@ -55,26 +56,25 @@ public final class EventListenerDiscoveryPolicy {
         Objects.requireNonNull(syntax, "syntax is required");
         Assert.hasText(eventType, "eventType is required");
         List<EventListenerCandidate> candidates = new ArrayList<>();
-        List<ListenerSourceLocation> unresolvedLocations = new ArrayList<>();
-        for (ClassMetadata metadata : syntax.classes()) {
-            for (ClassMetadata.MethodSignature method : metadata.methods()) {
+        List<SourceRange> unresolvedLocations = new ArrayList<>();
+        for (SourceTypeMetadata metadata : syntax.sourceTypes()) {
+            for (SourceMethodMetadata method : metadata.members().methods()) {
                 List<ListenerAnnotationEvidence> annotationEvidence = matchingEvidence(method.annotationEvidence());
                 if (CollectionUtils.isEmpty(annotationEvidence)) {
                     continue;
                 }
                 MethodTargetResolution resolution = method.analysisTarget();
                 if (!AnalysisTargetStatus.RESOLVED.equals(resolution.status())) {
-                    unresolvedLocations.add(ListenerSourceLocation.from(metadata.sourceFile(), method.range()));
+                    unresolvedLocations.add(new SourceRange(metadata.declaration().identity().sourceFile(), method.range()));
                     continue;
                 }
                 MethodTarget target = resolution.target().orElseThrow();
-                validateTargetSourceFile(metadata.sourceFile(), target.sourceFile());
+                validateTargetSourceFile(metadata.declaration().identity().sourceFile(), target.sourceFile());
                 if (!target.parameterTypes().contains(eventType)) {
                     continue;
                 }
-                ListenerSourceLocation sourceLocation = ListenerSourceLocation.from(
-                        metadata.sourceFile(), method.range());
-                candidates.add(new EventListenerCandidate(target, sourceLocation, annotationEvidence));
+                SourceRange declarationRange = new SourceRange(metadata.declaration().identity().sourceFile(), method.range());
+                candidates.add(new EventListenerCandidate(target, declarationRange, annotationEvidence));
             }
         }
         candidates.sort(Comparator.comparing(EventListenerCandidate::target, TARGET_ORDER));
@@ -114,9 +114,9 @@ public final class EventListenerDiscoveryPolicy {
 
     private static Optional<ListenerAnnotationEvidence> match(
             ListenerAnnotationKind kind, AnnotationEvidence annotation) {
-        Optional<ResolvedTypeIdentity> resolvedType = annotation.resolvedType();
+        Optional<JavaTypeIdentity> resolvedType = annotation.resolvedType();
         if (resolvedType.isPresent()) {
-            ResolvedTypeIdentity identity = resolvedType.get();
+            JavaTypeIdentity identity = resolvedType.get();
             return kind.matchesResolvedType(identity.packageName(), identity.className())
                     ? Optional.of(new ListenerAnnotationEvidence(kind, AnnotationMatchKind.RESOLVED_IDENTITY))
                     : Optional.empty();
@@ -138,12 +138,12 @@ public final class EventListenerDiscoveryPolicy {
         return pageEnd < totalCount;
     }
 
-    private static List<ListenerObservationSummary> observations(List<ListenerSourceLocation> unresolvedLocations) {
+    private static List<ListenerObservationSummary> observations(List<SourceRange> unresolvedLocations) {
         if (CollectionUtils.isEmpty(unresolvedLocations)) {
             return List.of();
         }
-        List<ListenerSourceLocation> sorted = unresolvedLocations.stream().sorted(SOURCE_LOCATION_ORDER).toList();
-        List<ListenerSourceLocation> samples = sorted.subList(
+        List<SourceRange> sorted = unresolvedLocations.stream().sorted(SOURCE_RANGE_ORDER).toList();
+        List<SourceRange> samples = sorted.subList(
                 0, Math.min(sorted.size(), EventListenerDiscoveryConstraints.OBSERVATION_SAMPLE_LIMIT));
         // AMBIGUOUS 與 UNRESOLVED 都沒有唯一可供呼叫圖使用的 target，因此共用同一診斷原因
         // 診斷 totalCount 保持完整，僅 source location samples 受固定上限限制

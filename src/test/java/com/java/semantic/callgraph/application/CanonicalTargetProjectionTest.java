@@ -1,6 +1,10 @@
 package com.java.semantic.callgraph.application;
 
+import com.java.semantic.syntax.domain.SourceTypeKind;
+
+import com.java.semantic.identity.JavaTypeIdentity;
 import com.java.semantic.identity.MethodTarget;
+import com.java.semantic.identity.SourceTypeIdentity;
 import com.java.semantic.repository.domain.RepositoryId;
 import com.java.semantic.repository.domain.RepositoryRevision;
 import com.java.semantic.repository.domain.RepositorySnapshot;
@@ -8,8 +12,8 @@ import com.java.semantic.semantic.domain.SemanticLocation;
 import com.java.semantic.semantic.domain.SemanticMethod;
 import com.java.semantic.semantic.domain.SemanticPosition;
 import com.java.semantic.semantic.domain.SemanticRange;
-import com.java.semantic.syntax.domain.ClassMetadata;
-import com.java.semantic.syntax.domain.ClassMetadata.MethodSignature;
+import com.java.semantic.syntax.domain.SourceTypeMetadata;
+import com.java.semantic.syntax.domain.SourceMethodMetadata;
 import com.java.semantic.syntax.domain.MethodTargetResolution;
 import com.java.semantic.syntax.domain.RepositorySyntax;
 import com.java.semantic.syntax.domain.SourceSlice;
@@ -69,12 +73,17 @@ class CanonicalTargetProjectionTest {
         assertThat(projected).isEmpty();
     }
 
-    private static RepositorySyntaxIndex index(ClassMetadata... types) {
+    private static RepositorySyntaxIndex index(SourceTypeMetadata... types) {
         return new RepositorySyntaxIndex(SNAPSHOT.repositoryId().value(), new RepositorySyntax(List.of(), List.of(types)));
     }
 
     private static MethodTarget target(String sourceFile, String className, String methodName, List<String> parameterTypes) {
-        return new MethodTarget(sourceFile, "com.example", className, methodName, parameterTypes);
+        return new MethodTarget(
+                new SourceTypeIdentity(
+                        new JavaTypeIdentity("com.example", className),
+                        sourceFile),
+                methodName,
+                parameterTypes);
     }
 
     private static SemanticMethod semanticMethod(
@@ -84,20 +93,20 @@ class CanonicalTargetProjectionTest {
                 "com.example", className, methodName, parameterTypes, "void", new SemanticLocation(uri, range, range));
     }
 
-    private static ClassMetadata type(MethodTarget target) {
+    private static SourceTypeMetadata type(MethodTarget target) {
         return type(target, new SyntaxRange(new SyntaxPosition(1, 0), new SyntaxPosition(4, 0)));
     }
 
-    private static ClassMetadata type(MethodTarget target, SyntaxRange methodRange) {
-        MethodSignature method = new MethodSignature(
-                target.methodName(), target.parameterTypes(), List.of(), null, null, 2, 5,
+    private static SourceTypeMetadata type(MethodTarget target, SyntaxRange methodRange) {
+        SourceMethodMetadata method = new SourceMethodMetadata(
+                target.methodName(), target.parameterTypes(), null, null, 2, 5,
                 methodRange, new SourceSlice(methodRange, "void " + target.methodName() + "() {}"),
                 List.<TypeReference>of(), Optional.empty(), List.of(), List.of(), List.of(), methodRange.start(),
                 MethodTargetResolution.resolved(target), true, false, true);
         SyntaxRange typeRange = new SyntaxRange(new SyntaxPosition(0, 0), new SyntaxPosition(5, 0));
-        return new ClassMetadata(
+        return com.java.semantic.syntax.domain.SourceTypeMetadataFixture.sourceType(
                 target.className(), target.packageName(), target.packageName() + "." + target.className(),
-                target.sourceFile(), ClassMetadata.TypeKind.CLASS, false,
+                target.sourceFile(), SourceTypeKind.CLASS, false,
                 List.of(), List.of(), List.of(), List.of(), List.of(), List.of(method), false, false, List.of(), typeRange,
                 new SourceSlice(typeRange, "class " + target.className() + " {}"), false, List.of());
     }

@@ -1,7 +1,9 @@
 package com.java.semantic.api;
 
 import com.java.semantic.api.security.ApiTokenFilter;
+import com.java.semantic.identity.JavaTypeIdentity;
 import com.java.semantic.identity.MethodTarget;
+import com.java.semantic.identity.SourceTypeIdentity;
 import com.java.semantic.repository.application.RepositoryRevisionMismatchException;
 import com.java.semantic.repository.domain.RepositoryId;
 import com.java.semantic.repository.domain.RepositoryRevision;
@@ -55,11 +57,11 @@ class ExactContentControllerTest {
     private static final RepositoryRevision REQUESTED_REVISION = RepositoryRevision.ofSha("1".repeat(40));
     private static final RepositoryRevision ANALYZED_REVISION = RepositoryRevision.ofSha("2".repeat(40));
     private static final MethodTarget TARGET = new MethodTarget(
-            "src/main/java/com/example/OrderMapper.java",
-            "com.example",
-            "OrderMapper",
-            "findOrders",
-            List.of("java.lang.String"));
+                new SourceTypeIdentity(
+                        new JavaTypeIdentity("com.example", "OrderMapper"),
+                        "src/main/java/com/example/OrderMapper.java"),
+                "findOrders",
+                List.of("java.lang.String"));
     private static final MapperStatementIdentity POSTGRES_STATEMENT = new MapperStatementIdentity(
             "com.example.OrderMapper",
             "findOrders",
@@ -530,9 +532,9 @@ class ExactContentControllerTest {
 
     private static MethodTarget alternateTarget(String sourceFile, String className) {
         return new MethodTarget(
-                sourceFile,
-                "com.example",
-                className,
+                new SourceTypeIdentity(
+                        new JavaTypeIdentity("com.example", className),
+                        sourceFile),
                 TARGET.methodName(),
                 TARGET.parameterTypes());
     }

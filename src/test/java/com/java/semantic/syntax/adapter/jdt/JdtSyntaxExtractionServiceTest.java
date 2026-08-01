@@ -1,5 +1,7 @@
 package com.java.semantic.syntax.adapter.jdt;
 
+import com.java.semantic.syntax.domain.SourceMethodMetadata;
+
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.spi.ILoggingEvent;
@@ -13,7 +15,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.stream.Collectors;
 
-import com.java.semantic.syntax.domain.ClassMetadata;
+import com.java.semantic.syntax.domain.SourceTypeMetadata;
 import com.java.semantic.syntax.domain.RepositorySyntax;
 import com.java.semantic.syntax.domain.SourceExtractionOutcome;
 import com.java.semantic.syntax.domain.SourceExtractionStatus;
@@ -75,7 +77,7 @@ class JdtSyntaxExtractionServiceTest {
                     assertThat(outcome.status()).isEqualTo(SourceExtractionStatus.EXTRACTED);
                     assertThat(outcome.reasonCode()).isEmpty();
                 });
-        assertThat(syntax.classes()).extracting(ClassMetadata::fullyQualifiedName)
+        assertThat(syntax.sourceTypes()).extracting(metadata -> metadata.declaration().identity().fullyQualifiedName())
                 .containsExactly("com.example.coverage.ExtractedType");
     }
 
@@ -104,11 +106,11 @@ class JdtSyntaxExtractionServiceTest {
                 """);
 
         RepositorySyntax syntax = new JdtSyntaxExtractionService().extract(repositoryRoot);
-        ClassMetadata eventConsumer = syntax.classes().stream()
-                .filter(metadata -> "com.example.EventConsumer".equals(metadata.fullyQualifiedName()))
+        SourceTypeMetadata eventConsumer = syntax.sourceTypes().stream()
+                .filter(metadata -> "com.example.EventConsumer".equals(metadata.declaration().identity().fullyQualifiedName()))
                 .findFirst()
                 .orElseThrow();
-        ClassMetadata.MethodSignature consume = eventConsumer.methods().stream()
+        SourceMethodMetadata consume = eventConsumer.members().methods().stream()
                 .filter(method -> "consume".equals(method.name()))
                 .findFirst()
                 .orElseThrow();
@@ -123,10 +125,10 @@ class JdtSyntaxExtractionServiceTest {
             assertThat(target.parameterTypes()).containsExactly("com.example.OrderPlaced");
             assertThat(target.sourceFile()).isEqualTo("src/main/java/com/example/EventConsumer.java");
         });
-        assertThat(eventConsumer.sourceFile()).isEqualTo("src/main/java/com/example/EventConsumer.java");
+        assertThat(eventConsumer.declaration().identity().sourceFile()).isEqualTo("src/main/java/com/example/EventConsumer.java");
         assertThat(discovery.candidates().candidates()).singleElement().satisfies(candidate -> {
             assertThat(candidate.target()).isEqualTo(consume.analysisTarget().target().orElseThrow());
-            assertThat(candidate.sourceLocation().sourceFile())
+            assertThat(candidate.declarationRange().sourceFile())
                     .isEqualTo("src/main/java/com/example/EventConsumer.java");
             assertThat(candidate.annotationEvidence()).containsExactly(new ListenerAnnotationEvidence(
                     ListenerAnnotationKind.EVENT_LISTENER, AnnotationMatchKind.WRITTEN_NAME));
@@ -143,8 +145,8 @@ class JdtSyntaxExtractionServiceTest {
 
         RepositorySyntax syntax = new JdtSyntaxExtractionService().extract(repositoryRoot);
 
-        assertThat(syntax.classes())
-                .extracting(ClassMetadata::fullyQualifiedName)
+        assertThat(syntax.sourceTypes())
+                .extracting(metadata -> metadata.declaration().identity().fullyQualifiedName())
                 .containsExactly("com.example.Healthy");
     }
 
@@ -164,12 +166,12 @@ class JdtSyntaxExtractionServiceTest {
 
         RepositorySyntax syntax = new JdtSyntaxExtractionService().extract(repositoryRoot);
 
-        assertThat(syntax.classes()).extracting(ClassMetadata::fullyQualifiedName)
+        assertThat(syntax.sourceTypes()).extracting(metadata -> metadata.declaration().identity().fullyQualifiedName())
                 .containsExactly("com.example.Order", "com.example.Order");
-        assertThat(syntax.classes()).flatExtracting(ClassMetadata::methods)
+        assertThat(syntax.sourceTypes()).flatExtracting(metadata -> metadata.members().methods())
                 .extracting(method -> method.analysisTarget().status())
                 .containsOnly(com.java.semantic.syntax.domain.AnalysisTargetStatus.RESOLVED);
-        assertThat(syntax.classes()).flatExtracting(ClassMetadata::methods)
+        assertThat(syntax.sourceTypes()).flatExtracting(metadata -> metadata.members().methods())
                 .extracting(method -> method.analysisTarget().target().orElseThrow().sourceFile())
                 .containsExactly("module-a/src/main/java/com/example/Order.java",
                         "module-b/src/main/java/com/example/Order.java");
@@ -213,24 +215,24 @@ class JdtSyntaxExtractionServiceTest {
     }
 
     private void assertCollidingFqnDeclarationsAreIsolated(RepositorySyntax syntax) {
-        assertThat(syntax.classes()).extracting(ClassMetadata::fullyQualifiedName)
+        assertThat(syntax.sourceTypes()).extracting(metadata -> metadata.declaration().identity().fullyQualifiedName())
                 .containsExactly("com.example.Consumer", "com.example.Order", "com.example.Order");
-        List<ClassMetadata> orders = syntax.classes().stream()
-                .filter(metadata -> "com.example.Order".equals(metadata.fullyQualifiedName()))
+        List<SourceTypeMetadata> orders = syntax.sourceTypes().stream()
+                .filter(metadata -> "com.example.Order".equals(metadata.declaration().identity().fullyQualifiedName()))
                 .toList();
         assertThat(orders)
-                .flatExtracting(ClassMetadata::methods)
+                .flatExtracting(metadata -> metadata.members().methods())
                 .extracting(method -> method.analysisTarget().status())
                 .containsOnly(com.java.semantic.syntax.domain.AnalysisTargetStatus.RESOLVED);
         assertThat(orders)
-                .flatExtracting(ClassMetadata::methods)
+                .flatExtracting(metadata -> metadata.members().methods())
                 .extracting(method -> method.analysisTarget().target().orElseThrow().sourceFile())
                 .containsExactlyInAnyOrder(
                         "module-a/src/main/java/com/example/Order.java",
                         "module-b/src/main/java/layout/Order.java");
-        assertThat(syntax.classes().stream()
-                .filter(metadata -> "com.example.Consumer".equals(metadata.fullyQualifiedName()))
-                .flatMap(metadata -> metadata.methods().stream())
+        assertThat(syntax.sourceTypes().stream()
+                .filter(metadata -> "com.example.Consumer".equals(metadata.declaration().identity().fullyQualifiedName()))
+                .flatMap(metadata -> metadata.members().methods().stream())
                 .filter(method -> "use".equals(method.name()))
                 .findFirst()
                 .orElseThrow()
@@ -342,9 +344,9 @@ class JdtSyntaxExtractionServiceTest {
                 """);
 
         RepositorySyntax syntax = new JdtSyntaxExtractionService().extract(repositoryRoot);
-        ClassMetadata.MethodSignature run = syntax.classes().stream()
-                .filter(type -> "com.example.AnchorFixture".equals(type.fullyQualifiedName()))
-                .flatMap(type -> type.methods().stream())
+        SourceMethodMetadata run = syntax.sourceTypes().stream()
+                .filter(type -> "com.example.AnchorFixture".equals(type.declaration().identity().fullyQualifiedName()))
+                .flatMap(type -> type.members().methods().stream())
                 .filter(method -> "run".equals(method.name()))
                 .findFirst()
                 .orElseThrow();

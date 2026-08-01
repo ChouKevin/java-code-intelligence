@@ -2,7 +2,9 @@ package com.java.semantic.semantic.application;
 
 import com.java.semantic.callgraph.application.CanonicalTargetProjection;
 import com.java.semantic.callgraph.application.ImplementationCandidateFactory;
+import com.java.semantic.identity.JavaTypeIdentity;
 import com.java.semantic.identity.MethodTarget;
+import com.java.semantic.identity.SourceTypeIdentity;
 import com.java.semantic.repository.application.RepositoryApplicationService;
 import com.java.semantic.repository.application.RepositoryRevisionMismatchException;
 import com.java.semantic.repository.domain.RepositoryId;
@@ -18,8 +20,9 @@ import com.java.semantic.semantic.domain.SemanticPosition;
 import com.java.semantic.semantic.domain.SemanticRange;
 import com.java.semantic.syntax.adapter.jdt.JdtSyntaxExtractionService;
 import com.java.semantic.syntax.domain.CanonicalMethodDeclarationResolver;
-import com.java.semantic.syntax.domain.ClassMetadata;
-import com.java.semantic.syntax.domain.ClassMetadata.MethodSignature;
+import com.java.semantic.syntax.domain.SourceTypeMetadata;
+import com.java.semantic.syntax.domain.SourceMethodMetadata;
+import com.java.semantic.syntax.domain.SourceTypeKind;
 import com.java.semantic.syntax.domain.MethodTargetResolution;
 import com.java.semantic.syntax.domain.RepositorySyntax;
 import com.java.semantic.syntax.domain.SourceSlice;
@@ -71,10 +74,10 @@ class MethodImplementationDiscoveryApplicationServiceTest {
         MethodTarget alpha = target("AlphaHandler.java", "AlphaHandler", "handle");
         DiscoveryFixture fixture = fixture(
                 List.of(
-                        type(requested, ClassMetadata.TypeKind.INTERFACE, false, true, false, false, List.of(), List.of()),
-                        type(zeta, ClassMetadata.TypeKind.CLASS, false, false, true, false,
+                        type(requested, SourceTypeKind.INTERFACE, false, true, false, false, List.of(), List.of()),
+                        type(zeta, SourceTypeKind.CLASS, false, false, true, false,
                                 List.of("zeta"), List.of("batch")),
-                        type(alpha, ClassMetadata.TypeKind.CLASS, false, false, true, true,
+                        type(alpha, SourceTypeKind.CLASS, false, false, true, true,
                                 List.of("alpha"), List.of("prod"))),
                 requested,
                 List.of(semantic(zeta), semantic(alpha)),
@@ -107,8 +110,8 @@ class MethodImplementationDiscoveryApplicationServiceTest {
         MethodTarget implementation = target("Handler.java", "Handler", "handle");
         DiscoveryFixture fixture = fixture(
                 List.of(
-                        type(requested, ClassMetadata.TypeKind.INTERFACE, false, true, false, false, List.of(), List.of()),
-                        type(implementation, ClassMetadata.TypeKind.CLASS, false, false, true, false,
+                        type(requested, SourceTypeKind.INTERFACE, false, true, false, false, List.of(), List.of()),
+                        type(implementation, SourceTypeKind.CLASS, false, false, true, false,
                                 List.of(), List.of())),
                 requested,
                 List.of(semantic(requested), semantic(implementation), semantic(implementation)),
@@ -124,7 +127,7 @@ class MethodImplementationDiscoveryApplicationServiceTest {
     @MethodSource("unsupportedDeclarations")
     void should_reject_unsupported_declaration_forms(
             String ignoredDescription,
-            ClassMetadata.TypeKind kind,
+            SourceTypeKind kind,
             boolean abstractClass,
             boolean abstractDeclaration,
             boolean executableDeclaration) {
@@ -149,8 +152,8 @@ class MethodImplementationDiscoveryApplicationServiceTest {
         MethodTarget implementation = target("Handler.java", "Handler", "handle");
         DiscoveryFixture fixture = fixture(
                 List.of(
-                        type(requested, ClassMetadata.TypeKind.CLASS, true, true, false, false, List.of(), List.of()),
-                        type(implementation, ClassMetadata.TypeKind.CLASS, false, false, true, false,
+                        type(requested, SourceTypeKind.CLASS, true, true, false, false, List.of(), List.of()),
+                        type(implementation, SourceTypeKind.CLASS, false, false, true, false,
                                 List.of(), List.of())),
                 requested,
                 List.of(semantic(implementation)),
@@ -215,7 +218,7 @@ class MethodImplementationDiscoveryApplicationServiceTest {
     void should_preserve_adapter_issue_multiplicity() {
         MethodTarget requested = target("Port.java", "Port", "handle");
         DiscoveryFixture fixture = fixture(
-                List.of(type(requested, ClassMetadata.TypeKind.INTERFACE, false, true, false, false,
+                List.of(type(requested, SourceTypeKind.INTERFACE, false, true, false, false,
                         List.of(), List.of())),
                 requested,
                 List.of(),
@@ -236,7 +239,7 @@ class MethodImplementationDiscoveryApplicationServiceTest {
     void should_record_projection_loss_without_returning_a_candidate() {
         MethodTarget requested = target("Port.java", "Port", "handle");
         DiscoveryFixture fixture = fixture(
-                List.of(type(requested, ClassMetadata.TypeKind.INTERFACE, false, true, false, false,
+                List.of(type(requested, SourceTypeKind.INTERFACE, false, true, false, false,
                         List.of(), List.of())),
                 requested,
                 List.of(unprojectableMethod()),
@@ -254,9 +257,9 @@ class MethodImplementationDiscoveryApplicationServiceTest {
         MethodTarget abstractImplementation = target("AbstractHandler.java", "AbstractHandler", "handle");
         DiscoveryFixture fixture = fixture(
                 List.of(
-                        type(requested, ClassMetadata.TypeKind.INTERFACE, false, true, false, false,
+                        type(requested, SourceTypeKind.INTERFACE, false, true, false, false,
                                 List.of(), List.of()),
-                        type(abstractImplementation, ClassMetadata.TypeKind.CLASS, true, true, false, false,
+                        type(abstractImplementation, SourceTypeKind.CLASS, true, true, false, false,
                                 List.of(), List.of())),
                 requested,
                 List.of(semantic(abstractImplementation)),
@@ -276,9 +279,9 @@ class MethodImplementationDiscoveryApplicationServiceTest {
         ImplementationCandidateFactory factory = mock(ImplementationCandidateFactory.class);
         DiscoveryFixture fixture = fixture(
                 List.of(
-                        type(requested, ClassMetadata.TypeKind.INTERFACE, false, true, false, false,
+                        type(requested, SourceTypeKind.INTERFACE, false, true, false, false,
                                 List.of(), List.of()),
-                        type(implementation, ClassMetadata.TypeKind.CLASS, false, false, true, false,
+                        type(implementation, SourceTypeKind.CLASS, false, false, true, false,
                                 List.of(), List.of())),
                 requested,
                 List.of(semantic(implementation)),
@@ -302,19 +305,19 @@ class MethodImplementationDiscoveryApplicationServiceTest {
         MethodTarget sourceBeta = target("B.java", "com.alpha", "Alpha", "alpha", List.of());
         DiscoveryFixture fixture = fixture(
                 List.of(
-                        type(requested, ClassMetadata.TypeKind.INTERFACE, false, true, false, false,
+                        type(requested, SourceTypeKind.INTERFACE, false, true, false, false,
                                 List.of(), List.of()),
-                        type(sourceBeta, ClassMetadata.TypeKind.CLASS, false, false, true, false,
+                        type(sourceBeta, SourceTypeKind.CLASS, false, false, true, false,
                                 List.of(), List.of()),
-                        type(packageBeta, ClassMetadata.TypeKind.CLASS, false, false, true, false,
+                        type(packageBeta, SourceTypeKind.CLASS, false, false, true, false,
                                 List.of(), List.of()),
-                        type(classBeta, ClassMetadata.TypeKind.CLASS, false, false, true, false,
+                        type(classBeta, SourceTypeKind.CLASS, false, false, true, false,
                                 List.of(), List.of()),
-                        type(parameterZeta, ClassMetadata.TypeKind.CLASS, false, false, true, false,
+                        type(parameterZeta, SourceTypeKind.CLASS, false, false, true, false,
                                 List.of(), List.of()),
-                        type(parameterAlpha, ClassMetadata.TypeKind.CLASS, false, false, true, false,
+                        type(parameterAlpha, SourceTypeKind.CLASS, false, false, true, false,
                                 List.of(), List.of()),
-                        type(methodAlpha, ClassMetadata.TypeKind.CLASS, false, false, true, false,
+                        type(methodAlpha, SourceTypeKind.CLASS, false, false, true, false,
                                 List.of(), List.of())),
                 requested,
                 List.of(
@@ -359,15 +362,15 @@ class MethodImplementationDiscoveryApplicationServiceTest {
 
     private static Stream<Arguments> unsupportedDeclarations() {
         return Stream.of(
-                Arguments.of("interface default method", ClassMetadata.TypeKind.INTERFACE, false, false, true),
-                Arguments.of("interface concrete method", ClassMetadata.TypeKind.INTERFACE, false, false, true),
-                Arguments.of("concrete class method", ClassMetadata.TypeKind.CLASS, false, false, true),
-                Arguments.of("enum abstract method", ClassMetadata.TypeKind.ENUM, false, true, false),
-                Arguments.of("abstract-class native method", ClassMetadata.TypeKind.CLASS, true, false, false));
+                Arguments.of("interface default method", SourceTypeKind.INTERFACE, false, false, true),
+                Arguments.of("interface concrete method", SourceTypeKind.INTERFACE, false, false, true),
+                Arguments.of("concrete class method", SourceTypeKind.CLASS, false, false, true),
+                Arguments.of("enum abstract method", SourceTypeKind.ENUM, false, true, false),
+                Arguments.of("abstract-class native method", SourceTypeKind.CLASS, true, false, false));
     }
 
     private DiscoveryFixture fixture(
-            List<ClassMetadata> classes,
+            List<SourceTypeMetadata> classes,
             MethodTarget requested,
             List<SemanticMethod> implementations,
             List<SemanticImplementationIssueReason> adapterIssues) {
@@ -405,7 +408,12 @@ class MethodImplementationDiscoveryApplicationServiceTest {
     }
 
     private static MethodTarget target(String sourceFile, String className, String methodName) {
-        return new MethodTarget(sourceFile, "com.acme", className, methodName, List.of());
+        return new MethodTarget(
+                new SourceTypeIdentity(
+                        new JavaTypeIdentity("com.acme", className),
+                        sourceFile),
+                methodName,
+                List.of());
     }
 
     private static MethodTarget target(
@@ -414,13 +422,18 @@ class MethodImplementationDiscoveryApplicationServiceTest {
             String className,
             String methodName,
             List<String> parameterTypes) {
-        return new MethodTarget(sourceFile, packageName, className, methodName, parameterTypes);
+        return new MethodTarget(
+                new SourceTypeIdentity(
+                        new JavaTypeIdentity(packageName, className),
+                        sourceFile),
+                methodName,
+                parameterTypes);
     }
 
     private static MethodTarget extractedTarget(RepositorySyntax syntax, String className, String methodName) {
-        return syntax.classes().stream()
-                .filter(metadata -> className.equals(metadata.className()))
-                .flatMap(metadata -> metadata.methods().stream())
+        return syntax.sourceTypes().stream()
+                .filter(metadata -> className.equals(metadata.declaration().identity().javaType().className()))
+                .flatMap(metadata -> metadata.members().methods().stream())
                 .filter(method -> methodName.equals(method.name()))
                 .map(method -> method.analysisTarget().target().orElseThrow())
                 .findFirst()
@@ -445,9 +458,9 @@ class MethodImplementationDiscoveryApplicationServiceTest {
                 new SemanticLocation("file:///outside/ExternalHandler.java", range, range));
     }
 
-    private static ClassMetadata type(
+    private static SourceTypeMetadata type(
             MethodTarget target,
-            ClassMetadata.TypeKind kind,
+            SourceTypeKind kind,
             boolean abstractClass,
             boolean abstractDeclaration,
             boolean executableDeclaration,
@@ -455,10 +468,9 @@ class MethodImplementationDiscoveryApplicationServiceTest {
             List<String> qualifiers,
             List<String> profiles) {
         SyntaxRange range = new SyntaxRange(new SyntaxPosition(0, 0), new SyntaxPosition(3, 0));
-        MethodSignature method = new MethodSignature(
+        SourceMethodMetadata method = new SourceMethodMetadata(
                 target.methodName(),
                 target.parameterTypes(),
-                List.of(),
                 null,
                 null,
                 1,
@@ -475,7 +487,7 @@ class MethodImplementationDiscoveryApplicationServiceTest {
                 executableDeclaration,
                 abstractDeclaration,
                 true);
-        return new ClassMetadata(
+        return com.java.semantic.syntax.domain.SourceTypeMetadataFixture.sourceType(
                 target.className(),
                 target.packageName(),
                 target.packageName() + "." + target.className(),

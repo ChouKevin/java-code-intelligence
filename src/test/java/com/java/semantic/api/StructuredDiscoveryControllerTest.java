@@ -1,7 +1,9 @@
 package com.java.semantic.api;
 
 import com.java.semantic.api.security.ApiTokenFilter;
+import com.java.semantic.identity.JavaTypeIdentity;
 import com.java.semantic.identity.MethodTarget;
+import com.java.semantic.identity.SourceTypeIdentity;
 import com.java.semantic.repository.application.RepositoryRevisionMismatchException;
 import com.java.semantic.repository.domain.RepositoryId;
 import com.java.semantic.repository.domain.RepositoryRevision;
@@ -33,7 +35,7 @@ import com.java.semantic.syntax.application.TypeMemberLimitation;
 import com.java.semantic.syntax.application.TypeMemberQuery;
 import com.java.semantic.syntax.application.TypeMemberResult;
 import com.java.semantic.syntax.application.TypeMemberTypeNotFoundException;
-import com.java.semantic.syntax.domain.ClassMetadata.TypeKind;
+import com.java.semantic.syntax.domain.SourceTypeKind;
 import com.java.semantic.syntax.domain.MapperEvidenceRepresentation;
 import com.java.semantic.syntax.domain.MapperStatementIdentity;
 import com.java.semantic.syntax.domain.SourceExtractionOutcome;
@@ -77,23 +79,23 @@ class StructuredDiscoveryControllerTest {
     private static final RepositoryRevision ANALYZED_REVISION = RepositoryRevision.ofSha("2".repeat(40));
     private static final String SOURCE_FILE = "src/main/java/com/example/OrderService.java";
     private static final MethodTarget METHOD_TARGET = new MethodTarget(
-            SOURCE_FILE,
-            "com.example",
-            "OrderService",
-            "createOrder",
-            List.of("com.example.Order"));
+                new SourceTypeIdentity(
+                        new JavaTypeIdentity("com.example", "OrderService"),
+                        SOURCE_FILE),
+                "createOrder",
+                List.of("com.example.Order"));
     private static final MethodTarget MAPPER_TARGET_A = new MethodTarget(
-            "module-a/src/main/java/com/example/OrderMapper.java",
-            "com.example",
-            "OrderMapper",
-            "findOrders",
-            List.of("java.lang.String"));
+                new SourceTypeIdentity(
+                        new JavaTypeIdentity("com.example", "OrderMapper"),
+                        "module-a/src/main/java/com/example/OrderMapper.java"),
+                "findOrders",
+                List.of("java.lang.String"));
     private static final MethodTarget MAPPER_TARGET_Z = new MethodTarget(
-            "module-z/src/main/java/com/example/OrderMapper.java",
-            "com.example",
-            "OrderMapper",
-            "findOrders",
-            List.of("java.lang.Long"));
+                new SourceTypeIdentity(
+                        new JavaTypeIdentity("com.example", "OrderMapper"),
+                        "module-z/src/main/java/com/example/OrderMapper.java"),
+                "findOrders",
+                List.of("java.lang.Long"));
     private static final List<ConceptKind> ACTIVE_CONCEPT_KINDS = List.of(
             ConceptKind.TYPE,
             ConceptKind.METHOD,
@@ -516,13 +518,13 @@ class StructuredDiscoveryControllerTest {
                         .value(SOURCE_FILE))
                 .andExpect(jsonPath("$.members[1].kind").value("FIELD"))
                 .andExpect(jsonPath("$.members[1].fieldName").value("repository"))
-                .andExpect(jsonPath("$.members[1].writtenType").value("OrderRepository"))
-                .andExpect(jsonPath("$.members[1].resolvedType").value("com.example.OrderRepository"))
+                .andExpect(jsonPath("$.members[1].writtenType").value("OrderRepository[][]"))
+                .andExpect(jsonPath("$.members[1].resolvedType").value("com.example.OrderRepository[][]"))
                 .andExpect(jsonPath("$.members[1].limitations[0]").value("FIELD_USAGE_NOT_INDEXED"))
                 .andExpect(jsonPath("$.members[1].availableFollowUps[0].operation")
                         .value("DISCOVER_CONCEPTS"))
                 .andExpect(jsonPath("$.members[1].availableFollowUps[0].request.terms[0].value")
-                        .value("com.example.OrderRepository"))
+                        .value("com.example.OrderRepository[][]"))
                 .andExpect(jsonPath("$.members[1].availableFollowUps[0].request.terms[0].matchMode")
                         .value("CANONICAL_EXACT"))
                 .andExpect(jsonPath("$.members[1].availableFollowUps[0].request.kinds[0]")
@@ -925,14 +927,14 @@ class StructuredDiscoveryControllerTest {
                 followUpFactory.forMethod(REPOSITORY_ID, ANALYZED_REVISION, METHOD_TARGET));
         FieldTypeMember field = new FieldTypeMember(
                 "repository",
-                "OrderRepository",
-                Optional.of("com.example.OrderRepository"),
+                "OrderRepository[][]",
+                Optional.of("com.example.OrderRepository[][]"),
                 List.of("org.springframework.beans.factory.annotation.Autowired"),
                 List.of(TypeMemberLimitation.FIELD_USAGE_NOT_INDEXED),
                 followUpFactory.forResolvedFieldType(
                         REPOSITORY_ID,
                         ANALYZED_REVISION,
-                        Optional.of("com.example.OrderRepository")));
+                        Optional.of("com.example.OrderRepository[][]")));
         TypeMemberQuery nextQuery = new TypeMemberQuery(
                 REPOSITORY_ID,
                 ANALYZED_REVISION,
@@ -948,7 +950,7 @@ class StructuredDiscoveryControllerTest {
                 ANALYZED_REVISION,
                 SOURCE_FILE,
                 "com.example.OrderService",
-                TypeKind.CLASS,
+                SourceTypeKind.CLASS,
                 List.of("org.springframework.stereotype.Service"),
                 List.of("com.example.OrderPort"),
                 List.of("com.example.BaseService"),

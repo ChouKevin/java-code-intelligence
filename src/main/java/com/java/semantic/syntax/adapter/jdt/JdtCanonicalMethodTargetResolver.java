@@ -6,6 +6,8 @@ import java.util.Objects;
 import java.util.Optional;
 
 import com.java.semantic.identity.MethodTarget;
+import com.java.semantic.identity.JavaTypeIdentity;
+import com.java.semantic.identity.SourceTypeIdentity;
 import com.java.semantic.syntax.domain.MethodTargetResolution;
 
 import org.eclipse.jdt.core.dom.IMethodBinding;
@@ -40,9 +42,9 @@ final class JdtCanonicalMethodTargetResolver {
             parameters.add(canonical.get());
         }
         return MethodTargetResolution.resolved(new MethodTarget(
-                source.repositoryRelativePath(),
-                packageName,
-                nestedClassName,
+                new SourceTypeIdentity(
+                        new JavaTypeIdentity(packageName, nestedClassName),
+                        source.repositoryRelativePath()),
                 declaration.getName(),
                 parameters));
     }

@@ -2,7 +2,7 @@ package com.java.semantic.syntax.application;
 
 import com.java.semantic.repository.domain.RepositoryId;
 import com.java.semantic.repository.domain.RepositoryRevision;
-import com.java.semantic.syntax.domain.ClassMetadata.TypeKind;
+import com.java.semantic.syntax.domain.SourceTypeKind;
 import com.java.semantic.syntax.domain.SourceExtractionOutcome;
 
 import java.util.List;
@@ -14,7 +14,7 @@ public record TypeMemberResult(
         RepositoryRevision analyzedRevision,
         String sourceFile,
         String fullyQualifiedName,
-        TypeKind typeKind,
+        SourceTypeKind typeKind,
         List<String> annotations,
         List<String> implementedTypes,
         List<String> extendedTypes,

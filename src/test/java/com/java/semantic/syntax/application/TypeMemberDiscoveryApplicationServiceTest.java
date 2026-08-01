@@ -1,6 +1,9 @@
 package com.java.semantic.syntax.application;
+import com.java.semantic.syntax.domain.SourceTypeMetadataFixture;
 
+import com.java.semantic.identity.JavaTypeIdentity;
 import com.java.semantic.identity.MethodTarget;
+import com.java.semantic.identity.SourceTypeIdentity;
 import com.java.semantic.repository.application.RepositoryApplicationService;
 import com.java.semantic.repository.domain.RepositoryId;
 import com.java.semantic.repository.domain.RepositoryRevision;
@@ -11,17 +14,19 @@ import com.java.semantic.syntax.application.DiscoveryFollowUp.DiscoverMethodImpl
 import com.java.semantic.syntax.application.DiscoveryFollowUp.GetMethodSourceRequest;
 import com.java.semantic.syntax.application.DiscoveryFollowUp.Operation;
 import com.java.semantic.syntax.application.DiscoveryFollowUp.TypeMembersRequest;
-import com.java.semantic.syntax.domain.ClassMetadata;
-import com.java.semantic.syntax.domain.ClassMetadata.FieldInfo;
-import com.java.semantic.syntax.domain.ClassMetadata.MethodSignature;
-import com.java.semantic.syntax.domain.ClassMetadata.TypeKind;
+import com.java.semantic.syntax.domain.AnnotationEvidence;
+import com.java.semantic.syntax.domain.ArrayTypeReference;
+import com.java.semantic.syntax.domain.SourceTypeMetadata;
+import com.java.semantic.syntax.domain.SourceFieldMetadata;
+import com.java.semantic.syntax.domain.SourceMethodMetadata;
+import com.java.semantic.syntax.domain.SourceTypeKind;
 import com.java.semantic.syntax.domain.MethodTargetResolution;
 import com.java.semantic.syntax.domain.RepositorySyntax;
 import com.java.semantic.syntax.domain.SourceSlice;
 import com.java.semantic.syntax.domain.SyntaxExtractionService;
 import com.java.semantic.syntax.domain.SyntaxPosition;
 import com.java.semantic.syntax.domain.SyntaxRange;
-import com.java.semantic.syntax.domain.TypeReference;
+import com.java.semantic.syntax.domain.NamedTypeReference;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -95,7 +100,7 @@ class TypeMemberDiscoveryApplicationServiceTest {
         assertThat(first.analyzedRevision()).isEqualTo(REVISION);
         assertThat(first.sourceFile()).isEqualTo(SOURCE_FILE);
         assertThat(first.fullyQualifiedName()).isEqualTo(TYPE_NAME);
-        assertThat(first.typeKind()).isEqualTo(TypeKind.CLASS);
+        assertThat(first.typeKind()).isEqualTo(SourceTypeKind.CLASS);
         assertThat(first.annotations()).containsExactly("Service");
         assertThat(first.implementedTypes()).containsExactly("OrderPort");
         assertThat(first.extendedTypes()).containsExactly("BaseOrderService");
@@ -249,6 +254,46 @@ class TypeMemberDiscoveryApplicationServiceTest {
                 .hasMessageContaining("repository-relative");
     }
 
+    @Test
+    void should_preserve_array_dimensions_in_resolved_field_type_and_follow_up() {
+        RepositorySnapshot snapshot = new RepositorySnapshot(REPOSITORY_ID, REPOSITORY_ROOT, REVISION);
+        TypeMemberQuery query = new TypeMemberQuery(
+                REPOSITORY_ID,
+                REVISION,
+                SOURCE_FILE,
+                TYPE_NAME,
+                Set.of(TypeMemberKind.FIELD),
+                Optional.empty(),
+                0,
+                10);
+        delegateSnapshot(snapshot);
+        when(syntaxExtractionService.extract(REPOSITORY_ROOT)).thenReturn(new RepositorySyntax(
+                List.of(),
+                List.of(arrayMetadata()),
+                List.of()));
+
+        TypeMemberResult result = service.discover(query);
+
+        assertThat(result.members()).singleElement().isInstanceOfSatisfying(
+                FieldTypeMember.class,
+                field -> {
+                    assertThat(field.writtenType()).isEqualTo("Order[][]");
+                    assertThat(field.resolvedType()).contains("com.acme.order.Order[][]");
+                    assertThat(field.availableFollowUps()).singleElement()
+                            .satisfies(followUp -> assertThat(followUp.request()).isEqualTo(
+                                    new ConceptDiscoveryRequest(
+                                            REPOSITORY_ID.value(),
+                                            REVISION.value(),
+                                            List.of(new DiscoveryFollowUp.ConceptTermRequest(
+                                                    "com.acme.order.Order[][]",
+                                                    ConceptMatchMode.CANONICAL_EXACT)),
+                                            List.of(ConceptKind.TYPE),
+                                            List.of(),
+                                            0,
+                                            50)));
+                });
+    }
+
     private void delegateSnapshot(RepositorySnapshot snapshot) {
         when(repositoryApplicationService.withSnapshot(
                 eq(REPOSITORY_ID), eq(Optional.of(REVISION)), any()))
@@ -265,15 +310,15 @@ class TypeMemberDiscoveryApplicationServiceTest {
                 List.of());
     }
 
-    private static ClassMetadata metadata(String sourceFile) {
-        List<MethodSignature> methods = new ArrayList<>(IntStream.range(0, 101)
+    private static SourceTypeMetadata metadata(String sourceFile) {
+        List<SourceMethodMetadata> methods = new ArrayList<>(IntStream.range(0, 101)
                 .mapToObj(index -> method(sourceFile, "method%03d".formatted(index), List.of()))
                 .toList());
         methods.add(method(sourceFile, "shared", List.of("com.acme.Beta")));
         methods.add(method(sourceFile, "shared", List.of("com.acme.Alpha")));
         Collections.reverse(methods);
 
-        List<FieldInfo> fields = new ArrayList<>(IntStream.range(0, 101)
+        List<SourceFieldMetadata> fields = new ArrayList<>(IntStream.range(0, 101)
                 .mapToObj(index -> field(
                         "field%03d".formatted(index),
                         "Type%03d".formatted(index),
@@ -283,12 +328,12 @@ class TypeMemberDiscoveryApplicationServiceTest {
         fields.add(field("aShared", "AlphaType", "com.acme.type.AlphaType"));
         Collections.reverse(fields);
 
-        return new ClassMetadata(
+        return SourceTypeMetadataFixture.sourceType(
                 "OrderService",
                 "com.acme.order",
                 TYPE_NAME,
                 sourceFile,
-                TypeKind.CLASS,
+                SourceTypeKind.CLASS,
                 false,
                 List.of("OrderPort"),
                 List.of("BaseOrderService"),
@@ -305,13 +350,13 @@ class TypeMemberDiscoveryApplicationServiceTest {
                 List.of());
     }
 
-    private static ClassMetadata duplicateMetadata() {
-        return new ClassMetadata(
+    private static SourceTypeMetadata duplicateMetadata() {
+        return SourceTypeMetadataFixture.sourceType(
                 "OrderService",
                 "com.acme.order",
                 TYPE_NAME,
                 DUPLICATE_SOURCE_FILE,
-                TypeKind.CLASS,
+                SourceTypeKind.CLASS,
                 false,
                 List.of(),
                 List.of(),
@@ -328,13 +373,48 @@ class TypeMemberDiscoveryApplicationServiceTest {
                 List.of());
     }
 
-    private static MethodSignature method(String sourceFile, String name, List<String> parameterTypes) {
+    private static SourceTypeMetadata arrayMetadata() {
+        SourceFieldMetadata field = new SourceFieldMetadata(
+                "orders",
+                "Order[][]",
+                "",
+                new ArrayTypeReference(
+                        "Order[][]",
+                        namedTypeReference("Order", "com.acme.order.Order"),
+                        2),
+                List.of());
+        return SourceTypeMetadataFixture.sourceType(
+                "OrderService",
+                "com.acme.order",
+                TYPE_NAME,
+                SOURCE_FILE,
+                SourceTypeKind.CLASS,
+                false,
+                List.of(),
+                List.of(),
+                List.of(),
+                List.of(),
+                List.of(field),
+                List.of(),
+                false,
+                false,
+                List.of(),
+                range(),
+                source(),
+                false,
+                List.of());
+    }
+
+    private static SourceMethodMetadata method(String sourceFile, String name, List<String> parameterTypes) {
         MethodTarget target = new MethodTarget(
-                sourceFile, "com.acme.order", "OrderService", name, parameterTypes);
-        return new MethodSignature(
+                new SourceTypeIdentity(
+                        new JavaTypeIdentity("com.acme.order", "OrderService"),
+                        sourceFile),
+                name,
+                parameterTypes);
+        return new SourceMethodMetadata(
                 name,
                 parameterTypes,
-                List.of(),
                 "",
                 null,
                 1,
@@ -353,13 +433,24 @@ class TypeMemberDiscoveryApplicationServiceTest {
                 false);
     }
 
-    private static FieldInfo field(String name, String writtenType, String resolvedType) {
-        return new FieldInfo(
+    private static SourceFieldMetadata field(String name, String writtenType, String resolvedType) {
+        return new SourceFieldMetadata(
                 name,
                 writtenType,
-                List.of("Autowired"),
                 "",
-                new TypeReference(writtenType, resolvedType, List.of(), true));
+                namedTypeReference(writtenType, resolvedType),
+                List.of(new AnnotationEvidence("Autowired", Optional.empty())));
+    }
+
+    private static NamedTypeReference namedTypeReference(String writtenType, String resolvedType) {
+        int lastDot = resolvedType.lastIndexOf('.');
+        String packageName = lastDot < 0 ? "" : resolvedType.substring(0, lastDot);
+        String className = lastDot < 0 ? resolvedType : resolvedType.substring(lastDot + 1);
+        if (lastDot < 0) {
+            return new NamedTypeReference(writtenType, writtenType, Optional.empty(), false);
+        }
+        return new NamedTypeReference(writtenType, className,
+                Optional.of(new JavaTypeIdentity(packageName, className)), true);
     }
 
     private static SyntaxRange range() {

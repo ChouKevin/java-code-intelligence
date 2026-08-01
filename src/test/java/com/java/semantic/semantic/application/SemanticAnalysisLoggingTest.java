@@ -1,5 +1,7 @@
 package com.java.semantic.semantic.application;
 
+import com.java.semantic.syntax.domain.SourceMethodMetadata;
+
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.spi.ILoggingEvent;
@@ -11,7 +13,9 @@ import com.java.semantic.callgraph.domain.GraphAnalysisStatus;
 import com.java.semantic.callgraph.domain.OutgoingGraphFragment;
 import com.java.semantic.config.IncomingGraphProperties;
 import com.java.semantic.config.OutgoingGraphProperties;
+import com.java.semantic.identity.JavaTypeIdentity;
 import com.java.semantic.identity.MethodTarget;
+import com.java.semantic.identity.SourceTypeIdentity;
 import com.java.semantic.repository.application.RepositoryApplicationService;
 import com.java.semantic.repository.domain.RepositoryId;
 import com.java.semantic.repository.domain.RepositoryRevision;
@@ -21,7 +25,8 @@ import com.java.semantic.semantic.domain.SemanticBindingAmbiguousException;
 import com.java.semantic.semantic.domain.SemanticBindingUnresolvedException;
 import com.java.semantic.semantic.domain.SemanticRequestTimeoutException;
 import com.java.semantic.syntax.domain.CanonicalMethodDeclarationResolver;
-import com.java.semantic.syntax.domain.ClassMetadata;
+import com.java.semantic.syntax.domain.SourceTypeMetadata;
+import com.java.semantic.syntax.domain.SourceTypeMetadataFixture;
 import com.java.semantic.syntax.domain.MethodTargetResolution;
 import com.java.semantic.syntax.domain.RepositorySyntax;
 import com.java.semantic.syntax.domain.SyntaxExtractionService;
@@ -48,9 +53,9 @@ class SemanticAnalysisLoggingTest {
         RepositoryId repositoryId = RepositoryId.of("orders");
         RepositoryRevision revision = RepositoryRevision.fixture();
         MethodTarget target = new MethodTarget(
-                "src/METHOD_BODY_SENTINEL.java",
-                "CREDENTIAL_SENTINEL",
-                "CredentialSentinel",
+                new SourceTypeIdentity(
+                        new JavaTypeIdentity("CREDENTIAL_SENTINEL", "CredentialSentinel"),
+                        "src/METHOD_BODY_SENTINEL.java"),
                 "methodBodySentinel",
                 List.of("METHOD_BODY_PARAMETER_SENTINEL"));
         RepositorySnapshot snapshot = new RepositorySnapshot(repositoryId, Path.of("safe-root"), revision);
@@ -112,9 +117,18 @@ class SemanticAnalysisLoggingTest {
     void should_log_expected_semantic_failures_at_warn_without_exception_details() {
         RepositoryId repositoryId = RepositoryId.of("orders");
         RepositoryRevision revision = RepositoryRevision.fixture();
-        MethodTarget target = new MethodTarget("OrderService.java", "com.acme", "OrderService", "place", List.of());
+        MethodTarget target = new MethodTarget(
+                new SourceTypeIdentity(
+                        new JavaTypeIdentity("com.acme", "OrderService"),
+                        "OrderService.java"),
+                "place",
+                List.of());
         MethodTarget restrictedCandidate = new MethodTarget(
-                "RESTRICTED_SEMANTIC_CANDIDATE_SENTINEL.java", "com.acme", "OrderService", "place", List.of());
+                new SourceTypeIdentity(
+                        new JavaTypeIdentity("com.acme", "OrderService"),
+                        "RESTRICTED_SEMANTIC_CANDIDATE_SENTINEL.java"),
+                "place",
+                List.of());
         List<RuntimeException> expectedFailures = List.of(
                 new SemanticBindingAmbiguousException(target, List.of(target, restrictedCandidate)),
                 new SemanticBindingUnresolvedException(restrictedCandidate),
@@ -158,7 +172,12 @@ class SemanticAnalysisLoggingTest {
     void should_log_returned_partial_analysis_summary_at_warn_without_a_throwable() {
         RepositoryId repositoryId = RepositoryId.of("orders");
         RepositoryRevision revision = RepositoryRevision.fixture();
-        MethodTarget target = new MethodTarget("OrderService.java", "com.acme", "OrderService", "place", List.of());
+        MethodTarget target = new MethodTarget(
+                new SourceTypeIdentity(
+                        new JavaTypeIdentity("com.acme", "OrderService"),
+                        "OrderService.java"),
+                "place",
+                List.of());
         RepositorySnapshot snapshot = new RepositorySnapshot(repositoryId, Path.of("safe-root"), revision);
         RepositoryApplicationService repositories = mock(RepositoryApplicationService.class);
         SyntaxExtractionService syntax = mock(SyntaxExtractionService.class);
@@ -207,7 +226,12 @@ class SemanticAnalysisLoggingTest {
     void should_log_incoming_success_and_partial_events_with_direction() {
         RepositoryId repositoryId = RepositoryId.of("orders");
         RepositoryRevision revision = RepositoryRevision.fixture();
-        MethodTarget target = new MethodTarget("OrderService.java", "com.acme", "OrderService", "place", List.of());
+        MethodTarget target = new MethodTarget(
+                new SourceTypeIdentity(
+                        new JavaTypeIdentity("com.acme", "OrderService"),
+                        "OrderService.java"),
+                "place",
+                List.of());
         RepositorySnapshot snapshot = new RepositorySnapshot(repositoryId, Path.of("safe-root"), revision);
         RepositoryApplicationService repositories = mock(RepositoryApplicationService.class);
         SyntaxExtractionService syntax = mock(SyntaxExtractionService.class);
@@ -265,9 +289,18 @@ class SemanticAnalysisLoggingTest {
     void should_log_incoming_expected_failures_and_unexpected_failures_without_sensitive_details() {
         RepositoryId repositoryId = RepositoryId.of("orders");
         RepositoryRevision revision = RepositoryRevision.fixture();
-        MethodTarget target = new MethodTarget("OrderService.java", "com.acme", "OrderService", "place", List.of());
+        MethodTarget target = new MethodTarget(
+                new SourceTypeIdentity(
+                        new JavaTypeIdentity("com.acme", "OrderService"),
+                        "OrderService.java"),
+                "place",
+                List.of());
         MethodTarget restrictedCandidate = new MethodTarget(
-                "RESTRICTED_SEMANTIC_CANDIDATE_SENTINEL.java", "com.acme", "OrderService", "place", List.of());
+                new SourceTypeIdentity(
+                        new JavaTypeIdentity("com.acme", "OrderService"),
+                        "RESTRICTED_SEMANTIC_CANDIDATE_SENTINEL.java"),
+                "place",
+                List.of());
         Logger logger = (Logger) LoggerFactory.getLogger(SemanticAnalysisApplicationService.class);
         ListAppender<ILoggingEvent> appender = new ListAppender<>();
         appender.start();
@@ -348,10 +381,9 @@ class SemanticAnalysisLoggingTest {
 
     private RepositorySyntax syntax(MethodTarget target) {
         RepositorySyntax syntax = mock(RepositorySyntax.class);
-        ClassMetadata metadata = mock(ClassMetadata.class);
-        ClassMetadata.MethodSignature method = mock(ClassMetadata.MethodSignature.class);
-        when(syntax.classes()).thenReturn(List.of(metadata));
-        when(metadata.methods()).thenReturn(List.of(method));
+        SourceMethodMetadata method = mock(SourceMethodMetadata.class);
+        SourceTypeMetadata metadata = SourceTypeMetadataFixture.sourceType(target, List.of(method));
+        when(syntax.sourceTypes()).thenReturn(List.of(metadata));
         when(method.analysisTarget()).thenReturn(MethodTargetResolution.resolved(target));
         when(method.namePosition()).thenReturn(new SyntaxPosition(0, 0));
         return syntax;

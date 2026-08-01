@@ -1,7 +1,9 @@
 package com.java.semantic.api;
 
 import com.java.semantic.api.security.ApiTokenFilter;
+import com.java.semantic.identity.JavaTypeIdentity;
 import com.java.semantic.identity.MethodTarget;
+import com.java.semantic.identity.SourceTypeIdentity;
 import com.java.semantic.repository.domain.RepositoryId;
 import com.java.semantic.repository.domain.RepositoryRevision;
 import com.java.semantic.trie.ApiEntryPointRef;
@@ -306,10 +308,18 @@ class ApiRouteControllerTest {
                         AnalysisTargetStatus.AMBIGUOUS,
                         Optional.empty(),
                         List.of(
-                                new MethodTarget("src/main/java/com/acme/ZController.java", "com.acme",
-                                        "ZController", "getOrder", List.of("java.lang.String")),
-                                new MethodTarget("src/main/java/com/acme/AController.java", "com.acme",
-                                        "AController", "getOrder", List.of("java.lang.Long"))),
+                                new MethodTarget(
+                                        new SourceTypeIdentity(
+                                                new JavaTypeIdentity("com.acme", "ZController"),
+                                                "src/main/java/com/acme/ZController.java"),
+                                        "getOrder",
+                                        List.of("java.lang.String")),
+                                new MethodTarget(
+                                        new SourceTypeIdentity(
+                                                new JavaTypeIdentity("com.acme", "AController"),
+                                                "src/main/java/com/acme/AController.java"),
+                                        "getOrder",
+                                        List.of("java.lang.Long"))),
                         "OVERLOAD_AMBIGUOUS"),
                 List.of());
     }

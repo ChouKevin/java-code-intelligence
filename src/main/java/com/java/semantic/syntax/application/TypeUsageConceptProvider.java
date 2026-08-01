@@ -6,20 +6,18 @@ import com.java.semantic.syntax.application.ConceptIdentity.TypeDeclarationSubje
 import com.java.semantic.syntax.application.ConceptIdentity.TypeUsageConceptIdentity;
 import com.java.semantic.syntax.application.ConceptIdentity.TypeUsageLocation;
 import com.java.semantic.syntax.application.ConceptIdentity.TypeUsageSlot;
+import com.java.semantic.identity.JavaTypeIdentity;
 import java.util.ArrayList;
 import java.util.EnumSet;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 
-import com.java.semantic.syntax.domain.ClassMetadata;
-import com.java.semantic.syntax.domain.ClassMetadata.FieldInfo;
-import com.java.semantic.syntax.domain.ClassMetadata.MethodSignature;
-import com.java.semantic.syntax.domain.ResolvedTypeIdentity;
 import com.java.semantic.syntax.domain.RepositorySyntax;
+import com.java.semantic.syntax.domain.SourceFieldMetadata;
+import com.java.semantic.syntax.domain.SourceMethodMetadata;
+import com.java.semantic.syntax.domain.SourceTypeMetadata;
 import com.java.semantic.syntax.domain.TypeReference;
-
-import org.springframework.util.StringUtils;
 
 /** 僅從 binding 已證實的 metadata 投影 TYPE_USAGE 概念 */
 public final class TypeUsageConceptProvider implements ConceptProvider {
@@ -39,26 +37,27 @@ public final class TypeUsageConceptProvider implements ConceptProvider {
     @Override
     public ConceptProviderProjection project(RepositorySyntax syntax) {
         List<ConceptCatalogEntry> entries = new ArrayList<>();
-        for (ClassMetadata metadata : syntax.classes()) {
+        for (SourceTypeMetadata metadata : syntax.sourceTypes()) {
             TypeDeclarationSubjectIdentity typeSubject = new TypeDeclarationSubjectIdentity(
-                    metadata.sourceFile(), metadata.fullyQualifiedName());
-            for (int index = 0; index < metadata.implementedTypeReferences().size(); index++) {
+                    metadata.declaration().identity().sourceFile(), metadata.declaration().identity().fullyQualifiedName());
+            for (int index = 0; index < metadata.relationships().implementedTypes().size(); index++) {
                 addTypeReference(entries, metadata, typeSubject,
                         new TypeUsageLocation(TypeUsageSlot.IMPLEMENTED_TYPE, index),
-                        metadata.implementedTypeReferences().get(index));
+                        metadata.relationships().implementedTypes().get(index));
             }
-            for (int index = 0; index < metadata.extendedTypeReferences().size(); index++) {
+            for (int index = 0; index < metadata.relationships().extendedTypes().size(); index++) {
                 addTypeReference(entries, metadata, typeSubject,
                         new TypeUsageLocation(TypeUsageSlot.EXTENDED_TYPE, index),
-                        metadata.extendedTypeReferences().get(index));
+                        metadata.relationships().extendedTypes().get(index));
             }
-            for (FieldInfo field : metadata.fields()) {
+            for (SourceFieldMetadata field : metadata.members().fields()) {
                 FieldDeclarationSubjectIdentity subject = new FieldDeclarationSubjectIdentity(
-                        metadata.sourceFile(), metadata.fullyQualifiedName(), field.name(), field.type());
+                        metadata.declaration().identity().sourceFile(), metadata.declaration().identity().fullyQualifiedName(),
+                        field.name(), field.type());
                 addTypeReference(entries, metadata, subject, new TypeUsageLocation(TypeUsageSlot.FIELD_DECLARATION, 0),
                         field.typeReference());
             }
-            for (MethodSignature method : metadata.methods()) {
+            for (SourceMethodMetadata method : metadata.members().methods()) {
                 DeclarationSubjectIdentity subject = DeclarationConceptProvider.methodSubject(metadata, method);
                 for (int index = 0; index < method.parameterTypeReferences().size(); index++) {
                     addTypeReference(entries, metadata, subject,
@@ -68,7 +67,7 @@ public final class TypeUsageConceptProvider implements ConceptProvider {
                 method.returnType().ifPresent(returnType -> addTypeReference(entries, metadata, subject,
                         new TypeUsageLocation(TypeUsageSlot.METHOD_RETURN, 0), returnType));
                 for (int index = 0; index < method.bodyTypeReferences().size(); index++) {
-                    ResolvedTypeIdentity reference = method.bodyTypeReferences().get(index);
+                    JavaTypeIdentity reference = method.bodyTypeReferences().get(index);
                     addResolvedType(entries, metadata, subject,
                             new TypeUsageLocation(TypeUsageSlot.METHOD_BODY_OR_ANNOTATION_MEMBER, index),
                             DeclarationConceptProvider.resolvedTypeName(reference));
@@ -80,31 +79,30 @@ public final class TypeUsageConceptProvider implements ConceptProvider {
 
     private static void addTypeReference(
             List<ConceptCatalogEntry> entries,
-            ClassMetadata metadata,
+            SourceTypeMetadata metadata,
             DeclarationSubjectIdentity subject,
             TypeUsageLocation location,
             TypeReference reference) {
-        if (StringUtils.hasText(reference.resolvedType())) {
-            addResolvedType(entries, metadata, subject, location, reference.resolvedType());
-        }
+        reference.resolvedTypeName().ifPresent(resolvedType ->
+                addResolvedType(entries, metadata, subject, location, resolvedType));
     }
 
     private static void addResolvedType(
             List<ConceptCatalogEntry> entries,
-            ClassMetadata metadata,
+            SourceTypeMetadata metadata,
             DeclarationSubjectIdentity subject,
             TypeUsageLocation location,
             String resolvedType) {
         TypeUsageConceptIdentity identity = new TypeUsageConceptIdentity(
-                metadata.sourceFile(), subject, location, resolvedType);
+                metadata.declaration().identity().sourceFile(), subject, location, resolvedType);
         entries.add(new ConceptCatalogEntry(
                 PROVIDER_ID,
                 identity,
                 resolvedType + "@" + subject.displayValue() + "[" + location.slot() + ":" + location.index() + "]",
                 resolvedType + " used by " + subject.displayValue(),
                 ConceptSearchTokenizer.tokenize(resolvedType + " " + subject.displayValue()),
-                metadata.packageName(),
-                Optional.of(metadata.fullyQualifiedName()),
+                metadata.declaration().identity().javaType().packageName(),
+                Optional.of(metadata.declaration().identity().fullyQualifiedName()),
                 ConceptAuthority.SYNTAX_RESOLVED,
                 Set.of(identity)));
     }

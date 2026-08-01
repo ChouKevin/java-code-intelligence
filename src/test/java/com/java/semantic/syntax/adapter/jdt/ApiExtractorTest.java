@@ -2,7 +2,9 @@ package com.java.semantic.syntax.adapter.jdt;
 
 import java.util.List;
 
+import com.java.semantic.identity.JavaTypeIdentity;
 import com.java.semantic.identity.MethodTarget;
+import com.java.semantic.identity.SourceTypeIdentity;
 import com.java.semantic.syntax.domain.ApiEntryPoint;
 import com.java.semantic.syntax.domain.EntryPointClass;
 import com.java.semantic.syntax.domain.RepositorySyntax;
@@ -24,9 +26,9 @@ class ApiExtractorTest {
         MethodTarget target = api.analysisTarget().target().orElseThrow();
 
         assertThat(target).isEqualTo(new MethodTarget(
-                "src/main/java/com/example/syntax/OrderApiController.java",
-                "com.example.syntax",
-                "OrderApiController",
+                new SourceTypeIdentity(
+                        new JavaTypeIdentity("com.example.syntax", "OrderApiController"),
+                        "src/main/java/com/example/syntax/OrderApiController.java"),
                 "get",
                 List.of("java.lang.Long")));
         assertThat(metadataTargetOf("OrderApiController", "get")).isSameAs(api.analysisTarget());
@@ -186,9 +188,9 @@ class ApiExtractorTest {
     }
 
     private Object metadataTargetOf(String className, String methodName) {
-        return syntax.classes().stream()
-                .filter(metadata -> className.equals(metadata.className()))
-                .flatMap(metadata -> metadata.methods().stream())
+        return syntax.sourceTypes().stream()
+                .filter(metadata -> className.equals(metadata.declaration().identity().javaType().className()))
+                .flatMap(metadata -> metadata.members().methods().stream())
                 .filter(method -> methodName.equals(method.name()))
                 .findFirst()
                 .orElseThrow(() -> new AssertionError("no metadata method " + className + "#" + methodName))

@@ -4,6 +4,8 @@
 
 `java-semantic-service` is a standalone Java 21/Spring Boot Maven project; it is not a module of the root application. Production code lives under `src/main/java/com/java/semantic`. Packages separate HTTP contracts (`api`), graph construction (`callgraph`), repository lifecycle (`repository`), JDT LS integration (`semantic`), JDT syntax extraction (`syntax`), route matching (`trie`), and shared identity/diagnostics/configuration. Runtime configuration is in `src/main/resources/application.yml`; the versioned contract is `src/main/resources/openapi/semantic-api-v1.yaml`. Tests mirror production packages under `src/test/java`, with fixture repositories in `src/test/resources/fixtures`.
 
+Domain vocabulary is summarized in [`docs/domain-model.md`](docs/domain-model.md).
+
 ## Build, Test, and Development Commands
 
 Run commands from the repository root:

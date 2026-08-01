@@ -3,7 +3,9 @@ package com.java.semantic.api;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.java.semantic.api.security.ApiTokenFilter;
+import com.java.semantic.identity.JavaTypeIdentity;
 import com.java.semantic.identity.MethodTarget;
+import com.java.semantic.identity.SourceTypeIdentity;
 import com.java.semantic.repository.application.RepositoryRevisionMismatchException;
 import com.java.semantic.repository.domain.RepositoryId;
 import com.java.semantic.repository.domain.RepositoryRevision;
@@ -18,9 +20,10 @@ import com.java.semantic.syntax.application.ListenerAnnotationEvidence;
 import com.java.semantic.syntax.application.ListenerAnnotationKind;
 import com.java.semantic.syntax.application.ListenerObservationCode;
 import com.java.semantic.syntax.application.ListenerObservationSummary;
-import com.java.semantic.syntax.application.ListenerSourceLocation;
 import com.java.semantic.syntax.application.RevisionBoundEventListenerDiscovery;
+import com.java.semantic.syntax.application.SourceRange;
 import com.java.semantic.syntax.domain.SyntaxPosition;
+import com.java.semantic.syntax.domain.SyntaxRange;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -294,17 +297,22 @@ class EventListenerDiscoveryControllerTest {
     private static RevisionBoundEventListenerDiscovery discoveryResult() {
         String sourceFile = "src/main/java/com/example/OrderListener.java";
         EventListenerCandidate candidate = new EventListenerCandidate(
-                new MethodTarget(sourceFile, "com.example", "OrderListener", "onOrder", List.of("com.example.Order")),
-                new ListenerSourceLocation(sourceFile, new SyntaxPosition(10, 4), new SyntaxPosition(12, 5)),
+                new MethodTarget(
+                        new SourceTypeIdentity(
+                                new JavaTypeIdentity("com.example", "OrderListener"),
+                                sourceFile),
+                        "onOrder",
+                        List.of("com.example.Order")),
+                new SourceRange(sourceFile, new SyntaxRange(
+                        new SyntaxPosition(10, 4), new SyntaxPosition(12, 5))),
                 List.of(new ListenerAnnotationEvidence(
                         ListenerAnnotationKind.EVENT_LISTENER, AnnotationMatchKind.RESOLVED_IDENTITY)));
         ListenerObservationSummary observation = new ListenerObservationSummary(
                 ListenerObservationCode.LISTENER_TARGET_UNRESOLVED,
                 2,
-                List.of(new ListenerSourceLocation(
+                List.of(new SourceRange(
                         "src/main/java/com/example/BrokenListener.java",
-                        new SyntaxPosition(4, 0),
-                        new SyntaxPosition(4, 18))));
+                        new SyntaxRange(new SyntaxPosition(4, 0), new SyntaxPosition(4, 18)))));
         return new RevisionBoundEventListenerDiscovery(
                 REPOSITORY_ID,
                 ANALYZED_REVISION,

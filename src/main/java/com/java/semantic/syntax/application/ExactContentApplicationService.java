@@ -7,8 +7,7 @@ import com.java.semantic.repository.domain.RepositorySnapshot;
 import com.java.semantic.semantic.domain.SemanticBindingAmbiguousException;
 import com.java.semantic.semantic.domain.SemanticTargetNotFoundException;
 import com.java.semantic.syntax.domain.CanonicalMethodDeclarationResolver;
-import com.java.semantic.syntax.domain.ClassMetadata;
-import com.java.semantic.syntax.domain.ClassMetadata.MethodSignature;
+import com.java.semantic.syntax.domain.SourceMethodMetadata;
 import com.java.semantic.syntax.domain.MapperEvidenceIndex;
 import com.java.semantic.syntax.domain.MapperFragmentEvidence;
 import com.java.semantic.syntax.domain.MapperFragmentIdentity;
@@ -131,8 +130,8 @@ public final class ExactContentApplicationService {
 
     private RawContent methodSource(RepositorySyntax syntax, MethodTarget target) {
         MethodTarget resolvedTarget = resolvedTarget(syntax, target);
-        MethodSignature signature = syntax.classes().stream()
-                .flatMap(metadata -> metadata.methods().stream())
+        SourceMethodMetadata signature = syntax.sourceTypes().stream()
+                .flatMap(metadata -> metadata.members().methods().stream())
                 .filter(method -> method.analysisTarget().target().filter(resolvedTarget::equals).isPresent())
                 .findFirst()
                 .orElseThrow(() -> new SemanticTargetNotFoundException(target));
@@ -143,11 +142,13 @@ public final class ExactContentApplicationService {
         MethodTarget resolvedTarget = resolvedTarget(syntax, target);
         MapperEvidenceIndex index = syntax.mapperEvidenceIndex()
                 .orElseThrow(() -> new SemanticTargetNotFoundException(target));
-        String namespace = syntax.classes().stream()
-                .filter(metadata -> metadata.sourceFile().equals(resolvedTarget.sourceFile()))
-                .filter(metadata -> metadata.packageName().equals(resolvedTarget.packageName()))
-                .filter(metadata -> metadata.className().equals(resolvedTarget.className()))
-                .map(ClassMetadata::fullyQualifiedName)
+        String namespace = syntax.sourceTypes().stream()
+                .filter(metadata -> metadata.declaration().identity().sourceFile().equals(resolvedTarget.sourceFile()))
+                .filter(metadata -> metadata.declaration().identity().javaType().packageName()
+                        .equals(resolvedTarget.packageName()))
+                .filter(metadata -> metadata.declaration().identity().javaType().className()
+                        .equals(resolvedTarget.className()))
+                .map(metadata -> metadata.declaration().identity().fullyQualifiedName())
                 .findFirst()
                 .orElseThrow(() -> new SemanticTargetNotFoundException(target));
         MapperStatementMethodMapping mapping = MapperStatementMethodMapping.fromSyntax(
@@ -241,8 +242,8 @@ public final class ExactContentApplicationService {
 
     private List<RawContent> allSegmentLookupContent(RepositorySyntax syntax) {
         List<RawContent> contents = new ArrayList<>();
-        for (MethodSignature method : syntax.classes().stream()
-                .flatMap(metadata -> metadata.methods().stream())
+        for (SourceMethodMetadata method : syntax.sourceTypes().stream()
+                .flatMap(metadata -> metadata.members().methods().stream())
                 .toList()) {
             RawContent content = RawContent.method(method.source().text());
             contents.add(content);

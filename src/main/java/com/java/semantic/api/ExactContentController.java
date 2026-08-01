@@ -48,7 +48,7 @@ public final class ExactContentController {
         ExactContentQuery query = new ExactContentQuery.MethodSource(
                 repositoryId(request.repoId()),
                 revision(request.expectedRevision()),
-                request.target().toDomain());
+                MethodTargetHttpMapper.toDomain(request.target()));
         return retrieve(query);
     }
 
@@ -58,7 +58,7 @@ public final class ExactContentController {
         ExactContentQuery query = new ExactContentQuery.MapperStatement(
                 repositoryId(request.repoId()),
                 revision(request.expectedRevision()),
-                request.target().toDomain());
+                MethodTargetHttpMapper.toDomain(request.target()));
         return retrieve(query);
     }
 
@@ -80,7 +80,7 @@ public final class ExactContentController {
         ExactContentQuery query = new ExactContentQuery.MethodSource(
                 repositoryId(request.repoId()),
                 revision(request.expectedRevision()),
-                request.target().toDomain());
+                MethodTargetHttpMapper.toDomain(request.target()));
         return readSegment(query, request.contentRef(), request.segmentIndex());
     }
 
@@ -91,7 +91,7 @@ public final class ExactContentController {
         ExactContentQuery query = new ExactContentQuery.MapperStatement(
                 repositoryId(request.repoId()),
                 revision(request.expectedRevision()),
-                request.target().toDomain());
+                MethodTargetHttpMapper.toDomain(request.target()));
         return readSegment(query, request.contentRef(), request.segmentIndex());
     }
 

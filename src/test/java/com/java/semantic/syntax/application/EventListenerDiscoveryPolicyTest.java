@@ -1,18 +1,19 @@
 package com.java.semantic.syntax.application;
 
+import com.java.semantic.identity.JavaTypeIdentity;
 import com.java.semantic.identity.MethodTarget;
+import com.java.semantic.identity.SourceTypeIdentity;
 import com.java.semantic.syntax.domain.AnalysisTargetStatus;
 import com.java.semantic.syntax.domain.AnnotationEvidence;
-import com.java.semantic.syntax.domain.ClassMetadata;
-import com.java.semantic.syntax.domain.ClassMetadata.MethodSignature;
-import com.java.semantic.syntax.domain.ClassMetadata.TypeKind;
+import com.java.semantic.syntax.domain.SourceTypeMetadata;
+import com.java.semantic.syntax.domain.SourceMethodMetadata;
+import com.java.semantic.syntax.domain.SourceTypeKind;
 import com.java.semantic.syntax.domain.MethodTargetResolution;
 import com.java.semantic.syntax.domain.RepositorySyntax;
-import com.java.semantic.syntax.domain.ResolvedTypeIdentity;
 import com.java.semantic.syntax.domain.SourceSlice;
 import com.java.semantic.syntax.domain.SyntaxPosition;
 import com.java.semantic.syntax.domain.SyntaxRange;
-import com.java.semantic.syntax.domain.TypeReference;
+import com.java.semantic.syntax.domain.NamedTypeReference;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
@@ -127,7 +128,7 @@ class EventListenerDiscoveryPolicyTest {
 
         assertThat(page.candidates().candidates()).singleElement().satisfies(candidate -> {
             assertThat(candidate.target()).isSameAs(target);
-            assertThat(candidate.sourceLocation().sourceFile()).isEqualTo(target.sourceFile());
+            assertThat(candidate.declarationRange().sourceFile()).isEqualTo(target.sourceFile());
         });
     }
 
@@ -177,9 +178,9 @@ class EventListenerDiscoveryPolicyTest {
     void should_report_unresolved_and_ambiguous_listeners_under_one_complete_diagnostic() {
         MethodTarget firstCandidate = resolvedTarget("a.java", "first", List.of(EVENT_TYPE));
         MethodTarget secondCandidate = resolvedTarget("b.java", "second", List.of(EVENT_TYPE));
-        MethodSignature unresolved = method(
+        SourceMethodMetadata unresolved = method(
                 "unresolved", MethodTargetResolution.unresolved("BINDING_UNAVAILABLE"), eventListener());
-        MethodSignature ambiguous = method("ambiguous", new MethodTargetResolution(
+        SourceMethodMetadata ambiguous = method("ambiguous", new MethodTargetResolution(
                 AnalysisTargetStatus.AMBIGUOUS, Optional.empty(), List.of(firstCandidate, secondCandidate),
                 "OVERLOAD_AMBIGUOUS"), eventListener());
         RepositorySyntax syntax = new RepositorySyntax(List.of(), List.of(
@@ -191,7 +192,7 @@ class EventListenerDiscoveryPolicyTest {
         assertThat(page.observations()).singleElement().satisfies(summary -> {
             assertThat(summary.code()).isEqualTo(ListenerObservationCode.LISTENER_TARGET_UNRESOLVED);
             assertThat(summary.totalCount()).isEqualTo(2);
-            assertThat(summary.sourceLocations()).extracting(ListenerSourceLocation::sourceFile)
+            assertThat(summary.declarationRanges()).extracting(SourceRange::sourceFile)
                     .containsExactly(
                             "module-a/src/main/java/com/acme/AmbiguousListener.java",
                             "module-b/src/main/java/com/acme/UnresolvedListener.java");
@@ -200,7 +201,7 @@ class EventListenerDiscoveryPolicyTest {
 
     @Test
     void should_fail_when_a_recognized_resolved_listener_target_has_a_different_source_file() {
-        MethodSignature method = method(
+        SourceMethodMetadata method = method(
                 "onOrder",
                 resolvedTarget("module-a/src/main/java/com/acme/OrderListeners.java", "onOrder", List.of("com.acme.OtherEvent")),
                 eventListener());
@@ -215,8 +216,8 @@ class EventListenerDiscoveryPolicyTest {
     @Test
     void should_require_candidate_annotation_evidence_and_matching_source_files() {
         MethodTarget target = resolvedTarget("events/OrderListeners.java", "onOrder", List.of(EVENT_TYPE));
-        ListenerSourceLocation matchingLocation = ListenerSourceLocation.from(target.sourceFile(), range());
-        ListenerSourceLocation mismatchedLocation = ListenerSourceLocation.from("events/Other.java", range());
+        SourceRange matchingLocation = new SourceRange(target.sourceFile(), range());
+        SourceRange mismatchedLocation = new SourceRange("events/Other.java", range());
 
         assertThatThrownBy(() -> new EventListenerCandidate(target, matchingLocation, List.of()))
                 .isInstanceOf(IllegalArgumentException.class);
@@ -233,7 +234,7 @@ class EventListenerDiscoveryPolicyTest {
         evidence.add(new ListenerAnnotationEvidence(
                 ListenerAnnotationKind.EVENT_LISTENER, AnnotationMatchKind.WRITTEN_NAME));
         EventListenerCandidate candidate = new EventListenerCandidate(
-                target, ListenerSourceLocation.from(target.sourceFile(), range()), evidence);
+                target, new SourceRange(target.sourceFile(), range()), evidence);
 
         evidence.clear();
 
@@ -252,7 +253,7 @@ class EventListenerDiscoveryPolicyTest {
 
         assertThat(page.observations()).singleElement().satisfies(summary -> {
             assertThat(summary.totalCount()).isEqualTo(6);
-            assertThat(summary.sourceLocations()).extracting(ListenerSourceLocation::sourceFile)
+            assertThat(summary.declarationRanges()).extracting(SourceRange::sourceFile)
                     .containsExactly("a.java", "b.java", "c.java", "d.java", "e.java");
         });
     }
@@ -262,45 +263,50 @@ class EventListenerDiscoveryPolicyTest {
     }
 
     private static AnnotationEvidence resolvedAnnotation(String writtenName, String packageName, String className) {
-        return new AnnotationEvidence(writtenName, Optional.of(new ResolvedTypeIdentity(packageName, className)));
+        return new AnnotationEvidence(writtenName, Optional.of(new JavaTypeIdentity(packageName, className)));
     }
 
     private static MethodTarget resolvedTarget(String sourceFile, String methodName, List<String> parameters) {
-        return new MethodTarget(sourceFile, "com.acme.events", "OrderListeners", methodName, parameters);
+        return new MethodTarget(
+                new SourceTypeIdentity(
+                        new JavaTypeIdentity("com.acme.events", "OrderListeners"),
+                        sourceFile),
+                methodName,
+                parameters);
     }
 
-    private static RepositorySyntax syntax(MethodSignature... methods) {
+    private static RepositorySyntax syntax(SourceMethodMetadata... methods) {
         return new RepositorySyntax(List.of(), Arrays.stream(methods)
                 .map(method -> metadata(method, sourceFileOf(method)))
                 .toList());
     }
 
-    private static ClassMetadata metadata(MethodSignature method, String sourceFile) {
-        return new ClassMetadata(
+    private static SourceTypeMetadata metadata(SourceMethodMetadata method, String sourceFile) {
+        return com.java.semantic.syntax.domain.SourceTypeMetadataFixture.sourceType(
                 "OrderListeners", "com.acme.events", "com.acme.events.OrderListeners",
-                sourceFile, TypeKind.CLASS, false, List.of(), List.of(), List.of(), List.of(),
+                sourceFile, SourceTypeKind.CLASS, false, List.of(), List.of(), List.of(), List.of(),
                 List.of(), List.of(method), false, false, List.of(), range(), new SourceSlice(range(), ""),
-                false, List.of(), List.of());
+                false, List.of());
     }
 
-    private static String sourceFileOf(MethodSignature method) {
+    private static String sourceFileOf(SourceMethodMetadata method) {
         return method.analysisTarget().target().map(MethodTarget::sourceFile).orElse(method.name() + ".java");
     }
 
-    private static MethodSignature method(String name, MethodTarget target, List<AnnotationEvidence> annotations) {
+    private static SourceMethodMetadata method(String name, MethodTarget target, List<AnnotationEvidence> annotations) {
         return method(name, MethodTargetResolution.resolved(target), annotations);
     }
 
-    private static MethodSignature method(
+    private static SourceMethodMetadata method(
             String name, MethodTargetResolution targetResolution, List<AnnotationEvidence> annotations) {
-        return new MethodSignature(name, List.of("DifferentReference"), List.of(), "", null, 3, 4,
+        return new SourceMethodMetadata(name, List.of("DifferentReference"), "", null, 3, 4,
                 range(), new SourceSlice(range(), ""),
-                List.of(new TypeReference(EVENT_TYPE, EVENT_TYPE, List.of(), false)), Optional.empty(), List.of(),
+                List.of(new NamedTypeReference(EVENT_TYPE, EVENT_TYPE, Optional.empty(), false)), Optional.empty(), List.of(),
                 annotations, List.of(), new SyntaxPosition(2, 4), targetResolution, true, false, false);
     }
 
-    private static MethodSignature unresolvedMethod(String name) {
-        return new MethodSignature(name, List.of(), List.of(), "", null, 3, 4,
+    private static SourceMethodMetadata unresolvedMethod(String name) {
+        return new SourceMethodMetadata(name, List.of(), "", null, 3, 4,
                 range(), new SourceSlice(range(), ""), List.of(), Optional.empty(), List.of(), eventListener(),
                 List.of(), new SyntaxPosition(2, 4), MethodTargetResolution.unresolved("BINDING_UNAVAILABLE"),
                 true, false, false);

@@ -19,15 +19,20 @@ import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException
 class MethodTargetTest {
 
     @Test
-    void should_preserve_repository_relative_source_and_parameter_list_independently_from_callers() {
+    void should_compose_java_type_and_source_identity_with_derived_method_projections() {
         List<String> parameterTypes = new ArrayList<>(List.of("java.lang.String"));
 
         MethodTarget target = new MethodTarget(
-                "module-a/src/main/java/com/example/Order.java",
-                "com.example", "Order", "submit", parameterTypes);
+                new SourceTypeIdentity(
+                        new JavaTypeIdentity("com.example", "Order"),
+                        "module-a/src/main/java/com/example/Order.java"),
+                "submit", parameterTypes);
         parameterTypes.add("int");
 
         assertThat(target.sourceFile()).isEqualTo("module-a/src/main/java/com/example/Order.java");
+        assertThat(target.packageName()).isEqualTo("com.example");
+        assertThat(target.className()).isEqualTo("Order");
+        assertThat(target.fullyQualifiedClassName()).isEqualTo("com.example.Order");
         assertThat(target.parameterTypes()).containsExactly("java.lang.String");
         assertThatThrownBy(() -> target.parameterTypes().add("long"))
                 .isInstanceOf(UnsupportedOperationException.class);
@@ -40,7 +45,8 @@ class MethodTargetTest {
                 "src/\u00A0Main.java", "src/\u2007Main.java", "src/\u202FMain.java");
 
         for (String invalidPath : invalidPaths) {
-            assertThatIllegalArgumentException().isThrownBy(() -> RepositoryRelativeSource.requireValid(invalidPath));
+            assertThatIllegalArgumentException().isThrownBy(() -> new SourceTypeIdentity(
+                    new JavaTypeIdentity("com.example", "Main"), invalidPath));
         }
     }
 
@@ -72,21 +78,42 @@ class MethodTargetTest {
 
     @Test
     void should_allow_default_package_but_reject_blank_method_target_members() {
-        assertThat(new MethodTarget("src/Main.java", "", "Main", "run", List.of())
+        assertThat(new MethodTarget(
+                new SourceTypeIdentity(
+                        new JavaTypeIdentity("", "Main"),
+                        "src/Main.java"),
+                "run",
+                List.of())
                 .packageName()).isEmpty();
 
         assertThatIllegalArgumentException().isThrownBy(() -> new MethodTarget(
-                "src/Main.java", "com.example", " ", "run", List.of()));
+                new SourceTypeIdentity(
+                        new JavaTypeIdentity("com.example", " "),
+                        "src/Main.java"),
+                "run",
+                List.of()));
         assertThatIllegalArgumentException().isThrownBy(() -> new MethodTarget(
-                "src/Main.java", "com.example", "Main", " ", List.of()));
+                new SourceTypeIdentity(
+                        new JavaTypeIdentity("com.example", "Main"),
+                        "src/Main.java"),
+                " ",
+                List.of()));
         assertThatIllegalArgumentException().isThrownBy(() -> new MethodTarget(
-                "src/Main.java", "com.example", "Main", "run", List.of(" ")));
+                new SourceTypeIdentity(
+                        new JavaTypeIdentity("com.example", "Main"),
+                        "src/Main.java"),
+                "run",
+                List.of(" ")));
     }
 
     @Test
     void should_accept_java_identifiers_for_nested_and_unicode_method_targets() {
         MethodTarget target = new MethodTarget(
-                "src/Outer.java", "com.example", "Outer.Inner", "方法", List.of());
+                new SourceTypeIdentity(
+                        new JavaTypeIdentity("com.example", "Outer.Inner"),
+                        "src/Outer.java"),
+                "方法",
+                List.of());
 
         assertThat(target.className()).isEqualTo("Outer.Inner");
         assertThat(target.methodName()).isEqualTo("方法");
@@ -95,27 +122,63 @@ class MethodTargetTest {
     @Test
     void should_reject_oversized_or_non_identifier_method_target_members() {
         assertThatIllegalArgumentException().isThrownBy(() -> new MethodTarget(
-                "a".repeat(1025), "com.example", "Main", "run", List.of()));
+                new SourceTypeIdentity(
+                        new JavaTypeIdentity("com.example", "Main"),
+                        "a".repeat(1025)),
+                "run",
+                List.of()));
         assertThatIllegalArgumentException().isThrownBy(() -> new MethodTarget(
-                "src/Main.java", "com.example", "Main\nForged", "run", List.of()));
+                new SourceTypeIdentity(
+                        new JavaTypeIdentity("com.example", "Main\nForged"),
+                        "src/Main.java"),
+                "run",
+                List.of()));
         assertThatIllegalArgumentException().isThrownBy(() -> new MethodTarget(
-                "src/Main.java", "com.example", "Main", "run\rForged", List.of()));
+                new SourceTypeIdentity(
+                        new JavaTypeIdentity("com.example", "Main"),
+                        "src/Main.java"),
+                "run\rForged",
+                List.of()));
         assertThatIllegalArgumentException().isThrownBy(() -> new MethodTarget(
-                "src/Main.java", "com.example", "Main\u0000Forged", "run", List.of()));
+                new SourceTypeIdentity(
+                        new JavaTypeIdentity("com.example", "Main\u0000Forged"),
+                        "src/Main.java"),
+                "run",
+                List.of()));
         assertThatIllegalArgumentException().isThrownBy(() -> new MethodTarget(
-                "src/Main.java", "com.example", "not-a-class", "run", List.of()));
+                new SourceTypeIdentity(
+                        new JavaTypeIdentity("com.example", "not-a-class"),
+                        "src/Main.java"),
+                "run",
+                List.of()));
         assertThatIllegalArgumentException().isThrownBy(() -> new MethodTarget(
-                "src/Main.java", "com.example", "Main", "1run", List.of()));
+                new SourceTypeIdentity(
+                        new JavaTypeIdentity("com.example", "Main"),
+                        "src/Main.java"),
+                "1run",
+                List.of()));
         assertThatIllegalArgumentException().isThrownBy(() -> new MethodTarget(
-                "src/Main.java", "com.example", "Main", "m".repeat(256), List.of()));
+                new SourceTypeIdentity(
+                        new JavaTypeIdentity("com.example", "Main"),
+                        "src/Main.java"),
+                "m".repeat(256),
+                List.of()));
     }
 
     @Test
     void should_defensively_copy_resolution_candidates_and_enforce_status_invariants() {
         MethodTarget first = new MethodTarget(
-                "module-a/src/Main.java", "example", "Main", "run", List.of());
+                new SourceTypeIdentity(
+                        new JavaTypeIdentity("example", "Main"),
+                        "module-a/src/Main.java"),
+                "run",
+                List.of());
         MethodTarget second = new MethodTarget(
-                "module-b/src/Main.java", "example", "Main", "run", List.of());
+                new SourceTypeIdentity(
+                        new JavaTypeIdentity("example", "Main"),
+                        "module-b/src/Main.java"),
+                "run",
+                List.of());
         List<MethodTarget> candidates = new ArrayList<>(List.of(first, second));
 
         MethodTargetResolution resolution = new MethodTargetResolution(
@@ -133,7 +196,11 @@ class MethodTargetTest {
     @Test
     void should_reject_ambiguous_resolution_when_candidates_repeat_the_same_target() {
         MethodTarget target = new MethodTarget(
-                "module-a/src/Main.java", "example", "Main", "run", List.of());
+                new SourceTypeIdentity(
+                        new JavaTypeIdentity("example", "Main"),
+                        "module-a/src/Main.java"),
+                "run",
+                List.of());
 
         assertThatIllegalArgumentException().isThrownBy(() -> new MethodTargetResolution(
                 AnalysisTargetStatus.AMBIGUOUS, Optional.empty(), List.of(target, target), "DUPLICATE_DECLARATION"));
@@ -142,9 +209,17 @@ class MethodTargetTest {
     @Test
     void should_reject_ambiguous_resolution_when_any_candidate_is_duplicated() {
         MethodTarget first = new MethodTarget(
-                "module-a/src/Main.java", "example", "Main", "run", List.of());
+                new SourceTypeIdentity(
+                        new JavaTypeIdentity("example", "Main"),
+                        "module-a/src/Main.java"),
+                "run",
+                List.of());
         MethodTarget second = new MethodTarget(
-                "module-b/src/Main.java", "example", "Main", "run", List.of());
+                new SourceTypeIdentity(
+                        new JavaTypeIdentity("example", "Main"),
+                        "module-b/src/Main.java"),
+                "run",
+                List.of());
 
         assertThatIllegalArgumentException().isThrownBy(() -> new MethodTargetResolution(
                 AnalysisTargetStatus.AMBIGUOUS, Optional.empty(), List.of(first, second, first),

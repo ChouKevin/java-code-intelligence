@@ -3,8 +3,6 @@ package com.java.semantic.syntax.domain;
 import java.util.Objects;
 import java.util.Optional;
 
-import org.springframework.util.Assert;
-
 /** 一個呼叫位置的原始語法證據 */
 public record SyntaxInvocation(
         InvocationKind kind,
@@ -19,7 +17,7 @@ public record SyntaxInvocation(
     public SyntaxInvocation {
         Objects.requireNonNull(kind, "kind is required");
         Objects.requireNonNull(range, "range is required");
-        Assert.hasText(expression, "expression is required");
+        require(hasText(expression), "expression is required");
         receiver = Objects.requireNonNullElse(receiver, "");
         receiverDeclaration = Objects.requireNonNullElse(receiverDeclaration, "");
         qualifier = Objects.requireNonNullElse(qualifier, "");
@@ -34,5 +32,15 @@ public record SyntaxInvocation(
         LAMBDA,
         METHOD_REFERENCE,
         STATIC_IMPORT
+    }
+
+    private static boolean hasText(String value) {
+        return !Objects.requireNonNullElse(value, "").isBlank();
+    }
+
+    private static void require(boolean condition, String message) {
+        if (!condition) {
+            throw new IllegalArgumentException(message);
+        }
     }
 }

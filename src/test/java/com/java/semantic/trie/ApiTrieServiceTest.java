@@ -7,7 +7,9 @@ import com.java.semantic.repository.domain.RepositoryId;
 import com.java.semantic.repository.domain.RepositoryRevision;
 import com.java.semantic.repository.domain.RepositorySnapshot;
 import com.java.semantic.support.ConcurrencyTestSupport;
+import com.java.semantic.identity.JavaTypeIdentity;
 import com.java.semantic.identity.MethodTarget;
+import com.java.semantic.identity.SourceTypeIdentity;
 import com.java.semantic.syntax.domain.ApiEntryPoint;
 import com.java.semantic.syntax.domain.EntryPointClass;
 import com.java.semantic.syntax.domain.EntryPointMethod;
@@ -281,15 +283,15 @@ class ApiTrieServiceTest {
     @Test
     void should_choose_the_same_complete_resolved_target_when_tied_route_display_fields_reverse() {
         MethodTarget smallerTarget = new MethodTarget(
-                "src/main/java/com/example/a/OrderHandler.java",
-                "com.example.a",
-                "OrderHandler",
+                new SourceTypeIdentity(
+                        new JavaTypeIdentity("com.example.a", "OrderHandler"),
+                        "src/main/java/com/example/a/OrderHandler.java"),
                 "handle",
                 List.of("java.lang.Integer"));
         MethodTarget largerTarget = new MethodTarget(
-                "src/main/java/com/example/z/OrderHandler.java",
-                "com.example.z",
-                "OrderHandler",
+                new SourceTypeIdentity(
+                        new JavaTypeIdentity("com.example.z", "OrderHandler"),
+                        "src/main/java/com/example/z/OrderHandler.java"),
                 "handle",
                 List.of("java.lang.String"));
         EntryPointClass smaller = route(
@@ -509,7 +511,11 @@ class ApiTrieServiceTest {
     @Test
     void should_preserve_the_exact_api_entry_point_resolution_in_the_trie_reference() {
         MethodTargetResolution resolution = MethodTargetResolution.resolved(new MethodTarget(
-                "src/main/java/com/example/Controller.java", "com.example", "Controller", "handler", List.of()));
+                new SourceTypeIdentity(
+                        new JavaTypeIdentity("com.example", "Controller"),
+                        "src/main/java/com/example/Controller.java"),
+                "handler",
+                List.of()));
         EntryPointClass entryPointClass = route("Controller", "handler", "GET", "/route", resolution);
         ApiTrieService service = new ApiTrieService();
 
@@ -589,9 +595,9 @@ class ApiTrieServiceTest {
 
     private static MethodTargetResolution resolvedTarget(String packageName, String className, String methodName) {
         return MethodTargetResolution.resolved(new MethodTarget(
-                "src/main/java/" + packageName.replace('.', '/') + "/" + className + ".java",
-                packageName,
-                className,
+                new SourceTypeIdentity(
+                        new JavaTypeIdentity(packageName, className),
+                        "src/main/java/" + packageName.replace('.', '/') + "/" + className + ".java"),
                 methodName,
                 List.of()));
     }

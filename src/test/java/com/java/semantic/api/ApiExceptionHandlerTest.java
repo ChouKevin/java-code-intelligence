@@ -2,7 +2,9 @@ package com.java.semantic.api;
 
 import com.java.semantic.api.dto.ApiErrorResponse;
 import com.java.semantic.api.dto.MethodTargetResponse;
+import com.java.semantic.identity.JavaTypeIdentity;
 import com.java.semantic.identity.MethodTarget;
+import com.java.semantic.identity.SourceTypeIdentity;
 import com.java.semantic.semantic.domain.SemanticBindingAmbiguousException;
 import com.java.semantic.semantic.domain.SemanticBindingUnresolvedException;
 import com.java.semantic.semantic.domain.SemanticProtocolException;
@@ -91,6 +93,11 @@ class ApiExceptionHandlerTest {
     }
 
     private static MethodTarget target(String className, String methodName) {
-        return new MethodTarget(className + ".java", "com.example", className, methodName, List.of());
+        return new MethodTarget(
+                new SourceTypeIdentity(
+                        new JavaTypeIdentity("com.example", className),
+                        className + ".java"),
+                methodName,
+                List.of());
     }
 }

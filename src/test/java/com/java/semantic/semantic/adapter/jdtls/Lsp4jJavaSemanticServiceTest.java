@@ -3,7 +3,9 @@ package com.java.semantic.semantic.adapter.jdtls;
 import com.java.semantic.repository.domain.RepositoryId;
 import com.java.semantic.repository.domain.RepositoryRevision;
 import com.java.semantic.repository.domain.RepositorySnapshot;
+import com.java.semantic.identity.JavaTypeIdentity;
 import com.java.semantic.identity.MethodTarget;
+import com.java.semantic.identity.SourceTypeIdentity;
 import com.java.semantic.semantic.domain.SemanticAmbiguousTypeException;
 import com.java.semantic.semantic.domain.SemanticCall;
 import com.java.semantic.semantic.domain.SemanticCallResolution;
@@ -309,9 +311,9 @@ class Lsp4jJavaSemanticServiceTest {
             throws IOException {
         String uri = sourceFile("OrderCrudService");
         MethodTarget target = new MethodTarget(
-                "src/main/java/com/example/generic/OrderCrudService.java",
-                PACKAGE,
-                "OrderCrudService",
+                new SourceTypeIdentity(
+                        new JavaTypeIdentity(PACKAGE, "OrderCrudService"),
+                        "src/main/java/com/example/generic/OrderCrudService.java"),
                 "processOrder",
                 List.of("com.example.Order"));
         SemanticDeclarationAnchor anchor = new SemanticDeclarationAnchor(

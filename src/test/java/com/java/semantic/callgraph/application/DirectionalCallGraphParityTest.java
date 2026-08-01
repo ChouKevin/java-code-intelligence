@@ -1,7 +1,11 @@
 package com.java.semantic.callgraph.application;
 
+import com.java.semantic.syntax.domain.SourceTypeKind;
+
 import com.java.semantic.callgraph.domain.GraphEdge;
+import com.java.semantic.identity.JavaTypeIdentity;
 import com.java.semantic.identity.MethodTarget;
+import com.java.semantic.identity.SourceTypeIdentity;
 import com.java.semantic.repository.domain.RepositoryId;
 import com.java.semantic.repository.domain.RepositoryRevision;
 import com.java.semantic.repository.domain.RepositorySnapshot;
@@ -17,8 +21,8 @@ import com.java.semantic.semantic.domain.SemanticMethod;
 import com.java.semantic.semantic.domain.SemanticPosition;
 import com.java.semantic.semantic.domain.SemanticRange;
 import com.java.semantic.semantic.domain.SemanticResolutionOrigin;
-import com.java.semantic.syntax.domain.ClassMetadata;
-import com.java.semantic.syntax.domain.ClassMetadata.MethodSignature;
+import com.java.semantic.syntax.domain.SourceTypeMetadata;
+import com.java.semantic.syntax.domain.SourceMethodMetadata;
 import com.java.semantic.syntax.domain.MethodTargetResolution;
 import com.java.semantic.syntax.domain.RepositorySyntax;
 import com.java.semantic.syntax.domain.SourceSlice;
@@ -44,9 +48,24 @@ class DirectionalCallGraphParityTest {
 
     @Test
     void should_match_the_outgoing_edge_for_the_selected_overload() {
-        MethodTarget callerTarget = new MethodTarget("Caller.java", "com.example", "Caller", "run", List.of());
-        MethodTarget stringTarget = new MethodTarget("Target.java", "com.example", "Target", "work", List.of("java.lang.String"));
-        MethodTarget intTarget = new MethodTarget("Target.java", "com.example", "Target", "work", List.of("int"));
+        MethodTarget callerTarget = new MethodTarget(
+                new SourceTypeIdentity(
+                        new JavaTypeIdentity("com.example", "Caller"),
+                        "Caller.java"),
+                "run",
+                List.of());
+        MethodTarget stringTarget = new MethodTarget(
+                new SourceTypeIdentity(
+                        new JavaTypeIdentity("com.example", "Target"),
+                        "Target.java"),
+                "work",
+                List.of("java.lang.String"));
+        MethodTarget intTarget = new MethodTarget(
+                new SourceTypeIdentity(
+                        new JavaTypeIdentity("com.example", "Target"),
+                        "Target.java"),
+                "work",
+                List.of("int"));
         SemanticMethod caller = incomingMethod(callerTarget, 0);
         SemanticMethod stringTargetMethod = incomingMethod(stringTarget, 10);
         SemanticRange callSite = new SemanticRange(new SemanticPosition(2, 0), new SemanticPosition(2, 4));
@@ -82,16 +101,16 @@ class DirectionalCallGraphParityTest {
                 + "#" + target.methodName() + target.parameterTypes();
     }
 
-    private static ClassMetadata type(MethodTarget target, List<SyntaxInvocation> invocations) {
+    private static SourceTypeMetadata type(MethodTarget target, List<SyntaxInvocation> invocations) {
         SyntaxRange range = new SyntaxRange(new SyntaxPosition(0, 0), new SyntaxPosition(20, 0));
-        MethodSignature method = new MethodSignature(
-                target.methodName(), target.parameterTypes(), List.of(), null, null, 1, 6,
+        SourceMethodMetadata method = new SourceMethodMetadata(
+                target.methodName(), target.parameterTypes(), null, null, 1, 6,
                 range, new SourceSlice(range, "void " + target.methodName() + "() {}"), List.<TypeReference>of(),
                 Optional.empty(), invocations, List.of(), List.of(), range.start(),
                 MethodTargetResolution.resolved(target), true, false, true);
-        return new ClassMetadata(
+        return com.java.semantic.syntax.domain.SourceTypeMetadataFixture.sourceType(
                 target.className(), target.packageName(), target.packageName() + "." + target.className(),
-                target.sourceFile(), ClassMetadata.TypeKind.CLASS, false,
+                target.sourceFile(), SourceTypeKind.CLASS, false,
                 List.of(), List.of(), List.of(), List.of(), List.of(), List.of(method), false, false, List.of(), range,
                 new SourceSlice(range, "class " + target.className() + " {}"), false, List.of());
     }

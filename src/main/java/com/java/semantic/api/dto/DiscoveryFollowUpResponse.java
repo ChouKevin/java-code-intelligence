@@ -1,5 +1,6 @@
 package com.java.semantic.api.dto;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
 import com.java.semantic.api.monitoring.ApiMonitoringField;
 import com.java.semantic.api.monitoring.ApiMonitoringMode;
 
@@ -34,7 +35,8 @@ public record DiscoveryFollowUpResponse(
             DiscoverMethodImplementationsRequestResponse,
             DiscoverConceptsRequestResponse,
             GetTypeMembersRequestResponse,
-            DiscoverTypeMembersRequestResponse {
+            DiscoverTypeMembersRequestResponse,
+            ResolveSourceSymbolRequestResponse {
     }
 
     /** exact method source 後續動作的完整請求 */
@@ -203,6 +205,48 @@ public record DiscoveryFollowUpResponse(
             memberKinds = List.copyOf(Objects.requireNonNull(
                     memberKinds, "memberKinds are required"));
             namePrefix = Objects.requireNonNull(namePrefix, "namePrefix is required");
+        }
+    }
+
+    /** source-symbol retry 的 method context projection */
+    public record SourceSymbolMethodContextResponse(
+            @ApiMonitoringField(ApiMonitoringMode.VALUE) String name,
+            @JsonInclude(JsonInclude.Include.NON_ABSENT)
+            @ApiMonitoringField(ApiMonitoringMode.OMIT) Optional<List<String>> parameterTypes) {
+
+        public SourceSymbolMethodContextResponse {
+            parameterTypes = Objects.requireNonNull(parameterTypes, "parameterTypes is required")
+                    .map(List::copyOf);
+        }
+    }
+
+    /** source-symbol retry 的 source type 與 optional method selector */
+    public record SourceSymbolContextResponse(
+            @ApiMonitoringField(ApiMonitoringMode.VALUE) String type,
+            @JsonInclude(JsonInclude.Include.NON_ABSENT)
+            @ApiMonitoringField(ApiMonitoringMode.VALUE) Optional<String> sourceFile,
+            @JsonInclude(JsonInclude.Include.NON_ABSENT)
+            @ApiMonitoringField(ApiMonitoringMode.NESTED) Optional<SourceSymbolMethodContextResponse> method) {
+
+        public SourceSymbolContextResponse {
+            sourceFile = Objects.requireNonNull(sourceFile, "sourceFile is required");
+            method = Objects.requireNonNull(method, "method is required");
+        }
+    }
+
+    /** RESOLVE_SOURCE_SYMBOL 後續動作的完整請求 */
+    public record ResolveSourceSymbolRequestResponse(
+            @ApiMonitoringField(ApiMonitoringMode.VALUE) String repoId,
+            @ApiMonitoringField(ApiMonitoringMode.VALUE) String expectedRevision,
+            @ApiMonitoringField(ApiMonitoringMode.NESTED) SourceSymbolContextResponse context,
+            @ApiMonitoringField(ApiMonitoringMode.VALUE) String symbol,
+            @JsonInclude(JsonInclude.Include.NON_ABSENT)
+            @ApiMonitoringField(ApiMonitoringMode.NESTED) Optional<PositionResponse> position)
+            implements RequestResponse {
+
+        public ResolveSourceSymbolRequestResponse {
+            context = Objects.requireNonNull(context, "context is required");
+            position = Objects.requireNonNull(position, "position is required");
         }
     }
 }

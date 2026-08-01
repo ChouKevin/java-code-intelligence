@@ -5,7 +5,6 @@ import com.java.semantic.api.monitoring.ApiMonitoringMode;
 
 import com.fasterxml.jackson.annotation.JsonAnySetter;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
-import com.java.semantic.identity.MethodTarget;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
@@ -38,10 +37,6 @@ public record MethodTargetRequest(
     public MethodTargetRequest {
         packageName = Objects.requireNonNull(packageName, "packageName is required");
         parameterTypes = List.copyOf(Objects.requireNonNull(parameterTypes, "parameterTypes are required"));
-    }
-
-    public MethodTarget toDomain() {
-        return new MethodTarget(sourceFile, packageName, className, methodName, parameterTypes);
     }
 
     @JsonAnySetter

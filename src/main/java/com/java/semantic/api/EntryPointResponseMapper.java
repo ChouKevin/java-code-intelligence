@@ -5,7 +5,6 @@ import com.java.semantic.api.dto.EntryPointClassResponse;
 import com.java.semantic.api.dto.EntryPointMethodResponse;
 import com.java.semantic.api.dto.EntryPointsResponse;
 import com.java.semantic.api.dto.MethodTargetResolutionResponse;
-import com.java.semantic.api.dto.MethodTargetResponse;
 import com.java.semantic.api.dto.MqEntryPointMethodResponse;
 import com.java.semantic.api.dto.ScheduleEntryPointMethodResponse;
 import com.java.semantic.identity.MethodTarget;
@@ -82,7 +81,7 @@ public final class EntryPointResponseMapper {
         return switch (resolution.status()) {
             case RESOLVED -> new MethodTargetResolutionResponse(
                     resolution.status().name(),
-                    targetResponse(resolution.target().orElseThrow()),
+                    MethodTargetHttpMapper.toResponse(resolution.target().orElseThrow()),
                     List.of(),
                     resolution.reasonCode());
             case UNRESOLVED -> new MethodTargetResolutionResponse(
@@ -93,7 +92,7 @@ public final class EntryPointResponseMapper {
             case AMBIGUOUS -> new MethodTargetResolutionResponse(
                     resolution.status().name(),
                     null,
-                    resolution.candidates().stream().sorted(METHOD_TARGET_COMPARATOR).map(EntryPointResponseMapper::targetResponse)
+                    resolution.candidates().stream().sorted(METHOD_TARGET_COMPARATOR).map(MethodTargetHttpMapper::toResponse)
                             .toList(),
                     resolution.reasonCode());
         };
@@ -105,15 +104,6 @@ public final class EntryPointResponseMapper {
             .thenComparing(MethodTarget::className)
             .thenComparing(MethodTarget::methodName)
             .thenComparing(MethodTarget::parameterTypes, EntryPointResponseMapper::compareParameterTypes);
-
-    private static MethodTargetResponse targetResponse(MethodTarget target) {
-        return new MethodTargetResponse(
-                target.sourceFile(),
-                target.packageName(),
-                target.className(),
-                target.methodName(),
-                target.parameterTypes());
-    }
 
     private static int compareParameterTypes(List<String> left, List<String> right) {
         int length = Math.min(left.size(), right.size());

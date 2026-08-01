@@ -1,12 +1,16 @@
 package com.java.semantic.semantic.application;
 
+import com.java.semantic.syntax.domain.SourceMethodMetadata;
+
 import com.java.semantic.callgraph.application.IncomingSemanticCallGraphBuilder;
 import com.java.semantic.callgraph.application.SemanticCallGraphBuilder;
 import com.java.semantic.callgraph.domain.IncomingGraphFragment;
 import com.java.semantic.config.IncomingGraphProperties;
 import com.java.semantic.callgraph.domain.OutgoingGraphFragment;
 import com.java.semantic.config.OutgoingGraphProperties;
+import com.java.semantic.identity.JavaTypeIdentity;
 import com.java.semantic.identity.MethodTarget;
+import com.java.semantic.identity.SourceTypeIdentity;
 import com.java.semantic.repository.application.RepositoryApplicationService;
 import com.java.semantic.repository.domain.RepositoryId;
 import com.java.semantic.repository.domain.RepositoryRevision;
@@ -17,7 +21,8 @@ import com.java.semantic.semantic.domain.SemanticMethod;
 import com.java.semantic.semantic.domain.SemanticPosition;
 import com.java.semantic.semantic.domain.SemanticRange;
 import com.java.semantic.syntax.domain.CanonicalMethodDeclarationResolver;
-import com.java.semantic.syntax.domain.ClassMetadata;
+import com.java.semantic.syntax.domain.SourceTypeMetadata;
+import com.java.semantic.syntax.domain.SourceTypeMetadataFixture;
 import com.java.semantic.syntax.domain.MethodTargetResolution;
 import com.java.semantic.syntax.domain.RepositorySyntax;
 import com.java.semantic.syntax.domain.SyntaxExtractionService;
@@ -167,7 +172,12 @@ class SemanticAnalysisConcurrencyTest {
     }
 
     private static MethodTarget target(String sourceFile, String className) {
-        return new MethodTarget(sourceFile, "com.example", className, "run", List.of());
+        return new MethodTarget(
+                new SourceTypeIdentity(
+                        new JavaTypeIdentity("com.example", className),
+                        sourceFile),
+                "run",
+                List.of());
     }
 
     private static SemanticMethod method(MethodTarget target, String root) {
@@ -178,10 +188,9 @@ class SemanticAnalysisConcurrencyTest {
 
     private static RepositorySyntax syntax(MethodTarget target) {
         RepositorySyntax syntax = mock(RepositorySyntax.class);
-        ClassMetadata metadata = mock(ClassMetadata.class);
-        ClassMetadata.MethodSignature method = mock(ClassMetadata.MethodSignature.class);
-        when(syntax.classes()).thenReturn(List.of(metadata));
-        when(metadata.methods()).thenReturn(List.of(method));
+        SourceMethodMetadata method = mock(SourceMethodMetadata.class);
+        SourceTypeMetadata metadata = SourceTypeMetadataFixture.sourceType(target, List.of(method));
+        when(syntax.sourceTypes()).thenReturn(List.of(metadata));
         when(method.analysisTarget()).thenReturn(MethodTargetResolution.resolved(target));
         when(method.namePosition()).thenReturn(new SyntaxPosition(0, 0));
         return syntax;

@@ -4,7 +4,9 @@ import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
+import com.java.semantic.identity.JavaTypeIdentity;
 import com.java.semantic.identity.MethodTarget;
+import com.java.semantic.identity.SourceTypeIdentity;
 import com.java.semantic.repository.config.RepositoryProperties;
 import com.java.semantic.repository.domain.RepositoryId;
 import com.java.semantic.repository.domain.RepositoryMode;
@@ -349,16 +351,20 @@ class RepositoryConcurrencyTest {
         DefaultRepositoryApplicationService service = service(new FakeGitRepositoryPort(), Duration.ofMillis(100));
         service.ensure(REPOSITORY_ID);
         MethodTarget target = new MethodTarget(
-                "OrderService.java", "com.example", "OrderService", "placeOrder", List.of());
+                new SourceTypeIdentity(
+                        new JavaTypeIdentity("com.example", "OrderService"),
+                        "OrderService.java"),
+                "placeOrder",
+                List.of());
         List<RuntimeException> expectedFailures = List.of(
                 new SemanticBindingAmbiguousException(target, List.of(
                         target,
                         new MethodTarget(
-                                "AlternativeOrderService.java",
-                                "com.example",
-                                "AlternativeOrderService",
-                                "placeOrder",
-                                List.of()))),
+                new SourceTypeIdentity(
+                        new JavaTypeIdentity("com.example", "AlternativeOrderService"),
+                        "AlternativeOrderService.java"),
+                "placeOrder",
+                List.of()))),
                 new SemanticBindingUnresolvedException(target),
                 new SemanticRequestTimeoutException(),
                 new SemanticTargetNotFoundException(target));

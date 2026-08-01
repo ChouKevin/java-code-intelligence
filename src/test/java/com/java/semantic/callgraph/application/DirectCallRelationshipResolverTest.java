@@ -17,8 +17,9 @@ import com.java.semantic.semantic.domain.SemanticMethod;
 import com.java.semantic.semantic.domain.SemanticPosition;
 import com.java.semantic.semantic.domain.SemanticRange;
 import com.java.semantic.semantic.domain.SemanticResolutionOrigin;
-import com.java.semantic.syntax.domain.ClassMetadata;
-import com.java.semantic.syntax.domain.ClassMetadata.MethodSignature;
+import com.java.semantic.syntax.domain.SourceTypeMetadata;
+import com.java.semantic.syntax.domain.SourceMethodMetadata;
+import com.java.semantic.syntax.domain.SourceTypeKind;
 import com.java.semantic.syntax.domain.MethodTargetResolution;
 import com.java.semantic.syntax.domain.RepositorySyntax;
 import com.java.semantic.syntax.domain.SourceSlice;
@@ -450,40 +451,40 @@ class DirectCallRelationshipResolverTest {
                 semanticService, new SpringImplementationSelector(), new CanonicalTargetProjection());
     }
 
-    private static RepositorySyntaxIndex index(ClassMetadata... types) {
+    private static RepositorySyntaxIndex index(SourceTypeMetadata... types) {
         return new RepositorySyntaxIndex(SNAPSHOT.repositoryId().value(), new RepositorySyntax(List.of(), List.of(types)));
     }
 
-    private static ClassMetadata type(MethodTarget target) {
-        return type(target, ClassMetadata.TypeKind.CLASS, true, List.of(), List.of());
+    private static SourceTypeMetadata type(MethodTarget target) {
+        return type(target, SourceTypeKind.CLASS, true, List.of(), List.of());
     }
 
-    private static ClassMetadata type(MethodTarget target, List<SyntaxInvocation> invocations) {
-        return type(target, ClassMetadata.TypeKind.CLASS, true, invocations, List.of());
+    private static SourceTypeMetadata type(MethodTarget target, List<SyntaxInvocation> invocations) {
+        return type(target, SourceTypeKind.CLASS, true, invocations, List.of());
     }
 
-    private static ClassMetadata interfaceType(MethodTarget target) {
-        return type(target, ClassMetadata.TypeKind.INTERFACE, false, List.of(), List.of());
+    private static SourceTypeMetadata interfaceType(MethodTarget target) {
+        return type(target, SourceTypeKind.INTERFACE, false, List.of(), List.of());
     }
 
-    private static ClassMetadata qualifiedType(MethodTarget target, String qualifier) {
-        return type(target, ClassMetadata.TypeKind.CLASS, true, List.of(), List.of(qualifier));
+    private static SourceTypeMetadata qualifiedType(MethodTarget target, String qualifier) {
+        return type(target, SourceTypeKind.CLASS, true, List.of(), List.of(qualifier));
     }
 
-    private static ClassMetadata type(
+    private static SourceTypeMetadata type(
             MethodTarget target,
-            ClassMetadata.TypeKind kind,
+            SourceTypeKind kind,
             boolean executableDeclaration,
             List<SyntaxInvocation> invocations,
             List<String> beanQualifiers) {
         SyntaxRange range = range(0, 0, 30, 0);
         SyntaxRange methodRange = range(0, 0, 5, 0);
-        MethodSignature method = new MethodSignature(
-                target.methodName(), target.parameterTypes(), List.of(), null, null, 1, 6,
+        SourceMethodMetadata method = new SourceMethodMetadata(
+                target.methodName(), target.parameterTypes(), null, null, 1, 6,
                 methodRange, new SourceSlice(methodRange, "void " + target.methodName() + "() {}"),
                 List.<TypeReference>of(), Optional.empty(), invocations, List.of(), List.of(), methodRange.start(),
                 MethodTargetResolution.resolved(target), executableDeclaration, !executableDeclaration, true);
-        return new ClassMetadata(
+        return com.java.semantic.syntax.domain.SourceTypeMetadataFixture.sourceType(
                 target.className(), target.packageName(), target.packageName() + "." + target.className(),
                 target.sourceFile(), kind, false, List.of(), List.of(), List.of(), List.of(), List.of(),
                 List.of(method), false, false, List.of(), range,

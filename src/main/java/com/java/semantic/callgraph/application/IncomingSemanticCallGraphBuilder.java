@@ -24,8 +24,9 @@ import com.java.semantic.semantic.domain.SemanticMethod;
 import com.java.semantic.semantic.domain.SemanticPosition;
 import com.java.semantic.semantic.domain.SemanticProtocolException;
 import com.java.semantic.semantic.domain.SemanticRange;
-import com.java.semantic.syntax.domain.ClassMetadata;
-import com.java.semantic.syntax.domain.ClassMetadata.MethodSignature;
+import com.java.semantic.syntax.domain.AnnotationEvidence;
+import com.java.semantic.syntax.domain.SourceMethodMetadata;
+import com.java.semantic.syntax.domain.SourceTypeMetadata;
 import com.java.semantic.syntax.domain.RepositorySyntax;
 import org.springframework.util.Assert;
 import org.springframework.util.CollectionUtils;
@@ -274,8 +275,8 @@ public final class IncomingSemanticCallGraphBuilder {
 
     private Optional<EvidenceMatch> opaqueDataAccessRelabelingEvidence(
             RepositorySyntaxIndex index, MethodTarget calleeTarget) {
-        Optional<ClassMetadata> declaringType = index.classMetadata(calleeTarget);
-        Optional<MethodSignature> declaredMethod = index.method(calleeTarget);
+        Optional<SourceTypeMetadata> declaringType = index.sourceType(calleeTarget);
+        Optional<SourceMethodMetadata> declaredMethod = index.method(calleeTarget);
         if (declaringType.isEmpty() || declaredMethod.isEmpty()) {
             return Optional.empty();
         }
@@ -676,7 +677,7 @@ public final class IncomingSemanticCallGraphBuilder {
                             nodeId, Optional.of(target), "", contentState, traversalState,
                             dispatchKind(index), Optional.empty(), Optional.empty());
                 }
-                MethodSignature method = index.method(target).orElseThrow();
+                SourceMethodMetadata method = index.method(target).orElseThrow();
                 CallSiteRange range = new CallSiteRange(
                         target.sourceFile(),
                         method.range().start().line(),
@@ -696,7 +697,9 @@ public final class IncomingSemanticCallGraphBuilder {
 
             private DispatchKind dispatchKind(RepositorySyntaxIndex index) {
                 return index.method(target)
-                        .filter(method -> method.annotations().contains("Async"))
+                        .filter(method -> method.annotationEvidence().stream()
+                                .map(AnnotationEvidence::writtenName)
+                                .anyMatch("Async"::equals))
                         .map(ignored -> DispatchKind.ASYNC)
                         .orElse(DispatchKind.SYNCHRONOUS);
             }

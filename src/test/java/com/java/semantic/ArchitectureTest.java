@@ -1,13 +1,17 @@
 package com.java.semantic;
 
+import com.java.semantic.api.MethodTargetHttpMapper;
+import com.java.semantic.api.dto.MethodTargetResponse;
 import com.java.semantic.repository.application.RepositoryApplicationService;
 import com.java.semantic.repository.domain.RepositoryId;
 import com.java.semantic.api.monitoring.ApiMonitoringField;
 import com.java.semantic.syntax.application.ConceptDiscoveryApplicationService;
 import com.java.semantic.syntax.application.ExactContentApplicationService;
+import com.java.semantic.syntax.application.SourceSymbolResolutionApplicationService;
 import com.java.semantic.syntax.application.TypeMemberDiscoveryApplicationService;
 import com.tngtech.archunit.core.domain.JavaClass;
 import com.tngtech.archunit.core.domain.JavaClasses;
+import com.tngtech.archunit.base.DescribedPredicate;
 import com.tngtech.archunit.core.importer.ClassFileImporter;
 import com.tngtech.archunit.core.importer.ImportOption;
 import org.junit.jupiter.api.BeforeAll;
@@ -17,9 +21,11 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.lang.reflect.RecordComponent;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.function.Function;
 
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.classes;
@@ -27,6 +33,39 @@ import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
 import static org.assertj.core.api.Assertions.assertThat;
 
 class ArchitectureTest {
+
+    private static final String SYNTAX_APPLICATION_PACKAGE = "com.java.semantic.syntax.application";
+
+    private static final Set<String> SOURCE_SYMBOL_APPLICATION_CONTRACT_NAMES = Set.of(
+            "SourceSymbolCandidate",
+            "VariableLike",
+            "StaticConstant",
+            "Method",
+            "SourceType",
+            "SourceContextCandidate",
+            "SourceTypeContextCandidate",
+            "SourceMethodContextCandidate",
+            "SourceSymbolResolution",
+            "SourceSymbolResolutionQuery",
+            "SourceSymbolResolver",
+            "SourceSymbolContext",
+            "SourceSymbolIssueCode",
+            "SourceSymbolIssueSummary",
+            "SourceSymbolKind",
+            "SourceSymbolResolutionStatus",
+            "SourceContextCandidateLimits",
+            "NavigableSourceSymbolCandidate",
+            "NavigableSourceContextCandidate",
+            "RevisionBoundSourceSymbolResolution");
+
+    private static final DescribedPredicate<JavaClass> SOURCE_SYMBOL_APPLICATION_CONTRACT =
+            new DescribedPredicate<>("source-symbol application contract") {
+                @Override
+                public boolean test(JavaClass javaClass) {
+                    return SYNTAX_APPLICATION_PACKAGE.equals(javaClass.getPackageName())
+                            && SOURCE_SYMBOL_APPLICATION_CONTRACT_NAMES.contains(javaClass.getSimpleName());
+                }
+            };
 
     private static JavaClasses classes;
 
@@ -56,6 +95,55 @@ class ArchitectureTest {
                 .as("no Path/File/URI may cross the HTTP API")
                 .allowEmptyShould(false)
                 .check(classes);
+    }
+
+    @Test
+    void should_keep_the_source_identity_model_jdk_only() {
+        noClasses()
+                .that().resideInAPackage("..identity..")
+                .should().dependOnClassesThat().resideOutsideOfPackages("java..", "com.java.semantic.identity..")
+                .as("the source identity model must remain JDK-only")
+                .allowEmptyShould(false)
+                .check(classes);
+    }
+
+    @Test
+    void should_keep_source_member_identity_in_the_syntax_domain() {
+        classes()
+                .that().haveSimpleName("SourceMemberIdentity")
+                .should().resideInAPackage("..syntax.domain..")
+                .as("source member identity belongs to syntax-domain source semantics")
+                .allowEmptyShould(false)
+                .check(classes);
+    }
+
+    @Test
+    void should_keep_legacy_identity_types_and_flat_constructors_absent() {
+        List<String> classNames = classes.stream().map(JavaClass::getName).toList();
+        assertThat(classNames).doesNotContain(
+                "com.java.semantic.syntax.domain.ClassMetadata",
+                "com.java.semantic.syntax.domain.ResolvedTypeIdentity",
+                "com.java.semantic.identity.PolicyIdentity",
+                "com.java.semantic.identity.SourceMemberIdentity");
+
+        assertThat(loadClass("com.java.semantic.identity.MethodTarget").getConstructors())
+                .noneMatch(constructor -> Arrays.equals(constructor.getParameterTypes(), new Class<?>[]{
+                        String.class, String.class, String.class, String.class, List.class}));
+        assertThat(loadClass("com.java.semantic.identity.SourceTypeIdentity").getConstructors())
+                .noneMatch(constructor -> Arrays.equals(constructor.getParameterTypes(), new Class<?>[]{
+                        String.class, Optional.class}));
+    }
+
+    @Test
+    void should_construct_method_target_responses_only_through_the_shared_http_mapper() {
+        List<String> violations = classes.stream()
+                .filter(javaClass -> !javaClass.isEquivalentTo(MethodTargetHttpMapper.class))
+                .flatMap(javaClass -> javaClass.getConstructorCallsFromSelf().stream()
+                        .filter(call -> call.getTargetOwner().isEquivalentTo(MethodTargetResponse.class))
+                        .map(call -> javaClass.getName()))
+                .toList();
+
+        assertThat(violations).isEmpty();
     }
 
     @Test
@@ -128,11 +216,16 @@ class ArchitectureTest {
     }
 
     @Test
-    void should_keep_the_syntax_domain_free_of_jdt_when_service_is_imported() {
+    void should_keep_the_syntax_domain_free_of_adapter_and_http_dependencies() {
         noClasses()
                 .that().resideInAPackage("..syntax.domain..")
-                .should().dependOnClassesThat().resideInAnyPackage("org.eclipse.jdt..", "org.eclipse.lsp4j..")
-                .as("the syntax extraction results the API and callers consume must stay free of JDT types")
+                .should().dependOnClassesThat().resideInAnyPackage(
+                        "org.eclipse.jdt..",
+                        "org.eclipse.lsp4j..",
+                        "org.springframework..",
+                        "com.fasterxml.jackson..",
+                        "com.java.semantic.api..")
+                .as("syntax-domain values must remain free of adapter, HTTP, JSON, and Spring dependencies")
                 .allowEmptyShould(false)
                 .check(classes);
     }
@@ -305,6 +398,7 @@ class ArchitectureTest {
                 .or().haveSimpleName("MethodImplementationDiscoveryApplicationService")
                 .or().areAssignableTo(ConceptDiscoveryApplicationService.class)
                 .or().areAssignableTo(ExactContentApplicationService.class)
+                .or().areAssignableTo(SourceSymbolResolutionApplicationService.class)
                 .or().areAssignableTo(TypeMemberDiscoveryApplicationService.class)
                 .should().callMethod(
                         RepositoryApplicationService.class,
@@ -312,6 +406,31 @@ class ArchitectureTest {
                         RepositoryId.class,
                         Optional.class,
                         Function.class)
+                .allowEmptyShould(false)
+                .check(classes);
+    }
+
+    @Test
+    void should_confine_source_symbol_parser_types_to_the_jdt_syntax_adapter() {
+        noClasses()
+                .that().resideOutsideOfPackage("..syntax.adapter.jdt..")
+                .should().dependOnClassesThat().haveSimpleName("JdtParseContext")
+                .as("the request-scoped parse partition must remain private to the JDT syntax adapter")
+                .allowEmptyShould(false)
+                .check(classes);
+    }
+
+    @Test
+    void should_keep_source_symbol_application_contract_framework_neutral() {
+        noClasses()
+                .that(SOURCE_SYMBOL_APPLICATION_CONTRACT)
+                .should().dependOnClassesThat().resideInAnyPackage(
+                        "org.eclipse.jdt..",
+                        "org.springframework.web..",
+                        "com.fasterxml.jackson..",
+                        "java.nio.file..",
+                        "com.java.semantic.api..")
+                .as("source-symbol application contracts must not expose JDT, HTTP, JSON, filesystem, or API types")
                 .allowEmptyShould(false)
                 .check(classes);
     }

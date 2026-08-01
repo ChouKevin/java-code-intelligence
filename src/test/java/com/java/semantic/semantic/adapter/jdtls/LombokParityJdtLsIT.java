@@ -11,7 +11,9 @@ import com.java.semantic.callgraph.domain.NodeTraversalState;
 import com.java.semantic.callgraph.domain.OutgoingGraphFragment;
 import com.java.semantic.callgraph.domain.ResolutionStrategy;
 import com.java.semantic.config.JdtLsProperties;
+import com.java.semantic.identity.JavaTypeIdentity;
 import com.java.semantic.identity.MethodTarget;
+import com.java.semantic.identity.SourceTypeIdentity;
 import com.java.semantic.repository.domain.RepositoryId;
 import com.java.semantic.repository.domain.RepositoryRevision;
 import com.java.semantic.repository.domain.RepositorySnapshot;
@@ -204,7 +206,11 @@ class LombokParityJdtLsIT {
      */
     private void assertIncomingRootAtGeneratedMemberFailsClosed(RepositorySyntax syntax) {
         MethodTarget generatedRoot = new MethodTarget(
-                "src/main/java/com/example/lombokgen/Order.java", PACKAGE, "Order", "getTotal", List.of());
+                new SourceTypeIdentity(
+                        new JavaTypeIdentity(PACKAGE, "Order"),
+                        "src/main/java/com/example/lombokgen/Order.java"),
+                "getTotal",
+                List.of());
 
         assertThat(new CanonicalMethodDeclarationResolver().resolve(syntax, generatedRoot).status())
                 .isEqualTo(AnalysisTargetStatus.UNRESOLVED);
@@ -257,8 +263,8 @@ class LombokParityJdtLsIT {
         MethodTarget resolved = new CanonicalMethodDeclarationResolver().resolve(syntax, target)
                 .target()
                 .orElseThrow(() -> new AssertionError("missing canonical method declaration"));
-        return syntax.classes().stream()
-                .flatMap(metadata -> metadata.methods().stream())
+        return syntax.sourceTypes().stream()
+                .flatMap(metadata -> metadata.members().methods().stream())
                 .filter(method -> method.analysisTarget().target().filter(resolved::equals).isPresent())
                 .map(method -> new SemanticDeclarationAnchor(
                         resolved,
@@ -269,10 +275,10 @@ class LombokParityJdtLsIT {
 
     private MethodTarget methodTarget(
             RepositorySyntax syntax, String className, String methodName, List<String> parameterTypes) {
-        return syntax.classes().stream()
-                .filter(metadata -> PACKAGE.equals(metadata.packageName()))
-                .filter(metadata -> className.equals(metadata.className()))
-                .flatMap(metadata -> metadata.methods().stream())
+        return syntax.sourceTypes().stream()
+                .filter(metadata -> PACKAGE.equals(metadata.declaration().identity().javaType().packageName()))
+                .filter(metadata -> className.equals(metadata.declaration().identity().javaType().className()))
+                .flatMap(metadata -> metadata.members().methods().stream())
                 .filter(method -> methodName.equals(method.name()))
                 .filter(method -> parameterTypes.equals(method.paramTypes()))
                 .flatMap(method -> method.analysisTarget().target().stream())

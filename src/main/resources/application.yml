@@ -13,6 +13,8 @@ semantic:
     exact-content:
       inline-utf8-bytes: ${EXACT_CONTENT_INLINE_UTF8_BYTES:32768}
       segment-utf8-bytes: ${EXACT_CONTENT_SEGMENT_UTF8_BYTES:32768}
+    source-symbol-resolution:
+      context-candidate-limit: ${SOURCE_SYMBOL_CONTEXT_CANDIDATE_LIMIT:100}
   api:
     api-token: ${SEMANTIC_API_TOKEN:}
   jdtls:

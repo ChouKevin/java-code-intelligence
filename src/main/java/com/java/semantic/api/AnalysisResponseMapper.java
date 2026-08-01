@@ -6,7 +6,6 @@ import com.java.semantic.api.dto.GraphNodeResponse;
 import com.java.semantic.api.dto.GraphTraversalResponse;
 import com.java.semantic.api.dto.GraphWarningResponse;
 import com.java.semantic.api.dto.IncomingCallGraphResponse;
-import com.java.semantic.api.dto.MethodTargetResponse;
 import com.java.semantic.api.dto.OutgoingCallGraphResponse;
 import com.java.semantic.api.dto.PositionResponse;
 import com.java.semantic.api.dto.SourceRangeResponse;
@@ -25,7 +24,6 @@ import com.java.semantic.callgraph.domain.NodeTraversalState;
 import com.java.semantic.callgraph.domain.OutgoingGraphFragment;
 import com.java.semantic.callgraph.domain.ResolutionStrategy;
 import com.java.semantic.callgraph.domain.ResolutionStrategyPartition;
-import com.java.semantic.identity.MethodTarget;
 import org.springframework.stereotype.Component;
 
 import java.util.Objects;
@@ -79,7 +77,7 @@ public final class AnalysisResponseMapper {
     private GraphNodeResponse node(GraphNode node) {
         return new GraphNodeResponse(
                 node.nodeId().value(),
-                node.target().map(this::target).orElse(null),
+                node.target().map(MethodTargetHttpMapper::toResponse).orElse(null),
                 NodeContentState.EXTERNAL.equals(node.contentState()) ? node.externalSymbol() : null,
                 contentState(node.contentState()),
                 traversalState(node.traversalState()),
@@ -106,20 +104,11 @@ public final class AnalysisResponseMapper {
                 warning.nodeId().value(),
                 warning.callExpression().orElse(null),
                 warning.callSite().map(this::range).orElse(null),
-                warning.candidates().stream().map(this::target).toList());
+                warning.candidates().stream().map(MethodTargetHttpMapper::toResponse).toList());
     }
 
     private GraphErrorResponse error(GraphError error) {
         return new GraphErrorResponse(error.code(), error.message(), error.nodeId().value());
-    }
-
-    private MethodTargetResponse target(MethodTarget target) {
-        return new MethodTargetResponse(
-                target.sourceFile(),
-                target.packageName(),
-                target.className(),
-                target.methodName(),
-                target.parameterTypes());
     }
 
     private SourceRangeResponse range(CallSiteRange range) {

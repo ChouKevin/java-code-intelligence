@@ -1,6 +1,8 @@
 package com.java.semantic.syntax.application;
 
+import com.java.semantic.identity.JavaTypeIdentity;
 import com.java.semantic.identity.MethodTarget;
+import com.java.semantic.identity.SourceTypeIdentity;
 import com.java.semantic.repository.application.RepositoryApplicationService;
 import com.java.semantic.repository.domain.RepositoryId;
 import com.java.semantic.repository.domain.RepositoryRevision;
@@ -281,11 +283,11 @@ class ConceptDiscoveryApplicationServiceTest {
 
         private static MethodTarget target(String methodName, String packageName) {
             return new MethodTarget(
-                    "src/main/java/" + packageName.replace('.', '/') + "/OrderService.java",
-                    packageName,
-                    "OrderService",
-                    methodName,
-                    List.of());
+                new SourceTypeIdentity(
+                        new JavaTypeIdentity(packageName, "OrderService"),
+                        "src/main/java/" + packageName.replace('.', '/') + "/OrderService.java"),
+                methodName,
+                List.of());
         }
     }
 }

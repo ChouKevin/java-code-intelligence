@@ -156,8 +156,8 @@ public final class SemanticAnalysisApplicationService {
             MethodTarget target,
             MethodTargetResolution resolution) {
         return switch (resolution.status()) {
-            case RESOLVED -> syntax.classes().stream()
-                    .flatMap(metadata -> metadata.methods().stream())
+            case RESOLVED -> syntax.sourceTypes().stream()
+                    .flatMap(metadata -> metadata.members().methods().stream())
                     .filter(method -> method.analysisTarget().target().filter(target::equals).isPresent())
                     .map(method -> new SemanticDeclarationAnchor(
                             target,

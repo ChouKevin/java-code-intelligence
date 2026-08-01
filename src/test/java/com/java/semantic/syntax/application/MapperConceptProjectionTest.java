@@ -6,7 +6,9 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.Optional;
 
+import com.java.semantic.identity.JavaTypeIdentity;
 import com.java.semantic.identity.MethodTarget;
+import com.java.semantic.identity.SourceTypeIdentity;
 import com.java.semantic.syntax.application.ConceptIdentity.MapperStatementConceptIdentity;
 import com.java.semantic.syntax.application.ConceptIdentity.MapperStatementVariantEvidenceIdentity;
 import com.java.semantic.syntax.adapter.jdt.JdtSyntaxExtractionService;
@@ -62,9 +64,9 @@ class MapperConceptProjectionTest {
                 0,
                 MapperEvidenceRepresentation.MAPPER_XML_ELEMENT);
         MethodTarget mappedMethod = new MethodTarget(
-                "src/main/java/com/example/ArchiveGateway.java",
-                "com.example",
-                "ArchiveGateway",
+                new SourceTypeIdentity(
+                        new JavaTypeIdentity("com.example", "ArchiveGateway"),
+                        "src/main/java/com/example/ArchiveGateway.java"),
                 "loadVendorRows",
                 List.of());
         MapperEvidenceIndex evidenceIndex = new MapperEvidenceIndex(

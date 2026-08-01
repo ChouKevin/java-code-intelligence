@@ -1,6 +1,6 @@
 package com.java.semantic.callgraph.domain;
 
-import com.java.semantic.identity.PolicyIdentity;
+import com.java.semantic.identity.JavaIdentityNormalizer;
 
 import java.util.List;
 
@@ -12,7 +12,7 @@ public record MethodId(
         List<String> parameterTypes) {
 
     public MethodId {
-        className = PolicyIdentity.className(packageName, className);
-        parameterTypes = PolicyIdentity.parameterTypes(parameterTypes);
+        className = JavaIdentityNormalizer.className(packageName, className);
+        parameterTypes = JavaIdentityNormalizer.parameterTypes(parameterTypes);
     }
 }

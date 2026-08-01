@@ -28,6 +28,8 @@ import com.java.semantic.syntax.application.MapperStatementConceptProvider;
 import com.java.semantic.syntax.application.StructuredConceptCatalogProjector;
 import com.java.semantic.syntax.application.TypeMemberDiscoveryApplicationService;
 import com.java.semantic.syntax.application.TypeUsageConceptProvider;
+import com.java.semantic.syntax.application.SourceSymbolResolutionApplicationService;
+import com.java.semantic.syntax.application.SourceSymbolResolver;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
@@ -39,7 +41,8 @@ import org.springframework.context.annotation.Configuration;
         OutgoingGraphProperties.class,
         ReadPolicyProperties.class,
         ImplementationDiscoveryProperties.class,
-        ExactContentProperties.class
+        ExactContentProperties.class,
+        SourceSymbolResolutionProperties.class
 })
 public class SemanticAnalysisConfiguration {
 
@@ -111,6 +114,17 @@ public class SemanticAnalysisConfiguration {
     @ConditionalOnBean({RepositoryApplicationService.class, SyntaxExtractionService.class})
     public DiscoveryFollowUpFactory discoveryFollowUpFactory() {
         return new DiscoveryFollowUpFactory();
+    }
+
+    @Bean
+    @ConditionalOnBean({RepositoryApplicationService.class, SourceSymbolResolver.class})
+    public SourceSymbolResolutionApplicationService sourceSymbolResolutionApplicationService(
+            RepositoryApplicationService repositoryApplicationService,
+            SourceSymbolResolver resolver,
+            DiscoveryFollowUpFactory discoveryFollowUpFactory,
+            SourceSymbolResolutionProperties properties) {
+        return new SourceSymbolResolutionApplicationService(
+                repositoryApplicationService, resolver, discoveryFollowUpFactory, properties);
     }
 
     @Bean

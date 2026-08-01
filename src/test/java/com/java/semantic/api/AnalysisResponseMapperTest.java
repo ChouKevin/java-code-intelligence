@@ -13,7 +13,9 @@ import com.java.semantic.callgraph.domain.NodeContentState;
 import com.java.semantic.callgraph.domain.NodeTraversalState;
 import com.java.semantic.callgraph.domain.OutgoingGraphFragment;
 import com.java.semantic.callgraph.domain.ResolutionStrategy;
+import com.java.semantic.identity.JavaTypeIdentity;
 import com.java.semantic.identity.MethodTarget;
+import com.java.semantic.identity.SourceTypeIdentity;
 import com.java.semantic.repository.domain.RepositoryRevision;
 import org.junit.jupiter.api.Test;
 
@@ -26,7 +28,11 @@ import static org.assertj.core.api.Assertions.assertThat;
 class AnalysisResponseMapperTest {
 
     private static final MethodTarget TARGET = new MethodTarget(
-            "src/main/java/com/acme/OrderService.java", "com.acme", "OrderService", "place", List.of());
+                new SourceTypeIdentity(
+                        new JavaTypeIdentity("com.acme", "OrderService"),
+                        "src/main/java/com/acme/OrderService.java"),
+                "place",
+                List.of());
 
     private final AnalysisResponseMapper mapper = new AnalysisResponseMapper();
 

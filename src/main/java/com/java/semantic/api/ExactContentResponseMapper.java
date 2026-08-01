@@ -13,8 +13,6 @@ import com.java.semantic.api.dto.ExactContentVariantResponse;
 import com.java.semantic.api.dto.MapperIncludeResolutionResponse;
 import com.java.semantic.api.dto.MapperFragmentIdentityResponse;
 import com.java.semantic.api.dto.MapperStatementIdentityResponse;
-import com.java.semantic.api.dto.MethodTargetResponse;
-import com.java.semantic.identity.MethodTarget;
 import com.java.semantic.syntax.application.ExactContentQuery;
 import com.java.semantic.syntax.application.ExactContentResult;
 import com.java.semantic.syntax.application.ExactContentSegment;
@@ -132,7 +130,7 @@ public final class ExactContentResponseMapper {
                     new GetMethodSourceSegmentRequestResponse(
                             source.repositoryId().value(),
                             source.expectedRevision().value(),
-                            target(source.target()),
+                            MethodTargetHttpMapper.toResponse(source.target()),
                             segmentQuery.contentRef(),
                             segmentQuery.segmentIndex()));
             case ExactContentQuery.MapperStatement statement -> followUp(
@@ -142,7 +140,7 @@ public final class ExactContentResponseMapper {
                     new GetMapperStatementSegmentRequestResponse(
                             statement.repositoryId().value(),
                             statement.expectedRevision().value(),
-                            target(statement.target()),
+                            MethodTargetHttpMapper.toResponse(statement.target()),
                             segmentQuery.contentRef(),
                             segmentQuery.segmentIndex()));
             case ExactContentQuery.MapperFragment fragment -> followUp(
@@ -167,15 +165,6 @@ public final class ExactContentResponseMapper {
                 operation,
                 new ApiResponse("POST", path, operationId),
                 request);
-    }
-
-    private MethodTargetResponse target(MethodTarget target) {
-        return new MethodTargetResponse(
-                target.sourceFile(),
-                target.packageName(),
-                target.className(),
-                target.methodName(),
-                target.parameterTypes());
     }
 
     private MapperStatementIdentityResponse statementIdentity(MapperStatementIdentity identity) {

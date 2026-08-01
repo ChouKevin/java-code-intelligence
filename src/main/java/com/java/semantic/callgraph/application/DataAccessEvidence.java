@@ -8,9 +8,10 @@ import java.util.stream.Stream;
 
 import com.java.semantic.callgraph.domain.ResolutionStrategy;
 import com.java.semantic.identity.MethodTarget;
-import com.java.semantic.syntax.domain.ClassMetadata;
-import com.java.semantic.syntax.domain.ClassMetadata.MethodSignature;
-import com.java.semantic.syntax.domain.ClassMetadata.TypeKind;
+import com.java.semantic.syntax.domain.AnnotationEvidence;
+import com.java.semantic.syntax.domain.SourceMethodMetadata;
+import com.java.semantic.syntax.domain.SourceTypeKind;
+import com.java.semantic.syntax.domain.SourceTypeMetadata;
 
 /**
  * 偵測介面宣告的方法是否為資料存取進入點
@@ -18,7 +19,7 @@ import com.java.semantic.syntax.domain.ClassMetadata.TypeKind;
  * 規則依序評估、第一個命中即回傳：MyBatis mapper SQL、Spring Data repository 已知父介面、
  * 帶有 {@code @Mapper}/{@code @Repository} 但缺乏具體證據的介面方法
  * <p>
- * 每條規則皆為 fail-closed：僅 {@link TypeKind#INTERFACE} 宣告型別參與評估，任何無法明確
+ * 每條規則皆為 fail-closed：僅 {@link SourceTypeKind#INTERFACE} 宣告型別參與評估，任何無法明確
  * 判定的情況一律回傳空值，交由呼叫端視為非資料存取進入點
  * <p>
  * 純元件，不做任何 I/O 或記錄
@@ -40,12 +41,12 @@ public final class DataAccessEvidence {
      * @return 命中的證據，未命中任何規則時為空
      */
     Optional<EvidenceMatch> evaluate(
-            ClassMetadata declaringType, MethodSignature declaredMethod, MethodTarget declarationTarget) {
+            SourceTypeMetadata declaringType, SourceMethodMetadata declaredMethod, MethodTarget declarationTarget) {
         Objects.requireNonNull(declaringType, "declaringType is required");
         Objects.requireNonNull(declaredMethod, "declaredMethod is required");
         Objects.requireNonNull(declarationTarget, "declarationTarget is required");
 
-        if (declaringType.kind() != TypeKind.INTERFACE) {
+        if (declaringType.declaration().kind() != SourceTypeKind.INTERFACE) {
             return Optional.empty();
         }
 
@@ -55,7 +56,7 @@ public final class DataAccessEvidence {
     }
 
     private Optional<EvidenceMatch> matchMybatisMapper(
-            ClassMetadata declaringType, MethodSignature declaredMethod, MethodTarget declarationTarget) {
+            SourceTypeMetadata declaringType, SourceMethodMetadata declaredMethod, MethodTarget declarationTarget) {
         if (Objects.isNull(declaredMethod.sqlSource())) {
             return Optional.empty();
         }
@@ -65,13 +66,15 @@ public final class DataAccessEvidence {
     }
 
     /**
-     * 介面的 {@code extends} 子句被 {@code ClassMetadataExtractor} 歸入 implementedTypes，
+     * 介面的 {@code extends} 子句保留在直接關係 evidence 中，
      * 一般型別的父類別則落在 extendedTypes；此規則已由 {@link #evaluate} 限定僅介面參與，
      * 因此取兩者聯集比對已知父介面不會誤判類別
      */
     private Optional<EvidenceMatch> matchSpringDataRepository(
-            ClassMetadata declaringType, MethodSignature declaredMethod, MethodTarget declarationTarget) {
-        return Stream.concat(declaringType.extendedTypes().stream(), declaringType.implementedTypes().stream())
+            SourceTypeMetadata declaringType, SourceMethodMetadata declaredMethod, MethodTarget declarationTarget) {
+        return Stream.concat(declaringType.relationships().extendedTypes().stream(),
+                        declaringType.relationships().implementedTypes().stream())
+                .map(reference -> reference.simpleTypeName())
                 .filter(SPRING_DATA_SUPERTYPES::contains)
                 .findFirst()
                 .map(supertype -> matched(
@@ -80,8 +83,9 @@ public final class DataAccessEvidence {
     }
 
     private Optional<EvidenceMatch> matchDataAccessWithoutEvidence(
-            ClassMetadata declaringType, MethodSignature declaredMethod, MethodTarget declarationTarget) {
-        return declaringType.annotations().stream()
+            SourceTypeMetadata declaringType, SourceMethodMetadata declaredMethod, MethodTarget declarationTarget) {
+        return declaringType.frameworkFacts().annotations().stream()
+                .map(AnnotationEvidence::writtenName)
                 .map(AnnotationSimpleNames::simpleName)
                 .filter(DATA_ACCESS_ANNOTATIONS::contains)
                 .findFirst()
@@ -92,15 +96,15 @@ public final class DataAccessEvidence {
     }
 
     private static EvidenceMatch matched(
-            ResolutionStrategy strategy, ClassMetadata declaringType, MethodSignature declaredMethod,
+            ResolutionStrategy strategy, SourceTypeMetadata declaringType, SourceMethodMetadata declaredMethod,
             MethodTarget declarationTarget, List<String> evidence) {
         return new EvidenceMatch(
                 strategy, opaqueSymbolOf(declaringType, declaredMethod), Optional.of(declarationTarget),
                 evidence);
     }
 
-    private static String opaqueSymbolOf(ClassMetadata declaringType, MethodSignature declaredMethod) {
-        return declaringType.fullyQualifiedName() + "#" + declaredMethod.name()
+    private static String opaqueSymbolOf(SourceTypeMetadata declaringType, SourceMethodMetadata declaredMethod) {
+        return declaringType.declaration().identity().fullyQualifiedName() + "#" + declaredMethod.name()
                 + "(" + String.join(",", declaredMethod.paramTypes()) + ")";
     }
 }

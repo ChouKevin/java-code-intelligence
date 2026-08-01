@@ -7,8 +7,8 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.TreeSet;
 
-import com.java.semantic.identity.PolicyIdentity;
-import com.java.semantic.syntax.domain.ResolvedTypeIdentity;
+import com.java.semantic.identity.JavaIdentityNormalizer;
+import com.java.semantic.identity.JavaTypeIdentity;
 
 import org.eclipse.jdt.core.dom.ASTNode;
 import org.eclipse.jdt.core.dom.ASTVisitor;
@@ -33,10 +33,10 @@ final class BodyTypeReferenceExtractor {
     private BodyTypeReferenceExtractor() {
     }
 
-    static List<ResolvedTypeIdentity> extract(MethodDeclaration method) {
-        Set<ResolvedTypeIdentity> references = new TreeSet<>(Comparator
-                .comparing(ResolvedTypeIdentity::packageName)
-                .thenComparing(ResolvedTypeIdentity::className));
+    static List<JavaTypeIdentity> extract(MethodDeclaration method) {
+        Set<JavaTypeIdentity> references = new TreeSet<>(Comparator
+                .comparing(JavaTypeIdentity::packageName)
+                .thenComparing(JavaTypeIdentity::className));
         ASTVisitor visitor = visitor(references);
         ASTNode body = method.getBody();
         if (Objects.nonNull(body)) {
@@ -50,7 +50,7 @@ final class BodyTypeReferenceExtractor {
         return List.copyOf(references);
     }
 
-    private static ASTVisitor visitor(Set<ResolvedTypeIdentity> references) {
+    private static ASTVisitor visitor(Set<JavaTypeIdentity> references) {
         return new ASTVisitor() {
             @Override
             public void preVisit(ASTNode node) {
@@ -101,7 +101,7 @@ final class BodyTypeReferenceExtractor {
         return binding instanceof IVariableBinding variable ? variable : null;
     }
 
-    private static void addField(IVariableBinding field, Set<ResolvedTypeIdentity> references) {
+    private static void addField(IVariableBinding field, Set<JavaTypeIdentity> references) {
         if (Objects.isNull(field) || !field.isField()) {
             return;
         }
@@ -110,13 +110,13 @@ final class BodyTypeReferenceExtractor {
         addType(declaration.getType(), references);
     }
 
-    private static void addType(ITypeBinding binding, Set<ResolvedTypeIdentity> references) {
+    private static void addType(ITypeBinding binding, Set<JavaTypeIdentity> references) {
         addType(binding, references, new HashSet<>());
     }
 
     private static void addType(
             ITypeBinding binding,
-            Set<ResolvedTypeIdentity> references,
+            Set<JavaTypeIdentity> references,
             Set<String> visitingBindings) {
         if (Objects.isNull(binding)) {
             return;
@@ -150,7 +150,7 @@ final class BodyTypeReferenceExtractor {
         }
     }
 
-    private static void addResolvedIdentity(ITypeBinding binding, Set<ResolvedTypeIdentity> references) {
+    private static void addResolvedIdentity(ITypeBinding binding, Set<JavaTypeIdentity> references) {
         ITypeBinding declaration = binding.getTypeDeclaration();
         if (Objects.isNull(declaration)) {
             return;
@@ -168,8 +168,8 @@ final class BodyTypeReferenceExtractor {
             return;
         }
         String packageName = packageBinding.getName();
-        references.add(new ResolvedTypeIdentity(
-                packageName, PolicyIdentity.className(packageName, qualifiedName)));
+        references.add(new JavaTypeIdentity(
+                packageName, JavaIdentityNormalizer.className(packageName, qualifiedName)));
     }
 
     private static ITypeBinding sourceTypeOf(ITypeBinding declaration) {

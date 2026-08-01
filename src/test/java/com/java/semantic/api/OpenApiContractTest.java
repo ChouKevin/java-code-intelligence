@@ -1,6 +1,5 @@
 package com.java.semantic.api;
 
-import com.java.semantic.identity.MethodTarget;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -84,6 +83,7 @@ class OpenApiContractTest {
                 "/v1/api-routes/suggest",
                 "/v1/discovery/event-listeners",
                 "/v1/discovery/method-implementations",
+                "/v1/discovery/source-symbols/resolve",
                 "/v1/discovery/concepts",
                 "/v1/discovery/type-members",
                 "/v1/discovery/method-source",
@@ -113,6 +113,64 @@ class OpenApiContractTest {
         assertRequiredRequestBody(
                 operation(paths, "/v1/analyses/call-graphs/incoming", "post"),
                 "#/components/schemas/AnalyzeIncomingCallGraphRequest");
+    }
+
+    @Test
+    void should_describe_closed_source_symbol_request_and_polymorphic_response() {
+        Map<String, Object> paths = map(document.get("paths"));
+        Map<String, Object> schemas = schemas();
+        Map<String, Object> operation = operation(paths, "/v1/discovery/source-symbols/resolve", "post");
+
+        assertThat(operation.get("operationId")).isEqualTo("resolveSourceSymbol");
+        assertRequiredRequestBody(operation, "#/components/schemas/ResolveSourceSymbolRequest");
+        assertResponseCodes(operation, "200", "400", "401", "403", "404", "409", "500");
+        assertThat(map(map(operation.get("responses")).get("200")))
+                .isEqualTo(Map.of("$ref", "#/components/responses/SourceSymbolResolution"));
+
+        Map<String, Object> request = schema(schemas, "ResolveSourceSymbolRequest");
+        assertClosedObject(request);
+        assertExactProperties(request, "repoId", "expectedRevision", "context", "symbol", "position");
+        assertThat(required(request)).containsExactlyInAnyOrder("repoId", "expectedRevision", "context", "symbol");
+        assertThat(schema(properties(request), "expectedRevision")).containsEntry("pattern", REVISION_PATTERN);
+
+        Map<String, Object> response = schema(schemas, "SourceSymbolResolutionResponse");
+        assertClosedObject(response);
+        assertExactPropertiesAndRequired(response,
+                "repoId", "analyzedRevision", "status", "contextCandidates",
+                "contextCandidateLimits", "candidates", "issues");
+
+        Map<String, Object> contextCandidate = schema(schemas, "SourceContextCandidateResponse");
+        assertThat(list(contextCandidate.get("oneOf"))).containsExactly(
+                Map.of("$ref", "#/components/schemas/SourceTypeContextCandidateResponse"),
+                Map.of("$ref", "#/components/schemas/SourceMethodContextCandidateResponse"));
+        assertThat(map(schema(contextCandidate, "discriminator").get("mapping")))
+                .containsExactlyInAnyOrderEntriesOf(Map.of(
+                        "SOURCE_TYPE", "#/components/schemas/SourceTypeContextCandidateResponse",
+                        "METHOD", "#/components/schemas/SourceMethodContextCandidateResponse"));
+        assertExactPropertiesAndRequired(schema(schemas, "SourceTypeContextCandidateResponse"),
+                "kind", "sourceFile", "retry");
+        assertExactPropertiesAndRequired(schema(schemas, "SourceMethodContextCandidateResponse"),
+                "kind", "target", "retry");
+
+        Map<String, Object> symbolCandidate = schema(schemas, "SourceSymbolCandidateResponse");
+        assertThat(list(symbolCandidate.get("oneOf"))).containsExactly(
+                Map.of("$ref", "#/components/schemas/VariableLikeSourceSymbolCandidateResponse"),
+                Map.of("$ref", "#/components/schemas/StaticConstantSourceSymbolCandidateResponse"),
+                Map.of("$ref", "#/components/schemas/MethodSourceSymbolCandidateResponse"),
+                Map.of("$ref", "#/components/schemas/SourceTypeSymbolCandidateResponse"));
+        assertThat(map(schema(symbolCandidate, "discriminator").get("mapping")))
+                .containsEntry("STATIC_CONSTANT", "#/components/schemas/StaticConstantSourceSymbolCandidateResponse")
+                .containsEntry("METHOD", "#/components/schemas/MethodSourceSymbolCandidateResponse")
+                .containsEntry("SOURCE_TYPE", "#/components/schemas/SourceTypeSymbolCandidateResponse");
+        assertThat(properties(schema(schemas, "StaticConstantSourceSymbolCandidateResponse")))
+                .containsKey("initializerSource");
+        assertThat(required(schema(schemas, "StaticConstantSourceSymbolCandidateResponse")))
+                .contains("initializerSource");
+        assertThat(properties(schema(schemas, "VariableLikeSourceSymbolCandidateResponse")))
+                .doesNotContainKey("initializerSource");
+
+        assertThat(list(schema(schemas, "DiscoveryFollowUpRequestResponse").get("oneOf")))
+                .contains(Map.of("$ref", "#/components/schemas/ResolveSourceSymbolRequestResponse"));
     }
 
     @Test
@@ -938,14 +996,9 @@ class OpenApiContractTest {
         Object request = requestConstructor.newInstance("order-service", "FIXTURE", null, target);
 
         Method depth = requestType.getMethod("depth");
-        Method toDomain = targetType.getMethod("toDomain");
         assertThat(depth.invoke(request)).isEqualTo(2);
-        assertThat(toDomain.invoke(target)).isEqualTo(new MethodTarget(
-                "src/main/java/com/example/OrderController.java",
-                "",
-                "OrderController",
-                "placeOrder",
-                List.of("com.example.PlaceOrderRequest")));
+        assertThat(Arrays.stream(targetType.getDeclaredMethods()).map(Method::getName))
+                .doesNotContain("toDomain");
 
         Object invalidTarget = targetConstructor.newInstance(
                 "",
@@ -1406,7 +1459,8 @@ class OpenApiContractTest {
                 "GET_METHOD_SQL_SEGMENT",
                 "GET_MAPPER_FRAGMENT_SEGMENT",
                 "ANALYZE_OUTGOING_CALL_GRAPH", "ANALYZE_INCOMING_CALL_GRAPH",
-                "DISCOVER_METHOD_IMPLEMENTATIONS", "DISCOVER_CONCEPTS", "GET_TYPE_MEMBERS", "GET_NEXT_PAGE");
+                "DISCOVER_METHOD_IMPLEMENTATIONS", "DISCOVER_CONCEPTS", "GET_TYPE_MEMBERS", "GET_NEXT_PAGE",
+                "RESOLVE_SOURCE_SYMBOL");
         assertThat(schema(properties(followUp), "api"))
                 .isEqualTo(Map.of("$ref", "#/components/schemas/DiscoveryFollowUpApiResponse"));
         assertThat(schema(properties(followUp), "request"))

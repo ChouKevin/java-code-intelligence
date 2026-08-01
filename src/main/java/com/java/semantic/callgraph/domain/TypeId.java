@@ -1,6 +1,6 @@
 package com.java.semantic.callgraph.domain;
 
-import com.java.semantic.identity.PolicyIdentity;
+import com.java.semantic.identity.JavaIdentityNormalizer;
 import org.springframework.util.Assert;
 import org.springframework.util.StringUtils;
 
@@ -11,7 +11,7 @@ public record TypeId(String repoId, String packageName, String className) {
         Assert.hasText(repoId, "repoId is required");
         Assert.notNull(packageName, "packageName is required");
         Assert.hasText(className, "className is required");
-        className = PolicyIdentity.className(packageName, className);
+        className = JavaIdentityNormalizer.className(packageName, className);
     }
 
     public String fullyQualifiedName() {

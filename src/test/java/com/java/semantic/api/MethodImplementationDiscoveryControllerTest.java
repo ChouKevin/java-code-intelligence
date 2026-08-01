@@ -4,7 +4,9 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.java.semantic.api.security.ApiTokenFilter;
 import com.java.semantic.callgraph.application.ImplementationCandidate;
+import com.java.semantic.identity.JavaTypeIdentity;
 import com.java.semantic.identity.MethodTarget;
+import com.java.semantic.identity.SourceTypeIdentity;
 import com.java.semantic.repository.domain.RepositoryId;
 import com.java.semantic.repository.domain.RepositoryRevision;
 import com.java.semantic.repository.application.RepositoryNotReadyException;
@@ -58,17 +60,17 @@ class MethodImplementationDiscoveryControllerTest {
     private static final RepositoryRevision REQUESTED_REVISION = RepositoryRevision.ofSha("1".repeat(40));
     private static final RepositoryRevision ANALYZED_REVISION = RepositoryRevision.ofSha("2".repeat(40));
     private static final MethodTarget DECLARATION_TARGET = new MethodTarget(
-            "src/main/java/com/example/OrderHandler.java",
-            "com.example",
-            "OrderHandler",
-            "handle",
-            List.of("com.example.Order"));
+                new SourceTypeIdentity(
+                        new JavaTypeIdentity("com.example", "OrderHandler"),
+                        "src/main/java/com/example/OrderHandler.java"),
+                "handle",
+                List.of("com.example.Order"));
     private static final MethodTarget IMPLEMENTATION_TARGET = new MethodTarget(
-            "src/main/java/com/example/DefaultOrderHandler.java",
-            "com.example",
-            "DefaultOrderHandler",
-            "handle",
-            List.of("com.example.Order"));
+                new SourceTypeIdentity(
+                        new JavaTypeIdentity("com.example", "DefaultOrderHandler"),
+                        "src/main/java/com/example/DefaultOrderHandler.java"),
+                "handle",
+                List.of("com.example.Order"));
 
     @Autowired
     private MockMvc mockMvc;

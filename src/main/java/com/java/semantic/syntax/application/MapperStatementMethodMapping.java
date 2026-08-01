@@ -3,10 +3,10 @@ package com.java.semantic.syntax.application;
 import com.java.semantic.identity.MethodTarget;
 import com.java.semantic.syntax.application.ConceptIdentity.MapperStatementConceptIdentity;
 import com.java.semantic.syntax.domain.AnalysisTargetStatus;
-import com.java.semantic.syntax.domain.ClassMetadata;
 import com.java.semantic.syntax.domain.MapperStatementEvidence;
 import com.java.semantic.syntax.domain.MethodTargetResolution;
 import com.java.semantic.syntax.domain.RepositorySyntax;
+import com.java.semantic.syntax.domain.SourceMethodMetadata;
 
 import java.util.Comparator;
 import java.util.List;
@@ -91,11 +91,12 @@ public record MapperStatementMethodMapping(
             RepositorySyntax syntax) {
         MapperStatementConceptIdentity statementIdentity = Objects.requireNonNull(identity, "identity is required");
         RepositorySyntax repositorySyntax = Objects.requireNonNull(syntax, "syntax is required");
-        List<MethodTargetResolution> declarationResolutions = repositorySyntax.classes().stream()
-                .filter(metadata -> metadata.fullyQualifiedName().equals(statementIdentity.namespace()))
-                .flatMap(metadata -> metadata.methods().stream())
+        List<MethodTargetResolution> declarationResolutions = repositorySyntax.sourceTypes().stream()
+                .filter(metadata -> metadata.declaration().identity().fullyQualifiedName()
+                        .equals(statementIdentity.namespace()))
+                .flatMap(metadata -> metadata.members().methods().stream())
                 .filter(method -> method.name().equals(statementIdentity.statementId()))
-                .map(ClassMetadata.MethodSignature::analysisTarget)
+                .map(SourceMethodMetadata::analysisTarget)
                 .toList();
         if (!declarationResolutions.isEmpty()) {
             boolean incompleteResolution = declarationResolutions.stream()

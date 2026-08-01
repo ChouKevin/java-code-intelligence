@@ -7,8 +7,8 @@ import com.java.semantic.config.ConfiguredReadPolicy;
 import com.java.semantic.config.ReadPolicyProperties;
 import com.java.semantic.repository.domain.RepositoryId;
 import com.java.semantic.syntax.domain.ApiEntryPoint;
-import com.java.semantic.syntax.domain.ClassMetadata;
-import com.java.semantic.syntax.domain.ClassMetadata.TypeKind;
+import com.java.semantic.syntax.domain.SourceTypeMetadata;
+import com.java.semantic.syntax.domain.SourceTypeKind;
 import com.java.semantic.syntax.domain.EntryPointClass;
 import com.java.semantic.syntax.domain.EntryPointMethod;
 import com.java.semantic.syntax.domain.EntryPointType;
@@ -44,12 +44,12 @@ class EntryPointDiscoveryFilterTest {
     private ReadPolicy readPolicy;
 
     private EntryPointDiscoveryFilter filter;
-    private ClassMetadata secretClassMetadata;
+    private SourceTypeMetadata secretSourceTypeMetadata;
 
     @BeforeEach
     void setUp() {
         filter = new EntryPointDiscoveryFilter(readPolicy);
-        secretClassMetadata = metadata("SecretMetadata", "secret metadata source");
+        secretSourceTypeMetadata = metadata("SecretMetadata", "secret metadata source");
     }
 
     @Test
@@ -57,7 +57,7 @@ class EntryPointDiscoveryFilterTest {
         RepositorySyntax syntax = new RepositorySyntax(
                 List.of(entryPointClass(new ApiEntryPoint(
                         "read", "secret", "/read", List.of("GET"), List.of("secret"), unresolved()))),
-                List.of(secretClassMetadata));
+                List.of(secretSourceTypeMetadata));
         when(readPolicy.visibilityOfRepository("orders"))
                 .thenReturn(EvidenceVisibility.BUSINESS_READ_FORBIDDEN);
 
@@ -87,13 +87,13 @@ class EntryPointDiscoveryFilterTest {
                                 "HiddenClass",
                                 new ApiEntryPoint(
                                         "classRead", "", "/class", List.of("GET"), List.of(), unresolved()))),
-                List.of(secretClassMetadata));
+                List.of(secretSourceTypeMetadata));
 
         RepositorySyntax filtered = configuredFilter.filter(
                 ORDERS, syntax, EnumSet.of(EntryPointType.API));
 
         assertThat(filtered.entryPoints()).isEmpty();
-        assertThat(filtered.classes()).isEmpty();
+        assertThat(filtered.sourceTypes()).isEmpty();
     }
 
     @Test
@@ -130,7 +130,7 @@ class EntryPointDiscoveryFilterTest {
                         new MqEntryPoint("consume", "allowed", MqBroker.KAFKA, List.of("orders"), unresolved()),
                         new ScheduleEntryPoint(
                                 "refresh", "allowed", ScheduleTriggerKind.CRON, "0 * * * * *", unresolved()))),
-                List.of(secretClassMetadata));
+                List.of(secretSourceTypeMetadata));
         when(readPolicy.visibilityOfRepository("orders")).thenReturn(EvidenceVisibility.READABLE);
         when(readPolicy.visibilityOf(any(TypeId.class))).thenReturn(EvidenceVisibility.READABLE);
         when(readPolicy.visibilityOfDiscoveredMethod(any(TypeId.class), eq("read")))
@@ -147,7 +147,7 @@ class EntryPointDiscoveryFilterTest {
                 assertThat(entryPoint.methods())
                         .extracting(EntryPointMethod::name)
                         .containsExactly("consume", "refresh"));
-        assertThat(filtered.classes()).isEmpty();
+        assertThat(filtered.sourceTypes()).isEmpty();
         assertThat(filtered.toString()).doesNotContain("secret");
     }
 
@@ -164,7 +164,7 @@ class EntryPointDiscoveryFilterTest {
                 ORDERS, syntax, EnumSet.of(EntryPointType.MQ));
 
         assertThat(filtered.entryPoints()).isEmpty();
-        assertThat(filtered.classes()).isEmpty();
+        assertThat(filtered.sourceTypes()).isEmpty();
     }
 
     @Test
@@ -172,7 +172,7 @@ class EntryPointDiscoveryFilterTest {
         RepositorySyntax syntax = new RepositorySyntax(
                 List.of(entryPointClass(new ApiEntryPoint(
                         "allowed", "", "/allowed", List.of("GET"), List.of(), unresolved()))),
-                List.of(secretClassMetadata));
+                List.of(secretSourceTypeMetadata));
         when(readPolicy.visibilityOfRepository("orders")).thenReturn(EvidenceVisibility.READABLE);
         when(readPolicy.visibilityOf(any(TypeId.class))).thenReturn(EvidenceVisibility.READABLE);
         when(readPolicy.visibilityOfDiscoveredMethod(any(TypeId.class), eq("allowed")))
@@ -182,7 +182,7 @@ class EntryPointDiscoveryFilterTest {
                 ORDERS, syntax, EnumSet.allOf(EntryPointType.class));
 
         assertThat(filtered.entryPoints()).hasSize(1);
-        assertThat(filtered.classes()).isEmpty();
+        assertThat(filtered.sourceTypes()).isEmpty();
         assertThat(filtered.toString()).doesNotContain("secret metadata source", "SecretMetadata");
     }
 
@@ -207,16 +207,16 @@ class EntryPointDiscoveryFilterTest {
                 List.of(methods));
     }
 
-    private static ClassMetadata metadata(String className, String source) {
+    private static SourceTypeMetadata metadata(String className, String source) {
         SyntaxRange range = new SyntaxRange(
                 new SyntaxPosition(0, 0),
                 new SyntaxPosition(0, source.length()));
-        return new ClassMetadata(
+        return com.java.semantic.syntax.domain.SourceTypeMetadataFixture.sourceType(
                 className,
                 "com.acme.secret",
                 "com.acme.secret." + className,
                 "com/acme/secret/" + className + ".java",
-                TypeKind.CLASS,
+                SourceTypeKind.CLASS,
                 false,
                 List.of(),
                 List.of(),

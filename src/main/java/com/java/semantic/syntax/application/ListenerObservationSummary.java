@@ -9,14 +9,14 @@ import java.util.Objects;
 public record ListenerObservationSummary(
         ListenerObservationCode code,
         long totalCount,
-        List<ListenerSourceLocation> sourceLocations) {
+        List<SourceRange> declarationRanges) {
 
     public ListenerObservationSummary {
         Objects.requireNonNull(code, "code is required");
         Assert.isTrue(totalCount > 0, "totalCount must be positive");
-        sourceLocations = List.copyOf(Objects.requireNonNull(sourceLocations, "sourceLocations are required"));
-        Assert.isTrue(sourceLocations.size() <= EventListenerDiscoveryConstraints.OBSERVATION_SAMPLE_LIMIT,
+        declarationRanges = List.copyOf(Objects.requireNonNull(declarationRanges, "declarationRanges are required"));
+        Assert.isTrue(declarationRanges.size() <= EventListenerDiscoveryConstraints.OBSERVATION_SAMPLE_LIMIT,
                 "source location samples exceed the observation limit");
-        Assert.isTrue(totalCount >= sourceLocations.size(), "totalCount must cover source location samples");
+        Assert.isTrue(totalCount >= declarationRanges.size(), "totalCount must cover source location samples");
     }
 }

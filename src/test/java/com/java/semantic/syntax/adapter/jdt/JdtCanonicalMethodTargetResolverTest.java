@@ -7,7 +7,9 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 
+import com.java.semantic.identity.JavaTypeIdentity;
 import com.java.semantic.identity.MethodTarget;
+import com.java.semantic.identity.SourceTypeIdentity;
 import com.java.semantic.syntax.domain.AnalysisTargetStatus;
 import com.java.semantic.syntax.domain.MethodTargetResolution;
 
@@ -43,8 +45,10 @@ class JdtCanonicalMethodTargetResolverTest {
 
         assertThat(resolution.status()).isEqualTo(AnalysisTargetStatus.RESOLVED);
         assertThat(resolution.target()).contains(new MethodTarget(
-                "src/main/java/com/example/Outer.java",
-                "com.example", "Outer.Inner", "process",
+                new SourceTypeIdentity(
+                        new JavaTypeIdentity("com.example", "Outer.Inner"),
+                        "src/main/java/com/example/Outer.java"),
+                "process",
                 List.of("int", "java.lang.String[][]", "java.util.List", "T[]")));
     }
 

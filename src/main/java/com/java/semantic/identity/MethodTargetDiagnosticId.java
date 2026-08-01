@@ -18,9 +18,9 @@ public final class MethodTargetDiagnosticId {
     public static String from(MethodTarget target) {
         Objects.requireNonNull(target, "target is required");
         MessageDigest digest = sha256();
-        update(digest, target.sourceFile());
-        update(digest, target.packageName());
-        update(digest, target.className());
+        update(digest, target.sourceType().sourceFile());
+        update(digest, target.sourceType().javaType().packageName());
+        update(digest, target.sourceType().javaType().className());
         update(digest, target.methodName());
         List<String> parameterTypes = target.parameterTypes();
         updateInteger(digest, parameterTypes.size());

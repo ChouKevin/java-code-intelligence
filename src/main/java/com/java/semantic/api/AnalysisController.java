@@ -36,7 +36,7 @@ public final class AnalysisController {
         return mapper.toResponse(service.analyzeOutgoing(
                 RepositoryId.of(request.repoId()),
                 new RepositoryRevision(request.expectedRevision()),
-                request.target().toDomain(),
+                MethodTargetHttpMapper.toDomain(request.target()),
                 request.depth()));
     }
 
@@ -46,7 +46,7 @@ public final class AnalysisController {
         return mapper.toResponse(service.analyzeIncoming(
                 RepositoryId.of(request.repoId()),
                 new RepositoryRevision(request.expectedRevision()),
-                request.target().toDomain(),
+                MethodTargetHttpMapper.toDomain(request.target()),
                 request.depth()));
     }
 }

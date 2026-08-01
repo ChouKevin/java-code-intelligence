@@ -1,6 +1,10 @@
 package com.java.semantic.syntax.domain;
 
+import com.java.semantic.syntax.domain.SourceMethodMetadata;
+
+import com.java.semantic.identity.JavaTypeIdentity;
 import com.java.semantic.identity.MethodTarget;
+import com.java.semantic.identity.SourceTypeIdentity;
 import com.java.semantic.syntax.adapter.jdt.JdtSyntaxExtractionService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -59,9 +63,9 @@ class CanonicalMethodDeclarationResolverTest {
         RepositorySyntax syntax = new JdtSyntaxExtractionService().extract(repositoryRoot);
         MethodTarget actual = targetOf(syntax, "First", "same");
         MethodTarget requested = new MethodTarget(
-                "src/main/java/alpha/Elsewhere.java",
-                actual.packageName(),
-                actual.className(),
+                new SourceTypeIdentity(
+                        new JavaTypeIdentity(actual.packageName(), actual.className()),
+                        "src/main/java/alpha/Elsewhere.java"),
                 actual.methodName(),
                 actual.parameterTypes());
 
@@ -93,10 +97,10 @@ class CanonicalMethodDeclarationResolverTest {
                 }
                 """);
         RepositorySyntax syntax = new JdtSyntaxExtractionService().extract(repositoryRoot);
-        MethodTarget requested = syntax.classes().stream()
-                .filter(metadata -> "com.example.selected".equals(metadata.packageName()))
-                .filter(metadata -> "Outer.Inner".equals(metadata.className()))
-                .flatMap(metadata -> metadata.methods().stream())
+        MethodTarget requested = syntax.sourceTypes().stream()
+                .filter(metadata -> "com.example.selected".equals(metadata.declaration().identity().javaType().packageName()))
+                .filter(metadata -> "Outer.Inner".equals(metadata.declaration().identity().javaType().className()))
+                .flatMap(metadata -> metadata.members().methods().stream())
                 .filter(method -> "selected".equals(method.name()))
                 .map(method -> method.analysisTarget().target().orElseThrow())
                 .findFirst()
@@ -120,18 +124,18 @@ class CanonicalMethodDeclarationResolverTest {
         writeModuleSource("module-a", "a");
         writeModuleSource("module-b", "b");
         RepositorySyntax extracted = new JdtSyntaxExtractionService().extract(repositoryRoot);
-        ClassMetadata moduleA = extracted.classes().stream()
-                .filter(metadata -> metadata.methods().stream().anyMatch(method -> method.analysisTarget()
+        SourceTypeMetadata moduleA = extracted.sourceTypes().stream()
+                .filter(metadata -> metadata.members().methods().stream().anyMatch(method -> method.analysisTarget()
                         .target().map(target -> target.sourceFile().startsWith("module-a/")).orElse(false)))
                 .findFirst()
                 .orElseThrow();
-        MethodTarget requested = moduleA.methods().getFirst().analysisTarget().target().orElseThrow();
-        MethodTarget alternate = extracted.classes().stream()
-                .filter(metadata -> metadata.methods().stream().anyMatch(method -> method.analysisTarget()
+        MethodTarget requested = moduleA.members().methods().getFirst().analysisTarget().target().orElseThrow();
+        MethodTarget alternate = extracted.sourceTypes().stream()
+                .filter(metadata -> metadata.members().methods().stream().anyMatch(method -> method.analysisTarget()
                         .target().map(target -> target.sourceFile().startsWith("module-b/")).orElse(false)))
                 .findFirst()
                 .orElseThrow()
-                .methods()
+                .members().methods()
                 .getFirst()
                 .analysisTarget()
                 .target()
@@ -160,8 +164,8 @@ class CanonicalMethodDeclarationResolverTest {
                 }
                 """);
         RepositorySyntax extracted = new JdtSyntaxExtractionService().extract(repositoryRoot);
-        ClassMetadata metadata = extracted.classes().getFirst();
-        MethodTarget requested = metadata.methods().getFirst().analysisTarget().target().orElseThrow();
+        SourceTypeMetadata metadata = extracted.sourceTypes().getFirst();
+        MethodTarget requested = metadata.members().methods().getFirst().analysisTarget().target().orElseThrow();
         RepositorySyntax syntax = new RepositorySyntax(List.of(), List.of(metadata, metadata));
 
         assertThatThrownBy(() -> new CanonicalMethodDeclarationResolver().resolve(syntax, requested))
@@ -172,9 +176,9 @@ class CanonicalMethodDeclarationResolverTest {
     }
 
     private MethodTarget targetOf(RepositorySyntax syntax, String className, String methodName) {
-        return syntax.classes().stream()
-                .filter(metadata -> className.equals(metadata.className()))
-                .flatMap(metadata -> metadata.methods().stream())
+        return syntax.sourceTypes().stream()
+                .filter(metadata -> className.equals(metadata.declaration().identity().javaType().className()))
+                .flatMap(metadata -> metadata.members().methods().stream())
                 .filter(method -> methodName.equals(method.name()))
                 .map(method -> method.analysisTarget().target().orElseThrow())
                 .findFirst()
@@ -198,19 +202,17 @@ class CanonicalMethodDeclarationResolverTest {
                 """.formatted(origin));
     }
 
-    private ClassMetadata withResolution(ClassMetadata metadata, MethodTargetResolution resolution) {
-        ClassMetadata.MethodSignature method = metadata.methods().getFirst();
-        ClassMetadata.MethodSignature replacement = new ClassMetadata.MethodSignature(
-                method.name(), method.paramTypes(), method.annotations(), method.sql(), method.sqlSource(),
+    private SourceTypeMetadata withResolution(SourceTypeMetadata metadata, MethodTargetResolution resolution) {
+        SourceMethodMetadata method = metadata.members().methods().getFirst();
+        SourceMethodMetadata replacement = new SourceMethodMetadata(
+                method.name(), method.paramTypes(), method.sql(), method.sqlSource(),
                 method.startLine(), method.endLine(), method.range(), method.source(),
                 method.parameterTypeReferences(), method.returnType(), method.invocations(), method.annotationEvidence(),
                 method.bodyTypeReferences(), method.namePosition(), resolution,
                 method.executableDeclaration(), method.abstractDeclaration(), method.overridableDeclaration());
-        return new ClassMetadata(
-                metadata.className(), metadata.packageName(), metadata.fullyQualifiedName(), metadata.sourceFile(),
-                metadata.kind(), metadata.isAbstract(), metadata.implementedTypes(), metadata.extendedTypes(),
-                metadata.annotations(), metadata.imports(), metadata.fields(), List.of(replacement),
-                metadata.hasFluentAccessors(), metadata.hasChainedAccessors(), metadata.profiles(), metadata.range(),
-                metadata.source(), metadata.primary(), metadata.beanQualifiers(), metadata.annotationEvidence());
+        return new SourceTypeMetadata(metadata.declaration(), metadata.relationships(),
+                new SourceTypeMembers(metadata.members().fields(), List.of(replacement),
+                        metadata.members().fluentSetters(), metadata.members().chainedAccessors()),
+                metadata.frameworkFacts(), metadata.compilationUnit());
     }
 }

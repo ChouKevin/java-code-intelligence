@@ -1,7 +1,9 @@
 package com.java.semantic.api;
 
 import com.java.semantic.api.security.ApiTokenFilter;
+import com.java.semantic.identity.JavaTypeIdentity;
 import com.java.semantic.identity.MethodTarget;
+import com.java.semantic.identity.SourceTypeIdentity;
 import com.java.semantic.repository.domain.RepositoryId;
 import com.java.semantic.repository.domain.RepositoryRevision;
 import com.java.semantic.syntax.application.EntryPointDiscoveryApplicationService;
@@ -212,8 +214,11 @@ class EntryPointControllerTest {
                 List.of(
                         new ApiEntryPoint("place", "place order", "/orders", List.of("GET"), List.of("orders"),
                                 MethodTargetResolution.resolved(new MethodTarget(
-                                        "src/main/java/com/acme/OrderController.java", "com.acme",
-                                        "OrderController", "place", List.of("java.lang.Long")))),
+                                        new SourceTypeIdentity(
+                                                new JavaTypeIdentity("com.acme", "OrderController"),
+                                                "src/main/java/com/acme/OrderController.java"),
+                                        "place",
+                                        List.of("java.lang.Long")))),
                         new MqEntryPoint("consume", "consume order", MqBroker.KAFKA, List.of("orders"),
                                 MethodTargetResolution.unresolved("METHOD_PARAMETER_BINDING_UNRESOLVED")),
                         new ScheduleEntryPoint("refresh", "refresh orders", ScheduleTriggerKind.CRON, "0 * * * *",

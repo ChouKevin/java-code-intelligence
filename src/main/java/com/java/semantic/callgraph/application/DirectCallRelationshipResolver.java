@@ -12,9 +12,9 @@ import com.java.semantic.semantic.domain.SemanticCallSite;
 import com.java.semantic.semantic.domain.SemanticMethod;
 import com.java.semantic.semantic.domain.SemanticPosition;
 import com.java.semantic.semantic.domain.SemanticRange;
-import com.java.semantic.syntax.domain.ClassMetadata;
-import com.java.semantic.syntax.domain.ClassMetadata.MethodSignature;
-import com.java.semantic.syntax.domain.ClassMetadata.TypeKind;
+import com.java.semantic.syntax.domain.SourceMethodMetadata;
+import com.java.semantic.syntax.domain.SourceTypeKind;
+import com.java.semantic.syntax.domain.SourceTypeMetadata;
 import com.java.semantic.syntax.domain.SyntaxInvocation;
 import com.java.semantic.syntax.domain.SyntaxPosition;
 import com.java.semantic.syntax.domain.SyntaxRange;
@@ -280,7 +280,7 @@ public final class DirectCallRelationshipResolver {
             SyntaxInvocation invocation,
             List<String> evidence) {
         List<ImplementationCandidate> candidates = new ArrayList<>();
-        if (index.method(declarationTarget).map(MethodSignature::executableDeclaration).orElse(false)) {
+        if (index.method(declarationTarget).map(SourceMethodMetadata::executableDeclaration).orElse(false)) {
             candidates.add(candidate(index, declarationMethod, declarationTarget));
         }
         try {
@@ -353,15 +353,15 @@ public final class DirectCallRelationshipResolver {
             SemanticMethod caller) {
         return canonicalTargetProjection.project(snapshot, index, caller)
                 .flatMap(index::method)
-                .map(MethodSignature::invocations)
+                .map(SourceMethodMetadata::invocations)
                 .orElse(List.of());
     }
 
     private boolean interfaceDeclaration(RepositorySyntaxIndex index, MethodTarget target) {
-        Optional<ClassMetadata> metadata = index.classMetadata(target);
+        Optional<SourceTypeMetadata> metadata = index.sourceType(target);
         boolean interfaceDeclaration = metadata
-                .map(ClassMetadata::kind)
-                .filter(TypeKind.INTERFACE::equals)
+                .map(sourceType -> sourceType.declaration().kind())
+                .filter(SourceTypeKind.INTERFACE::equals)
                 .isPresent();
         log.debug(
                 "phase=callgraph-resolution outcome=interface-classification targetId={} metadataPresent={} interface={}",

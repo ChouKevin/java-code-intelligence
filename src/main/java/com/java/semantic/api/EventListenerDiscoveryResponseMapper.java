@@ -8,13 +8,12 @@ import com.java.semantic.api.dto.ListenerObservationSummaryResponse;
 import com.java.semantic.api.dto.MethodTargetResponse;
 import com.java.semantic.api.dto.PositionResponse;
 import com.java.semantic.api.dto.SourceRangeResponse;
-import com.java.semantic.identity.MethodTarget;
 import com.java.semantic.syntax.application.CandidatePage;
 import com.java.semantic.syntax.application.EventListenerCandidate;
 import com.java.semantic.syntax.application.ListenerAnnotationEvidence;
 import com.java.semantic.syntax.application.ListenerObservationSummary;
-import com.java.semantic.syntax.application.ListenerSourceLocation;
 import com.java.semantic.syntax.application.RevisionBoundEventListenerDiscovery;
+import com.java.semantic.syntax.application.SourceRange;
 import org.springframework.stereotype.Component;
 import org.springframework.util.Assert;
 
@@ -47,8 +46,8 @@ public final class EventListenerDiscoveryResponseMapper {
     }
 
     private EventListenerCandidateResponse candidate(EventListenerCandidate candidate) {
-        MethodTargetResponse target = target(candidate.target());
-        SourceRangeResponse sourceRange = sourceRange(candidate.sourceLocation());
+        MethodTargetResponse target = MethodTargetHttpMapper.toResponse(candidate.target());
+        SourceRangeResponse sourceRange = sourceRange(candidate.declarationRange());
         Assert.isTrue(target.sourceFile().equals(sourceRange.sourceFile()),
                 "candidate target and source range sourceFile must match");
         return new EventListenerCandidateResponse(
@@ -63,26 +62,17 @@ public final class EventListenerDiscoveryResponseMapper {
 
     private ListenerObservationSummaryResponse observation(ListenerObservationSummary observation) {
         List<SourceRangeResponse> samples =
-                observation.sourceLocations().stream().map(this::sourceRange).toList();
+                observation.declarationRanges().stream().map(this::sourceRange).toList();
         return new ListenerObservationSummaryResponse(
                 observation.code().name(),
                 observation.totalCount(),
                 samples);
     }
 
-    private MethodTargetResponse target(MethodTarget target) {
-        return new MethodTargetResponse(
-                target.sourceFile(),
-                target.packageName(),
-                target.className(),
-                target.methodName(),
-                target.parameterTypes());
-    }
-
-    private SourceRangeResponse sourceRange(ListenerSourceLocation sourceLocation) {
+    private SourceRangeResponse sourceRange(SourceRange sourceRange) {
         return new SourceRangeResponse(
-                sourceLocation.sourceFile(),
-                new PositionResponse(sourceLocation.start().line(), sourceLocation.start().character()),
-                new PositionResponse(sourceLocation.end().line(), sourceLocation.end().character()));
+                sourceRange.sourceFile(),
+                new PositionResponse(sourceRange.range().start().line(), sourceRange.range().start().character()),
+                new PositionResponse(sourceRange.range().end().line(), sourceRange.range().end().character()));
     }
 }

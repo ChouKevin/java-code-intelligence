@@ -2,6 +2,7 @@ package com.java.semantic.syntax.application;
 
 import com.java.semantic.identity.MethodTarget;
 import com.java.semantic.identity.RepositoryRelativeSource;
+import com.java.semantic.syntax.domain.SyntaxPosition;
 
 import java.util.List;
 import java.util.Objects;
@@ -59,7 +60,11 @@ public record DiscoveryFollowUp(
         GET_NEXT_PAGE(
                 "/v1/discovery/type-members",
                 "discoverTypeMembers",
-                TypeMembersRequest.class);
+                TypeMembersRequest.class),
+        RESOLVE_SOURCE_SYMBOL(
+                "/v1/discovery/source-symbols/resolve",
+                "resolveSourceSymbol",
+                ResolveSourceSymbolRequest.class);
 
         private final ApiProjection api;
         private final Class<? extends RequestProjection> requestType;
@@ -100,7 +105,8 @@ public record DiscoveryFollowUp(
             DiscoverMethodImplementationsRequest,
             ConceptDiscoveryRequest,
             GetTypeMembersRequest,
-            TypeMembersRequest {
+            TypeMembersRequest,
+            ResolveSourceSymbolRequest {
     }
 
     /** Phase 1 固定供 Phase 2 實作的 exact method source 完整請求 */
@@ -270,6 +276,23 @@ public record DiscoveryFollowUp(
             if (offset < 0 || limit < 1 || limit > 100) {
                 throw new IllegalArgumentException("type member page is invalid");
             }
+        }
+    }
+
+    /** source-symbol endpoint 可直接重送的完整 revision-bound request */
+    public record ResolveSourceSymbolRequest(
+            String repoId,
+            String expectedRevision,
+            SourceSymbolContext context,
+            String symbol,
+            Optional<SyntaxPosition> position) implements RequestProjection {
+
+        public ResolveSourceSymbolRequest {
+            repoId = requiredText(repoId, "repoId");
+            expectedRevision = requiredText(expectedRevision, "expectedRevision");
+            context = Objects.requireNonNull(context, "context is required");
+            symbol = requiredText(symbol, "symbol");
+            position = Objects.requireNonNull(position, "position is required");
         }
     }
 

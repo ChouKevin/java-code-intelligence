@@ -5,7 +5,7 @@ import static com.example.evidence.Audit.record;
 import java.util.List;
 import java.util.function.Function;
 
-class PolicyIdentityFixture {
+class TypeEvidenceFixture {
 
     @PolicyMarker.Nested
     List<? super SecretDto> inspect(List<? extends SecretDto> values) {

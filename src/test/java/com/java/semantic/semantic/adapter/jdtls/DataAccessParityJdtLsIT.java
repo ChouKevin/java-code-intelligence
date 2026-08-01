@@ -132,7 +132,7 @@ class DataAccessParityJdtLsIT {
      * TARGET_ONLY/OPAQUE 並保留介面 MethodTarget；經 API 回應對應層後歸類 {@code RESOLVED_OPAQUE}
      * <p>
      * {@code interface CustomerRepository extends JpaRepository<..>} 的父介面被
-     * {@code ClassMetadataExtractor} 放進 implementedTypes，證據規則取 extendedTypes 與
+     * {@code SourceTypeMetadataExtractor} 放進 implementedTypes，證據規則取 extendedTypes 與
      * implementedTypes 聯集後即能命中已知父介面
      */
     private void assertSpringDataRepositoryEdgeIsResolvedOpaque(OutgoingGraphFragment fragment) {
@@ -229,8 +229,8 @@ class DataAccessParityJdtLsIT {
         MethodTarget resolved = new CanonicalMethodDeclarationResolver().resolve(syntax, target)
                 .target()
                 .orElseThrow(() -> new AssertionError("missing canonical method declaration"));
-        return syntax.classes().stream()
-                .flatMap(metadata -> metadata.methods().stream())
+        return syntax.sourceTypes().stream()
+                .flatMap(metadata -> metadata.members().methods().stream())
                 .filter(method -> method.analysisTarget().target().filter(resolved::equals).isPresent())
                 .map(method -> new SemanticDeclarationAnchor(
                         resolved,
@@ -245,10 +245,10 @@ class DataAccessParityJdtLsIT {
             String className,
             String methodName,
             List<String> parameterTypes) {
-        return syntax.classes().stream()
-                .filter(metadata -> packageName.equals(metadata.packageName()))
-                .filter(metadata -> className.equals(metadata.className()))
-                .flatMap(metadata -> metadata.methods().stream())
+        return syntax.sourceTypes().stream()
+                .filter(metadata -> packageName.equals(metadata.declaration().identity().javaType().packageName()))
+                .filter(metadata -> className.equals(metadata.declaration().identity().javaType().className()))
+                .flatMap(metadata -> metadata.members().methods().stream())
                 .filter(method -> methodName.equals(method.name()))
                 .filter(method -> parameterTypes.equals(method.paramTypes()))
                 .flatMap(method -> method.analysisTarget().target().stream())

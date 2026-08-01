@@ -1,6 +1,8 @@
 package com.java.semantic.trie;
 
+import com.java.semantic.identity.JavaTypeIdentity;
 import com.java.semantic.identity.MethodTarget;
+import com.java.semantic.identity.SourceTypeIdentity;
 import com.java.semantic.repository.domain.RepositoryId;
 import com.java.semantic.repository.domain.RepositoryRevision;
 import com.java.semantic.repository.domain.RepositorySnapshot;
@@ -51,9 +53,9 @@ class ApiRouteCandidateTest {
     @Test
     void should_preserve_analysis_target_identity_when_candidate_is_mapped_from_trie_ref() {
         MethodTarget target = new MethodTarget(
-                "src/main/java/com/example/orders/OrderController.java",
-                "com.example.orders",
-                "OrderController",
+                new SourceTypeIdentity(
+                        new JavaTypeIdentity("com.example.orders", "OrderController"),
+                        "src/main/java/com/example/orders/OrderController.java"),
                 "findOrder",
                 List.of("java.lang.String"));
         MethodTargetResolution resolution = MethodTargetResolution.resolved(target);

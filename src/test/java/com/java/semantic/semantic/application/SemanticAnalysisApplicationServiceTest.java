@@ -1,12 +1,18 @@
 package com.java.semantic.semantic.application;
 
+import com.java.semantic.syntax.domain.SourceTypeKind;
+
+import com.java.semantic.syntax.domain.SourceMethodMetadata;
+
 import com.java.semantic.callgraph.application.IncomingSemanticCallGraphBuilder;
 import com.java.semantic.callgraph.application.SemanticCallGraphBuilder;
 import com.java.semantic.callgraph.domain.IncomingGraphFragment;
 import com.java.semantic.callgraph.domain.OutgoingGraphFragment;
 import com.java.semantic.config.IncomingGraphProperties;
 import com.java.semantic.config.OutgoingGraphProperties;
+import com.java.semantic.identity.JavaTypeIdentity;
 import com.java.semantic.identity.MethodTarget;
+import com.java.semantic.identity.SourceTypeIdentity;
 import com.java.semantic.repository.application.RepositoryApplicationService;
 import com.java.semantic.repository.domain.RepositoryId;
 import com.java.semantic.repository.domain.RepositoryRevision;
@@ -18,7 +24,7 @@ import com.java.semantic.semantic.domain.SemanticMethod;
 import com.java.semantic.semantic.domain.SemanticPosition;
 import com.java.semantic.semantic.domain.SemanticRange;
 import com.java.semantic.syntax.domain.CanonicalMethodDeclarationResolver;
-import com.java.semantic.syntax.domain.ClassMetadata;
+import com.java.semantic.syntax.domain.SourceTypeMetadata;
 import com.java.semantic.syntax.domain.MethodTargetResolution;
 import com.java.semantic.syntax.domain.RepositorySyntax;
 import com.java.semantic.syntax.domain.SourceSlice;
@@ -66,7 +72,12 @@ class SemanticAnalysisApplicationServiceTest {
         RepositoryId repositoryId = RepositoryId.of("orders");
         RepositoryRevision revision = RepositoryRevision.fixture();
         RepositorySnapshot snapshot = new RepositorySnapshot(repositoryId, root, revision);
-        MethodTarget target = new MethodTarget("OrderService.java", "com.acme", "OrderService", "place", java.util.List.of());
+        MethodTarget target = new MethodTarget(
+                new SourceTypeIdentity(
+                        new JavaTypeIdentity("com.acme", "OrderService"),
+                        "OrderService.java"),
+                "place",
+                java.util.List.of());
         RepositorySyntax syntax = syntax(target);
         SemanticMethod method = new SemanticMethod(
                 "com.acme", "OrderService", "place", java.util.List.of(), "void",
@@ -108,7 +119,12 @@ class SemanticAnalysisApplicationServiceTest {
         RepositoryId repositoryId = RepositoryId.of("orders");
         RepositoryRevision revision = RepositoryRevision.fixture();
         RepositorySnapshot snapshot = new RepositorySnapshot(repositoryId, root, revision);
-        MethodTarget target = new MethodTarget("OrderService.java", "com.acme", "OrderService", "place", java.util.List.of());
+        MethodTarget target = new MethodTarget(
+                new SourceTypeIdentity(
+                        new JavaTypeIdentity("com.acme", "OrderService"),
+                        "OrderService.java"),
+                "place",
+                java.util.List.of());
         RepositorySyntax syntax = syntax(target);
         SemanticMethod method = new SemanticMethod(
                 "com.acme", "OrderService", "place", java.util.List.of(), "void",
@@ -149,10 +165,9 @@ class SemanticAnalysisApplicationServiceTest {
 
     private RepositorySyntax syntax(MethodTarget target) {
         SyntaxRange range = new SyntaxRange(new SyntaxPosition(0, 0), new SyntaxPosition(1, 0));
-        ClassMetadata.MethodSignature method = new ClassMetadata.MethodSignature(
+        SourceMethodMetadata method = new SourceMethodMetadata(
                 target.methodName(),
                 target.parameterTypes(),
-                List.of(),
                 null,
                 null,
                 1,
@@ -169,12 +184,12 @@ class SemanticAnalysisApplicationServiceTest {
                 true,
                 false,
                 true);
-        ClassMetadata metadata = new ClassMetadata(
+        SourceTypeMetadata metadata = com.java.semantic.syntax.domain.SourceTypeMetadataFixture.sourceType(
                 target.className(),
                 target.packageName(),
                 target.packageName() + "." + target.className(),
                 target.sourceFile(),
-                ClassMetadata.TypeKind.CLASS,
+                SourceTypeKind.CLASS,
                 false,
                 List.of(),
                 List.of(),

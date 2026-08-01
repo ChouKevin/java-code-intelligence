@@ -154,10 +154,10 @@ class GenericLimitationJdtLsIT {
             String methodName,
             List<String> parameterTypes) {
         RepositorySyntax syntax = new JdtSyntaxExtractionService().extract(root);
-        MethodTarget target = syntax.classes().stream()
-                .filter(metadata -> PACKAGE.equals(metadata.packageName()))
-                .filter(metadata -> className.equals(metadata.className()))
-                .flatMap(metadata -> metadata.methods().stream())
+        MethodTarget target = syntax.sourceTypes().stream()
+                .filter(metadata -> PACKAGE.equals(metadata.declaration().identity().javaType().packageName()))
+                .filter(metadata -> className.equals(metadata.declaration().identity().javaType().className()))
+                .flatMap(metadata -> metadata.members().methods().stream())
                 .filter(method -> methodName.equals(method.name()))
                 .filter(method -> parameterTypes.equals(method.paramTypes()))
                 .flatMap(method -> method.analysisTarget().target().stream())
@@ -171,8 +171,8 @@ class GenericLimitationJdtLsIT {
         MethodTarget resolved = new CanonicalMethodDeclarationResolver().resolve(syntax, target)
                 .target()
                 .orElseThrow(() -> new AssertionError("missing canonical method declaration"));
-        return syntax.classes().stream()
-                .flatMap(metadata -> metadata.methods().stream())
+        return syntax.sourceTypes().stream()
+                .flatMap(metadata -> metadata.members().methods().stream())
                 .filter(method -> method.analysisTarget().target().filter(resolved::equals).isPresent())
                 .map(method -> new SemanticDeclarationAnchor(
                         resolved,

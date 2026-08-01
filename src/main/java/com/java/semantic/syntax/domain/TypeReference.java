@@ -1,32 +1,20 @@
 package com.java.semantic.syntax.domain;
 
-import java.util.List;
-import java.util.Objects;
+import java.util.Optional;
 
-import org.springframework.util.Assert;
+import com.java.semantic.identity.JavaTypeIdentity;
 
-/** 原始碼寫法與 binding 解析結果的不可變型別證據 */
-public record TypeReference(
-        String writtenType,
-        String resolvedType,
-        List<TypeReference> typeArguments,
-        List<TypeReference> upperBounds,
-        List<TypeReference> lowerBounds,
-        boolean sourceDefined) {
+/** 原始碼型別寫法與已證實 binding 的密封證據介面 */
+public sealed interface TypeReference permits NominalTypeReference, PrimitiveTypeReference, ArrayTypeReference,
+        WildcardTypeReference, TypeVariableReference, CompositeTypeReference, InferredTypeReference {
 
-    public TypeReference {
-        Assert.hasText(writtenType, "writtenType is required");
-        resolvedType = Objects.requireNonNullElse(resolvedType, "");
-        typeArguments = List.copyOf(Objects.requireNonNull(typeArguments, "typeArguments is required"));
-        upperBounds = List.copyOf(Objects.requireNonNull(upperBounds, "upperBounds is required"));
-        lowerBounds = List.copyOf(Objects.requireNonNull(lowerBounds, "lowerBounds is required"));
+    String writtenType();
+
+    Optional<JavaTypeIdentity> resolvedNamedType();
+
+    default Optional<String> resolvedTypeName() {
+        return resolvedNamedType().map(JavaTypeIdentity::fullyQualifiedName);
     }
 
-    public TypeReference(
-            String writtenType,
-            String resolvedType,
-            List<TypeReference> typeArguments,
-            boolean sourceDefined) {
-        this(writtenType, resolvedType, typeArguments, List.of(), List.of(), sourceDefined);
-    }
+    boolean sourceDefined();
 }

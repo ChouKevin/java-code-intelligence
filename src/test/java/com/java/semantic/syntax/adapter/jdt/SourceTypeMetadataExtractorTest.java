@@ -3,43 +3,137 @@ package com.java.semantic.syntax.adapter.jdt;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.stream.Stream;
 
+import com.java.semantic.identity.JavaTypeIdentity;
 import com.java.semantic.identity.MethodTarget;
+import com.java.semantic.identity.SourceTypeIdentity;
 import com.java.semantic.callgraph.application.RepositorySyntaxIndex;
-import com.java.semantic.syntax.domain.ClassMetadata;
-import com.java.semantic.syntax.domain.ClassMetadata.FieldInfo;
+import com.java.semantic.syntax.domain.ArrayTypeReference;
+import com.java.semantic.syntax.domain.AnnotationEvidence;
+import com.java.semantic.syntax.domain.SourceTypeMetadata;
+import com.java.semantic.syntax.domain.SourceFieldMetadata;
+import com.java.semantic.syntax.domain.CompositeTypeReference;
+import com.java.semantic.syntax.domain.CompositeTypeReference.CompositeKind;
 import com.java.semantic.syntax.domain.EntryPointMethod;
+import com.java.semantic.syntax.domain.InferredTypeReference;
+import com.java.semantic.syntax.domain.NamedTypeReference;
+import com.java.semantic.syntax.domain.ParameterizedTypeReference;
+import com.java.semantic.syntax.domain.PrimitiveTypeReference;
 import com.java.semantic.syntax.domain.RepositorySyntax;
-import com.java.semantic.syntax.domain.ClassMetadata.MethodSignature;
-import com.java.semantic.syntax.domain.ClassMetadata.SqlSource;
-import com.java.semantic.syntax.domain.ClassMetadata.TypeKind;
+import com.java.semantic.syntax.domain.SourceMethodMetadata;
+import com.java.semantic.syntax.domain.SqlSourceKind;
+import com.java.semantic.syntax.domain.SourceTypeKind;
 import com.java.semantic.syntax.domain.SyntaxInvocation;
 import com.java.semantic.syntax.domain.SyntaxInvocation.InvocationKind;
 import com.java.semantic.syntax.domain.SyntaxPosition;
 import com.java.semantic.syntax.domain.SyntaxRange;
 import com.java.semantic.syntax.domain.AnalysisTargetStatus;
 import com.java.semantic.syntax.domain.InvocationTarget;
-import com.java.semantic.syntax.domain.ResolvedTypeIdentity;
 import com.java.semantic.syntax.domain.TypeReference;
+import com.java.semantic.syntax.domain.TypeVariableReference;
+import com.java.semantic.syntax.domain.WildcardTypeReference;
 
+import org.eclipse.jdt.core.dom.ASTNode;
+import org.eclipse.jdt.core.dom.ASTVisitor;
+import org.eclipse.jdt.core.dom.Type;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 
 import static org.assertj.core.api.Assertions.tuple;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** 型別 metadata 與 MyBatis SQL 抽取規則 */
-class ClassMetadataExtractorTest {
+class SourceTypeMetadataExtractorTest {
 
-    private final List<ClassMetadata> classes = SyntaxFixtures.extractSyntaxFixture().classes();
+    private final List<SourceTypeMetadata> classes = SyntaxFixtures.extractSyntaxFixture().sourceTypes();
 
-    private final List<ClassMetadata> multiModuleClasses = SyntaxFixtures.extractMultiModuleFixture().classes();
+    private final List<SourceTypeMetadata> multiModuleClasses = SyntaxFixtures.extractMultiModuleFixture().sourceTypes();
 
-    private final List<ClassMetadata> evidenceClasses = SyntaxFixtures.extract(
-            Path.of("src/test/resources/fixtures/syntax-evidence")).classes();
+    private final List<SourceTypeMetadata> evidenceClasses = SyntaxFixtures.extract(
+            Path.of("src/test/resources/fixtures/syntax-evidence")).sourceTypes();
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("typeReferenceForms")
+    void should_extract_each_supported_jdt_type_form_as_explicit_evidence(
+            String writtenType,
+            Class<? extends TypeReference> expectedType,
+            @TempDir Path tempDir) throws IOException {
+        ParsedSource parsed = parseTypeReferenceFixture(tempDir);
+        SourceSlices slices = new SourceSlices(parsed.unit(), parsed.text());
+        Type type = typeOf(parsed, slices, writtenType);
+
+        TypeReference reference = SourceTypeMetadataExtractor.typeReferenceOf(type, slices);
+
+        assertThat(reference).isInstanceOf(expectedType);
+        assertThat(reference.writtenType()).isEqualTo(writtenType);
+        assertEvidenceShape(writtenType, reference);
+    }
+
+    private static Stream<Arguments> typeReferenceForms() {
+        return Stream.of(
+                Arguments.of("Order", NamedTypeReference.class),
+                Arguments.of("int", PrimitiveTypeReference.class),
+                Arguments.of("List<Order>", ParameterizedTypeReference.class),
+                Arguments.of("Order[][]", ArrayTypeReference.class),
+                Arguments.of("? extends Order", WildcardTypeReference.class),
+                Arguments.of("T", TypeVariableReference.class),
+                Arguments.of("IllegalArgumentException | IllegalStateException", CompositeTypeReference.class),
+                Arguments.of("Order & Runnable", CompositeTypeReference.class),
+                Arguments.of("var", InferredTypeReference.class));
+    }
+
+    @Test
+    void should_project_parameterized_nominal_hierarchy_to_its_raw_repository_type(@TempDir Path tempDir)
+            throws IOException {
+        Path repositoryRoot = tempDir.resolve("repository-hierarchy");
+        Path sourceRoot = repositoryRoot.resolve("src/main/java/com/example");
+        Files.createDirectories(sourceRoot);
+        Files.writeString(sourceRoot.resolve("RepositoryHierarchy.java"), """
+                package com.example;
+
+                interface JpaRepository<T, ID> {
+                }
+
+                class Order {
+                }
+
+                interface OrderRepository extends JpaRepository<Order, Long> {
+                }
+                """);
+
+        SourceTypeMetadata metadata = new JdtSyntaxExtractionService().extract(repositoryRoot).sourceTypes().stream()
+                .filter(candidate -> candidate.declaration().identity().fullyQualifiedName().equals("com.example.OrderRepository"))
+                .findFirst()
+                .orElseThrow();
+
+        assertThat(metadata.relationships().extendedTypes()).singleElement().satisfies(reference -> {
+            assertThat(reference).isInstanceOf(ParameterizedTypeReference.class);
+            assertThat(((ParameterizedTypeReference) reference).simpleTypeName()).isEqualTo("JpaRepository");
+        });
+    }
+
+    @Test
+    void should_reject_a_non_nominal_type_when_a_hierarchy_requires_nominal_evidence(@TempDir Path tempDir)
+            throws IOException {
+        ParsedSource parsed = parseTypeReferenceFixture(tempDir);
+        SourceSlices slices = new SourceSlices(parsed.unit(), parsed.text());
+
+        assertThatThrownBy(() -> SourceTypeMetadataExtractor.nominalTypeReferenceOf(
+                typeOf(parsed, slices, "Order[][]"), slices))
+                .isInstanceOf(UnsupportedTypeFormException.class)
+                .hasMessageContaining("ArrayType");
+    }
 
     @Test
     void should_classify_interface_superinterfaces_as_extended_types(@TempDir Path tempDir) throws IOException {
@@ -56,18 +150,19 @@ class ClassMetadataExtractorTest {
                 }
                 """);
 
-        List<ClassMetadata> metadata = new JdtSyntaxExtractionService().extract(repositoryRoot).classes();
-        ClassMetadata child = metadata.stream()
-                .filter(candidate -> candidate.fullyQualifiedName().equals("com.example.Child"))
+        List<SourceTypeMetadata> metadata = new JdtSyntaxExtractionService().extract(repositoryRoot).sourceTypes();
+        SourceTypeMetadata child = metadata.stream()
+                .filter(candidate -> candidate.declaration().identity().fullyQualifiedName().equals("com.example.Child"))
                 .findFirst()
                 .orElseThrow();
 
-        assertThat(child.implementedTypes()).isEmpty();
-        assertThat(child.extendedTypes()).containsExactly("Parent");
-        assertThat(child.implementedTypeReferences()).isEmpty();
-        assertThat(child.extendedTypeReferences())
-                .extracting(TypeReference::resolvedType)
-                .containsExactly("com.example.Parent");
+        assertThat(child.relationships().implementedTypes()).isEmpty();
+        assertThat(child.relationships().extendedTypes()).extracting(reference -> reference.simpleTypeName())
+                .containsExactly("Parent");
+        assertThat(child.relationships().implementedTypes()).isEmpty();
+        assertThat(child.relationships().extendedTypes())
+                .extracting(TypeReference::resolvedTypeName)
+                .containsExactly(java.util.Optional.of("com.example.Parent"));
     }
 
     @Test
@@ -106,18 +201,18 @@ class ClassMetadataExtractorTest {
                 """;
         java.nio.file.Files.writeString(sourceRoot.resolve("FlagFixture.java"), source);
 
-        ClassMetadata metadata = new JdtSyntaxExtractionService().extract(repositoryRoot).classes().getFirst();
-        MethodSignature open = methodOf(List.of(metadata), "com.example.FlagFixture", "open");
-        MethodSignature constructor = metadata.methods().stream()
-                .filter(MethodSignature::executableDeclaration)
+        SourceTypeMetadata metadata = new JdtSyntaxExtractionService().extract(repositoryRoot).sourceTypes().getFirst();
+        SourceMethodMetadata open = methodOf(List.of(metadata), "com.example.FlagFixture", "open");
+        SourceMethodMetadata constructor = metadata.members().methods().stream()
+                .filter(SourceMethodMetadata::executableDeclaration)
                 .filter(method -> "FlagFixture".equals(method.name()))
                 .findFirst()
                 .orElseThrow();
-        MethodSignature abstractMethod = methodOf(List.of(metadata), "com.example.FlagFixture", "abstractMethod");
-        MethodSignature nativeMethod = methodOf(List.of(metadata), "com.example.FlagFixture", "nativeMethod");
-        MethodSignature unresolved = methodOf(List.of(metadata), "com.example.FlagFixture", "unresolved");
+        SourceMethodMetadata abstractMethod = methodOf(List.of(metadata), "com.example.FlagFixture", "abstractMethod");
+        SourceMethodMetadata nativeMethod = methodOf(List.of(metadata), "com.example.FlagFixture", "nativeMethod");
+        SourceMethodMetadata unresolved = methodOf(List.of(metadata), "com.example.FlagFixture", "unresolved");
 
-        assertThat(metadata.sourceFile()).isEqualTo("src/main/java/com/example/FlagFixture.java");
+        assertThat(metadata.declaration().identity().sourceFile()).isEqualTo("src/main/java/com/example/FlagFixture.java");
         assertThat(open.source().text()).isEqualTo("""
                 void /* 😀 */ open(String text) {
                         String emoji = "😀";
@@ -133,8 +228,8 @@ class ClassMetadataExtractorTest {
         assertThat(open.executableDeclaration()).isTrue();
         assertThat(open.overridableDeclaration()).isTrue();
         assertThat(constructor.overridableDeclaration()).isFalse();
-        assertThat(metadata.methods().stream().filter(method -> method.name().endsWith("Method"))
-                .filter(MethodSignature::executableDeclaration))
+        assertThat(metadata.members().methods().stream().filter(method -> method.name().endsWith("Method"))
+                .filter(SourceMethodMetadata::executableDeclaration))
                 .allSatisfy(method -> assertThat(method.overridableDeclaration()).isFalse());
         assertThat(abstractMethod.executableDeclaration()).isFalse();
         assertThat(abstractMethod.abstractDeclaration()).isTrue();
@@ -151,16 +246,36 @@ class ClassMetadataExtractorTest {
         assertThat(index.method(target.sourceFile(), new SyntaxRange(
                 new SyntaxPosition(open.range().start().line(), open.range().start().character() + 1),
                 open.range().end()))).isEmpty();
-        assertThat(index.method(new MethodTarget("src/main/java/com/example/Other.java", target.packageName(),
-                target.className(), target.methodName(), target.parameterTypes()))).isEmpty();
-        assertThat(index.method(new MethodTarget(target.sourceFile(), "other.example", target.className(),
-                target.methodName(), target.parameterTypes()))).isEmpty();
-        assertThat(index.method(new MethodTarget(target.sourceFile(), target.packageName(), "Other",
-                target.methodName(), target.parameterTypes()))).isEmpty();
-        assertThat(index.method(new MethodTarget(target.sourceFile(), target.packageName(), target.className(), "other",
+        assertThat(index.method(new MethodTarget(
+                new SourceTypeIdentity(
+                        new JavaTypeIdentity(target.packageName(), target.className()),
+                        "src/main/java/com/example/Other.java"),
+                target.methodName(),
                 target.parameterTypes()))).isEmpty();
-        assertThat(index.method(new MethodTarget(target.sourceFile(), target.packageName(), target.className(),
-                target.methodName(), List.of("int")))).isEmpty();
+        assertThat(index.method(new MethodTarget(
+                new SourceTypeIdentity(
+                        new JavaTypeIdentity("other.example", target.className()),
+                        target.sourceFile()),
+                target.methodName(),
+                target.parameterTypes()))).isEmpty();
+        assertThat(index.method(new MethodTarget(
+                new SourceTypeIdentity(
+                        new JavaTypeIdentity(target.packageName(), "Other"),
+                        target.sourceFile()),
+                target.methodName(),
+                target.parameterTypes()))).isEmpty();
+        assertThat(index.method(new MethodTarget(
+                new SourceTypeIdentity(
+                        new JavaTypeIdentity(target.packageName(), target.className()),
+                        target.sourceFile()),
+                "other",
+                target.parameterTypes()))).isEmpty();
+        assertThat(index.method(new MethodTarget(
+                new SourceTypeIdentity(
+                        new JavaTypeIdentity(target.packageName(), target.className()),
+                        target.sourceFile()),
+                target.methodName(),
+                List.of("int")))).isEmpty();
         assertThat(unresolved.analysisTarget().status()).isEqualTo(AnalysisTargetStatus.UNRESOLVED);
         assertThat(index.method(target.sourceFile(), unresolved.range())).isEmpty();
     }
@@ -202,7 +317,7 @@ class ClassMetadataExtractorTest {
                 }
                 """);
 
-        List<ClassMetadata> metadata = new JdtSyntaxExtractionService().extract(repositoryRoot).classes();
+        List<SourceTypeMetadata> metadata = new JdtSyntaxExtractionService().extract(repositoryRoot).sourceTypes();
 
         assertThat(methodOf(metadata, "com.example.FinalFixture", "open").overridableDeclaration()).isFalse();
         assertThat(methodOf(metadata, "com.example.RecordFixture", "open").overridableDeclaration()).isFalse();
@@ -239,7 +354,7 @@ class ClassMetadataExtractorTest {
                 }
                 """);
 
-        List<ClassMetadata> metadata = new JdtSyntaxExtractionService().extract(repositoryRoot).classes();
+        List<SourceTypeMetadata> metadata = new JdtSyntaxExtractionService().extract(repositoryRoot).sourceTypes();
 
         assertThat(methodOf(metadata, "com.example.Port", "handle").abstractDeclaration()).isTrue();
         assertThat(methodOf(metadata, "com.example.Port", "defaultHandle").abstractDeclaration()).isFalse();
@@ -253,32 +368,33 @@ class ClassMetadataExtractorTest {
 
     @Test
     void should_extract_exact_source_qualifier_invocation_and_resolved_type_evidence_in_one_snapshot() {
-        ClassMetadata service = classOf(evidenceClasses, "com.example.evidence.FastOrderService");
-        ClassMetadata coordinator = classOf(evidenceClasses, "com.example.evidence.OrderCoordinator");
-        FieldInfo mapper = coordinator.fields().stream()
+        SourceTypeMetadata service = classOf(evidenceClasses, "com.example.evidence.FastOrderService");
+        SourceTypeMetadata coordinator = classOf(evidenceClasses, "com.example.evidence.OrderCoordinator");
+        SourceFieldMetadata mapper = coordinator.members().fields().stream()
                 .filter(field -> "mapper".equals(field.name()))
                 .findFirst()
                 .orElseThrow();
-        FieldInfo unresolved = coordinator.fields().stream()
+        SourceFieldMetadata unresolved = coordinator.members().fields().stream()
                 .filter(field -> "unresolved".equals(field.name()))
                 .findFirst()
                 .orElseThrow();
-        FieldInfo libraryValues = coordinator.fields().stream()
+        SourceFieldMetadata libraryValues = coordinator.members().fields().stream()
                 .filter(field -> "libraryValues".equals(field.name()))
                 .findFirst()
                 .orElseThrow();
-        MethodSignature process = methodOf(evidenceClasses,
+        SourceMethodMetadata process = methodOf(evidenceClasses,
                 "com.example.evidence.OrderCoordinator", "process");
 
-        assertThat(service.primary()).isTrue();
-        assertThat(service.beanQualifiers()).containsExactly("fastOrderService");
-        assertThat(service.source().text())
+        assertThat(service.frameworkFacts().primary()).isTrue();
+        assertThat(service.frameworkFacts().beanQualifiers()).containsExactly("fastOrderService");
+        assertThat(service.declaration().source().text())
                 .isEqualTo("@Qualifier(\"fastOrderService\")\n@Primary\nclass FastOrderService {\n}");
-        assertThat(service.range().start().line()).isEqualTo(8);
-        assertThat(service.range().start().character()).isZero();
+        assertThat(service.declaration().source().range().start().line()).isEqualTo(8);
+        assertThat(service.declaration().source().range().start().character()).isZero();
 
         assertThat(mapper.type()).isEqualTo("OrderMapper");
-        assertThat(mapper.annotations()).containsExactly("Qualifier");
+        assertThat(mapper.annotationEvidence()).extracting(AnnotationEvidence::writtenName)
+                .containsExactly("Qualifier");
         assertThat(mapper.annotationEvidence()).singleElement().satisfies(annotation -> {
             assertThat(annotation.writtenName()).isEqualTo("Qualifier");
             assertThat(annotation.resolvedType()).get().satisfies(type -> {
@@ -288,27 +404,29 @@ class ClassMetadataExtractorTest {
         });
         assertThat(mapper.qualifier()).isEqualTo("vaultMapper");
         assertThat(mapper.typeReference().writtenType()).isEqualTo("OrderMapper");
-        assertThat(mapper.typeReference().resolvedType()).isEqualTo("com.example.evidence.OrderMapper");
+        assertThat(mapper.typeReference().resolvedTypeName()).contains("com.example.evidence.OrderMapper");
         assertThat(mapper.typeReference().sourceDefined()).isTrue();
         assertThat(unresolved.typeReference().writtenType()).isEqualTo("MissingDependency");
-        assertThat(unresolved.typeReference().resolvedType())
+        assertThat(unresolved.typeReference().resolvedTypeName())
                 .as("JDT recovery binding is not proven identity and must not escape as a guessed name")
-                .isEqualTo("");
+                .isEmpty();
         assertThat(unresolved.typeReference().sourceDefined()).isFalse();
-        assertThat(libraryValues.typeReference().resolvedType()).isEqualTo("java.util.List");
+        assertThat(libraryValues.typeReference().resolvedTypeName()).contains("java.util.List");
         assertThat(libraryValues.typeReference().sourceDefined()).isFalse();
 
         assertThat(process.paramTypes()).containsExactly("OrderLine");
         assertThat(process.parameterTypeReferences()).singleElement().satisfies(parameter -> {
             assertThat(parameter.writtenType()).isEqualTo("OrderLine");
-            assertThat(parameter.resolvedType()).isEqualTo("com.example.evidence.OrderLine");
+            assertThat(parameter.resolvedTypeName()).contains("com.example.evidence.OrderLine");
             assertThat(parameter.sourceDefined()).isTrue();
         });
         assertThat(process.returnType()).get().satisfies(returnType -> {
             assertThat(returnType.writtenType()).isEqualTo("Receipt<OrderLine>");
-            assertThat(returnType.resolvedType()).isEqualTo("com.example.evidence.Receipt");
-            assertThat(returnType.typeArguments()).singleElement().satisfies(argument ->
-                    assertThat(argument.resolvedType()).isEqualTo("com.example.evidence.OrderLine"));
+            assertThat(returnType).isInstanceOf(ParameterizedTypeReference.class);
+            ParameterizedTypeReference parameterized = (ParameterizedTypeReference) returnType;
+            assertThat(parameterized.resolvedTypeName()).contains("com.example.evidence.Receipt");
+            assertThat(parameterized.typeArguments()).singleElement().satisfies(argument ->
+                    assertThat(argument.resolvedTypeName()).contains("com.example.evidence.OrderLine"));
         });
         assertThat(process.source().text()).startsWith("Receipt<OrderLine> process(OrderLine order) {")
                 .contains("mapper.save(order)", "OrderLine::new", "record(\"saved\")");
@@ -373,7 +491,7 @@ class ClassMetadataExtractorTest {
         assertThat(staticImport.qualifier()).isEqualTo("");
         assertThat(staticImport.range()).isEqualTo(syntaxRange(30, 8, 30, 23));
 
-        MethodSignature qualifiedSuper = methodOf(evidenceClasses,
+        SourceMethodMetadata qualifiedSuper = methodOf(evidenceClasses,
                 "com.example.evidence.OuterEvidence.Inner", "qualifiedSuperReference");
         assertThat(qualifiedSuper.invocations()).singleElement().satisfies(invocation -> {
             assertThat(invocation.expression()).isEqualTo("OuterEvidence.super::inherited");
@@ -385,83 +503,92 @@ class ClassMetadataExtractorTest {
 
     @Test
     void should_extract_binding_proven_nested_policy_identities_and_wildcard_bounds() {
-        MethodSignature inspect = methodOf(evidenceClasses,
-                "com.example.evidence.PolicyIdentityFixture", "inspect");
+        SourceMethodMetadata inspect = methodOf(evidenceClasses,
+                "com.example.evidence.TypeEvidenceFixture", "inspect");
 
         assertThat(inspect.annotationEvidence()).singleElement().satisfies(annotation ->
                 assertThat(annotation.resolvedType()).contains(
-                        new ResolvedTypeIdentity(
+                        new JavaTypeIdentity(
                                 "com.example.evidence", "PolicyMarker.Nested")));
         assertThat(inspect.parameterTypeReferences()).singleElement().satisfies(parameter -> {
-            TypeReference wildcard = parameter.typeArguments().getFirst();
-            assertThat(wildcard.upperBounds()).singleElement()
-                    .extracting(TypeReference::resolvedType)
-                    .isEqualTo("com.example.evidence.SecretDto");
+            ParameterizedTypeReference parameterized = (ParameterizedTypeReference) parameter;
+            WildcardTypeReference wildcard = (WildcardTypeReference) parameterized.typeArguments().getFirst();
+            assertThat(wildcard.upperBound()).flatMap(TypeReference::resolvedTypeName)
+                    .contains("com.example.evidence.SecretDto");
         });
         assertThat(inspect.returnType()).get().satisfies(returnType -> {
-            TypeReference wildcard = returnType.typeArguments().getFirst();
-            assertThat(wildcard.lowerBounds()).singleElement()
-                    .extracting(TypeReference::resolvedType)
-                    .isEqualTo("com.example.evidence.SecretDto");
+            ParameterizedTypeReference parameterized = (ParameterizedTypeReference) returnType;
+            WildcardTypeReference wildcard = (WildcardTypeReference) parameterized.typeArguments().getFirst();
+            assertThat(wildcard.lowerBound()).flatMap(TypeReference::resolvedTypeName)
+                    .contains("com.example.evidence.SecretDto");
         });
         assertThat(inspect.invocations())
                 .extracting(SyntaxInvocation::expression, SyntaxInvocation::resolvedTarget)
                 .contains(
                         tuple("accept(values)", java.util.Optional.of(new InvocationTarget(
-                                "com.example.evidence", "PolicyIdentityFixture", "accept", List.of("List")))),
+                                "com.example.evidence", "TypeEvidenceFixture", "accept", List.of("List")))),
                         tuple("new OuterIdentity.Inner()", java.util.Optional.of(new InvocationTarget(
                                 "com.example.evidence", "OuterIdentity.Inner", "Inner", List.of()))),
                         tuple("created::overloaded", java.util.Optional.of(new InvocationTarget(
                                 "com.example.evidence", "OuterIdentity.Inner", "overloaded", List.of("List")))),
                         tuple("varargs(\"policy\")", java.util.Optional.of(new InvocationTarget(
-                                "com.example.evidence", "PolicyIdentityFixture", "varargs", List.of("String[]")))),
+                                "com.example.evidence", "TypeEvidenceFixture", "varargs", List.of("String[]")))),
                         tuple("record(\"policy\")", java.util.Optional.of(new InvocationTarget(
                                 "com.example.evidence", "Audit", "record", List.of("String")))));
     }
 
     @Test
     void should_extract_binding_proven_body_type_identities_from_non_invocation_sites() {
-        MethodSignature inspect = methodOf(evidenceClasses,
+        SourceMethodMetadata inspect = methodOf(evidenceClasses,
                 "com.example.evidence.BodyTypeEvidenceFixture", "inspect");
 
         assertThat(inspect.bodyTypeReferences()).contains(
-                new ResolvedTypeIdentity("com.example.evidence", "ForbiddenLocal"),
-                new ResolvedTypeIdentity("com.example.evidence", "ForbiddenCast"),
-                new ResolvedTypeIdentity("com.example.evidence", "ForbiddenInstanceof"),
-                new ResolvedTypeIdentity("com.example.evidence", "ForbiddenClassLiteral"),
-                new ResolvedTypeIdentity("com.example.evidence", "SecretHolder"),
-                new ResolvedTypeIdentity("com.example.evidence", "ForbiddenFieldValue"),
-                new ResolvedTypeIdentity("com.example.evidence", "GenericSecretHolder"),
-                new ResolvedTypeIdentity("com.example.evidence", "ForbiddenGenericFieldValue"),
-                new ResolvedTypeIdentity("com.example.evidence", "ForbiddenBareFieldValue"),
-                new ResolvedTypeIdentity("com.example.evidence", "ForbiddenAnnotationMember"));
+                new JavaTypeIdentity("com.example.evidence", "ForbiddenLocal"),
+                new JavaTypeIdentity("com.example.evidence", "ForbiddenCast"),
+                new JavaTypeIdentity("com.example.evidence", "ForbiddenInstanceof"),
+                new JavaTypeIdentity("com.example.evidence", "ForbiddenClassLiteral"),
+                new JavaTypeIdentity("com.example.evidence", "SecretHolder"),
+                new JavaTypeIdentity("com.example.evidence", "ForbiddenFieldValue"),
+                new JavaTypeIdentity("com.example.evidence", "GenericSecretHolder"),
+                new JavaTypeIdentity("com.example.evidence", "ForbiddenGenericFieldValue"),
+                new JavaTypeIdentity("com.example.evidence", "ForbiddenBareFieldValue"),
+                new JavaTypeIdentity("com.example.evidence", "ForbiddenAnnotationMember"));
     }
 
     @Test
     void should_extract_type_variable_binding_bounds_for_method_field_and_self_reference() {
-        MethodSignature load = methodOf(evidenceClasses,
+        SourceMethodMetadata load = methodOf(evidenceClasses,
                 "com.example.evidence.GenericBoundFixture", "load");
         TypeReference parameter = load.parameterTypeReferences().getFirst();
         TypeReference returned = load.returnType().orElseThrow();
-        FieldInfo field = classOf(evidenceClasses, "com.example.evidence.BoundedBox").fields().stream()
+        SourceFieldMetadata field = classOf(evidenceClasses, "com.example.evidence.BoundedBox").members().fields().stream()
                 .filter(value -> "value".equals(value.name()))
                 .findFirst()
                 .orElseThrow();
-        MethodSignature echo = methodOf(evidenceClasses,
+        SourceMethodMetadata echo = methodOf(evidenceClasses,
                 "com.example.evidence.GenericBoundFixture", "echo");
 
-        assertThat(parameter.upperBounds()).extracting(TypeReference::resolvedType)
-                .containsExactly("com.example.evidence.ForbiddenDto", "com.example.evidence.ForbiddenMarker");
-        assertThat(returned.upperBounds()).extracting(TypeReference::resolvedType)
-                .containsExactly("com.example.evidence.ForbiddenDto", "com.example.evidence.ForbiddenMarker");
-        assertThat(field.typeReference().upperBounds()).singleElement()
-                .extracting(TypeReference::resolvedType)
-                .isEqualTo("com.example.evidence.ForbiddenDto");
+        TypeVariableReference parameterVariable = (TypeVariableReference) parameter;
+        TypeVariableReference returnedVariable = (TypeVariableReference) returned;
+        TypeVariableReference fieldVariable = (TypeVariableReference) field.typeReference();
+        assertThat(parameterVariable.upperBounds()).extracting(TypeReference::resolvedTypeName)
+                .containsExactly(
+                        java.util.Optional.of("com.example.evidence.ForbiddenDto"),
+                        java.util.Optional.of("com.example.evidence.ForbiddenMarker"));
+        assertThat(returnedVariable.upperBounds()).extracting(TypeReference::resolvedTypeName)
+                .containsExactly(
+                        java.util.Optional.of("com.example.evidence.ForbiddenDto"),
+                        java.util.Optional.of("com.example.evidence.ForbiddenMarker"));
+        assertThat(fieldVariable.upperBounds()).singleElement()
+                .extracting(TypeReference::resolvedTypeName)
+                .isEqualTo(java.util.Optional.of("com.example.evidence.ForbiddenDto"));
         assertThat(echo.parameterTypeReferences()).singleElement().satisfies(selfReference -> {
-            assertThat(selfReference.upperBounds()).singleElement().satisfies(comparable -> {
-                assertThat(comparable.resolvedType()).isEqualTo("java.lang.Comparable");
-                assertThat(comparable.typeArguments()).singleElement().satisfies(nested ->
-                        assertThat(nested.upperBounds()).hasSize(0));
+            TypeVariableReference selfVariable = (TypeVariableReference) selfReference;
+            assertThat(selfVariable.upperBounds()).singleElement().satisfies(comparable -> {
+                ParameterizedTypeReference parameterized = (ParameterizedTypeReference) comparable;
+                assertThat(parameterized.resolvedTypeName()).contains("java.lang.Comparable");
+                assertThat(parameterized.typeArguments()).singleElement().satisfies(nested ->
+                        assertThat(((TypeVariableReference) nested).upperBounds()).hasSize(0));
             });
         });
     }
@@ -470,10 +597,10 @@ class ClassMetadataExtractorTest {
 
     @Test
     void should_prefer_annotation_sql_over_xml_when_both_declare_the_same_statement() {
-        MethodSignature method = methodOf(multiModuleClasses,
+        SourceMethodMetadata method = methodOf(multiModuleClasses,
                 "com.example.persistence.OrderMapper", "findByOrderNo");
 
-        assertThat(method.sqlSource()).isEqualTo(SqlSource.ANNOTATION);
+        assertThat(method.sqlSource()).isEqualTo(SqlSourceKind.ANNOTATION);
         assertThat(method.sql())
                 .as("fixture 的 XML 已改成 xml_marker，優先序反轉時這個斷言會變紅")
                 .isEqualTo("SELECT * FROM orders WHERE order_no = #{orderNo}")
@@ -482,10 +609,10 @@ class ClassMetadataExtractorTest {
 
     @Test
     void should_fall_back_to_xml_when_a_mapper_method_has_no_sql_annotation() {
-        MethodSignature method = methodOf(multiModuleClasses,
+        SourceMethodMetadata method = methodOf(multiModuleClasses,
                 "com.example.persistence.OrderMapper", "xmlOnly");
 
-        assertThat(method.sqlSource()).isEqualTo(SqlSource.MAPPER_XML);
+        assertThat(method.sqlSource()).isEqualTo(SqlSourceKind.MAPPER_XML);
         assertThat(method.sql()).isEqualTo("SELECT * FROM orders WHERE customer_id = #{customerId}");
     }
 
@@ -508,12 +635,12 @@ class ClassMetadataExtractorTest {
         assertThat(classes)
                 .as("舊分析器產出 com.example.syntax.Nested，永遠對不上 XML namespace")
                 .anyMatch(metadata -> "com.example.syntax.AccountMapper.Nested"
-                        .equals(metadata.fullyQualifiedName()));
+                        .equals(metadata.declaration().identity().fullyQualifiedName()));
     }
 
     @Test
     void should_leave_sql_source_unset_when_a_method_has_no_sql_at_all() {
-        MethodSignature method = methodOf(classes, "com.example.syntax.AccountShapes", "name");
+        SourceMethodMetadata method = methodOf(classes, "com.example.syntax.AccountShapes", "name");
 
         assertThat(method.sql()).isNull();
         assertThat(method.sqlSource()).isNull();
@@ -523,16 +650,16 @@ class ClassMetadataExtractorTest {
 
     @Test
     void should_classify_records_and_enums_when_a_file_declares_several_type_kinds() {
-        assertThat(classOf(classes, "com.example.syntax.AccountSummary").kind()).isEqualTo(TypeKind.RECORD);
-        assertThat(classOf(classes, "com.example.syntax.AccountStatus").kind()).isEqualTo(TypeKind.ENUM);
-        assertThat(classOf(classes, "com.example.syntax.AccountMapper").kind()).isEqualTo(TypeKind.INTERFACE);
-        assertThat(classOf(classes, "com.example.syntax.AccountShapes").kind()).isEqualTo(TypeKind.CLASS);
+        assertThat(classOf(classes, "com.example.syntax.AccountSummary").declaration().kind()).isEqualTo(SourceTypeKind.RECORD);
+        assertThat(classOf(classes, "com.example.syntax.AccountStatus").declaration().kind()).isEqualTo(SourceTypeKind.ENUM);
+        assertThat(classOf(classes, "com.example.syntax.AccountMapper").declaration().kind()).isEqualTo(SourceTypeKind.INTERFACE);
+        assertThat(classOf(classes, "com.example.syntax.AccountShapes").declaration().kind()).isEqualTo(SourceTypeKind.CLASS);
     }
 
     @Test
     void should_expose_record_components_as_fields_when_a_record_is_scanned() {
-        assertThat(classOf(classes, "com.example.syntax.AccountSummary").fields())
-                .extracting(ClassMetadata.FieldInfo::name, ClassMetadata.FieldInfo::type)
+        assertThat(classOf(classes, "com.example.syntax.AccountSummary").members().fields())
+                .extracting(SourceFieldMetadata::name, SourceFieldMetadata::type)
                 .containsExactly(
                         tuple("accountNo", "String"),
                         tuple("total", "long"));
@@ -540,37 +667,39 @@ class ClassMetadataExtractorTest {
 
     @Test
     void should_detect_fluent_accessors_when_the_class_declares_accessors_fluent_true() {
-        assertThat(classOf(classes, "com.example.syntax.AccountShapes").hasFluentAccessors())
+        assertThat(classOf(classes, "com.example.syntax.AccountShapes").members().fluentSetters())
                 .as("舊分析器比對 pretty print 後的字串是否等於 true")
                 .isTrue();
     }
 
     @Test
     void should_apply_explicit_and_default_accessors_chain_values() {
-        assertThat(classOf(classes, "com.example.syntax.ExplicitChainedShapes").hasChainedAccessors())
+        assertThat(classOf(classes, "com.example.syntax.ExplicitChainedShapes").members().chainedAccessors())
                 .isTrue();
-        assertThat(classOf(classes, "com.example.syntax.ExplicitNonChainedShapes").hasChainedAccessors())
+        assertThat(classOf(classes, "com.example.syntax.ExplicitNonChainedShapes").members().chainedAccessors())
                 .isFalse();
-        assertThat(classOf(classes, "com.example.syntax.AccountShapes").hasChainedAccessors())
+        assertThat(classOf(classes, "com.example.syntax.AccountShapes").members().chainedAccessors())
                 .as("Lombok defaults chain to fluent when chain is absent")
                 .isTrue();
     }
 
     @Test
     void should_read_every_profile_when_the_profile_annotation_declares_an_array() {
-        assertThat(classOf(classes, "com.example.syntax.AccountShapes").profiles())
+        assertThat(classOf(classes, "com.example.syntax.AccountShapes").frameworkFacts().profiles())
                 .containsExactly("dev", "uat");
     }
 
     @Test
     void should_keep_the_short_annotation_name_when_the_source_writes_it_short() {
-        assertThat(classOf(classes, "com.example.syntax.AccountShapes").annotations())
+        assertThat(classOf(classes, "com.example.syntax.AccountShapes").frameworkFacts().annotations())
+                .extracting(AnnotationEvidence::writtenName)
                 .contains("Service", "Profile", "Accessors");
     }
 
     @Test
     void should_keep_the_long_annotation_name_when_the_source_writes_it_fully_qualified() {
-        assertThat(classOf(classes, "com.example.syntax.FullyQualifiedEndpoint").annotations())
+        assertThat(classOf(classes, "com.example.syntax.FullyQualifiedEndpoint").frameworkFacts().annotations())
+                .extracting(AnnotationEvidence::writtenName)
                 .as("metadata 保留寫法原貌；改用 simpleNameOf 縮短時這個斷言才會變紅")
                 .contains("org.springframework.stereotype.Service",
                         "org.springframework.web.bind.annotation.RequestMapping")
@@ -579,13 +708,14 @@ class ClassMetadataExtractorTest {
 
     @Test
     void should_keep_the_long_method_annotation_name_when_a_mapping_is_written_fully_qualified() {
-        assertThat(methodOf(classes, "com.example.syntax.FullyQualifiedEndpoint", "ping").annotations())
+        assertThat(methodOf(classes, "com.example.syntax.FullyQualifiedEndpoint", "ping").annotationEvidence())
+                .extracting(AnnotationEvidence::writtenName)
                 .containsExactly("org.springframework.web.bind.annotation.GetMapping");
     }
 
     @Test
     void should_record_one_based_line_numbers_when_a_method_is_scanned() {
-        MethodSignature method = methodOf(classes, "com.example.syntax.AccountShapes", "name");
+        SourceMethodMetadata method = methodOf(classes, "com.example.syntax.AccountShapes", "name");
 
         assertThat(method.startLine()).isPositive();
         assertThat(method.endLine()).isGreaterThanOrEqualTo(method.startLine());
@@ -600,7 +730,7 @@ class ClassMetadataExtractorTest {
     @Test
     void should_include_every_module_when_the_repository_is_a_maven_aggregator() {
         assertThat(multiModuleClasses)
-                .extracting(ClassMetadata::fullyQualifiedName)
+                .extracting(metadata -> metadata.declaration().identity().fullyQualifiedName())
                 .contains("com.example.api.OrderMessageListener",
                         "com.example.service.OrderApplicationService",
                         "com.example.persistence.OrderMapper");
@@ -614,29 +744,144 @@ class ClassMetadataExtractorTest {
                 .as("JDT Core 的 ASTParser 不讀 pom；source root 由目錄結構決定")
                 .flatExtracting(entry -> entry.methods().stream().map(EntryPointMethod::name).toList())
                 .containsExactly("getBasic");
-        assertThat(methodOf(syntax.classes(), "com.example.basic.BasicRepository", "findById").sql())
+        assertThat(methodOf(syntax.sourceTypes(), "com.example.basic.BasicRepository", "findById").sql())
                 .isEqualTo("SELECT name FROM basic_orders WHERE id = #{id}");
     }
 
-    private ClassMetadata classOf(List<ClassMetadata> source, String fullyQualifiedName) {
+    private SourceTypeMetadata classOf(List<SourceTypeMetadata> source, String fullyQualifiedName) {
         return source.stream()
-                .filter(metadata -> fullyQualifiedName.equals(metadata.fullyQualifiedName()))
+                .filter(metadata -> fullyQualifiedName.equals(metadata.declaration().identity().fullyQualifiedName()))
                 .findFirst()
                 .orElseThrow(() -> new AssertionError("no class metadata " + fullyQualifiedName));
     }
 
-    private MethodSignature methodOf(List<ClassMetadata> source, String fullyQualifiedName, String methodName) {
-        return classOf(source, fullyQualifiedName).methods().stream()
+    private SourceMethodMetadata methodOf(List<SourceTypeMetadata> source, String fullyQualifiedName, String methodName) {
+        return classOf(source, fullyQualifiedName).members().methods().stream()
                 .filter(method -> methodName.equals(method.name()))
                 .findFirst()
                 .orElseThrow(() -> new AssertionError("no method " + fullyQualifiedName + "#" + methodName));
     }
 
-    private SyntaxInvocation invocationOf(MethodSignature method, String expression) {
+    private SyntaxInvocation invocationOf(SourceMethodMetadata method, String expression) {
         return method.invocations().stream()
                 .filter(invocation -> expression.equals(invocation.expression()))
                 .findFirst()
                 .orElseThrow(() -> new AssertionError("no invocation " + expression));
+    }
+
+    private ParsedSource parseTypeReferenceFixture(Path tempDir) throws IOException {
+        Path repositoryRoot = tempDir.resolve("type-reference-forms");
+        Path sourceRoot = repositoryRoot.resolve("src/main/java/com/example");
+        Files.createDirectories(sourceRoot);
+        Path sourceFile = sourceRoot.resolve("TypeReferenceForms.java");
+        String sourceText = """
+                package com.example;
+
+                import java.util.List;
+
+                class Order implements Runnable {
+                    @Override
+                    public void run() {
+                    }
+                }
+
+                class TypeReferenceForms<T extends Order & Runnable> {
+                    void nominal(Order value) {
+                    }
+
+                    void primitive(int value) {
+                    }
+
+                    void parameterized(List<Order> values) {
+                    }
+
+                    void array(Order[][] values) {
+                    }
+
+                    void wildcard(List<? extends Order> values) {
+                    }
+
+                    T typeVariable(T value) {
+                        return value;
+                    }
+
+                    void composite(Object value) {
+                        Object narrowed = (Order & Runnable) value;
+                        try {
+                        } catch (IllegalArgumentException | IllegalStateException exception) {
+                        }
+                    }
+
+                    void inferred() {
+                        %s local = new Order();
+                    }
+                }
+                """.formatted("var");
+        Files.writeString(sourceFile, sourceText);
+        SourceFile source = new SourceFile(sourceFile, sourceRoot, repositoryRoot);
+        List<ParsedSource> parsed = new ArrayList<>();
+        new JdtAstParser(List.of(sourceRoot)).parse(List.of(source), parsed::add);
+        return parsed.getFirst();
+    }
+
+    private Type typeOf(ParsedSource parsed, SourceSlices slices, String writtenType) {
+        AtomicReference<Type> found = new AtomicReference<>();
+        parsed.unit().accept(new ASTVisitor() {
+            @Override
+            public void preVisit(ASTNode node) {
+                if (node instanceof Type type && Objects.isNull(found.get())
+                        && writtenType.equals(slices.slice(type).text())) {
+                    found.set(type);
+                }
+            }
+        });
+        Type type = found.get();
+        if (Objects.isNull(type)) {
+            throw new AssertionError("no type " + writtenType);
+        }
+        return type;
+    }
+
+    private void assertEvidenceShape(String writtenType, TypeReference reference) {
+        if (reference instanceof NamedTypeReference named) {
+            assertThat(named.simpleTypeName()).isEqualTo("Order");
+            assertThat(named.resolvedTypeName()).contains("com.example.Order");
+            return;
+        }
+        if (reference instanceof PrimitiveTypeReference primitive) {
+            assertThat(primitive.resolvedTypeName()).isEmpty();
+            return;
+        }
+        if (reference instanceof ParameterizedTypeReference parameterized) {
+            assertThat(parameterized.rawType().simpleTypeName()).isEqualTo("List");
+            assertThat(parameterized.typeArguments()).singleElement().isInstanceOf(NamedTypeReference.class);
+            return;
+        }
+        if (reference instanceof ArrayTypeReference array) {
+            assertThat(array.dimensions()).isEqualTo(2);
+            assertThat(array.resolvedTypeName()).contains("com.example.Order[][]");
+            return;
+        }
+        if (reference instanceof WildcardTypeReference wildcard) {
+            assertThat(wildcard.upperBound()).isPresent();
+            assertThat(wildcard.lowerBound()).isEmpty();
+            return;
+        }
+        if (reference instanceof TypeVariableReference variable) {
+            assertThat(variable.variableName()).isEqualTo("T");
+            assertThat(variable.upperBounds()).hasSize(2);
+            return;
+        }
+        if (reference instanceof CompositeTypeReference composite) {
+            CompositeKind expectedKind = writtenType.contains("|")
+                    ? CompositeKind.UNION
+                    : CompositeKind.INTERSECTION;
+            assertThat(composite.kind()).isEqualTo(expectedKind);
+            assertThat(composite.alternatives()).hasSize(2);
+            return;
+        }
+        InferredTypeReference inferred = (InferredTypeReference) reference;
+        assertThat(inferred.resolvedNamedType()).isEmpty();
     }
 
     private SyntaxRange syntaxRange(int startLine, int startCharacter, int endLine, int endCharacter) {

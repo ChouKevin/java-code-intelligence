@@ -19,8 +19,9 @@ import com.java.semantic.repository.domain.RepositorySnapshot;
 import com.java.semantic.semantic.domain.JavaSemanticService;
 import com.java.semantic.semantic.domain.SemanticMethod;
 import com.java.semantic.semantic.domain.SemanticRange;
-import com.java.semantic.syntax.domain.ClassMetadata;
-import com.java.semantic.syntax.domain.ClassMetadata.MethodSignature;
+import com.java.semantic.syntax.domain.AnnotationEvidence;
+import com.java.semantic.syntax.domain.SourceMethodMetadata;
+import com.java.semantic.syntax.domain.SourceTypeMetadata;
 import com.java.semantic.syntax.domain.RepositorySyntax;
 import com.java.semantic.syntax.domain.SyntaxInvocation;
 import com.java.semantic.syntax.domain.SyntaxRange;
@@ -317,8 +318,8 @@ public final class SemanticCallGraphBuilder {
         }
 
         private Optional<EvidenceMatch> dataAccessEvidenceFor(MethodTarget declarationTarget) {
-            Optional<ClassMetadata> declaringType = index.classMetadata(declarationTarget);
-            Optional<MethodSignature> declaredMethod = index.method(declarationTarget);
+            Optional<SourceTypeMetadata> declaringType = index.sourceType(declarationTarget);
+            Optional<SourceMethodMetadata> declaredMethod = index.method(declarationTarget);
             if (declaringType.isEmpty() || declaredMethod.isEmpty()) {
                 return Optional.empty();
             }
@@ -335,8 +336,8 @@ public final class SemanticCallGraphBuilder {
         }
 
         /** builder chain 的 receiver（如 {@code X.XBuilder}）改以外層已標註型別重試一次 */
-        private Optional<ClassMetadata> receiverMetadata(String fullyQualifiedName) {
-            List<ClassMetadata> matches = index.classes(fullyQualifiedName);
+        private Optional<SourceTypeMetadata> receiverMetadata(String fullyQualifiedName) {
+            List<SourceTypeMetadata> matches = index.sourceTypes(fullyQualifiedName);
             if (matches.size() == 1) {
                 return Optional.of(matches.getFirst());
             }
@@ -347,7 +348,7 @@ public final class SemanticCallGraphBuilder {
             if (lastDot < 0) {
                 return Optional.empty();
             }
-            List<ClassMetadata> outerMatches = index.classes(fullyQualifiedName.substring(0, lastDot));
+            List<SourceTypeMetadata> outerMatches = index.sourceTypes(fullyQualifiedName.substring(0, lastDot));
             return outerMatches.size() == 1 ? Optional.of(outerMatches.getFirst()) : Optional.empty();
         }
 
@@ -568,7 +569,7 @@ public final class SemanticCallGraphBuilder {
                             nodeId, Optional.of(target), "", contentState, traversalState,
                             dispatchKind(index), Optional.empty(), Optional.empty());
                 }
-                MethodSignature method = index.method(target).orElseThrow();
+                SourceMethodMetadata method = index.method(target).orElseThrow();
                 CallSiteRange range = new CallSiteRange(
                         target.sourceFile(),
                         method.range().start().line(),
@@ -588,7 +589,9 @@ public final class SemanticCallGraphBuilder {
 
             private DispatchKind dispatchKind(RepositorySyntaxIndex index) {
                 return index.method(target)
-                        .filter(method -> method.annotations().contains("Async"))
+                        .filter(method -> method.annotationEvidence().stream()
+                                .map(AnnotationEvidence::writtenName)
+                                .anyMatch("Async"::equals))
                         .map(ignored -> DispatchKind.ASYNC)
                         .orElse(DispatchKind.SYNCHRONOUS);
             }

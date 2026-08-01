@@ -1,6 +1,7 @@
 package com.java.semantic.syntax.application;
 
 import com.java.semantic.identity.MethodTarget;
+import com.java.semantic.identity.JavaTypeIdentity;
 import com.java.semantic.syntax.application.ConceptIdentity.AnnotationUsageConceptIdentity;
 import com.java.semantic.syntax.application.ConceptIdentity.DeclarationSubjectIdentity;
 import com.java.semantic.syntax.application.ConceptIdentity.FieldConceptIdentity;
@@ -12,11 +13,10 @@ import com.java.semantic.syntax.application.ConceptIdentity.TypeDeclarationSubje
 import com.java.semantic.syntax.application.ConceptIdentity.UnresolvedMethodDeclarationSubjectIdentity;
 import com.java.semantic.syntax.domain.AnalysisTargetStatus;
 import com.java.semantic.syntax.domain.AnnotationEvidence;
-import com.java.semantic.syntax.domain.ClassMetadata;
-import com.java.semantic.syntax.domain.ClassMetadata.FieldInfo;
-import com.java.semantic.syntax.domain.ClassMetadata.MethodSignature;
-import com.java.semantic.syntax.domain.ResolvedTypeIdentity;
 import com.java.semantic.syntax.domain.RepositorySyntax;
+import com.java.semantic.syntax.domain.SourceFieldMetadata;
+import com.java.semantic.syntax.domain.SourceMethodMetadata;
+import com.java.semantic.syntax.domain.SourceTypeMetadata;
 import org.springframework.util.StringUtils;
 
 import java.util.ArrayList;
@@ -44,31 +44,34 @@ public final class DeclarationConceptProvider implements ConceptProvider {
     @Override
     public ConceptProviderProjection project(RepositorySyntax syntax) {
         List<ConceptCatalogEntry> entries = new ArrayList<>();
-        for (ClassMetadata metadata : syntax.classes()) {
-            TypeConceptIdentity typeIdentity = new TypeConceptIdentity(metadata.sourceFile(), metadata.fullyQualifiedName());
+        for (SourceTypeMetadata metadata : syntax.sourceTypes()) {
+            String sourceFile = metadata.declaration().identity().sourceFile();
+            String fullyQualifiedName = metadata.declaration().identity().fullyQualifiedName();
+            String packageName = metadata.declaration().identity().javaType().packageName();
+            String className = metadata.declaration().identity().javaType().className();
+            TypeConceptIdentity typeIdentity = new TypeConceptIdentity(sourceFile, fullyQualifiedName);
             TypeDeclarationSubjectIdentity typeSubject = new TypeDeclarationSubjectIdentity(
-                    metadata.sourceFile(), metadata.fullyQualifiedName());
-            entries.add(entry(typeIdentity, metadata.fullyQualifiedName(), metadata.className(), metadata.packageName(),
-                    Optional.of(metadata.fullyQualifiedName()), ConceptAuthority.SYNTAX_DECLARED,
-                    metadata.fullyQualifiedName()));
-            addAnnotationEntries(entries, metadata.sourceFile(), typeSubject, metadata.annotations(),
-                    metadata.annotationEvidence(), metadata.packageName(), Optional.of(metadata.fullyQualifiedName()));
-            for (FieldInfo field : metadata.fields()) {
+                    sourceFile, fullyQualifiedName);
+            entries.add(entry(typeIdentity, fullyQualifiedName, className, packageName,
+                    Optional.of(fullyQualifiedName), ConceptAuthority.SYNTAX_DECLARED, fullyQualifiedName));
+            addAnnotationEntries(entries, sourceFile, typeSubject, metadata.frameworkFacts().annotations(),
+                    packageName, Optional.of(fullyQualifiedName));
+            for (SourceFieldMetadata field : metadata.members().fields()) {
                 FieldConceptIdentity fieldIdentity = new FieldConceptIdentity(
-                        metadata.sourceFile(), metadata.fullyQualifiedName(), field.name(), field.type());
+                        sourceFile, fullyQualifiedName, field.name(), field.type());
                 FieldDeclarationSubjectIdentity fieldSubject = new FieldDeclarationSubjectIdentity(
-                        metadata.sourceFile(), metadata.fullyQualifiedName(), field.name(), field.type());
+                        sourceFile, fullyQualifiedName, field.name(), field.type());
                 entries.add(entry(fieldIdentity,
-                        sourceQualified(metadata.sourceFile(), fieldSubject.displayValue()),
+                        sourceQualified(sourceFile, fieldSubject.displayValue()),
                         field.name(),
-                        metadata.packageName(),
-                        Optional.of(metadata.fullyQualifiedName()),
+                        packageName,
+                        Optional.of(fullyQualifiedName),
                         ConceptAuthority.SYNTAX_DECLARED,
-                        metadata.fullyQualifiedName() + " " + field.name() + " " + field.type()));
-                addAnnotationEntries(entries, metadata.sourceFile(), fieldSubject, field.annotations(),
-                        field.annotationEvidence(), metadata.packageName(), Optional.of(metadata.fullyQualifiedName()));
+                        fullyQualifiedName + " " + field.name() + " " + field.type()));
+                addAnnotationEntries(entries, sourceFile, fieldSubject, field.annotationEvidence(),
+                        packageName, Optional.of(fullyQualifiedName));
             }
-            for (MethodSignature method : metadata.methods()) {
+            for (SourceMethodMetadata method : metadata.members().methods()) {
                 DeclarationSubjectIdentity methodSubject = methodSubject(metadata, method);
                 Optional<MethodTarget> resolvedTarget = resolvedTarget(method);
                 if (resolvedTarget.isPresent()) {
@@ -76,37 +79,38 @@ public final class DeclarationConceptProvider implements ConceptProvider {
                     MethodConceptIdentity methodIdentity = new MethodConceptIdentity(target);
                     entries.add(entry(methodIdentity,
                             sourceQualified(target.sourceFile(), ConceptIdentitySupport.methodDisplayValue(target)),
-                            metadata.className() + "." + method.name(),
-                            metadata.packageName(),
-                            Optional.of(metadata.fullyQualifiedName()),
+                            className + "." + method.name(),
+                            packageName,
+                            Optional.of(fullyQualifiedName),
                             ConceptAuthority.SYNTAX_RESOLVED,
-                            metadata.fullyQualifiedName() + " " + method.name() + " "
+                            fullyQualifiedName + " " + method.name() + " "
                                     + String.join(" ", method.paramTypes())));
                 }
-                addAnnotationEntries(entries, metadata.sourceFile(), methodSubject, method.annotations(),
-                        method.annotationEvidence(), metadata.packageName(), Optional.of(metadata.fullyQualifiedName()));
+                addAnnotationEntries(entries, sourceFile, methodSubject, method.annotationEvidence(),
+                        packageName, Optional.of(fullyQualifiedName));
             }
         }
         return new ConceptProviderProjection(entries, List.of());
     }
 
-    static DeclarationSubjectIdentity methodSubject(ClassMetadata metadata, MethodSignature method) {
+    static DeclarationSubjectIdentity methodSubject(SourceTypeMetadata metadata, SourceMethodMetadata method) {
         Optional<MethodTarget> resolvedTarget = resolvedTarget(method);
         if (resolvedTarget.isPresent()) {
             return new ResolvedMethodDeclarationSubjectIdentity(resolvedTarget.orElseThrow());
         }
         return new UnresolvedMethodDeclarationSubjectIdentity(
-                metadata.sourceFile(), metadata.fullyQualifiedName(), method.name(), method.paramTypes());
+                metadata.declaration().identity().sourceFile(), metadata.declaration().identity().fullyQualifiedName(),
+                method.name(), method.paramTypes());
     }
 
-    static Optional<MethodTarget> resolvedTarget(MethodSignature method) {
+    static Optional<MethodTarget> resolvedTarget(SourceMethodMetadata method) {
         if (method.analysisTarget().status() == AnalysisTargetStatus.RESOLVED) {
             return method.analysisTarget().target();
         }
         return Optional.empty();
     }
 
-    static String resolvedTypeName(ResolvedTypeIdentity resolvedType) {
+    static String resolvedTypeName(JavaTypeIdentity resolvedType) {
         return resolvedType.packageName().isEmpty()
                 ? resolvedType.className()
                 : resolvedType.packageName() + "." + resolvedType.className();
@@ -116,14 +120,10 @@ public final class DeclarationConceptProvider implements ConceptProvider {
             List<ConceptCatalogEntry> entries,
             String sourceFile,
             DeclarationSubjectIdentity subject,
-            List<String> writtenAnnotations,
             List<AnnotationEvidence> annotationEvidence,
             String packageName,
             Optional<String> declaringType) {
-        List<AnnotationEvidence> annotations = annotationEvidence.isEmpty()
-                ? writtenAnnotations.stream().map(writtenName -> new AnnotationEvidence(writtenName, Optional.empty())).toList()
-                : annotationEvidence;
-        for (AnnotationEvidence annotation : annotations) {
+        for (AnnotationEvidence annotation : annotationEvidence) {
             boolean resolved = annotation.resolvedType().isPresent();
             String annotationIdentity = resolved
                     ? resolvedTypeName(annotation.resolvedType().orElseThrow())

@@ -3,8 +3,9 @@ package com.java.semantic.syntax.application;
 import com.java.semantic.identity.MethodTarget;
 import com.java.semantic.repository.application.RepositoryApplicationService;
 import com.java.semantic.repository.domain.RepositorySnapshot;
-import com.java.semantic.syntax.domain.ClassMetadata;
-import com.java.semantic.syntax.domain.ClassMetadata.FieldInfo;
+import com.java.semantic.syntax.domain.AnnotationEvidence;
+import com.java.semantic.syntax.domain.SourceFieldMetadata;
+import com.java.semantic.syntax.domain.SourceTypeMetadata;
 import com.java.semantic.syntax.domain.RepositorySyntax;
 import com.java.semantic.syntax.domain.SyntaxExtractionService;
 
@@ -52,7 +53,7 @@ public final class TypeMemberDiscoveryApplicationService {
 
     private TypeMemberResult discoverSnapshot(RepositorySnapshot snapshot, TypeMemberQuery query) {
         RepositorySyntax syntax = syntaxExtractionService.extract(snapshot.root());
-        ClassMetadata metadata = resolveType(syntax, query);
+        SourceTypeMetadata metadata = resolveType(syntax, query);
         List<TypeMember> combined = combinedMembers(snapshot, metadata, query);
         int start = Math.min(query.offset(), combined.size());
         int end = (int) Math.min((long) start + query.limit(), combined.size());
@@ -66,12 +67,12 @@ public final class TypeMemberDiscoveryApplicationService {
         return new TypeMemberResult(
                 snapshot.repositoryId(),
                 snapshot.revision(),
-                metadata.sourceFile(),
-                metadata.fullyQualifiedName(),
-                metadata.kind(),
-                metadata.annotations(),
-                metadata.implementedTypes(),
-                metadata.extendedTypes(),
+                metadata.declaration().identity().sourceFile(),
+                metadata.declaration().identity().fullyQualifiedName(),
+                metadata.declaration().kind(),
+                metadata.frameworkFacts().annotations().stream().map(AnnotationEvidence::writtenName).toList(),
+                metadata.relationships().implementedTypes().stream().map(reference -> reference.simpleTypeName()).toList(),
+                metadata.relationships().extendedTypes().stream().map(reference -> reference.simpleTypeName()).toList(),
                 members,
                 page,
                 syntax.extractionOutcomes(),
@@ -80,11 +81,11 @@ public final class TypeMemberDiscoveryApplicationService {
 
     private List<TypeMember> combinedMembers(
             RepositorySnapshot snapshot,
-            ClassMetadata metadata,
+            SourceTypeMetadata metadata,
             TypeMemberQuery query) {
         List<TypeMember> combined = new ArrayList<>();
         if (query.memberKinds().contains(TypeMemberKind.METHOD)) {
-            List<MethodTypeMember> methods = metadata.methods().stream()
+            List<MethodTypeMember> methods = metadata.members().methods().stream()
                     .flatMap(method -> method.analysisTarget().target().stream())
                     .map(target -> methodMember(snapshot, metadata, target))
                     .filter(member -> matchesPrefix(member.target().methodName(), query.namePrefix()))
@@ -93,7 +94,7 @@ public final class TypeMemberDiscoveryApplicationService {
             combined.addAll(methods);
         }
         if (query.memberKinds().contains(TypeMemberKind.FIELD)) {
-            List<FieldTypeMember> fields = metadata.fields().stream()
+            List<FieldTypeMember> fields = metadata.members().fields().stream()
                     .map(field -> fieldMember(snapshot, field))
                     .filter(member -> matchesPrefix(member.fieldName(), query.namePrefix()))
                     .sorted(FIELD_ORDER)
@@ -105,7 +106,7 @@ public final class TypeMemberDiscoveryApplicationService {
 
     private MethodTypeMember methodMember(
             RepositorySnapshot snapshot,
-            ClassMetadata metadata,
+            SourceTypeMetadata metadata,
             MethodTarget target) {
         assertTargetBelongsToType(metadata, target);
         return new MethodTypeMember(
@@ -113,25 +114,22 @@ public final class TypeMemberDiscoveryApplicationService {
                 followUpFactory.forMethod(snapshot.repositoryId(), snapshot.revision(), target));
     }
 
-    private FieldTypeMember fieldMember(RepositorySnapshot snapshot, FieldInfo field) {
-        String resolvedTypeValue = field.typeReference().resolvedType();
-        Optional<String> resolvedType = resolvedTypeValue.isBlank()
-                ? Optional.empty()
-                : Optional.of(resolvedTypeValue);
+    private FieldTypeMember fieldMember(RepositorySnapshot snapshot, SourceFieldMetadata field) {
+        Optional<String> resolvedType = field.typeReference().resolvedTypeName();
         return new FieldTypeMember(
                 field.name(),
                 field.typeReference().writtenType(),
                 resolvedType,
-                field.annotations(),
+                field.annotationEvidence().stream().map(AnnotationEvidence::writtenName).toList(),
                 List.of(TypeMemberLimitation.FIELD_USAGE_NOT_INDEXED),
                 followUpFactory.forResolvedFieldType(
                         snapshot.repositoryId(), snapshot.revision(), resolvedType));
     }
 
-    private static ClassMetadata resolveType(RepositorySyntax syntax, TypeMemberQuery query) {
-        List<ClassMetadata> matches = syntax.classes().stream()
-                .filter(metadata -> metadata.sourceFile().equals(query.sourceFile()))
-                .filter(metadata -> metadata.fullyQualifiedName().equals(query.fullyQualifiedName()))
+    private static SourceTypeMetadata resolveType(RepositorySyntax syntax, TypeMemberQuery query) {
+        List<SourceTypeMetadata> matches = syntax.sourceTypes().stream()
+                .filter(metadata -> metadata.declaration().identity().sourceFile().equals(query.sourceFile()))
+                .filter(metadata -> metadata.declaration().identity().fullyQualifiedName().equals(query.fullyQualifiedName()))
                 .toList();
         if (matches.size() < 1) {
             throw new TypeMemberTypeNotFoundException();
@@ -142,10 +140,10 @@ public final class TypeMemberDiscoveryApplicationService {
         return matches.getFirst();
     }
 
-    private static void assertTargetBelongsToType(ClassMetadata metadata, MethodTarget target) {
-        boolean sameIdentity = target.sourceFile().equals(metadata.sourceFile())
-                && target.packageName().equals(metadata.packageName())
-                && target.className().equals(metadata.className());
+    private static void assertTargetBelongsToType(SourceTypeMetadata metadata, MethodTarget target) {
+        boolean sameIdentity = target.sourceFile().equals(metadata.declaration().identity().sourceFile())
+                && target.packageName().equals(metadata.declaration().identity().javaType().packageName())
+                && target.className().equals(metadata.declaration().identity().javaType().className());
         if (!sameIdentity) {
             throw new IllegalStateException("resolved method target does not belong to requested type");
         }

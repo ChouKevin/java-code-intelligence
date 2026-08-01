@@ -6,7 +6,8 @@ import java.util.Optional;
 import java.util.Set;
 
 import com.java.semantic.callgraph.domain.ResolutionStrategy;
-import com.java.semantic.syntax.domain.ClassMetadata;
+import com.java.semantic.syntax.domain.AnnotationEvidence;
+import com.java.semantic.syntax.domain.SourceTypeMetadata;
 import com.java.semantic.syntax.domain.SyntaxInvocation;
 import com.java.semantic.syntax.domain.SyntaxInvocation.InvocationKind;
 
@@ -39,7 +40,7 @@ public final class GeneratedMemberEvidence {
      * @param invocation   呼叫語法證據
      * @return 命中的證據，未命中任何規則時為空
      */
-    Optional<EvidenceMatch> evaluate(ClassMetadata receiverType, SyntaxInvocation invocation) {
+    Optional<EvidenceMatch> evaluate(SourceTypeMetadata receiverType, SyntaxInvocation invocation) {
         Objects.requireNonNull(receiverType, "receiverType is required");
         Objects.requireNonNull(invocation, "invocation is required");
 
@@ -61,13 +62,13 @@ public final class GeneratedMemberEvidence {
                 .or(() -> matchGeneratedConstructor(receiverType, invocation, argumentCount));
     }
 
-    private boolean hasSourceDeclaration(ClassMetadata receiverType, String invokedName, int argumentCount) {
-        return receiverType.methods().stream()
+    private boolean hasSourceDeclaration(SourceTypeMetadata receiverType, String invokedName, int argumentCount) {
+        return receiverType.members().methods().stream()
                 .anyMatch(declared -> declared.name().equals(invokedName) && declared.paramCount() == argumentCount);
     }
 
     private Optional<EvidenceMatch> matchGetter(
-            ClassMetadata receiverType, SyntaxInvocation invocation, String invokedName, int argumentCount) {
+            SourceTypeMetadata receiverType, SyntaxInvocation invocation, String invokedName, int argumentCount) {
         if (!isMethodOnReceiver(receiverType, invocation) || argumentCount != 0) {
             return Optional.empty();
         }
@@ -79,12 +80,12 @@ public final class GeneratedMemberEvidence {
                 .or(() -> accessorField(receiverType, invokedName, "is"))
                 .or(() -> fluentField(receiverType, invokedName));
         return field.map(matchedField -> matched(
-                receiverType.fullyQualifiedName() + "#get" + capitalize(matchedField) + "()",
+                receiverType.declaration().identity().fullyQualifiedName() + "#get" + capitalize(matchedField) + "()",
                 annotation.orElseThrow(), "getter", Optional.of(matchedField)));
     }
 
     private Optional<EvidenceMatch> matchSetter(
-            ClassMetadata receiverType, SyntaxInvocation invocation, String invokedName, int argumentCount) {
+            SourceTypeMetadata receiverType, SyntaxInvocation invocation, String invokedName, int argumentCount) {
         if (!isMethodOnReceiver(receiverType, invocation) || argumentCount != 1) {
             return Optional.empty();
         }
@@ -95,12 +96,12 @@ public final class GeneratedMemberEvidence {
         Optional<String> field = accessorField(receiverType, invokedName, "set")
                 .or(() -> fluentField(receiverType, invokedName));
         return field.map(matchedField -> matched(
-                receiverType.fullyQualifiedName() + "#set" + capitalize(matchedField) + "(..)",
+                receiverType.declaration().identity().fullyQualifiedName() + "#set" + capitalize(matchedField) + "(..)",
                 annotation.orElseThrow(), "setter", Optional.of(matchedField)));
     }
 
     private Optional<EvidenceMatch> matchObjectMethod(
-            ClassMetadata receiverType, SyntaxInvocation invocation, String invokedName, int argumentCount) {
+            SourceTypeMetadata receiverType, SyntaxInvocation invocation, String invokedName, int argumentCount) {
         if (!isMethodOnReceiver(receiverType, invocation)) {
             return Optional.empty();
         }
@@ -111,22 +112,23 @@ public final class GeneratedMemberEvidence {
         }
         Optional<String> annotation = matchedAnnotation(receiverType, OBJECT_METHOD_ANNOTATIONS);
         return annotation.map(matchedAnnotation -> matched(
-                receiverType.fullyQualifiedName() + "#" + invokedName + argumentSuffix(argumentCount),
+                receiverType.declaration().identity().fullyQualifiedName() + "#" + invokedName + argumentSuffix(argumentCount),
                 matchedAnnotation, "object method", Optional.empty()));
     }
 
     private Optional<EvidenceMatch> matchBuilderEntry(
-            ClassMetadata receiverType, SyntaxInvocation invocation, String invokedName, int argumentCount) {
+            SourceTypeMetadata receiverType, SyntaxInvocation invocation, String invokedName, int argumentCount) {
         if (!isMethodOnReceiver(receiverType, invocation) || argumentCount != 0 || !"builder".equals(invokedName)) {
             return Optional.empty();
         }
         Optional<String> annotation = matchedAnnotation(receiverType, BUILDER_ANNOTATIONS);
         return annotation.map(matchedAnnotation -> matched(
-                receiverType.fullyQualifiedName() + "#builder()", matchedAnnotation, "builder entry", Optional.empty()));
+                receiverType.declaration().identity().fullyQualifiedName() + "#builder()", matchedAnnotation,
+                "builder entry", Optional.empty()));
     }
 
     private Optional<EvidenceMatch> matchBuilderChain(
-            ClassMetadata receiverType, SyntaxInvocation invocation, String invokedName, int argumentCount) {
+            SourceTypeMetadata receiverType, SyntaxInvocation invocation, String invokedName, int argumentCount) {
         if (invocation.kind() != InvocationKind.METHOD) {
             return Optional.empty();
         }
@@ -150,30 +152,30 @@ public final class GeneratedMemberEvidence {
     }
 
     private Optional<EvidenceMatch> matchGeneratedConstructor(
-            ClassMetadata receiverType, SyntaxInvocation invocation, int argumentCount) {
+            SourceTypeMetadata receiverType, SyntaxInvocation invocation, int argumentCount) {
         if (invocation.kind() != InvocationKind.CONSTRUCTOR
-                || !receiverType.fullyQualifiedName().equals(invocation.receiverDeclaration())) {
+                || !receiverType.declaration().identity().fullyQualifiedName().equals(invocation.receiverDeclaration())) {
             return Optional.empty();
         }
         boolean noArgsMatch = argumentCount == 0
                 && matchedAnnotation(receiverType, NO_ARGS_CONSTRUCTOR_ANNOTATION).isPresent();
-        boolean allArgsMatch = argumentCount == receiverType.fields().size()
+        boolean allArgsMatch = argumentCount == receiverType.members().fields().size()
                 && matchedAnnotation(receiverType, ALL_ARGS_CONSTRUCTOR_ANNOTATION).isPresent();
         if (!noArgsMatch && !allArgsMatch) {
             return Optional.empty();
         }
         String annotation = noArgsMatch ? "NoArgsConstructor" : "AllArgsConstructor";
         return Optional.of(matched(
-                receiverType.fullyQualifiedName() + "#<init>(" + argumentCount + ")",
+                receiverType.declaration().identity().fullyQualifiedName() + "#<init>(" + argumentCount + ")",
                 annotation, "constructor", Optional.empty()));
     }
 
-    private boolean isMethodOnReceiver(ClassMetadata receiverType, SyntaxInvocation invocation) {
+    private boolean isMethodOnReceiver(SourceTypeMetadata receiverType, SyntaxInvocation invocation) {
         return invocation.kind() == InvocationKind.METHOD
-                && receiverType.fullyQualifiedName().equals(invocation.receiverDeclaration());
+                && receiverType.declaration().identity().fullyQualifiedName().equals(invocation.receiverDeclaration());
     }
 
-    private Optional<String> accessorField(ClassMetadata receiverType, String invokedName, String prefix) {
+    private Optional<String> accessorField(SourceTypeMetadata receiverType, String invokedName, String prefix) {
         if (!invokedName.startsWith(prefix) || invokedName.length() <= prefix.length()
                 || !Character.isUpperCase(invokedName.charAt(prefix.length()))) {
             return Optional.empty();
@@ -182,30 +184,31 @@ public final class GeneratedMemberEvidence {
         return fieldExists(receiverType, fieldName) ? Optional.of(fieldName) : Optional.empty();
     }
 
-    private Optional<String> fluentField(ClassMetadata receiverType, String invokedName) {
-        if (!receiverType.hasFluentAccessors()) {
+    private Optional<String> fluentField(SourceTypeMetadata receiverType, String invokedName) {
+        if (!receiverType.members().fluentSetters()) {
             return Optional.empty();
         }
         return fieldExists(receiverType, invokedName) ? Optional.of(invokedName) : Optional.empty();
     }
 
-    private boolean fieldExists(ClassMetadata receiverType, String fieldName) {
-        return receiverType.fields().stream().anyMatch(field -> field.name().equals(fieldName));
+    private boolean fieldExists(SourceTypeMetadata receiverType, String fieldName) {
+        return receiverType.members().fields().stream().anyMatch(field -> field.name().equals(fieldName));
     }
 
-    private Optional<String> matchedAnnotation(ClassMetadata receiverType, Set<String> expectedSimpleNames) {
-        return receiverType.annotations().stream()
+    private Optional<String> matchedAnnotation(SourceTypeMetadata receiverType, Set<String> expectedSimpleNames) {
+        return receiverType.frameworkFacts().annotations().stream()
+                .map(AnnotationEvidence::writtenName)
                 .map(AnnotationSimpleNames::simpleName)
                 .filter(expectedSimpleNames::contains)
                 .findFirst();
     }
 
-    private String builderFqnOf(ClassMetadata receiverType) {
-        return receiverType.fullyQualifiedName() + "." + simpleClassName(receiverType) + "Builder";
+    private String builderFqnOf(SourceTypeMetadata receiverType) {
+        return receiverType.declaration().identity().fullyQualifiedName() + "." + simpleClassName(receiverType) + "Builder";
     }
 
-    private String simpleClassName(ClassMetadata receiverType) {
-        String className = receiverType.className();
+    private String simpleClassName(SourceTypeMetadata receiverType) {
+        String className = receiverType.declaration().identity().javaType().className();
         int lastDot = className.lastIndexOf('.');
         return lastDot >= 0 ? className.substring(lastDot + 1) : className;
     }

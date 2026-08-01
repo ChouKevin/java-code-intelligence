@@ -1,20 +1,22 @@
 package com.java.semantic.callgraph.application;
 
+import com.java.semantic.syntax.domain.SourceTypeKind;
+
 import java.util.List;
 import java.util.Optional;
 import java.util.stream.Stream;
 
 import com.java.semantic.callgraph.domain.ResolutionStrategy;
-import com.java.semantic.syntax.domain.ClassMetadata;
-import com.java.semantic.syntax.domain.ClassMetadata.FieldInfo;
-import com.java.semantic.syntax.domain.ClassMetadata.MethodSignature;
+import com.java.semantic.syntax.domain.SourceTypeMetadata;
+import com.java.semantic.syntax.domain.SourceFieldMetadata;
+import com.java.semantic.syntax.domain.SourceMethodMetadata;
 import com.java.semantic.syntax.domain.MethodTargetResolution;
 import com.java.semantic.syntax.domain.SourceSlice;
 import com.java.semantic.syntax.domain.SyntaxInvocation;
 import com.java.semantic.syntax.domain.SyntaxInvocation.InvocationKind;
 import com.java.semantic.syntax.domain.SyntaxPosition;
 import com.java.semantic.syntax.domain.SyntaxRange;
-import com.java.semantic.syntax.domain.TypeReference;
+import com.java.semantic.syntax.domain.NamedTypeReference;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -29,7 +31,7 @@ class GeneratedMemberEvidenceTest {
 
     @Test
     void should_match_data_getter_without_source_declaration() {
-        ClassMetadata order = metadata("com.example.Order", List.of("Data"),
+        SourceTypeMetadata order = metadata("com.example.Order", List.of("Data"),
                 List.of(field("total", "BigDecimal")), List.of(), false);
         SyntaxInvocation call = invocation(InvocationKind.METHOD, "order.getTotal()", "com.example.Order");
 
@@ -42,8 +44,8 @@ class GeneratedMemberEvidenceTest {
 
     @Test
     void should_not_match_when_source_declares_same_signature() {
-        MethodSignature handWritten = method("getTotal", List.of());
-        ClassMetadata order = metadata("com.example.Order", List.of("Data"),
+        SourceMethodMetadata handWritten = method("getTotal", List.of());
+        SourceTypeMetadata order = metadata("com.example.Order", List.of("Data"),
                 List.of(field("total", "BigDecimal")), List.of(handWritten), false);
         SyntaxInvocation call = invocation(InvocationKind.METHOD, "order.getTotal()", "com.example.Order");
 
@@ -52,7 +54,7 @@ class GeneratedMemberEvidenceTest {
 
     @Test
     void should_not_match_required_args_constructor() {
-        ClassMetadata invoice = metadata("com.example.Invoice", List.of("RequiredArgsConstructor"),
+        SourceTypeMetadata invoice = metadata("com.example.Invoice", List.of("RequiredArgsConstructor"),
                 List.of(field("id", "String")), List.of(), false);
         SyntaxInvocation call = invocation(InvocationKind.CONSTRUCTOR, "new Invoice(id)", "com.example.Invoice");
 
@@ -62,7 +64,7 @@ class GeneratedMemberEvidenceTest {
     @ParameterizedTest(name = "{0}")
     @MethodSource("remainingRules")
     void should_evaluate_remaining_wave_one_rules(
-            String caseName, ClassMetadata receiverType, SyntaxInvocation call, Optional<String> expectedSymbol) {
+            String caseName, SourceTypeMetadata receiverType, SyntaxInvocation call, Optional<String> expectedSymbol) {
         Optional<EvidenceMatch> match = evidence.evaluate(receiverType, call);
 
         if (expectedSymbol.isPresent()) {
@@ -75,19 +77,19 @@ class GeneratedMemberEvidenceTest {
     }
 
     private static Stream<Arguments> remainingRules() {
-        ClassMetadata setterOwner = metadata("com.example.Order", List.of("Setter"),
+        SourceTypeMetadata setterOwner = metadata("com.example.Order", List.of("Setter"),
                 List.of(field("total", "BigDecimal")), List.of(), false);
-        ClassMetadata valueOwner = metadata("com.example.Order", List.of("Value"),
+        SourceTypeMetadata valueOwner = metadata("com.example.Order", List.of("Value"),
                 List.of(field("total", "BigDecimal")), List.of(), false);
-        ClassMetadata fluentGetterOwner = metadata("com.example.Order", List.of("Getter"),
+        SourceTypeMetadata fluentGetterOwner = metadata("com.example.Order", List.of("Getter"),
                 List.of(field("total", "BigDecimal")), List.of(), true);
-        ClassMetadata fluentSetterOwner = metadata("com.example.Order", List.of("Setter"),
+        SourceTypeMetadata fluentSetterOwner = metadata("com.example.Order", List.of("Setter"),
                 List.of(field("total", "BigDecimal")), List.of(), true);
-        ClassMetadata builderOwner = metadata("com.example.Order", List.of("Builder"),
+        SourceTypeMetadata builderOwner = metadata("com.example.Order", List.of("Builder"),
                 List.of(field("total", "BigDecimal"), field("carrier", "String")), List.of(), false);
-        ClassMetadata noArgsOwner = metadata("com.example.Order", List.of("NoArgsConstructor"),
+        SourceTypeMetadata noArgsOwner = metadata("com.example.Order", List.of("NoArgsConstructor"),
                 List.of(field("id", "String")), List.of(), false);
-        ClassMetadata allArgsOwner = metadata("com.example.Order", List.of("AllArgsConstructor"),
+        SourceTypeMetadata allArgsOwner = metadata("com.example.Order", List.of("AllArgsConstructor"),
                 List.of(field("id", "String"), field("total", "BigDecimal")), List.of(), false);
 
         return Stream.of(
@@ -139,32 +141,33 @@ class GeneratedMemberEvidenceTest {
                         Optional.<String>empty()));
     }
 
-    private static ClassMetadata metadata(
+    private static SourceTypeMetadata metadata(
             String fullyQualifiedName,
             List<String> annotations,
-            List<FieldInfo> fields,
-            List<MethodSignature> methods,
+            List<SourceFieldMetadata> fields,
+            List<SourceMethodMetadata> methods,
             boolean fluent) {
         int lastDot = fullyQualifiedName.lastIndexOf('.');
         String simpleName = fullyQualifiedName.substring(lastDot + 1);
         String packageName = lastDot >= 0 ? fullyQualifiedName.substring(0, lastDot) : "";
         SyntaxRange range = range(0, 0, 10, 0);
-        return new ClassMetadata(
+        return com.java.semantic.syntax.domain.SourceTypeMetadataFixture.sourceType(
                 simpleName, packageName, fullyQualifiedName,
                 "src/main/java/" + fullyQualifiedName.replace('.', '/') + ".java",
-                ClassMetadata.TypeKind.CLASS, false, List.of(), List.of(), annotations, List.of(),
+                SourceTypeKind.CLASS, false, List.of(), List.of(), annotations, List.of(),
                 fields, methods, fluent, fluent, List.of(), range,
                 new SourceSlice(range, "class " + simpleName + " {}"), false, List.of());
     }
 
-    private static FieldInfo field(String name, String type) {
-        return new FieldInfo(name, type, List.of(), "", new TypeReference(type, type, List.of(), true));
+    private static SourceFieldMetadata field(String name, String type) {
+        return new SourceFieldMetadata(name, type, "", new NamedTypeReference(
+                type, type, Optional.empty(), false), List.of());
     }
 
-    private static MethodSignature method(String name, List<String> paramTypes) {
+    private static SourceMethodMetadata method(String name, List<String> paramTypes) {
         SyntaxRange range = range(0, 0, 1, 0);
-        return new MethodSignature(
-                name, paramTypes, List.of(), null, null, 1, 2, range,
+        return new SourceMethodMetadata(
+                name, paramTypes, null, null, 1, 2, range,
                 new SourceSlice(range, "void " + name + "() {}"), List.of(), Optional.empty(), List.of(), List.of(),
                 List.of(), range.start(), MethodTargetResolution.unresolved("test-fixture"), true, false, true);
     }

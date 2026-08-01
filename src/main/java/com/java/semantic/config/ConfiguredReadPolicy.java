@@ -4,7 +4,7 @@ import com.java.semantic.callgraph.domain.EvidenceVisibility;
 import com.java.semantic.callgraph.domain.MethodId;
 import com.java.semantic.callgraph.domain.ReadPolicy;
 import com.java.semantic.callgraph.domain.TypeId;
-import com.java.semantic.identity.PolicyIdentity;
+import com.java.semantic.identity.JavaIdentityNormalizer;
 import org.springframework.util.Assert;
 
 import java.util.Objects;
@@ -44,7 +44,7 @@ public final class ConfiguredReadPolicy implements ReadPolicy {
                 || properties.forbiddenClasses().stream()
                         .anyMatch(rule -> Objects.equals(rule.repoId(), typeId.repoId())
                                 && Objects.equals(rule.packageName(), typeId.packageName())
-                                && Objects.equals(PolicyIdentity.className(
+                                && Objects.equals(JavaIdentityNormalizer.className(
                                         rule.packageName(), rule.className()), typeId.className()));
         return forbidden ? EvidenceVisibility.BUSINESS_READ_FORBIDDEN : EvidenceVisibility.READABLE;
     }
@@ -62,7 +62,7 @@ public final class ConfiguredReadPolicy implements ReadPolicy {
                 .anyMatch(rule -> Objects.equals(rule.repoId(), declaringType.repoId())
                         && Objects.equals(rule.packageName(), declaringType.packageName())
                         && Objects.equals(
-                                PolicyIdentity.className(rule.packageName(), rule.className()),
+                                JavaIdentityNormalizer.className(rule.packageName(), rule.className()),
                                 declaringType.className())
                         && Objects.equals(rule.methodName(), methodName));
         return forbidden ? EvidenceVisibility.BUSINESS_READ_FORBIDDEN : EvidenceVisibility.READABLE;
@@ -82,7 +82,7 @@ public final class ConfiguredReadPolicy implements ReadPolicy {
         return properties.forbiddenClasses().stream()
                 .anyMatch(rule -> Objects.equals(rule.repoId(), methodId.repoId())
                         && Objects.equals(rule.packageName(), methodId.packageName())
-                        && Objects.equals(PolicyIdentity.className(
+                        && Objects.equals(JavaIdentityNormalizer.className(
                                 rule.packageName(), rule.className()), methodId.className()));
     }
 
@@ -90,9 +90,9 @@ public final class ConfiguredReadPolicy implements ReadPolicy {
         return properties.forbiddenMethods().stream()
                 .anyMatch(rule -> Objects.equals(rule.repoId(), methodId.repoId())
                         && Objects.equals(rule.packageName(), methodId.packageName())
-                        && Objects.equals(PolicyIdentity.className(rule.packageName(), rule.className()), methodId.className())
+                        && Objects.equals(JavaIdentityNormalizer.className(rule.packageName(), rule.className()), methodId.className())
                         && Objects.equals(rule.methodName(), methodId.methodName())
-                        && Objects.equals(PolicyIdentity.parameterTypes(rule.parameterTypes()), methodId.parameterTypes()));
+                        && Objects.equals(JavaIdentityNormalizer.parameterTypes(rule.parameterTypes()), methodId.parameterTypes()));
     }
 
     private boolean matchesSegment(String prefix, String candidate) {

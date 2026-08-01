@@ -16,8 +16,9 @@ import com.java.semantic.semantic.domain.SemanticMethod;
 import com.java.semantic.semantic.domain.SemanticPosition;
 import com.java.semantic.semantic.domain.SemanticTargetNotFoundException;
 import com.java.semantic.syntax.domain.CanonicalMethodDeclarationResolver;
-import com.java.semantic.syntax.domain.ClassMetadata;
-import com.java.semantic.syntax.domain.ClassMetadata.MethodSignature;
+import com.java.semantic.syntax.domain.SourceMethodMetadata;
+import com.java.semantic.syntax.domain.SourceTypeKind;
+import com.java.semantic.syntax.domain.SourceTypeMetadata;
 import com.java.semantic.syntax.domain.MethodTargetResolution;
 import com.java.semantic.syntax.domain.RepositorySyntax;
 import com.java.semantic.syntax.domain.SyntaxExtractionService;
@@ -112,16 +113,16 @@ public final class MethodImplementationDiscoveryApplicationService {
     }
 
     private void assertEligible(RepositorySyntaxIndex index, MethodTarget target) {
-        MethodSignature declaration = index.method(target)
+        SourceMethodMetadata declaration = index.method(target)
                 .orElseThrow(() -> new ImplementationDiscoveryContractException(target));
-        ClassMetadata metadata = index.classMetadata(target)
+        SourceTypeMetadata metadata = index.sourceType(target)
                 .orElseThrow(() -> new ImplementationDiscoveryContractException(target));
         boolean abstractDeclaration = declaration.abstractDeclaration()
                 && !declaration.executableDeclaration();
-        boolean abstractInterfaceMethod = ClassMetadata.TypeKind.INTERFACE.equals(metadata.kind())
+        boolean abstractInterfaceMethod = SourceTypeKind.INTERFACE.equals(metadata.declaration().kind())
                 && abstractDeclaration;
-        boolean abstractClassMethod = ClassMetadata.TypeKind.CLASS.equals(metadata.kind())
-                && metadata.isAbstract()
+        boolean abstractClassMethod = SourceTypeKind.CLASS.equals(metadata.declaration().kind())
+                && metadata.declaration().abstractType()
                 && abstractDeclaration;
         if (!abstractInterfaceMethod && !abstractClassMethod) {
             throw new ImplementationTargetUnsupportedException(target);
@@ -133,8 +134,8 @@ public final class MethodImplementationDiscoveryApplicationService {
             MethodTarget target,
             MethodTargetResolution resolution) {
         return switch (resolution.status()) {
-            case RESOLVED -> syntax.classes().stream()
-                    .flatMap(metadata -> metadata.methods().stream())
+            case RESOLVED -> syntax.sourceTypes().stream()
+                    .flatMap(metadata -> metadata.members().methods().stream())
                     .filter(method -> method.analysisTarget().target().filter(target::equals).isPresent())
                     .map(method -> new SemanticDeclarationAnchor(
                             target,
@@ -167,7 +168,7 @@ public final class MethodImplementationDiscoveryApplicationService {
         }
         List<ImplementationCandidate> candidates = new ArrayList<>();
         for (Map.Entry<MethodTarget, SemanticMethod> entry : distinct.entrySet()) {
-            MethodSignature declaration = index.method(entry.getKey())
+            SourceMethodMetadata declaration = index.method(entry.getKey())
                     .orElseThrow(() -> new ImplementationDiscoveryContractException(entry.getKey()));
             if (!declaration.executableDeclaration()) {
                 issues.add(MethodImplementationIssueReason.NON_EXECUTABLE_TARGET);

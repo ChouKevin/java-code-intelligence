@@ -348,6 +348,30 @@ paths:
           $ref: '#/components/responses/Conflict'
         '500':
           $ref: '#/components/responses/MutationFailed'
+  /v1/discovery/source-symbols/resolve:
+    post:
+      operationId: resolveSourceSymbol
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ResolveSourceSymbolRequest'
+      responses:
+        '200':
+          $ref: '#/components/responses/SourceSymbolResolution'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/AuthDisabled'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/MutationFailed'
   /v1/discovery/method-source:
     post:
       operationId: getMethodSource
@@ -585,6 +609,12 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/ExactContentSegmentResponse'
+    SourceSymbolResolution:
+      description: Revision-bound source-only symbol resolution and executable retries
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/SourceSymbolResolutionResponse'
     BadRequest:
       description: Invalid repository id or request
       content:
@@ -706,6 +736,358 @@ components:
           maximum: 2
         target:
           $ref: '#/components/schemas/MethodTarget'
+    ResolveSourceSymbolRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - repoId
+        - expectedRevision
+        - context
+        - symbol
+      properties:
+        repoId:
+          type: string
+          minLength: 1
+          pattern: '^[a-z0-9][a-z0-9._-]{0,63}$'
+        expectedRevision:
+          type: string
+          minLength: 1
+          pattern: '^[0-9a-f]{40}$|^FIXTURE$'
+        context:
+          $ref: '#/components/schemas/SourceSymbolContextRequest'
+        symbol:
+          type: string
+          minLength: 1
+          maxLength: 255
+          pattern: '^[\p{L}\p{Nl}\p{Sc}\p{Pc}][\p{L}\p{Nl}\p{Sc}\p{Pc}\p{Mn}\p{Mc}\p{Nd}]*$'
+        position:
+          $ref: '#/components/schemas/Position'
+    SourceSymbolContextRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - type
+      properties:
+        type:
+          type: string
+          minLength: 1
+          maxLength: 255
+          pattern: '^[\p{L}\p{Nl}\p{Sc}\p{Pc}][\p{L}\p{Nl}\p{Sc}\p{Pc}\p{Mn}\p{Mc}\p{Nd}]*(?:\.[\p{L}\p{Nl}\p{Sc}\p{Pc}][\p{L}\p{Nl}\p{Sc}\p{Pc}\p{Mn}\p{Mc}\p{Nd}]*)*$'
+        sourceFile:
+          type: string
+          minLength: 1
+          maxLength: 1024
+          pattern: '^[^\u0000-\u001F\u007F-\u009F]+$'
+        method:
+          $ref: '#/components/schemas/SourceSymbolMethodContextRequest'
+    SourceSymbolMethodContextRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - name
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 255
+          pattern: '^[\p{L}\p{Nl}\p{Sc}\p{Pc}][\p{L}\p{Nl}\p{Sc}\p{Pc}\p{Mn}\p{Mc}\p{Nd}]*$'
+        parameterTypes:
+          type: array
+          items:
+            type: string
+            minLength: 1
+            pattern: '.*\S.*'
+    SourceSymbolResolutionResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - repoId
+        - analyzedRevision
+        - status
+        - contextCandidates
+        - contextCandidateLimits
+        - candidates
+        - issues
+      properties:
+        repoId:
+          type: string
+        analyzedRevision:
+          type: string
+          pattern: '^[0-9a-f]{40}$|^FIXTURE$'
+        status:
+          $ref: '#/components/schemas/SourceSymbolResolutionStatus'
+        contextCandidates:
+          type: array
+          items:
+            $ref: '#/components/schemas/SourceContextCandidateResponse'
+        contextCandidateLimits:
+          $ref: '#/components/schemas/SourceContextCandidateLimitsResponse'
+        candidates:
+          type: array
+          items:
+            $ref: '#/components/schemas/SourceSymbolCandidateResponse'
+        issues:
+          type: array
+          items:
+            $ref: '#/components/schemas/SourceSymbolIssueSummaryResponse'
+    SourceSymbolResolutionStatus:
+      type: string
+      enum:
+        - RESOLVED
+        - CONTEXT_NOT_FOUND
+        - SYMBOL_NOT_FOUND
+        - AMBIGUOUS_CONTEXT
+        - AMBIGUOUS_SYMBOL
+        - AMBIGUOUS_OCCURRENCE
+        - UNRESOLVED_BINDING
+        - POSITION_MISMATCH
+    SourceContextCandidateLimitsResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - candidateLimit
+        - returnedCount
+        - totalCount
+        - truncated
+      properties:
+        candidateLimit:
+          type: integer
+          minimum: 2
+          default: 100
+        returnedCount:
+          type: integer
+          minimum: 0
+        totalCount:
+          type: integer
+          minimum: 0
+        truncated:
+          type: boolean
+    SourceContextCandidateResponse:
+      oneOf:
+        - $ref: '#/components/schemas/SourceTypeContextCandidateResponse'
+        - $ref: '#/components/schemas/SourceMethodContextCandidateResponse'
+      discriminator:
+        propertyName: kind
+        mapping:
+          SOURCE_TYPE: '#/components/schemas/SourceTypeContextCandidateResponse'
+          METHOD: '#/components/schemas/SourceMethodContextCandidateResponse'
+    SourceTypeContextCandidateResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - kind
+        - sourceFile
+        - retry
+      properties:
+        kind:
+          type: string
+          enum:
+            - SOURCE_TYPE
+        sourceFile:
+          type: string
+        retry:
+          $ref: '#/components/schemas/DiscoveryFollowUpResponse'
+    SourceMethodContextCandidateResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - kind
+        - target
+        - retry
+      properties:
+        kind:
+          type: string
+          enum:
+            - METHOD
+        target:
+          $ref: '#/components/schemas/MethodTarget'
+        retry:
+          $ref: '#/components/schemas/DiscoveryFollowUpResponse'
+    SourceSymbolCandidateResponse:
+      oneOf:
+        - $ref: '#/components/schemas/VariableLikeSourceSymbolCandidateResponse'
+        - $ref: '#/components/schemas/StaticConstantSourceSymbolCandidateResponse'
+        - $ref: '#/components/schemas/MethodSourceSymbolCandidateResponse'
+        - $ref: '#/components/schemas/SourceTypeSymbolCandidateResponse'
+      discriminator:
+        propertyName: kind
+        mapping:
+          FIELD: '#/components/schemas/VariableLikeSourceSymbolCandidateResponse'
+          RECORD_COMPONENT: '#/components/schemas/VariableLikeSourceSymbolCandidateResponse'
+          PARAMETER: '#/components/schemas/VariableLikeSourceSymbolCandidateResponse'
+          LOCAL_VARIABLE: '#/components/schemas/VariableLikeSourceSymbolCandidateResponse'
+          ENUM_CONSTANT: '#/components/schemas/VariableLikeSourceSymbolCandidateResponse'
+          STATIC_CONSTANT: '#/components/schemas/StaticConstantSourceSymbolCandidateResponse'
+          METHOD: '#/components/schemas/MethodSourceSymbolCandidateResponse'
+          SOURCE_TYPE: '#/components/schemas/SourceTypeSymbolCandidateResponse'
+    VariableLikeSourceSymbolCandidateResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - kind
+        - name
+        - declarationOwner
+        - declaredType
+        - declarationRange
+        - representativeOccurrence
+        - occurrenceCount
+        - availableFollowUps
+      properties:
+        kind:
+          type: string
+          enum:
+            - FIELD
+            - RECORD_COMPONENT
+            - PARAMETER
+            - LOCAL_VARIABLE
+            - ENUM_CONSTANT
+        name:
+          type: string
+        declarationOwner:
+          type: string
+        declaredType:
+          $ref: '#/components/schemas/DeclaredTypeResponse'
+        declarationRange:
+          $ref: '#/components/schemas/SourceRange'
+        representativeOccurrence:
+          $ref: '#/components/schemas/SourceRange'
+        occurrenceCount:
+          type: integer
+          minimum: 1
+          description: All matching method occurrences, or the single declaration identifier in type context
+        availableFollowUps:
+          type: array
+          items:
+            $ref: '#/components/schemas/DiscoveryFollowUpResponse'
+    StaticConstantSourceSymbolCandidateResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - kind
+        - name
+        - declarationOwner
+        - declaredType
+        - initializerSource
+        - declarationRange
+        - representativeOccurrence
+        - occurrenceCount
+        - availableFollowUps
+      properties:
+        kind:
+          type: string
+          enum:
+            - STATIC_CONSTANT
+        name:
+          type: string
+        declarationOwner:
+          type: string
+        declaredType:
+          $ref: '#/components/schemas/DeclaredTypeResponse'
+        initializerSource:
+          type: string
+          minLength: 1
+          pattern: '.*\S.*'
+        declarationRange:
+          $ref: '#/components/schemas/SourceRange'
+        representativeOccurrence:
+          $ref: '#/components/schemas/SourceRange'
+        occurrenceCount:
+          type: integer
+          minimum: 1
+        availableFollowUps:
+          type: array
+          items:
+            $ref: '#/components/schemas/DiscoveryFollowUpResponse'
+    MethodSourceSymbolCandidateResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - kind
+        - name
+        - target
+        - declarationRange
+        - representativeOccurrence
+        - occurrenceCount
+        - availableFollowUps
+      properties:
+        kind:
+          type: string
+          enum:
+            - METHOD
+        name:
+          type: string
+        target:
+          $ref: '#/components/schemas/MethodTarget'
+        declarationRange:
+          $ref: '#/components/schemas/SourceRange'
+        representativeOccurrence:
+          $ref: '#/components/schemas/SourceRange'
+        occurrenceCount:
+          type: integer
+          minimum: 1
+        availableFollowUps:
+          type: array
+          items:
+            $ref: '#/components/schemas/DiscoveryFollowUpResponse'
+    SourceTypeSymbolCandidateResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - kind
+        - name
+        - fullyQualifiedName
+        - sourceFile
+        - declarationRange
+        - representativeOccurrence
+        - occurrenceCount
+        - availableFollowUps
+      properties:
+        kind:
+          type: string
+          enum:
+            - SOURCE_TYPE
+        name:
+          type: string
+        fullyQualifiedName:
+          type: string
+        sourceFile:
+          type: string
+        declarationRange:
+          $ref: '#/components/schemas/SourceRange'
+        representativeOccurrence:
+          $ref: '#/components/schemas/SourceRange'
+        occurrenceCount:
+          type: integer
+          minimum: 1
+        availableFollowUps:
+          type: array
+          items:
+            $ref: '#/components/schemas/DiscoveryFollowUpResponse'
+    DeclaredTypeResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - writtenType
+      properties:
+        writtenType:
+          type: string
+        resolvedType:
+          type: string
+    SourceSymbolIssueSummaryResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - code
+        - count
+      properties:
+        code:
+          type: string
+          enum:
+            - SOURCE_BINDING_UNRESOLVED
+            - UNSUPPORTED_SOURCE_CONSTRUCT
+        count:
+          type: integer
+          minimum: 1
     GetMethodSourceRequest:
       type: object
       additionalProperties: false
@@ -2029,6 +2411,7 @@ components:
             - DISCOVER_CONCEPTS
             - GET_TYPE_MEMBERS
             - GET_NEXT_PAGE
+            - RESOLVE_SOURCE_SYMBOL
         api:
           $ref: '#/components/schemas/DiscoveryFollowUpApiResponse'
         request:
@@ -2069,6 +2452,27 @@ components:
         - $ref: '#/components/schemas/DiscoverConceptsRequestResponse'
         - $ref: '#/components/schemas/GetTypeMembersRequestResponse'
         - $ref: '#/components/schemas/DiscoverTypeMembersRequestResponse'
+        - $ref: '#/components/schemas/ResolveSourceSymbolRequestResponse'
+    ResolveSourceSymbolRequestResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - repoId
+        - expectedRevision
+        - context
+        - symbol
+      properties:
+        repoId:
+          type: string
+        expectedRevision:
+          type: string
+          pattern: '^[0-9a-f]{40}$|^FIXTURE$'
+        context:
+          $ref: '#/components/schemas/SourceSymbolContextRequest'
+        symbol:
+          type: string
+        position:
+          $ref: '#/components/schemas/Position'
     MethodTargetFollowUpRequestResponse:
       type: object
       additionalProperties: false

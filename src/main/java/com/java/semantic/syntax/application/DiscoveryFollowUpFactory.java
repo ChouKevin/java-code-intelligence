@@ -26,7 +26,9 @@ import com.java.semantic.syntax.application.DiscoveryFollowUp.GetMethodSourceReq
 import com.java.semantic.syntax.application.DiscoveryFollowUp.GetMapperStatementRequest;
 import com.java.semantic.syntax.application.DiscoveryFollowUp.GetTypeMembersRequest;
 import com.java.semantic.syntax.application.DiscoveryFollowUp.Operation;
+import com.java.semantic.syntax.application.DiscoveryFollowUp.ResolveSourceSymbolRequest;
 import com.java.semantic.syntax.application.DiscoveryFollowUp.TypeMembersRequest;
+import com.java.semantic.syntax.domain.SyntaxPosition;
 
 import java.util.Comparator;
 import java.util.List;
@@ -88,6 +90,65 @@ public final class DiscoveryFollowUpFactory {
         String expectedRevision = revision(revision);
         MethodTarget methodTarget = Objects.requireNonNull(target, "target is required");
         return executableMethodAnalysis(repoId, expectedRevision, methodTarget);
+    }
+
+    /** source type identity 導向完整 type-member 與 canonical concept discovery */
+    public List<DiscoveryFollowUp> forSourceType(
+            RepositoryId repositoryId,
+            RepositoryRevision revision,
+            String sourceFile,
+            String fullyQualifiedName) {
+        return Stream.concat(
+                forType(repositoryId, revision, sourceFile, fullyQualifiedName).stream(),
+                forResolvedFieldType(repositoryId, revision, Optional.of(fullyQualifiedName)).stream())
+                .toList();
+    }
+
+    /** type ambiguity retry 插入 source file 並移除 stale position */
+    public DiscoveryFollowUp forSourceTypeContextRetry(
+            RepositoryId repositoryId,
+            RepositoryRevision revision,
+            SourceSymbolResolutionQuery original,
+            String sourceFile) {
+        SourceSymbolContext context = original.context();
+        SourceSymbolContext selected = new SourceSymbolContext(
+                context.fullyQualifiedType(), Optional.of(sourceFile), context.method());
+        return sourceSymbolRetry(repositoryId, revision, original, selected, Optional.empty());
+    }
+
+    /** method ambiguity retry 採用 canonical target signature 並移除 stale position */
+    public DiscoveryFollowUp forSourceMethodContextRetry(
+            RepositoryId repositoryId,
+            RepositoryRevision revision,
+            SourceSymbolResolutionQuery original,
+            MethodTarget target) {
+        MethodTarget selectedTarget = Objects.requireNonNull(target, "target is required");
+        SourceSymbolContext selected = new SourceSymbolContext(
+                original.context().fullyQualifiedType(),
+                Optional.of(selectedTarget.sourceFile()),
+                Optional.of(new SourceSymbolContext.MethodContext(
+                        selectedTarget.methodName(), Optional.of(selectedTarget.parameterTypes()))));
+        return sourceSymbolRetry(repositoryId, revision, original, selected, Optional.empty());
+    }
+
+    /** symbol ambiguity retry 固定 source file 與 representative occurrence start */
+    public DiscoveryFollowUp forSourceSymbolCandidateRetry(
+            RepositoryId repositoryId,
+            RepositoryRevision revision,
+            SourceSymbolResolutionQuery original,
+            SourceSymbolCandidate candidate) {
+        SourceSymbolCandidate selectedCandidate = Objects.requireNonNull(candidate, "candidate is required");
+        SourceSymbolContext context = original.context();
+        SourceSymbolContext selected = new SourceSymbolContext(
+                context.fullyQualifiedType(),
+                Optional.of(selectedCandidate.representativeOccurrence().sourceFile()),
+                context.method());
+        return sourceSymbolRetry(
+                repositoryId,
+                revision,
+                original,
+                selected,
+                Optional.of(selectedCandidate.representativeOccurrence().range().start()));
     }
 
     /** 唯一 mapper method 可直接取得其 exact SQL variants */
@@ -231,6 +292,21 @@ public final class DiscoveryFollowUpFactory {
             Operation operation,
             DiscoveryFollowUp.RequestProjection request) {
         return new DiscoveryFollowUp(operation, operation.api(), request);
+    }
+
+    private DiscoveryFollowUp sourceSymbolRetry(
+            RepositoryId repositoryId,
+            RepositoryRevision revision,
+            SourceSymbolResolutionQuery original,
+            SourceSymbolContext context,
+            Optional<SyntaxPosition> position) {
+        ResolveSourceSymbolRequest request = new ResolveSourceSymbolRequest(
+                repositoryId(repositoryId),
+                revision(revision),
+                context,
+                original.symbol(),
+                position);
+        return followUp(Operation.RESOLVE_SOURCE_SYMBOL, request);
     }
 
     private static String repositoryId(RepositoryId repositoryId) {

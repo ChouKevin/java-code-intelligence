@@ -1,33 +1,37 @@
 package com.java.semantic.syntax.application;
+import com.java.semantic.syntax.domain.SourceTypeMetadataFixture;
+import com.java.semantic.syntax.domain.AnalysisTargetStatus;
 
 import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 
+import com.java.semantic.identity.JavaTypeIdentity;
 import com.java.semantic.identity.MethodTarget;
+import com.java.semantic.identity.SourceTypeIdentity;
 import com.java.semantic.syntax.application.ConceptIdentity.TypeConceptIdentity;
 import com.java.semantic.syntax.application.ConceptIdentity.TypeUsageConceptIdentity;
 import com.java.semantic.syntax.application.ConceptIdentity.TypeUsageSlot;
-import com.java.semantic.syntax.domain.AnalysisTargetStatus;
 import com.java.semantic.syntax.domain.AnnotationEvidence;
+import com.java.semantic.syntax.domain.ArrayTypeReference;
 import com.java.semantic.syntax.domain.ApiEntryPoint;
-import com.java.semantic.syntax.domain.ClassMetadata;
-import com.java.semantic.syntax.domain.ClassMetadata.FieldInfo;
-import com.java.semantic.syntax.domain.ClassMetadata.MethodSignature;
-import com.java.semantic.syntax.domain.ClassMetadata.TypeKind;
+import com.java.semantic.syntax.domain.SourceTypeMetadata;
+import com.java.semantic.syntax.domain.SourceTypeRelationships;
+import com.java.semantic.syntax.domain.SourceFieldMetadata;
+import com.java.semantic.syntax.domain.SourceMethodMetadata;
+import com.java.semantic.syntax.domain.SourceTypeKind;
 import com.java.semantic.syntax.domain.EntryPointClass;
 import com.java.semantic.syntax.domain.MethodTargetResolution;
 import com.java.semantic.syntax.domain.MqBroker;
 import com.java.semantic.syntax.domain.MqEntryPoint;
+import com.java.semantic.syntax.domain.NamedTypeReference;
 import com.java.semantic.syntax.domain.RepositorySyntax;
-import com.java.semantic.syntax.domain.ResolvedTypeIdentity;
 import com.java.semantic.syntax.domain.ScheduleEntryPoint;
 import com.java.semantic.syntax.domain.ScheduleTriggerKind;
 import com.java.semantic.syntax.domain.SourceSlice;
 import com.java.semantic.syntax.domain.SyntaxPosition;
 import com.java.semantic.syntax.domain.SyntaxRange;
-import com.java.semantic.syntax.domain.TypeReference;
 
 import org.junit.jupiter.api.Test;
 
@@ -61,6 +65,10 @@ class StructuredConceptCatalogProjectorTest {
                         && entry.canonicalValue().contains("<unresolved>"))
                 .extracting(ConceptCatalogEntry::authority)
                 .containsExactly(ConceptAuthority.METADATA_VALUE_UNRESOLVED);
+        assertThat(catalog.entries())
+                .filteredOn(entry -> entry.identity() instanceof TypeUsageConceptIdentity)
+                .extracting(entry -> ((TypeUsageConceptIdentity) entry.identity()).resolvedType())
+                .contains("com.acme.order.OrderState[][]");
         assertThat(catalog.entries()).filteredOn(entry -> entry.target().isPresent()
                         && entry.target().orElseThrow().equals(target()))
                 .extracting(ConceptCatalogEntry::kind)
@@ -125,17 +133,14 @@ class StructuredConceptCatalogProjectorTest {
 
     @Test
     void should_project_only_binding_proven_implemented_and_extended_type_usages() {
-        ClassMetadata existing = metadata();
-        ClassMetadata metadata = new ClassMetadata(
-                existing.className(), existing.packageName(), existing.fullyQualifiedName(), existing.sourceFile(),
-                existing.kind(), existing.isAbstract(), List.of("OrderPort", "MissingPort"), List.of("BaseHandler"),
-                existing.annotations(), existing.imports(), existing.fields(), existing.methods(),
-                existing.hasFluentAccessors(), existing.hasChainedAccessors(), existing.profiles(), existing.range(),
-                existing.source(), existing.primary(), existing.beanQualifiers(), existing.annotationEvidence(),
-                List.of(
-                        new TypeReference("OrderPort", "com.acme.order.OrderPort", List.of(), true),
-                        new TypeReference("MissingPort", "", List.of(), false)),
-                List.of(new TypeReference("BaseHandler", "com.acme.order.BaseHandler", List.of(), true)));
+        SourceTypeMetadata existing = metadata();
+        SourceTypeMetadata metadata = new SourceTypeMetadata(
+                existing.declaration(),
+                new SourceTypeRelationships(
+                        List.of(namedTypeReference("BaseHandler", "com.acme.order.BaseHandler")),
+                        List.of(namedTypeReference("OrderPort", "com.acme.order.OrderPort"),
+                                new NamedTypeReference("MissingPort", "MissingPort", Optional.empty(), false))),
+                existing.members(), existing.frameworkFacts(), existing.compilationUnit());
 
         StructuredConceptCatalog catalog = projector.project(new RepositorySyntax(List.of(), List.of(metadata)));
 
@@ -150,7 +155,7 @@ class StructuredConceptCatalogProjectorTest {
     }
 
     private static RepositorySyntax repositorySyntax() {
-        ClassMetadata metadata = metadata();
+        SourceTypeMetadata metadata = metadata();
         EntryPointClass entryPoints = new EntryPointClass(
                 "OrderHandler", "com.acme.order", "com/acme/order/OrderHandler.java", "", List.of(), List.of(
                         new ApiEntryPoint("handleOrder", "", "/orders", List.of("POST", "GET"), List.of(), resolved()),
@@ -166,40 +171,41 @@ class StructuredConceptCatalogProjectorTest {
         return new RepositorySyntax(List.of(entryPoints), List.of(metadata, metadata));
     }
 
-    private static ClassMetadata metadata() {
-        MethodSignature method = new MethodSignature(
+    private static SourceTypeMetadata metadata() {
+        SourceMethodMetadata method = new SourceMethodMetadata(
                 "handleOrder",
                 List.of("com.acme.order.OrderCommand"),
-                List.of("Transactional"),
                 "",
                 null,
                 1,
                 2,
                 range(),
                 source(),
-                List.of(new TypeReference("OrderCommand", "com.acme.order.OrderCommand", List.of(), true)),
-                Optional.of(new TypeReference("OrderReceipt", "com.acme.order.OrderReceipt", List.of(), true)),
+                List.of(namedTypeReference("OrderCommand", "com.acme.order.OrderCommand")),
+                Optional.of(namedTypeReference("OrderReceipt", "com.acme.order.OrderReceipt")),
                 List.of(),
                 List.of(annotation("Transactional", "org.springframework.transaction.annotation.Transactional")),
-                List.of(new ResolvedTypeIdentity("com.acme.order", "OrderEvent")),
+                List.of(new JavaTypeIdentity("com.acme.order", "OrderEvent")),
                 new SyntaxPosition(1, 1),
                 resolved(),
                 true,
                 false,
                 false);
-        FieldInfo field = new FieldInfo(
+        SourceFieldMetadata field = new SourceFieldMetadata(
                 "orderState",
-                "OrderState",
-                List.of("Autowired"),
+                "OrderState[][]",
                 "",
-                new TypeReference("OrderState", "com.acme.order.OrderState", List.of(), true),
+                new ArrayTypeReference(
+                        "OrderState[][]",
+                        namedTypeReference("OrderState", "com.acme.order.OrderState"),
+                        2),
                 List.of(annotation("Autowired", "org.springframework.beans.factory.annotation.Autowired")));
-        return new ClassMetadata(
+        return SourceTypeMetadataFixture.sourceType(
                 "OrderHandler",
                 "com.acme.order",
                 OWNER_TYPE,
                 SOURCE_FILE,
-                TypeKind.CLASS,
+                SourceTypeKind.CLASS,
                 false,
                 List.of(),
                 List.of(),
@@ -213,14 +219,24 @@ class StructuredConceptCatalogProjectorTest {
                 range(),
                 source(),
                 false,
-                List.of(),
-                List.of(annotation("Service", "org.springframework.stereotype.Service")));
+                List.of());
     }
 
     private static AnnotationEvidence annotation(String writtenName, String resolvedType) {
-        return new AnnotationEvidence(writtenName, Optional.of(new ResolvedTypeIdentity(
+        return new AnnotationEvidence(writtenName, Optional.of(new JavaTypeIdentity(
                 resolvedType.substring(0, resolvedType.lastIndexOf('.')),
                 resolvedType.substring(resolvedType.lastIndexOf('.') + 1))));
+    }
+
+    private static NamedTypeReference namedTypeReference(String writtenType, String resolvedType) {
+        int lastDot = resolvedType.lastIndexOf('.');
+        String packageName = resolvedType.substring(0, lastDot);
+        String className = resolvedType.substring(lastDot + 1);
+        return new NamedTypeReference(
+                writtenType,
+                className,
+                Optional.of(new JavaTypeIdentity(packageName, className)),
+                true);
     }
 
     private static MethodTargetResolution resolved() {
@@ -228,7 +244,11 @@ class StructuredConceptCatalogProjectorTest {
     }
 
     private static MethodTarget target() {
-        return new MethodTarget(SOURCE_FILE, "com.acme.order", "OrderHandler", "handleOrder",
+        return new MethodTarget(
+                new SourceTypeIdentity(
+                        new JavaTypeIdentity("com.acme.order", "OrderHandler"),
+                        SOURCE_FILE),
+                "handleOrder",
                 List.of("com.acme.order.OrderCommand"));
     }
 

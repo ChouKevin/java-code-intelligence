@@ -1,6 +1,6 @@
 package com.java.semantic.semantic.adapter.jdtls;
 
-import com.java.semantic.identity.PolicyIdentity;
+import com.java.semantic.identity.JavaIdentityNormalizer;
 import org.springframework.util.StringUtils;
 
 import java.util.ArrayList;
@@ -52,7 +52,7 @@ final class MethodSignatures {
         if (!StringUtils.hasText(inside)) {
             return List.of();
         }
-        return PolicyIdentity.parameterTypes(splitParameters(inside)).stream()
+        return JavaIdentityNormalizer.parameterTypes(splitParameters(inside)).stream()
                 .filter(StringUtils::hasText)
                 .toList();
     }
@@ -83,7 +83,7 @@ final class MethodSignatures {
 
     /** 去除泛型與套件前綴,可變參數轉為陣列 */
     static String normalizeType(String type) {
-        return PolicyIdentity.parameterType(type);
+        return JavaIdentityNormalizer.parameterType(type);
     }
 
     private static int firstOf(String value, char... markers) {

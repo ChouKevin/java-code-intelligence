@@ -1,6 +1,8 @@
 package com.java.semantic.semantic.adapter.jdtls;
 
+import com.java.semantic.identity.JavaTypeIdentity;
 import com.java.semantic.identity.MethodTarget;
+import com.java.semantic.identity.SourceTypeIdentity;
 import com.java.semantic.repository.domain.RepositoryId;
 import com.java.semantic.repository.domain.RepositoryRevision;
 import com.java.semantic.repository.domain.RepositorySnapshot;
@@ -102,7 +104,12 @@ class JdtWorkspaceSourceLocatorTest {
     }
 
     private MethodTarget target(String sourceFile) {
-        return new MethodTarget(sourceFile, "com.example", "OrderService", "run", List.of());
+        return new MethodTarget(
+                new SourceTypeIdentity(
+                        new JavaTypeIdentity("com.example", "OrderService"),
+                        sourceFile),
+                "run",
+                List.of());
     }
 
     @FunctionalInterface

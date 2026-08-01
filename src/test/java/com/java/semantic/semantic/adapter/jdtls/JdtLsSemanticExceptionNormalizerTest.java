@@ -1,7 +1,9 @@
 package com.java.semantic.semantic.adapter.jdtls;
 
 import com.java.semantic.repository.domain.RepositoryId;
+import com.java.semantic.identity.JavaTypeIdentity;
 import com.java.semantic.identity.MethodTarget;
+import com.java.semantic.identity.SourceTypeIdentity;
 import com.java.semantic.semantic.domain.SemanticAmbiguousTypeException;
 import com.java.semantic.semantic.domain.SemanticEngineException;
 import com.java.semantic.semantic.domain.SemanticEngineNotReadyException;
@@ -111,9 +113,9 @@ class JdtLsSemanticExceptionNormalizerTest {
     @Test
     void should_preserve_exact_target_contract_failures_without_exposing_target_text() {
         SemanticTargetNotFoundException failure = new SemanticTargetNotFoundException(new MethodTarget(
-                "src/main/java/com/acme/Secret.java",
-                "com.acme",
-                "Secret",
+                new SourceTypeIdentity(
+                        new JavaTypeIdentity("com.acme", "Secret"),
+                        "src/main/java/com/acme/Secret.java"),
                 "run",
                 List.of()));
 

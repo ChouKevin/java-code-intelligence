@@ -1,7 +1,11 @@
 package com.java.semantic.syntax.application;
 
+import com.java.semantic.syntax.domain.SourceMethodMetadata;
+
 import com.java.semantic.config.ExactContentProperties;
+import com.java.semantic.identity.JavaTypeIdentity;
 import com.java.semantic.identity.MethodTarget;
+import com.java.semantic.identity.SourceTypeIdentity;
 import com.java.semantic.repository.application.RepositoryApplicationService;
 import com.java.semantic.repository.domain.RepositoryId;
 import com.java.semantic.repository.domain.RepositoryRevision;
@@ -12,7 +16,8 @@ import com.java.semantic.semantic.domain.SemanticTargetNotFoundException;
 import com.java.semantic.syntax.adapter.jdt.JdtSyntaxExtractionService;
 import com.java.semantic.syntax.domain.AnalysisTargetStatus;
 import com.java.semantic.syntax.domain.CanonicalMethodDeclarationResolver;
-import com.java.semantic.syntax.domain.ClassMetadata;
+import com.java.semantic.syntax.domain.SourceTypeMetadata;
+import com.java.semantic.syntax.domain.SourceTypeMembers;
 import com.java.semantic.syntax.domain.MapperEvidenceIndex;
 import com.java.semantic.syntax.domain.MapperEvidenceRepresentation;
 import com.java.semantic.syntax.domain.MapperFragmentEvidence;
@@ -77,12 +82,12 @@ class ExactContentApplicationServiceTest {
                     String find(String id) { return id; }
                 }
                 """);
-        ClassMetadata metadata = extracted.classes().getFirst();
+        SourceTypeMetadata metadata = extracted.sourceTypes().getFirst();
         MethodTarget target = methodTarget(extracted);
         MethodTarget alternate = new MethodTarget(
-                "src/main/java/com/example/Alternate.java",
-                target.packageName(),
-                target.className(),
+                new SourceTypeIdentity(
+                        new JavaTypeIdentity(target.packageName(), target.className()),
+                        "src/main/java/com/example/Alternate.java"),
                 target.methodName(),
                 target.parameterTypes());
         MethodTargetResolution ambiguous = new MethodTargetResolution(
@@ -102,9 +107,9 @@ class ExactContentApplicationServiceTest {
     void should_return_every_extracted_mapper_statement_variant_for_the_exact_logical_identity() {
         RepositorySyntax syntax = new JdtSyntaxExtractionService().extract(MULTI_MODULE_DATA_ACCESS_FIXTURE);
         String namespace = "com.example.persistence.OrderMapper";
-        MethodTarget target = syntax.classes().stream()
-                .filter(metadata -> namespace.equals(metadata.fullyQualifiedName()))
-                .flatMap(metadata -> metadata.methods().stream())
+        MethodTarget target = syntax.sourceTypes().stream()
+                .filter(metadata -> namespace.equals(metadata.declaration().identity().fullyQualifiedName()))
+                .flatMap(metadata -> metadata.members().methods().stream())
                 .filter(method -> "findByOrderNo".equals(method.name()))
                 .map(method -> method.analysisTarget().target().orElseThrow())
                 .findFirst()
@@ -137,7 +142,7 @@ class ExactContentApplicationServiceTest {
                     String find(Integer id);
                 }
                 """);
-        MethodTarget target = extracted.classes().getFirst().methods().getFirst()
+        MethodTarget target = extracted.sourceTypes().getFirst().members().methods().getFirst()
                 .analysisTarget().target().orElseThrow();
         MapperStatementIdentity statementIdentity = new MapperStatementIdentity(
                 "com.example.OrderMapper", "find", "mapper/OrderMapper.xml", Optional.empty(), 0,
@@ -161,7 +166,7 @@ class ExactContentApplicationServiceTest {
                     String find(MissingRequest request);
                 }
                 """);
-        MethodTarget target = extracted.classes().getFirst().methods().getFirst()
+        MethodTarget target = extracted.sourceTypes().getFirst().members().methods().getFirst()
                 .analysisTarget().target().orElseThrow();
         MapperStatementIdentity statementIdentity = new MapperStatementIdentity(
                 "com.example.OrderMapper", "find", "mapper/OrderMapper.xml", Optional.empty(), 0,
@@ -279,7 +284,11 @@ class ExactContentApplicationServiceTest {
                 class Orders { }
                 """);
         MethodTarget missing = new MethodTarget(
-                "src/main/java/com/example/Orders.java", "com.example", "Orders", "find", List.of("java.lang.String"));
+                new SourceTypeIdentity(
+                        new JavaTypeIdentity("com.example", "Orders"),
+                        "src/main/java/com/example/Orders.java"),
+                "find",
+                List.of("java.lang.String"));
 
         assertThatThrownBy(() -> service(syntax, new ExactContentProperties(32768, 32768))
                 .retrieve(new ExactContentQuery.MethodSource(REPOSITORY_ID, REVISION, missing)))
@@ -422,8 +431,8 @@ class ExactContentApplicationServiceTest {
     }
 
     private MethodTarget methodTarget(RepositorySyntax syntax) {
-        return syntax.classes().stream()
-                .flatMap(metadata -> metadata.methods().stream())
+        return syntax.sourceTypes().stream()
+                .flatMap(metadata -> metadata.members().methods().stream())
                 .map(method -> method.analysisTarget().target().orElseThrow())
                 .findFirst()
                 .orElseThrow();
@@ -435,7 +444,7 @@ class ExactContentApplicationServiceTest {
             List<MapperFragmentEvidence> fragments) {
         return new RepositorySyntax(
                 syntax.entryPoints(),
-                syntax.classes(),
+                syntax.sourceTypes(),
                 syntax.extractionOutcomes(),
                 Optional.of(new MapperEvidenceIndex(statements, fragments)));
     }
@@ -453,19 +462,17 @@ class ExactContentApplicationServiceTest {
                 MapperEvidenceRepresentation.MAPPER_XML_ELEMENT);
     }
 
-    private ClassMetadata withResolution(ClassMetadata metadata, MethodTargetResolution resolution) {
-        ClassMetadata.MethodSignature method = metadata.methods().getFirst();
-        ClassMetadata.MethodSignature replacement = new ClassMetadata.MethodSignature(
-                method.name(), method.paramTypes(), method.annotations(), method.sql(), method.sqlSource(),
+    private SourceTypeMetadata withResolution(SourceTypeMetadata metadata, MethodTargetResolution resolution) {
+        SourceMethodMetadata method = metadata.members().methods().getFirst();
+        SourceMethodMetadata replacement = new SourceMethodMetadata(
+                method.name(), method.paramTypes(), method.sql(), method.sqlSource(),
                 method.startLine(), method.endLine(), method.range(), method.source(),
                 method.parameterTypeReferences(), method.returnType(), method.invocations(), method.annotationEvidence(),
                 method.bodyTypeReferences(), method.namePosition(), resolution,
                 method.executableDeclaration(), method.abstractDeclaration(), method.overridableDeclaration());
-        return new ClassMetadata(
-                metadata.className(), metadata.packageName(), metadata.fullyQualifiedName(), metadata.sourceFile(),
-                metadata.kind(), metadata.isAbstract(), metadata.implementedTypes(), metadata.extendedTypes(),
-                metadata.annotations(), metadata.imports(), metadata.fields(), List.of(replacement),
-                metadata.hasFluentAccessors(), metadata.hasChainedAccessors(), metadata.profiles(), metadata.range(),
-                metadata.source(), metadata.primary(), metadata.beanQualifiers(), metadata.annotationEvidence());
+        return new SourceTypeMetadata(metadata.declaration(), metadata.relationships(),
+                new SourceTypeMembers(metadata.members().fields(), List.of(replacement),
+                        metadata.members().fluentSetters(), metadata.members().chainedAccessors()),
+                metadata.frameworkFacts(), metadata.compilationUnit());
     }
 }

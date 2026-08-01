@@ -139,7 +139,7 @@ public class ApiExceptionHandler {
             HttpServletRequest request) {
         List<MethodTargetResponse> candidates = exception.candidates().stream()
                 .sorted(Comparator.comparing(this::targetSortKey))
-                .map(this::target)
+                .map(MethodTargetHttpMapper::toResponse)
                 .toList();
         return ResponseEntity.status(HttpStatus.CONFLICT).body(ApiErrorResponse.withContext(
                 "SEMANTIC_BINDING_AMBIGUOUS",
@@ -147,7 +147,7 @@ public class ApiExceptionHandler {
                 null,
                 null,
                 null,
-                target(exception.target()),
+                MethodTargetHttpMapper.toResponse(exception.target()),
                 candidates,
                 requestId(request)));
     }
@@ -199,7 +199,7 @@ public class ApiExceptionHandler {
             MethodTarget target,
             HttpServletRequest request) {
         return ResponseEntity.status(status).body(ApiErrorResponse.withContext(
-                errorCode, message, null, null, null, target(target), List.of(), requestId(request)));
+                errorCode, message, null, null, null, MethodTargetHttpMapper.toResponse(target), List.of(), requestId(request)));
     }
 
     private ResponseEntity<ApiErrorResponse> response(
@@ -208,15 +208,6 @@ public class ApiExceptionHandler {
             String message,
             HttpServletRequest request) {
         return ResponseEntity.status(status).body(ApiErrorResponse.of(errorCode, message, requestId(request)));
-    }
-
-    private MethodTargetResponse target(MethodTarget target) {
-        return new MethodTargetResponse(
-                target.sourceFile(),
-                target.packageName(),
-                target.className(),
-                target.methodName(),
-                target.parameterTypes());
     }
 
     private String targetSortKey(MethodTarget target) {

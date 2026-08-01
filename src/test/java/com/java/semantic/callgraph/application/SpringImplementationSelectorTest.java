@@ -1,7 +1,9 @@
 package com.java.semantic.callgraph.application;
 
 import com.java.semantic.callgraph.domain.ResolutionStrategy;
+import com.java.semantic.identity.JavaTypeIdentity;
 import com.java.semantic.identity.MethodTarget;
+import com.java.semantic.identity.SourceTypeIdentity;
 import com.java.semantic.semantic.domain.SemanticLocation;
 import com.java.semantic.semantic.domain.SemanticMethod;
 import com.java.semantic.semantic.domain.SemanticPosition;
@@ -77,7 +79,12 @@ class SpringImplementationSelectorTest {
     }
 
     private static ImplementationCandidate candidate(String className, boolean primary, List<String> qualifiers) {
-        MethodTarget target = new MethodTarget(className + ".java", "com.example", className, "work", List.of());
+        MethodTarget target = new MethodTarget(
+                new SourceTypeIdentity(
+                        new JavaTypeIdentity("com.example", className),
+                        className + ".java"),
+                "work",
+                List.of());
         SemanticRange range = new SemanticRange(new SemanticPosition(0, 0), new SemanticPosition(1, 0));
         SemanticMethod method = new SemanticMethod(
                 "com.example", className, "work", List.of(), "void",

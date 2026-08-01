@@ -60,12 +60,14 @@ public final class CanonicalMethodDeclarationResolver {
     }
 
     private List<Declaration> declarationsFor(RepositorySyntax syntax, MethodTarget target) {
-        return syntax.classes().stream()
-                .flatMap(metadata -> metadata.methods().stream()
+        return syntax.sourceTypes().stream()
+                .flatMap(metadata -> metadata.members().methods().stream()
                         .map(method -> new Declaration(metadata, method, method.analysisTarget())))
                 .filter(declaration -> containsSource(declaration.resolution(), target.sourceFile()))
-                .filter(declaration -> target.packageName().equals(declaration.metadata().packageName()))
-                .filter(declaration -> target.className().equals(declaration.metadata().className()))
+                .filter(declaration -> target.packageName().equals(
+                        declaration.sourceType().declaration().identity().javaType().packageName()))
+                .filter(declaration -> target.className().equals(
+                        declaration.sourceType().declaration().identity().javaType().className()))
                 .filter(declaration -> target.methodName().equals(declaration.method().name()))
                 .toList();
     }
@@ -87,8 +89,8 @@ public final class CanonicalMethodDeclarationResolver {
     }
 
     private record Declaration(
-            ClassMetadata metadata,
-            ClassMetadata.MethodSignature method,
+            SourceTypeMetadata sourceType,
+            SourceMethodMetadata method,
             MethodTargetResolution resolution) {
     }
 }

@@ -4,23 +4,18 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 
-import org.springframework.util.StringUtils;
+/** Java 宣告識別的共用正規化規則 */
+public final class JavaIdentityNormalizer {
 
-/**
- * 供讀取政策與語法證據共用的 Java 宣告識別正規化。
- *
- * <p>類別名稱相對於其套件保留巢狀路徑，方法參數則採與語意簽章一致的簡單名稱。</p>
- */
-public final class PolicyIdentity {
-
-    private PolicyIdentity() {
+    private JavaIdentityNormalizer() {
+        throw new UnsupportedOperationException("utility class");
     }
 
     public static String className(String packageName, String declarationName) {
         Objects.requireNonNull(packageName, "packageName is required");
         String value = Objects.requireNonNull(declarationName, "declarationName is required").trim()
                 .replace('$', '.');
-        String prefix = StringUtils.hasText(packageName) ? packageName + "." : "";
+        String prefix = packageName.isBlank() ? "" : packageName + ".";
         return value.startsWith(prefix) ? value.substring(prefix.length()) : value;
     }
 
@@ -35,7 +30,7 @@ public final class PolicyIdentity {
 
     public static String parameterType(String parameterType) {
         String value = Objects.requireNonNull(parameterType, "parameterType is required").trim();
-        if (!StringUtils.hasText(value)) {
+        if (value.isBlank()) {
             return "";
         }
         int genericStart = value.indexOf('<');

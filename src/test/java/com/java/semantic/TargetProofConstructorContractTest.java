@@ -1,7 +1,8 @@
 package com.java.semantic;
 
 import com.java.semantic.syntax.domain.ApiEntryPoint;
-import com.java.semantic.syntax.domain.ClassMetadata;
+import com.java.semantic.syntax.domain.SourceTypeMetadata;
+import com.java.semantic.syntax.domain.SourceMethodMetadata;
 import com.java.semantic.syntax.domain.MqEntryPoint;
 import com.java.semantic.syntax.domain.MethodTargetResolution;
 import com.java.semantic.syntax.domain.ScheduleEntryPoint;
@@ -31,11 +32,11 @@ class TargetProofConstructorContractTest {
                 });
         }
 
-        assertThat(ClassMetadata.MethodSignature.class.getConstructors())
+        assertThat(SourceMethodMetadata.class.getConstructors())
                 .singleElement()
                 .satisfies(constructor -> {
                     assertThat(constructor.getParameterCount())
-                            .isEqualTo(ClassMetadata.MethodSignature.class.getRecordComponents().length);
+                            .isEqualTo(SourceMethodMetadata.class.getRecordComponents().length);
                     assertThat(constructor.getParameterTypes())
                             .contains(MethodTargetResolution.class);
                 });

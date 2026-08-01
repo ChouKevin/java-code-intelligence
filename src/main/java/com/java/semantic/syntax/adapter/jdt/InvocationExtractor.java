@@ -11,7 +11,7 @@ import com.java.semantic.syntax.domain.SyntaxInvocation;
 import com.java.semantic.syntax.domain.SyntaxInvocation.InvocationKind;
 import com.java.semantic.syntax.domain.InvocationTarget;
 import com.java.semantic.syntax.domain.SyntaxPosition;
-import com.java.semantic.identity.PolicyIdentity;
+import com.java.semantic.identity.JavaIdentityNormalizer;
 
 import org.eclipse.jdt.core.dom.ASTNode;
 import org.eclipse.jdt.core.dom.ASTVisitor;
@@ -185,7 +185,7 @@ final class InvocationExtractor {
             parameters.add(name);
         }
         return Optional.of(new InvocationTarget(
-                packageName, PolicyIdentity.className(packageName, qualifiedName), declaration.getName(), parameters));
+                packageName, JavaIdentityNormalizer.className(packageName, qualifiedName), declaration.getName(), parameters));
     }
 
     private static String resolvedReceiverType(ASTNode receiver) {

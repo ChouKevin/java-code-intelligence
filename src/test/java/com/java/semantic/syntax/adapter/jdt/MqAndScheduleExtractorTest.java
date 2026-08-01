@@ -5,7 +5,9 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 
+import com.java.semantic.identity.JavaTypeIdentity;
 import com.java.semantic.identity.MethodTarget;
+import com.java.semantic.identity.SourceTypeIdentity;
 import com.java.semantic.syntax.domain.EntryPointClass;
 import com.java.semantic.syntax.domain.MqBroker;
 import com.java.semantic.syntax.domain.MqEntryPoint;
@@ -28,9 +30,9 @@ class MqAndScheduleExtractorTest {
         MethodTarget target = mqOf("rabbitMulti").analysisTarget().target().orElseThrow();
 
         assertThat(target).isEqualTo(new MethodTarget(
-                "src/main/java/com/example/syntax/OrderListeners.java",
-                "com.example.syntax",
-                "OrderListeners",
+                new SourceTypeIdentity(
+                        new JavaTypeIdentity("com.example.syntax", "OrderListeners"),
+                        "src/main/java/com/example/syntax/OrderListeners.java"),
                 "rabbitMulti",
                 List.of("java.lang.String")));
     }
@@ -40,9 +42,9 @@ class MqAndScheduleExtractorTest {
         MethodTarget target = scheduleOf("bothTriggers").analysisTarget().target().orElseThrow();
 
         assertThat(target).isEqualTo(new MethodTarget(
-                "src/main/java/com/example/syntax/OrderJobs.java",
-                "com.example.syntax",
-                "OrderJobs",
+                new SourceTypeIdentity(
+                        new JavaTypeIdentity("com.example.syntax", "OrderJobs"),
+                        "src/main/java/com/example/syntax/OrderJobs.java"),
                 "bothTriggers",
                 List.of()));
     }

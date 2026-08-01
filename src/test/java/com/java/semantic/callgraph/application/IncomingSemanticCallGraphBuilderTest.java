@@ -1,5 +1,7 @@
 package com.java.semantic.callgraph.application;
 
+import com.java.semantic.syntax.domain.SourceTypeKind;
+
 import com.java.semantic.callgraph.domain.DispatchKind;
 import com.java.semantic.callgraph.domain.GraphAnalysisStatus;
 import com.java.semantic.callgraph.domain.GraphLimitReason;
@@ -24,8 +26,10 @@ import com.java.semantic.semantic.domain.SemanticPosition;
 import com.java.semantic.semantic.domain.SemanticProtocolException;
 import com.java.semantic.semantic.domain.SemanticRange;
 import com.java.semantic.semantic.domain.SemanticResolutionOrigin;
-import com.java.semantic.syntax.domain.ClassMetadata;
-import com.java.semantic.syntax.domain.ClassMetadata.MethodSignature;
+import com.java.semantic.syntax.domain.SourceTypeMetadata;
+import com.java.semantic.syntax.domain.SourceMethodMetadata;
+import com.java.semantic.syntax.domain.AnnotationEvidence;
+import com.java.semantic.syntax.domain.SqlSourceKind;
 import com.java.semantic.syntax.domain.MethodTargetResolution;
 import com.java.semantic.syntax.domain.RepositorySyntax;
 import com.java.semantic.syntax.domain.SourceSlice;
@@ -477,7 +481,7 @@ class IncomingSemanticCallGraphBuilderTest {
         IncomingGraphFragment fragment = builder(semantic)
                 .build(SNAPSHOT,
                         syntax(dataAccessInterfaceType(
-                                        mapperTarget, "select xml from orders", ClassMetadata.SqlSource.MAPPER_XML, List.of()),
+                                        mapperTarget, "select xml from orders", SqlSourceKind.MAPPER_XML, List.of()),
                                 type(callerTarget)),
                         mapperTarget, mapper, 1, 0);
 
@@ -510,17 +514,17 @@ class IncomingSemanticCallGraphBuilderTest {
         assertThat(fragment.warnings()).extracting(warning -> warning.code()).contains("DESCENDANT_CALL_UNRESOLVED");
     }
 
-    private static ClassMetadata dataAccessInterfaceType(
-            MethodTarget target, String sql, ClassMetadata.SqlSource sqlSource, List<String> annotations) {
+    private static SourceTypeMetadata dataAccessInterfaceType(
+            MethodTarget target, String sql, SqlSourceKind sqlSource, List<String> annotations) {
         SyntaxRange range = new SyntaxRange(new SyntaxPosition(0, 0), new SyntaxPosition(30, 0));
-        MethodSignature method = new MethodSignature(
-                target.methodName(), target.parameterTypes(), List.of(), sql, sqlSource, 1, 6,
+        SourceMethodMetadata method = new SourceMethodMetadata(
+                target.methodName(), target.parameterTypes(), sql, sqlSource, 1, 6,
                 range, new SourceSlice(range, target.methodName() + "();"), List.<TypeReference>of(),
                 Optional.empty(), List.of(), List.of(), List.of(), range.start(),
                 MethodTargetResolution.resolved(target), false, true, true);
-        return new ClassMetadata(
+        return com.java.semantic.syntax.domain.SourceTypeMetadataFixture.sourceType(
                 target.className(), target.packageName(), target.packageName() + "." + target.className(),
-                target.sourceFile(), ClassMetadata.TypeKind.INTERFACE, false,
+                target.sourceFile(), SourceTypeKind.INTERFACE, false,
                 List.of(), List.of(), annotations, List.of(), List.of(), List.of(method), false, false, List.of(), range,
                 new SourceSlice(range, "interface " + target.className() + " {}"), false, List.of());
     }
@@ -536,52 +540,53 @@ class IncomingSemanticCallGraphBuilderTest {
         return new RepositorySyntax(List.of(), Arrays.stream(targets).map(IncomingSemanticCallGraphBuilderTest::type).toList());
     }
 
-    private static RepositorySyntax syntax(ClassMetadata... types) {
+    private static RepositorySyntax syntax(SourceTypeMetadata... types) {
         return new RepositorySyntax(List.of(), List.of(types));
     }
 
-    private static ClassMetadata type(MethodTarget target) {
+    private static SourceTypeMetadata type(MethodTarget target) {
         SyntaxRange range = new SyntaxRange(new SyntaxPosition(0, 0), new SyntaxPosition(30, 0));
         List<SyntaxInvocation> invocations = List.of(
                 invocation(1), invocation(2), invocation(3), invocation(4), invocation(5), invocation(7), invocation(12));
-        MethodSignature method = new MethodSignature(
-                target.methodName(), target.parameterTypes(), List.of(), null, null, 1, 6,
+        SourceMethodMetadata method = new SourceMethodMetadata(
+                target.methodName(), target.parameterTypes(), null, null, 1, 6,
                 range, new SourceSlice(range, "void " + target.methodName() + "() {}"), List.<TypeReference>of(),
                 Optional.empty(), invocations, List.of(), List.of(), range.start(),
                 MethodTargetResolution.resolved(target), true, false, true);
-        return new ClassMetadata(
+        return com.java.semantic.syntax.domain.SourceTypeMetadataFixture.sourceType(
                 target.className(), target.packageName(), target.packageName() + "." + target.className(),
-                target.sourceFile(), ClassMetadata.TypeKind.CLASS, false,
+                target.sourceFile(), SourceTypeKind.CLASS, false,
                 List.of(), List.of(), List.of(), List.of(), List.of(), List.of(method), false, false, List.of(), range,
                 new SourceSlice(range, "class " + target.className() + " {}"), false, List.of());
     }
 
-    private static ClassMetadata asyncType(MethodTarget target) {
+    private static SourceTypeMetadata asyncType(MethodTarget target) {
         SyntaxRange range = new SyntaxRange(new SyntaxPosition(0, 0), new SyntaxPosition(30, 0));
         List<SyntaxInvocation> invocations = List.of(
                 invocation(1), invocation(2), invocation(3), invocation(4), invocation(5), invocation(7), invocation(12));
-        MethodSignature method = new MethodSignature(
-                target.methodName(), target.parameterTypes(), List.of("Async"), null, null, 1, 6,
+        SourceMethodMetadata method = new SourceMethodMetadata(
+                target.methodName(), target.parameterTypes(), null, null, 1, 6,
                 range, new SourceSlice(range, "@Async\nvoid " + target.methodName() + "() {}"),
-                List.<TypeReference>of(), Optional.empty(), invocations, List.of(), List.of(), range.start(),
+                List.<TypeReference>of(), Optional.empty(), invocations,
+                List.of(new AnnotationEvidence("Async", Optional.empty())), List.of(), range.start(),
                 MethodTargetResolution.resolved(target), true, false, true);
-        return new ClassMetadata(
+        return com.java.semantic.syntax.domain.SourceTypeMetadataFixture.sourceType(
                 target.className(), target.packageName(), target.packageName() + "." + target.className(),
-                target.sourceFile(), ClassMetadata.TypeKind.CLASS, false,
+                target.sourceFile(), SourceTypeKind.CLASS, false,
                 List.of(), List.of(), List.of(), List.of(), List.of(), List.of(method), false, false, List.of(), range,
                 new SourceSlice(range, "class " + target.className() + " {}"), false, List.of());
     }
 
-    private static ClassMetadata interfaceType(MethodTarget target) {
+    private static SourceTypeMetadata interfaceType(MethodTarget target) {
         SyntaxRange range = new SyntaxRange(new SyntaxPosition(0, 0), new SyntaxPosition(30, 0));
-        MethodSignature method = new MethodSignature(
-                target.methodName(), target.parameterTypes(), List.of(), null, null, 1, 6,
+        SourceMethodMetadata method = new SourceMethodMetadata(
+                target.methodName(), target.parameterTypes(), null, null, 1, 6,
                 range, new SourceSlice(range, "void " + target.methodName() + "() {}"), List.<TypeReference>of(),
                 Optional.empty(), List.of(), List.of(), List.of(), range.start(),
                 MethodTargetResolution.resolved(target), false, true, true);
-        return new ClassMetadata(
+        return com.java.semantic.syntax.domain.SourceTypeMetadataFixture.sourceType(
                 target.className(), target.packageName(), target.packageName() + "." + target.className(),
-                target.sourceFile(), ClassMetadata.TypeKind.INTERFACE, false,
+                target.sourceFile(), SourceTypeKind.INTERFACE, false,
                 List.of(), List.of(), List.of(), List.of(), List.of(), List.of(method), false, false, List.of(), range,
                 new SourceSlice(range, "interface " + target.className() + " {}"), false, List.of());
     }

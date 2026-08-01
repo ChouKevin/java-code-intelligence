@@ -1,6 +1,8 @@
 package com.java.semantic.callgraph.application;
 
+import com.java.semantic.identity.JavaTypeIdentity;
 import com.java.semantic.identity.MethodTarget;
+import com.java.semantic.identity.SourceTypeIdentity;
 import com.java.semantic.semantic.domain.SemanticCall;
 import com.java.semantic.semantic.domain.SemanticLocation;
 import com.java.semantic.semantic.domain.SemanticMethod;
@@ -17,7 +19,12 @@ final class SemanticGraphTestFixture {
     }
 
     static MethodTarget target(String className, String methodName) {
-        return new MethodTarget(className + ".java", "com.example", className, methodName, List.of());
+        return new MethodTarget(
+                new SourceTypeIdentity(
+                        new JavaTypeIdentity("com.example", className),
+                        className + ".java"),
+                methodName,
+                List.of());
     }
 
     static SemanticMethod outgoingMethod(MethodTarget target, int line) {

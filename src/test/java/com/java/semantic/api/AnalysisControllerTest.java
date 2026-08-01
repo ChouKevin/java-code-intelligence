@@ -17,7 +17,9 @@ import com.java.semantic.callgraph.domain.NodeContentState;
 import com.java.semantic.callgraph.domain.NodeTraversalState;
 import com.java.semantic.callgraph.domain.OutgoingGraphFragment;
 import com.java.semantic.callgraph.domain.ResolutionStrategy;
+import com.java.semantic.identity.JavaTypeIdentity;
 import com.java.semantic.identity.MethodTarget;
+import com.java.semantic.identity.SourceTypeIdentity;
 import com.java.semantic.repository.domain.RepositoryId;
 import com.java.semantic.repository.domain.RepositoryRevision;
 import com.java.semantic.semantic.application.SemanticAnalysisApplicationService;
@@ -28,9 +30,10 @@ import com.java.semantic.syntax.application.EventListenerDiscoveryApplicationSer
 import com.java.semantic.syntax.application.EventListenerDiscoveryPage;
 import com.java.semantic.syntax.application.ListenerAnnotationEvidence;
 import com.java.semantic.syntax.application.ListenerAnnotationKind;
-import com.java.semantic.syntax.application.ListenerSourceLocation;
 import com.java.semantic.syntax.application.RevisionBoundEventListenerDiscovery;
+import com.java.semantic.syntax.application.SourceRange;
 import com.java.semantic.syntax.domain.SyntaxPosition;
+import com.java.semantic.syntax.domain.SyntaxRange;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
@@ -59,16 +62,35 @@ class AnalysisControllerTest {
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
     private static final RepositoryRevision REVISION = RepositoryRevision.ofSha("1".repeat(40));
     private static final MethodTarget TARGET = new MethodTarget(
-            "src/main/java/com/acme/OrderService.java", "com.acme", "OrderService", "place", List.of());
+                new SourceTypeIdentity(
+                        new JavaTypeIdentity("com.acme", "OrderService"),
+                        "src/main/java/com/acme/OrderService.java"),
+                "place",
+                List.of());
     private static final MethodTarget CALLER_TARGET = new MethodTarget(
-            "src/main/java/com/acme/CheckoutService.java", "com.acme", "CheckoutService", "checkout", List.of());
+                new SourceTypeIdentity(
+                        new JavaTypeIdentity("com.acme", "CheckoutService"),
+                        "src/main/java/com/acme/CheckoutService.java"),
+                "checkout",
+                List.of());
     private static final MethodTarget AMBIGUOUS_ALPHA = new MethodTarget(
-            "src/main/java/com/acme/AlphaOrderService.java", "com.acme", "AlphaOrderService", "place", List.of());
+                new SourceTypeIdentity(
+                        new JavaTypeIdentity("com.acme", "AlphaOrderService"),
+                        "src/main/java/com/acme/AlphaOrderService.java"),
+                "place",
+                List.of());
     private static final MethodTarget AMBIGUOUS_ZETA = new MethodTarget(
-            "src/main/java/com/acme/ZetaOrderService.java", "com.acme", "ZetaOrderService", "place", List.of());
+                new SourceTypeIdentity(
+                        new JavaTypeIdentity("com.acme", "ZetaOrderService"),
+                        "src/main/java/com/acme/ZetaOrderService.java"),
+                "place",
+                List.of());
     private static final MethodTarget DISCOVERED_TARGET = new MethodTarget(
-            "src/main/java/com/acme/OrderListener.java", "com.acme", "OrderListener", "onOrder",
-            List.of("com.acme.OrderPlaced"));
+                new SourceTypeIdentity(
+                        new JavaTypeIdentity("com.acme", "OrderListener"),
+                        "src/main/java/com/acme/OrderListener.java"),
+                "onOrder",
+                List.of("com.acme.OrderPlaced"));
 
     @Autowired
     private MockMvc mockMvc;
@@ -105,6 +127,10 @@ class AnalysisControllerTest {
                 .andExpect(jsonPath("$.status").value("SUCCESS"))
                 .andExpect(jsonPath("$.rootNodeId").value("node-0000"))
                 .andExpect(jsonPath("$.nodes[0].target.sourceFile").value(TARGET.sourceFile()))
+                .andExpect(jsonPath("$.nodes[0].target.packageName").value(TARGET.packageName()))
+                .andExpect(jsonPath("$.nodes[0].target.className").value(TARGET.className()))
+                .andExpect(jsonPath("$.nodes[0].target.methodName").value(TARGET.methodName()))
+                .andExpect(jsonPath("$.nodes[0].target.parameterTypes").isEmpty())
                 .andExpect(jsonPath("$.traversal.nodeBudget").value(40));
 
         then(semanticAnalysisApplicationService).should().analyzeOutgoing(
@@ -385,11 +411,12 @@ class AnalysisControllerTest {
     }
 
     private RevisionBoundEventListenerDiscovery discoveryResult() {
-        ListenerSourceLocation sourceLocation = new ListenerSourceLocation(
-                DISCOVERED_TARGET.sourceFile(), new SyntaxPosition(6, 4), new SyntaxPosition(8, 5));
+        SourceRange declarationRange = new SourceRange(
+                DISCOVERED_TARGET.sourceFile(), new SyntaxRange(
+                        new SyntaxPosition(6, 4), new SyntaxPosition(8, 5)));
         EventListenerCandidate candidate = new EventListenerCandidate(
                 DISCOVERED_TARGET,
-                sourceLocation,
+                declarationRange,
                 List.of(new ListenerAnnotationEvidence(
                         ListenerAnnotationKind.EVENT_LISTENER, AnnotationMatchKind.RESOLVED_IDENTITY)));
         return new RevisionBoundEventListenerDiscovery(
