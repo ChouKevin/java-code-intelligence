@@ -1,5 +1,7 @@
 package com.java.semantic.api;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.java.semantic.api.security.ApiTokenFilter;
 import com.java.semantic.identity.JavaTypeIdentity;
 import com.java.semantic.identity.MethodTarget;
@@ -7,28 +9,44 @@ import com.java.semantic.identity.SourceTypeIdentity;
 import com.java.semantic.repository.application.RepositoryRevisionMismatchException;
 import com.java.semantic.repository.domain.RepositoryId;
 import com.java.semantic.repository.domain.RepositoryRevision;
-import com.java.semantic.syntax.application.ConceptAuthority;
-import com.java.semantic.syntax.application.ConceptCatalogEntry;
-import com.java.semantic.syntax.application.ConceptDiscoveryApplicationService;
-import com.java.semantic.syntax.application.ConceptIdentity;
-import com.java.semantic.syntax.application.ConceptIdentity.FieldConceptIdentity;
-import com.java.semantic.syntax.application.ConceptIdentity.MapperStatementConceptIdentity;
-import com.java.semantic.syntax.application.ConceptIdentity.MapperStatementVariantEvidenceIdentity;
-import com.java.semantic.syntax.application.ConceptIdentity.MethodConceptIdentity;
-import com.java.semantic.syntax.application.ConceptIssueReason;
-import com.java.semantic.syntax.application.ConceptIssueSummary;
-import com.java.semantic.syntax.application.ConceptKind;
-import com.java.semantic.syntax.application.ConceptKindUnavailableException;
-import com.java.semantic.syntax.application.ConceptMatchMode;
-import com.java.semantic.syntax.application.ConceptPage;
-import com.java.semantic.syntax.application.ConceptSearchQuery;
-import com.java.semantic.syntax.application.ConceptSearchResult;
-import com.java.semantic.syntax.application.ConceptSearchTerm;
+import com.java.semantic.syntax.application.concept.ConceptAuthority;
+import com.java.semantic.syntax.application.concept.ConceptCatalogEntry;
+import com.java.semantic.syntax.application.concept.ConceptDiscoveryApplicationService;
+import com.java.semantic.syntax.application.concept.ConceptIdentity;
+import com.java.semantic.syntax.application.concept.DeclarationConceptIdentity.FieldConceptIdentity;
+import com.java.semantic.syntax.application.concept.DeclarationConceptIdentity.TypeConceptIdentity;
+import com.java.semantic.syntax.application.concept.EntryPointConceptIdentity.ApiRouteConceptIdentity;
+import com.java.semantic.syntax.application.concept.EntryPointConceptIdentity.MqDestinationConceptIdentity;
+import com.java.semantic.syntax.application.concept.EntryPointConceptIdentity.ScheduleConceptIdentity;
+import com.java.semantic.syntax.application.concept.MapperConceptIdentity.MapperStatementConceptIdentity;
+import com.java.semantic.syntax.application.concept.MapperConceptIdentity.MapperStatementVariantEvidenceIdentity;
+import com.java.semantic.syntax.application.concept.DeclarationConceptIdentity.MethodConceptIdentity;
+import com.java.semantic.syntax.application.concept.ConceptIssueReason;
+import com.java.semantic.syntax.application.concept.ConceptIssueSummary;
+import com.java.semantic.syntax.application.concept.ConceptKind;
+import com.java.semantic.syntax.application.concept.ConceptKindUnavailableException;
+import com.java.semantic.syntax.application.concept.ConceptIdentityNotFoundException;
+import com.java.semantic.syntax.application.concept.ConceptMatchMode;
+import com.java.semantic.syntax.application.concept.ConceptPage;
+import com.java.semantic.syntax.application.concept.ConceptSearchQuery;
+import com.java.semantic.syntax.application.concept.ConceptSearchResult;
+import com.java.semantic.syntax.application.concept.ConceptSearchTerm;
+import com.java.semantic.syntax.application.concept.ConceptResolveQuery;
+import com.java.semantic.syntax.application.concept.RevisionBoundConceptResolution;
+import com.java.semantic.syntax.application.concept.ReferencedTypeIdentity;
+import com.java.semantic.syntax.application.concept.FieldConceptDetails;
+import com.java.semantic.syntax.application.concept.UsageConceptIdentity.AnnotationUsageConceptIdentity;
+import com.java.semantic.syntax.application.concept.UsageConceptIdentity.ResolvedAnnotationIdentity;
+import com.java.semantic.syntax.application.concept.UsageConceptIdentity.ResolvedMethodDeclarationSubjectIdentity;
+import com.java.semantic.syntax.application.concept.UsageConceptIdentity.TypeUsageConceptIdentity;
+import com.java.semantic.syntax.application.concept.UsageConceptIdentity.TypeUsageLocation;
+import com.java.semantic.syntax.application.concept.UsageConceptIdentity.TypeUsageSlot;
+import com.java.semantic.syntax.application.concept.TypeUsagePath;
 import com.java.semantic.syntax.application.DiscoveryFollowUp;
 import com.java.semantic.syntax.application.DiscoveryFollowUpFactory;
 import com.java.semantic.syntax.application.FieldTypeMember;
 import com.java.semantic.syntax.application.MethodTypeMember;
-import com.java.semantic.syntax.application.MapperStatementMethodMapping;
+import com.java.semantic.syntax.application.concept.MapperStatementMethodMapping;
 import com.java.semantic.syntax.application.TypeMemberDiscoveryApplicationService;
 import com.java.semantic.syntax.application.TypeMemberKind;
 import com.java.semantic.syntax.application.TypeMemberLimitation;
@@ -38,7 +56,14 @@ import com.java.semantic.syntax.application.TypeMemberTypeNotFoundException;
 import com.java.semantic.syntax.domain.SourceTypeKind;
 import com.java.semantic.syntax.domain.MapperEvidenceRepresentation;
 import com.java.semantic.syntax.domain.MapperStatementIdentity;
+import com.java.semantic.syntax.domain.MapperStatementKey;
+import com.java.semantic.syntax.domain.MqBroker;
+import com.java.semantic.syntax.domain.ArrayTypeReference;
+import com.java.semantic.syntax.domain.NamedTypeReference;
+import com.java.semantic.syntax.domain.ParameterizedTypeReference;
+import com.java.semantic.syntax.domain.ScheduleTriggerKind;
 import com.java.semantic.syntax.domain.SourceExtractionOutcome;
+import com.java.semantic.syntax.domain.SourceMemberIdentity.TypeMember;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
@@ -74,6 +99,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 class StructuredDiscoveryControllerTest {
 
     private static final String TOKEN = "test-token";
+    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
     private static final RepositoryId REPOSITORY_ID = RepositoryId.of("orders");
     private static final RepositoryRevision REQUESTED_REVISION = RepositoryRevision.ofSha("1".repeat(40));
     private static final RepositoryRevision ANALYZED_REVISION = RepositoryRevision.ofSha("2".repeat(40));
@@ -149,21 +175,17 @@ class StructuredDiscoveryControllerTest {
                 .andExpect(jsonPath("$.supportedKinds[6]").value("MQ_DESTINATION"))
                 .andExpect(jsonPath("$.supportedKinds[7]").value("SCHEDULE"))
                 .andExpect(jsonPath("$.limitations[0]").value("SOURCE_BODY_NOT_SEARCHED"))
-                .andExpect(jsonPath("$.candidates[0].kind").value("FIELD"))
+                .andExpect(jsonPath("$.candidates[0].identity.kind").value("FIELD"))
                 .andExpect(jsonPath("$.candidates[0].matchedTerms[0]").value("order"))
                 .andExpect(jsonPath("$.candidates[0].matchedTerms[1]").value("service"))
-                .andExpect(jsonPath("$.candidates[0].subject")
-                        .value(SOURCE_FILE + "::com.example.OrderService#repository:OrderRepository"))
-                .andExpect(jsonPath("$.candidates[0].target").isEmpty())
-                .andExpect(jsonPath("$.candidates[0].evidence[0].kind").value("METHOD"))
-                .andExpect(jsonPath("$.candidates[0].evidence[0].subject").isEmpty())
-                .andExpect(jsonPath("$.candidates[0].evidence[0].target.methodName")
+                .andExpect(jsonPath("$.candidates[0].identity.sourceFile").value(SOURCE_FILE))
+                .andExpect(jsonPath("$.candidates[0].identity.ownerPackageName").value("com.example"))
+                .andExpect(jsonPath("$.candidates[0].identity.ownerClassName").value("OrderService"))
+                .andExpect(jsonPath("$.candidates[0].identity.fieldName").value("repository"))
+                .andExpect(jsonPath("$.candidates[0].evidence[0].identity.kind").value("METHOD"))
+                .andExpect(jsonPath("$.candidates[0].evidence[0].identity.target.methodName")
                         .value("createOrder"))
-                .andExpect(jsonPath("$.candidates[0].evidence[0].canonicalValue").doesNotExist())
-                .andExpect(jsonPath("$.candidates[0].evidence[1].kind").value("FIELD"))
-                .andExpect(jsonPath("$.candidates[0].evidence[1].subject")
-                        .value(SOURCE_FILE + "::com.example.OrderService#repository:OrderRepository"))
-                .andExpect(jsonPath("$.candidates[0].evidence[1].target").isEmpty())
+                .andExpect(jsonPath("$.candidates[0].evidence[1].identity.kind").value("FIELD"))
                 .andExpect(jsonPath("$.candidates[0].availableFollowUps[0].operation")
                         .value("GET_TYPE_MEMBERS"))
                 .andExpect(jsonPath("$.candidates[0].availableFollowUps[0].api.method")
@@ -192,13 +214,12 @@ class StructuredDiscoveryControllerTest {
                         .isEmpty())
                 .andExpect(jsonPath("$.candidates[0].availableFollowUps[0].request.offset").value(0))
                 .andExpect(jsonPath("$.candidates[0].availableFollowUps[0].request.limit").value(50))
-                .andExpect(jsonPath("$.candidates[1].kind").value("METHOD"))
-                .andExpect(jsonPath("$.candidates[1].subject").isEmpty())
-                .andExpect(jsonPath("$.candidates[1].target.sourceFile").value(SOURCE_FILE))
-                .andExpect(jsonPath("$.candidates[1].target.packageName").value("com.example"))
-                .andExpect(jsonPath("$.candidates[1].target.className").value("OrderService"))
-                .andExpect(jsonPath("$.candidates[1].target.methodName").value("createOrder"))
-                .andExpect(jsonPath("$.candidates[1].target.parameterTypes[0]").value("com.example.Order"))
+                .andExpect(jsonPath("$.candidates[1].identity.kind").value("METHOD"))
+                .andExpect(jsonPath("$.candidates[1].identity.target.sourceFile").value(SOURCE_FILE))
+                .andExpect(jsonPath("$.candidates[1].identity.target.packageName").value("com.example"))
+                .andExpect(jsonPath("$.candidates[1].identity.target.className").value("OrderService"))
+                .andExpect(jsonPath("$.candidates[1].identity.target.methodName").value("createOrder"))
+                .andExpect(jsonPath("$.candidates[1].identity.target.parameterTypes[0]").value("com.example.Order"))
                 .andExpect(jsonPath("$.candidates[1].availableFollowUps.length()").value(4))
                 .andExpect(jsonPath("$.candidates[1].availableFollowUps[0].operation")
                         .value("GET_METHOD_SOURCE"))
@@ -258,6 +279,52 @@ class StructuredDiscoveryControllerTest {
     }
 
     @Test
+    void should_project_closed_typed_identity_variants_and_recursive_field_details() throws Exception {
+        given(conceptDiscoveryApplicationService.search(any())).willReturn(typedIdentityResult());
+
+        mockMvc.perform(conceptRequest("""
+                {
+                  "repoId":"orders",
+                  "expectedRevision":"1111111111111111111111111111111111111111",
+                  "terms":[{"value":"order","matchMode":"TOKEN_PREFIX"}],
+                  "kinds":["TYPE","METHOD","FIELD","ANNOTATION_USAGE","TYPE_USAGE","API_ROUTE","MQ_DESTINATION","SCHEDULE","MAPPER_STATEMENT"]
+                }
+                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.candidates.length()").value(9))
+                .andExpect(jsonPath("$.candidates[0].identity.kind").value("TYPE"))
+                .andExpect(jsonPath("$.candidates[1].identity.kind").value("METHOD"))
+                .andExpect(jsonPath("$.candidates[1].identity.target.sourceFile").value(SOURCE_FILE))
+                .andExpect(jsonPath("$.candidates[2].identity.kind").value("FIELD"))
+                .andExpect(jsonPath("$.candidates[2].identity.ownerPackageName").value("com.example"))
+                .andExpect(jsonPath("$.candidates[2].identity.ownerClassName").value("OrderService"))
+                .andExpect(jsonPath("$.candidates[2].details.kind").value("FIELD"))
+                .andExpect(jsonPath("$.candidates[2].details.declaredType.kind").value("PARAMETERIZED"))
+                .andExpect(jsonPath("$.candidates[2].details.declaredType.rawType.kind").value("NAMED"))
+                .andExpect(jsonPath("$.candidates[2].details.declaredType.typeArguments[1].kind")
+                        .value("PARAMETERIZED"))
+                .andExpect(jsonPath("$.candidates[2].details.declaredType.typeArguments[1].typeArguments[0].kind")
+                        .value("ARRAY"))
+                .andExpect(jsonPath("$.candidates[2].details.declaredType.typeArguments[1].typeArguments[0].dimensions")
+                        .value(1))
+                .andExpect(jsonPath("$.candidates[3].identity.kind").value("ANNOTATION_USAGE"))
+                .andExpect(jsonPath("$.candidates[4].identity.kind").value("TYPE_USAGE"))
+                .andExpect(jsonPath("$.candidates[5].identity.kind").value("API_ROUTE"))
+                .andExpect(jsonPath("$.candidates[6].identity.kind").value("MQ_DESTINATION"))
+                .andExpect(jsonPath("$.candidates[7].identity.kind").value("SCHEDULE"))
+                .andExpect(jsonPath("$.candidates[8].identity.kind").value("MAPPER_STATEMENT"))
+                .andExpect(jsonPath("$.candidates[8].details.kind").value("MAPPER_STATEMENT"))
+                .andExpect(jsonPath("$.candidates[8].evidence[1].identity.kind").value("MAPPER_STATEMENT_VARIANT"))
+                .andExpect(jsonPath("$.candidates[8].evidence[1].identity.variant.resourcePath")
+                        .value("module-a/src/main/resources/mapper/OrderMapper.xml"))
+                .andExpect(jsonPath("$.candidates[0].kind").doesNotExist())
+                .andExpect(jsonPath("$.candidates[0].sourceFile").doesNotExist())
+                .andExpect(jsonPath("$.candidates[0].subject").doesNotExist())
+                .andExpect(jsonPath("$.candidates[0].target").doesNotExist())
+                .andExpect(jsonPath("$.candidates[0].mapperStatementMapping").doesNotExist());
+    }
+
+    @Test
     void should_accept_mapper_statement_kind_and_return_deterministic_variant_identity_evidence() throws Exception {
         given(conceptDiscoveryApplicationService.search(any())).willReturn(mapperConceptResult());
 
@@ -273,49 +340,48 @@ class StructuredDiscoveryControllerTest {
                 .andExpect(jsonPath("$.searchedKinds[0]").value("MAPPER_STATEMENT"))
                 .andExpect(jsonPath("$.supportedKinds[8]").value("MAPPER_STATEMENT"))
                 .andExpect(jsonPath("$.candidates.length()").value(1))
-                .andExpect(jsonPath("$.candidates[0].kind").value("MAPPER_STATEMENT"))
-                .andExpect(jsonPath("$.candidates[0].canonicalValue")
-                        .value("com.example.OrderMapper#findOrders"))
-                .andExpect(jsonPath("$.candidates[0].subject")
-                        .value("com.example.OrderMapper#findOrders"))
-                .andExpect(jsonPath("$.candidates[0].target").doesNotExist())
-                .andExpect(jsonPath("$.candidates[0].availableFollowUps").isEmpty())
-                .andExpect(jsonPath("$.candidates[0].mapperStatementMapping.namespace")
+                .andExpect(jsonPath("$.candidates[0].identity.kind").value("MAPPER_STATEMENT"))
+                .andExpect(jsonPath("$.candidates[0].identity.statement.namespace")
                         .value("com.example.OrderMapper"))
-                .andExpect(jsonPath("$.candidates[0].mapperStatementMapping.statementId")
+                .andExpect(jsonPath("$.candidates[0].identity.statement.statementId")
                         .value("findOrders"))
-                .andExpect(jsonPath("$.candidates[0].mapperStatementMapping.status")
+                .andExpect(jsonPath("$.candidates[0].availableFollowUps").isEmpty())
+                .andExpect(jsonPath("$.candidates[0].details.mapping.namespace")
+                        .value("com.example.OrderMapper"))
+                .andExpect(jsonPath("$.candidates[0].details.mapping.statementId")
+                        .value("findOrders"))
+                .andExpect(jsonPath("$.candidates[0].details.mapping.status")
                         .value("RESOLVED"))
-                .andExpect(jsonPath("$.candidates[0].mapperStatementMapping.reason")
+                .andExpect(jsonPath("$.candidates[0].details.mapping.reason")
                         .doesNotExist())
-                .andExpect(jsonPath("$.candidates[0].mapperStatementMapping.candidates.length()")
+                .andExpect(jsonPath("$.candidates[0].details.mapping.candidates.length()")
                         .value(1))
                 .andExpect(jsonPath(
-                        "$.candidates[0].mapperStatementMapping.candidates[0].target.sourceFile")
+                        "$.candidates[0].details.mapping.candidates[0].target.sourceFile")
                         .value(MAPPER_TARGET_A.sourceFile()))
                 .andExpect(jsonPath(
-                        "$.candidates[0].mapperStatementMapping.candidates[0].availableFollowUps.length()")
+                        "$.candidates[0].details.mapping.candidates[0].availableFollowUps.length()")
                         .value(1))
                 .andExpect(jsonPath(
-                        "$.candidates[0].mapperStatementMapping.candidates[0].availableFollowUps[0].operation")
+                        "$.candidates[0].details.mapping.candidates[0].availableFollowUps[0].operation")
                         .value("GET_METHOD_SQL"))
                 .andExpect(jsonPath(
-                        "$.candidates[0].mapperStatementMapping.candidates[0].availableFollowUps[0].api.path")
+                        "$.candidates[0].details.mapping.candidates[0].availableFollowUps[0].api.path")
                         .value("/v1/discovery/method-sql"))
                 .andExpect(jsonPath(
-                        "$.candidates[0].mapperStatementMapping.candidates[0].availableFollowUps[0].request.target.parameterTypes[0]")
+                        "$.candidates[0].details.mapping.candidates[0].availableFollowUps[0].request.target.parameterTypes[0]")
                         .value("java.lang.String"))
-                .andExpect(jsonPath("$.candidates[0].evidence[1].resourcePath")
+                .andExpect(jsonPath("$.candidates[0].evidence[1].identity.variant.resourcePath")
                         .value("module-a/src/main/resources/mapper/OrderMapper.xml"))
-                .andExpect(jsonPath("$.candidates[0].evidence[1].databaseId").value("postgres"))
-                .andExpect(jsonPath("$.candidates[0].evidence[1].documentOrdinal").value(1))
-                .andExpect(jsonPath("$.candidates[0].evidence[1].representation")
+                .andExpect(jsonPath("$.candidates[0].evidence[1].identity.variant.databaseId").value("postgres"))
+                .andExpect(jsonPath("$.candidates[0].evidence[1].identity.variant.documentOrdinal").value(1))
+                .andExpect(jsonPath("$.candidates[0].evidence[1].identity.variant.representation")
                         .value("MAPPER_XML_ELEMENT"))
-                .andExpect(jsonPath("$.candidates[0].evidence[2].resourcePath")
+                .andExpect(jsonPath("$.candidates[0].evidence[2].identity.variant.resourcePath")
                         .value("module-b/src/main/resources/mapper/OrderMapper.xml"))
-                .andExpect(jsonPath("$.candidates[0].evidence[2].databaseId").value("oracle"))
-                .andExpect(jsonPath("$.candidates[0].evidence[2].documentOrdinal").value(0))
-                .andExpect(jsonPath("$.candidates[0].evidence[2].representation")
+                .andExpect(jsonPath("$.candidates[0].evidence[2].identity.variant.databaseId").value("oracle"))
+                .andExpect(jsonPath("$.candidates[0].evidence[2].identity.variant.documentOrdinal").value(0))
+                .andExpect(jsonPath("$.candidates[0].evidence[2].identity.variant.representation")
                         .value("MAPPER_XML_ELEMENT"))
                 .andExpect(jsonPath("$.candidates[0].evidence[1].content").doesNotExist())
                 .andExpect(jsonPath("$.candidates[0].evidence[2].content").doesNotExist());
@@ -339,30 +405,29 @@ class StructuredDiscoveryControllerTest {
                 }
                 """))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.candidates[0].target").doesNotExist())
-                .andExpect(jsonPath("$.candidates[0].mapperStatementMapping.status")
+                .andExpect(jsonPath("$.candidates[0].details.mapping.status")
                         .value("AMBIGUOUS"))
-                .andExpect(jsonPath("$.candidates[0].mapperStatementMapping.reason")
+                .andExpect(jsonPath("$.candidates[0].details.mapping.reason")
                         .doesNotExist())
-                .andExpect(jsonPath("$.candidates[0].mapperStatementMapping.candidates.length()")
+                .andExpect(jsonPath("$.candidates[0].details.mapping.candidates.length()")
                         .value(2))
                 .andExpect(jsonPath(
-                        "$.candidates[0].mapperStatementMapping.candidates[0].target.sourceFile")
+                        "$.candidates[0].details.mapping.candidates[0].target.sourceFile")
                         .value(MAPPER_TARGET_A.sourceFile()))
                 .andExpect(jsonPath(
-                        "$.candidates[0].mapperStatementMapping.candidates[1].target.sourceFile")
+                        "$.candidates[0].details.mapping.candidates[1].target.sourceFile")
                         .value(MAPPER_TARGET_Z.sourceFile()))
                 .andExpect(jsonPath(
-                        "$.candidates[0].mapperStatementMapping.candidates[0].availableFollowUps[0].operation")
+                        "$.candidates[0].details.mapping.candidates[0].availableFollowUps[0].operation")
                         .value("GET_METHOD_SOURCE"))
                 .andExpect(jsonPath(
-                        "$.candidates[0].mapperStatementMapping.candidates[0].availableFollowUps.length()")
+                        "$.candidates[0].details.mapping.candidates[0].availableFollowUps.length()")
                         .value(1))
                 .andExpect(jsonPath(
-                        "$.candidates[0].mapperStatementMapping.candidates[1].availableFollowUps[0].operation")
+                        "$.candidates[0].details.mapping.candidates[1].availableFollowUps[0].operation")
                         .value("GET_METHOD_SOURCE"))
                 .andExpect(jsonPath(
-                        "$.candidates[0].mapperStatementMapping.candidates[1].availableFollowUps.length()")
+                        "$.candidates[0].details.mapping.candidates[1].availableFollowUps.length()")
                         .value(1));
     }
 
@@ -380,16 +445,15 @@ class StructuredDiscoveryControllerTest {
                 }
                 """))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.candidates[0].target").doesNotExist())
-                .andExpect(jsonPath("$.candidates[0].mapperStatementMapping.namespace")
+                .andExpect(jsonPath("$.candidates[0].details.mapping.namespace")
                         .value("com.example.OrderMapper"))
-                .andExpect(jsonPath("$.candidates[0].mapperStatementMapping.statementId")
+                .andExpect(jsonPath("$.candidates[0].details.mapping.statementId")
                         .value("findOrders"))
-                .andExpect(jsonPath("$.candidates[0].mapperStatementMapping.status")
+                .andExpect(jsonPath("$.candidates[0].details.mapping.status")
                         .value("UNRESOLVED"))
-                .andExpect(jsonPath("$.candidates[0].mapperStatementMapping.reason")
+                .andExpect(jsonPath("$.candidates[0].details.mapping.reason")
                         .value("INCOMPLETE_METHOD_RESOLUTION"))
-                .andExpect(jsonPath("$.candidates[0].mapperStatementMapping.candidates")
+                .andExpect(jsonPath("$.candidates[0].details.mapping.candidates")
                         .isEmpty())
                 .andExpect(jsonPath("$.candidates[0].availableFollowUps").isEmpty());
     }
@@ -397,7 +461,8 @@ class StructuredDiscoveryControllerTest {
     @Test
     void should_expose_only_source_follow_up_for_resolved_candidate_in_unresolved_mapper_mapping() throws Exception {
         MapperStatementConceptIdentity identity =
-                new MapperStatementConceptIdentity("com.example.OrderMapper", "findOrders");
+                new MapperStatementConceptIdentity(
+                        new MapperStatementKey("com.example.OrderMapper", "findOrders"));
         MapperStatementMethodMapping mapping = new MapperStatementMethodMapping(
                 identity,
                 MapperStatementMethodMapping.Status.UNRESOLVED,
@@ -414,20 +479,20 @@ class StructuredDiscoveryControllerTest {
                 }
                 """))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.candidates[0].mapperStatementMapping.status")
+                .andExpect(jsonPath("$.candidates[0].details.mapping.status")
                         .value("UNRESOLVED"))
-                .andExpect(jsonPath("$.candidates[0].mapperStatementMapping.reason")
+                .andExpect(jsonPath("$.candidates[0].details.mapping.reason")
                         .value("INCOMPLETE_METHOD_RESOLUTION"))
-                .andExpect(jsonPath("$.candidates[0].mapperStatementMapping.candidates.length()")
+                .andExpect(jsonPath("$.candidates[0].details.mapping.candidates.length()")
                         .value(1))
                 .andExpect(jsonPath(
-                        "$.candidates[0].mapperStatementMapping.candidates[0].availableFollowUps.length()")
+                        "$.candidates[0].details.mapping.candidates[0].availableFollowUps.length()")
                         .value(1))
                 .andExpect(jsonPath(
-                        "$.candidates[0].mapperStatementMapping.candidates[0].availableFollowUps[0].operation")
+                        "$.candidates[0].details.mapping.candidates[0].availableFollowUps[0].operation")
                         .value("GET_METHOD_SOURCE"))
                 .andExpect(jsonPath(
-                        "$.candidates[0].mapperStatementMapping.candidates[0].availableFollowUps[?(@.operation == 'GET_METHOD_SQL')]")
+                        "$.candidates[0].details.mapping.candidates[0].availableFollowUps[?(@.operation == 'GET_METHOD_SQL')]")
                         .isEmpty());
     }
 
@@ -522,13 +587,19 @@ class StructuredDiscoveryControllerTest {
                 .andExpect(jsonPath("$.members[1].resolvedType").value("com.example.OrderRepository[][]"))
                 .andExpect(jsonPath("$.members[1].limitations[0]").value("FIELD_USAGE_NOT_INDEXED"))
                 .andExpect(jsonPath("$.members[1].availableFollowUps[0].operation")
-                        .value("DISCOVER_CONCEPTS"))
-                .andExpect(jsonPath("$.members[1].availableFollowUps[0].request.terms[0].value")
-                        .value("com.example.OrderRepository[][]"))
-                .andExpect(jsonPath("$.members[1].availableFollowUps[0].request.terms[0].matchMode")
-                        .value("CANONICAL_EXACT"))
-                .andExpect(jsonPath("$.members[1].availableFollowUps[0].request.kinds[0]")
+                        .value("RESOLVE_CONCEPT"))
+                .andExpect(jsonPath("$.members[1].availableFollowUps[0].api.path")
+                        .value("/v1/discovery/concepts/resolve"))
+                .andExpect(jsonPath("$.members[1].availableFollowUps[0].api.operationId")
+                        .value("resolveConcept"))
+                .andExpect(jsonPath("$.members[1].availableFollowUps[0].request.identity.kind")
                         .value("TYPE"))
+                .andExpect(jsonPath("$.members[1].availableFollowUps[0].request.identity.sourceFile")
+                        .value("src/main/java/com/example/OrderRepository.java"))
+                .andExpect(jsonPath("$.members[1].availableFollowUps[0].request.identity.packageName")
+                        .value("com.example"))
+                .andExpect(jsonPath("$.members[1].availableFollowUps[0].request.identity.className")
+                        .value("OrderRepository"))
                 .andExpect(jsonPath("$.availableFollowUps[0].operation").value("GET_NEXT_PAGE"))
                 .andExpect(jsonPath("$.availableFollowUps[0].api.path")
                         .value("/v1/discovery/type-members"))
@@ -553,6 +624,67 @@ class StructuredDiscoveryControllerTest {
                 Optional.empty(),
                 0,
                 50));
+    }
+
+    @Test
+    void should_execute_field_type_follow_up_as_typed_concept_resolution() throws Exception {
+        given(typeMemberDiscoveryApplicationService.discover(any())).willReturn(typeMemberResult());
+        TypeConceptIdentity typeIdentity = new TypeConceptIdentity(new SourceTypeIdentity(
+                new JavaTypeIdentity("com.example", "OrderRepository"),
+                "src/main/java/com/example/OrderRepository.java"));
+        given(conceptDiscoveryApplicationService.resolve(any())).willReturn(new RevisionBoundConceptResolution(
+                REPOSITORY_ID,
+                ANALYZED_REVISION,
+                conceptEntry(
+                        typeIdentity,
+                        "OrderRepository",
+                        Optional.of("com.example.OrderRepository"),
+                        Set.<ConceptIdentity>of(typeIdentity))));
+
+        mockMvc.perform(typeMemberRequest("""
+                {
+                  "repoId":"orders",
+                  "expectedRevision":"1111111111111111111111111111111111111111",
+                  "sourceFile":"src/main/java/com/example/OrderService.java",
+                  "fullyQualifiedName":"com.example.OrderService",
+                  "memberKinds":["FIELD"]
+                }
+                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.members[1].availableFollowUps[0].operation")
+                        .value("RESOLVE_CONCEPT"))
+                .andExpect(jsonPath("$.members[1].availableFollowUps[0].api.path")
+                        .value("/v1/discovery/concepts/resolve"))
+                .andExpect(jsonPath("$.members[1].availableFollowUps[0].request.repoId").value("orders"))
+                .andExpect(jsonPath("$.members[1].availableFollowUps[0].request.expectedRevision")
+                        .value("2222222222222222222222222222222222222222"))
+                .andExpect(jsonPath("$.members[1].availableFollowUps[0].request.identity.kind")
+                        .value("TYPE"))
+                .andExpect(jsonPath("$.members[1].availableFollowUps[0].request.identity.sourceFile")
+                        .value("src/main/java/com/example/OrderRepository.java"))
+                .andExpect(jsonPath("$.members[1].availableFollowUps[0].request.identity.packageName")
+                        .value("com.example"))
+                .andExpect(jsonPath("$.members[1].availableFollowUps[0].request.identity.className")
+                        .value("OrderRepository"));
+
+        mockMvc.perform(resolveConceptRequest("""
+                {
+                  "repoId":"orders",
+                  "expectedRevision":"2222222222222222222222222222222222222222",
+                  "identity":{
+                    "kind":"TYPE",
+                    "sourceFile":"src/main/java/com/example/OrderRepository.java",
+                    "packageName":"com.example",
+                    "className":"OrderRepository"
+                  }
+                }
+                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.candidate.identity.kind").value("TYPE"))
+                .andExpect(jsonPath("$.candidate.identity.sourceFile")
+                        .value("src/main/java/com/example/OrderRepository.java"))
+                .andExpect(jsonPath("$.candidate.identity.packageName").value("com.example"))
+                .andExpect(jsonPath("$.candidate.identity.className").value("OrderRepository"));
     }
 
     @ParameterizedTest
@@ -582,6 +714,97 @@ class StructuredDiscoveryControllerTest {
                 .andExpect(jsonPath("$.errorCode").value("REPOSITORY_REVISION_MISMATCH"))
                 .andExpect(jsonPath("$.expectedRevision").value(REQUESTED_REVISION.value()))
                 .andExpect(jsonPath("$.currentRevision").value(ANALYZED_REVISION.value()));
+    }
+
+    @ParameterizedTest
+    @MethodSource("resolveConceptRequests")
+    void should_round_trip_every_concrete_concept_identity_variant(
+            String body,
+            String identityKind) throws Exception {
+        given(conceptDiscoveryApplicationService.resolve(any())).willAnswer(invocation ->
+                resolveConceptResult(invocation.getArgument(0)));
+
+        String response = mockMvc.perform(resolveConceptRequest(body))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.candidate.identity.kind").value(identityKind))
+                .andReturn().getResponse().getContentAsString();
+
+        JsonNode expectedIdentity = OBJECT_MAPPER.readTree(body).path("identity");
+        JsonNode actualIdentity = OBJECT_MAPPER.readTree(response).path("candidate").path("identity");
+        assertThat(actualIdentity).isEqualTo(expectedIdentity);
+    }
+
+    @ParameterizedTest
+    @MethodSource("malformedResolveConceptTypeIdentities")
+    void should_reject_malformed_typed_coordinates_before_concept_resolve(String identity) throws Exception {
+        mockMvc.perform(resolveConceptRequest(resolveConceptIdentity(identity)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.errorCode").value("REQUEST_INVALID"));
+
+        then(conceptDiscoveryApplicationService).shouldHaveNoInteractions();
+    }
+
+    @Test
+    void should_resolve_field_owned_annotation_without_declared_type() throws Exception {
+        given(conceptDiscoveryApplicationService.resolve(any())).willAnswer(invocation ->
+                resolveConceptResult(invocation.getArgument(0)));
+
+        mockMvc.perform(resolveConceptRequest(resolveConceptIdentity("""
+                {"kind":"ANNOTATION_USAGE","declaration":{"kind":"FIELD","sourceFile":"src/main/java/com/example/OrderService.java","ownerPackageName":"com.example","ownerClassName":"OrderService","fieldName":"orders"},"annotationType":{"status":"UNRESOLVED","writtenName":"Autowired"}}
+                """)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.candidate.identity.declaration.kind").value("FIELD"))
+                .andExpect(jsonPath("$.candidate.identity.declaration.declaredType").doesNotExist());
+    }
+
+    @Test
+    void should_resolve_field_identity_without_declared_type_and_return_type_only_in_details() throws Exception {
+        FieldConceptIdentity fieldIdentity = new FieldConceptIdentity(new TypeMember(sourceType(), "orders"));
+        given(conceptDiscoveryApplicationService.resolve(any())).willReturn(new RevisionBoundConceptResolution(
+                REPOSITORY_ID,
+                ANALYZED_REVISION,
+                fieldConceptEntry(fieldIdentity)));
+
+        mockMvc.perform(resolveConceptRequest(resolveConceptIdentity("""
+                {"kind":"FIELD","sourceFile":"src/main/java/com/example/OrderService.java","ownerPackageName":"com.example","ownerClassName":"OrderService","fieldName":"orders"}
+                """)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.candidate.identity.declaredType").doesNotExist())
+                .andExpect(jsonPath("$.candidate.details.kind").value("FIELD"))
+                .andExpect(jsonPath("$.candidate.details.declaredType.writtenType")
+                        .value("Map<String, List<Order[]>>"));
+    }
+
+    @Test
+    void should_reject_unknown_resolve_concept_identity_field() throws Exception {
+        mockMvc.perform(resolveConceptRequest("""
+                {
+                  "repoId":"orders",
+                  "expectedRevision":"1111111111111111111111111111111111111111",
+                  "identity":{"kind":"TYPE","sourceFile":"src/main/java/com/example/OrderService.java","packageName":"com.example","className":"OrderService","unexpected":true}
+                }
+                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.errorCode").value("REQUEST_INVALID"));
+    }
+
+    @Test
+    void should_return_typed_not_found_for_absent_resolve_concept_identity() throws Exception {
+        given(conceptDiscoveryApplicationService.resolve(any())).willThrow(new ConceptIdentityNotFoundException());
+
+        mockMvc.perform(resolveConceptRequest(resolveConceptTypeIdentity()))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.errorCode").value("CONCEPT_IDENTITY_NOT_FOUND"));
+    }
+
+    @Test
+    void should_preserve_revision_mismatch_for_resolve_concept() throws Exception {
+        given(conceptDiscoveryApplicationService.resolve(any())).willThrow(
+                new RepositoryRevisionMismatchException(REQUESTED_REVISION, ANALYZED_REVISION));
+
+        mockMvc.perform(resolveConceptRequest(resolveConceptTypeIdentity()))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.errorCode").value("REPOSITORY_REVISION_MISMATCH"));
     }
 
     @Test
@@ -768,6 +991,84 @@ class StructuredDiscoveryControllerTest {
                 .content(body);
     }
 
+    private static MockHttpServletRequestBuilder resolveConceptRequest(String body) {
+        return post("/v1/discovery/concepts/resolve")
+                .header(ApiTokenFilter.API_TOKEN_HEADER, TOKEN)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(body);
+    }
+
+    private static Stream<Arguments> resolveConceptRequests() {
+        return Stream.of(
+                arguments(resolveConceptTypeIdentity(), "TYPE"),
+                arguments(resolveConceptIdentity("""
+                        {"kind":"METHOD","target":{"sourceFile":"src/main/java/com/example/OrderService.java","packageName":"com.example","className":"OrderService","methodName":"createOrder","parameterTypes":["com.example.Order"]}}
+                        """), "METHOD"),
+                arguments(resolveConceptIdentity("""
+                        {"kind":"FIELD","sourceFile":"src/main/java/com/example/OrderService.java","ownerPackageName":"com.example","ownerClassName":"OrderService","fieldName":"repository"}
+                        """), "FIELD"),
+                arguments(resolveConceptIdentity("""
+                        {"kind":"ANNOTATION_USAGE","declaration":{"kind":"TYPE","sourceFile":"src/main/java/com/example/OrderService.java","packageName":"com.example","className":"OrderService"},"annotationType":{"status":"RESOLVED","javaType":{"packageName":"org.springframework.stereotype","className":"Service"}}}
+                        """), "ANNOTATION_USAGE"),
+                arguments(resolveConceptIdentity("""
+                        {"kind":"TYPE_USAGE","owner":{"kind":"METHOD","target":{"sourceFile":"src/main/java/com/example/OrderService.java","packageName":"com.example","className":"OrderService","methodName":"createOrder","parameterTypes":["com.example.Order"]}},"location":{"slot":"METHOD_PARAMETER","index":0},"path":[{"kind":"TYPE_ARGUMENT","index":0}],"referencedType":{"javaType":{"packageName":"com.example","className":"Order"},"arrayDimensions":0}}
+                        """), "TYPE_USAGE"),
+                arguments(resolveConceptIdentity("""
+                        {"kind":"API_ROUTE","target":{"sourceFile":"src/main/java/com/example/OrderService.java","packageName":"com.example","className":"OrderService","methodName":"createOrder","parameterTypes":["com.example.Order"]},"httpVerb":"POST","route":"/orders"}
+                        """), "API_ROUTE"),
+                arguments(resolveConceptIdentity("""
+                        {"kind":"MQ_DESTINATION","target":{"sourceFile":"src/main/java/com/example/OrderService.java","packageName":"com.example","className":"OrderService","methodName":"createOrder","parameterTypes":["com.example.Order"]},"broker":"KAFKA","destination":"orders"}
+                        """), "MQ_DESTINATION"),
+                arguments(resolveConceptIdentity("""
+                        {"kind":"SCHEDULE","target":{"sourceFile":"src/main/java/com/example/OrderService.java","packageName":"com.example","className":"OrderService","methodName":"createOrder","parameterTypes":["com.example.Order"]},"triggerKind":"CRON","triggerValue":"0 * * * * *"}
+                        """), "SCHEDULE"),
+                arguments(resolveConceptIdentity("""
+                        {"kind":"MAPPER_STATEMENT","statement":{"namespace":"com.example.OrderMapper","statementId":"findOrders"}}
+                        """), "MAPPER_STATEMENT"),
+                arguments(resolveConceptIdentity("""
+                        {"kind":"MAPPER_STATEMENT_VARIANT","variant":{"statement":{"namespace":"com.example.OrderMapper","statementId":"findOrders"},"resourcePath":"src/main/resources/OrderMapper.xml","databaseId":"postgres","documentOrdinal":0,"representation":"MAPPER_XML_ELEMENT"}}
+                        """), "MAPPER_STATEMENT_VARIANT"));
+    }
+
+    private static Stream<Arguments> malformedResolveConceptTypeIdentities() {
+        return Stream.of(
+                Arguments.of("{\"kind\":\"TYPE\",\"sourceFile\":\"/etc/passwd\",\"packageName\":\"com.example\",\"className\":\"OrderService\"}"),
+                Arguments.of("{\"kind\":\"TYPE\",\"sourceFile\":\"../../etc/passwd\",\"packageName\":\"com.example\",\"className\":\"OrderService\"}"),
+                Arguments.of("{\"kind\":\"TYPE\",\"sourceFile\":\"src\\\\main\\\\java\\\\OrderService.java\",\"packageName\":\"com.example\",\"className\":\"OrderService\"}"),
+                Arguments.of("{\"kind\":\"TYPE\",\"sourceFile\":\"src/main/../OrderService.java\",\"packageName\":\"com.example\",\"className\":\"OrderService\"}"),
+                Arguments.of("{\"kind\":\"TYPE\",\"sourceFile\":\"src/main/java/com/example/OrderService.java\",\"packageName\":\"com.example\",\"className\":\"1OrderService\"}"));
+    }
+
+    private static String resolveConceptTypeIdentity() {
+        return resolveConceptIdentity("""
+                {"kind":"TYPE","sourceFile":"src/main/java/com/example/OrderService.java","packageName":"com.example","className":"OrderService"}
+                """);
+    }
+
+    private static String resolveConceptIdentity(String identity) {
+        return """
+                {
+                  "repoId":"orders",
+                  "expectedRevision":"1111111111111111111111111111111111111111",
+                  "identity":%s
+                }
+                """.formatted(identity);
+    }
+
+    private static RevisionBoundConceptResolution resolveConceptResult(ConceptResolveQuery query) {
+        ConceptIdentity identity = query.identity();
+        ConceptCatalogEntry candidate = new ConceptCatalogEntry(
+                "resolve-test",
+                identity,
+                "display",
+                "com.example",
+                Optional.of("com.example.OrderService"),
+                ConceptAuthority.SYNTAX_DECLARED,
+                Set.of(identity));
+        return new RevisionBoundConceptResolution(
+                query.repositoryId(), ANALYZED_REVISION, candidate);
+    }
+
     private static String validConceptRequest() {
         return """
                 {
@@ -786,21 +1087,15 @@ class StructuredDiscoveryControllerTest {
     }
 
     private static ConceptSearchResult conceptResult() {
-        FieldConceptIdentity fieldIdentity = new FieldConceptIdentity(
-                SOURCE_FILE,
-                "com.example.OrderService",
-                "repository",
-                "OrderRepository");
+        FieldConceptIdentity fieldIdentity = new FieldConceptIdentity(new TypeMember(sourceType(), "repository"));
         MethodConceptIdentity methodIdentity = new MethodConceptIdentity(METHOD_TARGET);
         ConceptCatalogEntry field = conceptEntry(
                 fieldIdentity,
-                "com.example.OrderService#repository",
                 "OrderService.repository",
                 Optional.of("com.example.OrderService"),
                 Set.of(fieldIdentity, methodIdentity));
         ConceptCatalogEntry method = conceptEntry(
                 methodIdentity,
-                "com.example.OrderService#createOrder(com.example.Order)",
                 "OrderService.createOrder",
                 Optional.of("com.example.OrderService"),
                 Set.of(methodIdentity));
@@ -829,6 +1124,54 @@ class StructuredDiscoveryControllerTest {
                 Optional.of(nextQuery));
     }
 
+    private static ConceptSearchResult typedIdentityResult() {
+        TypeConceptIdentity typeIdentity = new TypeConceptIdentity(sourceType());
+        MethodConceptIdentity methodIdentity = new MethodConceptIdentity(METHOD_TARGET);
+        FieldConceptIdentity fieldIdentity = new FieldConceptIdentity(new TypeMember(sourceType(), "orders"));
+        AnnotationUsageConceptIdentity annotationIdentity = new AnnotationUsageConceptIdentity(
+                new ResolvedMethodDeclarationSubjectIdentity(METHOD_TARGET),
+                new ResolvedAnnotationIdentity(new JavaTypeIdentity("org.springframework", "Transactional")));
+        TypeUsageConceptIdentity typeUsageIdentity = new TypeUsageConceptIdentity(
+                new ResolvedMethodDeclarationSubjectIdentity(METHOD_TARGET),
+                new TypeUsageLocation(TypeUsageSlot.METHOD_PARAMETER, 0),
+                TypeUsagePath.empty(),
+                new ReferencedTypeIdentity(new JavaTypeIdentity("com.example", "Order"), 0));
+        ApiRouteConceptIdentity routeIdentity = new ApiRouteConceptIdentity(
+                METHOD_TARGET,
+                "GET",
+                "/orders");
+        MqDestinationConceptIdentity destinationIdentity = new MqDestinationConceptIdentity(
+                METHOD_TARGET,
+                MqBroker.KAFKA,
+                "orders.created");
+        ScheduleConceptIdentity scheduleIdentity = new ScheduleConceptIdentity(
+                METHOD_TARGET,
+                ScheduleTriggerKind.CRON,
+                Optional.of("0 * * * * *"));
+        ConceptCatalogEntry mapper = mapperConceptResult().candidates().get(0);
+        List<ConceptCatalogEntry> candidates = List.of(
+                conceptEntry(typeIdentity, "OrderService", Optional.of("com.example.OrderService"), Set.of(typeIdentity)),
+                conceptEntry(methodIdentity, "OrderService.createOrder", Optional.of("com.example.OrderService"), Set.of(methodIdentity)),
+                fieldConceptEntry(fieldIdentity),
+                conceptEntry(annotationIdentity, "Transactional on createOrder", Optional.of("com.example.OrderService"), Set.of(annotationIdentity)),
+                conceptEntry(typeUsageIdentity, "Order", Optional.of("com.example.OrderService"), Set.of(typeUsageIdentity)),
+                conceptEntry(routeIdentity, "GET /orders", Optional.of("com.example.OrderService"), Set.of(routeIdentity)),
+                conceptEntry(destinationIdentity, "orders.created", Optional.of("com.example.OrderService"), Set.of(destinationIdentity)),
+                conceptEntry(scheduleIdentity, "0 * * * * *", Optional.of("com.example.OrderService"), Set.of(scheduleIdentity)),
+                mapper);
+        return new ConceptSearchResult(
+                REPOSITORY_ID,
+                ANALYZED_REVISION,
+                List.of(new ConceptSearchTerm("order", ConceptMatchMode.TOKEN_PREFIX)),
+                ACTIVE_CONCEPT_KINDS,
+                ACTIVE_CONCEPT_KINDS,
+                candidates,
+                new ConceptPage(0, 50, candidates.size(), candidates.size(), false),
+                completeCoverage(),
+                List.of(),
+                Optional.empty());
+    }
+
     private static ConceptSearchResult emptyConceptResult(
             List<SourceExtractionOutcome> extractionOutcomes) {
         return new ConceptSearchResult(
@@ -850,7 +1193,8 @@ class StructuredDiscoveryControllerTest {
 
     private static ConceptSearchResult mapperConceptResult(List<MethodTarget> mappedTargets) {
         MapperStatementConceptIdentity identity =
-                new MapperStatementConceptIdentity("com.example.OrderMapper", "findOrders");
+                new MapperStatementConceptIdentity(
+                        new MapperStatementKey("com.example.OrderMapper", "findOrders"));
         List<MethodTarget> distinctTargets = mappedTargets.stream().distinct().toList();
         return mapperConceptResult(MapperStatementMethodMapping.fromDeclarations(
                 identity,
@@ -862,15 +1206,13 @@ class StructuredDiscoveryControllerTest {
     private static ConceptSearchResult mapperConceptResult(MapperStatementMethodMapping mapping) {
         MapperStatementConceptIdentity identity = mapping.statementIdentity();
         MapperStatementIdentity postgresIdentity = new MapperStatementIdentity(
-                "com.example.OrderMapper",
-                "findOrders",
+                new MapperStatementKey("com.example.OrderMapper", "findOrders"),
                 "module-a/src/main/resources/mapper/OrderMapper.xml",
                 Optional.of("postgres"),
                 1,
                 MapperEvidenceRepresentation.MAPPER_XML_ELEMENT);
         MapperStatementIdentity oracleIdentity = new MapperStatementIdentity(
-                "com.example.OrderMapper",
-                "findOrders",
+                new MapperStatementKey("com.example.OrderMapper", "findOrders"),
                 "module-b/src/main/resources/mapper/OrderMapper.xml",
                 Optional.of("oracle"),
                 0,
@@ -879,16 +1221,17 @@ class StructuredDiscoveryControllerTest {
                 "test",
                 identity,
                 "com.example.OrderMapper#findOrders",
-                "com.example.OrderMapper#findOrders",
-                Set.of("find", "orders"),
                 "",
                 Optional.of("com.example.OrderMapper"),
                 ConceptAuthority.SYNTAX_DECLARED,
-                Set.of(
+                Set.<ConceptIdentity>of(
                         identity,
                         new MapperStatementVariantEvidenceIdentity(oracleIdentity),
                         new MapperStatementVariantEvidenceIdentity(postgresIdentity)),
-                Optional.of(mapping));
+                Optional.empty(),
+                Optional.empty(),
+                Optional.of(mapping),
+                Optional.empty());
         return new ConceptSearchResult(
                 REPOSITORY_ID,
                 ANALYZED_REVISION,
@@ -904,20 +1247,61 @@ class StructuredDiscoveryControllerTest {
 
     private static ConceptCatalogEntry conceptEntry(
             ConceptIdentity identity,
-            String canonicalValue,
             String displayValue,
             Optional<String> declaringType,
             Set<ConceptIdentity> evidence) {
         return new ConceptCatalogEntry(
                 "test",
                 identity,
-                canonicalValue,
                 displayValue,
-                Set.of("order"),
                 "com.example",
                 declaringType,
                 ConceptAuthority.SYNTAX_RESOLVED,
                 evidence);
+    }
+
+    private static ConceptCatalogEntry fieldConceptEntry(FieldConceptIdentity identity) {
+        NamedTypeReference map = new NamedTypeReference(
+                "Map",
+                "Map",
+                Optional.of(new JavaTypeIdentity("java.util", "Map")),
+                false);
+        NamedTypeReference string = new NamedTypeReference(
+                "String",
+                "String",
+                Optional.of(new JavaTypeIdentity("java.lang", "String")),
+                false);
+        NamedTypeReference list = new NamedTypeReference(
+                "List",
+                "List",
+                Optional.of(new JavaTypeIdentity("java.util", "List")),
+                false);
+        NamedTypeReference order = new NamedTypeReference(
+                "Order",
+                "Order",
+                Optional.of(new JavaTypeIdentity("com.example", "Order")),
+                true);
+        ParameterizedTypeReference declaredType = new ParameterizedTypeReference(
+                "Map<String, List<Order[]>>",
+                map,
+                List.of(
+                        string,
+                        new ParameterizedTypeReference(
+                                "List<Order[]>",
+                                list,
+                                List.of(new ArrayTypeReference("Order[]", order, 1)))));
+        return new ConceptCatalogEntry(
+                "test",
+                identity,
+                "OrderService.orders",
+                "com.example",
+                Optional.of("com.example.OrderService"),
+                ConceptAuthority.SYNTAX_RESOLVED,
+                Set.of(identity),
+                Optional.empty(),
+                Optional.empty(),
+                Optional.empty(),
+                Optional.of(new FieldConceptDetails(declaredType)));
     }
 
     private static TypeMemberResult typeMemberResult() {
@@ -934,7 +1318,9 @@ class StructuredDiscoveryControllerTest {
                 followUpFactory.forResolvedFieldType(
                         REPOSITORY_ID,
                         ANALYZED_REVISION,
-                        Optional.of("com.example.OrderRepository[][]")));
+                        Optional.of(new TypeConceptIdentity(new SourceTypeIdentity(
+                                new JavaTypeIdentity("com.example", "OrderRepository"),
+                                "src/main/java/com/example/OrderRepository.java")))));
         TypeMemberQuery nextQuery = new TypeMemberQuery(
                 REPOSITORY_ID,
                 ANALYZED_REVISION,
@@ -970,5 +1356,9 @@ class StructuredDiscoveryControllerTest {
 
     private static List<SourceExtractionOutcome> completeCoverage() {
         return List.of(SourceExtractionOutcome.extracted(SOURCE_FILE));
+    }
+
+    private static SourceTypeIdentity sourceType() {
+        return new SourceTypeIdentity(new JavaTypeIdentity("com.example", "OrderService"), SOURCE_FILE);
     }
 }

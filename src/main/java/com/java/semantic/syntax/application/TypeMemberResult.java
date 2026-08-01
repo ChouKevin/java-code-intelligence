@@ -1,5 +1,6 @@
 package com.java.semantic.syntax.application;
 
+import com.java.semantic.syntax.application.concept.ConceptPage;
 import com.java.semantic.repository.domain.RepositoryId;
 import com.java.semantic.repository.domain.RepositoryRevision;
 import com.java.semantic.syntax.domain.SourceTypeKind;

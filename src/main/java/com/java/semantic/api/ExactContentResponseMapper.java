@@ -169,8 +169,8 @@ public final class ExactContentResponseMapper {
 
     private MapperStatementIdentityResponse statementIdentity(MapperStatementIdentity identity) {
         return new MapperStatementIdentityResponse(
-                identity.namespace(),
-                identity.statementId(),
+                identity.statementKey().namespace(),
+                identity.statementKey().statementId(),
                 identity.resourcePath(),
                 identity.databaseId(),
                 identity.documentOrdinal(),

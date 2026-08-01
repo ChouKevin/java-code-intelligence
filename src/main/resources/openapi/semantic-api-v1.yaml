@@ -324,6 +324,30 @@ paths:
           $ref: '#/components/responses/ConceptKindUnavailable'
         '500':
           $ref: '#/components/responses/MutationFailed'
+  /v1/discovery/concepts/resolve:
+    post:
+      operationId: resolveConcept
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ResolveConceptRequest'
+      responses:
+        '200':
+          $ref: '#/components/responses/ConceptResolution'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/AuthDisabled'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/MutationFailed'
   /v1/discovery/type-members:
     post:
       operationId: discoverTypeMembers
@@ -585,6 +609,12 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/DiscoverConceptsResponse'
+    ConceptResolution:
+      description: Revision-bound exact typed concept identity resolution
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ResolveConceptResponse'
     ConceptKindUnavailable:
       description: Requested concept kind is declared but inactive in this composition
       content:
@@ -762,6 +792,24 @@ components:
           pattern: '^[\p{L}\p{Nl}\p{Sc}\p{Pc}][\p{L}\p{Nl}\p{Sc}\p{Pc}\p{Mn}\p{Mc}\p{Nd}]*$'
         position:
           $ref: '#/components/schemas/Position'
+    ResolveConceptRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - repoId
+        - expectedRevision
+        - identity
+      properties:
+        repoId:
+          type: string
+          minLength: 1
+          pattern: '^[a-z0-9][a-z0-9._-]{0,63}$'
+        expectedRevision:
+          type: string
+          minLength: 1
+          pattern: '^[0-9a-f]{40}$|^FIXTURE$'
+        identity:
+          $ref: '#/components/schemas/ConceptIdentityResponse'
     SourceSymbolContextRequest:
       type: object
       additionalProperties: false
@@ -1619,7 +1667,6 @@ components:
       enum:
         - TOKEN_EXACT
         - TOKEN_PREFIX
-        - CANONICAL_EXACT
     DiscoverConceptsResponse:
       type: object
       additionalProperties: false
@@ -1684,30 +1731,21 @@ components:
       type: object
       additionalProperties: false
       required:
-        - kind
-        - canonicalValue
+        - identity
         - displayValue
         - matchedTerms
-        - packageName
         - authority
         - evidence
         - availableFollowUps
       properties:
-        kind:
-          $ref: '#/components/schemas/ConceptKind'
-        canonicalValue:
-          type: string
+        identity:
+          $ref: '#/components/schemas/ConceptIdentityResponse'
         displayValue:
           type: string
         matchedTerms:
           type: array
           items:
             type: string
-        packageName:
-          type: string
-        declaringType:
-          type: string
-          nullable: true
         authority:
           type: string
           enum:
@@ -1716,15 +1754,8 @@ components:
             - FRAMEWORK_METADATA
             - WRITTEN_NAME_FALLBACK
             - METADATA_VALUE_UNRESOLVED
-        subject:
-          type: string
-          nullable: true
-        target:
-          nullable: true
-          allOf:
-            - $ref: '#/components/schemas/MethodTarget'
-        mapperStatementMapping:
-          $ref: '#/components/schemas/MapperStatementMappingResponse'
+        details:
+          $ref: '#/components/schemas/ConceptCandidateDetailsResponse'
         evidence:
           type: array
           items:
@@ -1897,30 +1928,397 @@ components:
       type: object
       additionalProperties: false
       required:
+        - identity
+      properties:
+        identity:
+          $ref: '#/components/schemas/ConceptIdentityResponse'
+    ConceptCandidateDetailsResponse:
+      oneOf:
+        - $ref: '#/components/schemas/FieldDetailsResponse'
+        - $ref: '#/components/schemas/MapperStatementDetailsResponse'
+      discriminator:
+        propertyName: kind
+        mapping:
+          FIELD: '#/components/schemas/FieldDetailsResponse'
+          MAPPER_STATEMENT: '#/components/schemas/MapperStatementDetailsResponse'
+    FieldDetailsResponse:
+      type: object
+      additionalProperties: false
+      required:
         - kind
+        - declaredType
       properties:
         kind:
-          $ref: '#/components/schemas/ConceptKind'
-        subject:
-          type: string
-          nullable: true
-        target:
-          nullable: true
-          allOf:
-            - $ref: '#/components/schemas/MethodTarget'
-        resourcePath:
-          type: string
-        databaseId:
-          type: string
-          nullable: true
-        documentOrdinal:
-          type: integer
-          minimum: 0
-        representation:
           type: string
           enum:
-            - MAPPER_XML_ELEMENT
-            - ANNOTATION_SQL_TEXT
+            - FIELD
+        declaredType:
+          $ref: '#/components/schemas/FieldTypeReferenceResponse'
+    MapperStatementDetailsResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - kind
+        - mapping
+      properties:
+        kind:
+          type: string
+          enum:
+            - MAPPER_STATEMENT
+        mapping:
+          $ref: '#/components/schemas/MapperStatementMappingResponse'
+    ConceptIdentityResponse:
+      oneOf:
+        - $ref: '#/components/schemas/TypeConceptIdentityResponse'
+        - $ref: '#/components/schemas/MethodConceptIdentityResponse'
+        - $ref: '#/components/schemas/FieldConceptIdentityResponse'
+        - $ref: '#/components/schemas/AnnotationUsageConceptIdentityResponse'
+        - $ref: '#/components/schemas/TypeUsageConceptIdentityResponse'
+        - $ref: '#/components/schemas/ApiRouteConceptIdentityResponse'
+        - $ref: '#/components/schemas/MqDestinationConceptIdentityResponse'
+        - $ref: '#/components/schemas/ScheduleConceptIdentityResponse'
+        - $ref: '#/components/schemas/MapperStatementConceptIdentityResponse'
+        - $ref: '#/components/schemas/MapperStatementVariantConceptIdentityResponse'
+      discriminator:
+        propertyName: kind
+        mapping:
+          TYPE: '#/components/schemas/TypeConceptIdentityResponse'
+          METHOD: '#/components/schemas/MethodConceptIdentityResponse'
+          FIELD: '#/components/schemas/FieldConceptIdentityResponse'
+          ANNOTATION_USAGE: '#/components/schemas/AnnotationUsageConceptIdentityResponse'
+          TYPE_USAGE: '#/components/schemas/TypeUsageConceptIdentityResponse'
+          API_ROUTE: '#/components/schemas/ApiRouteConceptIdentityResponse'
+          MQ_DESTINATION: '#/components/schemas/MqDestinationConceptIdentityResponse'
+          SCHEDULE: '#/components/schemas/ScheduleConceptIdentityResponse'
+          MAPPER_STATEMENT: '#/components/schemas/MapperStatementConceptIdentityResponse'
+          MAPPER_STATEMENT_VARIANT: '#/components/schemas/MapperStatementVariantConceptIdentityResponse'
+    TypeConceptIdentityResponse:
+      type: object
+      additionalProperties: false
+      required: [kind, sourceFile, packageName, className]
+      properties:
+        kind: {type: string, enum: [TYPE]}
+        sourceFile: {type: string}
+        packageName: {type: string}
+        className: {type: string}
+    MethodConceptIdentityResponse:
+      type: object
+      additionalProperties: false
+      required: [kind, target]
+      properties:
+        kind: {type: string, enum: [METHOD]}
+        target: {$ref: '#/components/schemas/MethodTarget'}
+    FieldConceptIdentityResponse:
+      type: object
+      additionalProperties: false
+      required: [kind, sourceFile, ownerPackageName, ownerClassName, fieldName]
+      properties:
+        kind: {type: string, enum: [FIELD]}
+        sourceFile: {type: string}
+        ownerPackageName: {type: string}
+        ownerClassName: {type: string}
+        fieldName: {type: string}
+    ResolveConceptResponse:
+      type: object
+      additionalProperties: false
+      required: [repoId, analyzedRevision, candidate]
+      properties:
+        repoId:
+          type: string
+        analyzedRevision:
+          type: string
+          pattern: '^[0-9a-f]{40}$|^FIXTURE$'
+        candidate:
+          $ref: '#/components/schemas/ConceptCandidateResponse'
+    AnnotationUsageConceptIdentityResponse:
+      type: object
+      additionalProperties: false
+      required: [kind, declaration, annotationType]
+      properties:
+        kind: {type: string, enum: [ANNOTATION_USAGE]}
+        declaration: {$ref: '#/components/schemas/DeclarationSubjectResponse'}
+        annotationType: {$ref: '#/components/schemas/AnnotationTypeResponse'}
+    TypeUsageConceptIdentityResponse:
+      type: object
+      additionalProperties: false
+      required: [kind, owner, location, path, referencedType]
+      properties:
+        kind: {type: string, enum: [TYPE_USAGE]}
+        owner: {$ref: '#/components/schemas/DeclarationSubjectResponse'}
+        location: {$ref: '#/components/schemas/TypeUsageLocationResponse'}
+        path:
+          type: array
+          items: {$ref: '#/components/schemas/TypeUsagePathResponse'}
+        referencedType: {$ref: '#/components/schemas/ReferencedTypeResponse'}
+    ApiRouteConceptIdentityResponse:
+      type: object
+      additionalProperties: false
+      required: [kind, target, httpVerb, route]
+      properties:
+        kind: {type: string, enum: [API_ROUTE]}
+        target: {$ref: '#/components/schemas/MethodTarget'}
+        httpVerb: {type: string}
+        route: {type: string}
+    MqDestinationConceptIdentityResponse:
+      type: object
+      additionalProperties: false
+      required: [kind, target, broker, destination]
+      properties:
+        kind: {type: string, enum: [MQ_DESTINATION]}
+        target: {$ref: '#/components/schemas/MethodTarget'}
+        broker: {type: string, enum: [RABBIT, KAFKA]}
+        destination: {type: string}
+    ScheduleConceptIdentityResponse:
+      type: object
+      additionalProperties: false
+      required: [kind, target, triggerKind]
+      properties:
+        kind: {type: string, enum: [SCHEDULE]}
+        target: {$ref: '#/components/schemas/MethodTarget'}
+        triggerKind: {type: string, enum: [CRON, FIXED_DELAY, FIXED_RATE, JOB_HANDLER, UNSPECIFIED]}
+        triggerValue: {type: string}
+    MapperStatementConceptIdentityResponse:
+      type: object
+      additionalProperties: false
+      required: [kind, statement]
+      properties:
+        kind: {type: string, enum: [MAPPER_STATEMENT]}
+        statement: {$ref: '#/components/schemas/MapperStatementKeyResponse'}
+    MapperStatementVariantConceptIdentityResponse:
+      type: object
+      additionalProperties: false
+      required: [kind, variant]
+      properties:
+        kind: {type: string, enum: [MAPPER_STATEMENT_VARIANT]}
+        variant: {$ref: '#/components/schemas/MapperStatementVariantResponse'}
+    MapperStatementKeyResponse:
+      type: object
+      additionalProperties: false
+      required: [namespace, statementId]
+      properties:
+        namespace: {type: string}
+        statementId: {type: string}
+    MapperStatementVariantResponse:
+      type: object
+      additionalProperties: false
+      required: [statement, resourcePath, documentOrdinal, representation]
+      properties:
+        statement: {$ref: '#/components/schemas/MapperStatementKeyResponse'}
+        resourcePath: {type: string}
+        databaseId: {type: string}
+        documentOrdinal: {type: integer, minimum: 0}
+        representation: {type: string, enum: [MAPPER_XML_ELEMENT, ANNOTATION_SQL_TEXT]}
+    DeclarationSubjectResponse:
+      oneOf:
+        - $ref: '#/components/schemas/TypeDeclarationSubjectResponse'
+        - $ref: '#/components/schemas/ResolvedMethodDeclarationSubjectResponse'
+        - $ref: '#/components/schemas/UnresolvedMethodDeclarationSubjectResponse'
+        - $ref: '#/components/schemas/FieldDeclarationSubjectResponse'
+      discriminator:
+        propertyName: kind
+        mapping:
+          TYPE: '#/components/schemas/TypeDeclarationSubjectResponse'
+          METHOD: '#/components/schemas/ResolvedMethodDeclarationSubjectResponse'
+          METHOD_UNRESOLVED: '#/components/schemas/UnresolvedMethodDeclarationSubjectResponse'
+          FIELD: '#/components/schemas/FieldDeclarationSubjectResponse'
+    TypeDeclarationSubjectResponse:
+      type: object
+      additionalProperties: false
+      required: [kind, sourceFile, packageName, className]
+      properties:
+        kind: {type: string, enum: [TYPE]}
+        sourceFile: {type: string}
+        packageName: {type: string}
+        className: {type: string}
+    ResolvedMethodDeclarationSubjectResponse:
+      type: object
+      additionalProperties: false
+      required: [kind, target]
+      properties:
+        kind: {type: string, enum: [METHOD]}
+        target: {$ref: '#/components/schemas/MethodTarget'}
+    UnresolvedMethodDeclarationSubjectResponse:
+      type: object
+      additionalProperties: false
+      required: [kind, sourceFile, ownerPackageName, ownerClassName, methodName, parameterTypes]
+      properties:
+        kind: {type: string, enum: [METHOD_UNRESOLVED]}
+        sourceFile: {type: string}
+        ownerPackageName: {type: string}
+        ownerClassName: {type: string}
+        methodName: {type: string}
+        parameterTypes:
+          type: array
+          items: {type: string}
+    FieldDeclarationSubjectResponse:
+      type: object
+      additionalProperties: false
+      required: [kind, sourceFile, ownerPackageName, ownerClassName, fieldName]
+      properties:
+        kind: {type: string, enum: [FIELD]}
+        sourceFile: {type: string}
+        ownerPackageName: {type: string}
+        ownerClassName: {type: string}
+        fieldName: {type: string}
+    AnnotationTypeResponse:
+      oneOf:
+        - $ref: '#/components/schemas/ResolvedAnnotationTypeResponse'
+        - $ref: '#/components/schemas/UnresolvedAnnotationTypeResponse'
+      discriminator:
+        propertyName: status
+        mapping:
+          RESOLVED: '#/components/schemas/ResolvedAnnotationTypeResponse'
+          UNRESOLVED: '#/components/schemas/UnresolvedAnnotationTypeResponse'
+    ResolvedAnnotationTypeResponse:
+      type: object
+      additionalProperties: false
+      required: [status, javaType]
+      properties:
+        status: {type: string, enum: [RESOLVED]}
+        javaType: {$ref: '#/components/schemas/JavaTypeIdentityResponse'}
+    UnresolvedAnnotationTypeResponse:
+      type: object
+      additionalProperties: false
+      required: [status, writtenName]
+      properties:
+        status: {type: string, enum: [UNRESOLVED]}
+        writtenName: {type: string}
+    JavaTypeIdentityResponse:
+      type: object
+      additionalProperties: false
+      required: [packageName, className]
+      properties:
+        packageName: {type: string}
+        className: {type: string}
+    TypeUsageLocationResponse:
+      type: object
+      additionalProperties: false
+      required: [slot, index]
+      properties:
+        slot: {type: string, enum: [IMPLEMENTED_TYPE, EXTENDED_TYPE, METHOD_PARAMETER, METHOD_RETURN, METHOD_BODY_OR_ANNOTATION_MEMBER, FIELD_DECLARATION]}
+        index: {type: integer, minimum: 0}
+    ReferencedTypeResponse:
+      type: object
+      additionalProperties: false
+      required: [javaType, arrayDimensions]
+      properties:
+        javaType: {$ref: '#/components/schemas/JavaTypeIdentityResponse'}
+        arrayDimensions: {type: integer, minimum: 0}
+    TypeUsagePathResponse:
+      oneOf:
+        - $ref: '#/components/schemas/TypeArgumentPathResponse'
+        - $ref: '#/components/schemas/WildcardExtendsBoundPathResponse'
+        - $ref: '#/components/schemas/WildcardSuperBoundPathResponse'
+        - $ref: '#/components/schemas/TypeVariableBoundPathResponse'
+      discriminator:
+        propertyName: kind
+        mapping:
+          TYPE_ARGUMENT: '#/components/schemas/TypeArgumentPathResponse'
+          WILDCARD_EXTENDS_BOUND: '#/components/schemas/WildcardExtendsBoundPathResponse'
+          WILDCARD_SUPER_BOUND: '#/components/schemas/WildcardSuperBoundPathResponse'
+          TYPE_VARIABLE_BOUND: '#/components/schemas/TypeVariableBoundPathResponse'
+    TypeArgumentPathResponse:
+      type: object
+      additionalProperties: false
+      required: [kind, index]
+      properties:
+        kind: {type: string, enum: [TYPE_ARGUMENT]}
+        index: {type: integer, minimum: 0}
+    WildcardExtendsBoundPathResponse:
+      type: object
+      additionalProperties: false
+      required: [kind]
+      properties:
+        kind: {type: string, enum: [WILDCARD_EXTENDS_BOUND]}
+    WildcardSuperBoundPathResponse:
+      type: object
+      additionalProperties: false
+      required: [kind]
+      properties:
+        kind: {type: string, enum: [WILDCARD_SUPER_BOUND]}
+    TypeVariableBoundPathResponse:
+      type: object
+      additionalProperties: false
+      required: [kind, index]
+      properties:
+        kind: {type: string, enum: [TYPE_VARIABLE_BOUND]}
+        index: {type: integer, minimum: 0}
+    FieldTypeReferenceResponse:
+      oneOf:
+        - $ref: '#/components/schemas/NamedFieldTypeReferenceResponse'
+        - $ref: '#/components/schemas/ParameterizedFieldTypeReferenceResponse'
+        - $ref: '#/components/schemas/PrimitiveFieldTypeReferenceResponse'
+        - $ref: '#/components/schemas/ArrayFieldTypeReferenceResponse'
+        - $ref: '#/components/schemas/WildcardFieldTypeReferenceResponse'
+        - $ref: '#/components/schemas/TypeVariableFieldTypeReferenceResponse'
+      discriminator:
+        propertyName: kind
+        mapping:
+          NAMED: '#/components/schemas/NamedFieldTypeReferenceResponse'
+          PARAMETERIZED: '#/components/schemas/ParameterizedFieldTypeReferenceResponse'
+          PRIMITIVE: '#/components/schemas/PrimitiveFieldTypeReferenceResponse'
+          ARRAY: '#/components/schemas/ArrayFieldTypeReferenceResponse'
+          WILDCARD: '#/components/schemas/WildcardFieldTypeReferenceResponse'
+          TYPE_VARIABLE: '#/components/schemas/TypeVariableFieldTypeReferenceResponse'
+    NamedFieldTypeReferenceResponse:
+      type: object
+      additionalProperties: false
+      required: [kind, writtenType, simpleTypeName, sourceDefined]
+      properties:
+        kind: {type: string, enum: [NAMED]}
+        writtenType: {type: string}
+        simpleTypeName: {type: string}
+        resolvedJavaType: {$ref: '#/components/schemas/JavaTypeIdentityResponse'}
+        sourceDefined: {type: boolean}
+    ParameterizedFieldTypeReferenceResponse:
+      type: object
+      additionalProperties: false
+      required: [kind, writtenType, rawType, typeArguments]
+      properties:
+        kind: {type: string, enum: [PARAMETERIZED]}
+        writtenType: {type: string}
+        rawType: {$ref: '#/components/schemas/NamedFieldTypeReferenceResponse'}
+        typeArguments:
+          type: array
+          items: {$ref: '#/components/schemas/FieldTypeReferenceResponse'}
+    PrimitiveFieldTypeReferenceResponse:
+      type: object
+      additionalProperties: false
+      required: [kind, writtenType]
+      properties:
+        kind: {type: string, enum: [PRIMITIVE]}
+        writtenType: {type: string}
+    ArrayFieldTypeReferenceResponse:
+      type: object
+      additionalProperties: false
+      required: [kind, writtenType, elementType, dimensions]
+      properties:
+        kind: {type: string, enum: [ARRAY]}
+        writtenType: {type: string}
+        elementType: {$ref: '#/components/schemas/FieldTypeReferenceResponse'}
+        dimensions: {type: integer, minimum: 1}
+    WildcardFieldTypeReferenceResponse:
+      type: object
+      additionalProperties: false
+      required: [kind, writtenType, sourceDefined]
+      properties:
+        kind: {type: string, enum: [WILDCARD]}
+        writtenType: {type: string}
+        upperBound: {$ref: '#/components/schemas/FieldTypeReferenceResponse'}
+        lowerBound: {$ref: '#/components/schemas/FieldTypeReferenceResponse'}
+        sourceDefined: {type: boolean}
+    TypeVariableFieldTypeReferenceResponse:
+      type: object
+      additionalProperties: false
+      required: [kind, writtenType, variableName, upperBounds, sourceDefined]
+      properties:
+        kind: {type: string, enum: [TYPE_VARIABLE]}
+        writtenType: {type: string}
+        variableName: {type: string}
+        upperBounds:
+          type: array
+          items: {$ref: '#/components/schemas/FieldTypeReferenceResponse'}
+        sourceDefined: {type: boolean}
     ConceptPageResponse:
       type: object
       additionalProperties: false
@@ -2381,7 +2779,7 @@ components:
             - ANALYZE_OUTGOING_CALL_GRAPH
             - ANALYZE_INCOMING_CALL_GRAPH
             - DISCOVER_METHOD_IMPLEMENTATIONS
-            - DISCOVER_CONCEPTS
+            - RESOLVE_CONCEPT
             - GET_TYPE_MEMBERS
             - GET_NEXT_PAGE
         api:
@@ -2408,7 +2806,7 @@ components:
             - ANALYZE_OUTGOING_CALL_GRAPH
             - ANALYZE_INCOMING_CALL_GRAPH
             - DISCOVER_METHOD_IMPLEMENTATIONS
-            - DISCOVER_CONCEPTS
+            - RESOLVE_CONCEPT
             - GET_TYPE_MEMBERS
             - GET_NEXT_PAGE
             - RESOLVE_SOURCE_SYMBOL
@@ -2437,7 +2835,6 @@ components:
         - $ref: '#/components/schemas/MethodTargetFollowUpRequestResponse'
         - $ref: '#/components/schemas/AnalyzeCallGraphRequestResponse'
         - $ref: '#/components/schemas/DiscoverMethodImplementationsRequestResponse'
-        - $ref: '#/components/schemas/DiscoverConceptsRequestResponse'
         - $ref: '#/components/schemas/GetTypeMembersRequestResponse'
         - $ref: '#/components/schemas/DiscoverTypeMembersRequestResponse'
     DiscoveryFollowUpRequestResponse:
@@ -2449,7 +2846,8 @@ components:
         - $ref: '#/components/schemas/GetMapperFragmentSegmentRequestResponse'
         - $ref: '#/components/schemas/AnalyzeCallGraphRequestResponse'
         - $ref: '#/components/schemas/DiscoverMethodImplementationsRequestResponse'
-        - $ref: '#/components/schemas/DiscoverConceptsRequestResponse'
+        - $ref: '#/components/schemas/ResolveConceptRequestResponse'
+        - $ref: '#/components/schemas/ConceptSearchPageRequestResponse'
         - $ref: '#/components/schemas/GetTypeMembersRequestResponse'
         - $ref: '#/components/schemas/DiscoverTypeMembersRequestResponse'
         - $ref: '#/components/schemas/ResolveSourceSymbolRequestResponse'
@@ -2609,7 +3007,22 @@ components:
           pattern: '^[0-9a-f]{40}$|^FIXTURE$'
         declarationTarget:
           $ref: '#/components/schemas/MethodTarget'
-    DiscoverConceptsRequestResponse:
+    ResolveConceptRequestResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - repoId
+        - expectedRevision
+        - identity
+      properties:
+        repoId:
+          type: string
+        expectedRevision:
+          type: string
+          pattern: '^[0-9a-f]{40}$|^FIXTURE$'
+        identity:
+          $ref: '#/components/schemas/ConceptIdentityResponse'
+    ConceptSearchPageRequestResponse:
       type: object
       additionalProperties: false
       required:
@@ -2633,7 +3046,7 @@ components:
         terms:
           type: array
           items:
-            $ref: '#/components/schemas/ConceptTermResponse'
+            $ref: '#/components/schemas/ConceptSearchTermResponse'
         kinds:
           type: array
           minItems: 1
@@ -2649,7 +3062,7 @@ components:
           type: integer
           minimum: 1
           maximum: 100
-    ConceptTermResponse:
+    ConceptSearchTermResponse:
       type: object
       additionalProperties: false
       required:

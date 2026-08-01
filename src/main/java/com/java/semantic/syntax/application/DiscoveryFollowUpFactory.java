@@ -1,32 +1,33 @@
 package com.java.semantic.syntax.application;
 
+import com.java.semantic.syntax.application.concept.ConceptIdentity;
 import com.java.semantic.identity.MethodTarget;
+import com.java.semantic.identity.SourceTypeIdentity;
 import com.java.semantic.repository.domain.RepositoryId;
 import com.java.semantic.repository.domain.RepositoryRevision;
-import com.java.semantic.syntax.application.ConceptIdentity.AnnotationUsageConceptIdentity;
-import com.java.semantic.syntax.application.ConceptIdentity.ApiRouteConceptIdentity;
-import com.java.semantic.syntax.application.ConceptIdentity.DeclarationSubjectIdentity;
-import com.java.semantic.syntax.application.ConceptIdentity.FieldConceptIdentity;
-import com.java.semantic.syntax.application.ConceptIdentity.FieldDeclarationSubjectIdentity;
-import com.java.semantic.syntax.application.ConceptIdentity.MethodConceptIdentity;
-import com.java.semantic.syntax.application.ConceptIdentity.MapperStatementConceptIdentity;
-import com.java.semantic.syntax.application.ConceptIdentity.MapperStatementVariantEvidenceIdentity;
-import com.java.semantic.syntax.application.ConceptIdentity.MqDestinationConceptIdentity;
-import com.java.semantic.syntax.application.ConceptIdentity.ResolvedMethodDeclarationSubjectIdentity;
-import com.java.semantic.syntax.application.ConceptIdentity.ScheduleConceptIdentity;
-import com.java.semantic.syntax.application.ConceptIdentity.TypeConceptIdentity;
-import com.java.semantic.syntax.application.ConceptIdentity.TypeDeclarationSubjectIdentity;
-import com.java.semantic.syntax.application.ConceptIdentity.TypeUsageConceptIdentity;
-import com.java.semantic.syntax.application.ConceptIdentity.UnresolvedMethodDeclarationSubjectIdentity;
+import com.java.semantic.syntax.application.concept.EntryPointConceptIdentity.ApiRouteConceptIdentity;
+import com.java.semantic.syntax.application.concept.DeclarationConceptIdentity.FieldConceptIdentity;
+import com.java.semantic.syntax.application.concept.DeclarationConceptIdentity.MethodConceptIdentity;
+import com.java.semantic.syntax.application.concept.EntryPointConceptIdentity.MqDestinationConceptIdentity;
+import com.java.semantic.syntax.application.concept.EntryPointConceptIdentity.ScheduleConceptIdentity;
+import com.java.semantic.syntax.application.concept.MapperConceptIdentity.MapperStatementConceptIdentity;
+import com.java.semantic.syntax.application.concept.MapperConceptIdentity.MapperStatementVariantEvidenceIdentity;
+import com.java.semantic.syntax.application.concept.DeclarationConceptIdentity.TypeConceptIdentity;
+import com.java.semantic.syntax.application.concept.UsageConceptIdentity.AnnotationUsageConceptIdentity;
+import com.java.semantic.syntax.application.concept.UsageConceptIdentity.DeclarationSubjectIdentity;
+import com.java.semantic.syntax.application.concept.UsageConceptIdentity.FieldDeclarationSubjectIdentity;
+import com.java.semantic.syntax.application.concept.UsageConceptIdentity.ResolvedMethodDeclarationSubjectIdentity;
+import com.java.semantic.syntax.application.concept.UsageConceptIdentity.TypeDeclarationSubjectIdentity;
+import com.java.semantic.syntax.application.concept.UsageConceptIdentity.TypeUsageConceptIdentity;
+import com.java.semantic.syntax.application.concept.UsageConceptIdentity.UnresolvedMethodDeclarationSubjectIdentity;
 import com.java.semantic.syntax.application.DiscoveryFollowUp.AnalyzeCallGraphRequest;
-import com.java.semantic.syntax.application.DiscoveryFollowUp.ConceptDiscoveryRequest;
-import com.java.semantic.syntax.application.DiscoveryFollowUp.ConceptTermRequest;
 import com.java.semantic.syntax.application.DiscoveryFollowUp.DiscoverMethodImplementationsRequest;
 import com.java.semantic.syntax.application.DiscoveryFollowUp.GetMethodSourceRequest;
 import com.java.semantic.syntax.application.DiscoveryFollowUp.GetMapperStatementRequest;
 import com.java.semantic.syntax.application.DiscoveryFollowUp.GetTypeMembersRequest;
 import com.java.semantic.syntax.application.DiscoveryFollowUp.Operation;
 import com.java.semantic.syntax.application.DiscoveryFollowUp.ResolveSourceSymbolRequest;
+import com.java.semantic.syntax.application.DiscoveryFollowUp.ResolveConceptRequest;
 import com.java.semantic.syntax.application.DiscoveryFollowUp.TypeMembersRequest;
 import com.java.semantic.syntax.domain.SyntaxPosition;
 
@@ -53,15 +54,15 @@ public final class DiscoveryFollowUpFactory {
             case TypeConceptIdentity typeIdentity -> forType(
                     repositoryId,
                     revision,
-                    typeIdentity.sourceFile(),
-                    typeIdentity.fullyQualifiedType());
+                    typeIdentity.type().sourceFile(),
+                    typeIdentity.type().fullyQualifiedName());
             case MethodConceptIdentity methodIdentity ->
                     forConceptMethod(repositoryId, revision, methodIdentity.target());
             case FieldConceptIdentity fieldIdentity -> forType(
                     repositoryId,
                     revision,
-                    fieldIdentity.sourceFile(),
-                    fieldIdentity.ownerType());
+                    fieldIdentity.field().ownerType().sourceFile(),
+                    fieldIdentity.field().ownerType().fullyQualifiedName());
             case AnnotationUsageConceptIdentity annotationIdentity -> forDeclaration(
                     repositoryId,
                     revision,
@@ -69,7 +70,7 @@ public final class DiscoveryFollowUpFactory {
             case TypeUsageConceptIdentity typeUsageIdentity -> forDeclaration(
                     repositoryId,
                     revision,
-                    typeUsageIdentity.ownerDeclaration());
+                    typeUsageIdentity.owner());
             case ApiRouteConceptIdentity routeIdentity ->
                     forConceptMethod(repositoryId, revision, routeIdentity.target());
             case MqDestinationConceptIdentity destinationIdentity ->
@@ -92,15 +93,18 @@ public final class DiscoveryFollowUpFactory {
         return executableMethodAnalysis(repoId, expectedRevision, methodTarget);
     }
 
-    /** source type identity 導向完整 type-member 與 canonical concept discovery */
+    /** source type identity 導向完整 type-member 與 typed concept resolve */
     public List<DiscoveryFollowUp> forSourceType(
             RepositoryId repositoryId,
             RepositoryRevision revision,
-            String sourceFile,
-            String fullyQualifiedName) {
+            SourceTypeIdentity sourceType) {
+        SourceTypeIdentity type = Objects.requireNonNull(sourceType, "sourceType is required");
         return Stream.concat(
-                forType(repositoryId, revision, sourceFile, fullyQualifiedName).stream(),
-                forResolvedFieldType(repositoryId, revision, Optional.of(fullyQualifiedName)).stream())
+                forType(repositoryId, revision, type.sourceFile(), type.fullyQualifiedName()).stream(),
+                forResolvedFieldType(
+                        repositoryId,
+                        revision,
+                        Optional.of(new TypeConceptIdentity(type))).stream())
                 .toList();
     }
 
@@ -205,27 +209,22 @@ public final class DiscoveryFollowUpFactory {
     }
 
     /**
-     * 已解析欄位型別使用 canonical exact TYPE 搜尋
-     * 外部 dependency 可以合法回傳零筆且不推測來源檔
+     * 已解析且 source-qualified 的欄位型別直接使用 typed TYPE resolve
+     * 外部 dependency 可以合法沒有 follow-up，絕不推測來源檔
      */
     public List<DiscoveryFollowUp> forResolvedFieldType(
             RepositoryId repositoryId,
             RepositoryRevision revision,
-            Optional<String> resolvedType) {
-        Optional<String> type = Objects.requireNonNull(resolvedType, "resolvedType is required");
-        if (!type.isPresent()) {
+            Optional<TypeConceptIdentity> resolvedType) {
+        Optional<TypeConceptIdentity> type = Objects.requireNonNull(resolvedType, "resolvedType is required");
+        if (type.isEmpty()) {
             return List.of();
         }
-        ConceptDiscoveryRequest request = new ConceptDiscoveryRequest(
+        ResolveConceptRequest request = new ResolveConceptRequest(
                 repositoryId(repositoryId),
                 revision(revision),
-                "ALL",
-                List.of(new ConceptTermRequest(type.orElseThrow(), ConceptMatchMode.CANONICAL_EXACT)),
-                List.of(ConceptKind.TYPE),
-                Optional.empty(),
-                0,
-                50);
-        return List.of(followUp(Operation.DISCOVER_CONCEPTS, request));
+                type.orElseThrow());
+        return List.of(followUp(Operation.RESOLVE_CONCEPT, request));
     }
 
     /** 建立保留完整型別查詢條件且只替換 offset 的下一頁請求 */
@@ -256,18 +255,18 @@ public final class DiscoveryFollowUpFactory {
             case TypeDeclarationSubjectIdentity typeSubject -> forType(
                     repositoryId,
                     revision,
-                    typeSubject.sourceFile(),
-                    typeSubject.ownerType());
+                    typeSubject.type().sourceFile(),
+                    typeSubject.type().fullyQualifiedName());
             case UnresolvedMethodDeclarationSubjectIdentity methodSubject -> forType(
                     repositoryId,
                     revision,
-                    methodSubject.sourceFile(),
-                    methodSubject.ownerType());
+                    methodSubject.owner().sourceFile(),
+                    methodSubject.owner().fullyQualifiedName());
             case FieldDeclarationSubjectIdentity fieldSubject -> forType(
                     repositoryId,
                     revision,
-                    fieldSubject.sourceFile(),
-                    fieldSubject.ownerType());
+                    fieldSubject.field().ownerType().sourceFile(),
+                    fieldSubject.field().ownerType().fullyQualifiedName());
         };
     }
 

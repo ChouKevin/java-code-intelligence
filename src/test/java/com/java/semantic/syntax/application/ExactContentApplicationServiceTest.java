@@ -24,6 +24,7 @@ import com.java.semantic.syntax.domain.MapperFragmentEvidence;
 import com.java.semantic.syntax.domain.MapperFragmentIdentity;
 import com.java.semantic.syntax.domain.MapperStatementEvidence;
 import com.java.semantic.syntax.domain.MapperStatementIdentity;
+import com.java.semantic.syntax.domain.MapperStatementKey;
 import com.java.semantic.syntax.domain.MethodTargetResolution;
 import com.java.semantic.syntax.domain.RepositorySyntax;
 import com.java.semantic.syntax.domain.SyntaxExtractionService;
@@ -145,7 +146,8 @@ class ExactContentApplicationServiceTest {
         MethodTarget target = extracted.sourceTypes().getFirst().members().methods().getFirst()
                 .analysisTarget().target().orElseThrow();
         MapperStatementIdentity statementIdentity = new MapperStatementIdentity(
-                "com.example.OrderMapper", "find", "mapper/OrderMapper.xml", Optional.empty(), 0,
+                new MapperStatementKey("com.example.OrderMapper", "find"),
+                "mapper/OrderMapper.xml", Optional.empty(), 0,
                 MapperEvidenceRepresentation.MAPPER_XML_ELEMENT);
         RepositorySyntax syntax = withEvidence(extracted, List.of(new MapperStatementEvidence(
                 statementIdentity, "select", "SELECT 1", List.of(), Optional.of(target))), List.of());
@@ -169,7 +171,8 @@ class ExactContentApplicationServiceTest {
         MethodTarget target = extracted.sourceTypes().getFirst().members().methods().getFirst()
                 .analysisTarget().target().orElseThrow();
         MapperStatementIdentity statementIdentity = new MapperStatementIdentity(
-                "com.example.OrderMapper", "find", "mapper/OrderMapper.xml", Optional.empty(), 0,
+                new MapperStatementKey("com.example.OrderMapper", "find"),
+                "mapper/OrderMapper.xml", Optional.empty(), 0,
                 MapperEvidenceRepresentation.MAPPER_XML_ELEMENT);
         RepositorySyntax syntax = withEvidence(extracted, List.of(new MapperStatementEvidence(
                 statementIdentity, "select", "SELECT 1", List.of(), Optional.of(target))), List.of());
@@ -192,8 +195,7 @@ class ExactContentApplicationServiceTest {
                 """);
         MethodTarget target = methodTarget(extracted);
         MapperStatementIdentity statementIdentity = new MapperStatementIdentity(
-                "com.example.Orders",
-                "find",
+                new MapperStatementKey("com.example.Orders", "find"),
                 "src/main/resources/mapper/Orders.xml",
                 Optional.empty(),
                 4,

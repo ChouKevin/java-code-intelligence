@@ -5,16 +5,14 @@ import java.util.Optional;
 
 /** mapper statement 變體在單一 repository syntax 快照內的型別化識別 */
 public record MapperStatementIdentity(
-        String namespace,
-        String statementId,
+        MapperStatementKey statementKey,
         String resourcePath,
         Optional<String> databaseId,
         int documentOrdinal,
         MapperEvidenceRepresentation representation) {
 
     public MapperStatementIdentity {
-        namespace = requiredText(namespace, "namespace");
-        statementId = requiredText(statementId, "statementId");
+        statementKey = Objects.requireNonNull(statementKey, "statementKey is required");
         resourcePath = requiredText(resourcePath, "resourcePath");
         databaseId = Objects.requireNonNull(databaseId, "databaseId is required")
                 .map(value -> requiredText(value, "databaseId"));

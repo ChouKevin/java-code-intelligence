@@ -20,7 +20,8 @@ import com.java.semantic.semantic.domain.SemanticProtocolException;
 import com.java.semantic.semantic.domain.SemanticRequestTimeoutException;
 import com.java.semantic.semantic.domain.SemanticTargetNotFoundException;
 import com.java.semantic.syntax.application.ExactContentApplicationService.ExactContentNotFoundException;
-import com.java.semantic.syntax.application.ConceptKindUnavailableException;
+import com.java.semantic.syntax.application.concept.ConceptKindUnavailableException;
+import com.java.semantic.syntax.application.concept.ConceptIdentityNotFoundException;
 import com.java.semantic.syntax.application.TypeMemberTypeNotFoundException;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.HttpStatus;
@@ -65,6 +66,11 @@ public class ApiExceptionHandler {
     @ExceptionHandler(TypeMemberTypeNotFoundException.class)
     public ResponseEntity<ApiErrorResponse> typeMemberTypeNotFound(HttpServletRequest request) {
         return response(HttpStatus.NOT_FOUND, "TYPE_MEMBER_TYPE_NOT_FOUND", "type was not found", request);
+    }
+
+    @ExceptionHandler(ConceptIdentityNotFoundException.class)
+    public ResponseEntity<ApiErrorResponse> conceptIdentityNotFound(HttpServletRequest request) {
+        return response(HttpStatus.NOT_FOUND, "CONCEPT_IDENTITY_NOT_FOUND", "concept identity was not found", request);
     }
 
     @ExceptionHandler({RepositoryBusyException.class, RepositoryNotReadyException.class})

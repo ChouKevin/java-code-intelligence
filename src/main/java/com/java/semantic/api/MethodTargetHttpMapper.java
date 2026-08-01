@@ -25,6 +25,17 @@ public final class MethodTargetHttpMapper {
                 httpRequest.parameterTypes());
     }
 
+    /** 將已驗證的扁平 HTTP 回應 DTO 還原為組合的領域目標 */
+    public static MethodTarget toDomain(MethodTargetResponse response) {
+        MethodTargetResponse httpResponse = Objects.requireNonNull(response, "response is required");
+        return new MethodTarget(
+                new SourceTypeIdentity(
+                        new JavaTypeIdentity(httpResponse.packageName(), httpResponse.className()),
+                        httpResponse.sourceFile()),
+                httpResponse.methodName(),
+                httpResponse.parameterTypes());
+    }
+
     /** 將組合的領域目標轉換為穩定的扁平 HTTP 回應 */
     public static MethodTargetResponse toResponse(MethodTarget target) {
         MethodTarget domainTarget = Objects.requireNonNull(target, "target is required");

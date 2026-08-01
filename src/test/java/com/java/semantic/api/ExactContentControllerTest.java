@@ -18,6 +18,7 @@ import com.java.semantic.syntax.application.ExactContentSegmentQuery;
 import com.java.semantic.syntax.domain.MapperEvidenceRepresentation;
 import com.java.semantic.syntax.domain.MapperFragmentIdentity;
 import com.java.semantic.syntax.domain.MapperStatementIdentity;
+import com.java.semantic.syntax.domain.MapperStatementKey;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -63,15 +64,13 @@ class ExactContentControllerTest {
                 "findOrders",
                 List.of("java.lang.String"));
     private static final MapperStatementIdentity POSTGRES_STATEMENT = new MapperStatementIdentity(
-            "com.example.OrderMapper",
-            "findOrders",
+            new MapperStatementKey("com.example.OrderMapper", "findOrders"),
             "src/main/resources/mapper/OrderMapper.xml",
             Optional.of("postgres"),
             3,
             MapperEvidenceRepresentation.MAPPER_XML_ELEMENT);
     private static final MapperStatementIdentity ANNOTATION_STATEMENT = new MapperStatementIdentity(
-            "com.example.OrderMapper",
-            "findOrders",
+            new MapperStatementKey("com.example.OrderMapper", "findOrders"),
             "src/main/java/com/example/OrderMapper.java",
             Optional.empty(),
             0,
@@ -141,6 +140,7 @@ class ExactContentControllerTest {
                 .andExpect(jsonPath("$.variants[0].statementIdentity.namespace")
                         .value("com.example.OrderMapper"))
                 .andExpect(jsonPath("$.variants[0].statementIdentity.statementId").value("findOrders"))
+                .andExpect(jsonPath("$.variants[0].statementIdentity.statementKey").doesNotExist())
                 .andExpect(jsonPath("$.variants[0].statementIdentity.resourcePath")
                         .value("src/main/resources/mapper/OrderMapper.xml"))
                 .andExpect(jsonPath("$.variants[0].statementIdentity.databaseId").value("postgres"))

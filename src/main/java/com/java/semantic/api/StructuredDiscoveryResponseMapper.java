@@ -1,6 +1,7 @@
 package com.java.semantic.api;
 
 import com.java.semantic.api.dto.ConceptCandidateResponse;
+import com.java.semantic.api.dto.ConceptCandidateDetailsResponse;
 import com.java.semantic.api.dto.ConceptCoverageResponse;
 import com.java.semantic.api.dto.ConceptEvidenceResponse;
 import com.java.semantic.api.dto.ConceptIssueSummaryResponse;
@@ -10,8 +11,8 @@ import com.java.semantic.api.dto.DiscoverTypeMembersResponse;
 import com.java.semantic.api.dto.DiscoveryFollowUpResponse;
 import com.java.semantic.api.dto.DiscoveryFollowUpResponse.AnalyzeCallGraphRequestResponse;
 import com.java.semantic.api.dto.DiscoveryFollowUpResponse.ApiResponse;
-import com.java.semantic.api.dto.DiscoveryFollowUpResponse.ConceptTermResponse;
-import com.java.semantic.api.dto.DiscoveryFollowUpResponse.DiscoverConceptsRequestResponse;
+import com.java.semantic.api.dto.DiscoveryFollowUpResponse.ConceptSearchPageRequestResponse;
+import com.java.semantic.api.dto.DiscoveryFollowUpResponse.ConceptSearchTermResponse;
 import com.java.semantic.api.dto.DiscoveryFollowUpResponse.DiscoverMethodImplementationsRequestResponse;
 import com.java.semantic.api.dto.DiscoveryFollowUpResponse.DiscoverTypeMembersRequestResponse;
 import com.java.semantic.api.dto.DiscoveryFollowUpResponse.GetMethodSourceRequestResponse;
@@ -19,53 +20,43 @@ import com.java.semantic.api.dto.DiscoveryFollowUpResponse.GetMapperStatementReq
 import com.java.semantic.api.dto.DiscoveryFollowUpResponse.GetTypeMembersRequestResponse;
 import com.java.semantic.api.dto.DiscoveryFollowUpResponse.RequestResponse;
 import com.java.semantic.api.dto.DiscoveryFollowUpResponse.ResolveSourceSymbolRequestResponse;
+import com.java.semantic.api.dto.DiscoveryFollowUpResponse.ResolveConceptRequestResponse;
 import com.java.semantic.api.dto.DiscoveryFollowUpResponse.SourceSymbolContextResponse;
 import com.java.semantic.api.dto.DiscoveryFollowUpResponse.SourceSymbolMethodContextResponse;
 import com.java.semantic.api.dto.FieldTypeMemberResponse;
-import com.java.semantic.api.dto.MethodTargetResponse;
 import com.java.semantic.api.dto.PositionResponse;
+import com.java.semantic.api.dto.ResolveConceptResponse;
 import com.java.semantic.api.dto.MethodTypeMemberResponse;
 import com.java.semantic.api.dto.MapperMethodCandidateResponse;
 import com.java.semantic.api.dto.MapperStatementMappingResponse;
 import com.java.semantic.api.dto.TypeMemberResponse;
 import com.java.semantic.api.dto.UnavailableDiscoveryFollowUpResponse;
 import com.java.semantic.identity.MethodTarget;
-import com.java.semantic.syntax.application.ConceptCatalogEntry;
-import com.java.semantic.syntax.application.ConceptIdentity;
-import com.java.semantic.syntax.application.ConceptIdentity.AnnotationUsageConceptIdentity;
-import com.java.semantic.syntax.application.ConceptIdentity.ApiRouteConceptIdentity;
-import com.java.semantic.syntax.application.ConceptIdentity.FieldConceptIdentity;
-import com.java.semantic.syntax.application.ConceptIdentity.FieldDeclarationSubjectIdentity;
-import com.java.semantic.syntax.application.ConceptIdentity.MethodConceptIdentity;
-import com.java.semantic.syntax.application.ConceptIdentity.MapperStatementConceptIdentity;
-import com.java.semantic.syntax.application.ConceptIdentity.MapperStatementVariantEvidenceIdentity;
-import com.java.semantic.syntax.application.ConceptIdentity.MqDestinationConceptIdentity;
-import com.java.semantic.syntax.application.ConceptIdentity.ResolvedMethodDeclarationSubjectIdentity;
-import com.java.semantic.syntax.application.ConceptIdentity.ScheduleConceptIdentity;
-import com.java.semantic.syntax.application.ConceptIdentity.TypeConceptIdentity;
-import com.java.semantic.syntax.application.ConceptIdentity.TypeDeclarationSubjectIdentity;
-import com.java.semantic.syntax.application.ConceptIdentity.TypeUsageConceptIdentity;
-import com.java.semantic.syntax.application.ConceptIdentity.UnresolvedMethodDeclarationSubjectIdentity;
-import com.java.semantic.syntax.application.ConceptIssueSummary;
-import com.java.semantic.syntax.application.ConceptKind;
-import com.java.semantic.syntax.application.ConceptPage;
-import com.java.semantic.syntax.application.ConceptSearchQuery;
-import com.java.semantic.syntax.application.ConceptSearchResult;
-import com.java.semantic.syntax.application.ConceptSearchTerm;
+import com.java.semantic.repository.domain.RepositoryId;
+import com.java.semantic.repository.domain.RepositoryRevision;
+import com.java.semantic.syntax.application.concept.ConceptCatalogEntry;
+import com.java.semantic.syntax.application.concept.ConceptIdentity;
+import com.java.semantic.syntax.application.concept.ConceptIdentityOrdering;
+import com.java.semantic.syntax.application.concept.ConceptIssueSummary;
+import com.java.semantic.syntax.application.concept.ConceptKind;
+import com.java.semantic.syntax.application.concept.ConceptPage;
+import com.java.semantic.syntax.application.concept.ConceptSearchQuery;
+import com.java.semantic.syntax.application.concept.ConceptSearchResult;
+import com.java.semantic.syntax.application.concept.ConceptSearchTerm;
+import com.java.semantic.syntax.application.concept.RevisionBoundConceptResolution;
 import com.java.semantic.syntax.application.DiscoveryFollowUp;
 import com.java.semantic.syntax.application.DiscoveryFollowUp.AnalyzeCallGraphRequest;
-import com.java.semantic.syntax.application.DiscoveryFollowUp.ConceptDiscoveryRequest;
-import com.java.semantic.syntax.application.DiscoveryFollowUp.ConceptTermRequest;
 import com.java.semantic.syntax.application.DiscoveryFollowUp.DiscoverMethodImplementationsRequest;
 import com.java.semantic.syntax.application.DiscoveryFollowUp.GetMethodSourceRequest;
 import com.java.semantic.syntax.application.DiscoveryFollowUp.GetMapperStatementRequest;
 import com.java.semantic.syntax.application.DiscoveryFollowUp.GetTypeMembersRequest;
 import com.java.semantic.syntax.application.DiscoveryFollowUp.TypeMembersRequest;
 import com.java.semantic.syntax.application.DiscoveryFollowUp.ResolveSourceSymbolRequest;
+import com.java.semantic.syntax.application.DiscoveryFollowUp.ResolveConceptRequest;
 import com.java.semantic.syntax.application.DiscoveryFollowUpFactory;
 import com.java.semantic.syntax.application.FieldTypeMember;
 import com.java.semantic.syntax.application.MethodTypeMember;
-import com.java.semantic.syntax.application.MapperStatementMethodMapping;
+import com.java.semantic.syntax.application.concept.MapperStatementMethodMapping;
 import com.java.semantic.syntax.application.TypeMember;
 import com.java.semantic.syntax.application.TypeMemberResult;
 import com.java.semantic.syntax.domain.SourceExtractionOutcome;
@@ -94,15 +85,16 @@ public final class StructuredDiscoveryResponseMapper {
 
     private static final String FIX_SOURCE_OR_RETRY = "FIX_SOURCE_OR_RETRY";
 
-    private static final Comparator<ConceptIdentity> EVIDENCE_ORDER = Comparator
-            .comparing(ConceptIdentity::kind)
-            .thenComparing(ConceptIdentity::canonicalOrderKey);
-
     private final DiscoveryFollowUpFactory followUpFactory;
+    private final ConceptIdentityHttpMapper conceptIdentityHttpMapper;
 
-    public StructuredDiscoveryResponseMapper(DiscoveryFollowUpFactory followUpFactory) {
+    public StructuredDiscoveryResponseMapper(
+            DiscoveryFollowUpFactory followUpFactory,
+            ConceptIdentityHttpMapper conceptIdentityHttpMapper) {
         this.followUpFactory = Objects.requireNonNull(
                 followUpFactory, "followUpFactory is required");
+        this.conceptIdentityHttpMapper = Objects.requireNonNull(
+                conceptIdentityHttpMapper, "conceptIdentityHttpMapper is required");
     }
 
     /** 將概念搜尋結果映射為固定版本 HTTP 回應 */
@@ -129,6 +121,19 @@ public final class StructuredDiscoveryResponseMapper {
                 unavailableFollowUps(searchResult));
     }
 
+    /** 將單一精確 typed concept resolve 結果映射為固定版本 HTTP 回應 */
+    public ResolveConceptResponse toResponse(RevisionBoundConceptResolution result) {
+        RevisionBoundConceptResolution resolution = Objects.requireNonNull(result, "result is required");
+        return new ResolveConceptResponse(
+                resolution.repositoryId().value(),
+                resolution.analyzedRevision().value(),
+                candidate(
+                        resolution.repositoryId(),
+                        resolution.analyzedRevision(),
+                        List.of(),
+                        resolution.candidate()));
+    }
+
     /** 將型別成員探索結果映射為帶 discriminator 的固定版本 HTTP 回應 */
     public DiscoverTypeMembersResponse toResponse(TypeMemberResult result) {
         TypeMemberResult memberResult = Objects.requireNonNull(result, "result is required");
@@ -150,29 +155,52 @@ public final class StructuredDiscoveryResponseMapper {
     private ConceptCandidateResponse candidate(
             ConceptSearchResult result,
             ConceptCatalogEntry entry) {
+        return candidate(
+                result.repositoryId(),
+                result.analyzedRevision(),
+                result.normalizedTerms().stream().map(ConceptSearchTerm::value).toList(),
+                entry);
+    }
+
+    private ConceptCandidateResponse candidate(
+            RepositoryId repositoryId,
+            RepositoryRevision revision,
+            List<String> matchedTerms,
+            ConceptCatalogEntry entry) {
         ConceptIdentity identity = entry.identity();
         return new ConceptCandidateResponse(
-                entry.kind().name(),
-                entry.canonicalValue(),
+                conceptIdentityHttpMapper.toResponse(identity),
                 entry.displayValue(),
-                result.normalizedTerms().stream().map(ConceptSearchTerm::value).toList(),
-                entry.packageName(),
-                entry.declaringType(),
+                matchedTerms,
                 entry.authority().name(),
-                subject(identity),
-                target(identity),
-                mapperStatementMapping(result, entry),
+                details(repositoryId, revision, entry),
                 entry.evidence().stream()
-                        .sorted(EVIDENCE_ORDER)
+                        .sorted(ConceptIdentityOrdering.comparator())
                         .map(this::evidence)
                         .toList(),
                 followUpFactory.forConcept(
-                                result.repositoryId(),
-                                result.analyzedRevision(),
+                                repositoryId,
+                                revision,
                                 identity)
                         .stream()
                         .map(this::followUp)
                         .toList());
+    }
+
+    private Optional<ConceptCandidateDetailsResponse> details(
+            RepositoryId repositoryId,
+            RepositoryRevision revision,
+            ConceptCatalogEntry entry) {
+        if (entry.fieldDetails().isPresent()) {
+            return entry.fieldDetails().map(details ->
+                    new ConceptCandidateDetailsResponse.FieldDetailsResponse(
+                            "FIELD",
+                            conceptIdentityHttpMapper.fieldTypeReference(details.declaredType())));
+        }
+        return mapperStatementMapping(repositoryId, revision, entry).map(mapping ->
+                new ConceptCandidateDetailsResponse.MapperStatementDetailsResponse(
+                        "MAPPER_STATEMENT",
+                        mapping));
     }
 
     /**
@@ -180,29 +208,32 @@ public final class StructuredDiscoveryResponseMapper {
      * 歧義時保留全部 complete targets 供 Agent 逐一檢視而不代選
      */
     private Optional<MapperStatementMappingResponse> mapperStatementMapping(
-            ConceptSearchResult result,
+            RepositoryId repositoryId,
+            RepositoryRevision revision,
             ConceptCatalogEntry entry) {
         return entry.mapperStatementMapping().map(mapping -> new MapperStatementMappingResponse(
-                mapping.statementIdentity().namespace(),
-                mapping.statementIdentity().statementId(),
+                mapping.statementIdentity().statementKey().namespace(),
+                mapping.statementIdentity().statementKey().statementId(),
                 mapping.status().name(),
                 mapping.reason().map(Enum::name),
                 mapping.targets().stream()
-                        .map(mappedTarget -> mapperMethodCandidate(result, mapping, mappedTarget))
+                        .map(mappedTarget -> mapperMethodCandidate(
+                                repositoryId, revision, mapping, mappedTarget))
                         .toList()));
     }
 
     private MapperMethodCandidateResponse mapperMethodCandidate(
-            ConceptSearchResult result,
+            RepositoryId repositoryId,
+            RepositoryRevision revision,
             MapperStatementMethodMapping mapping,
             MethodTarget mappedTarget) {
         List<DiscoveryFollowUp> followUps = switch (mapping.status()) {
             case RESOLVED -> followUpFactory.forResolvedMapperStatement(
-                    result.repositoryId(), result.analyzedRevision(), mappedTarget);
+                    repositoryId, revision, mappedTarget);
             case AMBIGUOUS -> followUpFactory.forAmbiguousMapperMethod(
-                    result.repositoryId(), result.analyzedRevision(), mappedTarget);
+                    repositoryId, revision, mappedTarget);
             case UNRESOLVED -> followUpFactory.forAmbiguousMapperMethod(
-                    result.repositoryId(), result.analyzedRevision(), mappedTarget);
+                    repositoryId, revision, mappedTarget);
         };
         return new MapperMethodCandidateResponse(
                 MethodTargetHttpMapper.toResponse(mappedTarget),
@@ -210,86 +241,7 @@ public final class StructuredDiscoveryResponseMapper {
     }
 
     private ConceptEvidenceResponse evidence(ConceptIdentity identity) {
-        if (identity instanceof MapperStatementVariantEvidenceIdentity variantIdentity) {
-            return new ConceptEvidenceResponse(
-                    identity.kind().name(),
-                    subject(identity),
-                    Optional.empty(),
-                    Optional.of(variantIdentity.mapperStatement().resourcePath()),
-                    variantIdentity.mapperStatement().databaseId(),
-                    Optional.of(variantIdentity.mapperStatement().documentOrdinal()),
-                    Optional.of(variantIdentity.mapperStatement().representation().name()));
-        }
-        return new ConceptEvidenceResponse(
-                identity.kind().name(),
-                subject(identity),
-                target(identity),
-                Optional.empty(),
-                Optional.empty(),
-                Optional.empty(),
-                Optional.empty());
-    }
-
-    private Optional<String> subject(ConceptIdentity identity) {
-        return switch (identity) {
-            case TypeConceptIdentity typeIdentity ->
-                    Optional.of(typeIdentity.sourceFile() + "::" + typeIdentity.fullyQualifiedType());
-            case MethodConceptIdentity ignored -> Optional.empty();
-            case FieldConceptIdentity fieldIdentity -> Optional.of(
-                    fieldIdentity.sourceFile() + "::" + fieldIdentity.ownerType()
-                            + "#" + fieldIdentity.fieldName() + ":" + fieldIdentity.declaredType());
-            case AnnotationUsageConceptIdentity annotationIdentity -> Optional.of(
-                    annotationIdentity.sourceFile() + "::"
-                            + annotationIdentity.annotatedDeclaration().displayValue()
-                            + "@" + annotationIdentity.annotationIdentity());
-            case TypeUsageConceptIdentity typeUsageIdentity -> Optional.of(
-                    typeUsageIdentity.sourceFile() + "::"
-                            + typeUsageIdentity.ownerDeclaration().displayValue()
-                            + "[" + typeUsageIdentity.usageLocation().slot().name()
-                            + ":" + typeUsageIdentity.usageLocation().index() + "]"
-                            + ":" + typeUsageIdentity.resolvedType());
-            case ApiRouteConceptIdentity routeIdentity ->
-                    Optional.of(routeIdentity.httpVerb() + " " + routeIdentity.route());
-            case MqDestinationConceptIdentity destinationIdentity ->
-                    Optional.of(destinationIdentity.broker().name() + ":" + destinationIdentity.destination());
-            case ScheduleConceptIdentity scheduleIdentity -> Optional.of(
-                    scheduleIdentity.triggerKind().name() + ":"
-                            + scheduleIdentity.triggerValue().orElse("<unresolved>"));
-            case MapperStatementConceptIdentity mapperIdentity ->
-                    Optional.of(mapperIdentity.namespace() + "#" + mapperIdentity.statementId());
-            case MapperStatementVariantEvidenceIdentity variantIdentity ->
-                    Optional.of(variantIdentity.mapperStatement().namespace() + "#"
-                            + variantIdentity.mapperStatement().statementId());
-        };
-    }
-
-    private Optional<MethodTargetResponse> target(ConceptIdentity identity) {
-        return switch (identity) {
-            case MethodConceptIdentity methodIdentity -> Optional.of(MethodTargetHttpMapper.toResponse(methodIdentity.target()));
-            case ApiRouteConceptIdentity routeIdentity -> Optional.of(MethodTargetHttpMapper.toResponse(routeIdentity.target()));
-            case MqDestinationConceptIdentity destinationIdentity ->
-                    Optional.of(MethodTargetHttpMapper.toResponse(destinationIdentity.target()));
-            case ScheduleConceptIdentity scheduleIdentity -> Optional.of(MethodTargetHttpMapper.toResponse(scheduleIdentity.target()));
-            case AnnotationUsageConceptIdentity annotationIdentity ->
-                    declarationTarget(annotationIdentity.annotatedDeclaration());
-            case TypeUsageConceptIdentity typeUsageIdentity ->
-                    declarationTarget(typeUsageIdentity.ownerDeclaration());
-            case TypeConceptIdentity ignored -> Optional.empty();
-            case FieldConceptIdentity ignored -> Optional.empty();
-            case MapperStatementConceptIdentity ignored -> Optional.empty();
-            case MapperStatementVariantEvidenceIdentity ignored -> Optional.empty();
-        };
-    }
-
-    private Optional<MethodTargetResponse> declarationTarget(
-            ConceptIdentity.DeclarationSubjectIdentity subject) {
-        return switch (subject) {
-            case ResolvedMethodDeclarationSubjectIdentity methodSubject ->
-                    Optional.of(MethodTargetHttpMapper.toResponse(methodSubject.target()));
-            case TypeDeclarationSubjectIdentity ignored -> Optional.empty();
-            case UnresolvedMethodDeclarationSubjectIdentity ignored -> Optional.empty();
-            case FieldDeclarationSubjectIdentity ignored -> Optional.empty();
-        };
+        return new ConceptEvidenceResponse(conceptIdentityHttpMapper.toResponse(identity));
     }
 
     private TypeMemberResponse member(TypeMember member) {
@@ -355,14 +307,14 @@ public final class StructuredDiscoveryResponseMapper {
     }
 
     private DiscoveryFollowUpResponse conceptNextPage(ConceptSearchQuery query) {
-        List<ConceptTermResponse> terms = query.terms().stream()
+        List<ConceptSearchTermResponse> terms = query.terms().stream()
                 .map(this::conceptTerm)
                 .toList();
         List<String> kinds = query.kinds().stream()
                 .sorted(Comparator.comparing(ConceptKind::name))
                 .map(Enum::name)
                 .toList();
-        DiscoverConceptsRequestResponse request = new DiscoverConceptsRequestResponse(
+        ConceptSearchPageRequestResponse request = new ConceptSearchPageRequestResponse(
                 query.repositoryId().value(),
                 query.expectedRevision().value(),
                 "ALL",
@@ -407,15 +359,10 @@ public final class StructuredDiscoveryResponseMapper {
                             implementations.repoId(),
                             implementations.expectedRevision(),
                             MethodTargetHttpMapper.toResponse(implementations.declarationTarget()));
-            case ConceptDiscoveryRequest concepts -> new DiscoverConceptsRequestResponse(
-                    concepts.repoId(),
-                    concepts.expectedRevision(),
-                    concepts.operator(),
-                    concepts.terms().stream().map(this::conceptTerm).toList(),
-                    concepts.kinds().stream().map(Enum::name).toList(),
-                    concepts.packagePrefix(),
-                    concepts.offset(),
-                    concepts.limit());
+            case ResolveConceptRequest concept -> new ResolveConceptRequestResponse(
+                    concept.repoId(),
+                    concept.expectedRevision(),
+                    conceptIdentityHttpMapper.toResponse(concept.identity()));
             case GetTypeMembersRequest members -> new GetTypeMembersRequestResponse(
                     members.repoId(),
                     members.expectedRevision(),
@@ -448,12 +395,8 @@ public final class StructuredDiscoveryResponseMapper {
         };
     }
 
-    private ConceptTermResponse conceptTerm(ConceptSearchTerm term) {
-        return new ConceptTermResponse(term.value(), term.matchMode().name());
-    }
-
-    private ConceptTermResponse conceptTerm(ConceptTermRequest term) {
-        return new ConceptTermResponse(term.value(), term.matchMode().name());
+    private ConceptSearchTermResponse conceptTerm(ConceptSearchTerm term) {
+        return new ConceptSearchTermResponse(term.value(), term.matchMode().name());
     }
 
 }

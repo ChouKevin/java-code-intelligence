@@ -144,12 +144,9 @@ public final class SourceSymbolResolutionApplicationService {
             case SourceSymbolCandidate.Method method -> followUpFactory.forMethod(
                     snapshot.repositoryId(), snapshot.revision(), method.identity());
             case SourceSymbolCandidate.SourceType type -> followUpFactory.forSourceType(
-                    snapshot.repositoryId(), snapshot.revision(), type.identity().sourceFile(),
-                    type.identity().fullyQualifiedName());
-            case SourceSymbolCandidate.VariableLike variable -> followUpFactory.forResolvedFieldType(
-                    snapshot.repositoryId(), snapshot.revision(), variable.resolvedType());
-            case SourceSymbolCandidate.StaticConstant constant -> followUpFactory.forResolvedFieldType(
-                    snapshot.repositoryId(), snapshot.revision(), constant.resolvedType());
+                    snapshot.repositoryId(), snapshot.revision(), type.identity());
+            case SourceSymbolCandidate.VariableLike ignored -> List.of();
+            case SourceSymbolCandidate.StaticConstant ignored -> List.of();
         };
     }
 }

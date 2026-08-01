@@ -4,12 +4,15 @@ import com.java.semantic.api.dto.DiscoverConceptsRequest;
 import com.java.semantic.api.dto.DiscoverConceptsResponse;
 import com.java.semantic.api.dto.DiscoverTypeMembersRequest;
 import com.java.semantic.api.dto.DiscoverTypeMembersResponse;
+import com.java.semantic.api.dto.ResolveConceptRequest;
+import com.java.semantic.api.dto.ResolveConceptResponse;
 import com.java.semantic.repository.domain.RepositoryId;
 import com.java.semantic.repository.domain.RepositoryRevision;
-import com.java.semantic.syntax.application.ConceptDiscoveryApplicationService;
-import com.java.semantic.syntax.application.ConceptKind;
-import com.java.semantic.syntax.application.ConceptSearchQuery;
-import com.java.semantic.syntax.application.ConceptSearchTerm;
+import com.java.semantic.syntax.application.concept.ConceptDiscoveryApplicationService;
+import com.java.semantic.syntax.application.concept.ConceptKind;
+import com.java.semantic.syntax.application.concept.ConceptSearchQuery;
+import com.java.semantic.syntax.application.concept.ConceptSearchTerm;
+import com.java.semantic.syntax.application.concept.ConceptResolveQuery;
 import com.java.semantic.syntax.application.TypeMemberDiscoveryApplicationService;
 import com.java.semantic.syntax.application.TypeMemberKind;
 import com.java.semantic.syntax.application.TypeMemberQuery;
@@ -33,15 +36,19 @@ public final class StructuredDiscoveryController {
     private final ConceptDiscoveryApplicationService conceptService;
     private final TypeMemberDiscoveryApplicationService typeMemberService;
     private final StructuredDiscoveryResponseMapper mapper;
+    private final ConceptIdentityHttpMapper conceptIdentityHttpMapper;
 
     public StructuredDiscoveryController(
             ConceptDiscoveryApplicationService conceptService,
             TypeMemberDiscoveryApplicationService typeMemberService,
-            StructuredDiscoveryResponseMapper mapper) {
+            StructuredDiscoveryResponseMapper mapper,
+            ConceptIdentityHttpMapper conceptIdentityHttpMapper) {
         this.conceptService = Objects.requireNonNull(conceptService, "conceptService is required");
         this.typeMemberService = Objects.requireNonNull(
                 typeMemberService, "typeMemberService is required");
         this.mapper = Objects.requireNonNull(mapper, "mapper is required");
+        this.conceptIdentityHttpMapper = Objects.requireNonNull(
+                conceptIdentityHttpMapper, "conceptIdentityHttpMapper is required");
     }
 
     /** 探索固定儲存庫版本的結構化概念 */
@@ -59,6 +66,17 @@ public final class StructuredDiscoveryController {
                 request.offset(),
                 request.limit());
         return mapper.toResponse(conceptService.search(query));
+    }
+
+    /** 固定儲存庫版本中以精確 typed identity resolve 單一結構化概念 */
+    @PostMapping("/concepts/resolve")
+    public ResolveConceptResponse resolveConcept(
+            @Valid @RequestBody ResolveConceptRequest request) {
+        ConceptResolveQuery query = new ConceptResolveQuery(
+                RepositoryId.of(request.repoId()),
+                new RepositoryRevision(request.expectedRevision()),
+                conceptIdentityHttpMapper.toDomain(request.identity()));
+        return mapper.toResponse(conceptService.resolve(query));
     }
 
     private static Set<ConceptKind> distinctKinds(List<ConceptKind> kinds) {

@@ -31,6 +31,7 @@ import com.java.semantic.syntax.domain.MapperFragmentEvidence;
 import com.java.semantic.syntax.domain.MapperFragmentIdentity;
 import com.java.semantic.syntax.domain.MapperStatementEvidence;
 import com.java.semantic.syntax.domain.MapperStatementIdentity;
+import com.java.semantic.syntax.domain.MapperStatementKey;
 
 import org.springframework.util.CollectionUtils;
 import org.springframework.util.StringUtils;
@@ -179,8 +180,7 @@ class MapperXmlSqlExtractor {
             return Optional.empty();
         }
         MapperStatementIdentity identity = new MapperStatementIdentity(
-                namespace,
-                statementId,
+                new MapperStatementKey(namespace, statementId),
                 resourcePath,
                 optionalAttribute(element, "databaseId"),
                 documentOrdinal,

@@ -47,10 +47,10 @@ public final class MapperEvidenceIndex {
 
     /** 保留同 namespace 與 statement id 的每個合法變體 */
     public List<MapperStatementEvidence> statements(String namespace, String statementId) {
+        MapperStatementKey statementKey = new MapperStatementKey(namespace, statementId);
         List<MapperStatementEvidence> matches = new ArrayList<>();
         for (MapperStatementEvidence evidence : statementsByIdentity.values()) {
-            if (evidence.identity().namespace().equals(namespace)
-                    && evidence.identity().statementId().equals(statementId)) {
+            if (evidence.identity().statementKey().equals(statementKey)) {
                 matches.add(evidence);
             }
         }
@@ -91,7 +91,7 @@ public final class MapperEvidenceIndex {
         if (refId.contains(".")) {
             return (fragment.namespace() + "." + fragment.fragmentId()).equals(refId);
         }
-        return fragment.namespace().equals(statement.namespace())
+        return fragment.namespace().equals(statement.statementKey().namespace())
                 && fragment.fragmentId().equals(refId);
     }
 

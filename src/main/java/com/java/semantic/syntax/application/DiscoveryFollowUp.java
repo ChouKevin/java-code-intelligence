@@ -1,5 +1,6 @@
 package com.java.semantic.syntax.application;
 
+import com.java.semantic.syntax.application.concept.ConceptIdentity;
 import com.java.semantic.identity.MethodTarget;
 import com.java.semantic.identity.RepositoryRelativeSource;
 import com.java.semantic.syntax.domain.SyntaxPosition;
@@ -49,10 +50,10 @@ public record DiscoveryFollowUp(
                 "/v1/discovery/method-implementations",
                 "discoverMethodImplementations",
                 DiscoverMethodImplementationsRequest.class),
-        DISCOVER_CONCEPTS(
-                "/v1/discovery/concepts",
-                "discoverConcepts",
-                ConceptDiscoveryRequest.class),
+        RESOLVE_CONCEPT(
+                "/v1/discovery/concepts/resolve",
+                "resolveConcept",
+                ResolveConceptRequest.class),
         GET_TYPE_MEMBERS(
                 "/v1/discovery/type-members",
                 "discoverTypeMembers",
@@ -103,7 +104,7 @@ public record DiscoveryFollowUp(
             GetMapperStatementRequest,
             AnalyzeCallGraphRequest,
             DiscoverMethodImplementationsRequest,
-            ConceptDiscoveryRequest,
+            ResolveConceptRequest,
             GetTypeMembersRequest,
             TypeMembersRequest,
             ResolveSourceSymbolRequest {
@@ -165,62 +166,16 @@ public record DiscoveryFollowUp(
         }
     }
 
-    /** 概念搜尋 HTTP term 的固定 value 與 matchMode */
-    public record ConceptTermRequest(String value, ConceptMatchMode matchMode) {
-
-        public ConceptTermRequest {
-            value = requiredText(value, "value");
-            matchMode = Objects.requireNonNull(matchMode, "matchMode is required");
-        }
-    }
-
-    /** 已解析欄位型別導向 TYPE canonical exact 搜尋的完整請求 */
-    public record ConceptDiscoveryRequest(
+    /** 精確 typed concept resolve endpoint 的完整請求 */
+    public record ResolveConceptRequest(
             String repoId,
             String expectedRevision,
-            String operator,
-            List<ConceptTermRequest> terms,
-            List<ConceptKind> kinds,
-            Optional<String> packagePrefix,
-            int offset,
-            int limit) implements RequestProjection {
+            ConceptIdentity identity) implements RequestProjection {
 
-        public ConceptDiscoveryRequest {
+        public ResolveConceptRequest {
             repoId = requiredText(repoId, "repoId");
             expectedRevision = requiredText(expectedRevision, "expectedRevision");
-            if (!"ALL".equals(operator)) {
-                throw new IllegalArgumentException("operator must be ALL");
-            }
-            terms = List.copyOf(Objects.requireNonNull(terms, "terms are required"));
-            kinds = List.copyOf(Objects.requireNonNull(kinds, "kinds are required"));
-            packagePrefix = Objects.requireNonNull(packagePrefix, "packagePrefix is required");
-            if (terms.size() < 1 || terms.size() > 4 || kinds.size() < 1 || kinds.size() > 8) {
-                throw new IllegalArgumentException("terms and kinds are required");
-            }
-            if (offset < 0 || limit < 1 || limit > 100) {
-                throw new IllegalArgumentException("concept page is invalid");
-            }
-        }
-
-        /** 保留舊內部 follow-up 建構子；HTTP boundary 僅輸出單一 packagePrefix */
-        public ConceptDiscoveryRequest(
-                String repoId,
-                String expectedRevision,
-                List<ConceptTermRequest> terms,
-                List<ConceptKind> kinds,
-                List<String> packageFilters,
-                int offset,
-                int limit) {
-            this(repoId, expectedRevision, "ALL", terms, kinds, optionalPackagePrefix(packageFilters), offset, limit);
-        }
-
-        private static Optional<String> optionalPackagePrefix(List<String> packageFilters) {
-            List<String> filters = List.copyOf(Objects.requireNonNull(
-                    packageFilters, "packageFilters are required"));
-            if (filters.size() > 1) {
-                throw new IllegalArgumentException("only one packagePrefix is supported");
-            }
-            return filters.stream().findFirst();
+            identity = Objects.requireNonNull(identity, "identity is required");
         }
     }
 

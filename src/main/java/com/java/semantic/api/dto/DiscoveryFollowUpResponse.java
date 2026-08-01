@@ -33,7 +33,8 @@ public record DiscoveryFollowUpResponse(
             GetMapperFragmentSegmentRequestResponse,
             AnalyzeCallGraphRequestResponse,
             DiscoverMethodImplementationsRequestResponse,
-            DiscoverConceptsRequestResponse,
+            ResolveConceptRequestResponse,
+            ConceptSearchPageRequestResponse,
             GetTypeMembersRequestResponse,
             DiscoverTypeMembersRequestResponse,
             ResolveSourceSymbolRequestResponse {
@@ -150,22 +151,35 @@ public record DiscoveryFollowUpResponse(
         }
     }
 
-    /** 概念探索 follow-up 的單一搜尋條件 */
-    public record ConceptTermResponse(@ApiMonitoringField(ApiMonitoringMode.VALUE) String value, @ApiMonitoringField(ApiMonitoringMode.VALUE) String matchMode) {
+    /** 精確 typed concept resolve follow-up 的完整請求 */
+    public record ResolveConceptRequestResponse(
+            @ApiMonitoringField(ApiMonitoringMode.VALUE) String repoId,
+            @ApiMonitoringField(ApiMonitoringMode.VALUE) String expectedRevision,
+            @ApiMonitoringField(ApiMonitoringMode.NESTED) ConceptIdentityResponse identity) implements RequestResponse {
+
+        public ResolveConceptRequestResponse {
+            identity = Objects.requireNonNull(identity, "identity is required");
+        }
     }
 
-    /** 概念探索或概念下一頁後續動作的完整請求 */
-    public record DiscoverConceptsRequestResponse(
+    /** 概念搜尋下一頁 follow-up 的單一搜尋條件 */
+    public record ConceptSearchTermResponse(
+            @ApiMonitoringField(ApiMonitoringMode.VALUE) String value,
+            @ApiMonitoringField(ApiMonitoringMode.VALUE) String matchMode) {
+    }
+
+    /** 保留原始結構化搜尋條件的概念下一頁完整請求 */
+    public record ConceptSearchPageRequestResponse(
             @ApiMonitoringField(ApiMonitoringMode.VALUE) String repoId,
             @ApiMonitoringField(ApiMonitoringMode.VALUE) String expectedRevision,
             @ApiMonitoringField(ApiMonitoringMode.VALUE) String operator,
-            @ApiMonitoringField(ApiMonitoringMode.SIZE) List<ConceptTermResponse> terms,
+            @ApiMonitoringField(ApiMonitoringMode.SIZE) List<ConceptSearchTermResponse> terms,
             @ApiMonitoringField(ApiMonitoringMode.SIZE) List<String> kinds,
             @ApiMonitoringField(ApiMonitoringMode.VALUE) Optional<String> packagePrefix,
             @ApiMonitoringField(ApiMonitoringMode.VALUE) int offset,
             @ApiMonitoringField(ApiMonitoringMode.VALUE) int limit) implements RequestResponse {
 
-        public DiscoverConceptsRequestResponse {
+        public ConceptSearchPageRequestResponse {
             terms = List.copyOf(Objects.requireNonNull(terms, "terms are required"));
             kinds = List.copyOf(Objects.requireNonNull(kinds, "kinds are required"));
             packagePrefix = Objects.requireNonNull(packagePrefix, "packagePrefix is required");

@@ -5,12 +5,13 @@ import com.java.semantic.api.dto.MethodTargetResponse;
 import com.java.semantic.repository.application.RepositoryApplicationService;
 import com.java.semantic.repository.domain.RepositoryId;
 import com.java.semantic.api.monitoring.ApiMonitoringField;
-import com.java.semantic.syntax.application.ConceptDiscoveryApplicationService;
+import com.java.semantic.syntax.application.concept.ConceptDiscoveryApplicationService;
 import com.java.semantic.syntax.application.ExactContentApplicationService;
 import com.java.semantic.syntax.application.SourceSymbolResolutionApplicationService;
 import com.java.semantic.syntax.application.TypeMemberDiscoveryApplicationService;
 import com.tngtech.archunit.core.domain.JavaClass;
 import com.tngtech.archunit.core.domain.JavaClasses;
+import com.tngtech.archunit.core.domain.Dependency;
 import com.tngtech.archunit.base.DescribedPredicate;
 import com.tngtech.archunit.core.importer.ClassFileImporter;
 import com.tngtech.archunit.core.importer.ImportOption;
@@ -32,6 +33,7 @@ import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.classes;
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
 import static org.assertj.core.api.Assertions.assertThat;
 
+/** 驗證 Java Semantic Service 的分層依賴與 HTTP 合約邊界 */
 class ArchitectureTest {
 
     private static final String SYNTAX_APPLICATION_PACKAGE = "com.java.semantic.syntax.application";
@@ -228,6 +230,36 @@ class ArchitectureTest {
                 .as("syntax-domain values must remain free of adapter, HTTP, JSON, and Spring dependencies")
                 .allowEmptyShould(false)
                 .check(classes);
+    }
+
+    @Test
+    void should_keep_concept_discovery_free_of_http_runtime_adapters_and_sibling_services() {
+        noClasses()
+                .that().resideInAPackage("..syntax.application.concept..")
+                .should().dependOnClassesThat().resideInAnyPackage(
+                        "..api..",
+                        "com.fasterxml.jackson..",
+                        "org.springframework.web..",
+                        "org.springdoc..",
+                        "io.swagger..",
+                        "..callgraph..",
+                        "..semantic.adapter..",
+                        "..syntax.adapter.jdt..")
+                .as("concept discovery composes syntax and repository contracts without HTTP, mappers, or runtime adapters")
+                .allowEmptyShould(false)
+                .check(classes);
+
+        List<String> siblingApplicationDependencies = classes.stream()
+                .filter(javaClass -> javaClass.getPackageName()
+                        .startsWith("com.java.semantic.syntax.application.concept"))
+                .flatMap(javaClass -> javaClass.getDirectDependenciesFromSelf().stream())
+                .map(Dependency::getTargetClass)
+                .filter(target -> target.getPackageName().startsWith("com.java.semantic.syntax.application"))
+                .filter(target -> !target.getPackageName()
+                        .startsWith("com.java.semantic.syntax.application.concept"))
+                .map(JavaClass::getName)
+                .toList();
+        assertThat(siblingApplicationDependencies).isEmpty();
     }
 
     @Test

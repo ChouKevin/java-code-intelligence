@@ -1,6 +1,7 @@
 package com.java.semantic.syntax.adapter.jdt;
 
 import java.io.IOException;
+import java.lang.reflect.RecordComponent;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
@@ -11,6 +12,7 @@ import com.java.semantic.syntax.domain.MapperEvidenceRepresentation;
 import com.java.semantic.syntax.domain.MapperFragmentIdentity;
 import com.java.semantic.syntax.domain.MapperStatementEvidence;
 import com.java.semantic.syntax.domain.MapperStatementIdentity;
+import com.java.semantic.syntax.domain.MapperStatementKey;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -104,23 +106,31 @@ class MapperXmlSqlExtractorTest {
 
         MapperXmlSqlExtractor.Extraction extraction = extractor.extract(repositoryRoot, List.of(resourceRoot));
         MapperEvidenceIndex evidenceIndex = extraction.evidenceIndex();
+        assertThat(MapperStatementKey.class.getRecordComponents())
+                .extracting(RecordComponent::getName)
+                .containsExactly("namespace", "statementId");
+        assertThat(MapperStatementIdentity.class.getRecordComponents())
+                .extracting(RecordComponent::getName)
+                .containsExactly(
+                        "statementKey",
+                        "resourcePath",
+                        "databaseId",
+                        "documentOrdinal",
+                        "representation");
         MapperStatementIdentity postgresIdentity = new MapperStatementIdentity(
-                "com.example.OrderMapper",
-                "findById",
+                new MapperStatementKey("com.example.OrderMapper", "findById"),
                 "src/main/resources/mapper/OrderMapper.xml",
                 Optional.of("postgres"),
                 0,
                 MapperEvidenceRepresentation.MAPPER_XML_ELEMENT);
         MapperStatementIdentity oracleIdentity = new MapperStatementIdentity(
-                "com.example.OrderMapper",
-                "findById",
+                new MapperStatementKey("com.example.OrderMapper", "findById"),
                 "src/main/resources/mapper/OrderMapper.xml",
                 Optional.of("oracle"),
                 1,
                 MapperEvidenceRepresentation.MAPPER_XML_ELEMENT);
         MapperStatementIdentity dynamicIdentity = new MapperStatementIdentity(
-                "com.example.OrderMapper",
-                "findDynamic",
+                new MapperStatementKey("com.example.OrderMapper", "findDynamic"),
                 "src/main/resources/mapper/OrderMapper.xml",
                 Optional.empty(),
                 3,

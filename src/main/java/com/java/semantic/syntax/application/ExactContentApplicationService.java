@@ -1,5 +1,8 @@
 package com.java.semantic.syntax.application;
 
+import com.java.semantic.syntax.application.concept.MapperConceptIdentity.MapperStatementConceptIdentity;
+import com.java.semantic.syntax.application.concept.MapperStatementMethodMapping;
+import com.java.semantic.syntax.domain.MapperStatementKey;
 import com.java.semantic.config.ExactContentProperties;
 import com.java.semantic.identity.MethodTarget;
 import com.java.semantic.repository.application.RepositoryApplicationService;
@@ -152,7 +155,8 @@ public final class ExactContentApplicationService {
                 .findFirst()
                 .orElseThrow(() -> new SemanticTargetNotFoundException(target));
         MapperStatementMethodMapping mapping = MapperStatementMethodMapping.fromSyntax(
-                new ConceptIdentity.MapperStatementConceptIdentity(namespace, resolvedTarget.methodName()), syntax);
+                new MapperStatementConceptIdentity(
+                        new MapperStatementKey(namespace, resolvedTarget.methodName())), syntax);
         if (mapping.status() != MapperStatementMethodMapping.Status.RESOLVED
                 || !mapping.targets().getFirst().equals(resolvedTarget)) {
             throw new SemanticTargetNotFoundException(target);

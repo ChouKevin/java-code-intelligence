@@ -17,17 +17,18 @@ import com.java.semantic.semantic.application.SemanticAnalysisApplicationService
 import com.java.semantic.semantic.domain.JavaSemanticService;
 import com.java.semantic.syntax.domain.CanonicalMethodDeclarationResolver;
 import com.java.semantic.syntax.domain.SyntaxExtractionService;
-import com.java.semantic.syntax.application.ConceptDiscoveryApplicationService;
-import com.java.semantic.syntax.application.ConceptSearchMatcher;
-import com.java.semantic.syntax.application.ConceptSearchTokenizer;
-import com.java.semantic.syntax.application.DeclarationConceptProvider;
+import com.java.semantic.syntax.application.concept.ConceptDiscoveryApplicationService;
+import com.java.semantic.syntax.application.concept.ConceptSearchDocumentProjector;
+import com.java.semantic.syntax.application.concept.ConceptSearchMatcher;
+import com.java.semantic.syntax.application.concept.ConceptSearchTokenizer;
+import com.java.semantic.syntax.application.concept.DeclarationConceptProvider;
 import com.java.semantic.syntax.application.DiscoveryFollowUpFactory;
-import com.java.semantic.syntax.application.EntryPointConceptProvider;
+import com.java.semantic.syntax.application.concept.EntryPointConceptProvider;
 import com.java.semantic.syntax.application.ExactContentApplicationService;
-import com.java.semantic.syntax.application.MapperStatementConceptProvider;
-import com.java.semantic.syntax.application.StructuredConceptCatalogProjector;
+import com.java.semantic.syntax.application.concept.MapperStatementConceptProvider;
+import com.java.semantic.syntax.application.concept.StructuredConceptCatalogProjector;
 import com.java.semantic.syntax.application.TypeMemberDiscoveryApplicationService;
-import com.java.semantic.syntax.application.TypeUsageConceptProvider;
+import com.java.semantic.syntax.application.concept.TypeUsageConceptProvider;
 import com.java.semantic.syntax.application.SourceSymbolResolutionApplicationService;
 import com.java.semantic.syntax.application.SourceSymbolResolver;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
@@ -56,6 +57,12 @@ public class SemanticAnalysisConfiguration {
     @ConditionalOnBean({RepositoryApplicationService.class, SyntaxExtractionService.class})
     public ConceptSearchMatcher conceptSearchMatcher() {
         return new ConceptSearchMatcher();
+    }
+
+    @Bean
+    @ConditionalOnBean({RepositoryApplicationService.class, SyntaxExtractionService.class})
+    public ConceptSearchDocumentProjector conceptSearchDocumentProjector() {
+        return new ConceptSearchDocumentProjector();
     }
 
     @Bean
@@ -102,11 +109,13 @@ public class SemanticAnalysisConfiguration {
             RepositoryApplicationService repositoryApplicationService,
             SyntaxExtractionService syntaxExtractionService,
             StructuredConceptCatalogProjector structuredConceptCatalogProjector,
+            ConceptSearchDocumentProjector conceptSearchDocumentProjector,
             ConceptSearchMatcher conceptSearchMatcher) {
         return new ConceptDiscoveryApplicationService(
                 repositoryApplicationService,
                 syntaxExtractionService,
                 structuredConceptCatalogProjector,
+                conceptSearchDocumentProjector,
                 conceptSearchMatcher);
     }
 

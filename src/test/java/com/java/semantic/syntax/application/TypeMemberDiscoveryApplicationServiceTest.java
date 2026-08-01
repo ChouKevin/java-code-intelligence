@@ -1,4 +1,7 @@
 package com.java.semantic.syntax.application;
+
+import com.java.semantic.syntax.application.concept.ConceptPage;
+import com.java.semantic.syntax.application.concept.DeclarationConceptIdentity.TypeConceptIdentity;
 import com.java.semantic.syntax.domain.SourceTypeMetadataFixture;
 
 import com.java.semantic.identity.JavaTypeIdentity;
@@ -9,7 +12,6 @@ import com.java.semantic.repository.domain.RepositoryId;
 import com.java.semantic.repository.domain.RepositoryRevision;
 import com.java.semantic.repository.domain.RepositorySnapshot;
 import com.java.semantic.syntax.application.DiscoveryFollowUp.AnalyzeCallGraphRequest;
-import com.java.semantic.syntax.application.DiscoveryFollowUp.ConceptDiscoveryRequest;
 import com.java.semantic.syntax.application.DiscoveryFollowUp.DiscoverMethodImplementationsRequest;
 import com.java.semantic.syntax.application.DiscoveryFollowUp.GetMethodSourceRequest;
 import com.java.semantic.syntax.application.DiscoveryFollowUp.Operation;
@@ -61,6 +63,11 @@ class TypeMemberDiscoveryApplicationServiceTest {
     private static final String DUPLICATE_SOURCE_FILE =
             "module-b/src/main/java/com/acme/order/OrderService.java";
     private static final String TYPE_NAME = "com.acme.order.OrderService";
+    private static final String REFERENCED_SOURCE_FILE =
+            "module-a/src/main/java/com/acme/order/Order.java";
+    private static final String DUPLICATE_REFERENCED_SOURCE_FILE =
+            "module-b/src/main/java/com/acme/order/Order.java";
+    private static final String REFERENCED_TYPE_NAME = "com.acme.order.Order";
 
     @Mock
     private RepositoryApplicationService repositoryApplicationService;
@@ -162,19 +169,7 @@ class TypeMemberDiscoveryApplicationServiceTest {
         assertThat(fields.getFirst().resolvedType()).contains("com.acme.type.AlphaType");
         assertThat(fields.getFirst().annotations()).containsExactly("Autowired");
         assertThat(fields.getFirst().limitations()).containsExactly(TypeMemberLimitation.FIELD_USAGE_NOT_INDEXED);
-        assertThat(fields.getFirst().availableFollowUps()).singleElement()
-                .satisfies(followUp -> {
-                    assertThat(followUp.operation()).isEqualTo(Operation.DISCOVER_CONCEPTS);
-                    assertThat(followUp.request()).isEqualTo(new ConceptDiscoveryRequest(
-                            REPOSITORY_ID.value(),
-                            REVISION.value(),
-                            List.of(new DiscoveryFollowUp.ConceptTermRequest(
-                                    "com.acme.type.AlphaType", ConceptMatchMode.CANONICAL_EXACT)),
-                            List.of(ConceptKind.TYPE),
-                            List.of(),
-                            0,
-                            50));
-                });
+        assertThat(fields.getFirst().availableFollowUps()).isEmpty();
         assertThat(fields.get(1).resolvedType()).isEmpty();
         assertThat(fields.get(1).availableFollowUps()).isEmpty();
 
@@ -279,18 +274,75 @@ class TypeMemberDiscoveryApplicationServiceTest {
                 field -> {
                     assertThat(field.writtenType()).isEqualTo("Order[][]");
                     assertThat(field.resolvedType()).contains("com.acme.order.Order[][]");
-                    assertThat(field.availableFollowUps()).singleElement()
-                            .satisfies(followUp -> assertThat(followUp.request()).isEqualTo(
-                                    new ConceptDiscoveryRequest(
-                                            REPOSITORY_ID.value(),
-                                            REVISION.value(),
-                                            List.of(new DiscoveryFollowUp.ConceptTermRequest(
-                                                    "com.acme.order.Order[][]",
-                                                    ConceptMatchMode.CANONICAL_EXACT)),
-                                            List.of(ConceptKind.TYPE),
-                                            List.of(),
-                                            0,
-                                            50)));
+                    assertThat(field.availableFollowUps()).isEmpty();
+                });
+    }
+
+    @Test
+    void should_offer_an_exact_concept_resolve_follow_up_for_a_uniquely_declared_field_type() {
+        RepositorySnapshot snapshot = new RepositorySnapshot(REPOSITORY_ID, REPOSITORY_ROOT, REVISION);
+        TypeMemberQuery query = new TypeMemberQuery(
+                REPOSITORY_ID,
+                REVISION,
+                SOURCE_FILE,
+                TYPE_NAME,
+                Set.of(TypeMemberKind.FIELD),
+                Optional.empty(),
+                0,
+                10);
+        delegateSnapshot(snapshot);
+        when(syntaxExtractionService.extract(REPOSITORY_ROOT)).thenReturn(new RepositorySyntax(
+                List.of(),
+                List.of(arrayMetadata(), referencedOrderMetadata(REFERENCED_SOURCE_FILE)),
+                List.of()));
+
+        TypeMemberResult result = service.discover(query);
+
+        assertThat(result.members()).singleElement().isInstanceOfSatisfying(
+                FieldTypeMember.class,
+                field -> {
+                    assertThat(field.resolvedType()).contains("com.acme.order.Order[][]");
+                    assertThat(field.availableFollowUps()).singleElement().satisfies(followUp -> {
+                        assertThat(followUp.operation()).isEqualTo(Operation.RESOLVE_CONCEPT);
+                        assertThat(followUp.request()).isEqualTo(new DiscoveryFollowUp.ResolveConceptRequest(
+                                REPOSITORY_ID.value(),
+                                REVISION.value(),
+                                new TypeConceptIdentity(new SourceTypeIdentity(
+                                        new JavaTypeIdentity("com.acme.order", "Order"),
+                                        REFERENCED_SOURCE_FILE))));
+                    });
+                });
+    }
+
+    @Test
+    void should_not_offer_an_exact_concept_resolve_follow_up_for_an_ambiguously_declared_field_type() {
+        RepositorySnapshot snapshot = new RepositorySnapshot(REPOSITORY_ID, REPOSITORY_ROOT, REVISION);
+        TypeMemberQuery query = new TypeMemberQuery(
+                REPOSITORY_ID,
+                REVISION,
+                SOURCE_FILE,
+                TYPE_NAME,
+                Set.of(TypeMemberKind.FIELD),
+                Optional.empty(),
+                0,
+                10);
+        delegateSnapshot(snapshot);
+        when(syntaxExtractionService.extract(REPOSITORY_ROOT)).thenReturn(new RepositorySyntax(
+                List.of(),
+                List.of(
+                        arrayMetadata(),
+                        referencedOrderMetadata(REFERENCED_SOURCE_FILE),
+                        referencedOrderMetadata(DUPLICATE_REFERENCED_SOURCE_FILE)),
+                List.of()));
+
+        TypeMemberResult result = service.discover(query);
+
+        assertThat(result.members()).singleElement().isInstanceOfSatisfying(
+                FieldTypeMember.class,
+                field -> {
+                    assertThat(field.writtenType()).isEqualTo("Order[][]");
+                    assertThat(field.resolvedType()).contains("com.acme.order.Order[][]");
+                    assertThat(field.availableFollowUps()).isEmpty();
                 });
     }
 
@@ -395,6 +447,29 @@ class TypeMemberDiscoveryApplicationServiceTest {
                 List.of(),
                 List.of(),
                 List.of(field),
+                List.of(),
+                false,
+                false,
+                List.of(),
+                range(),
+                source(),
+                false,
+                List.of());
+    }
+
+    private static SourceTypeMetadata referencedOrderMetadata(String sourceFile) {
+        return SourceTypeMetadataFixture.sourceType(
+                "Order",
+                "com.acme.order",
+                REFERENCED_TYPE_NAME,
+                sourceFile,
+                SourceTypeKind.CLASS,
+                false,
+                List.of(),
+                List.of(),
+                List.of(),
+                List.of(),
+                List.of(),
                 List.of(),
                 false,
                 false,

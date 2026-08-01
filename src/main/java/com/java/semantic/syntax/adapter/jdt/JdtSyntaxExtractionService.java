@@ -13,6 +13,7 @@ import com.java.semantic.syntax.domain.MapperEvidenceIndex;
 import com.java.semantic.syntax.domain.MapperEvidenceRepresentation;
 import com.java.semantic.syntax.domain.MapperStatementEvidence;
 import com.java.semantic.syntax.domain.MapperStatementIdentity;
+import com.java.semantic.syntax.domain.MapperStatementKey;
 import com.java.semantic.syntax.domain.RepositorySyntax;
 import com.java.semantic.syntax.domain.SourceExtractionOutcome;
 import com.java.semantic.syntax.domain.SyntaxExtractionException;
@@ -114,8 +115,9 @@ public class JdtSyntaxExtractionService implements SyntaxExtractionService {
                     continue;
                 }
                 MapperStatementIdentity identity = new MapperStatementIdentity(
-                        metadata.declaration().identity().fullyQualifiedName(),
-                        method.name(),
+                        new MapperStatementKey(
+                                metadata.declaration().identity().fullyQualifiedName(),
+                                method.name()),
                         method.analysisTarget().target().map(target -> target.sourceFile())
                                 .orElse(metadata.declaration().identity().sourceFile()),
                         Optional.empty(),

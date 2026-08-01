@@ -16,7 +16,7 @@ import com.java.semantic.api.dto.OutgoingCallGraphResponse;
 import com.java.semantic.api.dto.IncomingCallGraphResponse;
 import com.java.semantic.api.dto.PositionResponse;
 import com.java.semantic.api.dto.SourceRangeResponse;
-import com.java.semantic.syntax.application.ConceptKind;
+import com.java.semantic.syntax.application.concept.ConceptKind;
 import jakarta.validation.ConstraintViolation;
 import jakarta.validation.Validation;
 import jakarta.validation.Validator;
@@ -40,6 +40,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -85,6 +86,7 @@ class OpenApiContractTest {
                 "/v1/discovery/method-implementations",
                 "/v1/discovery/source-symbols/resolve",
                 "/v1/discovery/concepts",
+                "/v1/discovery/concepts/resolve",
                 "/v1/discovery/type-members",
                 "/v1/discovery/method-source",
                 "/v1/discovery/method-source-segment",
@@ -170,7 +172,41 @@ class OpenApiContractTest {
                 .doesNotContainKey("initializerSource");
 
         assertThat(list(schema(schemas, "DiscoveryFollowUpRequestResponse").get("oneOf")))
-                .contains(Map.of("$ref", "#/components/schemas/ResolveSourceSymbolRequestResponse"));
+                .contains(
+                        Map.of("$ref", "#/components/schemas/ResolveSourceSymbolRequestResponse"),
+                        Map.of("$ref", "#/components/schemas/ResolveConceptRequestResponse"));
+    }
+
+    @Test
+    void should_describe_exact_typed_concept_resolution_without_search_parameters() {
+        Map<String, Object> paths = map(document.get("paths"));
+        Map<String, Object> schemas = schemas();
+        Map<String, Object> operation = operation(paths, "/v1/discovery/concepts/resolve", "post");
+
+        assertThat(operation.get("operationId")).isEqualTo("resolveConcept");
+        assertRequiredRequestBody(operation, "#/components/schemas/ResolveConceptRequest");
+        assertResponseCodes(operation, "200", "400", "401", "403", "404", "409", "500");
+        assertThat(map(map(operation.get("responses")).get("200")))
+                .isEqualTo(Map.of("$ref", "#/components/responses/ConceptResolution"));
+
+        Map<String, Object> request = schema(schemas, "ResolveConceptRequest");
+        assertClosedObject(request);
+        assertExactPropertiesAndRequired(request, "repoId", "expectedRevision", "identity");
+        assertThat(schema(properties(request), "expectedRevision")).containsEntry("pattern", REVISION_PATTERN);
+        assertThat(schema(properties(request), "identity"))
+                .isEqualTo(Map.of("$ref", "#/components/schemas/ConceptIdentityResponse"));
+
+        Map<String, Object> response = schema(schemas, "ResolveConceptResponse");
+        assertClosedObject(response);
+        assertExactPropertiesAndRequired(response, "repoId", "analyzedRevision", "candidate");
+        assertThat(schema(properties(response), "candidate"))
+                .isEqualTo(Map.of("$ref", "#/components/schemas/ConceptCandidateResponse"));
+        assertThat(schema(properties(response), "analyzedRevision"))
+                .containsEntry("pattern", REVISION_PATTERN);
+
+        Map<String, Object> fieldIdentity = schema(schemas, "FieldConceptIdentityResponse");
+        assertExactPropertiesAndRequired(
+                fieldIdentity, "kind", "sourceFile", "ownerPackageName", "ownerClassName", "fieldName");
     }
 
     @Test
@@ -219,7 +255,7 @@ class OpenApiContractTest {
                 .containsExactlyElementsOf(runtimeConceptKinds)
                 .contains("MAPPER_STATEMENT");
         assertThat(list(schema(schemas, "ConceptMatchMode").get("enum")))
-                .containsExactly("TOKEN_EXACT", "TOKEN_PREFIX", "CANONICAL_EXACT");
+                .containsExactly("TOKEN_EXACT", "TOKEN_PREFIX");
 
         Map<String, Object> response = schema(schemas, "DiscoverConceptsResponse");
         assertClosedObject(response);
@@ -236,16 +272,18 @@ class OpenApiContractTest {
         Map<String, Object> candidate = schema(schemas, "ConceptCandidateResponse");
         assertClosedObject(candidate);
         assertExactProperties(candidate,
-                "kind", "canonicalValue", "displayValue", "matchedTerms", "packageName", "declaringType", "authority",
-                "subject", "target", "mapperStatementMapping", "evidence", "availableFollowUps");
+                "identity", "displayValue", "matchedTerms", "authority", "details", "evidence", "availableFollowUps");
         assertThat(required(candidate)).containsExactlyInAnyOrder(
-                "kind", "canonicalValue", "displayValue", "matchedTerms", "packageName", "authority", "evidence", "availableFollowUps");
-        assertThat(schema(properties(candidate), "kind"))
-                .isEqualTo(Map.of("$ref", "#/components/schemas/ConceptKind"));
+                "identity", "displayValue", "matchedTerms", "authority", "evidence", "availableFollowUps");
+        assertThat(schema(properties(candidate), "identity"))
+                .isEqualTo(Map.of("$ref", "#/components/schemas/ConceptIdentityResponse"));
+        assertThat(schema(properties(candidate), "details"))
+                .isEqualTo(Map.of("$ref", "#/components/schemas/ConceptCandidateDetailsResponse"));
         assertThat(schema(schema(properties(candidate), "availableFollowUps"), "items"))
                 .isEqualTo(Map.of("$ref", "#/components/schemas/ConceptCandidateFollowUpResponse"));
-        assertThat(schema(properties(candidate), "mapperStatementMapping"))
-                .isEqualTo(Map.of("$ref", "#/components/schemas/MapperStatementMappingResponse"));
+
+        assertClosedConceptIdentitySchemas(schemas);
+        assertClosedFieldTypeReferenceSchemas(schemas);
 
         Map<String, Object> mapperMapping = schema(schemas, "MapperStatementMappingResponse");
         assertThat(mapperMapping).containsOnlyKeys("description", "oneOf", "discriminator");
@@ -298,11 +336,9 @@ class OpenApiContractTest {
 
         Map<String, Object> evidence = schema(schemas, "ConceptEvidenceResponse");
         assertClosedObject(evidence);
-        assertExactProperties(evidence,
-                "kind", "subject", "target", "resourcePath", "databaseId", "documentOrdinal", "representation");
-        assertThat(required(evidence)).containsExactly("kind");
-        assertThat(list(schema(properties(evidence), "representation").get("enum")))
-                .containsExactly("MAPPER_XML_ELEMENT", "ANNOTATION_SQL_TEXT");
+        assertExactPropertiesAndRequired(evidence, "identity");
+        assertThat(schema(properties(evidence), "identity"))
+                .isEqualTo(Map.of("$ref", "#/components/schemas/ConceptIdentityResponse"));
 
         assertPageCoverageAndFollowUpSchemas(schemas);
     }
@@ -906,7 +942,7 @@ class OpenApiContractTest {
 
         assertThat(schemas.keySet()).noneMatch(name -> name.matches(".*(Flattened|Recursive|Cursor|Session|AnalysisStatus).*"));
         assertThat(schemas.keySet().stream().filter(name -> name.contains("Page")).toList())
-                .containsExactly("ConceptPageResponse", "CandidatePageResponse");
+                .containsExactly("ConceptPageResponse", "ConceptSearchPageRequestResponse", "CandidatePageResponse");
     }
 
     @Test
@@ -1444,7 +1480,7 @@ class OpenApiContractTest {
         assertExactPropertiesAndRequired(candidateFollowUp, "operation", "api", "request");
         assertThat(list(schema(properties(candidateFollowUp), "operation").get("enum"))).containsExactly(
                 "GET_METHOD_SOURCE", "GET_METHOD_SQL", "ANALYZE_OUTGOING_CALL_GRAPH", "ANALYZE_INCOMING_CALL_GRAPH",
-                "DISCOVER_METHOD_IMPLEMENTATIONS", "DISCOVER_CONCEPTS", "GET_TYPE_MEMBERS", "GET_NEXT_PAGE");
+                "DISCOVER_METHOD_IMPLEMENTATIONS", "RESOLVE_CONCEPT", "GET_TYPE_MEMBERS", "GET_NEXT_PAGE");
         assertThat(schema(properties(candidateFollowUp), "request"))
                 .isEqualTo(Map.of("$ref", "#/components/schemas/ConceptCandidateFollowUpRequestResponse"));
 
@@ -1459,7 +1495,7 @@ class OpenApiContractTest {
                 "GET_METHOD_SQL_SEGMENT",
                 "GET_MAPPER_FRAGMENT_SEGMENT",
                 "ANALYZE_OUTGOING_CALL_GRAPH", "ANALYZE_INCOMING_CALL_GRAPH",
-                "DISCOVER_METHOD_IMPLEMENTATIONS", "DISCOVER_CONCEPTS", "GET_TYPE_MEMBERS", "GET_NEXT_PAGE",
+                "DISCOVER_METHOD_IMPLEMENTATIONS", "RESOLVE_CONCEPT", "GET_TYPE_MEMBERS", "GET_NEXT_PAGE",
                 "RESOLVE_SOURCE_SYMBOL");
         assertThat(schema(properties(followUp), "api"))
                 .isEqualTo(Map.of("$ref", "#/components/schemas/DiscoveryFollowUpApiResponse"));
@@ -1494,9 +1530,11 @@ class OpenApiContractTest {
         assertClosedFollowUpRequest(schemas, "AnalyzeCallGraphRequestResponse", "repoId", "expectedRevision", "depth", "target");
         assertClosedFollowUpRequest(schemas, "DiscoverMethodImplementationsRequestResponse",
                 "repoId", "expectedRevision", "declarationTarget");
-        assertClosedFollowUpRequest(schemas, "DiscoverConceptsRequestResponse",
+        assertClosedFollowUpRequest(schemas, "ResolveConceptRequestResponse",
+                "repoId", "expectedRevision", "identity");
+        assertClosedFollowUpRequest(schemas, "ConceptSearchPageRequestResponse",
                 "operator", "repoId", "expectedRevision", "terms", "kinds", "packagePrefix", "offset", "limit");
-        assertThat(schema(properties(schema(schemas, "DiscoverConceptsRequestResponse")), "kinds"))
+        assertThat(schema(properties(schema(schemas, "ConceptSearchPageRequestResponse")), "kinds"))
                 .contains(entry("minItems", 1), entry("uniqueItems", Boolean.TRUE))
                 .doesNotContainKey("maxItems");
         assertClosedFollowUpRequest(schemas, "GetTypeMembersRequestResponse",
@@ -1568,6 +1606,149 @@ class OpenApiContractTest {
         assertThat(list(schema(properties(apiValueConstraints), "path").get("enum"))).containsExactly(path);
         assertThat(list(schema(properties(apiValueConstraints), "operationId").get("enum")))
                 .containsExactly(operationId);
+    }
+
+    private void assertClosedConceptIdentitySchemas(Map<String, Object> schemas) {
+        assertDiscriminatedUnion(
+                schemas,
+                "ConceptIdentityResponse",
+                "kind",
+                Map.of(
+                        "TYPE", "TypeConceptIdentityResponse",
+                        "METHOD", "MethodConceptIdentityResponse",
+                        "FIELD", "FieldConceptIdentityResponse",
+                        "ANNOTATION_USAGE", "AnnotationUsageConceptIdentityResponse",
+                        "TYPE_USAGE", "TypeUsageConceptIdentityResponse",
+                        "API_ROUTE", "ApiRouteConceptIdentityResponse",
+                        "MQ_DESTINATION", "MqDestinationConceptIdentityResponse",
+                        "SCHEDULE", "ScheduleConceptIdentityResponse",
+                        "MAPPER_STATEMENT", "MapperStatementConceptIdentityResponse",
+                        "MAPPER_STATEMENT_VARIANT", "MapperStatementVariantConceptIdentityResponse"));
+        assertDiscriminatedUnion(
+                schemas,
+                "ConceptCandidateDetailsResponse",
+                "kind",
+                Map.of(
+                        "FIELD", "FieldDetailsResponse",
+                        "MAPPER_STATEMENT", "MapperStatementDetailsResponse"));
+        assertDiscriminatedUnion(
+                schemas,
+                "DeclarationSubjectResponse",
+                "kind",
+                Map.of(
+                        "TYPE", "TypeDeclarationSubjectResponse",
+                        "METHOD", "ResolvedMethodDeclarationSubjectResponse",
+                        "METHOD_UNRESOLVED", "UnresolvedMethodDeclarationSubjectResponse",
+                        "FIELD", "FieldDeclarationSubjectResponse"));
+        assertDiscriminatedUnion(
+                schemas,
+                "AnnotationTypeResponse",
+                "status",
+                Map.of(
+                        "RESOLVED", "ResolvedAnnotationTypeResponse",
+                        "UNRESOLVED", "UnresolvedAnnotationTypeResponse"));
+        assertDiscriminatedUnion(
+                schemas,
+                "TypeUsagePathResponse",
+                "kind",
+                Map.of(
+                        "TYPE_ARGUMENT", "TypeArgumentPathResponse",
+                        "WILDCARD_EXTENDS_BOUND", "WildcardExtendsBoundPathResponse",
+                        "WILDCARD_SUPER_BOUND", "WildcardSuperBoundPathResponse",
+                        "TYPE_VARIABLE_BOUND", "TypeVariableBoundPathResponse"));
+
+        List<String> closedIdentityObjects = List.of(
+                "TypeConceptIdentityResponse",
+                "MethodConceptIdentityResponse",
+                "FieldConceptIdentityResponse",
+                "AnnotationUsageConceptIdentityResponse",
+                "TypeUsageConceptIdentityResponse",
+                "ApiRouteConceptIdentityResponse",
+                "MqDestinationConceptIdentityResponse",
+                "ScheduleConceptIdentityResponse",
+                "MapperStatementConceptIdentityResponse",
+                "MapperStatementVariantConceptIdentityResponse",
+                "MapperStatementKeyResponse",
+                "MapperStatementVariantResponse",
+                "FieldDetailsResponse",
+                "MapperStatementDetailsResponse",
+                "TypeDeclarationSubjectResponse",
+                "ResolvedMethodDeclarationSubjectResponse",
+                "UnresolvedMethodDeclarationSubjectResponse",
+                "FieldDeclarationSubjectResponse",
+                "ResolvedAnnotationTypeResponse",
+                "UnresolvedAnnotationTypeResponse",
+                "JavaTypeIdentityResponse",
+                "TypeUsageLocationResponse",
+                "ReferencedTypeResponse",
+                "TypeArgumentPathResponse",
+                "WildcardExtendsBoundPathResponse",
+                "WildcardSuperBoundPathResponse",
+                "TypeVariableBoundPathResponse");
+        closedIdentityObjects.forEach(name -> assertClosedObject(schema(schemas, name)));
+
+        Map<String, Object> target = schema(schemas, "MethodTarget");
+        assertClosedObject(target);
+        assertExactPropertiesAndRequired(
+                target, "sourceFile", "packageName", "className", "methodName", "parameterTypes");
+    }
+
+    private void assertClosedFieldTypeReferenceSchemas(Map<String, Object> schemas) {
+        assertDiscriminatedUnion(
+                schemas,
+                "FieldTypeReferenceResponse",
+                "kind",
+                Map.of(
+                        "NAMED", "NamedFieldTypeReferenceResponse",
+                        "PARAMETERIZED", "ParameterizedFieldTypeReferenceResponse",
+                        "PRIMITIVE", "PrimitiveFieldTypeReferenceResponse",
+                        "ARRAY", "ArrayFieldTypeReferenceResponse",
+                        "WILDCARD", "WildcardFieldTypeReferenceResponse",
+                        "TYPE_VARIABLE", "TypeVariableFieldTypeReferenceResponse"));
+        List<String> closedFieldTypeObjects = List.of(
+                "NamedFieldTypeReferenceResponse",
+                "ParameterizedFieldTypeReferenceResponse",
+                "PrimitiveFieldTypeReferenceResponse",
+                "ArrayFieldTypeReferenceResponse",
+                "WildcardFieldTypeReferenceResponse",
+                "TypeVariableFieldTypeReferenceResponse");
+        closedFieldTypeObjects.forEach(name -> assertClosedObject(schema(schemas, name)));
+        Map<String, Object> named = schema(schemas, "NamedFieldTypeReferenceResponse");
+        assertExactProperties(named, "kind", "writtenType", "simpleTypeName", "resolvedJavaType", "sourceDefined");
+        assertThat(required(named)).containsExactlyInAnyOrder("kind", "writtenType", "simpleTypeName", "sourceDefined");
+        assertExactPropertiesAndRequired(
+                schema(schemas, "ParameterizedFieldTypeReferenceResponse"),
+                "kind", "writtenType", "rawType", "typeArguments");
+        assertExactPropertiesAndRequired(
+                schema(schemas, "PrimitiveFieldTypeReferenceResponse"), "kind", "writtenType");
+        assertExactPropertiesAndRequired(
+                schema(schemas, "ArrayFieldTypeReferenceResponse"),
+                "kind", "writtenType", "elementType", "dimensions");
+        Map<String, Object> wildcard = schema(schemas, "WildcardFieldTypeReferenceResponse");
+        assertExactProperties(wildcard, "kind", "writtenType", "upperBound", "lowerBound", "sourceDefined");
+        assertThat(required(wildcard)).containsExactlyInAnyOrder("kind", "writtenType", "sourceDefined");
+        assertExactPropertiesAndRequired(
+                schema(schemas, "TypeVariableFieldTypeReferenceResponse"),
+                "kind", "writtenType", "variableName", "upperBounds", "sourceDefined");
+    }
+
+    private void assertDiscriminatedUnion(
+            Map<String, Object> schemas,
+            String schemaName,
+            String discriminatorProperty,
+            Map<String, String> variants) {
+        Map<String, Object> union = schema(schemas, schemaName);
+        assertThat(union).containsOnlyKeys("oneOf", "discriminator");
+        List<Map<String, String>> references = variants.values().stream()
+                .map(name -> Map.of("$ref", "#/components/schemas/" + name))
+                .toList();
+        assertThat(list(union.get("oneOf"))).containsExactlyInAnyOrderElementsOf(references);
+        Map<String, String> mapping = variants.entrySet().stream()
+                .collect(Collectors.toMap(
+                        Map.Entry::getKey,
+                        entry -> "#/components/schemas/" + entry.getValue()));
+        assertThat(schema(union, "discriminator")).containsEntry("propertyName", discriminatorProperty);
+        assertThat(map(schema(union, "discriminator").get("mapping"))).containsExactlyInAnyOrderEntriesOf(mapping);
     }
 
     private void assertOpenApiPayloadValid(String schemaName, Map<String, Object> payload) throws Exception {
