@@ -2,6 +2,7 @@ package com.java.semantic.api.dto;
 
 import com.java.semantic.api.monitoring.ApiMonitoringField;
 import com.java.semantic.api.monitoring.ApiMonitoringMode;
+import com.java.semantic.api.dto.location.SourceRangePayload;
 
 import java.util.List;
 import java.util.Objects;
@@ -10,7 +11,7 @@ import java.util.Objects;
 public record GraphEdgeResponse(
         @ApiMonitoringField(ApiMonitoringMode.VALUE) String callerNodeId,
         @ApiMonitoringField(ApiMonitoringMode.VALUE) String calleeNodeId,
-        @ApiMonitoringField(ApiMonitoringMode.NESTED) SourceRangeResponse callSite,
+        @ApiMonitoringField(ApiMonitoringMode.NESTED) SourceRangePayload callSite,
         @ApiMonitoringField(ApiMonitoringMode.OMIT) String callExpression,
         @ApiMonitoringField(ApiMonitoringMode.VALUE) String resolutionStrategy,
         @ApiMonitoringField(ApiMonitoringMode.VALUE) String category,

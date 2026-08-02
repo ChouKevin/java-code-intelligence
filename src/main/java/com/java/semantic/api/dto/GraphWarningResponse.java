@@ -1,7 +1,10 @@
 package com.java.semantic.api.dto;
 
+import com.java.semantic.api.dto.identity.MethodTargetPayload;
+
 import com.java.semantic.api.monitoring.ApiMonitoringField;
 import com.java.semantic.api.monitoring.ApiMonitoringMode;
+import com.java.semantic.api.dto.location.SourceRangePayload;
 
 import java.util.List;
 import java.util.Objects;
@@ -12,8 +15,8 @@ public record GraphWarningResponse(
         @ApiMonitoringField(ApiMonitoringMode.SIZE) String message,
         @ApiMonitoringField(ApiMonitoringMode.VALUE) String nodeId,
         @ApiMonitoringField(ApiMonitoringMode.OMIT) String callExpression,
-        @ApiMonitoringField(ApiMonitoringMode.NESTED) SourceRangeResponse callSite,
-        @ApiMonitoringField(ApiMonitoringMode.SIZE) List<MethodTargetResponse> candidates) {
+        @ApiMonitoringField(ApiMonitoringMode.NESTED) SourceRangePayload callSite,
+        @ApiMonitoringField(ApiMonitoringMode.SIZE) List<MethodTargetPayload> candidates) {
 
     public GraphWarningResponse {
         code = Objects.requireNonNull(code, "code is required");

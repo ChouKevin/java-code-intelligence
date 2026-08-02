@@ -125,7 +125,7 @@ class ApiExtractorTest {
 
     @Test
     void should_produce_no_entry_point_when_a_record_or_an_enum_declares_a_mapping_method() {
-        assertThat(classes.stream().map(EntryPointClass::className))
+        assertThat(classes.stream().map(entry -> entry.sourceType().javaType().className()))
                 .as("record 與 enum 不會是 controller、listener 或排程宿主")
                 .doesNotContain("AccountSummary", "AccountStatus");
     }
@@ -134,12 +134,12 @@ class ApiExtractorTest {
     void should_exclude_feign_clients_when_an_interface_declares_feign_client() {
         assertThat(classes)
                 .as("Feign 是出站呼叫，不是入站端點")
-                .noneMatch(entry -> "RemoteOrderClient".equals(entry.className()));
+                .noneMatch(entry -> "RemoteOrderClient".equals(entry.sourceType().javaType().className()));
     }
 
     @Test
     void should_skip_the_whole_file_when_any_type_in_it_is_a_controller_advice() {
-        assertThat(classes.stream().map(EntryPointClass::className))
+        assertThat(classes.stream().map(entry -> entry.sourceType().javaType().className()))
                 .doesNotContain("GlobalExceptionAdvice", "CoLocatedEndpoint");
     }
 
@@ -154,14 +154,14 @@ class ApiExtractorTest {
     }
 
     @Test
-    void should_record_the_source_relative_file_path_when_a_class_is_scanned() {
-        assertThat(classOf("OrderApiController").packagePath())
-                .isEqualTo("com/example/syntax/OrderApiController.java");
+    void should_record_the_repository_relative_file_path_when_a_class_is_scanned() {
+        assertThat(classOf("OrderApiController").sourceType().sourceFile())
+                .isEqualTo("src/main/java/com/example/syntax/OrderApiController.java");
     }
 
     private List<String> routesOf(String className) {
         return classes.stream()
-                .filter(entry -> className.equals(entry.className()))
+                .filter(entry -> className.equals(entry.sourceType().javaType().className()))
                 .flatMap(entry -> entry.methods().stream())
                 .filter(ApiEntryPoint.class::isInstance)
                 .map(ApiEntryPoint.class::cast)
@@ -171,7 +171,7 @@ class ApiExtractorTest {
 
     private ApiEntryPoint apiOf(String className, String methodName) {
         return classes.stream()
-                .filter(entry -> className.equals(entry.className()))
+                .filter(entry -> className.equals(entry.sourceType().javaType().className()))
                 .flatMap(entry -> entry.methods().stream())
                 .filter(ApiEntryPoint.class::isInstance)
                 .map(ApiEntryPoint.class::cast)
@@ -182,7 +182,7 @@ class ApiExtractorTest {
 
     private EntryPointClass classOf(String className) {
         return classes.stream()
-                .filter(entry -> className.equals(entry.className()))
+                .filter(entry -> className.equals(entry.sourceType().javaType().className()))
                 .findFirst()
                 .orElseThrow(() -> new AssertionError("no entry point class " + className));
     }

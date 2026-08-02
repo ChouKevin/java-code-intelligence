@@ -1,5 +1,7 @@
 package com.java.semantic.api.dto;
 
+import com.java.semantic.api.dto.identity.JavaTypeIdentityPayload;
+
 import com.fasterxml.jackson.annotation.JsonAnySetter;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonSubTypes;
@@ -30,7 +32,7 @@ public sealed interface AnnotationTypeResponse permits
     /** 已解析 annotation 型別回應 */
     record ResolvedAnnotationTypeResponse(
             @ApiMonitoringField(ApiMonitoringMode.VALUE) String status,
-            @ApiMonitoringField(ApiMonitoringMode.NESTED) JavaTypeIdentityResponse javaType)
+            @ApiMonitoringField(ApiMonitoringMode.NESTED) JavaTypeIdentityPayload javaType)
             implements AnnotationTypeResponse {
     }
 

@@ -1,7 +1,7 @@
 package com.java.semantic.api;
 
 import com.java.semantic.api.dto.ApiErrorResponse;
-import com.java.semantic.api.dto.MethodTargetResponse;
+import com.java.semantic.api.dto.identity.MethodTargetPayload;
 import com.java.semantic.identity.JavaTypeIdentity;
 import com.java.semantic.identity.MethodTarget;
 import com.java.semantic.identity.SourceTypeIdentity;
@@ -83,13 +83,8 @@ class ApiExceptionHandlerTest {
         return request;
     }
 
-    private static MethodTargetResponse responseTarget(MethodTarget target) {
-        return new MethodTargetResponse(
-                target.sourceFile(),
-                target.packageName(),
-                target.className(),
-                target.methodName(),
-                target.parameterTypes());
+    private static MethodTargetPayload responseTarget(MethodTarget target) {
+        return JavaSourceIdentityHttpMapper.toPayload(target);
     }
 
     private static MethodTarget target(String className, String methodName) {

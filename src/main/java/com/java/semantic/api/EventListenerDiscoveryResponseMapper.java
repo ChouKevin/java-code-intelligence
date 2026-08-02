@@ -5,9 +5,9 @@ import com.java.semantic.api.dto.DiscoverEventListenersResponse;
 import com.java.semantic.api.dto.EventListenerCandidateResponse;
 import com.java.semantic.api.dto.ListenerAnnotationEvidenceResponse;
 import com.java.semantic.api.dto.ListenerObservationSummaryResponse;
-import com.java.semantic.api.dto.MethodTargetResponse;
-import com.java.semantic.api.dto.PositionResponse;
-import com.java.semantic.api.dto.SourceRangeResponse;
+import com.java.semantic.api.dto.identity.MethodTargetPayload;
+import com.java.semantic.api.dto.location.SourceRangePayload;
+import com.java.semantic.api.dto.location.TextRangePayload;
 import com.java.semantic.syntax.application.CandidatePage;
 import com.java.semantic.syntax.application.EventListenerCandidate;
 import com.java.semantic.syntax.application.ListenerAnnotationEvidence;
@@ -23,6 +23,12 @@ import java.util.Objects;
 /** 將事件監聽器探索結果轉換為穩定 HTTP 回應 */
 @Component
 public final class EventListenerDiscoveryResponseMapper {
+
+    private final SourceLocationHttpMapper sourceLocationMapper;
+
+    public EventListenerDiscoveryResponseMapper(SourceLocationHttpMapper sourceLocationMapper) {
+        this.sourceLocationMapper = Objects.requireNonNull(sourceLocationMapper, "sourceLocationMapper is required");
+    }
 
     public DiscoverEventListenersResponse toResponse(RevisionBoundEventListenerDiscovery discovery) {
         Objects.requireNonNull(discovery, "discovery is required");
@@ -46,10 +52,10 @@ public final class EventListenerDiscoveryResponseMapper {
     }
 
     private EventListenerCandidateResponse candidate(EventListenerCandidate candidate) {
-        MethodTargetResponse target = MethodTargetHttpMapper.toResponse(candidate.target());
-        SourceRangeResponse sourceRange = sourceRange(candidate.declarationRange());
-        Assert.isTrue(target.sourceFile().equals(sourceRange.sourceFile()),
+        MethodTargetPayload target = JavaSourceIdentityHttpMapper.toPayload(candidate.target());
+        Assert.isTrue(target.sourceType().sourceFile().equals(candidate.declarationRange().sourceFile()),
                 "candidate target and source range sourceFile must match");
+        TextRangePayload sourceRange = sourceLocationMapper.toTextRange(candidate.declarationRange());
         return new EventListenerCandidateResponse(
                 target,
                 candidate.annotationEvidence().stream().map(this::annotationEvidence).toList(),
@@ -61,18 +67,13 @@ public final class EventListenerDiscoveryResponseMapper {
     }
 
     private ListenerObservationSummaryResponse observation(ListenerObservationSummary observation) {
-        List<SourceRangeResponse> samples =
-                observation.declarationRanges().stream().map(this::sourceRange).toList();
+        List<SourceRangePayload> samples = observation.declarationRanges().stream()
+                .map(sourceLocationMapper::toSourceRange)
+                .toList();
         return new ListenerObservationSummaryResponse(
                 observation.code().name(),
                 observation.totalCount(),
                 samples);
     }
 
-    private SourceRangeResponse sourceRange(SourceRange sourceRange) {
-        return new SourceRangeResponse(
-                sourceRange.sourceFile(),
-                new PositionResponse(sourceRange.range().start().line(), sourceRange.range().start().character()),
-                new PositionResponse(sourceRange.range().end().line(), sourceRange.range().end().character()));
-    }
 }

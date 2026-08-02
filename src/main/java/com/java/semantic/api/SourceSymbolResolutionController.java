@@ -24,17 +24,21 @@ public final class SourceSymbolResolutionController {
 
     private final SourceSymbolResolutionResponseMapper mapper;
 
+    private final SourceLocationHttpMapper sourceLocationMapper;
+
     public SourceSymbolResolutionController(
             SourceSymbolResolutionApplicationService service,
-            SourceSymbolResolutionResponseMapper mapper) {
+            SourceSymbolResolutionResponseMapper mapper,
+            SourceLocationHttpMapper sourceLocationMapper) {
         this.service = Objects.requireNonNull(service, "service is required");
         this.mapper = Objects.requireNonNull(mapper, "mapper is required");
+        this.sourceLocationMapper = Objects.requireNonNull(sourceLocationMapper, "sourceLocationMapper is required");
     }
 
     @PostMapping("/resolve")
     public SourceSymbolResolutionResponse resolve(@Valid @RequestBody ResolveSourceSymbolRequest request) {
         SourceSymbolContext context = new SourceSymbolContext(
-                request.context().type(),
+                JavaSourceIdentityHttpMapper.toDomain(request.context().javaType()),
                 request.context().sourceFile(),
                 request.context().method().map(method -> new SourceSymbolContext.MethodContext(
                         method.name(), method.parameterTypes())));
@@ -43,7 +47,7 @@ public final class SourceSymbolResolutionController {
                 new RepositoryRevision(request.expectedRevision()),
                 context,
                 request.symbol(),
-                request.position().map(position -> position.toDomain()));
+                request.position().map(sourceLocationMapper::toSyntaxPosition));
         return mapper.toResponse(service.resolve(query));
     }
 }

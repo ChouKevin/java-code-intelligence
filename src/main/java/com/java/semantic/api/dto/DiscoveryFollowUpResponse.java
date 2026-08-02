@@ -1,8 +1,14 @@
 package com.java.semantic.api.dto;
 
+import com.java.semantic.api.dto.identity.MethodTargetPayload;
+import com.java.semantic.api.dto.identity.MapperFragmentIdentityPayload;
+import com.java.semantic.api.dto.identity.SourceTypeIdentityPayload;
+import com.java.semantic.api.dto.identity.SourceSymbolContextPayload;
+
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.java.semantic.api.monitoring.ApiMonitoringField;
 import com.java.semantic.api.monitoring.ApiMonitoringMode;
+import com.java.semantic.api.dto.location.PositionPayload;
 
 import java.util.List;
 import java.util.Objects;
@@ -44,7 +50,7 @@ public record DiscoveryFollowUpResponse(
     public record GetMethodSourceRequestResponse(
             @ApiMonitoringField(ApiMonitoringMode.VALUE) String repoId,
             @ApiMonitoringField(ApiMonitoringMode.VALUE) String expectedRevision,
-            @ApiMonitoringField(ApiMonitoringMode.NESTED) MethodTargetResponse target) implements RequestResponse {
+            @ApiMonitoringField(ApiMonitoringMode.NESTED) MethodTargetPayload target) implements RequestResponse {
 
         public GetMethodSourceRequestResponse {
             target = Objects.requireNonNull(target, "target is required");
@@ -55,7 +61,7 @@ public record DiscoveryFollowUpResponse(
     public record GetMapperStatementRequestResponse(
             @ApiMonitoringField(ApiMonitoringMode.VALUE) String repoId,
             @ApiMonitoringField(ApiMonitoringMode.VALUE) String expectedRevision,
-            @ApiMonitoringField(ApiMonitoringMode.NESTED) MethodTargetResponse target)
+            @ApiMonitoringField(ApiMonitoringMode.NESTED) MethodTargetPayload target)
             implements RequestResponse {
 
         public GetMapperStatementRequestResponse {
@@ -71,7 +77,7 @@ public record DiscoveryFollowUpResponse(
             @ApiMonitoringField(ApiMonitoringMode.VALUE) String repoId,
             @ApiMonitoringField(ApiMonitoringMode.VALUE) String expectedRevision,
             @ApiMonitoringField(ApiMonitoringMode.NESTED)
-            MapperFragmentIdentityResponse fragmentIdentity) implements RequestResponse {
+            MapperFragmentIdentityPayload fragmentIdentity) implements RequestResponse {
 
         public GetMapperFragmentRequestResponse {
             fragmentIdentity = Objects.requireNonNull(fragmentIdentity, "fragmentIdentity is required");
@@ -85,7 +91,7 @@ public record DiscoveryFollowUpResponse(
     public record GetMethodSourceSegmentRequestResponse(
             @ApiMonitoringField(ApiMonitoringMode.VALUE) String repoId,
             @ApiMonitoringField(ApiMonitoringMode.VALUE) String expectedRevision,
-            @ApiMonitoringField(ApiMonitoringMode.NESTED) MethodTargetResponse target,
+            @ApiMonitoringField(ApiMonitoringMode.NESTED) MethodTargetPayload target,
             @ApiMonitoringField(ApiMonitoringMode.OMIT) String contentRef,
             @ApiMonitoringField(ApiMonitoringMode.VALUE) int segmentIndex) implements RequestResponse {
 
@@ -101,7 +107,7 @@ public record DiscoveryFollowUpResponse(
     public record GetMapperStatementSegmentRequestResponse(
             @ApiMonitoringField(ApiMonitoringMode.VALUE) String repoId,
             @ApiMonitoringField(ApiMonitoringMode.VALUE) String expectedRevision,
-            @ApiMonitoringField(ApiMonitoringMode.NESTED) MethodTargetResponse target,
+            @ApiMonitoringField(ApiMonitoringMode.NESTED) MethodTargetPayload target,
             @ApiMonitoringField(ApiMonitoringMode.OMIT) String contentRef,
             @ApiMonitoringField(ApiMonitoringMode.VALUE) int segmentIndex) implements RequestResponse {
 
@@ -118,7 +124,7 @@ public record DiscoveryFollowUpResponse(
             @ApiMonitoringField(ApiMonitoringMode.VALUE) String repoId,
             @ApiMonitoringField(ApiMonitoringMode.VALUE) String expectedRevision,
             @ApiMonitoringField(ApiMonitoringMode.NESTED)
-            MapperFragmentIdentityResponse fragmentIdentity,
+            MapperFragmentIdentityPayload fragmentIdentity,
             @ApiMonitoringField(ApiMonitoringMode.OMIT) String contentRef,
             @ApiMonitoringField(ApiMonitoringMode.VALUE) int segmentIndex) implements RequestResponse {
 
@@ -132,7 +138,7 @@ public record DiscoveryFollowUpResponse(
             @ApiMonitoringField(ApiMonitoringMode.VALUE) String repoId,
             @ApiMonitoringField(ApiMonitoringMode.VALUE) String expectedRevision,
             @ApiMonitoringField(ApiMonitoringMode.VALUE) int depth,
-            @ApiMonitoringField(ApiMonitoringMode.NESTED) MethodTargetResponse target) implements RequestResponse {
+            @ApiMonitoringField(ApiMonitoringMode.NESTED) MethodTargetPayload target) implements RequestResponse {
 
         public AnalyzeCallGraphRequestResponse {
             target = Objects.requireNonNull(target, "target is required");
@@ -143,7 +149,7 @@ public record DiscoveryFollowUpResponse(
     public record DiscoverMethodImplementationsRequestResponse(
             @ApiMonitoringField(ApiMonitoringMode.VALUE) String repoId,
             @ApiMonitoringField(ApiMonitoringMode.VALUE) String expectedRevision,
-            @ApiMonitoringField(ApiMonitoringMode.NESTED) MethodTargetResponse declarationTarget) implements RequestResponse {
+            @ApiMonitoringField(ApiMonitoringMode.NESTED) MethodTargetPayload declarationTarget) implements RequestResponse {
 
         public DiscoverMethodImplementationsRequestResponse {
             declarationTarget = Objects.requireNonNull(
@@ -190,14 +196,14 @@ public record DiscoveryFollowUpResponse(
     public record GetTypeMembersRequestResponse(
             @ApiMonitoringField(ApiMonitoringMode.VALUE) String repoId,
             @ApiMonitoringField(ApiMonitoringMode.VALUE) String expectedRevision,
-            @ApiMonitoringField(ApiMonitoringMode.VALUE) String sourceFile,
-            @ApiMonitoringField(ApiMonitoringMode.VALUE) String fullyQualifiedName,
+            @ApiMonitoringField(ApiMonitoringMode.NESTED) SourceTypeIdentityPayload sourceType,
             @ApiMonitoringField(ApiMonitoringMode.SIZE) List<String> memberKinds,
             @ApiMonitoringField(ApiMonitoringMode.OMIT) Optional<String> namePrefix,
             @ApiMonitoringField(ApiMonitoringMode.VALUE) int offset,
             @ApiMonitoringField(ApiMonitoringMode.VALUE) int limit) implements RequestResponse {
 
         public GetTypeMembersRequestResponse {
+            sourceType = Objects.requireNonNull(sourceType, "sourceType is required");
             memberKinds = List.copyOf(Objects.requireNonNull(
                     memberKinds, "memberKinds are required"));
             namePrefix = Objects.requireNonNull(namePrefix, "namePrefix is required");
@@ -208,43 +214,17 @@ public record DiscoveryFollowUpResponse(
     public record DiscoverTypeMembersRequestResponse(
             @ApiMonitoringField(ApiMonitoringMode.VALUE) String repoId,
             @ApiMonitoringField(ApiMonitoringMode.VALUE) String expectedRevision,
-            @ApiMonitoringField(ApiMonitoringMode.VALUE) String sourceFile,
-            @ApiMonitoringField(ApiMonitoringMode.VALUE) String fullyQualifiedName,
+            @ApiMonitoringField(ApiMonitoringMode.NESTED) SourceTypeIdentityPayload sourceType,
             @ApiMonitoringField(ApiMonitoringMode.SIZE) List<String> memberKinds,
             @ApiMonitoringField(ApiMonitoringMode.OMIT) Optional<String> namePrefix,
             @ApiMonitoringField(ApiMonitoringMode.VALUE) int offset,
             @ApiMonitoringField(ApiMonitoringMode.VALUE) int limit) implements RequestResponse {
 
         public DiscoverTypeMembersRequestResponse {
+            sourceType = Objects.requireNonNull(sourceType, "sourceType is required");
             memberKinds = List.copyOf(Objects.requireNonNull(
                     memberKinds, "memberKinds are required"));
             namePrefix = Objects.requireNonNull(namePrefix, "namePrefix is required");
-        }
-    }
-
-    /** source-symbol retry 的 method context projection */
-    public record SourceSymbolMethodContextResponse(
-            @ApiMonitoringField(ApiMonitoringMode.VALUE) String name,
-            @JsonInclude(JsonInclude.Include.NON_ABSENT)
-            @ApiMonitoringField(ApiMonitoringMode.OMIT) Optional<List<String>> parameterTypes) {
-
-        public SourceSymbolMethodContextResponse {
-            parameterTypes = Objects.requireNonNull(parameterTypes, "parameterTypes is required")
-                    .map(List::copyOf);
-        }
-    }
-
-    /** source-symbol retry 的 source type 與 optional method selector */
-    public record SourceSymbolContextResponse(
-            @ApiMonitoringField(ApiMonitoringMode.VALUE) String type,
-            @JsonInclude(JsonInclude.Include.NON_ABSENT)
-            @ApiMonitoringField(ApiMonitoringMode.VALUE) Optional<String> sourceFile,
-            @JsonInclude(JsonInclude.Include.NON_ABSENT)
-            @ApiMonitoringField(ApiMonitoringMode.NESTED) Optional<SourceSymbolMethodContextResponse> method) {
-
-        public SourceSymbolContextResponse {
-            sourceFile = Objects.requireNonNull(sourceFile, "sourceFile is required");
-            method = Objects.requireNonNull(method, "method is required");
         }
     }
 
@@ -252,10 +232,10 @@ public record DiscoveryFollowUpResponse(
     public record ResolveSourceSymbolRequestResponse(
             @ApiMonitoringField(ApiMonitoringMode.VALUE) String repoId,
             @ApiMonitoringField(ApiMonitoringMode.VALUE) String expectedRevision,
-            @ApiMonitoringField(ApiMonitoringMode.NESTED) SourceSymbolContextResponse context,
+            @ApiMonitoringField(ApiMonitoringMode.NESTED) SourceSymbolContextPayload context,
             @ApiMonitoringField(ApiMonitoringMode.VALUE) String symbol,
             @JsonInclude(JsonInclude.Include.NON_ABSENT)
-            @ApiMonitoringField(ApiMonitoringMode.NESTED) Optional<PositionResponse> position)
+            @ApiMonitoringField(ApiMonitoringMode.NESTED) Optional<PositionPayload> position)
             implements RequestResponse {
 
         public ResolveSourceSymbolRequestResponse {

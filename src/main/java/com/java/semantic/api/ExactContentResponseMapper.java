@@ -11,14 +11,11 @@ import com.java.semantic.api.dto.ExactContentResponse;
 import com.java.semantic.api.dto.ExactContentSegmentResponse;
 import com.java.semantic.api.dto.ExactContentVariantResponse;
 import com.java.semantic.api.dto.MapperIncludeResolutionResponse;
-import com.java.semantic.api.dto.MapperFragmentIdentityResponse;
-import com.java.semantic.api.dto.MapperStatementIdentityResponse;
 import com.java.semantic.syntax.application.ExactContentQuery;
 import com.java.semantic.syntax.application.ExactContentResult;
 import com.java.semantic.syntax.application.ExactContentSegment;
 import com.java.semantic.syntax.application.ExactContentSegmentQuery;
 import com.java.semantic.syntax.domain.MapperFragmentIdentity;
-import com.java.semantic.syntax.domain.MapperStatementIdentity;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
@@ -40,6 +37,13 @@ public final class ExactContentResponseMapper {
             "/v1/discovery/mapper-sql-fragment";
     private static final String MAPPER_FRAGMENT_SEGMENT_PATH =
             "/v1/discovery/mapper-fragment-segment";
+
+    private final MapperIdentityHttpMapper mapperIdentityHttpMapper;
+
+    public ExactContentResponseMapper(MapperIdentityHttpMapper mapperIdentityHttpMapper) {
+        this.mapperIdentityHttpMapper = Objects.requireNonNull(
+                mapperIdentityHttpMapper, "mapperIdentityHttpMapper is required");
+    }
 
     /** 將 inline 或 oversized exact content 投影為封閉 HTTP 回應 */
     public ExactContentResponse toResponse(ExactContentQuery query, ExactContentResult result) {
@@ -81,8 +85,8 @@ public final class ExactContentResponseMapper {
                         .map(resolution -> includeResolution(query, resolution))
                         .toList();
         return new ExactContentVariantResponse(
-                variant.statementIdentity().map(this::statementIdentity),
-                variant.fragmentIdentity().map(this::fragmentIdentity),
+                variant.statementIdentity().map(mapperIdentityHttpMapper::toPayload),
+                variant.fragmentIdentity().map(mapperIdentityHttpMapper::toPayload),
                 content.inlineContent(),
                 content.contentRef(),
                 content.utf8ByteCount(),
@@ -117,7 +121,7 @@ public final class ExactContentResponseMapper {
                 new GetMapperFragmentRequestResponse(
                         query.repositoryId().value(),
                         query.expectedRevision().value(),
-                        fragmentIdentity(identity)));
+                        mapperIdentityHttpMapper.toPayload(identity)));
     }
 
     private DiscoveryFollowUpResponse segmentFollowUp(ExactContentSegmentQuery segmentQuery) {
@@ -130,7 +134,7 @@ public final class ExactContentResponseMapper {
                     new GetMethodSourceSegmentRequestResponse(
                             source.repositoryId().value(),
                             source.expectedRevision().value(),
-                            MethodTargetHttpMapper.toResponse(source.target()),
+                            JavaSourceIdentityHttpMapper.toPayload(source.target()),
                             segmentQuery.contentRef(),
                             segmentQuery.segmentIndex()));
             case ExactContentQuery.MapperStatement statement -> followUp(
@@ -140,7 +144,7 @@ public final class ExactContentResponseMapper {
                     new GetMapperStatementSegmentRequestResponse(
                             statement.repositoryId().value(),
                             statement.expectedRevision().value(),
-                            MethodTargetHttpMapper.toResponse(statement.target()),
+                            JavaSourceIdentityHttpMapper.toPayload(statement.target()),
                             segmentQuery.contentRef(),
                             segmentQuery.segmentIndex()));
             case ExactContentQuery.MapperFragment fragment -> followUp(
@@ -150,7 +154,7 @@ public final class ExactContentResponseMapper {
                     new GetMapperFragmentSegmentRequestResponse(
                             fragment.repositoryId().value(),
                             fragment.expectedRevision().value(),
-                            fragmentIdentity(fragment.fragmentIdentity()),
+                            mapperIdentityHttpMapper.toPayload(fragment.fragmentIdentity()),
                             segmentQuery.contentRef(),
                             segmentQuery.segmentIndex()));
         };
@@ -167,22 +171,4 @@ public final class ExactContentResponseMapper {
                 request);
     }
 
-    private MapperStatementIdentityResponse statementIdentity(MapperStatementIdentity identity) {
-        return new MapperStatementIdentityResponse(
-                identity.statementKey().namespace(),
-                identity.statementKey().statementId(),
-                identity.resourcePath(),
-                identity.databaseId(),
-                identity.documentOrdinal(),
-                identity.representation());
-    }
-
-    private MapperFragmentIdentityResponse fragmentIdentity(MapperFragmentIdentity identity) {
-        return new MapperFragmentIdentityResponse(
-                identity.namespace(),
-                identity.fragmentId(),
-                identity.resourcePath(),
-                identity.documentOrdinal(),
-                identity.representation());
-    }
 }

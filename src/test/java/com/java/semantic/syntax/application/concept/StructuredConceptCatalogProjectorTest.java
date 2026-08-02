@@ -221,7 +221,10 @@ class StructuredConceptCatalogProjectorTest {
     private static RepositorySyntax repositorySyntax() {
         SourceTypeMetadata metadata = metadata();
         EntryPointClass entryPoints = new EntryPointClass(
-                "OrderHandler", "com.acme.order", "com/acme/order/OrderHandler.java", "", List.of(), List.of(
+                new SourceTypeIdentity(
+                        new JavaTypeIdentity("com.acme.order", "OrderHandler"),
+                        "com/acme/order/OrderHandler.java"),
+                "", List.of(), List.of(
                         new ApiEntryPoint("handleOrder", "", "/orders", List.of("POST", "GET"), List.of(), resolved()),
                         new ApiEntryPoint("handleOrder", "", "/orders", List.of(ApiEntryPoint.ALL_METHODS), List.of(), resolved()),
                         new ApiEntryPoint("handleOrder", "", "/orders/${tenant}", List.of("GET"), List.of(), resolved()),

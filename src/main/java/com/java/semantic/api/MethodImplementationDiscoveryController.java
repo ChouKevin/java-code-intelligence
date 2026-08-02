@@ -35,7 +35,7 @@ public final class MethodImplementationDiscoveryController {
         MethodImplementationDiscoveryQuery query = new MethodImplementationDiscoveryQuery(
                 RepositoryId.of(request.repoId()),
                 new RepositoryRevision(request.expectedRevision()),
-                MethodTargetHttpMapper.toDomain(request.declarationTarget()));
+                JavaSourceIdentityHttpMapper.toDomain(request.declarationTarget()));
         return mapper.toResponse(service.discover(query));
     }
 }

@@ -2,6 +2,7 @@ package com.java.semantic.api.dto;
 
 import com.java.semantic.api.monitoring.ApiMonitoringField;
 import com.java.semantic.api.monitoring.ApiMonitoringMode;
+import com.java.semantic.api.dto.identity.SourceTypeIdentityPayload;
 
 import com.fasterxml.jackson.annotation.JsonAnySetter;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
@@ -14,6 +15,7 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
+import jakarta.validation.Valid;
 import jakarta.validation.constraints.Size;
 
 import java.util.List;
@@ -29,13 +31,9 @@ public final class DiscoverTypeMembersRequest {
     @Pattern(regexp = "^[0-9a-f]{40}$|^FIXTURE$")
     private String expectedRevision;
 
-    @NotBlank
-    @Size(max = 1024)
-    private String sourceFile;
-
-    @NotBlank
-    @Size(max = 1024)
-    private String fullyQualifiedName;
+    @NotNull
+    @Valid
+    private SourceTypeIdentityPayload sourceType;
 
     @NotEmpty
     private List<@NotNull TypeMemberKind> memberKinds;
@@ -58,12 +56,8 @@ public final class DiscoverTypeMembersRequest {
         return expectedRevision;
     }
 
-    public String sourceFile() {
-        return sourceFile;
-    }
-
-    public String fullyQualifiedName() {
-        return fullyQualifiedName;
+    public SourceTypeIdentityPayload sourceType() {
+        return sourceType;
     }
 
     public List<TypeMemberKind> memberKinds() {
@@ -92,14 +86,9 @@ public final class DiscoverTypeMembersRequest {
         this.expectedRevision = expectedRevision;
     }
 
-    @JsonSetter("sourceFile")
-    public void setSourceFile(String sourceFile) {
-        this.sourceFile = sourceFile;
-    }
-
-    @JsonSetter("fullyQualifiedName")
-    public void setFullyQualifiedName(String fullyQualifiedName) {
-        this.fullyQualifiedName = fullyQualifiedName;
+    @JsonSetter("sourceType")
+    public void setSourceType(SourceTypeIdentityPayload sourceType) {
+        this.sourceType = sourceType;
     }
 
     @JsonSetter(value = "memberKinds", nulls = Nulls.FAIL)

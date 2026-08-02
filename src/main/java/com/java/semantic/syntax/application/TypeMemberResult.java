@@ -3,18 +3,18 @@ package com.java.semantic.syntax.application;
 import com.java.semantic.syntax.application.concept.ConceptPage;
 import com.java.semantic.repository.domain.RepositoryId;
 import com.java.semantic.repository.domain.RepositoryRevision;
+import com.java.semantic.identity.SourceTypeIdentity;
 import com.java.semantic.syntax.domain.SourceTypeKind;
 import com.java.semantic.syntax.domain.SourceExtractionOutcome;
 
 import java.util.List;
 import java.util.Objects;
 
-/** 重複攜帶型別屬性與固定版本合併成員頁的探索結果 */
+/** 綁定來源型別 identity 與固定版本的成員探索結果 */
 public record TypeMemberResult(
         RepositoryId repositoryId,
         RepositoryRevision analyzedRevision,
-        String sourceFile,
-        String fullyQualifiedName,
+        SourceTypeIdentity sourceType,
         SourceTypeKind typeKind,
         List<String> annotations,
         List<String> implementedTypes,
@@ -27,8 +27,7 @@ public record TypeMemberResult(
     public TypeMemberResult {
         repositoryId = Objects.requireNonNull(repositoryId, "repositoryId is required");
         analyzedRevision = Objects.requireNonNull(analyzedRevision, "analyzedRevision is required");
-        sourceFile = Objects.requireNonNull(sourceFile, "sourceFile is required");
-        fullyQualifiedName = Objects.requireNonNull(fullyQualifiedName, "fullyQualifiedName is required");
+        sourceType = Objects.requireNonNull(sourceType, "sourceType is required");
         typeKind = Objects.requireNonNull(typeKind, "typeKind is required");
         annotations = List.copyOf(Objects.requireNonNull(annotations, "annotations are required"));
         implementedTypes = List.copyOf(Objects.requireNonNull(

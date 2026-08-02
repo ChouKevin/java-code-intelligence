@@ -40,7 +40,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 /** 概念 identity HTTP 邊界完整還原契約 */
 class ConceptIdentityHttpMapperTest {
 
-    private final ConceptIdentityHttpMapper mapper = new ConceptIdentityHttpMapper();
+    private final ConceptIdentityHttpMapper mapper = new ConceptIdentityHttpMapper(
+            new SourceLocationHttpMapper(), new MapperIdentityHttpMapper());
 
     @ParameterizedTest(name = "{0}")
     @MethodSource("concreteIdentities")

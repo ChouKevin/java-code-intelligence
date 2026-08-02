@@ -1,5 +1,7 @@
 package com.java.semantic.api.dto;
 
+import com.java.semantic.api.dto.identity.MethodTargetPayload;
+
 import com.java.semantic.api.monitoring.ApiMonitoringField;
 import com.java.semantic.api.monitoring.ApiMonitoringMode;
 
@@ -12,8 +14,8 @@ public record ApiErrorResponse(
         @ApiMonitoringField(ApiMonitoringMode.VALUE) String repoId,
         @ApiMonitoringField(ApiMonitoringMode.VALUE) String expectedRevision,
         @ApiMonitoringField(ApiMonitoringMode.VALUE) String currentRevision,
-        @ApiMonitoringField(ApiMonitoringMode.NESTED) MethodTargetResponse target,
-        @ApiMonitoringField(ApiMonitoringMode.SIZE) List<MethodTargetResponse> candidates,
+        @ApiMonitoringField(ApiMonitoringMode.NESTED) MethodTargetPayload target,
+        @ApiMonitoringField(ApiMonitoringMode.SIZE) List<MethodTargetPayload> candidates,
         @ApiMonitoringField(ApiMonitoringMode.VALUE) String requestId) {
 
     public ApiErrorResponse {
@@ -31,8 +33,8 @@ public record ApiErrorResponse(
             String repoId,
             String expectedRevision,
             String currentRevision,
-            MethodTargetResponse target,
-            List<MethodTargetResponse> candidates,
+            MethodTargetPayload target,
+            List<MethodTargetPayload> candidates,
             String requestId) {
         return new ApiErrorResponse(
                 errorCode, message, repoId, expectedRevision, currentRevision, target, candidates, requestId);

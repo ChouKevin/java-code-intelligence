@@ -1,5 +1,7 @@
 package com.java.semantic.api.dto;
 
+import com.java.semantic.api.dto.identity.MethodTargetPayload;
+
 import com.java.semantic.api.monitoring.ApiMonitoringField;
 import com.java.semantic.api.monitoring.ApiMonitoringMode;
 
@@ -10,7 +12,7 @@ import java.util.Objects;
 public record DiscoverMethodImplementationsResponse(
         @ApiMonitoringField(ApiMonitoringMode.VALUE) String repoId,
         @ApiMonitoringField(ApiMonitoringMode.VALUE) String revision,
-        @ApiMonitoringField(ApiMonitoringMode.NESTED) MethodTargetResponse requestedTarget,
+        @ApiMonitoringField(ApiMonitoringMode.NESTED) MethodTargetPayload requestedTarget,
         @ApiMonitoringField(ApiMonitoringMode.SIZE) List<MethodImplementationCandidateResponse> candidates,
         @ApiMonitoringField(ApiMonitoringMode.NESTED) MethodImplementationLimitsResponse limits,
         @ApiMonitoringField(ApiMonitoringMode.NESTED) MethodImplementationResolutionResponse resolution) {

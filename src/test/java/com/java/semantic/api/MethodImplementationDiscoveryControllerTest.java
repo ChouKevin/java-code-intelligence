@@ -90,9 +90,7 @@ class MethodImplementationDiscoveryControllerTest {
                                   "repoId":"orders",
                                   "expectedRevision":"1111111111111111111111111111111111111111",
                                   "declarationTarget":{
-                                    "sourceFile":"src/main/java/com/example/OrderHandler.java",
-                                    "packageName":"com.example",
-                                    "className":"OrderHandler",
+                                    "sourceType":{"javaType":{"packageName":"com.example","className":"OrderHandler"},"sourceFile":"src/main/java/com/example/OrderHandler.java"},
                                     "methodName":"handle",
                                     "parameterTypes":["com.example.Order"]
                                   }
@@ -101,8 +99,8 @@ class MethodImplementationDiscoveryControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.repoId").value("orders"))
                 .andExpect(jsonPath("$.revision").value("2222222222222222222222222222222222222222"))
-                .andExpect(jsonPath("$.requestedTarget.sourceFile").value(DECLARATION_TARGET.sourceFile()))
-                .andExpect(jsonPath("$.candidates[0].target.sourceFile").value(IMPLEMENTATION_TARGET.sourceFile()))
+                .andExpect(jsonPath("$.requestedTarget.sourceType.sourceFile").value(DECLARATION_TARGET.sourceFile()))
+                .andExpect(jsonPath("$.candidates[0].target.sourceType.sourceFile").value(IMPLEMENTATION_TARGET.sourceFile()))
                 .andExpect(jsonPath("$.candidates[0].primary").value(true))
                 .andExpect(jsonPath("$.candidates[0].qualifiers[0]").value("ordersHandler"))
                 .andExpect(jsonPath("$.candidates[0].profiles[0]").value("prod"))
@@ -121,17 +119,13 @@ class MethodImplementationDiscoveryControllerTest {
                   "repoId":"orders",
                   "revision":"2222222222222222222222222222222222222222",
                   "requestedTarget":{
-                    "sourceFile":"src/main/java/com/example/OrderHandler.java",
-                    "packageName":"com.example",
-                    "className":"OrderHandler",
+                    "sourceType":{"javaType":{"packageName":"com.example","className":"OrderHandler"},"sourceFile":"src/main/java/com/example/OrderHandler.java"},
                     "methodName":"handle",
                     "parameterTypes":["com.example.Order"]
                   },
                   "candidates":[{
                     "target":{
-                      "sourceFile":"src/main/java/com/example/DefaultOrderHandler.java",
-                      "packageName":"com.example",
-                      "className":"DefaultOrderHandler",
+                      "sourceType":{"javaType":{"packageName":"com.example","className":"DefaultOrderHandler"},"sourceFile":"src/main/java/com/example/DefaultOrderHandler.java"},
                       "methodName":"handle",
                       "parameterTypes":["com.example.Order"]
                     },
@@ -164,9 +158,7 @@ class MethodImplementationDiscoveryControllerTest {
                   "repoId":"orders",
                   "expectedRevision":"invalid",
                   "declarationTarget":{
-                    "sourceFile":"src/main/java/com/example/OrderHandler.java",
-                    "packageName":"com.example",
-                    "className":"OrderHandler",
+                    "sourceType":{"javaType":{"packageName":"com.example","className":"OrderHandler"},"sourceFile":"src/main/java/com/example/OrderHandler.java"},
                     "methodName":"handle",
                     "parameterTypes":[]
                   }
@@ -180,9 +172,7 @@ class MethodImplementationDiscoveryControllerTest {
                   "expectedRevision":"1111111111111111111111111111111111111111",
                   "unexpected":true,
                   "declarationTarget":{
-                    "sourceFile":"src/main/java/com/example/OrderHandler.java",
-                    "packageName":"com.example",
-                    "className":"OrderHandler",
+                    "sourceType":{"javaType":{"packageName":"com.example","className":"OrderHandler"},"sourceFile":"src/main/java/com/example/OrderHandler.java"},
                     "methodName":"handle",
                     "parameterTypes":[]
                   }
@@ -195,9 +185,7 @@ class MethodImplementationDiscoveryControllerTest {
                   "repoId":"orders",
                   "expectedRevision":"1111111111111111111111111111111111111111",
                   "declarationTarget":{
-                    "sourceFile":"src/main/java/com/example/OrderHandler.java",
-                    "packageName":"com.example",
-                    "className":"OrderHandler",
+                    "sourceType":{"javaType":{"packageName":"com.example","className":"OrderHandler"},"sourceFile":"src/main/java/com/example/OrderHandler.java"},
                     "methodName":"handle",
                     "parameterTypes":[],
                     "unexpected":true
@@ -260,7 +248,7 @@ class MethodImplementationDiscoveryControllerTest {
                 .andExpect(status().isUnprocessableEntity())
                 .andExpect(jsonPath("$.errorCode").value("IMPLEMENTATION_TARGET_UNSUPPORTED"))
                 .andExpect(jsonPath("$.message").value("requested method does not support implementation discovery"))
-                .andExpect(jsonPath("$.target.sourceFile").value(DECLARATION_TARGET.sourceFile()));
+                .andExpect(jsonPath("$.target.sourceType.sourceFile").value(DECLARATION_TARGET.sourceFile()));
     }
 
     @Test
@@ -309,9 +297,7 @@ class MethodImplementationDiscoveryControllerTest {
                   "repoId":"orders",
                   "expectedRevision":"1111111111111111111111111111111111111111",
                   "declarationTarget":{
-                    "sourceFile":"src/main/java/com/example/OrderHandler.java",
-                    "packageName":"com.example",
-                    "className":"OrderHandler",
+                    "sourceType":{"javaType":{"packageName":"com.example","className":"OrderHandler"},"sourceFile":"src/main/java/com/example/OrderHandler.java"},
                     "methodName":"handle",
                     "parameterTypes":["com.example.Order"]
                   }

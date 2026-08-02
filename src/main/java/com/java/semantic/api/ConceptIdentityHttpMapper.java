@@ -7,9 +7,7 @@ import com.java.semantic.api.dto.ConceptIdentityResponse;
 import com.java.semantic.api.dto.ConceptIdentityResponse.ApiRouteConceptIdentityResponse;
 import com.java.semantic.api.dto.ConceptIdentityResponse.FieldConceptIdentityResponse;
 import com.java.semantic.api.dto.ConceptIdentityResponse.MapperStatementConceptIdentityResponse;
-import com.java.semantic.api.dto.ConceptIdentityResponse.MapperStatementKeyResponse;
 import com.java.semantic.api.dto.ConceptIdentityResponse.MapperStatementVariantConceptIdentityResponse;
-import com.java.semantic.api.dto.ConceptIdentityResponse.MapperStatementVariantResponse;
 import com.java.semantic.api.dto.ConceptIdentityResponse.MethodConceptIdentityResponse;
 import com.java.semantic.api.dto.ConceptIdentityResponse.MqDestinationConceptIdentityResponse;
 import com.java.semantic.api.dto.ConceptIdentityResponse.ScheduleConceptIdentityResponse;
@@ -27,7 +25,7 @@ import com.java.semantic.api.dto.FieldTypeReferenceResponse.ParameterizedFieldTy
 import com.java.semantic.api.dto.FieldTypeReferenceResponse.PrimitiveFieldTypeReferenceResponse;
 import com.java.semantic.api.dto.FieldTypeReferenceResponse.TypeVariableFieldTypeReferenceResponse;
 import com.java.semantic.api.dto.FieldTypeReferenceResponse.WildcardFieldTypeReferenceResponse;
-import com.java.semantic.api.dto.JavaTypeIdentityResponse;
+import com.java.semantic.api.dto.identity.JavaTypeIdentityPayload;
 import com.java.semantic.api.dto.ReferencedTypeResponse;
 import com.java.semantic.api.dto.TypeUsageLocationResponse;
 import com.java.semantic.api.dto.TypeUsagePathResponse;
@@ -36,7 +34,7 @@ import com.java.semantic.api.dto.TypeUsagePathResponse.TypeVariableBoundPathResp
 import com.java.semantic.api.dto.TypeUsagePathResponse.WildcardExtendsBoundPathResponse;
 import com.java.semantic.api.dto.TypeUsagePathResponse.WildcardSuperBoundPathResponse;
 import com.java.semantic.identity.JavaTypeIdentity;
-import com.java.semantic.identity.SourceTypeIdentity;
+import com.java.semantic.identity.MethodTarget;
 import com.java.semantic.syntax.application.concept.ConceptIdentity;
 import com.java.semantic.syntax.application.concept.DeclarationConceptIdentity.FieldConceptIdentity;
 import com.java.semantic.syntax.application.concept.DeclarationConceptIdentity.MethodConceptIdentity;
@@ -70,12 +68,10 @@ import com.java.semantic.syntax.domain.PrimitiveTypeReference;
 import com.java.semantic.syntax.domain.TypeReference;
 import com.java.semantic.syntax.domain.TypeVariableReference;
 import com.java.semantic.syntax.domain.WildcardTypeReference;
-import com.java.semantic.syntax.domain.MapperEvidenceRepresentation;
-import com.java.semantic.syntax.domain.MapperStatementIdentity;
-import com.java.semantic.syntax.domain.MapperStatementKey;
 import com.java.semantic.syntax.domain.MqBroker;
 import com.java.semantic.syntax.domain.ScheduleTriggerKind;
 import com.java.semantic.syntax.domain.SourceMemberIdentity.TypeMember;
+import com.java.semantic.syntax.domain.SourceMemberIdentity;
 import org.springframework.stereotype.Component;
 
 import java.util.Objects;
@@ -84,24 +80,30 @@ import java.util.Objects;
 @Component
 public final class ConceptIdentityHttpMapper {
 
+    private final SourceLocationHttpMapper sourceLocationMapper;
+    private final MapperIdentityHttpMapper mapperIdentityHttpMapper;
+
+    public ConceptIdentityHttpMapper(
+            SourceLocationHttpMapper sourceLocationMapper,
+            MapperIdentityHttpMapper mapperIdentityHttpMapper) {
+        this.sourceLocationMapper = Objects.requireNonNull(sourceLocationMapper, "sourceLocationMapper is required");
+        this.mapperIdentityHttpMapper = Objects.requireNonNull(
+                mapperIdentityHttpMapper, "mapperIdentityHttpMapper is required");
+    }
+
     /** 將任一概念 identity 投影為其精確 HTTP discriminator 變體 */
     public ConceptIdentityResponse toResponse(ConceptIdentity identity) {
         ConceptIdentity conceptIdentity = Objects.requireNonNull(identity, "identity is required");
         return switch (conceptIdentity) {
             case TypeConceptIdentity typeIdentity -> new TypeConceptIdentityResponse(
                     typeIdentity.identityKind().name(),
-                    typeIdentity.type().sourceFile(),
-                    typeIdentity.type().javaType().packageName(),
-                    typeIdentity.type().javaType().className());
+                    JavaSourceIdentityHttpMapper.toPayload(typeIdentity.type()));
             case MethodConceptIdentity methodIdentity -> new MethodConceptIdentityResponse(
                     methodIdentity.identityKind().name(),
-                    MethodTargetHttpMapper.toResponse(methodIdentity.target()));
+                    JavaSourceIdentityHttpMapper.toPayload(methodIdentity.target()));
             case FieldConceptIdentity fieldIdentity -> new FieldConceptIdentityResponse(
                     fieldIdentity.identityKind().name(),
-                    fieldIdentity.field().ownerType().sourceFile(),
-                    fieldIdentity.field().ownerType().javaType().packageName(),
-                    fieldIdentity.field().ownerType().javaType().className(),
-                    fieldIdentity.field().name());
+                    JavaSourceIdentityHttpMapper.toPayload(fieldIdentity.field(), sourceLocationMapper));
             case AnnotationUsageConceptIdentity annotationIdentity ->
                     new ConceptIdentityResponse.AnnotationUsageConceptIdentityResponse(
                             annotationIdentity.identityKind().name(),
@@ -117,33 +119,26 @@ public final class ConceptIdentityHttpMapper {
                     referencedType(typeUsageIdentity.referencedType()));
             case ApiRouteConceptIdentity routeIdentity -> new ApiRouteConceptIdentityResponse(
                     routeIdentity.identityKind().name(),
-                    MethodTargetHttpMapper.toResponse(routeIdentity.target()),
+                    JavaSourceIdentityHttpMapper.toPayload(routeIdentity.target()),
                     routeIdentity.httpVerb(),
                     routeIdentity.route());
             case MqDestinationConceptIdentity destinationIdentity -> new MqDestinationConceptIdentityResponse(
                     destinationIdentity.identityKind().name(),
-                    MethodTargetHttpMapper.toResponse(destinationIdentity.target()),
+                    JavaSourceIdentityHttpMapper.toPayload(destinationIdentity.target()),
                     destinationIdentity.broker().name(),
                     destinationIdentity.destination());
             case ScheduleConceptIdentity scheduleIdentity -> new ScheduleConceptIdentityResponse(
                     scheduleIdentity.identityKind().name(),
-                    MethodTargetHttpMapper.toResponse(scheduleIdentity.target()),
+                    JavaSourceIdentityHttpMapper.toPayload(scheduleIdentity.target()),
                     scheduleIdentity.triggerKind().name(),
                     scheduleIdentity.triggerValue());
             case MapperStatementConceptIdentity mapperIdentity -> new MapperStatementConceptIdentityResponse(
                     mapperIdentity.identityKind().name(),
-                    mapperStatementKey(mapperIdentity.statementKey().namespace(), mapperIdentity.statementKey().statementId()));
+                    mapperIdentityHttpMapper.toPayload(mapperIdentity.statementKey()));
             case MapperStatementVariantEvidenceIdentity variantIdentity ->
                     new MapperStatementVariantConceptIdentityResponse(
                             variantIdentity.identityKind().name(),
-                            new MapperStatementVariantResponse(
-                                    mapperStatementKey(
-                                            variantIdentity.mapperStatement().statementKey().namespace(),
-                                            variantIdentity.mapperStatement().statementKey().statementId()),
-                                    variantIdentity.mapperStatement().resourcePath(),
-                                    variantIdentity.mapperStatement().databaseId(),
-                                    variantIdentity.mapperStatement().documentOrdinal(),
-                                    variantIdentity.mapperStatement().representation().name()));
+                            mapperIdentityHttpMapper.toPayload(variantIdentity.mapperStatement()));
         };
     }
 
@@ -152,12 +147,11 @@ public final class ConceptIdentityHttpMapper {
         ConceptIdentityResponse httpResponse = Objects.requireNonNull(response, "response is required");
         return switch (httpResponse) {
             case TypeConceptIdentityResponse type -> new TypeConceptIdentity(
-                    sourceType(type.sourceFile(), type.packageName(), type.className()));
+                    JavaSourceIdentityHttpMapper.toDomain(type.sourceType()));
             case MethodConceptIdentityResponse method -> new MethodConceptIdentity(
-                    MethodTargetHttpMapper.toDomain(method.target()));
+                    JavaSourceIdentityHttpMapper.toDomain(method.target()));
             case FieldConceptIdentityResponse field -> new FieldConceptIdentity(
-                    new TypeMember(sourceType(
-                            field.sourceFile(), field.ownerPackageName(), field.ownerClassName()), field.fieldName()));
+                    requireTypeMember(JavaSourceIdentityHttpMapper.toDomain(field.identity(), sourceLocationMapper)));
             case ConceptIdentityResponse.AnnotationUsageConceptIdentityResponse annotation ->
                     new AnnotationUsageConceptIdentity(
                             declarationSubject(annotation.declaration()),
@@ -172,24 +166,20 @@ public final class ConceptIdentityHttpMapper {
                             javaType(typeUsage.referencedType().javaType()),
                             typeUsage.referencedType().arrayDimensions()));
             case ApiRouteConceptIdentityResponse route -> new ApiRouteConceptIdentity(
-                    MethodTargetHttpMapper.toDomain(route.target()), route.httpVerb(), route.route());
+                    JavaSourceIdentityHttpMapper.toDomain(route.target()), route.httpVerb(), route.route());
             case MqDestinationConceptIdentityResponse destination -> new MqDestinationConceptIdentity(
-                    MethodTargetHttpMapper.toDomain(destination.target()),
+                    JavaSourceIdentityHttpMapper.toDomain(destination.target()),
                     MqBroker.valueOf(destination.broker()),
                     destination.destination());
             case ScheduleConceptIdentityResponse schedule -> new ScheduleConceptIdentity(
-                    MethodTargetHttpMapper.toDomain(schedule.target()),
+                    JavaSourceIdentityHttpMapper.toDomain(schedule.target()),
                     ScheduleTriggerKind.valueOf(schedule.triggerKind()),
                     schedule.triggerValue());
             case MapperStatementConceptIdentityResponse mapper -> new MapperStatementConceptIdentity(
-                    mapperStatementKey(mapper.statement()));
+                    mapperIdentityHttpMapper.toDomain(mapper.identity()));
             case MapperStatementVariantConceptIdentityResponse variant ->
-                    new MapperStatementVariantEvidenceIdentity(new MapperStatementIdentity(
-                            mapperStatementKey(variant.variant().statement()),
-                            variant.variant().resourcePath(),
-                            variant.variant().databaseId(),
-                            variant.variant().documentOrdinal(),
-                            MapperEvidenceRepresentation.valueOf(variant.variant().representation())));
+                    new MapperStatementVariantEvidenceIdentity(
+                            mapperIdentityHttpMapper.toDomain(variant.identity()));
         };
     }
 
@@ -239,27 +229,21 @@ public final class ConceptIdentityHttpMapper {
         return switch (subject) {
             case TypeDeclarationSubjectIdentity typeSubject -> new TypeDeclarationSubjectResponse(
                     "TYPE",
-                    typeSubject.type().sourceFile(),
-                    typeSubject.type().javaType().packageName(),
-                    typeSubject.type().javaType().className());
+                    JavaSourceIdentityHttpMapper.toPayload(typeSubject.type()));
             case ResolvedMethodDeclarationSubjectIdentity methodSubject ->
                     new ResolvedMethodDeclarationSubjectResponse(
                             "METHOD",
-                            MethodTargetHttpMapper.toResponse(methodSubject.target()));
+                            JavaSourceIdentityHttpMapper.toPayload(methodSubject.target()));
             case UnresolvedMethodDeclarationSubjectIdentity methodSubject ->
                     new UnresolvedMethodDeclarationSubjectResponse(
                             "METHOD_UNRESOLVED",
-                            methodSubject.owner().sourceFile(),
-                            methodSubject.owner().javaType().packageName(),
-                            methodSubject.owner().javaType().className(),
-                            methodSubject.signature().methodName(),
-                            methodSubject.signature().parameterTypes());
+                            JavaSourceIdentityHttpMapper.toPayload(new MethodTarget(
+                                    methodSubject.owner(),
+                                    methodSubject.signature().methodName(),
+                                    methodSubject.signature().parameterTypes())));
             case FieldDeclarationSubjectIdentity fieldSubject -> new FieldDeclarationSubjectResponse(
                     "FIELD",
-                    fieldSubject.field().ownerType().sourceFile(),
-                    fieldSubject.field().ownerType().javaType().packageName(),
-                    fieldSubject.field().ownerType().javaType().className(),
-                    fieldSubject.field().name());
+                    JavaSourceIdentityHttpMapper.toPayload(fieldSubject.field(), sourceLocationMapper));
         };
     }
 
@@ -267,17 +251,16 @@ public final class ConceptIdentityHttpMapper {
         DeclarationSubjectResponse httpResponse = Objects.requireNonNull(response, "response is required");
         return switch (httpResponse) {
             case TypeDeclarationSubjectResponse type -> new TypeDeclarationSubjectIdentity(
-                    sourceType(type.sourceFile(), type.packageName(), type.className()));
+                    JavaSourceIdentityHttpMapper.toDomain(type.sourceType()));
             case ResolvedMethodDeclarationSubjectResponse method ->
-                    new ResolvedMethodDeclarationSubjectIdentity(MethodTargetHttpMapper.toDomain(method.target()));
+                    new ResolvedMethodDeclarationSubjectIdentity(JavaSourceIdentityHttpMapper.toDomain(method.target()));
             case UnresolvedMethodDeclarationSubjectResponse method ->
                     new UnresolvedMethodDeclarationSubjectIdentity(
-                            sourceType(
-                                    method.sourceFile(), method.ownerPackageName(), method.ownerClassName()),
-                            new MethodDeclarationSignature(method.methodName(), method.parameterTypes()));
+                            JavaSourceIdentityHttpMapper.toDomain(method.target().sourceType()),
+                            new MethodDeclarationSignature(
+                                    method.target().methodName(), method.target().parameterTypes()));
             case FieldDeclarationSubjectResponse field -> new FieldDeclarationSubjectIdentity(
-                    new TypeMember(sourceType(
-                            field.sourceFile(), field.ownerPackageName(), field.ownerClassName()), field.fieldName()));
+                    requireTypeMember(JavaSourceIdentityHttpMapper.toDomain(field.identity(), sourceLocationMapper)));
         };
     }
 
@@ -334,25 +317,19 @@ public final class ConceptIdentityHttpMapper {
                 namedType.sourceDefined());
     }
 
-    private MapperStatementKeyResponse mapperStatementKey(String namespace, String statementId) {
-        return new MapperStatementKeyResponse(namespace, statementId);
+    private JavaTypeIdentityPayload javaType(JavaTypeIdentity javaType) {
+        return JavaSourceIdentityHttpMapper.toPayload(javaType);
     }
 
-    private MapperStatementKey mapperStatementKey(MapperStatementKeyResponse response) {
-        MapperStatementKeyResponse httpResponse = Objects.requireNonNull(response, "response is required");
-        return new MapperStatementKey(httpResponse.namespace(), httpResponse.statementId());
+    private JavaTypeIdentity javaType(JavaTypeIdentityPayload response) {
+        return JavaSourceIdentityHttpMapper.toDomain(response);
     }
 
-    private JavaTypeIdentityResponse javaType(JavaTypeIdentity javaType) {
-        return new JavaTypeIdentityResponse(javaType.packageName(), javaType.className());
-    }
-
-    private JavaTypeIdentity javaType(JavaTypeIdentityResponse response) {
-        JavaTypeIdentityResponse typeResponse = Objects.requireNonNull(response, "response is required");
-        return new JavaTypeIdentity(typeResponse.packageName(), typeResponse.className());
-    }
-
-    private SourceTypeIdentity sourceType(String sourceFile, String packageName, String className) {
-        return new SourceTypeIdentity(new JavaTypeIdentity(packageName, className), sourceFile);
+    private TypeMember requireTypeMember(SourceMemberIdentity identity) {
+        SourceMemberIdentity member = Objects.requireNonNull(identity, "identity is required");
+        if (member instanceof TypeMember typeMember) {
+            return typeMember;
+        }
+        throw new IllegalArgumentException("field identity must be type-scoped");
     }
 }

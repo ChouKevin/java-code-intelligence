@@ -119,6 +119,12 @@ paths:
     get:
       operationId: listEntryPoints
       parameters:
+        - name: expectedRevision
+          in: query
+          required: true
+          schema:
+            type: string
+            pattern: '^[0-9a-f]{40}$|^FIXTURE$'
         - name: types
           in: query
           required: false
@@ -399,7 +405,7 @@ paths:
   /v1/discovery/method-source:
     post:
       operationId: getMethodSource
-      description: Returns exact method source for one canonical five-field MethodTarget
+      description: Returns exact method source for one canonical composed MethodTargetPayload
       requestBody:
         required: true
         content:
@@ -742,7 +748,7 @@ components:
           minimum: 1
           maximum: 2
         target:
-          $ref: '#/components/schemas/MethodTarget'
+          $ref: '#/components/schemas/MethodTargetPayload'
     AnalyzeIncomingCallGraphRequest:
       type: object
       additionalProperties: false
@@ -765,7 +771,7 @@ components:
           minimum: 1
           maximum: 2
         target:
-          $ref: '#/components/schemas/MethodTarget'
+          $ref: '#/components/schemas/MethodTargetPayload'
     ResolveSourceSymbolRequest:
       type: object
       additionalProperties: false
@@ -784,14 +790,14 @@ components:
           minLength: 1
           pattern: '^[0-9a-f]{40}$|^FIXTURE$'
         context:
-          $ref: '#/components/schemas/SourceSymbolContextRequest'
+          $ref: '#/components/schemas/SourceSymbolContextPayload'
         symbol:
           type: string
           minLength: 1
           maxLength: 255
           pattern: '^[\p{L}\p{Nl}\p{Sc}\p{Pc}][\p{L}\p{Nl}\p{Sc}\p{Pc}\p{Mn}\p{Mc}\p{Nd}]*$'
         position:
-          $ref: '#/components/schemas/Position'
+          $ref: '#/components/schemas/PositionPayload'
     ResolveConceptRequest:
       type: object
       additionalProperties: false
@@ -810,25 +816,22 @@ components:
           pattern: '^[0-9a-f]{40}$|^FIXTURE$'
         identity:
           $ref: '#/components/schemas/ConceptIdentityResponse'
-    SourceSymbolContextRequest:
+    SourceSymbolContextPayload:
       type: object
       additionalProperties: false
       required:
-        - type
+        - javaType
       properties:
-        type:
-          type: string
-          minLength: 1
-          maxLength: 255
-          pattern: '^[\p{L}\p{Nl}\p{Sc}\p{Pc}][\p{L}\p{Nl}\p{Sc}\p{Pc}\p{Mn}\p{Mc}\p{Nd}]*(?:\.[\p{L}\p{Nl}\p{Sc}\p{Pc}][\p{L}\p{Nl}\p{Sc}\p{Pc}\p{Mn}\p{Mc}\p{Nd}]*)*$'
+        javaType:
+          $ref: '#/components/schemas/JavaTypeIdentityPayload'
         sourceFile:
           type: string
           minLength: 1
           maxLength: 1024
           pattern: '^[^\u0000-\u001F\u007F-\u009F]+$'
         method:
-          $ref: '#/components/schemas/SourceSymbolMethodContextRequest'
-    SourceSymbolMethodContextRequest:
+          $ref: '#/components/schemas/SourceSymbolMethodContextPayload'
+    SourceSymbolMethodContextPayload:
       type: object
       additionalProperties: false
       required:
@@ -948,7 +951,7 @@ components:
           enum:
             - METHOD
         target:
-          $ref: '#/components/schemas/MethodTarget'
+          $ref: '#/components/schemas/MethodTargetPayload'
         retry:
           $ref: '#/components/schemas/DiscoveryFollowUpResponse'
     SourceSymbolCandidateResponse:
@@ -973,8 +976,7 @@ components:
       additionalProperties: false
       required:
         - kind
-        - name
-        - declarationOwner
+        - identity
         - declaredType
         - declarationRange
         - representativeOccurrence
@@ -989,16 +991,14 @@ components:
             - PARAMETER
             - LOCAL_VARIABLE
             - ENUM_CONSTANT
-        name:
-          type: string
-        declarationOwner:
-          type: string
+        identity:
+          $ref: '#/components/schemas/SourceMemberIdentityPayload'
         declaredType:
           $ref: '#/components/schemas/DeclaredTypeResponse'
         declarationRange:
-          $ref: '#/components/schemas/SourceRange'
+          $ref: '#/components/schemas/TextRangePayload'
         representativeOccurrence:
-          $ref: '#/components/schemas/SourceRange'
+          $ref: '#/components/schemas/TextRangePayload'
         occurrenceCount:
           type: integer
           minimum: 1
@@ -1012,8 +1012,7 @@ components:
       additionalProperties: false
       required:
         - kind
-        - name
-        - declarationOwner
+        - identity
         - declaredType
         - initializerSource
         - declarationRange
@@ -1025,10 +1024,8 @@ components:
           type: string
           enum:
             - STATIC_CONSTANT
-        name:
-          type: string
-        declarationOwner:
-          type: string
+        identity:
+          $ref: '#/components/schemas/SourceMemberIdentityPayload'
         declaredType:
           $ref: '#/components/schemas/DeclaredTypeResponse'
         initializerSource:
@@ -1036,9 +1033,9 @@ components:
           minLength: 1
           pattern: '.*\S.*'
         declarationRange:
-          $ref: '#/components/schemas/SourceRange'
+          $ref: '#/components/schemas/TextRangePayload'
         representativeOccurrence:
-          $ref: '#/components/schemas/SourceRange'
+          $ref: '#/components/schemas/TextRangePayload'
         occurrenceCount:
           type: integer
           minimum: 1
@@ -1051,7 +1048,6 @@ components:
       additionalProperties: false
       required:
         - kind
-        - name
         - target
         - declarationRange
         - representativeOccurrence
@@ -1062,14 +1058,12 @@ components:
           type: string
           enum:
             - METHOD
-        name:
-          type: string
         target:
-          $ref: '#/components/schemas/MethodTarget'
+          $ref: '#/components/schemas/MethodTargetPayload'
         declarationRange:
-          $ref: '#/components/schemas/SourceRange'
+          $ref: '#/components/schemas/TextRangePayload'
         representativeOccurrence:
-          $ref: '#/components/schemas/SourceRange'
+          $ref: '#/components/schemas/TextRangePayload'
         occurrenceCount:
           type: integer
           minimum: 1
@@ -1082,9 +1076,7 @@ components:
       additionalProperties: false
       required:
         - kind
-        - name
-        - fullyQualifiedName
-        - sourceFile
+        - identity
         - declarationRange
         - representativeOccurrence
         - occurrenceCount
@@ -1094,16 +1086,12 @@ components:
           type: string
           enum:
             - SOURCE_TYPE
-        name:
-          type: string
-        fullyQualifiedName:
-          type: string
-        sourceFile:
-          type: string
+        identity:
+          $ref: '#/components/schemas/SourceTypeIdentityPayload'
         declarationRange:
-          $ref: '#/components/schemas/SourceRange'
+          $ref: '#/components/schemas/TextRangePayload'
         representativeOccurrence:
-          $ref: '#/components/schemas/SourceRange'
+          $ref: '#/components/schemas/TextRangePayload'
         occurrenceCount:
           type: integer
           minimum: 1
@@ -1153,7 +1141,7 @@ components:
           minLength: 1
           pattern: '^[0-9a-f]{40}$|^FIXTURE$'
         target:
-          $ref: '#/components/schemas/MethodTarget'
+          $ref: '#/components/schemas/MethodTargetPayload'
     GetMapperStatementRequest:
       type: object
       additionalProperties: false
@@ -1171,7 +1159,7 @@ components:
           minLength: 1
           pattern: '^[0-9a-f]{40}$|^FIXTURE$'
         target:
-          $ref: '#/components/schemas/MethodTarget'
+          $ref: '#/components/schemas/MethodTargetPayload'
     GetMapperFragmentRequest:
       type: object
       additionalProperties: false
@@ -1189,7 +1177,7 @@ components:
           minLength: 1
           pattern: '^[0-9a-f]{40}$|^FIXTURE$'
         fragmentIdentity:
-          $ref: '#/components/schemas/MapperFragmentIdentityRequest'
+          $ref: '#/components/schemas/MapperFragmentIdentityPayload'
     GetMethodSourceSegmentRequest:
       type: object
       additionalProperties: false
@@ -1210,7 +1198,7 @@ components:
           minLength: 1
           pattern: '^[0-9a-f]{40}$|^FIXTURE$'
         target:
-          $ref: '#/components/schemas/MethodTarget'
+          $ref: '#/components/schemas/MethodTargetPayload'
         contentRef:
           type: string
           minLength: 1
@@ -1239,7 +1227,7 @@ components:
           minLength: 1
           pattern: '^[0-9a-f]{40}$|^FIXTURE$'
         target:
-          $ref: '#/components/schemas/MethodTarget'
+          $ref: '#/components/schemas/MethodTargetPayload'
         contentRef:
           type: string
           minLength: 1
@@ -1268,7 +1256,7 @@ components:
           minLength: 1
           pattern: '^[0-9a-f]{40}$|^FIXTURE$'
         fragmentIdentity:
-          $ref: '#/components/schemas/MapperFragmentIdentityRequest'
+          $ref: '#/components/schemas/MapperFragmentIdentityPayload'
         contentRef:
           type: string
           minLength: 1
@@ -1277,7 +1265,7 @@ components:
         segmentIndex:
           type: integer
           minimum: 0
-    MapperFragmentIdentityRequest:
+    MapperFragmentIdentityPayload:
       type: object
       additionalProperties: false
       required:
@@ -1310,30 +1298,31 @@ components:
           type: string
           enum:
             - MAPPER_XML_ELEMENT
-    MethodTarget:
+    SourceTypeIdentityPayload:
       type: object
       additionalProperties: false
       required:
+        - javaType
         - sourceFile
-        - packageName
-        - className
-        - methodName
-        - parameterTypes
       properties:
+        javaType:
+          $ref: '#/components/schemas/JavaTypeIdentityPayload'
         sourceFile:
           type: string
           minLength: 1
           maxLength: 1024
           pattern: '^[^\u0000-\u001F\u007F-\u009F]*[^\u0000-\u0020\u007F-\u009F\u1680\u2000-\u2006\u2008-\u200A\u2028-\u2029\u205F\u3000][^\u0000-\u001F\u007F-\u009F]*$'
           description: Repository-relative source path. The server additionally enforces normalized path segments.
-        packageName:
-          type: string
-        className:
-          type: string
-          minLength: 1
-          maxLength: 255
-          pattern: '^[\p{L}\p{Nl}\p{Sc}\p{Pc}][\p{L}\p{Nl}\p{Sc}\p{Pc}\p{Mn}\p{Mc}\p{Nd}]*(?:\.[\p{L}\p{Nl}\p{Sc}\p{Pc}][\p{L}\p{Nl}\p{Sc}\p{Pc}\p{Mn}\p{Mc}\p{Nd}]*)*$'
-          description: Portable Unicode-category approximation of the server's dot-separated Java identifier validation.
+    MethodTargetPayload:
+      type: object
+      additionalProperties: false
+      required:
+        - sourceType
+        - methodName
+        - parameterTypes
+      properties:
+        sourceType:
+          $ref: '#/components/schemas/SourceTypeIdentityPayload'
         methodName:
           type: string
           minLength: 1
@@ -1347,6 +1336,56 @@ components:
             type: string
             minLength: 1
             pattern: '.*\S.*'
+    SourceMemberIdentityPayload:
+      oneOf:
+        - $ref: '#/components/schemas/TypeMemberIdentityPayload'
+        - $ref: '#/components/schemas/MethodScopedIdentityPayload'
+      discriminator:
+        propertyName: scope
+        mapping:
+          TYPE: '#/components/schemas/TypeMemberIdentityPayload'
+          METHOD: '#/components/schemas/MethodScopedIdentityPayload'
+    TypeMemberIdentityPayload:
+      type: object
+      additionalProperties: false
+      required:
+        - scope
+        - ownerType
+        - name
+      properties:
+        scope:
+          type: string
+          enum:
+            - TYPE
+        ownerType:
+          $ref: '#/components/schemas/SourceTypeIdentityPayload'
+        name:
+          type: string
+          minLength: 1
+          maxLength: 255
+          pattern: '^[\p{L}\p{Nl}\p{Sc}\p{Pc}][\p{L}\p{Nl}\p{Sc}\p{Pc}\p{Mn}\p{Mc}\p{Nd}]*$'
+    MethodScopedIdentityPayload:
+      type: object
+      additionalProperties: false
+      required:
+        - scope
+        - declaringMethod
+        - declarationRange
+        - name
+      properties:
+        scope:
+          type: string
+          enum:
+            - METHOD
+        declaringMethod:
+          $ref: '#/components/schemas/MethodTargetPayload'
+        declarationRange:
+          $ref: '#/components/schemas/TextRangePayload'
+        name:
+          type: string
+          minLength: 1
+          maxLength: 255
+          pattern: '^[\p{L}\p{Nl}\p{Sc}\p{Pc}][\p{L}\p{Nl}\p{Sc}\p{Pc}\p{Mn}\p{Mc}\p{Nd}]*$'
     MethodTargetResolutionResponse:
       type: object
       additionalProperties: false
@@ -1364,11 +1403,11 @@ components:
         target:
           nullable: true
           allOf:
-            - $ref: '#/components/schemas/MethodTarget'
+            - $ref: '#/components/schemas/MethodTargetPayload'
         candidates:
           type: array
           items:
-            $ref: '#/components/schemas/MethodTarget'
+            $ref: '#/components/schemas/MethodTargetPayload'
         reasonCode:
           type: string
     ApiRouteLookupRequest:
@@ -1481,7 +1520,7 @@ components:
           minLength: 1
           pattern: '^[0-9a-f]{40}$|^FIXTURE$'
         declarationTarget:
-          $ref: '#/components/schemas/MethodTarget'
+          $ref: '#/components/schemas/MethodTargetPayload'
     DiscoverMethodImplementationsResponse:
       type: object
       additionalProperties: false
@@ -1499,7 +1538,7 @@ components:
           type: string
           pattern: '^[0-9a-f]{40}$|^FIXTURE$'
         requestedTarget:
-          $ref: '#/components/schemas/MethodTarget'
+          $ref: '#/components/schemas/MethodTargetPayload'
         candidates:
           type: array
           items:
@@ -1518,7 +1557,7 @@ components:
         - profiles
       properties:
         target:
-          $ref: '#/components/schemas/MethodTarget'
+          $ref: '#/components/schemas/MethodTargetPayload'
         primary:
           type: boolean
         qualifiers:
@@ -1780,15 +1819,12 @@ components:
       type: object
       additionalProperties: false
       required:
-        - namespace
-        - statementId
+        - statement
         - status
         - candidates
       properties:
-        namespace:
-          type: string
-        statementId:
-          type: string
+        statement:
+          $ref: '#/components/schemas/MapperStatementKeyPayload'
         status:
           type: string
           enum:
@@ -1804,15 +1840,12 @@ components:
       type: object
       additionalProperties: false
       required:
-        - namespace
-        - statementId
+        - statement
         - status
         - candidates
       properties:
-        namespace:
-          type: string
-        statementId:
-          type: string
+        statement:
+          $ref: '#/components/schemas/MapperStatementKeyPayload'
         status:
           type: string
           enum:
@@ -1827,16 +1860,13 @@ components:
       type: object
       additionalProperties: false
       required:
-        - namespace
-        - statementId
+        - statement
         - status
         - reason
         - candidates
       properties:
-        namespace:
-          type: string
-        statementId:
-          type: string
+        statement:
+          $ref: '#/components/schemas/MapperStatementKeyPayload'
         status:
           type: string
           enum:
@@ -1858,7 +1888,7 @@ components:
         - availableFollowUps
       properties:
         target:
-          $ref: '#/components/schemas/MethodTarget'
+          $ref: '#/components/schemas/MethodTargetPayload'
         availableFollowUps:
           type: array
           minItems: 1
@@ -1895,7 +1925,7 @@ components:
         - availableFollowUps
       properties:
         target:
-          $ref: '#/components/schemas/MethodTarget'
+          $ref: '#/components/schemas/MethodTargetPayload'
         availableFollowUps:
           type: array
           minItems: 1
@@ -1995,29 +2025,24 @@ components:
     TypeConceptIdentityResponse:
       type: object
       additionalProperties: false
-      required: [kind, sourceFile, packageName, className]
+      required: [kind, sourceType]
       properties:
         kind: {type: string, enum: [TYPE]}
-        sourceFile: {type: string}
-        packageName: {type: string}
-        className: {type: string}
+        sourceType: {$ref: '#/components/schemas/SourceTypeIdentityPayload'}
     MethodConceptIdentityResponse:
       type: object
       additionalProperties: false
       required: [kind, target]
       properties:
         kind: {type: string, enum: [METHOD]}
-        target: {$ref: '#/components/schemas/MethodTarget'}
+        target: {$ref: '#/components/schemas/MethodTargetPayload'}
     FieldConceptIdentityResponse:
       type: object
       additionalProperties: false
-      required: [kind, sourceFile, ownerPackageName, ownerClassName, fieldName]
+      required: [kind, identity]
       properties:
         kind: {type: string, enum: [FIELD]}
-        sourceFile: {type: string}
-        ownerPackageName: {type: string}
-        ownerClassName: {type: string}
-        fieldName: {type: string}
+        identity: {$ref: '#/components/schemas/SourceMemberIdentityPayload'}
     ResolveConceptResponse:
       type: object
       additionalProperties: false
@@ -2056,7 +2081,7 @@ components:
       required: [kind, target, httpVerb, route]
       properties:
         kind: {type: string, enum: [API_ROUTE]}
-        target: {$ref: '#/components/schemas/MethodTarget'}
+        target: {$ref: '#/components/schemas/MethodTargetPayload'}
         httpVerb: {type: string}
         route: {type: string}
     MqDestinationConceptIdentityResponse:
@@ -2065,7 +2090,7 @@ components:
       required: [kind, target, broker, destination]
       properties:
         kind: {type: string, enum: [MQ_DESTINATION]}
-        target: {$ref: '#/components/schemas/MethodTarget'}
+        target: {$ref: '#/components/schemas/MethodTargetPayload'}
         broker: {type: string, enum: [RABBIT, KAFKA]}
         destination: {type: string}
     ScheduleConceptIdentityResponse:
@@ -2074,40 +2099,30 @@ components:
       required: [kind, target, triggerKind]
       properties:
         kind: {type: string, enum: [SCHEDULE]}
-        target: {$ref: '#/components/schemas/MethodTarget'}
+        target: {$ref: '#/components/schemas/MethodTargetPayload'}
         triggerKind: {type: string, enum: [CRON, FIXED_DELAY, FIXED_RATE, JOB_HANDLER, UNSPECIFIED]}
         triggerValue: {type: string}
     MapperStatementConceptIdentityResponse:
       type: object
       additionalProperties: false
-      required: [kind, statement]
+      required: [kind, identity]
       properties:
         kind: {type: string, enum: [MAPPER_STATEMENT]}
-        statement: {$ref: '#/components/schemas/MapperStatementKeyResponse'}
+        identity: {$ref: '#/components/schemas/MapperStatementKeyPayload'}
     MapperStatementVariantConceptIdentityResponse:
       type: object
       additionalProperties: false
-      required: [kind, variant]
+      required: [kind, identity]
       properties:
         kind: {type: string, enum: [MAPPER_STATEMENT_VARIANT]}
-        variant: {$ref: '#/components/schemas/MapperStatementVariantResponse'}
-    MapperStatementKeyResponse:
+        identity: {$ref: '#/components/schemas/MapperStatementIdentityPayload'}
+    MapperStatementKeyPayload:
       type: object
       additionalProperties: false
       required: [namespace, statementId]
       properties:
         namespace: {type: string}
         statementId: {type: string}
-    MapperStatementVariantResponse:
-      type: object
-      additionalProperties: false
-      required: [statement, resourcePath, documentOrdinal, representation]
-      properties:
-        statement: {$ref: '#/components/schemas/MapperStatementKeyResponse'}
-        resourcePath: {type: string}
-        databaseId: {type: string}
-        documentOrdinal: {type: integer, minimum: 0}
-        representation: {type: string, enum: [MAPPER_XML_ELEMENT, ANNOTATION_SQL_TEXT]}
     DeclarationSubjectResponse:
       oneOf:
         - $ref: '#/components/schemas/TypeDeclarationSubjectResponse'
@@ -2124,42 +2139,31 @@ components:
     TypeDeclarationSubjectResponse:
       type: object
       additionalProperties: false
-      required: [kind, sourceFile, packageName, className]
+      required: [kind, sourceType]
       properties:
         kind: {type: string, enum: [TYPE]}
-        sourceFile: {type: string}
-        packageName: {type: string}
-        className: {type: string}
+        sourceType: {$ref: '#/components/schemas/SourceTypeIdentityPayload'}
     ResolvedMethodDeclarationSubjectResponse:
       type: object
       additionalProperties: false
       required: [kind, target]
       properties:
         kind: {type: string, enum: [METHOD]}
-        target: {$ref: '#/components/schemas/MethodTarget'}
+        target: {$ref: '#/components/schemas/MethodTargetPayload'}
     UnresolvedMethodDeclarationSubjectResponse:
       type: object
       additionalProperties: false
-      required: [kind, sourceFile, ownerPackageName, ownerClassName, methodName, parameterTypes]
+      required: [kind, target]
       properties:
         kind: {type: string, enum: [METHOD_UNRESOLVED]}
-        sourceFile: {type: string}
-        ownerPackageName: {type: string}
-        ownerClassName: {type: string}
-        methodName: {type: string}
-        parameterTypes:
-          type: array
-          items: {type: string}
+        target: {$ref: '#/components/schemas/MethodTargetPayload'}
     FieldDeclarationSubjectResponse:
       type: object
       additionalProperties: false
-      required: [kind, sourceFile, ownerPackageName, ownerClassName, fieldName]
+      required: [kind, identity]
       properties:
         kind: {type: string, enum: [FIELD]}
-        sourceFile: {type: string}
-        ownerPackageName: {type: string}
-        ownerClassName: {type: string}
-        fieldName: {type: string}
+        identity: {$ref: '#/components/schemas/SourceMemberIdentityPayload'}
     AnnotationTypeResponse:
       oneOf:
         - $ref: '#/components/schemas/ResolvedAnnotationTypeResponse'
@@ -2175,7 +2179,7 @@ components:
       required: [status, javaType]
       properties:
         status: {type: string, enum: [RESOLVED]}
-        javaType: {$ref: '#/components/schemas/JavaTypeIdentityResponse'}
+        javaType: {$ref: '#/components/schemas/JavaTypeIdentityPayload'}
     UnresolvedAnnotationTypeResponse:
       type: object
       additionalProperties: false
@@ -2183,13 +2187,18 @@ components:
       properties:
         status: {type: string, enum: [UNRESOLVED]}
         writtenName: {type: string}
-    JavaTypeIdentityResponse:
+    JavaTypeIdentityPayload:
       type: object
       additionalProperties: false
       required: [packageName, className]
       properties:
         packageName: {type: string}
-        className: {type: string}
+        className:
+          type: string
+          minLength: 1
+          maxLength: 255
+          pattern: '^[\p{L}\p{Nl}\p{Sc}\p{Pc}][\p{L}\p{Nl}\p{Sc}\p{Pc}\p{Mn}\p{Mc}\p{Nd}]*(?:\.[\p{L}\p{Nl}\p{Sc}\p{Pc}][\p{L}\p{Nl}\p{Sc}\p{Pc}\p{Mn}\p{Mc}\p{Nd}]*)*$'
+          description: Portable Unicode-category approximation of the server's dot-separated Java identifier validation.
     TypeUsageLocationResponse:
       type: object
       additionalProperties: false
@@ -2202,7 +2211,7 @@ components:
       additionalProperties: false
       required: [javaType, arrayDimensions]
       properties:
-        javaType: {$ref: '#/components/schemas/JavaTypeIdentityResponse'}
+        javaType: {$ref: '#/components/schemas/JavaTypeIdentityPayload'}
         arrayDimensions: {type: integer, minimum: 0}
     TypeUsagePathResponse:
       oneOf:
@@ -2268,7 +2277,7 @@ components:
         kind: {type: string, enum: [NAMED]}
         writtenType: {type: string}
         simpleTypeName: {type: string}
-        resolvedJavaType: {$ref: '#/components/schemas/JavaTypeIdentityResponse'}
+        resolvedJavaType: {$ref: '#/components/schemas/JavaTypeIdentityPayload'}
         sourceDefined: {type: boolean}
     ParameterizedFieldTypeReferenceResponse:
       type: object
@@ -2405,8 +2414,7 @@ components:
       required:
         - repoId
         - expectedRevision
-        - sourceFile
-        - fullyQualifiedName
+        - sourceType
         - memberKinds
       properties:
         repoId:
@@ -2417,17 +2425,8 @@ components:
           type: string
           minLength: 1
           pattern: '^[0-9a-f]{40}$|^FIXTURE$'
-        sourceFile:
-          type: string
-          minLength: 1
-          maxLength: 1024
-          pattern: '^[^\u0000-\u001F\u007F-\u009F]*[^\u0000-\u0020\u007F-\u009F\u1680\u2000-\u2006\u2008-\u200A\u2028-\u2029\u205F\u3000][^\u0000-\u001F\u007F-\u009F]*$'
-          description: Repository-relative source path. The server additionally enforces normalized path segments.
-        fullyQualifiedName:
-          type: string
-          minLength: 1
-          maxLength: 1024
-          pattern: '.*\S.*'
+        sourceType:
+          $ref: '#/components/schemas/SourceTypeIdentityPayload'
         memberKinds:
           type: array
           minItems: 1
@@ -2457,8 +2456,7 @@ components:
       required:
         - repoId
         - analyzedRevision
-        - sourceFile
-        - fullyQualifiedName
+        - sourceType
         - typeKind
         - annotations
         - implementedTypes
@@ -2473,10 +2471,8 @@ components:
         analyzedRevision:
           type: string
           pattern: '^[0-9a-f]{40}$|^FIXTURE$'
-        sourceFile:
-          type: string
-        fullyQualifiedName:
-          type: string
+        sourceType:
+          $ref: '#/components/schemas/SourceTypeIdentityPayload'
         typeKind:
           type: string
         annotations:
@@ -2525,7 +2521,7 @@ components:
           enum:
             - METHOD
         target:
-          $ref: '#/components/schemas/MethodTarget'
+          $ref: '#/components/schemas/MethodTargetPayload'
         availableFollowUps:
           type: array
           items:
@@ -2535,7 +2531,7 @@ components:
       additionalProperties: false
       required:
         - kind
-        - fieldName
+        - identity
         - writtenType
         - annotations
         - limitations
@@ -2545,8 +2541,8 @@ components:
           type: string
           enum:
             - FIELD
-        fieldName:
-          type: string
+        identity:
+          $ref: '#/components/schemas/SourceMemberIdentityPayload'
         writtenType:
           type: string
         resolvedType:
@@ -2594,9 +2590,9 @@ components:
         - availableFollowUps
       properties:
         statementIdentity:
-          $ref: '#/components/schemas/MapperStatementIdentityResponse'
+          $ref: '#/components/schemas/MapperStatementIdentityPayload'
         fragmentIdentity:
-          $ref: '#/components/schemas/MapperFragmentIdentityResponse'
+          $ref: '#/components/schemas/MapperFragmentIdentityPayload'
         content:
           type: string
           description: Complete untruncated source, mapper XML, or annotation SQL content
@@ -2686,20 +2682,17 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/DiscoveryFollowUpResponse'
-    MapperStatementIdentityResponse:
+    MapperStatementIdentityPayload:
       type: object
       additionalProperties: false
       required:
-        - namespace
-        - statementId
+        - statementKey
         - resourcePath
         - documentOrdinal
         - representation
       properties:
-        namespace:
-          type: string
-        statementId:
-          type: string
+        statementKey:
+          $ref: '#/components/schemas/MapperStatementKeyPayload'
         resourcePath:
           type: string
           description: Repository-relative mapper or Java source path
@@ -2713,30 +2706,6 @@ components:
           enum:
             - MAPPER_XML_ELEMENT
             - ANNOTATION_SQL_TEXT
-    MapperFragmentIdentityResponse:
-      type: object
-      additionalProperties: false
-      required:
-        - namespace
-        - fragmentId
-        - resourcePath
-        - documentOrdinal
-        - representation
-      properties:
-        namespace:
-          type: string
-        fragmentId:
-          type: string
-        resourcePath:
-          type: string
-          description: Repository-relative mapper resource path
-        documentOrdinal:
-          type: integer
-          minimum: 0
-        representation:
-          type: string
-          enum:
-            - MAPPER_XML_ELEMENT
     ExactContentSegmentResponse:
       type: object
       additionalProperties: false
@@ -2866,15 +2835,15 @@ components:
           type: string
           pattern: '^[0-9a-f]{40}$|^FIXTURE$'
         context:
-          $ref: '#/components/schemas/SourceSymbolContextRequest'
+          $ref: '#/components/schemas/SourceSymbolContextPayload'
         symbol:
           type: string
         position:
-          $ref: '#/components/schemas/Position'
+          $ref: '#/components/schemas/PositionPayload'
     MethodTargetFollowUpRequestResponse:
       type: object
       additionalProperties: false
-      description: Shared complete five-field method authority for method source and mapper statement SQL follow-ups
+      description: Shared complete composed method authority for method source and mapper statement SQL follow-ups
       required:
         - repoId
         - expectedRevision
@@ -2886,7 +2855,7 @@ components:
           type: string
           pattern: '^[0-9a-f]{40}$|^FIXTURE$'
         target:
-          $ref: '#/components/schemas/MethodTarget'
+          $ref: '#/components/schemas/MethodTargetPayload'
     GetMapperFragmentRequestResponse:
       type: object
       additionalProperties: false
@@ -2902,7 +2871,7 @@ components:
           type: string
           pattern: '^[0-9a-f]{40}$|^FIXTURE$'
         fragmentIdentity:
-          $ref: '#/components/schemas/MapperFragmentIdentityResponse'
+          $ref: '#/components/schemas/MapperFragmentIdentityPayload'
     GetMethodSourceSegmentRequestResponse:
       type: object
       additionalProperties: false
@@ -2920,7 +2889,7 @@ components:
           type: string
           pattern: '^[0-9a-f]{40}$|^FIXTURE$'
         target:
-          $ref: '#/components/schemas/MethodTarget'
+          $ref: '#/components/schemas/MethodTargetPayload'
         contentRef:
           type: string
         segmentIndex:
@@ -2943,7 +2912,7 @@ components:
           type: string
           pattern: '^[0-9a-f]{40}$|^FIXTURE$'
         target:
-          $ref: '#/components/schemas/MethodTarget'
+          $ref: '#/components/schemas/MethodTargetPayload'
         contentRef:
           type: string
         segmentIndex:
@@ -2966,7 +2935,7 @@ components:
           type: string
           pattern: '^[0-9a-f]{40}$|^FIXTURE$'
         fragmentIdentity:
-          $ref: '#/components/schemas/MapperFragmentIdentityResponse'
+          $ref: '#/components/schemas/MapperFragmentIdentityPayload'
         contentRef:
           type: string
         segmentIndex:
@@ -2991,7 +2960,7 @@ components:
           minimum: 1
           maximum: 2
         target:
-          $ref: '#/components/schemas/MethodTarget'
+          $ref: '#/components/schemas/MethodTargetPayload'
     DiscoverMethodImplementationsRequestResponse:
       type: object
       additionalProperties: false
@@ -3006,7 +2975,7 @@ components:
           type: string
           pattern: '^[0-9a-f]{40}$|^FIXTURE$'
         declarationTarget:
-          $ref: '#/components/schemas/MethodTarget'
+          $ref: '#/components/schemas/MethodTargetPayload'
     ResolveConceptRequestResponse:
       type: object
       additionalProperties: false
@@ -3079,8 +3048,7 @@ components:
       required:
         - repoId
         - expectedRevision
-        - sourceFile
-        - fullyQualifiedName
+        - sourceType
         - memberKinds
         - offset
         - limit
@@ -3090,11 +3058,8 @@ components:
         expectedRevision:
           type: string
           pattern: '^[0-9a-f]{40}$|^FIXTURE$'
-        sourceFile:
-          type: string
-          description: Repository-relative source path.
-        fullyQualifiedName:
-          type: string
+        sourceType:
+          $ref: '#/components/schemas/SourceTypeIdentityPayload'
         memberKinds:
           type: array
           items:
@@ -3115,8 +3080,7 @@ components:
       required:
         - repoId
         - expectedRevision
-        - sourceFile
-        - fullyQualifiedName
+        - sourceType
         - memberKinds
         - offset
         - limit
@@ -3126,11 +3090,8 @@ components:
         expectedRevision:
           type: string
           pattern: '^[0-9a-f]{40}$|^FIXTURE$'
-        sourceFile:
-          type: string
-          description: Repository-relative source path.
-        fullyQualifiedName:
-          type: string
+        sourceType:
+          $ref: '#/components/schemas/SourceTypeIdentityPayload'
         memberKinds:
           type: array
           items:
@@ -3179,14 +3140,14 @@ components:
         - sourceRange
       properties:
         target:
-          $ref: '#/components/schemas/MethodTarget'
+          $ref: '#/components/schemas/MethodTargetPayload'
         listenerAnnotations:
           type: array
           minItems: 1
           items:
             $ref: '#/components/schemas/ListenerAnnotationEvidenceResponse'
         sourceRange:
-          $ref: '#/components/schemas/SourceRange'
+          $ref: '#/components/schemas/TextRangePayload'
     ListenerAnnotationEvidenceResponse:
       type: object
       additionalProperties: false
@@ -3225,7 +3186,7 @@ components:
           type: array
           maxItems: 5
           items:
-            $ref: '#/components/schemas/SourceRange'
+            $ref: '#/components/schemas/SourceRangePayload'
     ListenerObservationCode:
       type: string
       enum:
@@ -3270,10 +3231,10 @@ components:
       enum:
         - NONE
         - NODE_BUDGET
-    Position:
+    PositionPayload:
       type: object
       additionalProperties: false
-      description: Zero-based UTF-16 position.
+      description: Zero-based UTF-16 position
       required:
         - line
         - character
@@ -3284,23 +3245,32 @@ components:
         character:
           type: integer
           minimum: 0
-    SourceRange:
+    TextRangePayload:
       type: object
       additionalProperties: false
-      description: Zero-based UTF-16 range with a start-inclusive and end-exclusive boundary.
+      description: Zero-based UTF-16 range with a start-inclusive and end-exclusive boundary
       required:
-        - sourceFile
         - start
         - end
+      properties:
+        start:
+          $ref: '#/components/schemas/PositionPayload'
+        end:
+          $ref: '#/components/schemas/PositionPayload'
+    SourceRangePayload:
+      type: object
+      additionalProperties: false
+      description: Independently navigable repository source range
+      required:
+        - sourceFile
+        - range
       properties:
         sourceFile:
           type: string
           minLength: 1
           pattern: '.*\S.*'
-        start:
-          $ref: '#/components/schemas/Position'
-        end:
-          $ref: '#/components/schemas/Position'
+        range:
+          $ref: '#/components/schemas/TextRangePayload'
     GraphTraversal:
       type: object
       additionalProperties: false
@@ -3342,7 +3312,7 @@ components:
         target:
           nullable: true
           allOf:
-            - $ref: '#/components/schemas/MethodTarget'
+            - $ref: '#/components/schemas/MethodTargetPayload'
         externalSymbol:
           type: string
           nullable: true
@@ -3358,7 +3328,7 @@ components:
         declarationRange:
           nullable: true
           allOf:
-            - $ref: '#/components/schemas/SourceRange'
+            - $ref: '#/components/schemas/TextRangePayload'
     GraphEdge:
       type: object
       additionalProperties: false
@@ -3377,7 +3347,7 @@ components:
         calleeNodeId:
           type: string
         callSite:
-          $ref: '#/components/schemas/SourceRange'
+          $ref: '#/components/schemas/SourceRangePayload'
         callExpression:
           type: string
         resolutionStrategy:
@@ -3458,11 +3428,11 @@ components:
         callSite:
           nullable: true
           allOf:
-            - $ref: '#/components/schemas/SourceRange'
+            - $ref: '#/components/schemas/SourceRangePayload'
         candidates:
           type: array
           items:
-            $ref: '#/components/schemas/MethodTarget'
+            $ref: '#/components/schemas/MethodTargetPayload'
     GraphError:
       type: object
       additionalProperties: false
@@ -3565,8 +3535,7 @@ components:
         - analyzedRevision
         - httpMethod
         - routeTemplate
-        - packageName
-        - className
+        - sourceType
         - methodName
         - analysisTarget
         - matchReasons
@@ -3580,10 +3549,8 @@ components:
           type: string
         routeTemplate:
           type: string
-        packageName:
-          type: string
-        className:
-          type: string
+        sourceType:
+          $ref: '#/components/schemas/SourceTypeIdentityPayload'
         methodName:
           type: string
         analysisTarget:
@@ -3629,6 +3596,7 @@ components:
           type: string
     EntryPointsResponse:
       type: object
+      additionalProperties: false
       required:
         - repoId
         - analyzedRevision
@@ -3645,20 +3613,15 @@ components:
             $ref: '#/components/schemas/EntryPointClassResponse'
     EntryPointClassResponse:
       type: object
+      additionalProperties: false
       required:
-        - className
-        - packageName
-        - packagePath
+        - sourceType
         - description
         - basePaths
         - methods
       properties:
-        className:
-          type: string
-        packageName:
-          type: string
-        packagePath:
-          type: string
+        sourceType:
+          $ref: '#/components/schemas/SourceTypeIdentityPayload'
         description:
           type: string
         basePaths:
@@ -3865,11 +3828,11 @@ components:
         target:
           nullable: true
           allOf:
-            - $ref: '#/components/schemas/MethodTarget'
+            - $ref: '#/components/schemas/MethodTargetPayload'
         candidates:
           type: array
           items:
-            $ref: '#/components/schemas/MethodTarget'
+            $ref: '#/components/schemas/MethodTargetPayload'
         requestId:
           type: string
           nullable: true
@@ -3901,11 +3864,11 @@ components:
         target:
           nullable: true
           allOf:
-            - $ref: '#/components/schemas/MethodTarget'
+            - $ref: '#/components/schemas/MethodTargetPayload'
         candidates:
           type: array
           items:
-            $ref: '#/components/schemas/MethodTarget'
+            $ref: '#/components/schemas/MethodTargetPayload'
         requestId:
           type: string
           nullable: true

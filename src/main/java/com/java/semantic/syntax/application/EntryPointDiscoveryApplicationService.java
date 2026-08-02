@@ -2,12 +2,16 @@ package com.java.semantic.syntax.application;
 
 import com.java.semantic.repository.application.RepositoryApplicationService;
 import com.java.semantic.repository.domain.RepositoryId;
+import com.java.semantic.repository.domain.RepositoryRevision;
 import com.java.semantic.repository.domain.RepositorySnapshot;
+import com.java.semantic.syntax.domain.EntryPointClass;
 import com.java.semantic.syntax.domain.EntryPointType;
 import com.java.semantic.syntax.domain.RepositorySyntax;
 import com.java.semantic.syntax.domain.SyntaxExtractionService;
 import org.springframework.stereotype.Service;
 
+import java.util.Comparator;
+import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
@@ -33,13 +37,15 @@ public final class EntryPointDiscoveryApplicationService {
 
     public RevisionBoundEntryPoints list(
             RepositoryId repositoryId,
+            RepositoryRevision expectedRevision,
             Set<EntryPointType> requestedTypes) {
         Objects.requireNonNull(repositoryId, "repositoryId is required");
+        Objects.requireNonNull(expectedRevision, "expectedRevision is required");
         Objects.requireNonNull(requestedTypes, "requestedTypes is required");
         Set<EntryPointType> immutableTypes = Set.copyOf(requestedTypes);
         return repositoryApplicationService.withSnapshot(
                 repositoryId,
-                Optional.empty(),
+                Optional.of(expectedRevision),
                 snapshot -> listSnapshot(snapshot, immutableTypes));
     }
 
@@ -49,7 +55,11 @@ public final class EntryPointDiscoveryApplicationService {
         RepositorySyntax extracted = syntaxExtractionService.extract(snapshot.root());
         RepositorySyntax filtered = discoveryFilter.filter(
                 snapshot.repositoryId(), extracted, requestedTypes);
+        List<EntryPointClass> sortedEntryPoints = filtered.entryPoints().stream()
+                .sorted(Comparator.comparing((EntryPointClass entryPoint) -> entryPoint.sourceType().sourceFile())
+                        .thenComparing(entryPoint -> entryPoint.sourceType().javaType().fullyQualifiedName()))
+                .toList();
         return new RevisionBoundEntryPoints(
-                snapshot.repositoryId(), snapshot.revision(), filtered.entryPoints());
+                snapshot.repositoryId(), snapshot.revision(), sortedEntryPoints);
     }
 }

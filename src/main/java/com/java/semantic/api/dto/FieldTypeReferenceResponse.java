@@ -1,5 +1,7 @@
 package com.java.semantic.api.dto;
 
+import com.java.semantic.api.dto.identity.JavaTypeIdentityPayload;
+
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.java.semantic.api.monitoring.ApiMonitoringField;
 import com.java.semantic.api.monitoring.ApiMonitoringMode;
@@ -22,7 +24,7 @@ public sealed interface FieldTypeReferenceResponse permits
             @ApiMonitoringField(ApiMonitoringMode.VALUE) String writtenType,
             @ApiMonitoringField(ApiMonitoringMode.VALUE) String simpleTypeName,
             @JsonInclude(JsonInclude.Include.NON_ABSENT)
-            @ApiMonitoringField(ApiMonitoringMode.NESTED) Optional<JavaTypeIdentityResponse> resolvedJavaType,
+            @ApiMonitoringField(ApiMonitoringMode.NESTED) Optional<JavaTypeIdentityPayload> resolvedJavaType,
             @ApiMonitoringField(ApiMonitoringMode.VALUE) boolean sourceDefined) implements FieldTypeReferenceResponse {
     }
 

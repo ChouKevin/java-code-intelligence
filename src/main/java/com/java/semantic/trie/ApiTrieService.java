@@ -35,8 +35,8 @@ public class ApiTrieService {
             .thenComparing(ApiEntryPointRef::analyzedRevision)
             .thenComparing(ApiEntryPointRef::httpMethod)
             .thenComparing(ApiEntryPointRef::routeTemplate)
-            .thenComparing(ApiEntryPointRef::packageName)
-            .thenComparing(ApiEntryPointRef::className)
+            .thenComparing(ref -> ref.sourceType().sourceFile())
+            .thenComparing(ref -> ref.sourceType().javaType().fullyQualifiedName())
             .thenComparing(ApiEntryPointRef::methodName)
             .thenComparing(ApiEntryPointRef::analysisTarget, ApiTrieService::compareAnalysisTargets);
     private static final Comparator<MethodTarget> METHOD_TARGET_COMPARATOR = Comparator
@@ -139,8 +139,7 @@ public class ApiTrieService {
                         ApiEntryPointRef ref = new ApiEntryPointRef(
                                 repoId,
                                 snapshot.revision().value(),
-                                entryPointClass.packageName(),
-                                entryPointClass.className(),
+                                entryPointClass.sourceType(),
                                 api.name(),
                                 normalized.httpMethod(),
                                 normalized.path(),

@@ -7,9 +7,6 @@ import com.java.semantic.api.dto.GraphTraversalResponse;
 import com.java.semantic.api.dto.GraphWarningResponse;
 import com.java.semantic.api.dto.IncomingCallGraphResponse;
 import com.java.semantic.api.dto.OutgoingCallGraphResponse;
-import com.java.semantic.api.dto.PositionResponse;
-import com.java.semantic.api.dto.SourceRangeResponse;
-import com.java.semantic.callgraph.domain.CallSiteRange;
 import com.java.semantic.callgraph.domain.DispatchKind;
 import com.java.semantic.callgraph.domain.GraphAnalysisStatus;
 import com.java.semantic.callgraph.domain.GraphEdge;
@@ -31,6 +28,12 @@ import java.util.Objects;
 /** Maps the domain-only normalized fragment through the API-owned Task 3 response contract. */
 @Component
 public final class AnalysisResponseMapper {
+
+    private final SourceLocationHttpMapper sourceLocationMapper;
+
+    public AnalysisResponseMapper(SourceLocationHttpMapper sourceLocationMapper) {
+        this.sourceLocationMapper = Objects.requireNonNull(sourceLocationMapper, "sourceLocationMapper is required");
+    }
 
     public OutgoingCallGraphResponse toResponse(OutgoingGraphFragment fragment) {
         Objects.requireNonNull(fragment, "fragment is required");
@@ -77,20 +80,20 @@ public final class AnalysisResponseMapper {
     private GraphNodeResponse node(GraphNode node) {
         return new GraphNodeResponse(
                 node.nodeId().value(),
-                node.target().map(MethodTargetHttpMapper::toResponse).orElse(null),
+                node.target().map(JavaSourceIdentityHttpMapper::toPayload).orElse(null),
                 NodeContentState.EXTERNAL.equals(node.contentState()) ? node.externalSymbol() : null,
                 contentState(node.contentState()),
                 traversalState(node.traversalState()),
                 dispatchKind(node.dispatchKind()),
                 node.methodBody().orElse(null),
-                node.declarationRange().map(this::range).orElse(null));
+                node.declarationRange().map(sourceLocationMapper::toTextRange).orElse(null));
     }
 
     private GraphEdgeResponse edge(GraphEdge edge) {
         return new GraphEdgeResponse(
                 edge.callerNodeId().value(),
                 edge.calleeNodeId().value(),
-                range(edge.callSite()),
+                sourceLocationMapper.toSourceRange(edge.callSite()),
                 edge.callExpression(),
                 resolutionStrategy(edge.resolutionStrategy()),
                 ResolutionStrategyPartition.categoryOf(edge.resolutionStrategy()).name(),
@@ -103,19 +106,12 @@ public final class AnalysisResponseMapper {
                 warning.message(),
                 warning.nodeId().value(),
                 warning.callExpression().orElse(null),
-                warning.callSite().map(this::range).orElse(null),
-                warning.candidates().stream().map(MethodTargetHttpMapper::toResponse).toList());
+                warning.callSite().map(sourceLocationMapper::toSourceRange).orElse(null),
+                warning.candidates().stream().map(JavaSourceIdentityHttpMapper::toPayload).toList());
     }
 
     private GraphErrorResponse error(GraphError error) {
         return new GraphErrorResponse(error.code(), error.message(), error.nodeId().value());
-    }
-
-    private SourceRangeResponse range(CallSiteRange range) {
-        return new SourceRangeResponse(
-                range.sourceFile(),
-                new PositionResponse(range.startLine(), range.startCharacter()),
-                new PositionResponse(range.endLine(), range.endCharacter()));
     }
 
     private String limitReason(GraphLimitReason value) {

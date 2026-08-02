@@ -4,6 +4,7 @@ import com.fasterxml.jackson.annotation.JsonAnySetter;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.java.semantic.api.monitoring.ApiMonitoringField;
 import com.java.semantic.api.monitoring.ApiMonitoringMode;
+import com.java.semantic.api.dto.identity.MapperFragmentIdentityPayload;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
@@ -24,7 +25,7 @@ public record GetMapperFragmentSegmentRequest(
         @NotBlank @Pattern(regexp = "^[0-9a-f]{40}$|^FIXTURE$")
         String expectedRevision,
         @ApiMonitoringField(ApiMonitoringMode.NESTED)
-        @NotNull @Valid MapperFragmentIdentityRequest fragmentIdentity,
+        @NotNull @Valid MapperFragmentIdentityPayload fragmentIdentity,
         @ApiMonitoringField(ApiMonitoringMode.OMIT)
         @NotBlank @Size(max = 128) @Pattern(regexp = "[^\\p{javaISOControl}]+")
         String contentRef,

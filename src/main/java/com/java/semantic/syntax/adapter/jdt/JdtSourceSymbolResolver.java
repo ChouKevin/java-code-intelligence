@@ -92,7 +92,8 @@ public final class JdtSourceSymbolResolver implements SourceSymbolResolver {
             return ambiguousContext(query.context(), contexts);
         }
         if (contexts.isEmpty()) {
-            List<SourceSymbolIssueSummary> issues = index.hasUnsupportedContext(query.context().fullyQualifiedType())
+            List<SourceSymbolIssueSummary> issues = index.hasUnsupportedContext(
+                    query.context().javaType().fullyQualifiedName())
                     ? List.of(new SourceSymbolIssueSummary(SourceSymbolIssueCode.UNSUPPORTED_SOURCE_CONSTRUCT, 1))
                     : List.of();
             return empty(SourceSymbolResolutionStatus.CONTEXT_NOT_FOUND, List.of(), issues);
@@ -768,7 +769,7 @@ public final class JdtSourceSymbolResolver implements SourceSymbolResolver {
                 }
                 for (AbstractTypeDeclaration type : SourceTypes.allTypesOf(parsed.unit())) {
                     if (type instanceof AnnotationTypeDeclaration
-                            || !requested.fullyQualifiedType().equals(fullyQualifiedName(parsed, type))) {
+                            || !requested.javaType().fullyQualifiedName().equals(fullyQualifiedName(parsed, type))) {
                         continue;
                     }
                     if (requested.method().isEmpty()) {

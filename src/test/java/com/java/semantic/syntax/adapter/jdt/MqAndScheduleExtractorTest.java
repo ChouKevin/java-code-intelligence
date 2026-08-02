@@ -160,7 +160,7 @@ class MqAndScheduleExtractorTest {
 
     private List<String> destinationsOf(String className) {
         return classes.stream()
-                .filter(entry -> className.equals(entry.className()))
+                .filter(entry -> className.equals(entry.sourceType().javaType().className()))
                 .flatMap(entry -> entry.methods().stream())
                 .filter(MqEntryPoint.class::isInstance)
                 .map(MqEntryPoint.class::cast)

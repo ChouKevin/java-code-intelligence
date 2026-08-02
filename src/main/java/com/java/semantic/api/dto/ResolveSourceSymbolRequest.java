@@ -4,6 +4,8 @@ import com.fasterxml.jackson.annotation.JsonAnySetter;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.java.semantic.api.monitoring.ApiMonitoringField;
 import com.java.semantic.api.monitoring.ApiMonitoringMode;
+import com.java.semantic.api.dto.location.PositionPayload;
+import com.java.semantic.api.dto.identity.SourceSymbolContextPayload;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
@@ -18,11 +20,11 @@ public record ResolveSourceSymbolRequest(
         @ApiMonitoringField(ApiMonitoringMode.VALUE) @NotBlank String repoId,
         @ApiMonitoringField(ApiMonitoringMode.VALUE) @NotBlank
         @Pattern(regexp = "^[0-9a-f]{40}$|^FIXTURE$") String expectedRevision,
-        @ApiMonitoringField(ApiMonitoringMode.NESTED) @NotNull @Valid SourceSymbolContextRequest context,
+        @ApiMonitoringField(ApiMonitoringMode.NESTED) @NotNull @Valid SourceSymbolContextPayload context,
         @ApiMonitoringField(ApiMonitoringMode.VALUE) @NotBlank
         @Pattern(regexp = "[\\p{L}\\p{Nl}\\p{Sc}\\p{Pc}]"
                 + "[\\p{L}\\p{Nl}\\p{Sc}\\p{Pc}\\p{Mn}\\p{Mc}\\p{Nd}]*") String symbol,
-        @ApiMonitoringField(ApiMonitoringMode.NESTED) @Valid Optional<SourceSymbolPositionRequest> position) {
+        @ApiMonitoringField(ApiMonitoringMode.NESTED) @Valid Optional<PositionPayload> position) {
 
     public ResolveSourceSymbolRequest {
         position = Objects.requireNonNull(position, "position is required");

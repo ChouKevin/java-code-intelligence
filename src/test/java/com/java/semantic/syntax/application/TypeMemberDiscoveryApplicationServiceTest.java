@@ -63,6 +63,8 @@ class TypeMemberDiscoveryApplicationServiceTest {
     private static final String DUPLICATE_SOURCE_FILE =
             "module-b/src/main/java/com/acme/order/OrderService.java";
     private static final String TYPE_NAME = "com.acme.order.OrderService";
+    private static final SourceTypeIdentity SOURCE_TYPE = new SourceTypeIdentity(
+            new JavaTypeIdentity("com.acme.order", "OrderService"), SOURCE_FILE);
     private static final String REFERENCED_SOURCE_FILE =
             "module-a/src/main/java/com/acme/order/Order.java";
     private static final String DUPLICATE_REFERENCED_SOURCE_FILE =
@@ -92,8 +94,7 @@ class TypeMemberDiscoveryApplicationServiceTest {
         TypeMemberQuery firstQuery = new TypeMemberQuery(
                 REPOSITORY_ID,
                 REVISION,
-                SOURCE_FILE,
-                TYPE_NAME,
+                SOURCE_TYPE,
                 Set.of(TypeMemberKind.FIELD, TypeMemberKind.METHOD),
                 Optional.empty(),
                 101,
@@ -105,8 +106,7 @@ class TypeMemberDiscoveryApplicationServiceTest {
 
         assertThat(first.repositoryId()).isEqualTo(REPOSITORY_ID);
         assertThat(first.analyzedRevision()).isEqualTo(REVISION);
-        assertThat(first.sourceFile()).isEqualTo(SOURCE_FILE);
-        assertThat(first.fullyQualifiedName()).isEqualTo(TYPE_NAME);
+        assertThat(first.sourceType()).isEqualTo(SOURCE_TYPE);
         assertThat(first.typeKind()).isEqualTo(SourceTypeKind.CLASS);
         assertThat(first.annotations()).containsExactly("Service");
         assertThat(first.implementedTypes()).containsExactly("OrderPort");
@@ -181,8 +181,7 @@ class TypeMemberDiscoveryApplicationServiceTest {
                     assertThat(followUp.request()).isEqualTo(new TypeMembersRequest(
                             REPOSITORY_ID.value(),
                             REVISION.value(),
-                            SOURCE_FILE,
-                            TYPE_NAME,
+                            SOURCE_TYPE,
                             List.of(TypeMemberKind.METHOD, TypeMemberKind.FIELD),
                             Optional.empty(),
                             106,
@@ -191,8 +190,7 @@ class TypeMemberDiscoveryApplicationServiceTest {
 
         TypeMemberResult second = service.discover(firstQuery.nextPage(106));
 
-        assertThat(second.sourceFile()).isEqualTo(first.sourceFile());
-        assertThat(second.fullyQualifiedName()).isEqualTo(first.fullyQualifiedName());
+        assertThat(second.sourceType()).isEqualTo(first.sourceType());
         assertThat(second.typeKind()).isEqualTo(first.typeKind());
         assertThat(second.annotations()).isEqualTo(first.annotations());
         assertThat(second.implementedTypes()).isEqualTo(first.implementedTypes());
@@ -207,8 +205,7 @@ class TypeMemberDiscoveryApplicationServiceTest {
         TypeMemberQuery firstQuery = new TypeMemberQuery(
                 REPOSITORY_ID,
                 REVISION,
-                SOURCE_FILE,
-                TYPE_NAME,
+                SOURCE_TYPE,
                 Set.of(TypeMemberKind.FIELD, TypeMemberKind.METHOD),
                 Optional.of("shared"),
                 0,
@@ -225,8 +222,7 @@ class TypeMemberDiscoveryApplicationServiceTest {
                     assertThat(followUp.request()).isEqualTo(new TypeMembersRequest(
                             REPOSITORY_ID.value(),
                             REVISION.value(),
-                            SOURCE_FILE,
-                            TYPE_NAME,
+                            SOURCE_TYPE,
                             List.of(TypeMemberKind.METHOD, TypeMemberKind.FIELD),
                             Optional.of("shared"),
                             1,
@@ -239,8 +235,9 @@ class TypeMemberDiscoveryApplicationServiceTest {
         assertThatThrownBy(() -> new TypeMemberQuery(
                 REPOSITORY_ID,
                 REVISION,
-                "/workspace/orders/src/main/java/com/acme/order/OrderService.java",
-                TYPE_NAME,
+                new SourceTypeIdentity(
+                        new JavaTypeIdentity("com.acme.order", "OrderService"),
+                        "/workspace/orders/src/main/java/com/acme/order/OrderService.java"),
                 Set.of(TypeMemberKind.METHOD),
                 Optional.empty(),
                 0,
@@ -255,8 +252,7 @@ class TypeMemberDiscoveryApplicationServiceTest {
         TypeMemberQuery query = new TypeMemberQuery(
                 REPOSITORY_ID,
                 REVISION,
-                SOURCE_FILE,
-                TYPE_NAME,
+                SOURCE_TYPE,
                 Set.of(TypeMemberKind.FIELD),
                 Optional.empty(),
                 0,
@@ -284,8 +280,7 @@ class TypeMemberDiscoveryApplicationServiceTest {
         TypeMemberQuery query = new TypeMemberQuery(
                 REPOSITORY_ID,
                 REVISION,
-                SOURCE_FILE,
-                TYPE_NAME,
+                SOURCE_TYPE,
                 Set.of(TypeMemberKind.FIELD),
                 Optional.empty(),
                 0,
@@ -320,8 +315,7 @@ class TypeMemberDiscoveryApplicationServiceTest {
         TypeMemberQuery query = new TypeMemberQuery(
                 REPOSITORY_ID,
                 REVISION,
-                SOURCE_FILE,
-                TYPE_NAME,
+                SOURCE_TYPE,
                 Set.of(TypeMemberKind.FIELD),
                 Optional.empty(),
                 0,

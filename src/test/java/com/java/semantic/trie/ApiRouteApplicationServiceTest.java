@@ -1,5 +1,7 @@
 package com.java.semantic.trie;
 
+import com.java.semantic.identity.JavaTypeIdentity;
+import com.java.semantic.identity.SourceTypeIdentity;
 import com.java.semantic.repository.domain.RepositoryId;
 import com.java.semantic.repository.domain.RepositoryRevision;
 import com.java.semantic.syntax.domain.MethodTargetResolution;
@@ -86,8 +88,9 @@ class ApiRouteApplicationServiceTest {
         return new ApiEntryPointRef(
                 repoId,
                 revision,
-                "com.acme.order",
-                className,
+                new SourceTypeIdentity(
+                        new JavaTypeIdentity("com.acme.order", className),
+                        "src/main/java/com/acme/order/" + className + ".java"),
                 "handle",
                 "POST",
                 routeTemplate,

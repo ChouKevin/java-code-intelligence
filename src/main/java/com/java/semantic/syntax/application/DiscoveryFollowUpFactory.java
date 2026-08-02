@@ -54,15 +54,13 @@ public final class DiscoveryFollowUpFactory {
             case TypeConceptIdentity typeIdentity -> forType(
                     repositoryId,
                     revision,
-                    typeIdentity.type().sourceFile(),
-                    typeIdentity.type().fullyQualifiedName());
+                    typeIdentity.type());
             case MethodConceptIdentity methodIdentity ->
                     forConceptMethod(repositoryId, revision, methodIdentity.target());
             case FieldConceptIdentity fieldIdentity -> forType(
                     repositoryId,
                     revision,
-                    fieldIdentity.field().ownerType().sourceFile(),
-                    fieldIdentity.field().ownerType().fullyQualifiedName());
+                    fieldIdentity.field().ownerType());
             case AnnotationUsageConceptIdentity annotationIdentity -> forDeclaration(
                     repositoryId,
                     revision,
@@ -100,7 +98,7 @@ public final class DiscoveryFollowUpFactory {
             SourceTypeIdentity sourceType) {
         SourceTypeIdentity type = Objects.requireNonNull(sourceType, "sourceType is required");
         return Stream.concat(
-                forType(repositoryId, revision, type.sourceFile(), type.fullyQualifiedName()).stream(),
+                forType(repositoryId, revision, type).stream(),
                 forResolvedFieldType(
                         repositoryId,
                         revision,
@@ -116,7 +114,7 @@ public final class DiscoveryFollowUpFactory {
             String sourceFile) {
         SourceSymbolContext context = original.context();
         SourceSymbolContext selected = new SourceSymbolContext(
-                context.fullyQualifiedType(), Optional.of(sourceFile), context.method());
+                context.javaType(), Optional.of(sourceFile), context.method());
         return sourceSymbolRetry(repositoryId, revision, original, selected, Optional.empty());
     }
 
@@ -128,7 +126,7 @@ public final class DiscoveryFollowUpFactory {
             MethodTarget target) {
         MethodTarget selectedTarget = Objects.requireNonNull(target, "target is required");
         SourceSymbolContext selected = new SourceSymbolContext(
-                original.context().fullyQualifiedType(),
+                original.context().javaType(),
                 Optional.of(selectedTarget.sourceFile()),
                 Optional.of(new SourceSymbolContext.MethodContext(
                         selectedTarget.methodName(), Optional.of(selectedTarget.parameterTypes()))));
@@ -144,7 +142,7 @@ public final class DiscoveryFollowUpFactory {
         SourceSymbolCandidate selectedCandidate = Objects.requireNonNull(candidate, "candidate is required");
         SourceSymbolContext context = original.context();
         SourceSymbolContext selected = new SourceSymbolContext(
-                context.fullyQualifiedType(),
+                context.javaType(),
                 Optional.of(selectedCandidate.representativeOccurrence().sourceFile()),
                 context.method());
         return sourceSymbolRetry(
@@ -236,8 +234,7 @@ public final class DiscoveryFollowUpFactory {
         TypeMembersRequest request = new TypeMembersRequest(
                 nextQuery.repositoryId().value(),
                 nextQuery.expectedRevision().value(),
-                nextQuery.sourceFile(),
-                nextQuery.fullyQualifiedName(),
+                nextQuery.sourceType(),
                 orderedKinds,
                 nextQuery.namePrefix(),
                 nextQuery.offset(),
@@ -255,31 +252,26 @@ public final class DiscoveryFollowUpFactory {
             case TypeDeclarationSubjectIdentity typeSubject -> forType(
                     repositoryId,
                     revision,
-                    typeSubject.type().sourceFile(),
-                    typeSubject.type().fullyQualifiedName());
+                    typeSubject.type());
             case UnresolvedMethodDeclarationSubjectIdentity methodSubject -> forType(
                     repositoryId,
                     revision,
-                    methodSubject.owner().sourceFile(),
-                    methodSubject.owner().fullyQualifiedName());
+                    methodSubject.owner());
             case FieldDeclarationSubjectIdentity fieldSubject -> forType(
                     repositoryId,
                     revision,
-                    fieldSubject.field().ownerType().sourceFile(),
-                    fieldSubject.field().ownerType().fullyQualifiedName());
+                    fieldSubject.field().ownerType());
         };
     }
 
     private List<DiscoveryFollowUp> forType(
             RepositoryId repositoryId,
             RepositoryRevision revision,
-            String sourceFile,
-            String fullyQualifiedName) {
+            SourceTypeIdentity sourceType) {
         GetTypeMembersRequest request = new GetTypeMembersRequest(
                 repositoryId(repositoryId),
                 revision(revision),
-                sourceFile,
-                fullyQualifiedName,
+                Objects.requireNonNull(sourceType, "sourceType is required"),
                 List.of(TypeMemberKind.METHOD, TypeMemberKind.FIELD),
                 Optional.empty(),
                 0,

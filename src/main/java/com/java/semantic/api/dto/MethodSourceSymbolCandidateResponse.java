@@ -1,17 +1,19 @@
 package com.java.semantic.api.dto;
 
+import com.java.semantic.api.dto.identity.MethodTargetPayload;
+
 import com.java.semantic.api.monitoring.ApiMonitoringField;
 import com.java.semantic.api.monitoring.ApiMonitoringMode;
+import com.java.semantic.api.dto.location.TextRangePayload;
 
 import java.util.List;
 
-/** canonical MethodTarget source-symbol response */
+/** 以 canonical 方法目標識別的方法來源符號回應 */
 public record MethodSourceSymbolCandidateResponse(
         @ApiMonitoringField(ApiMonitoringMode.VALUE) String kind,
-        @ApiMonitoringField(ApiMonitoringMode.VALUE) String name,
-        @ApiMonitoringField(ApiMonitoringMode.NESTED) MethodTargetResponse target,
-        @ApiMonitoringField(ApiMonitoringMode.NESTED) SourceRangeResponse declarationRange,
-        @ApiMonitoringField(ApiMonitoringMode.NESTED) SourceRangeResponse representativeOccurrence,
+        @ApiMonitoringField(ApiMonitoringMode.NESTED) MethodTargetPayload target,
+        @ApiMonitoringField(ApiMonitoringMode.NESTED) TextRangePayload declarationRange,
+        @ApiMonitoringField(ApiMonitoringMode.NESTED) TextRangePayload representativeOccurrence,
         @ApiMonitoringField(ApiMonitoringMode.VALUE) int occurrenceCount,
         @ApiMonitoringField(ApiMonitoringMode.SIZE) List<DiscoveryFollowUpResponse> availableFollowUps)
         implements SourceSymbolCandidateResponse {

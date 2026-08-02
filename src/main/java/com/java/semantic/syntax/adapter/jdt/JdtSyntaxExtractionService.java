@@ -82,8 +82,8 @@ public class JdtSyntaxExtractionService implements SyntaxExtractionService {
                 extractionOutcomes.add(SourceExtractionOutcome.extracted(parsed.source().repositoryRelativePath()));
             });
 
-            entryPoints.sort(Comparator.comparing(EntryPointClass::packagePath)
-                    .thenComparing(EntryPointClass::className));
+            entryPoints.sort(Comparator.comparing((EntryPointClass entryPoint) -> entryPoint.sourceType().sourceFile())
+                    .thenComparing(entryPoint -> entryPoint.sourceType().javaType().fullyQualifiedName()));
             sourceTypes.sort(Comparator.comparing(metadata -> metadata.declaration().identity().fullyQualifiedName()));
             MapperEvidenceIndex mapperEvidenceIndex = withAnnotationSqlEvidence(
                     mapperExtraction.evidenceIndex(), sourceTypes);

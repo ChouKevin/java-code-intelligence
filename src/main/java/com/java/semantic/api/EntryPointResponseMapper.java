@@ -35,9 +35,7 @@ public final class EntryPointResponseMapper {
     private EntryPointClassResponse toResponse(EntryPointClass entryPointClass) {
         Objects.requireNonNull(entryPointClass, "entryPointClass is required");
         return new EntryPointClassResponse(
-                entryPointClass.className(),
-                entryPointClass.packageName(),
-                entryPointClass.packagePath(),
+                JavaSourceIdentityHttpMapper.toPayload(entryPointClass.sourceType()),
                 entryPointClass.description(),
                 entryPointClass.basePaths(),
                 entryPointClass.methods().stream().map(this::toResponse).toList());
@@ -81,7 +79,7 @@ public final class EntryPointResponseMapper {
         return switch (resolution.status()) {
             case RESOLVED -> new MethodTargetResolutionResponse(
                     resolution.status().name(),
-                    MethodTargetHttpMapper.toResponse(resolution.target().orElseThrow()),
+                    JavaSourceIdentityHttpMapper.toPayload(resolution.target().orElseThrow()),
                     List.of(),
                     resolution.reasonCode());
             case UNRESOLVED -> new MethodTargetResolutionResponse(
@@ -92,7 +90,7 @@ public final class EntryPointResponseMapper {
             case AMBIGUOUS -> new MethodTargetResolutionResponse(
                     resolution.status().name(),
                     null,
-                    resolution.candidates().stream().sorted(METHOD_TARGET_COMPARATOR).map(MethodTargetHttpMapper::toResponse)
+                    resolution.candidates().stream().sorted(METHOD_TARGET_COMPARATOR).map(JavaSourceIdentityHttpMapper::toPayload)
                             .toList(),
                     resolution.reasonCode());
         };

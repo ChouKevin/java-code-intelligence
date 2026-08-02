@@ -97,8 +97,7 @@ public final class StructuredDiscoveryController {
         TypeMemberQuery query = new TypeMemberQuery(
                 RepositoryId.of(request.repoId()),
                 new RepositoryRevision(request.expectedRevision()),
-                request.sourceFile(),
-                request.fullyQualifiedName(),
+                JavaSourceIdentityHttpMapper.toDomain(request.sourceType()),
                 memberKinds,
                 Optional.ofNullable(request.namePrefix()),
                 request.offset(),

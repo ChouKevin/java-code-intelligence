@@ -2,7 +2,7 @@ package com.java.semantic.syntax.application;
 
 import com.java.semantic.syntax.application.concept.ConceptIdentity;
 import com.java.semantic.identity.MethodTarget;
-import com.java.semantic.identity.RepositoryRelativeSource;
+import com.java.semantic.identity.SourceTypeIdentity;
 import com.java.semantic.syntax.domain.SyntaxPosition;
 
 import java.util.List;
@@ -183,8 +183,7 @@ public record DiscoveryFollowUp(
     public record GetTypeMembersRequest(
             String repoId,
             String expectedRevision,
-            String sourceFile,
-            String fullyQualifiedName,
+            SourceTypeIdentity sourceType,
             List<TypeMemberKind> memberKinds,
             Optional<String> namePrefix,
             int offset,
@@ -193,8 +192,7 @@ public record DiscoveryFollowUp(
         public GetTypeMembersRequest {
             repoId = requiredText(repoId, "repoId");
             expectedRevision = requiredText(expectedRevision, "expectedRevision");
-            sourceFile = RepositoryRelativeSource.requireValid(sourceFile);
-            fullyQualifiedName = requiredText(fullyQualifiedName, "fullyQualifiedName");
+            sourceType = Objects.requireNonNull(sourceType, "sourceType is required");
             memberKinds = List.copyOf(Objects.requireNonNull(
                     memberKinds, "memberKinds are required"));
             namePrefix = Objects.requireNonNull(namePrefix, "namePrefix is required");
@@ -211,8 +209,7 @@ public record DiscoveryFollowUp(
     public record TypeMembersRequest(
             String repoId,
             String expectedRevision,
-            String sourceFile,
-            String fullyQualifiedName,
+            SourceTypeIdentity sourceType,
             List<TypeMemberKind> memberKinds,
             Optional<String> namePrefix,
             int offset,
@@ -221,8 +218,7 @@ public record DiscoveryFollowUp(
         public TypeMembersRequest {
             repoId = requiredText(repoId, "repoId");
             expectedRevision = requiredText(expectedRevision, "expectedRevision");
-            sourceFile = RepositoryRelativeSource.requireValid(sourceFile);
-            fullyQualifiedName = requiredText(fullyQualifiedName, "fullyQualifiedName");
+            sourceType = Objects.requireNonNull(sourceType, "sourceType is required");
             memberKinds = List.copyOf(Objects.requireNonNull(memberKinds, "memberKinds are required"));
             namePrefix = Objects.requireNonNull(namePrefix, "namePrefix is required");
             if (memberKinds.size() < 1) {

@@ -16,6 +16,7 @@ import java.nio.file.Path;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException;
 
 class ApiRouteCandidateTest {
 
@@ -27,8 +28,9 @@ class ApiRouteCandidateTest {
         ApiEntryPointRef ref = new ApiEntryPointRef(
                 "repo-a",
                 REVISION,
-                "com.example.orders",
-                "OrderController",
+                new SourceTypeIdentity(
+                        new JavaTypeIdentity("com.example.orders", "OrderController"),
+                        "src/main/java/com/example/orders/OrderController.java"),
                 "findOrder",
                 "GET",
                 "/orders/{*}",
@@ -43,8 +45,9 @@ class ApiRouteCandidateTest {
                 REVISION,
                 "GET",
                 "/orders/{*}",
-                "com.example.orders",
-                "OrderController",
+                new SourceTypeIdentity(
+                        new JavaTypeIdentity("com.example.orders", "OrderController"),
+                        "src/main/java/com/example/orders/OrderController.java"),
                 "findOrder",
                 unresolved(),
                 List.of(ApiRouteMatchReason.TEMPLATE_MATCH, ApiRouteMatchReason.HTTP_METHOD_MATCH)));
@@ -67,9 +70,9 @@ class ApiRouteCandidateTest {
                 List.of(),
                 resolution);
         EntryPointClass entryPointClass = new EntryPointClass(
-                "OrderController",
-                "com.example.orders",
-                "com/example/orders/OrderController.java",
+                new SourceTypeIdentity(
+                        new JavaTypeIdentity("com.example.orders", "OrderController"),
+                        "src/main/java/com/example/orders/OrderController.java"),
                 "",
                 List.of(),
                 List.of(entryPoint));
@@ -86,6 +89,28 @@ class ApiRouteCandidateTest {
 
         assertThat(candidate.analysisTarget()).isSameAs(resolution);
         assertThat(candidate.analysisTarget().target()).get().isSameAs(target);
+    }
+
+    @Test
+    void should_reject_a_resolved_target_that_diverges_from_the_declared_route_identity() {
+        SourceTypeIdentity routeSourceType = new SourceTypeIdentity(
+                new JavaTypeIdentity("com.example.orders", "OrderController"),
+                "src/main/java/com/example/orders/OrderController.java");
+        MethodTarget divergentTarget = new MethodTarget(
+                routeSourceType,
+                "listOrders",
+                List.of());
+
+        assertThatIllegalArgumentException().isThrownBy(() -> new ApiRouteCandidate(
+                "repo-a",
+                REVISION,
+                "GET",
+                "/orders/{*}",
+                routeSourceType,
+                "findOrder",
+                MethodTargetResolution.resolved(divergentTarget),
+                List.of()))
+                .withMessage("resolved target must match route source type and method name");
     }
 
     private static MethodTargetResolution unresolved() {

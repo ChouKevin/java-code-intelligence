@@ -3,6 +3,8 @@ package com.java.semantic.api.dto;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.java.semantic.api.monitoring.ApiMonitoringField;
 import com.java.semantic.api.monitoring.ApiMonitoringMode;
+import com.java.semantic.api.dto.identity.MapperFragmentIdentityPayload;
+import com.java.semantic.api.dto.identity.MapperStatementIdentityPayload;
 
 import java.util.List;
 import java.util.Objects;
@@ -12,10 +14,10 @@ import java.util.Optional;
 public record ExactContentVariantResponse(
         @JsonInclude(JsonInclude.Include.NON_ABSENT)
         @ApiMonitoringField(ApiMonitoringMode.NESTED)
-        Optional<MapperStatementIdentityResponse> statementIdentity,
+        Optional<MapperStatementIdentityPayload> statementIdentity,
         @JsonInclude(JsonInclude.Include.NON_ABSENT)
         @ApiMonitoringField(ApiMonitoringMode.NESTED)
-        Optional<MapperFragmentIdentityResponse> fragmentIdentity,
+        Optional<MapperFragmentIdentityPayload> fragmentIdentity,
         @JsonInclude(JsonInclude.Include.NON_ABSENT)
         @ApiMonitoringField(ApiMonitoringMode.OMIT)
         Optional<String> content,

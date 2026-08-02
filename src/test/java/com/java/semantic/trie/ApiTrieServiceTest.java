@@ -206,10 +206,10 @@ class ApiTrieServiceTest {
         service.reload(snapshot("repo", SHA_ONE.value()), syntax(later, earlier));
 
         assertThat(refs(service.lookupMatches("/collision-sentinel", "GET", "")))
-                .extracting(ApiEntryPointRef::className, ApiEntryPointRef::methodName)
+                .extracting(ref -> ref.sourceType().javaType().className(), ApiEntryPointRef::methodName)
                 .containsExactly(Tuple.tuple("AControllerSentinel", "aHandlerSentinel"));
         assertThat(refs(service.suggestMatches("/collision-sentinel", "GET", "", 10)))
-                .extracting(ApiEntryPointRef::className, ApiEntryPointRef::methodName)
+                .extracting(ref -> ref.sourceType().javaType().className(), ApiEntryPointRef::methodName)
                 .containsExactly(Tuple.tuple("AControllerSentinel", "aHandlerSentinel"));
         assertThat(output)
                 .contains("repoId=repo", "category=INTRA_REPOSITORY_COLLISION")
@@ -233,10 +233,10 @@ class ApiTrieServiceTest {
         service.reload(snapshot("repo", SHA_ONE.value()), syntax(largerPackage, smallerPackage));
 
         assertThat(refs(service.lookupMatches("/package-collision", "GET", "")))
-                .extracting(ApiEntryPointRef::packageName)
+                .extracting(ref -> ref.sourceType().javaType().packageName())
                 .containsExactly("a.package");
         assertThat(refs(service.suggestMatches("/package-collision", "GET", "", 10)))
-                .extracting(ApiEntryPointRef::packageName)
+                .extracting(ref -> ref.sourceType().javaType().packageName())
                 .containsExactly("a.package");
     }
 
@@ -557,9 +557,9 @@ class ApiTrieServiceTest {
         List<EntryPointMethod> methods = List.of(new ApiEntryPoint(
                 methodName, "", path, List.of(httpMethod), List.of(), resolution));
         return new EntryPointClass(
-                className,
-                "com.example",
-                "com/example/" + className + ".java",
+                new SourceTypeIdentity(
+                        new JavaTypeIdentity("com.example", className),
+                        "com/example/" + className + ".java"),
                 "",
                 List.of(),
                 methods);
@@ -585,9 +585,9 @@ class ApiTrieServiceTest {
         List<EntryPointMethod> methods = List.of(new ApiEntryPoint(
                 methodName, "", path, List.of(httpMethod), List.of(), resolution));
         return new EntryPointClass(
-                className,
-                packageName,
-                packageName.replace('.', '/') + "/" + className + ".java",
+                new SourceTypeIdentity(
+                        new JavaTypeIdentity(packageName, className),
+                        packageName.replace('.', '/') + "/" + className + ".java"),
                 "",
                 List.of(),
                 methods);

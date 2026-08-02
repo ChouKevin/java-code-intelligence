@@ -48,7 +48,9 @@ public final class EntryPointDiscoveryFilter {
             EntryPointClass entryPoint,
             Set<EntryPointType> requestedTypes) {
         TypeId typeId = new TypeId(
-                repositoryId.value(), entryPoint.packageName(), entryPoint.className());
+                repositoryId.value(),
+                entryPoint.sourceType().javaType().packageName(),
+                entryPoint.sourceType().javaType().className());
         if (EvidenceVisibility.BUSINESS_READ_FORBIDDEN.equals(readPolicy.visibilityOf(typeId))) {
             return Optional.empty();
         }
@@ -61,9 +63,7 @@ public final class EntryPointDiscoveryFilter {
             return Optional.empty();
         }
         return Optional.of(new EntryPointClass(
-                entryPoint.className(),
-                entryPoint.packageName(),
-                entryPoint.packagePath(),
+                entryPoint.sourceType(),
                 entryPoint.description(),
                 entryPoint.basePaths(),
                 methods));

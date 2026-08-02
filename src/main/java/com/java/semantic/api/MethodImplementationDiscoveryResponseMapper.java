@@ -26,7 +26,7 @@ public final class MethodImplementationDiscoveryResponseMapper {
         return new DiscoverMethodImplementationsResponse(
                 discovery.repositoryId().value(),
                 discovery.revision().value(),
-                MethodTargetHttpMapper.toResponse(discovery.requestedTarget()),
+                JavaSourceIdentityHttpMapper.toPayload(discovery.requestedTarget()),
                 discovery.candidates().stream().map(this::candidate).toList(),
                 limits(discovery.limits()),
                 resolution(discovery.issues()));
@@ -34,7 +34,7 @@ public final class MethodImplementationDiscoveryResponseMapper {
 
     private MethodImplementationCandidateResponse candidate(ImplementationCandidate candidate) {
         return new MethodImplementationCandidateResponse(
-                MethodTargetHttpMapper.toResponse(candidate.target()),
+                JavaSourceIdentityHttpMapper.toPayload(candidate.target()),
                 candidate.primary(),
                 candidate.qualifiers(),
                 candidate.profiles());

@@ -137,10 +137,12 @@ class ExactContentControllerTest {
         mockMvc.perform(exactRequest("/v1/discovery/method-sql", methodRequest()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.variants.length()").value(2))
-                .andExpect(jsonPath("$.variants[0].statementIdentity.namespace")
+                .andExpect(jsonPath("$.variants[0].statementIdentity.statementKey.namespace")
                         .value("com.example.OrderMapper"))
-                .andExpect(jsonPath("$.variants[0].statementIdentity.statementId").value("findOrders"))
-                .andExpect(jsonPath("$.variants[0].statementIdentity.statementKey").doesNotExist())
+                .andExpect(jsonPath("$.variants[0].statementIdentity.statementKey.statementId")
+                        .value("findOrders"))
+                .andExpect(jsonPath("$.variants[0].statementIdentity.namespace").doesNotExist())
+                .andExpect(jsonPath("$.variants[0].statementIdentity.statementId").doesNotExist())
                 .andExpect(jsonPath("$.variants[0].statementIdentity.resourcePath")
                         .value("src/main/resources/mapper/OrderMapper.xml"))
                 .andExpect(jsonPath("$.variants[0].statementIdentity.databaseId").value("postgres"))
@@ -157,7 +159,7 @@ class ExactContentControllerTest {
                         .value("/v1/discovery/method-sql-segment"))
                 .andExpect(jsonPath("$.variants[0].availableFollowUps[0].api.operationId")
                         .value("getMethodSqlSegment"))
-                .andExpect(jsonPath("$.variants[0].availableFollowUps[0].request.target.sourceFile")
+                .andExpect(jsonPath("$.variants[0].availableFollowUps[0].request.target.sourceType.sourceFile")
                         .value(TARGET.sourceFile()))
                 .andExpect(jsonPath("$.variants[0].availableFollowUps[0].request.contentRef")
                         .value(CONTENT_REF))
@@ -345,9 +347,10 @@ class ExactContentControllerTest {
                   "repoId":"orders",
                   "expectedRevision":"invalid",
                   "target":{
-                    "sourceFile":"src/main/java/com/example/OrderMapper.java",
-                    "packageName":"com.example",
-                    "className":"OrderMapper",
+                    "sourceType":{
+                      "javaType":{"packageName":"com.example","className":"OrderMapper"},
+                      "sourceFile":"src/main/java/com/example/OrderMapper.java"
+                    },
                     "methodName":"findOrders",
                     "parameterTypes":["java.lang.String"]
                   },
@@ -383,8 +386,8 @@ class ExactContentControllerTest {
         mockMvc.perform(exactRequest("/v1/discovery/method-source", methodRequest()))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.errorCode").value("SEMANTIC_BINDING_AMBIGUOUS"))
-                .andExpect(jsonPath("$.candidates[0].sourceFile").value("a/OrderMapper.java"))
-                .andExpect(jsonPath("$.candidates[1].sourceFile").value("z/OrderMapper.java"));
+                .andExpect(jsonPath("$.candidates[0].sourceType.sourceFile").value("a/OrderMapper.java"))
+                .andExpect(jsonPath("$.candidates[1].sourceType.sourceFile").value("z/OrderMapper.java"));
 
         willThrow(new SemanticTargetNotFoundException(TARGET))
                 .given(exactContentApplicationService).retrieve(any());
@@ -429,9 +432,10 @@ class ExactContentControllerTest {
                   "repoId":"orders",
                   "expectedRevision":"1111111111111111111111111111111111111111",
                   "target":{
-                    "sourceFile":"src/main/java/com/example/OrderMapper.java",
-                    "packageName":"com.example",
-                    "className":"OrderMapper",
+                    "sourceType":{
+                      "javaType":{"packageName":"com.example","className":"OrderMapper"},
+                      "sourceFile":"src/main/java/com/example/OrderMapper.java"
+                    },
                     "methodName":"findOrders",
                     "parameterTypes":["java.lang.String"]
                   }
@@ -445,9 +449,10 @@ class ExactContentControllerTest {
                   "repoId":"orders",
                   "expectedRevision":"1111111111111111111111111111111111111111",
                   "target":{
-                    "sourceFile":"src/main/java/com/example/OrderMapper.java",
-                    "packageName":"com.example",
-                    "className":"OrderMapper",
+                    "sourceType":{
+                      "javaType":{"packageName":"com.example","className":"OrderMapper"},
+                      "sourceFile":"src/main/java/com/example/OrderMapper.java"
+                    },
                     "methodName":"findOrders",
                     "parameterTypes":["java.lang.String"]
                   },

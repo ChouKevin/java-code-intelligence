@@ -1,5 +1,7 @@
 package com.java.semantic.api.dto;
 
+import com.java.semantic.api.dto.identity.MethodTargetPayload;
+
 import com.fasterxml.jackson.annotation.JsonAnySetter;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.java.semantic.api.monitoring.ApiMonitoringField;
@@ -23,7 +25,7 @@ public record GetMapperStatementSegmentRequest(
         @ApiMonitoringField(ApiMonitoringMode.VALUE)
         @NotBlank @Pattern(regexp = "^[0-9a-f]{40}$|^FIXTURE$")
         String expectedRevision,
-        @ApiMonitoringField(ApiMonitoringMode.NESTED) @NotNull @Valid MethodTargetRequest target,
+        @ApiMonitoringField(ApiMonitoringMode.NESTED) @NotNull @Valid MethodTargetPayload target,
         @ApiMonitoringField(ApiMonitoringMode.OMIT)
         @NotBlank @Size(max = 128) @Pattern(regexp = "[^\\p{javaISOControl}]+")
         String contentRef,

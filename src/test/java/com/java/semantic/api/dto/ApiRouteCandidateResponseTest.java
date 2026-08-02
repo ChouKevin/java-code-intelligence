@@ -1,5 +1,8 @@
 package com.java.semantic.api.dto;
 
+import com.java.semantic.api.dto.identity.JavaTypeIdentityPayload;
+import com.java.semantic.api.dto.identity.MethodTargetPayload;
+import com.java.semantic.api.dto.identity.SourceTypeIdentityPayload;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.function.Executable;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -26,10 +29,10 @@ class ApiRouteCandidateResponseTest {
     private static Stream<Arguments> missingRequiredValues() {
         return Stream.of(
                 Arguments.of("missing analysis target", (Executable) () -> new ApiRouteCandidateResponse(
-                        "repo", "revision", "GET", "/orders", "com.example", "OrderController", "find", null,
+                        "repo", "revision", "GET", "/orders", sourceType(), "find", null,
                         List.of())),
                 Arguments.of("missing match reasons", (Executable) () -> new ApiRouteCandidateResponse(
-                        "repo", "revision", "GET", "/orders", "com.example", "OrderController", "find",
+                        "repo", "revision", "GET", "/orders", sourceType(), "find",
                         new MethodTargetResolutionResponse("UNRESOLVED", null, List.of(), "NOT_FOUND"), null)),
                 Arguments.of("missing status", (Executable) () -> new MethodTargetResolutionResponse(
                         null, null, List.of(), "")),
@@ -41,17 +44,21 @@ class ApiRouteCandidateResponseTest {
 
     @Test
     void should_defensively_copy_resolution_candidates() {
-        List<MethodTargetResponse> candidates = new ArrayList<>();
+        List<MethodTargetPayload> candidates = new ArrayList<>();
         MethodTargetResolutionResponse response = new MethodTargetResolutionResponse(
                 "AMBIGUOUS", null, candidates, "OVERLOAD_AMBIGUOUS");
 
-        candidates.add(new MethodTargetResponse(
-                "src/main/java/com/example/OrderController.java",
-                "com.example",
-                "OrderController",
+        candidates.add(new MethodTargetPayload(
+                sourceType(),
                 "find",
                 List.of("java.lang.String")));
 
         assertThat(response.candidates()).isEmpty();
+    }
+
+    private static SourceTypeIdentityPayload sourceType() {
+        return new SourceTypeIdentityPayload(
+                new JavaTypeIdentityPayload("com.example", "OrderController"),
+                "src/main/java/com/example/OrderController.java");
     }
 }

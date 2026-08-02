@@ -1,5 +1,11 @@
 package com.java.semantic.api.dto;
 
+import com.java.semantic.api.dto.identity.MethodTargetPayload;
+import com.java.semantic.api.dto.identity.MapperStatementIdentityPayload;
+import com.java.semantic.api.dto.identity.MapperStatementKeyPayload;
+import com.java.semantic.api.dto.identity.SourceMemberIdentityPayload;
+import com.java.semantic.api.dto.identity.SourceTypeIdentityPayload;
+
 import com.fasterxml.jackson.annotation.JsonAnySetter;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonInclude;
@@ -50,26 +56,21 @@ public sealed interface ConceptIdentityResponse permits
     /** 型別宣告 identity 回應 */
     record TypeConceptIdentityResponse(
             @ApiMonitoringField(ApiMonitoringMode.VALUE) String kind,
-            @ApiMonitoringField(ApiMonitoringMode.VALUE) String sourceFile,
-            @ApiMonitoringField(ApiMonitoringMode.VALUE) String packageName,
-            @ApiMonitoringField(ApiMonitoringMode.VALUE) String className)
+            @ApiMonitoringField(ApiMonitoringMode.NESTED) SourceTypeIdentityPayload sourceType)
             implements ConceptIdentityResponse {
     }
 
     /** 方法宣告 identity 回應 */
     record MethodConceptIdentityResponse(
             @ApiMonitoringField(ApiMonitoringMode.VALUE) String kind,
-            @ApiMonitoringField(ApiMonitoringMode.NESTED) MethodTargetResponse target)
+            @ApiMonitoringField(ApiMonitoringMode.NESTED) MethodTargetPayload target)
             implements ConceptIdentityResponse {
     }
 
     /** 欄位宣告 identity 回應 */
     record FieldConceptIdentityResponse(
             @ApiMonitoringField(ApiMonitoringMode.VALUE) String kind,
-            @ApiMonitoringField(ApiMonitoringMode.VALUE) String sourceFile,
-            @ApiMonitoringField(ApiMonitoringMode.VALUE) String ownerPackageName,
-            @ApiMonitoringField(ApiMonitoringMode.VALUE) String ownerClassName,
-            @ApiMonitoringField(ApiMonitoringMode.VALUE) String fieldName)
+            @ApiMonitoringField(ApiMonitoringMode.NESTED) SourceMemberIdentityPayload identity)
             implements ConceptIdentityResponse {
     }
 
@@ -94,7 +95,7 @@ public sealed interface ConceptIdentityResponse permits
     /** HTTP 路由 entry-point identity 回應 */
     record ApiRouteConceptIdentityResponse(
             @ApiMonitoringField(ApiMonitoringMode.VALUE) String kind,
-            @ApiMonitoringField(ApiMonitoringMode.NESTED) MethodTargetResponse target,
+            @ApiMonitoringField(ApiMonitoringMode.NESTED) MethodTargetPayload target,
             @ApiMonitoringField(ApiMonitoringMode.VALUE) String httpVerb,
             @ApiMonitoringField(ApiMonitoringMode.VALUE) String route)
             implements ConceptIdentityResponse {
@@ -103,7 +104,7 @@ public sealed interface ConceptIdentityResponse permits
     /** 訊息目的地 entry-point identity 回應 */
     record MqDestinationConceptIdentityResponse(
             @ApiMonitoringField(ApiMonitoringMode.VALUE) String kind,
-            @ApiMonitoringField(ApiMonitoringMode.NESTED) MethodTargetResponse target,
+            @ApiMonitoringField(ApiMonitoringMode.NESTED) MethodTargetPayload target,
             @ApiMonitoringField(ApiMonitoringMode.VALUE) String broker,
             @ApiMonitoringField(ApiMonitoringMode.VALUE) String destination)
             implements ConceptIdentityResponse {
@@ -112,7 +113,7 @@ public sealed interface ConceptIdentityResponse permits
     /** 排程 entry-point identity 回應 */
     record ScheduleConceptIdentityResponse(
             @ApiMonitoringField(ApiMonitoringMode.VALUE) String kind,
-            @ApiMonitoringField(ApiMonitoringMode.NESTED) MethodTargetResponse target,
+            @ApiMonitoringField(ApiMonitoringMode.NESTED) MethodTargetPayload target,
             @ApiMonitoringField(ApiMonitoringMode.VALUE) String triggerKind,
             @JsonInclude(JsonInclude.Include.NON_ABSENT)
             @ApiMonitoringField(ApiMonitoringMode.VALUE) Optional<String> triggerValue)
@@ -122,42 +123,14 @@ public sealed interface ConceptIdentityResponse permits
     /** 邏輯 mapper statement identity 回應 */
     record MapperStatementConceptIdentityResponse(
             @ApiMonitoringField(ApiMonitoringMode.VALUE) String kind,
-            @ApiMonitoringField(ApiMonitoringMode.NESTED) MapperStatementKeyResponse statement)
+            @ApiMonitoringField(ApiMonitoringMode.NESTED) MapperStatementKeyPayload identity)
             implements ConceptIdentityResponse {
     }
 
     /** 實體 mapper statement evidence identity 回應 */
     record MapperStatementVariantConceptIdentityResponse(
             @ApiMonitoringField(ApiMonitoringMode.VALUE) String kind,
-            @ApiMonitoringField(ApiMonitoringMode.NESTED) MapperStatementVariantResponse variant)
+            @ApiMonitoringField(ApiMonitoringMode.NESTED) MapperStatementIdentityPayload identity)
             implements ConceptIdentityResponse {
-    }
-
-    /** mapper statement 的 logical key 回應 */
-    @JsonIgnoreProperties(ignoreUnknown = false)
-    record MapperStatementKeyResponse(
-            @ApiMonitoringField(ApiMonitoringMode.VALUE) String namespace,
-            @ApiMonitoringField(ApiMonitoringMode.VALUE) String statementId) {
-
-        @JsonAnySetter
-        public void rejectUnknownProperty(String property, Object value) {
-            throw new IllegalArgumentException("unknown mapper statement key property");
-        }
-    }
-
-    /** mapper statement 的實體證據回應 */
-    @JsonIgnoreProperties(ignoreUnknown = false)
-    record MapperStatementVariantResponse(
-            @ApiMonitoringField(ApiMonitoringMode.NESTED) MapperStatementKeyResponse statement,
-            @ApiMonitoringField(ApiMonitoringMode.VALUE) String resourcePath,
-            @JsonInclude(JsonInclude.Include.NON_ABSENT)
-            @ApiMonitoringField(ApiMonitoringMode.VALUE) Optional<String> databaseId,
-            @ApiMonitoringField(ApiMonitoringMode.VALUE) int documentOrdinal,
-            @ApiMonitoringField(ApiMonitoringMode.VALUE) String representation) {
-
-        @JsonAnySetter
-        public void rejectUnknownProperty(String property, Object value) {
-            throw new IllegalArgumentException("unknown mapper statement variant property");
-        }
     }
 }

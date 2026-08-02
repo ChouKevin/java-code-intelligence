@@ -1,5 +1,7 @@
 package com.java.semantic.api.dto;
 
+import com.java.semantic.api.dto.identity.MethodTargetPayload;
+
 import com.java.semantic.api.monitoring.ApiMonitoringField;
 import com.java.semantic.api.monitoring.ApiMonitoringMode;
 
@@ -8,7 +10,7 @@ import java.util.Objects;
 
 /** 可作為後續外呼圖輸入的方法實作候選 */
 public record MethodImplementationCandidateResponse(
-        @ApiMonitoringField(ApiMonitoringMode.NESTED) MethodTargetResponse target,
+        @ApiMonitoringField(ApiMonitoringMode.NESTED) MethodTargetPayload target,
         @ApiMonitoringField(ApiMonitoringMode.VALUE) boolean primary,
         @ApiMonitoringField(ApiMonitoringMode.SIZE) List<String> qualifiers,
         @ApiMonitoringField(ApiMonitoringMode.SIZE) List<String> profiles) {

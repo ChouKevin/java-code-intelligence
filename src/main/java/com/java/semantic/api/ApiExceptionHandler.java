@@ -2,7 +2,7 @@ package com.java.semantic.api;
 
 import com.java.semantic.api.dto.ApiErrorResponse;
 import com.java.semantic.api.dto.ConceptKindUnavailableResponse;
-import com.java.semantic.api.dto.MethodTargetResponse;
+import com.java.semantic.api.dto.identity.MethodTargetPayload;
 import com.java.semantic.identity.MethodTarget;
 import com.java.semantic.repository.application.ImmutableFixtureException;
 import com.java.semantic.repository.application.RepositoryBusyException;
@@ -28,6 +28,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
@@ -44,7 +45,11 @@ public class ApiExceptionHandler {
         return response(HttpStatus.BAD_REQUEST, "REQUEST_INVALID", "repository id is invalid", request);
     }
 
-    @ExceptionHandler({MethodArgumentNotValidException.class, HttpMessageNotReadableException.class})
+    @ExceptionHandler({
+            MethodArgumentNotValidException.class,
+            HttpMessageNotReadableException.class,
+            MissingServletRequestParameterException.class
+    })
     public ResponseEntity<ApiErrorResponse> invalidRequest(HttpServletRequest request) {
         return response(HttpStatus.BAD_REQUEST, "REQUEST_INVALID", "request body is invalid", request);
     }
@@ -143,9 +148,9 @@ public class ApiExceptionHandler {
     public ResponseEntity<ApiErrorResponse> semanticBindingAmbiguous(
             SemanticBindingAmbiguousException exception,
             HttpServletRequest request) {
-        List<MethodTargetResponse> candidates = exception.candidates().stream()
+        List<MethodTargetPayload> candidates = exception.candidates().stream()
                 .sorted(Comparator.comparing(this::targetSortKey))
-                .map(MethodTargetHttpMapper::toResponse)
+                .map(JavaSourceIdentityHttpMapper::toPayload)
                 .toList();
         return ResponseEntity.status(HttpStatus.CONFLICT).body(ApiErrorResponse.withContext(
                 "SEMANTIC_BINDING_AMBIGUOUS",
@@ -153,7 +158,7 @@ public class ApiExceptionHandler {
                 null,
                 null,
                 null,
-                MethodTargetHttpMapper.toResponse(exception.target()),
+                JavaSourceIdentityHttpMapper.toPayload(exception.target()),
                 candidates,
                 requestId(request)));
     }
@@ -205,7 +210,7 @@ public class ApiExceptionHandler {
             MethodTarget target,
             HttpServletRequest request) {
         return ResponseEntity.status(status).body(ApiErrorResponse.withContext(
-                errorCode, message, null, null, null, MethodTargetHttpMapper.toResponse(target), List.of(), requestId(request)));
+                errorCode, message, null, null, null, JavaSourceIdentityHttpMapper.toPayload(target), List.of(), requestId(request)));
     }
 
     private ResponseEntity<ApiErrorResponse> response(

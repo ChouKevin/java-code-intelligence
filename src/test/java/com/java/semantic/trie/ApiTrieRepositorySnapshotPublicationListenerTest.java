@@ -212,9 +212,9 @@ class ApiTrieRepositorySnapshotPublicationListenerTest {
                 methodName,
                 List.of()))));
         return new EntryPointClass(
-                className,
-                "com.example",
-                "com/example/" + className + ".java",
+                new SourceTypeIdentity(
+                        new JavaTypeIdentity("com.example", className),
+                        "com/example/" + className + ".java"),
                 "",
                 List.of(),
                 methods);

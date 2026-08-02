@@ -137,16 +137,14 @@ public final class EntryPointConceptProvider implements ConceptProvider {
         return new ConceptCatalogEntry(
                 PROVIDER_ID,
                 identity,
-                entryPointClass.className() + "." + methodName,
-                entryPointClass.packageName(),
+                entryPointClass.sourceType().javaType().className() + "." + methodName,
+                entryPointClass.sourceType().javaType().packageName(),
                 Optional.of(qualifiedType(entryPointClass)),
                 authority,
                 Set.of(identity));
     }
 
     private static String qualifiedType(EntryPointClass entryPointClass) {
-        return entryPointClass.packageName().isEmpty()
-                ? entryPointClass.className()
-                : entryPointClass.packageName() + "." + entryPointClass.className();
+        return entryPointClass.sourceType().javaType().fullyQualifiedName();
     }
 }

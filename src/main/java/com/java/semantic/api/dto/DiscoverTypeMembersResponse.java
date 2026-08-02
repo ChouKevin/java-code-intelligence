@@ -2,16 +2,16 @@ package com.java.semantic.api.dto;
 
 import com.java.semantic.api.monitoring.ApiMonitoringField;
 import com.java.semantic.api.monitoring.ApiMonitoringMode;
+import com.java.semantic.api.dto.identity.SourceTypeIdentityPayload;
 
 import java.util.List;
 import java.util.Objects;
 
-/** 綁定實際分析版本且重複型別屬性的成員探索回應 */
+/** 綁定實際分析版本與來源型別 identity 的成員探索回應 */
 public record DiscoverTypeMembersResponse(
         @ApiMonitoringField(ApiMonitoringMode.VALUE) String repoId,
         @ApiMonitoringField(ApiMonitoringMode.VALUE) String analyzedRevision,
-        @ApiMonitoringField(ApiMonitoringMode.VALUE) String sourceFile,
-        @ApiMonitoringField(ApiMonitoringMode.VALUE) String fullyQualifiedName,
+        @ApiMonitoringField(ApiMonitoringMode.NESTED) SourceTypeIdentityPayload sourceType,
         @ApiMonitoringField(ApiMonitoringMode.VALUE) String typeKind,
         @ApiMonitoringField(ApiMonitoringMode.SIZE) List<String> annotations,
         @ApiMonitoringField(ApiMonitoringMode.SIZE) List<String> implementedTypes,
@@ -23,6 +23,7 @@ public record DiscoverTypeMembersResponse(
 
     public DiscoverTypeMembersResponse {
         annotations = List.copyOf(Objects.requireNonNull(annotations, "annotations are required"));
+        sourceType = Objects.requireNonNull(sourceType, "sourceType is required");
         implementedTypes = List.copyOf(Objects.requireNonNull(
                 implementedTypes, "implementedTypes are required"));
         extendedTypes = List.copyOf(Objects.requireNonNull(extendedTypes, "extendedTypes are required"));

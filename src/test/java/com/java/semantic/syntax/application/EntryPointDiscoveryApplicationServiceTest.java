@@ -1,5 +1,7 @@
 package com.java.semantic.syntax.application;
 
+import com.java.semantic.identity.JavaTypeIdentity;
+import com.java.semantic.identity.SourceTypeIdentity;
 import com.java.semantic.repository.application.RepositoryApplicationService;
 import com.java.semantic.repository.domain.RepositoryId;
 import com.java.semantic.repository.domain.RepositoryRevision;
@@ -63,7 +65,7 @@ class EntryPointDiscoveryApplicationServiceTest {
     void should_extract_and_filter_inside_snapshot_and_return_exact_revision() {
         RepositorySnapshot snapshot = new RepositorySnapshot(REPOSITORY_ID, REPOSITORY_ROOT, REVISION);
         Set<EntryPointType> requested = EnumSet.of(EntryPointType.API, EntryPointType.MQ);
-        when(repositoryApplicationService.withSnapshot(eq(REPOSITORY_ID), eq(Optional.empty()), any()))
+        when(repositoryApplicationService.withSnapshot(eq(REPOSITORY_ID), eq(Optional.of(REVISION)), any()))
                 .thenAnswer(invocation -> {
                     Function<RepositorySnapshot, RevisionBoundEntryPoints> operation = invocation.getArgument(2);
                     return operation.apply(snapshot);
@@ -71,7 +73,7 @@ class EntryPointDiscoveryApplicationServiceTest {
         when(syntaxExtractionService.extract(REPOSITORY_ROOT)).thenReturn(extracted);
         when(discoveryFilter.filter(REPOSITORY_ID, extracted, requested)).thenReturn(filtered);
 
-        RevisionBoundEntryPoints result = service.list(REPOSITORY_ID, requested);
+        RevisionBoundEntryPoints result = service.list(REPOSITORY_ID, REVISION, requested);
 
         assertThat(result.repositoryId()).isEqualTo(REPOSITORY_ID);
         assertThat(result.analyzedRevision()).isEqualTo(REVISION);
@@ -92,14 +94,37 @@ class EntryPointDiscoveryApplicationServiceTest {
                 .thenReturn(RepositorySyntax.empty());
 
         RevisionBoundEntryPoints result = service.list(
-                REPOSITORY_ID, EnumSet.allOf(EntryPointType.class));
+                REPOSITORY_ID, RepositoryRevision.fixture(), EnumSet.allOf(EntryPointType.class));
 
         assertThat(result.analyzedRevision()).isEqualTo(RepositoryRevision.fixture());
         assertThat(result.entryPoints()).isEmpty();
     }
 
+    @Test
+    void should_sort_same_java_type_from_two_modules_by_repository_relative_source_file() {
+        RepositorySnapshot snapshot = new RepositorySnapshot(REPOSITORY_ID, REPOSITORY_ROOT, REVISION);
+        EntryPointClass moduleB = entryPointClass(
+                "module-b/src/main/java/com/acme/order/OrderController.java", "moduleB");
+        EntryPointClass moduleA = entryPointClass(
+                "module-a/src/main/java/com/acme/order/OrderController.java", "moduleA");
+        RepositorySyntax unsorted = new RepositorySyntax(List.of(moduleB, moduleA), List.of());
+        delegateSnapshot(snapshot);
+        when(syntaxExtractionService.extract(REPOSITORY_ROOT)).thenReturn(extracted);
+        when(discoveryFilter.filter(REPOSITORY_ID, extracted, EnumSet.of(EntryPointType.API)))
+                .thenReturn(unsorted);
+
+        RevisionBoundEntryPoints result = service.list(
+                REPOSITORY_ID, REVISION, EnumSet.of(EntryPointType.API));
+
+        assertThat(result.entryPoints()).extracting(entryPoint -> entryPoint.sourceType().sourceFile())
+                .containsExactly(
+                        "module-a/src/main/java/com/acme/order/OrderController.java",
+                        "module-b/src/main/java/com/acme/order/OrderController.java");
+    }
+
     private void delegateSnapshot(RepositorySnapshot snapshot) {
-        when(repositoryApplicationService.withSnapshot(eq(REPOSITORY_ID), eq(Optional.empty()), any()))
+        when(repositoryApplicationService.withSnapshot(
+                eq(REPOSITORY_ID), eq(Optional.of(snapshot.revision())), any()))
                 .thenAnswer(invocation -> {
                     Function<RepositorySnapshot, RevisionBoundEntryPoints> operation = invocation.getArgument(2);
                     return operation.apply(snapshot);
@@ -107,10 +132,12 @@ class EntryPointDiscoveryApplicationServiceTest {
     }
 
     private static EntryPointClass entryPointClass(String methodName) {
+        return entryPointClass("com/acme/order/OrderController.java", methodName);
+    }
+
+    private static EntryPointClass entryPointClass(String sourceFile, String methodName) {
         return new EntryPointClass(
-                "OrderController",
-                "com.acme.order",
-                "com/acme/order/OrderController.java",
+                new SourceTypeIdentity(new JavaTypeIdentity("com.acme.order", "OrderController"), sourceFile),
                 "",
                 List.of(),
                 List.of(new ApiEntryPoint(

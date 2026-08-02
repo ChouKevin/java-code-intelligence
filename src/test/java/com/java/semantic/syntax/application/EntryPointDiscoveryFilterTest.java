@@ -1,5 +1,7 @@
 package com.java.semantic.syntax.application;
 
+import com.java.semantic.identity.JavaTypeIdentity;
+import com.java.semantic.identity.SourceTypeIdentity;
 import com.java.semantic.callgraph.domain.EvidenceVisibility;
 import com.java.semantic.callgraph.domain.ReadPolicy;
 import com.java.semantic.callgraph.domain.TypeId;
@@ -199,9 +201,9 @@ class EntryPointDiscoveryFilterTest {
             String className,
             EntryPointMethod... methods) {
         return new EntryPointClass(
-                className,
-                packageName,
-                packageName.replace('.', '/') + "/" + className + ".java",
+                new SourceTypeIdentity(
+                        new JavaTypeIdentity(packageName, className),
+                        packageName.replace('.', '/') + "/" + className + ".java"),
                 "",
                 List.of(),
                 List.of(methods));

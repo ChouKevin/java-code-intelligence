@@ -1,30 +1,30 @@
-package com.java.semantic.api.dto;
+package com.java.semantic.api.dto.identity;
 
 import com.fasterxml.jackson.annotation.JsonAnySetter;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import com.fasterxml.jackson.annotation.JsonInclude;
 import com.java.semantic.api.monitoring.ApiMonitoringField;
 import com.java.semantic.api.monitoring.ApiMonitoringMode;
 import jakarta.validation.Valid;
-import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 
 import java.util.Objects;
 import java.util.Optional;
 
-/** canonical source type、source file 與 optional method selector */
+/** Java 型別與可選來源及方法限制的 source-symbol HTTP selector */
 @JsonIgnoreProperties(ignoreUnknown = false)
-public record SourceSymbolContextRequest(
-        @ApiMonitoringField(ApiMonitoringMode.VALUE) @NotBlank @Size(max = 255)
-        @Pattern(regexp = "[\\p{L}\\p{Nl}\\p{Sc}\\p{Pc}]"
-                + "[\\p{L}\\p{Nl}\\p{Sc}\\p{Pc}\\p{Mn}\\p{Mc}\\p{Nd}]*"
-                + "(?:\\.[\\p{L}\\p{Nl}\\p{Sc}\\p{Pc}]"
-                + "[\\p{L}\\p{Nl}\\p{Sc}\\p{Pc}\\p{Mn}\\p{Mc}\\p{Nd}]*)*") String type,
+public record SourceSymbolContextPayload(
+        @ApiMonitoringField(ApiMonitoringMode.NESTED) @NotNull @Valid JavaTypeIdentityPayload javaType,
+        @JsonInclude(JsonInclude.Include.NON_ABSENT)
         @ApiMonitoringField(ApiMonitoringMode.VALUE)
         Optional<@Size(max = 1024) @Pattern(regexp = "[^\\p{javaISOControl}]+") String> sourceFile,
-        @ApiMonitoringField(ApiMonitoringMode.NESTED) @Valid Optional<SourceSymbolMethodContextRequest> method) {
+        @JsonInclude(JsonInclude.Include.NON_ABSENT)
+        @ApiMonitoringField(ApiMonitoringMode.NESTED) @Valid Optional<SourceSymbolMethodContextPayload> method) {
 
-    public SourceSymbolContextRequest {
+    public SourceSymbolContextPayload {
+        javaType = Objects.requireNonNull(javaType, "javaType is required");
         sourceFile = Objects.requireNonNull(sourceFile, "sourceFile is required");
         method = Objects.requireNonNull(method, "method is required");
     }

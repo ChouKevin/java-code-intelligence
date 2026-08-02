@@ -1,5 +1,7 @@
 package com.java.semantic.api.dto;
 
+import com.java.semantic.api.dto.identity.MethodTargetPayload;
+
 import com.java.semantic.api.monitoring.ApiMonitoringField;
 import com.java.semantic.api.monitoring.ApiMonitoringMode;
 
@@ -8,7 +10,7 @@ import java.util.Objects;
 
 /** mapper statement 對應之完整 method target 與狀態限定 follow-up */
 public record MapperMethodCandidateResponse(
-        @ApiMonitoringField(ApiMonitoringMode.NESTED) MethodTargetResponse target,
+        @ApiMonitoringField(ApiMonitoringMode.NESTED) MethodTargetPayload target,
         @ApiMonitoringField(ApiMonitoringMode.SIZE)
         List<DiscoveryFollowUpResponse> availableFollowUps) {
 

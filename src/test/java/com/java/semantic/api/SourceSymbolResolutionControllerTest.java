@@ -79,6 +79,12 @@ class SourceSymbolResolutionControllerTest {
                 .andExpect(jsonPath("$.analyzedRevision").value("2".repeat(40)))
                 .andExpect(jsonPath("$.status").value("AMBIGUOUS_SYMBOL"))
                 .andExpect(jsonPath("$.candidates[0].kind").value("STATIC_CONSTANT"))
+                .andExpect(jsonPath("$.candidates[0].identity.scope").value("TYPE"))
+                .andExpect(jsonPath("$.candidates[0].identity.ownerType.javaType.packageName")
+                        .value("com.acme"))
+                .andExpect(jsonPath("$.candidates[0].identity.ownerType.javaType.className")
+                        .value("Outer.Inner"))
+                .andExpect(jsonPath("$.candidates[0].identity.name").value("TOPIC"))
                 .andExpect(jsonPath("$.candidates[0].initializerSource").value("\"orders\" + \".created\""))
                 .andExpect(jsonPath("$.candidates[0].declarationRange.start.line").value(3))
                 .andExpect(jsonPath("$.candidates[0].representativeOccurrence.end.character").value(17))
@@ -93,7 +99,7 @@ class SourceSymbolResolutionControllerTest {
                 .andReturn().getResponse().getContentAsString();
         JsonNode candidate = OBJECT_MAPPER.readTree(symbolBody).path("candidates").get(0);
         assertThat(candidate.properties()).extracting(Map.Entry::getKey).containsExactlyInAnyOrder(
-                "kind", "name", "declarationOwner", "declaredType", "initializerSource",
+                "kind", "identity", "declaredType", "initializerSource",
                 "declarationRange", "representativeOccurrence", "occurrenceCount", "availableFollowUps");
         assertThat(OBJECT_MAPPER.readTree(symbolBody).properties())
                 .extracting(Map.Entry::getKey)
@@ -122,6 +128,8 @@ class SourceSymbolResolutionControllerTest {
         then(service).should(times(2)).resolve(query.capture());
         assertThat(query.getAllValues().getFirst().context().method()).hasValueSatisfying(method ->
                 assertThat(method.parameterTypes()).hasValue(List.of("com.acme.Order")));
+        assertThat(query.getAllValues().getFirst().context().javaType())
+                .isEqualTo(new JavaTypeIdentity("com.acme", "Outer.Inner"));
         assertThat(query.getAllValues().getFirst().position()).hasValue(new SyntaxPosition(8, 12));
     }
 
@@ -130,8 +138,8 @@ class SourceSymbolResolutionControllerTest {
         mockMvc.perform(request(validRequest().replace("\"symbol\":\"TOPIC\"", "\"symbol\":\"TOPIC\",\"extra\":true")))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.errorCode").value("REQUEST_INVALID"));
-        mockMvc.perform(request(validRequest().replace("\"type\":\"com.acme.OrderService\"",
-                        "\"type\":\"not a type\"")))
+        mockMvc.perform(request(validRequest().replace("\"className\":\"Outer.Inner\"",
+                        "\"className\":\"not a type\"")))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.errorCode").value("REQUEST_INVALID"));
         mockMvc.perform(request(validRequest().replace("\"line\":8", "\"line\":-1")))
@@ -151,7 +159,7 @@ class SourceSymbolResolutionControllerTest {
                 "TOPIC",
                 new SourceMemberIdentity.TypeMember(
                         new SourceTypeIdentity(
-                                new JavaTypeIdentity("com.acme", "OrderService"), SOURCE_FILE),
+                                new JavaTypeIdentity("com.acme", "Outer.Inner"), SOURCE_FILE),
                         "TOPIC"),
                 "String",
                 Optional.empty(),
@@ -203,7 +211,7 @@ class SourceSymbolResolutionControllerTest {
                 REPOSITORY_ID,
                 EXPECTED,
                 new SourceSymbolContext(
-                        "com.acme.OrderService",
+                        new JavaTypeIdentity("com.acme", "Outer.Inner"),
                         Optional.empty(),
                         Optional.of(new SourceSymbolContext.MethodContext(
                                 "confirm", Optional.of(List.of("com.acme.Order"))))),
@@ -224,7 +232,7 @@ class SourceSymbolResolutionControllerTest {
                   "repoId":"orders",
                   "expectedRevision":"1111111111111111111111111111111111111111",
                   "context":{
-                    "type":"com.acme.OrderService",
+                    "javaType":{"packageName":"com.acme","className":"Outer.Inner"},
                     "method":{"name":"confirm","parameterTypes":["com.acme.Order"]}
                   },
                   "symbol":"TOPIC",

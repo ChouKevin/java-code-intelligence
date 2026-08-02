@@ -1,25 +1,26 @@
 package com.java.semantic.syntax.application;
 
+import com.java.semantic.identity.JavaTypeIdentity;
 import com.java.semantic.identity.RepositoryRelativeSource;
 
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 
-/** source type 與 optional canonical method 的 resolution context */
+/** 來源型別與可選 canonical 方法的解析查詢條件 */
 public record SourceSymbolContext(
-        String fullyQualifiedType,
+        JavaTypeIdentity javaType,
         Optional<String> sourceFile,
         Optional<MethodContext> method) {
 
     public SourceSymbolContext {
-        fullyQualifiedType = requiredText(fullyQualifiedType, "fullyQualifiedType");
+        javaType = Objects.requireNonNull(javaType, "javaType is required");
         sourceFile = Objects.requireNonNull(sourceFile, "sourceFile is required")
                 .map(RepositoryRelativeSource::requireValid);
         method = Objects.requireNonNull(method, "method is required");
     }
 
-    /** method name 與 optional canonical parameter type selector */
+    /** 方法名稱與可選 canonical 參數型別的查詢條件 */
     public record MethodContext(String name, Optional<List<String>> parameterTypes) {
 
         public MethodContext {

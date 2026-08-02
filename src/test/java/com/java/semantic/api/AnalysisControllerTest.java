@@ -115,9 +115,10 @@ class AnalysisControllerTest {
                                   "expectedRevision":"1111111111111111111111111111111111111111",
                                   "depth":2,
                                   "target":{
-                                    "sourceFile":"src/main/java/com/acme/OrderService.java",
-                                    "packageName":"com.acme",
-                                    "className":"OrderService",
+                                    "sourceType":{
+                                      "javaType":{"packageName":"com.acme","className":"OrderService"},
+                                      "sourceFile":"src/main/java/com/acme/OrderService.java"
+                                    },
                                     "methodName":"place",
                                     "parameterTypes":[]
                                   }
@@ -126,9 +127,11 @@ class AnalysisControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("SUCCESS"))
                 .andExpect(jsonPath("$.rootNodeId").value("node-0000"))
-                .andExpect(jsonPath("$.nodes[0].target.sourceFile").value(TARGET.sourceFile()))
-                .andExpect(jsonPath("$.nodes[0].target.packageName").value(TARGET.packageName()))
-                .andExpect(jsonPath("$.nodes[0].target.className").value(TARGET.className()))
+                .andExpect(jsonPath("$.nodes[0].target.sourceType.sourceFile").value(TARGET.sourceFile()))
+                .andExpect(jsonPath("$.nodes[0].target.sourceType.javaType.packageName")
+                        .value(TARGET.packageName()))
+                .andExpect(jsonPath("$.nodes[0].target.sourceType.javaType.className")
+                        .value(TARGET.className()))
                 .andExpect(jsonPath("$.nodes[0].target.methodName").value(TARGET.methodName()))
                 .andExpect(jsonPath("$.nodes[0].target.parameterTypes").isEmpty())
                 .andExpect(jsonPath("$.traversal.nodeBudget").value(40));
@@ -151,9 +154,10 @@ class AnalysisControllerTest {
                                   "expectedRevision":"1111111111111111111111111111111111111111",
                                   "depth":2,
                                   "target":{
-                                    "sourceFile":"src/main/java/com/acme/OrderService.java",
-                                    "packageName":"com.acme",
-                                    "className":"OrderService",
+                                    "sourceType":{
+                                      "javaType":{"packageName":"com.acme","className":"OrderService"},
+                                      "sourceFile":"src/main/java/com/acme/OrderService.java"
+                                    },
                                     "methodName":"place",
                                     "parameterTypes":[]
                                   }
@@ -162,18 +166,20 @@ class AnalysisControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("PARTIAL"))
                 .andExpect(jsonPath("$.rootNodeId").value("node-0000"))
-                .andExpect(jsonPath("$.nodes[0].target.sourceFile").value(TARGET.sourceFile()))
+                .andExpect(jsonPath("$.nodes[0].target.sourceType.sourceFile").value(TARGET.sourceFile()))
                 .andExpect(jsonPath("$.traversal.nodeBudget").value(40))
                 .andExpect(jsonPath("$.edges[0].callerNodeId").value("node-caller"))
                 .andExpect(jsonPath("$.edges[0].calleeNodeId").value("node-0000"))
                 .andExpect(jsonPath("$.edges[0].callSite.sourceFile").value(CALLER_TARGET.sourceFile()))
-                .andExpect(jsonPath("$.edges[0].callSite.start.line").value(12))
-                .andExpect(jsonPath("$.edges[0].callSite.start.character").value(3))
-                .andExpect(jsonPath("$.edges[0].callSite.end.line").value(12))
-                .andExpect(jsonPath("$.edges[0].callSite.end.character").value(15))
+                .andExpect(jsonPath("$.edges[0].callSite.range.start.line").value(12))
+                .andExpect(jsonPath("$.edges[0].callSite.range.start.character").value(3))
+                .andExpect(jsonPath("$.edges[0].callSite.range.end.line").value(12))
+                .andExpect(jsonPath("$.edges[0].callSite.range.end.character").value(15))
                 .andExpect(jsonPath("$.warnings[0].code").value("DESCENDANT_CALL_AMBIGUOUS"))
-                .andExpect(jsonPath("$.warnings[0].candidates[0].sourceFile").value(AMBIGUOUS_ALPHA.sourceFile()))
-                .andExpect(jsonPath("$.warnings[0].candidates[1].sourceFile").value(AMBIGUOUS_ZETA.sourceFile()));
+                .andExpect(jsonPath("$.warnings[0].candidates[0].sourceType.sourceFile")
+                        .value(AMBIGUOUS_ALPHA.sourceFile()))
+                .andExpect(jsonPath("$.warnings[0].candidates[1].sourceType.sourceFile")
+                        .value(AMBIGUOUS_ZETA.sourceFile()));
 
         then(semanticAnalysisApplicationService).should().analyzeIncoming(
                 RepositoryId.of("orders"), REVISION, TARGET, 2);
@@ -190,9 +196,10 @@ class AnalysisControllerTest {
                                   "expectedRevision":"1111111111111111111111111111111111111111",
                                   "depth":3,
                                   "target":{
-                                    "sourceFile":"src/main/java/com/acme/OrderService.java",
-                                    "packageName":"com.acme",
-                                    "className":"OrderService",
+                                    "sourceType":{
+                                      "javaType":{"packageName":"com.acme","className":"OrderService"},
+                                      "sourceFile":"src/main/java/com/acme/OrderService.java"
+                                    },
                                     "methodName":"place",
                                     "parameterTypes":[]
                                   }
@@ -217,9 +224,10 @@ class AnalysisControllerTest {
                                   "depth":2,
                                   "nodeBudget":1,
                                   "target":{
-                                    "sourceFile":"src/main/java/com/acme/OrderService.java",
-                                    "packageName":"com.acme",
-                                    "className":"OrderService",
+                                    "sourceType":{
+                                      "javaType":{"packageName":"com.acme","className":"OrderService"},
+                                      "sourceFile":"src/main/java/com/acme/OrderService.java"
+                                    },
                                     "methodName":"place",
                                     "parameterTypes":[]
                                   }
@@ -241,9 +249,10 @@ class AnalysisControllerTest {
                                   "expectedRevision":"1111111111111111111111111111111111111111",
                                   "depth":2,
                                   "target":{
-                                    "sourceFile":"src/main/java/com/acme/OrderService.java",
-                                    "packageName":"com.acme",
-                                    "className":"OrderService",
+                                    "sourceType":{
+                                      "javaType":{"packageName":"com.acme","className":"OrderService"},
+                                      "sourceFile":"src/main/java/com/acme/OrderService.java"
+                                    },
                                     "methodName":"place",
                                     "parameterTypes":[],
                                     "nodeBudget":1
@@ -265,9 +274,13 @@ class AnalysisControllerTest {
                                   "repoId":"orders",
                                   "expectedRevision":"1111111111111111111111111111111111111111",
                                   "target":{
-                                    "sourceFile":"src/main/java/com/acme/OrderService.java",
-                                    "packageName":"com.acme",
-                                    "className":"OrderService\\nFORGED_ANALYSIS_LOG",
+                                    "sourceType":{
+                                      "javaType":{
+                                        "packageName":"com.acme",
+                                        "className":"OrderService\\nFORGED_ANALYSIS_LOG"
+                                      },
+                                      "sourceFile":"src/main/java/com/acme/OrderService.java"
+                                    },
                                     "methodName":"place",
                                     "parameterTypes":[]
                                   }
@@ -287,9 +300,10 @@ class AnalysisControllerTest {
                   "repoId":"orders",
                   "expectedRevision":"1111111111111111111111111111111111111111",
                   "target":{
-                    "sourceFile":"%s",
-                    "packageName":"com.acme",
-                    "className":"OrderService",
+                    "sourceType":{
+                      "javaType":{"packageName":"com.acme","className":"OrderService"},
+                      "sourceFile":"%s"
+                    },
                     "methodName":"place",
                     "parameterTypes":[]
                   }
@@ -318,9 +332,10 @@ class AnalysisControllerTest {
                                   "repoId":"orders",
                                   "expectedRevision":"1111111111111111111111111111111111111111",
                                   "target":{
-                                    "sourceFile":"src/main/java/com/acme/OrderService.java",
-                                    "packageName":"com.acme",
-                                    "className":"OrderService",
+                                    "sourceType":{
+                                      "javaType":{"packageName":"com.acme","className":"OrderService"},
+                                      "sourceFile":"src/main/java/com/acme/OrderService.java"
+                                    },
                                     "methodName":"place",
                                     "parameterTypes":[]
                                   }

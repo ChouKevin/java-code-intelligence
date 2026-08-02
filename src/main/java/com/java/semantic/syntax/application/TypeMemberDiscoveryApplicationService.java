@@ -69,8 +69,7 @@ public final class TypeMemberDiscoveryApplicationService {
         return new TypeMemberResult(
                 snapshot.repositoryId(),
                 snapshot.revision(),
-                metadata.declaration().identity().sourceFile(),
-                metadata.declaration().identity().fullyQualifiedName(),
+                metadata.declaration().identity(),
                 metadata.declaration().kind(),
                 metadata.frameworkFacts().annotations().stream().map(AnnotationEvidence::writtenName).toList(),
                 metadata.relationships().implementedTypes().stream().map(reference -> reference.simpleTypeName()).toList(),
@@ -157,8 +156,7 @@ public final class TypeMemberDiscoveryApplicationService {
 
     private static SourceTypeMetadata resolveType(RepositorySyntax syntax, TypeMemberQuery query) {
         List<SourceTypeMetadata> matches = syntax.sourceTypes().stream()
-                .filter(metadata -> metadata.declaration().identity().sourceFile().equals(query.sourceFile()))
-                .filter(metadata -> metadata.declaration().identity().fullyQualifiedName().equals(query.fullyQualifiedName()))
+                .filter(metadata -> metadata.declaration().identity().equals(query.sourceType()))
                 .toList();
         if (matches.size() < 1) {
             throw new TypeMemberTypeNotFoundException();

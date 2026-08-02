@@ -1,6 +1,7 @@
 package com.java.semantic.semantic.adapter.jdtls;
 
 import com.java.semantic.api.AnalysisResponseMapper;
+import com.java.semantic.api.SourceLocationHttpMapper;
 import com.java.semantic.api.dto.GraphEdgeResponse;
 import com.java.semantic.callgraph.application.CanonicalTargetProjection;
 import com.java.semantic.callgraph.application.DirectCallRelationshipResolver;
@@ -116,7 +117,9 @@ class DataAccessParityJdtLsIT {
                     assertThat(mapperTarget.methodName()).isEqualTo("xmlOnly");
                 });
 
-        List<GraphEdgeResponse> mappedEdges = new AnalysisResponseMapper().toResponse(fragment).edges();
+        List<GraphEdgeResponse> mappedEdges = new AnalysisResponseMapper(new SourceLocationHttpMapper())
+                .toResponse(fragment)
+                .edges();
         assertThat(mappedEdges)
                 .filteredOn(edge -> "MYBATIS_MAPPER".equals(edge.resolutionStrategy()))
                 .singleElement()
@@ -146,7 +149,9 @@ class DataAccessParityJdtLsIT {
                     assertThat(callee.target().orElseThrow().className()).isEqualTo("CustomerRepository");
                 });
 
-        List<GraphEdgeResponse> mappedEdges = new AnalysisResponseMapper().toResponse(fragment).edges();
+        List<GraphEdgeResponse> mappedEdges = new AnalysisResponseMapper(new SourceLocationHttpMapper())
+                .toResponse(fragment)
+                .edges();
         assertThat(mappedEdges)
                 .filteredOn(edge -> "SPRING_DATA_REPOSITORY".equals(edge.resolutionStrategy()))
                 .singleElement()

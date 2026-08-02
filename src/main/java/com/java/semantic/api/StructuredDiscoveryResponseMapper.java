@@ -21,10 +21,9 @@ import com.java.semantic.api.dto.DiscoveryFollowUpResponse.GetTypeMembersRequest
 import com.java.semantic.api.dto.DiscoveryFollowUpResponse.RequestResponse;
 import com.java.semantic.api.dto.DiscoveryFollowUpResponse.ResolveSourceSymbolRequestResponse;
 import com.java.semantic.api.dto.DiscoveryFollowUpResponse.ResolveConceptRequestResponse;
-import com.java.semantic.api.dto.DiscoveryFollowUpResponse.SourceSymbolContextResponse;
-import com.java.semantic.api.dto.DiscoveryFollowUpResponse.SourceSymbolMethodContextResponse;
+import com.java.semantic.api.dto.identity.SourceSymbolContextPayload;
+import com.java.semantic.api.dto.identity.SourceSymbolMethodContextPayload;
 import com.java.semantic.api.dto.FieldTypeMemberResponse;
-import com.java.semantic.api.dto.PositionResponse;
 import com.java.semantic.api.dto.ResolveConceptResponse;
 import com.java.semantic.api.dto.MethodTypeMemberResponse;
 import com.java.semantic.api.dto.MapperMethodCandidateResponse;
@@ -32,6 +31,7 @@ import com.java.semantic.api.dto.MapperStatementMappingResponse;
 import com.java.semantic.api.dto.TypeMemberResponse;
 import com.java.semantic.api.dto.UnavailableDiscoveryFollowUpResponse;
 import com.java.semantic.identity.MethodTarget;
+import com.java.semantic.identity.SourceTypeIdentity;
 import com.java.semantic.repository.domain.RepositoryId;
 import com.java.semantic.repository.domain.RepositoryRevision;
 import com.java.semantic.syntax.application.concept.ConceptCatalogEntry;
@@ -61,6 +61,7 @@ import com.java.semantic.syntax.application.TypeMember;
 import com.java.semantic.syntax.application.TypeMemberResult;
 import com.java.semantic.syntax.domain.SourceExtractionOutcome;
 import com.java.semantic.syntax.domain.SourceExtractionStatus;
+import com.java.semantic.syntax.domain.SourceMemberIdentity;
 import org.springframework.stereotype.Component;
 
 import java.util.Comparator;
@@ -87,14 +88,21 @@ public final class StructuredDiscoveryResponseMapper {
 
     private final DiscoveryFollowUpFactory followUpFactory;
     private final ConceptIdentityHttpMapper conceptIdentityHttpMapper;
+    private final MapperIdentityHttpMapper mapperIdentityHttpMapper;
+    private final SourceLocationHttpMapper sourceLocationMapper;
 
     public StructuredDiscoveryResponseMapper(
             DiscoveryFollowUpFactory followUpFactory,
-            ConceptIdentityHttpMapper conceptIdentityHttpMapper) {
+            ConceptIdentityHttpMapper conceptIdentityHttpMapper,
+            MapperIdentityHttpMapper mapperIdentityHttpMapper,
+            SourceLocationHttpMapper sourceLocationMapper) {
         this.followUpFactory = Objects.requireNonNull(
                 followUpFactory, "followUpFactory is required");
         this.conceptIdentityHttpMapper = Objects.requireNonNull(
                 conceptIdentityHttpMapper, "conceptIdentityHttpMapper is required");
+        this.mapperIdentityHttpMapper = Objects.requireNonNull(
+                mapperIdentityHttpMapper, "mapperIdentityHttpMapper is required");
+        this.sourceLocationMapper = Objects.requireNonNull(sourceLocationMapper, "sourceLocationMapper is required");
     }
 
     /** 將概念搜尋結果映射為固定版本 HTTP 回應 */
@@ -140,13 +148,12 @@ public final class StructuredDiscoveryResponseMapper {
         return new DiscoverTypeMembersResponse(
                 memberResult.repositoryId().value(),
                 memberResult.analyzedRevision().value(),
-                memberResult.sourceFile(),
-                memberResult.fullyQualifiedName(),
+                JavaSourceIdentityHttpMapper.toPayload(memberResult.sourceType()),
                 memberResult.typeKind().name(),
                 memberResult.annotations(),
                 memberResult.implementedTypes(),
                 memberResult.extendedTypes(),
-                memberResult.members().stream().map(this::member).toList(),
+                memberResult.members().stream().map(member -> member(memberResult.sourceType(), member)).toList(),
                 page(memberResult.page()),
                 coverage(memberResult.coverage()),
                 memberResult.availableFollowUps().stream().map(this::followUp).toList());
@@ -212,8 +219,7 @@ public final class StructuredDiscoveryResponseMapper {
             RepositoryRevision revision,
             ConceptCatalogEntry entry) {
         return entry.mapperStatementMapping().map(mapping -> new MapperStatementMappingResponse(
-                mapping.statementIdentity().statementKey().namespace(),
-                mapping.statementIdentity().statementKey().statementId(),
+                mapperIdentityHttpMapper.toPayload(mapping.statementIdentity().statementKey()),
                 mapping.status().name(),
                 mapping.reason().map(Enum::name),
                 mapping.targets().stream()
@@ -236,7 +242,7 @@ public final class StructuredDiscoveryResponseMapper {
                     repositoryId, revision, mappedTarget);
         };
         return new MapperMethodCandidateResponse(
-                MethodTargetHttpMapper.toResponse(mappedTarget),
+                JavaSourceIdentityHttpMapper.toPayload(mappedTarget),
                 followUps.stream().map(this::followUp).toList());
     }
 
@@ -244,15 +250,17 @@ public final class StructuredDiscoveryResponseMapper {
         return new ConceptEvidenceResponse(conceptIdentityHttpMapper.toResponse(identity));
     }
 
-    private TypeMemberResponse member(TypeMember member) {
+    private TypeMemberResponse member(SourceTypeIdentity sourceType, TypeMember member) {
         return switch (member) {
             case MethodTypeMember method -> new MethodTypeMemberResponse(
                     method.kind().name(),
-                    MethodTargetHttpMapper.toResponse(method.target()),
+                    JavaSourceIdentityHttpMapper.toPayload(method.target()),
                     method.availableFollowUps().stream().map(this::followUp).toList());
             case FieldTypeMember field -> new FieldTypeMemberResponse(
                     field.kind().name(),
-                    field.fieldName(),
+                    JavaSourceIdentityHttpMapper.toPayload(
+                            new SourceMemberIdentity.TypeMember(sourceType, field.fieldName()),
+                            sourceLocationMapper),
                     field.writtenType(),
                     field.resolvedType(),
                     field.annotations(),
@@ -344,21 +352,21 @@ public final class StructuredDiscoveryResponseMapper {
             case GetMethodSourceRequest source -> new GetMethodSourceRequestResponse(
                     source.repoId(),
                     source.expectedRevision(),
-                    MethodTargetHttpMapper.toResponse(source.target()));
+                    JavaSourceIdentityHttpMapper.toPayload(source.target()));
             case GetMapperStatementRequest statement -> new GetMapperStatementRequestResponse(
                     statement.repoId(),
                     statement.expectedRevision(),
-                    MethodTargetHttpMapper.toResponse(statement.target()));
+                    JavaSourceIdentityHttpMapper.toPayload(statement.target()));
             case AnalyzeCallGraphRequest graph -> new AnalyzeCallGraphRequestResponse(
                     graph.repoId(),
                     graph.expectedRevision(),
                     graph.depth(),
-                    MethodTargetHttpMapper.toResponse(graph.target()));
+                    JavaSourceIdentityHttpMapper.toPayload(graph.target()));
             case DiscoverMethodImplementationsRequest implementations ->
                     new DiscoverMethodImplementationsRequestResponse(
                             implementations.repoId(),
                             implementations.expectedRevision(),
-                            MethodTargetHttpMapper.toResponse(implementations.declarationTarget()));
+                            JavaSourceIdentityHttpMapper.toPayload(implementations.declarationTarget()));
             case ResolveConceptRequest concept -> new ResolveConceptRequestResponse(
                     concept.repoId(),
                     concept.expectedRevision(),
@@ -366,8 +374,7 @@ public final class StructuredDiscoveryResponseMapper {
             case GetTypeMembersRequest members -> new GetTypeMembersRequestResponse(
                     members.repoId(),
                     members.expectedRevision(),
-                    members.sourceFile(),
-                    members.fullyQualifiedName(),
+                    JavaSourceIdentityHttpMapper.toPayload(members.sourceType()),
                     members.memberKinds().stream().map(Enum::name).toList(),
                     members.namePrefix(),
                     members.offset(),
@@ -375,8 +382,7 @@ public final class StructuredDiscoveryResponseMapper {
             case TypeMembersRequest members -> new DiscoverTypeMembersRequestResponse(
                     members.repoId(),
                     members.expectedRevision(),
-                    members.sourceFile(),
-                    members.fullyQualifiedName(),
+                    JavaSourceIdentityHttpMapper.toPayload(members.sourceType()),
                     members.memberKinds().stream().map(Enum::name).toList(),
                     members.namePrefix(),
                     members.offset(),
@@ -384,14 +390,13 @@ public final class StructuredDiscoveryResponseMapper {
             case ResolveSourceSymbolRequest sourceSymbol -> new ResolveSourceSymbolRequestResponse(
                     sourceSymbol.repoId(),
                     sourceSymbol.expectedRevision(),
-                    new SourceSymbolContextResponse(
-                            sourceSymbol.context().fullyQualifiedType(),
+                    new SourceSymbolContextPayload(
+                            JavaSourceIdentityHttpMapper.toPayload(sourceSymbol.context().javaType()),
                             sourceSymbol.context().sourceFile(),
-                            sourceSymbol.context().method().map(method -> new SourceSymbolMethodContextResponse(
+                            sourceSymbol.context().method().map(method -> new SourceSymbolMethodContextPayload(
                                     method.name(), method.parameterTypes()))),
                     sourceSymbol.symbol(),
-                    sourceSymbol.position().map(position -> new PositionResponse(
-                            position.line(), position.character())));
+                    sourceSymbol.position().map(sourceLocationMapper::toPayload));
         };
     }
 

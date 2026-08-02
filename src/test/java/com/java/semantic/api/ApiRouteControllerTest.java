@@ -224,8 +224,11 @@ class ApiRouteControllerTest {
                 .andExpect(jsonPath("$.candidates[0].analyzedRevision").exists())
                 .andExpect(jsonPath("$.candidates[0].httpMethod").exists())
                 .andExpect(jsonPath("$.candidates[0].routeTemplate").exists())
-                .andExpect(jsonPath("$.candidates[0].packageName").exists())
-                .andExpect(jsonPath("$.candidates[0].className").exists())
+                .andExpect(jsonPath("$.candidates[0].sourceType.javaType.packageName").exists())
+                .andExpect(jsonPath("$.candidates[0].sourceType.javaType.className").exists())
+                .andExpect(jsonPath("$.candidates[0].sourceType.sourceFile").exists())
+                .andExpect(jsonPath("$.candidates[0].packageName").doesNotExist())
+                .andExpect(jsonPath("$.candidates[0].className").doesNotExist())
                 .andExpect(jsonPath("$.candidates[0].methodName").exists())
                 .andReturn().getResponse().getContentAsString();
         assertThat(body).doesNotContain("SECRET").doesNotContain("exception");
@@ -243,9 +246,9 @@ class ApiRouteControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.candidates[0].analysisTarget.status").value("AMBIGUOUS"))
                 .andExpect(jsonPath("$.candidates[0].analysisTarget.target").doesNotExist())
-                .andExpect(jsonPath("$.candidates[0].analysisTarget.candidates[0].sourceFile")
+                .andExpect(jsonPath("$.candidates[0].analysisTarget.candidates[0].sourceType.sourceFile")
                         .value("src/main/java/com/acme/AController.java"))
-                .andExpect(jsonPath("$.candidates[0].analysisTarget.candidates[1].sourceFile")
+                .andExpect(jsonPath("$.candidates[0].analysisTarget.candidates[1].sourceType.sourceFile")
                         .value("src/main/java/com/acme/ZController.java"))
                 .andExpect(jsonPath("$.candidates[0].analysisTarget.reasonCode").value("OVERLOAD_AMBIGUOUS"));
     }
@@ -258,8 +261,9 @@ class ApiRouteControllerTest {
                         SHA_ONE.value(),
                         "GET",
                         "/orders/{id}",
-                        "com.acme.display",
-                        "DisplayController",
+                        new SourceTypeIdentity(
+                                new JavaTypeIdentity("com.acme.display", "DisplayController"),
+                                "src/main/java/com/acme/display/DisplayController.java"),
                         "displayMethod",
                         MethodTargetResolution.unresolved("METHOD_PARAMETER_BINDING_UNRESOLVED"),
                         List.of())));
@@ -272,8 +276,49 @@ class ApiRouteControllerTest {
                 .andExpect(jsonPath("$.candidates[0].analysisTarget.status").value("UNRESOLVED"))
                 .andExpect(jsonPath("$.candidates[0].analysisTarget.target").doesNotExist())
                 .andExpect(jsonPath("$.candidates[0].analysisTarget.candidates").isEmpty())
+                .andExpect(jsonPath("$.candidates[0].sourceType.javaType.packageName").value("com.acme.display"))
+                .andExpect(jsonPath("$.candidates[0].sourceType.javaType.className").value("DisplayController"))
+                .andExpect(jsonPath("$.candidates[0].methodName").value("displayMethod"))
                 .andExpect(jsonPath("$.candidates[0].analysisTarget.reasonCode")
                         .value("METHOD_PARAMETER_BINDING_UNRESOLVED"));
+    }
+
+    @Test
+    void should_serialize_resolved_outer_identity_equal_to_the_nested_target() throws Exception {
+        SourceTypeIdentity sourceType = new SourceTypeIdentity(
+                new JavaTypeIdentity("com.acme.order", "OrderController"),
+                "module-a/src/main/java/com/acme/order/OrderController.java");
+        MethodTarget target = new MethodTarget(sourceType, "getOrder", List.of("java.lang.String"));
+        given(apiRouteApplicationService.lookupMatches(any(), any(), any()))
+                .willReturn(batch(new ApiRouteCandidate(
+                        "repo-a",
+                        SHA_ONE.value(),
+                        "GET",
+                        "/orders/{id}",
+                        sourceType,
+                        "getOrder",
+                        MethodTargetResolution.resolved(target),
+                        List.of())));
+
+        mockMvc.perform(post("/v1/api-routes/lookup")
+                        .header(ApiTokenFilter.API_TOKEN_HEADER, TOKEN)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"apiPath\":\"/orders/42\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.candidates[0].sourceType.javaType.packageName")
+                        .value("com.acme.order"))
+                .andExpect(jsonPath("$.candidates[0].sourceType.javaType.className")
+                        .value("OrderController"))
+                .andExpect(jsonPath("$.candidates[0].sourceType.sourceFile")
+                        .value("module-a/src/main/java/com/acme/order/OrderController.java"))
+                .andExpect(jsonPath("$.candidates[0].methodName").value("getOrder"))
+                .andExpect(jsonPath("$.candidates[0].analysisTarget.target.sourceType.javaType.packageName")
+                        .value("com.acme.order"))
+                .andExpect(jsonPath("$.candidates[0].analysisTarget.target.sourceType.javaType.className")
+                        .value("OrderController"))
+                .andExpect(jsonPath("$.candidates[0].analysisTarget.target.sourceType.sourceFile")
+                        .value("module-a/src/main/java/com/acme/order/OrderController.java"))
+                .andExpect(jsonPath("$.candidates[0].analysisTarget.target.methodName").value("getOrder"));
     }
 
     @Test
@@ -301,8 +346,9 @@ class ApiRouteControllerTest {
                 revision,
                 "GET",
                 "/orders/{*}",
-                "com.acme.order",
-                "OrderController",
+                new SourceTypeIdentity(
+                        new JavaTypeIdentity("com.acme.order", "OrderController"),
+                        "src/main/java/com/acme/order/OrderController.java"),
                 "getOrder",
                 new MethodTargetResolution(
                         AnalysisTargetStatus.AMBIGUOUS,
@@ -330,8 +376,7 @@ class ApiRouteControllerTest {
                         new ApiEntryPointRef(
                                 candidate.repoId(),
                                 candidate.analyzedRevision(),
-                                candidate.packageName(),
-                                candidate.className(),
+                                candidate.sourceType(),
                                 candidate.methodName(),
                                 candidate.httpMethod(),
                                 candidate.routeTemplate(),

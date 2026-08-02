@@ -1,10 +1,9 @@
 package com.java.semantic.syntax.application;
 
-import com.java.semantic.identity.RepositoryRelativeSource;
+import com.java.semantic.identity.SourceTypeIdentity;
 import com.java.semantic.repository.domain.RepositoryId;
 import com.java.semantic.repository.domain.RepositoryRevision;
 
-import javax.lang.model.SourceVersion;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
@@ -13,8 +12,7 @@ import java.util.Set;
 public record TypeMemberQuery(
         RepositoryId repositoryId,
         RepositoryRevision expectedRevision,
-        String sourceFile,
-        String fullyQualifiedName,
+        SourceTypeIdentity sourceType,
         Set<TypeMemberKind> memberKinds,
         Optional<String> namePrefix,
         int offset,
@@ -25,8 +23,7 @@ public record TypeMemberQuery(
     public TypeMemberQuery {
         repositoryId = Objects.requireNonNull(repositoryId, "repositoryId is required");
         expectedRevision = Objects.requireNonNull(expectedRevision, "expectedRevision is required");
-        sourceFile = RepositoryRelativeSource.requireValid(sourceFile);
-        fullyQualifiedName = requiredTypeName(fullyQualifiedName);
+        sourceType = Objects.requireNonNull(sourceType, "sourceType is required");
         memberKinds = Set.copyOf(Objects.requireNonNull(memberKinds, "memberKinds are required"));
         namePrefix = normalizedPrefix(namePrefix);
         if (memberKinds.size() < 1) {
@@ -48,21 +45,11 @@ public record TypeMemberQuery(
         return new TypeMemberQuery(
                 repositoryId,
                 expectedRevision,
-                sourceFile,
-                fullyQualifiedName,
+                sourceType,
                 memberKinds,
                 namePrefix,
                 nextOffset,
                 limit);
-    }
-
-    private static String requiredTypeName(String value) {
-        String typeName = Objects.requireNonNull(value, "fullyQualifiedName is required");
-        if (typeName.isBlank() || !SourceVersion.isName(typeName)
-                || typeName.codePoints().anyMatch(Character::isISOControl)) {
-            throw new IllegalArgumentException("fullyQualifiedName must be a canonical Java type name");
-        }
-        return typeName;
     }
 
     private static Optional<String> normalizedPrefix(Optional<String> value) {

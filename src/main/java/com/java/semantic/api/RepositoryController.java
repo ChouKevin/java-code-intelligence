@@ -7,6 +7,7 @@ import com.java.semantic.api.dto.RepositoryStatusResponse;
 import com.java.semantic.api.dto.SyncRepositoryRequest;
 import com.java.semantic.repository.application.RepositoryApplicationService;
 import com.java.semantic.repository.domain.RepositoryId;
+import com.java.semantic.repository.domain.RepositoryRevision;
 import com.java.semantic.syntax.application.EntryPointDiscoveryApplicationService;
 import jakarta.validation.Valid;
 import org.springframework.util.StringUtils;
@@ -83,10 +84,12 @@ public class RepositoryController {
     @GetMapping("/{repoId}/entry-points")
     public EntryPointsResponse entryPoints(
             @PathVariable String repoId,
+            @RequestParam String expectedRevision,
             @RequestParam(required = false) String types) {
         RepositoryId repositoryId = RepositoryId.of(repoId);
+        RepositoryRevision revision = new RepositoryRevision(expectedRevision);
         EntryPointListRequest request = EntryPointListRequest.from(types);
         return entryPointResponseMapper.toResponse(
-                entryPointDiscoveryApplicationService.list(repositoryId, request.types()));
+                entryPointDiscoveryApplicationService.list(repositoryId, revision, request.types()));
     }
 }

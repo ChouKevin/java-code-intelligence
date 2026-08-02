@@ -1,5 +1,6 @@
 package com.java.semantic.syntax.adapter.jdt;
 
+import com.java.semantic.identity.JavaTypeIdentity;
 import com.java.semantic.identity.MethodTarget;
 import com.java.semantic.repository.domain.RepositoryId;
 import com.java.semantic.repository.domain.RepositoryRevision;
@@ -49,17 +50,17 @@ class JdtSourceSymbolResolverTest {
         JdtSourceSymbolResolver resolver = new JdtSourceSymbolResolver();
 
         SourceSymbolResolution constant = resolver.resolve(snapshot(repositoryRoot), query(
-                typeContext("com.acme.OrderService"), "TOPIC", Optional.empty()));
+                typeContext("OrderService"), "TOPIC", Optional.empty()));
         SourceSymbolResolution runtime = resolver.resolve(snapshot(repositoryRoot), query(
-                typeContext("com.acme.OrderService"), "RUNTIME", Optional.empty()));
+                typeContext("OrderService"), "RUNTIME", Optional.empty()));
         SourceSymbolResolution constantObject = resolver.resolve(snapshot(repositoryRoot), query(
-                typeContext("com.acme.OrderService"), "CONSTANT_OBJECT", Optional.empty()));
+                typeContext("OrderService"), "CONSTANT_OBJECT", Optional.empty()));
         SourceSymbolResolution method = resolver.resolve(snapshot(repositoryRoot), query(
-                typeContext("com.acme.OrderService"), "work", Optional.empty()));
+                typeContext("OrderService"), "work", Optional.empty()));
         SourceSymbolResolution nested = resolver.resolve(snapshot(repositoryRoot), query(
-                typeContext("com.acme.OrderService"), "Nested", Optional.empty()));
+                typeContext("OrderService"), "Nested", Optional.empty()));
         SourceSymbolResolution local = resolver.resolve(snapshot(repositoryRoot), query(
-                methodContext("com.acme.OrderService", "confirm", Optional.of(List.of("com.acme.Order"))),
+                methodContext("OrderService", "confirm", Optional.of(List.of("com.acme.Order"))),
                 "local", Optional.empty()));
 
         assertThat(constant.status()).isEqualTo(SourceSymbolResolutionStatus.RESOLVED);
@@ -117,14 +118,14 @@ class JdtSourceSymbolResolverTest {
         JdtSourceSymbolResolver resolver = new JdtSourceSymbolResolver();
 
         SourceSymbolResolution overloadContext = resolver.resolve(snapshot(repositoryRoot), query(
-                methodContext("com.acme.Ambiguous", "pick", Optional.empty()), "foo", Optional.empty()));
+                methodContext("Ambiguous", "pick", Optional.empty()), "foo", Optional.empty()));
         SourceSymbolResolution directOverloads = resolver.resolve(snapshot(repositoryRoot), query(
-                typeContext("com.acme.Ambiguous"), "pick", Optional.empty()));
+                typeContext("Ambiguous"), "pick", Optional.empty()));
         SourceSymbolResolution occurrences = resolver.resolve(snapshot(repositoryRoot), query(
-                methodContext("com.acme.Ambiguous", "inspect", Optional.of(List.of("java.lang.String"))),
+                methodContext("Ambiguous", "inspect", Optional.of(List.of("java.lang.String"))),
                 "foo", Optional.empty()));
         SourceSymbolResolution ownerOrderedMethods = resolver.resolve(snapshot(repositoryRoot), query(
-                methodContext("com.acme.Ambiguous", "inspect", Optional.of(List.of("java.lang.String"))),
+                methodContext("Ambiguous", "inspect", Optional.of(List.of("java.lang.String"))),
                 "run", Optional.empty()));
 
         assertThat(overloadContext.status()).isEqualTo(SourceSymbolResolutionStatus.AMBIGUOUS_CONTEXT);
@@ -169,10 +170,10 @@ class JdtSourceSymbolResolverTest {
         JdtSourceSymbolResolver resolver = new JdtSourceSymbolResolver();
 
         SourceSymbolResolution ambiguous = resolver.resolve(snapshot(repositoryRoot), query(
-                typeContext("com.acme.Owner"), "TOKEN", Optional.empty()));
+                typeContext("Owner"), "TOKEN", Optional.empty()));
         SourceSymbolResolution selected = resolver.resolve(snapshot(repositoryRoot), query(
                 new SourceSymbolContext(
-                        "com.acme.Owner",
+                        new JavaTypeIdentity("com.acme", "Owner"),
                         Optional.of("module-a/src/main/java/com/acme/Owner.java"),
                         Optional.empty()),
                 "TOKEN", Optional.empty()));
@@ -201,7 +202,7 @@ class JdtSourceSymbolResolverTest {
                 """);
         JdtSourceSymbolResolver resolver = new JdtSourceSymbolResolver();
         SourceSymbolContext context = methodContext(
-                "com.acme.GenericService", "inspect", Optional.empty());
+                "GenericService", "inspect", Optional.empty());
 
         SourceSymbolResolution unresolved = resolver.resolve(snapshot(repositoryRoot), query(
                 context, "T", Optional.empty()));
@@ -223,16 +224,17 @@ class JdtSourceSymbolResolverTest {
                 RepositoryId.of("order-service"), RepositoryRevision.fixture(), context, symbol, position);
     }
 
-    private SourceSymbolContext typeContext(String fullyQualifiedType) {
-        return new SourceSymbolContext(fullyQualifiedType, Optional.empty(), Optional.empty());
+    private SourceSymbolContext typeContext(String className) {
+        return new SourceSymbolContext(
+                new JavaTypeIdentity("com.acme", className), Optional.empty(), Optional.empty());
     }
 
     private SourceSymbolContext methodContext(
-            String fullyQualifiedType,
+            String className,
             String methodName,
             Optional<List<String>> parameterTypes) {
         return new SourceSymbolContext(
-                fullyQualifiedType,
+                new JavaTypeIdentity("com.acme", className),
                 Optional.empty(),
                 Optional.of(new SourceSymbolContext.MethodContext(methodName, parameterTypes)));
     }

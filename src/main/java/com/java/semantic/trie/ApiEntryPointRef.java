@@ -1,5 +1,6 @@
 package com.java.semantic.trie;
 
+import com.java.semantic.identity.SourceTypeIdentity;
 import com.java.semantic.syntax.domain.MethodTargetResolution;
 
 import java.util.Objects;
@@ -8,14 +9,14 @@ import java.util.Objects;
 public record ApiEntryPointRef(
         String repoId,
         String analyzedRevision,
-        String packageName,
-        String className,
+        SourceTypeIdentity sourceType,
         String methodName,
         String httpMethod,
         String routeTemplate,
         MethodTargetResolution analysisTarget) {
 
     public ApiEntryPointRef {
+        sourceType = Objects.requireNonNull(sourceType, "sourceType is required");
         analysisTarget = Objects.requireNonNull(analysisTarget, "analysisTarget is required");
     }
 

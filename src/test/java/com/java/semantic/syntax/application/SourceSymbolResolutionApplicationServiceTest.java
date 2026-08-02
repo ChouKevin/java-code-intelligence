@@ -49,7 +49,7 @@ class SourceSymbolResolutionApplicationServiceTest {
                 repositories, resolver, new DiscoveryFollowUpFactory(), new SourceSymbolResolutionProperties(2));
         SourceSymbolResolutionQuery query = query(
                 new SourceSymbolContext(
-                        "com.acme.OrderService",
+                        new JavaTypeIdentity("com.acme", "OrderService"),
                         Optional.empty(),
                         Optional.of(new SourceSymbolContext.MethodContext("work", Optional.empty()))),
                 "value",
@@ -112,13 +112,16 @@ class SourceSymbolResolutionApplicationServiceTest {
                 new SourceSymbolResolutionProperties(100));
 
         RevisionBoundSourceSymbolResolution types = service.resolve(query(
-                new SourceSymbolContext("com.acme.OrderService", Optional.empty(), Optional.empty()),
+                new SourceSymbolContext(
+                        new JavaTypeIdentity("com.acme", "OrderService"), Optional.empty(), Optional.empty()),
                 "type", Optional.of(new SyntaxPosition(2, 2))));
         RevisionBoundSourceSymbolResolution ambiguous = service.resolve(query(
-                new SourceSymbolContext("com.acme.OrderService", Optional.empty(), Optional.empty()),
+                new SourceSymbolContext(
+                        new JavaTypeIdentity("com.acme", "OrderService"), Optional.empty(), Optional.empty()),
                 "pick", Optional.empty()));
         RevisionBoundSourceSymbolResolution resolved = service.resolve(query(
-                new SourceSymbolContext("com.acme.OrderService", Optional.empty(), Optional.empty()),
+                new SourceSymbolContext(
+                        new JavaTypeIdentity("com.acme", "OrderService"), Optional.empty(), Optional.empty()),
                 "confirm", Optional.empty()));
 
         assertThat(types.contextCandidates()).allSatisfy(candidate -> {

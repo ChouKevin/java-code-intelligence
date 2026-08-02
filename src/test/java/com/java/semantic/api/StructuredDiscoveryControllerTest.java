@@ -178,10 +178,14 @@ class StructuredDiscoveryControllerTest {
                 .andExpect(jsonPath("$.candidates[0].identity.kind").value("FIELD"))
                 .andExpect(jsonPath("$.candidates[0].matchedTerms[0]").value("order"))
                 .andExpect(jsonPath("$.candidates[0].matchedTerms[1]").value("service"))
-                .andExpect(jsonPath("$.candidates[0].identity.sourceFile").value(SOURCE_FILE))
-                .andExpect(jsonPath("$.candidates[0].identity.ownerPackageName").value("com.example"))
-                .andExpect(jsonPath("$.candidates[0].identity.ownerClassName").value("OrderService"))
-                .andExpect(jsonPath("$.candidates[0].identity.fieldName").value("repository"))
+                .andExpect(jsonPath("$.candidates[0].identity.identity.scope").value("TYPE"))
+                .andExpect(jsonPath("$.candidates[0].identity.identity.ownerType.sourceFile")
+                        .value(SOURCE_FILE))
+                .andExpect(jsonPath("$.candidates[0].identity.identity.ownerType.javaType.packageName")
+                        .value("com.example"))
+                .andExpect(jsonPath("$.candidates[0].identity.identity.ownerType.javaType.className")
+                        .value("OrderService"))
+                .andExpect(jsonPath("$.candidates[0].identity.identity.name").value("repository"))
                 .andExpect(jsonPath("$.candidates[0].evidence[0].identity.kind").value("METHOD"))
                 .andExpect(jsonPath("$.candidates[0].evidence[0].identity.target.methodName")
                         .value("createOrder"))
@@ -198,14 +202,14 @@ class StructuredDiscoveryControllerTest {
                         .value("orders"))
                 .andExpect(jsonPath("$.candidates[0].availableFollowUps[0].request.expectedRevision")
                         .value(ANALYZED_REVISION.value()))
-                .andExpect(jsonPath("$.candidates[0].availableFollowUps[0].request.sourceFile")
+                .andExpect(jsonPath("$.candidates[0].availableFollowUps[0].request.sourceType.sourceFile")
                         .value(SOURCE_FILE))
                 .andExpect(jsonPath(
-                        "$.candidates[0].availableFollowUps[0].request.fullyQualifiedName")
-                        .value("com.example.OrderService"))
+                        "$.candidates[0].availableFollowUps[0].request.sourceType.javaType.packageName")
+                        .value("com.example"))
                 .andExpect(jsonPath(
-                        "$.candidates[0].availableFollowUps[0].request.fullyQualifiedTypeName")
-                        .doesNotExist())
+                        "$.candidates[0].availableFollowUps[0].request.sourceType.javaType.className")
+                        .value("OrderService"))
                 .andExpect(jsonPath("$.candidates[0].availableFollowUps[0].request.memberKinds[0]")
                         .value("METHOD"))
                 .andExpect(jsonPath("$.candidates[0].availableFollowUps[0].request.memberKinds[1]")
@@ -215,9 +219,12 @@ class StructuredDiscoveryControllerTest {
                 .andExpect(jsonPath("$.candidates[0].availableFollowUps[0].request.offset").value(0))
                 .andExpect(jsonPath("$.candidates[0].availableFollowUps[0].request.limit").value(50))
                 .andExpect(jsonPath("$.candidates[1].identity.kind").value("METHOD"))
-                .andExpect(jsonPath("$.candidates[1].identity.target.sourceFile").value(SOURCE_FILE))
-                .andExpect(jsonPath("$.candidates[1].identity.target.packageName").value("com.example"))
-                .andExpect(jsonPath("$.candidates[1].identity.target.className").value("OrderService"))
+                .andExpect(jsonPath("$.candidates[1].identity.target.sourceType.sourceFile")
+                        .value(SOURCE_FILE))
+                .andExpect(jsonPath("$.candidates[1].identity.target.sourceType.javaType.packageName")
+                        .value("com.example"))
+                .andExpect(jsonPath("$.candidates[1].identity.target.sourceType.javaType.className")
+                        .value("OrderService"))
                 .andExpect(jsonPath("$.candidates[1].identity.target.methodName").value("createOrder"))
                 .andExpect(jsonPath("$.candidates[1].identity.target.parameterTypes[0]").value("com.example.Order"))
                 .andExpect(jsonPath("$.candidates[1].availableFollowUps.length()").value(4))
@@ -294,10 +301,13 @@ class StructuredDiscoveryControllerTest {
                 .andExpect(jsonPath("$.candidates.length()").value(9))
                 .andExpect(jsonPath("$.candidates[0].identity.kind").value("TYPE"))
                 .andExpect(jsonPath("$.candidates[1].identity.kind").value("METHOD"))
-                .andExpect(jsonPath("$.candidates[1].identity.target.sourceFile").value(SOURCE_FILE))
+                .andExpect(jsonPath("$.candidates[1].identity.target.sourceType.sourceFile")
+                        .value(SOURCE_FILE))
                 .andExpect(jsonPath("$.candidates[2].identity.kind").value("FIELD"))
-                .andExpect(jsonPath("$.candidates[2].identity.ownerPackageName").value("com.example"))
-                .andExpect(jsonPath("$.candidates[2].identity.ownerClassName").value("OrderService"))
+                .andExpect(jsonPath("$.candidates[2].identity.identity.ownerType.javaType.packageName")
+                        .value("com.example"))
+                .andExpect(jsonPath("$.candidates[2].identity.identity.ownerType.javaType.className")
+                        .value("OrderService"))
                 .andExpect(jsonPath("$.candidates[2].details.kind").value("FIELD"))
                 .andExpect(jsonPath("$.candidates[2].details.declaredType.kind").value("PARAMETERIZED"))
                 .andExpect(jsonPath("$.candidates[2].details.declaredType.rawType.kind").value("NAMED"))
@@ -315,7 +325,7 @@ class StructuredDiscoveryControllerTest {
                 .andExpect(jsonPath("$.candidates[8].identity.kind").value("MAPPER_STATEMENT"))
                 .andExpect(jsonPath("$.candidates[8].details.kind").value("MAPPER_STATEMENT"))
                 .andExpect(jsonPath("$.candidates[8].evidence[1].identity.kind").value("MAPPER_STATEMENT_VARIANT"))
-                .andExpect(jsonPath("$.candidates[8].evidence[1].identity.variant.resourcePath")
+                .andExpect(jsonPath("$.candidates[8].evidence[1].identity.identity.resourcePath")
                         .value("module-a/src/main/resources/mapper/OrderMapper.xml"))
                 .andExpect(jsonPath("$.candidates[0].kind").doesNotExist())
                 .andExpect(jsonPath("$.candidates[0].sourceFile").doesNotExist())
@@ -341,15 +351,17 @@ class StructuredDiscoveryControllerTest {
                 .andExpect(jsonPath("$.supportedKinds[8]").value("MAPPER_STATEMENT"))
                 .andExpect(jsonPath("$.candidates.length()").value(1))
                 .andExpect(jsonPath("$.candidates[0].identity.kind").value("MAPPER_STATEMENT"))
-                .andExpect(jsonPath("$.candidates[0].identity.statement.namespace")
+                .andExpect(jsonPath("$.candidates[0].identity.identity.namespace")
                         .value("com.example.OrderMapper"))
-                .andExpect(jsonPath("$.candidates[0].identity.statement.statementId")
+                .andExpect(jsonPath("$.candidates[0].identity.identity.statementId")
                         .value("findOrders"))
                 .andExpect(jsonPath("$.candidates[0].availableFollowUps").isEmpty())
-                .andExpect(jsonPath("$.candidates[0].details.mapping.namespace")
+                .andExpect(jsonPath("$.candidates[0].details.mapping.statement.namespace")
                         .value("com.example.OrderMapper"))
-                .andExpect(jsonPath("$.candidates[0].details.mapping.statementId")
+                .andExpect(jsonPath("$.candidates[0].details.mapping.statement.statementId")
                         .value("findOrders"))
+                .andExpect(jsonPath("$.candidates[0].details.mapping.namespace").doesNotExist())
+                .andExpect(jsonPath("$.candidates[0].details.mapping.statementId").doesNotExist())
                 .andExpect(jsonPath("$.candidates[0].details.mapping.status")
                         .value("RESOLVED"))
                 .andExpect(jsonPath("$.candidates[0].details.mapping.reason")
@@ -357,7 +369,7 @@ class StructuredDiscoveryControllerTest {
                 .andExpect(jsonPath("$.candidates[0].details.mapping.candidates.length()")
                         .value(1))
                 .andExpect(jsonPath(
-                        "$.candidates[0].details.mapping.candidates[0].target.sourceFile")
+                        "$.candidates[0].details.mapping.candidates[0].target.sourceType.sourceFile")
                         .value(MAPPER_TARGET_A.sourceFile()))
                 .andExpect(jsonPath(
                         "$.candidates[0].details.mapping.candidates[0].availableFollowUps.length()")
@@ -371,17 +383,17 @@ class StructuredDiscoveryControllerTest {
                 .andExpect(jsonPath(
                         "$.candidates[0].details.mapping.candidates[0].availableFollowUps[0].request.target.parameterTypes[0]")
                         .value("java.lang.String"))
-                .andExpect(jsonPath("$.candidates[0].evidence[1].identity.variant.resourcePath")
+                .andExpect(jsonPath("$.candidates[0].evidence[1].identity.identity.resourcePath")
                         .value("module-a/src/main/resources/mapper/OrderMapper.xml"))
-                .andExpect(jsonPath("$.candidates[0].evidence[1].identity.variant.databaseId").value("postgres"))
-                .andExpect(jsonPath("$.candidates[0].evidence[1].identity.variant.documentOrdinal").value(1))
-                .andExpect(jsonPath("$.candidates[0].evidence[1].identity.variant.representation")
+                .andExpect(jsonPath("$.candidates[0].evidence[1].identity.identity.databaseId").value("postgres"))
+                .andExpect(jsonPath("$.candidates[0].evidence[1].identity.identity.documentOrdinal").value(1))
+                .andExpect(jsonPath("$.candidates[0].evidence[1].identity.identity.representation")
                         .value("MAPPER_XML_ELEMENT"))
-                .andExpect(jsonPath("$.candidates[0].evidence[2].identity.variant.resourcePath")
+                .andExpect(jsonPath("$.candidates[0].evidence[2].identity.identity.resourcePath")
                         .value("module-b/src/main/resources/mapper/OrderMapper.xml"))
-                .andExpect(jsonPath("$.candidates[0].evidence[2].identity.variant.databaseId").value("oracle"))
-                .andExpect(jsonPath("$.candidates[0].evidence[2].identity.variant.documentOrdinal").value(0))
-                .andExpect(jsonPath("$.candidates[0].evidence[2].identity.variant.representation")
+                .andExpect(jsonPath("$.candidates[0].evidence[2].identity.identity.databaseId").value("oracle"))
+                .andExpect(jsonPath("$.candidates[0].evidence[2].identity.identity.documentOrdinal").value(0))
+                .andExpect(jsonPath("$.candidates[0].evidence[2].identity.identity.representation")
                         .value("MAPPER_XML_ELEMENT"))
                 .andExpect(jsonPath("$.candidates[0].evidence[1].content").doesNotExist())
                 .andExpect(jsonPath("$.candidates[0].evidence[2].content").doesNotExist());
@@ -412,10 +424,10 @@ class StructuredDiscoveryControllerTest {
                 .andExpect(jsonPath("$.candidates[0].details.mapping.candidates.length()")
                         .value(2))
                 .andExpect(jsonPath(
-                        "$.candidates[0].details.mapping.candidates[0].target.sourceFile")
+                        "$.candidates[0].details.mapping.candidates[0].target.sourceType.sourceFile")
                         .value(MAPPER_TARGET_A.sourceFile()))
                 .andExpect(jsonPath(
-                        "$.candidates[0].details.mapping.candidates[1].target.sourceFile")
+                        "$.candidates[0].details.mapping.candidates[1].target.sourceType.sourceFile")
                         .value(MAPPER_TARGET_Z.sourceFile()))
                 .andExpect(jsonPath(
                         "$.candidates[0].details.mapping.candidates[0].availableFollowUps[0].operation")
@@ -445,9 +457,9 @@ class StructuredDiscoveryControllerTest {
                 }
                 """))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.candidates[0].details.mapping.namespace")
+                .andExpect(jsonPath("$.candidates[0].details.mapping.statement.namespace")
                         .value("com.example.OrderMapper"))
-                .andExpect(jsonPath("$.candidates[0].details.mapping.statementId")
+                .andExpect(jsonPath("$.candidates[0].details.mapping.statement.statementId")
                         .value("findOrders"))
                 .andExpect(jsonPath("$.candidates[0].details.mapping.status")
                         .value("UNRESOLVED"))
@@ -545,20 +557,22 @@ class StructuredDiscoveryControllerTest {
                 {
                   "repoId":"orders",
                   "expectedRevision":"1111111111111111111111111111111111111111",
-                  "sourceFile":"src/main/java/com/example/OrderService.java",
-                  "fullyQualifiedName":"com.example.OrderService",
+                  "sourceType":{"javaType":{"packageName":"com.example","className":"OrderService"},"sourceFile":"src/main/java/com/example/OrderService.java"},
                   "memberKinds":["METHOD","FIELD"]
                 }
                 """))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.repoId").value("orders"))
-                .andExpect(jsonPath("$.sourceFile").value(SOURCE_FILE))
-                .andExpect(jsonPath("$.fullyQualifiedName").value("com.example.OrderService"))
+                .andExpect(jsonPath("$.sourceType.sourceFile").value(SOURCE_FILE))
+                .andExpect(jsonPath("$.sourceType.javaType.packageName").value("com.example"))
+                .andExpect(jsonPath("$.sourceType.javaType.className").value("OrderService"))
                 .andExpect(jsonPath("$.typeKind").value("CLASS"))
                 .andExpect(jsonPath("$.members[0].kind").value("METHOD"))
-                .andExpect(jsonPath("$.members[0].target.sourceFile").value(SOURCE_FILE))
-                .andExpect(jsonPath("$.members[0].target.packageName").value("com.example"))
-                .andExpect(jsonPath("$.members[0].target.className").value("OrderService"))
+                .andExpect(jsonPath("$.members[0].target.sourceType.sourceFile").value(SOURCE_FILE))
+                .andExpect(jsonPath("$.members[0].target.sourceType.javaType.packageName")
+                        .value("com.example"))
+                .andExpect(jsonPath("$.members[0].target.sourceType.javaType.className")
+                        .value("OrderService"))
                 .andExpect(jsonPath("$.members[0].target.methodName").value("createOrder"))
                 .andExpect(jsonPath("$.members[0].target.parameterTypes[0]").value("com.example.Order"))
                 .andExpect(jsonPath("$.members[0].availableFollowUps[0].operation")
@@ -579,10 +593,12 @@ class StructuredDiscoveryControllerTest {
                         .value("ANALYZE_INCOMING_CALL_GRAPH"))
                 .andExpect(jsonPath("$.members[0].availableFollowUps[3].operation")
                         .value("DISCOVER_METHOD_IMPLEMENTATIONS"))
-                .andExpect(jsonPath("$.members[0].availableFollowUps[3].request.declarationTarget.sourceFile")
+                .andExpect(jsonPath(
+                        "$.members[0].availableFollowUps[3].request.declarationTarget.sourceType.sourceFile")
                         .value(SOURCE_FILE))
                 .andExpect(jsonPath("$.members[1].kind").value("FIELD"))
-                .andExpect(jsonPath("$.members[1].fieldName").value("repository"))
+                .andExpect(jsonPath("$.members[1].identity.scope").value("TYPE"))
+                .andExpect(jsonPath("$.members[1].identity.name").value("repository"))
                 .andExpect(jsonPath("$.members[1].writtenType").value("OrderRepository[][]"))
                 .andExpect(jsonPath("$.members[1].resolvedType").value("com.example.OrderRepository[][]"))
                 .andExpect(jsonPath("$.members[1].limitations[0]").value("FIELD_USAGE_NOT_INDEXED"))
@@ -594,20 +610,23 @@ class StructuredDiscoveryControllerTest {
                         .value("resolveConcept"))
                 .andExpect(jsonPath("$.members[1].availableFollowUps[0].request.identity.kind")
                         .value("TYPE"))
-                .andExpect(jsonPath("$.members[1].availableFollowUps[0].request.identity.sourceFile")
+                .andExpect(jsonPath("$.members[1].availableFollowUps[0].request.identity.sourceType.sourceFile")
                         .value("src/main/java/com/example/OrderRepository.java"))
-                .andExpect(jsonPath("$.members[1].availableFollowUps[0].request.identity.packageName")
+                .andExpect(jsonPath("$.members[1].availableFollowUps[0].request.identity.sourceType.javaType.packageName")
                         .value("com.example"))
-                .andExpect(jsonPath("$.members[1].availableFollowUps[0].request.identity.className")
+                .andExpect(jsonPath("$.members[1].availableFollowUps[0].request.identity.sourceType.javaType.className")
                         .value("OrderRepository"))
                 .andExpect(jsonPath("$.availableFollowUps[0].operation").value("GET_NEXT_PAGE"))
                 .andExpect(jsonPath("$.availableFollowUps[0].api.path")
                         .value("/v1/discovery/type-members"))
                 .andExpect(jsonPath("$.availableFollowUps[0].api.operationId")
                         .value("discoverTypeMembers"))
-                .andExpect(jsonPath("$.availableFollowUps[0].request.sourceFile").value(SOURCE_FILE))
-                .andExpect(jsonPath("$.availableFollowUps[0].request.fullyQualifiedName")
-                        .value("com.example.OrderService"))
+                .andExpect(jsonPath("$.availableFollowUps[0].request.sourceType.sourceFile")
+                        .value(SOURCE_FILE))
+                .andExpect(jsonPath("$.availableFollowUps[0].request.sourceType.javaType.packageName")
+                        .value("com.example"))
+                .andExpect(jsonPath("$.availableFollowUps[0].request.sourceType.javaType.className")
+                        .value("OrderService"))
                 .andExpect(jsonPath("$.availableFollowUps[0].request.memberKinds[0]").value("METHOD"))
                 .andExpect(jsonPath("$.availableFollowUps[0].request.memberKinds[1]").value("FIELD"))
                 .andExpect(jsonPath("$.availableFollowUps[0].request.offset").value(2))
@@ -618,8 +637,7 @@ class StructuredDiscoveryControllerTest {
         assertThat(query.getValue()).isEqualTo(new TypeMemberQuery(
                 REPOSITORY_ID,
                 REQUESTED_REVISION,
-                SOURCE_FILE,
-                "com.example.OrderService",
+                sourceType(),
                 Set.of(TypeMemberKind.METHOD, TypeMemberKind.FIELD),
                 Optional.empty(),
                 0,
@@ -645,8 +663,7 @@ class StructuredDiscoveryControllerTest {
                 {
                   "repoId":"orders",
                   "expectedRevision":"1111111111111111111111111111111111111111",
-                  "sourceFile":"src/main/java/com/example/OrderService.java",
-                  "fullyQualifiedName":"com.example.OrderService",
+                  "sourceType":{"javaType":{"packageName":"com.example","className":"OrderService"},"sourceFile":"src/main/java/com/example/OrderService.java"},
                   "memberKinds":["FIELD"]
                 }
                 """))
@@ -660,11 +677,11 @@ class StructuredDiscoveryControllerTest {
                         .value("2222222222222222222222222222222222222222"))
                 .andExpect(jsonPath("$.members[1].availableFollowUps[0].request.identity.kind")
                         .value("TYPE"))
-                .andExpect(jsonPath("$.members[1].availableFollowUps[0].request.identity.sourceFile")
+                .andExpect(jsonPath("$.members[1].availableFollowUps[0].request.identity.sourceType.sourceFile")
                         .value("src/main/java/com/example/OrderRepository.java"))
-                .andExpect(jsonPath("$.members[1].availableFollowUps[0].request.identity.packageName")
+                .andExpect(jsonPath("$.members[1].availableFollowUps[0].request.identity.sourceType.javaType.packageName")
                         .value("com.example"))
-                .andExpect(jsonPath("$.members[1].availableFollowUps[0].request.identity.className")
+                .andExpect(jsonPath("$.members[1].availableFollowUps[0].request.identity.sourceType.javaType.className")
                         .value("OrderRepository"));
 
         mockMvc.perform(resolveConceptRequest("""
@@ -673,18 +690,18 @@ class StructuredDiscoveryControllerTest {
                   "expectedRevision":"2222222222222222222222222222222222222222",
                   "identity":{
                     "kind":"TYPE",
-                    "sourceFile":"src/main/java/com/example/OrderRepository.java",
-                    "packageName":"com.example",
-                    "className":"OrderRepository"
+                    "sourceType":{"javaType":{"packageName":"com.example","className":"OrderRepository"},"sourceFile":"src/main/java/com/example/OrderRepository.java"}
                   }
                 }
                 """))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.candidate.identity.kind").value("TYPE"))
-                .andExpect(jsonPath("$.candidate.identity.sourceFile")
+                .andExpect(jsonPath("$.candidate.identity.sourceType.sourceFile")
                         .value("src/main/java/com/example/OrderRepository.java"))
-                .andExpect(jsonPath("$.candidate.identity.packageName").value("com.example"))
-                .andExpect(jsonPath("$.candidate.identity.className").value("OrderRepository"));
+                .andExpect(jsonPath("$.candidate.identity.sourceType.javaType.packageName")
+                        .value("com.example"))
+                .andExpect(jsonPath("$.candidate.identity.sourceType.javaType.className")
+                        .value("OrderRepository"));
     }
 
     @ParameterizedTest
@@ -750,7 +767,7 @@ class StructuredDiscoveryControllerTest {
                 resolveConceptResult(invocation.getArgument(0)));
 
         mockMvc.perform(resolveConceptRequest(resolveConceptIdentity("""
-                {"kind":"ANNOTATION_USAGE","declaration":{"kind":"FIELD","sourceFile":"src/main/java/com/example/OrderService.java","ownerPackageName":"com.example","ownerClassName":"OrderService","fieldName":"orders"},"annotationType":{"status":"UNRESOLVED","writtenName":"Autowired"}}
+                {"kind":"ANNOTATION_USAGE","declaration":{"kind":"FIELD","identity":{"scope":"TYPE","ownerType":{"javaType":{"packageName":"com.example","className":"OrderService"},"sourceFile":"src/main/java/com/example/OrderService.java"},"name":"orders"}},"annotationType":{"status":"UNRESOLVED","writtenName":"Autowired"}}
                 """)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.candidate.identity.declaration.kind").value("FIELD"))
@@ -766,7 +783,7 @@ class StructuredDiscoveryControllerTest {
                 fieldConceptEntry(fieldIdentity)));
 
         mockMvc.perform(resolveConceptRequest(resolveConceptIdentity("""
-                {"kind":"FIELD","sourceFile":"src/main/java/com/example/OrderService.java","ownerPackageName":"com.example","ownerClassName":"OrderService","fieldName":"orders"}
+                {"kind":"FIELD","identity":{"scope":"TYPE","ownerType":{"javaType":{"packageName":"com.example","className":"OrderService"},"sourceFile":"src/main/java/com/example/OrderService.java"},"name":"orders"}}
                 """)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.candidate.identity.declaredType").doesNotExist())
@@ -781,7 +798,7 @@ class StructuredDiscoveryControllerTest {
                 {
                   "repoId":"orders",
                   "expectedRevision":"1111111111111111111111111111111111111111",
-                  "identity":{"kind":"TYPE","sourceFile":"src/main/java/com/example/OrderService.java","packageName":"com.example","className":"OrderService","unexpected":true}
+                  "identity":{"kind":"TYPE","sourceType":{"javaType":{"packageName":"com.example","className":"OrderService"},"sourceFile":"src/main/java/com/example/OrderService.java"},"unexpected":true}
                 }
                 """))
                 .andExpect(status().isBadRequest())
@@ -863,8 +880,7 @@ class StructuredDiscoveryControllerTest {
                 {
                   "repoId":"orders",
                   "expectedRevision":"1111111111111111111111111111111111111111",
-                  "sourceFile":"src/main/java/com/example/Missing.java",
-                  "fullyQualifiedName":"com.example.Missing",
+                  "sourceType":{"javaType":{"packageName":"com.example","className":"Missing"},"sourceFile":"src/main/java/com/example/Missing.java"},
                   "memberKinds":["METHOD"]
                 }
                 """))
@@ -947,8 +963,7 @@ class StructuredDiscoveryControllerTest {
                         {
                           "repoId":"orders",
                           "expectedRevision":"1111111111111111111111111111111111111111",
-                          "sourceFile":"src/main/java/com/example/OrderService.java",
-                          "fullyQualifiedName":"com.example.OrderService",
+                          "sourceType":{"javaType":{"packageName":"com.example","className":"OrderService"},"sourceFile":"src/main/java/com/example/OrderService.java"},
                           "memberKinds":["UNKNOWN"]
                         }
                         """),
@@ -956,8 +971,7 @@ class StructuredDiscoveryControllerTest {
                         {
                           "repoId":"orders",
                           "expectedRevision":"1111111111111111111111111111111111111111",
-                          "sourceFile":"src/main/java/com/example/OrderService.java",
-                          "fullyQualifiedName":"com.example.OrderService",
+                          "sourceType":{"javaType":{"packageName":"com.example","className":"OrderService"},"sourceFile":"src/main/java/com/example/OrderService.java"},
                           "memberKinds":["METHOD"],
                           "limit":0
                         }
@@ -1002,46 +1016,46 @@ class StructuredDiscoveryControllerTest {
         return Stream.of(
                 arguments(resolveConceptTypeIdentity(), "TYPE"),
                 arguments(resolveConceptIdentity("""
-                        {"kind":"METHOD","target":{"sourceFile":"src/main/java/com/example/OrderService.java","packageName":"com.example","className":"OrderService","methodName":"createOrder","parameterTypes":["com.example.Order"]}}
+                        {"kind":"METHOD","target":{"sourceType":{"javaType":{"packageName":"com.example","className":"OrderService"},"sourceFile":"src/main/java/com/example/OrderService.java"},"methodName":"createOrder","parameterTypes":["com.example.Order"]}}
                         """), "METHOD"),
                 arguments(resolveConceptIdentity("""
-                        {"kind":"FIELD","sourceFile":"src/main/java/com/example/OrderService.java","ownerPackageName":"com.example","ownerClassName":"OrderService","fieldName":"repository"}
+                        {"kind":"FIELD","identity":{"scope":"TYPE","ownerType":{"javaType":{"packageName":"com.example","className":"OrderService"},"sourceFile":"src/main/java/com/example/OrderService.java"},"name":"repository"}}
                         """), "FIELD"),
                 arguments(resolveConceptIdentity("""
-                        {"kind":"ANNOTATION_USAGE","declaration":{"kind":"TYPE","sourceFile":"src/main/java/com/example/OrderService.java","packageName":"com.example","className":"OrderService"},"annotationType":{"status":"RESOLVED","javaType":{"packageName":"org.springframework.stereotype","className":"Service"}}}
+                        {"kind":"ANNOTATION_USAGE","declaration":{"kind":"TYPE","sourceType":{"javaType":{"packageName":"com.example","className":"OrderService"},"sourceFile":"src/main/java/com/example/OrderService.java"}},"annotationType":{"status":"RESOLVED","javaType":{"packageName":"org.springframework.stereotype","className":"Service"}}}
                         """), "ANNOTATION_USAGE"),
                 arguments(resolveConceptIdentity("""
-                        {"kind":"TYPE_USAGE","owner":{"kind":"METHOD","target":{"sourceFile":"src/main/java/com/example/OrderService.java","packageName":"com.example","className":"OrderService","methodName":"createOrder","parameterTypes":["com.example.Order"]}},"location":{"slot":"METHOD_PARAMETER","index":0},"path":[{"kind":"TYPE_ARGUMENT","index":0}],"referencedType":{"javaType":{"packageName":"com.example","className":"Order"},"arrayDimensions":0}}
+                        {"kind":"TYPE_USAGE","owner":{"kind":"METHOD","target":{"sourceType":{"javaType":{"packageName":"com.example","className":"OrderService"},"sourceFile":"src/main/java/com/example/OrderService.java"},"methodName":"createOrder","parameterTypes":["com.example.Order"]}},"location":{"slot":"METHOD_PARAMETER","index":0},"path":[{"kind":"TYPE_ARGUMENT","index":0}],"referencedType":{"javaType":{"packageName":"com.example","className":"Order"},"arrayDimensions":0}}
                         """), "TYPE_USAGE"),
                 arguments(resolveConceptIdentity("""
-                        {"kind":"API_ROUTE","target":{"sourceFile":"src/main/java/com/example/OrderService.java","packageName":"com.example","className":"OrderService","methodName":"createOrder","parameterTypes":["com.example.Order"]},"httpVerb":"POST","route":"/orders"}
+                        {"kind":"API_ROUTE","target":{"sourceType":{"javaType":{"packageName":"com.example","className":"OrderService"},"sourceFile":"src/main/java/com/example/OrderService.java"},"methodName":"createOrder","parameterTypes":["com.example.Order"]},"httpVerb":"POST","route":"/orders"}
                         """), "API_ROUTE"),
                 arguments(resolveConceptIdentity("""
-                        {"kind":"MQ_DESTINATION","target":{"sourceFile":"src/main/java/com/example/OrderService.java","packageName":"com.example","className":"OrderService","methodName":"createOrder","parameterTypes":["com.example.Order"]},"broker":"KAFKA","destination":"orders"}
+                        {"kind":"MQ_DESTINATION","target":{"sourceType":{"javaType":{"packageName":"com.example","className":"OrderService"},"sourceFile":"src/main/java/com/example/OrderService.java"},"methodName":"createOrder","parameterTypes":["com.example.Order"]},"broker":"KAFKA","destination":"orders"}
                         """), "MQ_DESTINATION"),
                 arguments(resolveConceptIdentity("""
-                        {"kind":"SCHEDULE","target":{"sourceFile":"src/main/java/com/example/OrderService.java","packageName":"com.example","className":"OrderService","methodName":"createOrder","parameterTypes":["com.example.Order"]},"triggerKind":"CRON","triggerValue":"0 * * * * *"}
+                        {"kind":"SCHEDULE","target":{"sourceType":{"javaType":{"packageName":"com.example","className":"OrderService"},"sourceFile":"src/main/java/com/example/OrderService.java"},"methodName":"createOrder","parameterTypes":["com.example.Order"]},"triggerKind":"CRON","triggerValue":"0 * * * * *"}
                         """), "SCHEDULE"),
                 arguments(resolveConceptIdentity("""
-                        {"kind":"MAPPER_STATEMENT","statement":{"namespace":"com.example.OrderMapper","statementId":"findOrders"}}
+                        {"kind":"MAPPER_STATEMENT","identity":{"namespace":"com.example.OrderMapper","statementId":"findOrders"}}
                         """), "MAPPER_STATEMENT"),
                 arguments(resolveConceptIdentity("""
-                        {"kind":"MAPPER_STATEMENT_VARIANT","variant":{"statement":{"namespace":"com.example.OrderMapper","statementId":"findOrders"},"resourcePath":"src/main/resources/OrderMapper.xml","databaseId":"postgres","documentOrdinal":0,"representation":"MAPPER_XML_ELEMENT"}}
+                        {"kind":"MAPPER_STATEMENT_VARIANT","identity":{"statementKey":{"namespace":"com.example.OrderMapper","statementId":"findOrders"},"resourcePath":"src/main/resources/OrderMapper.xml","databaseId":"postgres","documentOrdinal":0,"representation":"MAPPER_XML_ELEMENT"}}
                         """), "MAPPER_STATEMENT_VARIANT"));
     }
 
     private static Stream<Arguments> malformedResolveConceptTypeIdentities() {
         return Stream.of(
-                Arguments.of("{\"kind\":\"TYPE\",\"sourceFile\":\"/etc/passwd\",\"packageName\":\"com.example\",\"className\":\"OrderService\"}"),
-                Arguments.of("{\"kind\":\"TYPE\",\"sourceFile\":\"../../etc/passwd\",\"packageName\":\"com.example\",\"className\":\"OrderService\"}"),
-                Arguments.of("{\"kind\":\"TYPE\",\"sourceFile\":\"src\\\\main\\\\java\\\\OrderService.java\",\"packageName\":\"com.example\",\"className\":\"OrderService\"}"),
-                Arguments.of("{\"kind\":\"TYPE\",\"sourceFile\":\"src/main/../OrderService.java\",\"packageName\":\"com.example\",\"className\":\"OrderService\"}"),
-                Arguments.of("{\"kind\":\"TYPE\",\"sourceFile\":\"src/main/java/com/example/OrderService.java\",\"packageName\":\"com.example\",\"className\":\"1OrderService\"}"));
+                Arguments.of("{\"kind\":\"TYPE\",\"sourceType\":{\"sourceFile\":\"/etc/passwd\",\"javaType\":{\"packageName\":\"com.example\",\"className\":\"OrderService\"}}}"),
+                Arguments.of("{\"kind\":\"TYPE\",\"sourceType\":{\"sourceFile\":\"../../etc/passwd\",\"javaType\":{\"packageName\":\"com.example\",\"className\":\"OrderService\"}}}"),
+                Arguments.of("{\"kind\":\"TYPE\",\"sourceType\":{\"sourceFile\":\"src\\\\main\\\\java\\\\OrderService.java\",\"javaType\":{\"packageName\":\"com.example\",\"className\":\"OrderService\"}}}"),
+                Arguments.of("{\"kind\":\"TYPE\",\"sourceType\":{\"sourceFile\":\"src/main/../OrderService.java\",\"javaType\":{\"packageName\":\"com.example\",\"className\":\"OrderService\"}}}"),
+                Arguments.of("{\"kind\":\"TYPE\",\"sourceType\":{\"sourceFile\":\"src/main/java/com/example/OrderService.java\",\"javaType\":{\"packageName\":\"com.example\",\"className\":\"1OrderService\"}}}"));
     }
 
     private static String resolveConceptTypeIdentity() {
         return resolveConceptIdentity("""
-                {"kind":"TYPE","sourceFile":"src/main/java/com/example/OrderService.java","packageName":"com.example","className":"OrderService"}
+                {"kind":"TYPE","sourceType":{"javaType":{"packageName":"com.example","className":"OrderService"},"sourceFile":"src/main/java/com/example/OrderService.java"}}
                 """);
     }
 
@@ -1324,8 +1338,7 @@ class StructuredDiscoveryControllerTest {
         TypeMemberQuery nextQuery = new TypeMemberQuery(
                 REPOSITORY_ID,
                 ANALYZED_REVISION,
-                SOURCE_FILE,
-                "com.example.OrderService",
+                sourceType(),
                 Set.of(TypeMemberKind.METHOD, TypeMemberKind.FIELD),
                 Optional.empty(),
                 0,
@@ -1334,8 +1347,7 @@ class StructuredDiscoveryControllerTest {
         return new TypeMemberResult(
                 REPOSITORY_ID,
                 ANALYZED_REVISION,
-                SOURCE_FILE,
-                "com.example.OrderService",
+                sourceType(),
                 SourceTypeKind.CLASS,
                 List.of("org.springframework.stereotype.Service"),
                 List.of("com.example.OrderPort"),

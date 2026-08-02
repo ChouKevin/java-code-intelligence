@@ -34,7 +34,7 @@ class AnalysisResponseMapperTest {
                 "place",
                 List.of());
 
-    private final AnalysisResponseMapper mapper = new AnalysisResponseMapper();
+    private final AnalysisResponseMapper mapper = new AnalysisResponseMapper(new SourceLocationHttpMapper());
 
     @Test
     void should_map_resolution_strategy_to_its_resolution_category() {

@@ -1,5 +1,7 @@
 package com.java.semantic.api.dto;
 
+import com.java.semantic.api.dto.identity.MethodTargetPayload;
+
 import com.java.semantic.api.monitoring.ApiMonitoringField;
 import com.java.semantic.api.monitoring.ApiMonitoringMode;
 
@@ -15,7 +17,7 @@ import jakarta.validation.constraints.Pattern;
 public record DiscoverMethodImplementationsRequest(
         @ApiMonitoringField(ApiMonitoringMode.VALUE) @NotBlank String repoId,
         @ApiMonitoringField(ApiMonitoringMode.VALUE) @NotBlank @Pattern(regexp = "^[0-9a-f]{40}$|^FIXTURE$") String expectedRevision,
-        @ApiMonitoringField(ApiMonitoringMode.NESTED) @NotNull @Valid MethodTargetRequest declarationTarget) {
+        @ApiMonitoringField(ApiMonitoringMode.NESTED) @NotNull @Valid MethodTargetPayload declarationTarget) {
 
     @JsonAnySetter
     public void rejectUnknownProperty(String property, Object value) {

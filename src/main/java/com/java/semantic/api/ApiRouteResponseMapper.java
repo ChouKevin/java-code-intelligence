@@ -27,8 +27,7 @@ public final class ApiRouteResponseMapper {
                 candidate.analyzedRevision(),
                 candidate.httpMethod(),
                 candidate.routeTemplate(),
-                candidate.packageName(),
-                candidate.className(),
+                JavaSourceIdentityHttpMapper.toPayload(candidate.sourceType()),
                 candidate.methodName(),
                 EntryPointResponseMapper.toResponse(candidate.analysisTarget()),
                 candidate.matchReasons());

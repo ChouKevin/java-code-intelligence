@@ -1,7 +1,18 @@
 package com.java.semantic;
 
-import com.java.semantic.api.MethodTargetHttpMapper;
-import com.java.semantic.api.dto.MethodTargetResponse;
+import com.java.semantic.api.JavaSourceIdentityHttpMapper;
+import com.java.semantic.api.MapperIdentityHttpMapper;
+import com.java.semantic.api.SourceLocationHttpMapper;
+import com.java.semantic.api.dto.identity.JavaTypeIdentityPayload;
+import com.java.semantic.api.dto.identity.MapperFragmentIdentityPayload;
+import com.java.semantic.api.dto.identity.MapperStatementIdentityPayload;
+import com.java.semantic.api.dto.identity.MapperStatementKeyPayload;
+import com.java.semantic.api.dto.identity.MethodTargetPayload;
+import com.java.semantic.api.dto.identity.SourceMemberIdentityPayload;
+import com.java.semantic.api.dto.identity.SourceTypeIdentityPayload;
+import com.java.semantic.api.dto.location.PositionPayload;
+import com.java.semantic.api.dto.location.SourceRangePayload;
+import com.java.semantic.api.dto.location.TextRangePayload;
 import com.java.semantic.repository.application.RepositoryApplicationService;
 import com.java.semantic.repository.domain.RepositoryId;
 import com.java.semantic.api.monitoring.ApiMonitoringField;
@@ -28,6 +39,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.function.Function;
+import java.util.stream.Collectors;
 
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.classes;
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
@@ -102,9 +114,27 @@ class ArchitectureTest {
     @Test
     void should_keep_the_source_identity_model_jdk_only() {
         noClasses()
-                .that().resideInAPackage("..identity..")
+                .that().resideInAPackage("com.java.semantic.identity..")
                 .should().dependOnClassesThat().resideOutsideOfPackages("java..", "com.java.semantic.identity..")
                 .as("the source identity model must remain JDK-only")
+                .allowEmptyShould(false)
+                .check(classes);
+    }
+
+    @Test
+    void should_keep_shared_http_payloads_inside_the_transport_boundary() {
+        noClasses()
+                .that().resideInAnyPackage(
+                        "com.java.semantic.api.dto.identity..",
+                        "com.java.semantic.api.dto.location..")
+                .should().dependOnClassesThat().resideOutsideOfPackages(
+                        "java..",
+                        "com.fasterxml.jackson.annotation..",
+                        "jakarta.validation..",
+                        "com.java.semantic.api.dto.identity..",
+                        "com.java.semantic.api.dto.location..",
+                        "com.java.semantic.api.monitoring..")
+                .as("shared HTTP payloads may depend only on transport concerns and other shared payloads")
                 .allowEmptyShould(false)
                 .check(classes);
     }
@@ -126,7 +156,22 @@ class ArchitectureTest {
                 "com.java.semantic.syntax.domain.ClassMetadata",
                 "com.java.semantic.syntax.domain.ResolvedTypeIdentity",
                 "com.java.semantic.identity.PolicyIdentity",
-                "com.java.semantic.identity.SourceMemberIdentity");
+                "com.java.semantic.identity.SourceMemberIdentity",
+                "com.java.semantic.api.dto.MethodTargetRequest",
+                "com.java.semantic.api.dto.MethodTargetResponse",
+                "com.java.semantic.api.dto.JavaTypeIdentityResponse",
+                "com.java.semantic.api.dto.PositionResponse",
+                "com.java.semantic.api.dto.SourceRangeResponse",
+                "com.java.semantic.api.dto.MapperStatementIdentityResponse",
+                "com.java.semantic.api.dto.MapperFragmentIdentityRequest",
+                "com.java.semantic.api.dto.MapperFragmentIdentityResponse",
+                "com.java.semantic.api.dto.SourceSymbolPositionRequest",
+                "com.java.semantic.api.dto.SourceSymbolContextRequest",
+                "com.java.semantic.api.dto.SourceSymbolMethodContextRequest",
+                "com.java.semantic.api.dto.ConceptIdentityResponse$MapperStatementKeyResponse",
+                "com.java.semantic.api.dto.ConceptIdentityResponse$MapperStatementVariantResponse",
+                "com.java.semantic.api.dto.DiscoveryFollowUpResponse$SourceSymbolContextResponse",
+                "com.java.semantic.api.dto.DiscoveryFollowUpResponse$SourceSymbolMethodContextResponse");
 
         assertThat(loadClass("com.java.semantic.identity.MethodTarget").getConstructors())
                 .noneMatch(constructor -> Arrays.equals(constructor.getParameterTypes(), new Class<?>[]{
@@ -137,15 +182,32 @@ class ArchitectureTest {
     }
 
     @Test
-    void should_construct_method_target_responses_only_through_the_shared_http_mapper() {
-        List<String> violations = classes.stream()
-                .filter(javaClass -> !javaClass.isEquivalentTo(MethodTargetHttpMapper.class))
-                .flatMap(javaClass -> javaClass.getConstructorCallsFromSelf().stream()
-                        .filter(call -> call.getTargetOwner().isEquivalentTo(MethodTargetResponse.class))
-                        .map(call -> javaClass.getName()))
-                .toList();
+    void should_construct_java_source_identity_payloads_only_through_the_shared_http_mapper() {
+        assertPayloadConstructionOwner(
+                JavaSourceIdentityHttpMapper.class,
+                Set.of(
+                        JavaTypeIdentityPayload.class,
+                        SourceTypeIdentityPayload.class,
+                        MethodTargetPayload.class,
+                        SourceMemberIdentityPayload.TypeMember.class,
+                        SourceMemberIdentityPayload.MethodScoped.class));
+    }
 
-        assertThat(violations).isEmpty();
+    @Test
+    void should_construct_location_payloads_only_through_the_shared_http_mapper() {
+        assertPayloadConstructionOwner(
+                SourceLocationHttpMapper.class,
+                Set.of(PositionPayload.class, TextRangePayload.class, SourceRangePayload.class));
+    }
+
+    @Test
+    void should_construct_mapper_identity_payloads_only_through_the_shared_http_mapper() {
+        assertPayloadConstructionOwner(
+                MapperIdentityHttpMapper.class,
+                Set.of(
+                        MapperStatementKeyPayload.class,
+                        MapperStatementIdentityPayload.class,
+                        MapperFragmentIdentityPayload.class));
     }
 
     @Test
@@ -173,6 +235,22 @@ class ArchitectureTest {
         } catch (ClassNotFoundException exception) {
             throw new IllegalStateException("compiled architecture class is unavailable", exception);
         }
+    }
+
+    private static void assertPayloadConstructionOwner(
+            Class<?> owner,
+            Set<Class<?>> payloadTypes) {
+        Set<String> payloadTypeNames = payloadTypes.stream()
+                .map(Class::getName)
+                .collect(Collectors.toSet());
+        List<String> violations = classes.stream()
+                .filter(javaClass -> !javaClass.isEquivalentTo(owner))
+                .flatMap(javaClass -> javaClass.getConstructorCallsFromSelf().stream()
+                        .filter(call -> payloadTypeNames.contains(call.getTargetOwner().getName()))
+                        .map(call -> javaClass.getName() + " -> " + call.getTargetOwner().getName()))
+                .toList();
+
+        assertThat(violations).isEmpty();
     }
 
     @Test
@@ -487,9 +565,7 @@ class ArchitectureTest {
     @Test
     void should_keep_outgoing_graph_response_dtos_free_of_domain_and_runtime_types() {
         noClasses()
-                .that().haveSimpleName("PositionResponse")
-                .or().haveSimpleName("SourceRangeResponse")
-                .or().haveSimpleName("GraphTraversalResponse")
+                .that().haveSimpleName("GraphTraversalResponse")
                 .or().haveSimpleName("GraphNodeResponse")
                 .or().haveSimpleName("GraphEdgeResponse")
                 .or().haveSimpleName("GraphWarningResponse")

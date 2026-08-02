@@ -11,6 +11,8 @@ import com.java.semantic.syntax.domain.EntryPointClass;
 import com.java.semantic.syntax.domain.EntryPointMethod;
 import com.java.semantic.syntax.domain.MethodTargetResolution;
 import com.java.semantic.syntax.domain.SourceTypeMetadata;
+import com.java.semantic.identity.JavaTypeIdentity;
+import com.java.semantic.identity.SourceTypeIdentity;
 
 import org.eclipse.jdt.core.dom.ASTNode;
 import org.eclipse.jdt.core.dom.AbstractTypeDeclaration;
@@ -71,9 +73,9 @@ class SourceSyntaxExtractor {
         }
 
         return Optional.of(new EntryPointClass(
-                SourceTypes.nestedName(type),
-                PackageNames.of(parsed),
-                parsed.source().relativePath(),
+                new SourceTypeIdentity(
+                        new JavaTypeIdentity(PackageNames.of(parsed), SourceTypes.nestedName(type)),
+                        parsed.source().repositoryRelativePath()),
                 JavadocReader.descriptionOf(type),
                 ApiExtractor.basePathsOf(type),
                 methods));
