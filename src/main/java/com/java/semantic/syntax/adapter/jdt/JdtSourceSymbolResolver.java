@@ -26,10 +26,7 @@ import org.eclipse.jdt.core.dom.ASTVisitor;
 import org.eclipse.jdt.core.dom.AbstractTypeDeclaration;
 import org.eclipse.jdt.core.dom.AnnotationTypeDeclaration;
 import org.eclipse.jdt.core.dom.EnumConstantDeclaration;
-import org.eclipse.jdt.core.dom.EnumDeclaration;
 import org.eclipse.jdt.core.dom.FieldDeclaration;
-import org.eclipse.jdt.core.dom.IBinding;
-import org.eclipse.jdt.core.dom.IMethodBinding;
 import org.eclipse.jdt.core.dom.ITypeBinding;
 import org.eclipse.jdt.core.dom.IVariableBinding;
 import org.eclipse.jdt.core.dom.MethodDeclaration;
@@ -42,7 +39,6 @@ import org.eclipse.jdt.core.dom.VariableDeclarationFragment;
 import org.eclipse.jdt.core.dom.VariableDeclarationStatement;
 import org.springframework.stereotype.Service;
 import org.springframework.util.CollectionUtils;
-import org.springframework.util.StringUtils;
 
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
@@ -57,7 +53,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 
-/** request-scoped JDT source-only symbol resolver */
+/** 不保留 request state 的 JDT source-only symbol resolver */
 @Service
 public final class JdtSourceSymbolResolver implements SourceSymbolResolver {
 
@@ -72,7 +68,7 @@ public final class JdtSourceSymbolResolver implements SourceSymbolResolver {
 
     private final SourceFileScanner sourceFileScanner = new SourceFileScanner();
 
-    private final JdtCanonicalMethodTargetResolver methodTargetResolver = new JdtCanonicalMethodTargetResolver();
+    private final JdtSourceDeclarationLocator declarationLocator = new JdtSourceDeclarationLocator();
 
     @Override
     public SourceSymbolResolution resolve(RepositorySnapshot snapshot, SourceSymbolResolutionQuery query) {
@@ -87,7 +83,7 @@ public final class JdtSourceSymbolResolver implements SourceSymbolResolver {
         RequestIndex index = new RequestIndex();
         JdtAstParser parser = new JdtAstParser(sourceRoots);
         JdtParseContext parseContext = parser.parseWithContext(files, index::add);
-        List<ContextRef> contexts = index.contexts(query.context(), methodTargetResolver);
+        List<JdtSourceDeclarationLocator.LocatedContext> contexts = index.contexts(query.context());
         if (contexts.size() > 1) {
             return ambiguousContext(query.context(), contexts);
         }
@@ -99,22 +95,24 @@ public final class JdtSourceSymbolResolver implements SourceSymbolResolver {
             return empty(SourceSymbolResolutionStatus.CONTEXT_NOT_FOUND, List.of(), issues);
         }
 
-        ContextRef selectedBatchContext = contexts.getFirst();
+        JdtSourceDeclarationLocator.LocatedContext selectedBatchContext = contexts.getFirst();
         ParsedSource reparsed = parser.parseSelected(selectedBatchContext.parsed().source(), parseContext);
         RequestIndex selectedIndex = new RequestIndex(index.sourceTypeNames(), index.declarationsByKey());
         selectedIndex.add(reparsed);
-        List<ContextRef> selectedContexts = selectedIndex.contexts(query.context(), methodTargetResolver);
+        List<JdtSourceDeclarationLocator.LocatedContext> selectedContexts = selectedIndex.contexts(query.context());
         if (selectedContexts.size() != 1) {
             return empty(SourceSymbolResolutionStatus.CONTEXT_NOT_FOUND, List.of(), List.of());
         }
-        ContextRef selected = selectedContexts.getFirst();
+        JdtSourceDeclarationLocator.LocatedContext selected = selectedContexts.getFirst();
         if (selected.method().isPresent()) {
             return resolveMethodContext(selected, query, selectedIndex);
         }
         return resolveTypeContext(selected, query, selectedIndex.sourceTypeNames());
     }
 
-    private SourceSymbolResolution ambiguousContext(SourceSymbolContext requested, List<ContextRef> contexts) {
+    private SourceSymbolResolution ambiguousContext(
+            SourceSymbolContext requested,
+            List<JdtSourceDeclarationLocator.LocatedContext> contexts) {
         List<SourceContextCandidate> candidates;
         if (requested.method().isPresent()) {
             candidates = contexts.stream()
@@ -135,10 +133,11 @@ public final class JdtSourceSymbolResolver implements SourceSymbolResolver {
     }
 
     private SourceSymbolResolution resolveTypeContext(
-            ContextRef context,
+            JdtSourceDeclarationLocator.LocatedContext context,
             SourceSymbolResolutionQuery query,
             Set<String> sourceTypeNames) {
-        List<DirectDeclaration> declarations = directDeclarations(context, query.symbol());
+        List<JdtSourceDeclarationLocator.LocatedDeclaration> declarations =
+                declarationLocator.directDeclarations(context.type(), query.symbol());
         Optional<SyntaxPosition> requestedPosition = query.position();
         if (requestedPosition.isPresent()) {
             declarations = declarations.stream()
@@ -171,7 +170,7 @@ public final class JdtSourceSymbolResolver implements SourceSymbolResolver {
     }
 
     private SourceSymbolResolution resolveMethodContext(
-            ContextRef context,
+            JdtSourceDeclarationLocator.LocatedContext context,
             SourceSymbolResolutionQuery query,
             RequestIndex index) {
         MethodDeclaration method = context.method().orElseThrow();
@@ -192,12 +191,13 @@ public final class JdtSourceSymbolResolver implements SourceSymbolResolver {
         Map<String, List<SimpleName>> namesByDeclaration = new LinkedHashMap<>();
         EnumMap<SourceSymbolIssueCode, Integer> unresolved = new EnumMap<>(SourceSymbolIssueCode.class);
         for (SimpleName occurrence : occurrences) {
-            Optional<BindingIdentity> identity = bindingIdentity(occurrence.resolveBinding());
+            Optional<JdtSourceDeclarationLocator.BindingIdentity> identity =
+                    declarationLocator.bindingIdentity(occurrence.resolveBinding());
             if (identity.isEmpty()) {
                 increment(unresolved, SourceSymbolIssueCode.SOURCE_BINDING_UNRESOLVED);
                 continue;
             }
-            BindingIdentity binding = identity.orElseThrow();
+            JdtSourceDeclarationLocator.BindingIdentity binding = identity.orElseThrow();
             if (binding.unsupported()) {
                 increment(unresolved, SourceSymbolIssueCode.UNSUPPORTED_SOURCE_CONSTRUCT);
                 continue;
@@ -228,48 +228,9 @@ public final class JdtSourceSymbolResolver implements SourceSymbolResolver {
         return selected(status, context, candidates, issues, occurrences.size());
     }
 
-    private List<DirectDeclaration> directDeclarations(ContextRef context, String symbol) {
-        AbstractTypeDeclaration type = context.type();
-        List<DirectDeclaration> declarations = new ArrayList<>();
-        for (Object member : type.bodyDeclarations()) {
-            if (member instanceof FieldDeclaration field) {
-                for (Object fragmentValue : field.fragments()) {
-                    VariableDeclarationFragment fragment = (VariableDeclarationFragment) fragmentValue;
-                    if (symbol.equals(fragment.getName().getIdentifier())) {
-                        declarations.add(new DirectDeclaration(fragment.getName(), field, fragment));
-                    }
-                }
-            } else if (member instanceof MethodDeclaration method
-                    && symbol.equals(method.getName().getIdentifier())) {
-                declarations.add(new DirectDeclaration(method.getName(), method, method));
-            } else if (member instanceof AbstractTypeDeclaration nested
-                    && symbol.equals(nested.getName().getIdentifier())) {
-                declarations.add(new DirectDeclaration(nested.getName(), nested, nested));
-            }
-        }
-        if (type instanceof EnumDeclaration enumeration) {
-            for (Object constantValue : enumeration.enumConstants()) {
-                EnumConstantDeclaration constant = (EnumConstantDeclaration) constantValue;
-                if (symbol.equals(constant.getName().getIdentifier())) {
-                    declarations.add(new DirectDeclaration(constant.getName(), constant, constant));
-                }
-            }
-        }
-        if (type instanceof RecordDeclaration record) {
-            for (Object componentValue : record.recordComponents()) {
-                SingleVariableDeclaration component = (SingleVariableDeclaration) componentValue;
-                if (symbol.equals(component.getName().getIdentifier())) {
-                    declarations.add(new DirectDeclaration(component.getName(), component, component));
-                }
-            }
-        }
-        declarations.sort(Comparator.comparingInt(declaration -> declaration.name().getStartPosition()));
-        return List.copyOf(declarations);
-    }
-
     private ResolutionAttempt candidateForDirectDeclaration(
-            ContextRef context,
-            DirectDeclaration declaration,
+            JdtSourceDeclarationLocator.LocatedContext context,
+            JdtSourceDeclarationLocator.LocatedDeclaration declaration,
             Set<String> sourceTypeNames) {
         ASTNode node = declaration.identityNode();
         if (node instanceof VariableDeclarationFragment fragment) {
@@ -493,8 +454,7 @@ public final class JdtSourceSymbolResolver implements SourceSymbolResolver {
             ParsedSource parsed,
             AbstractTypeDeclaration ownerType,
             MethodDeclaration method) {
-        return methodTargetResolver.resolve(
-                parsed.source(), packageName(parsed), SourceTypes.nestedName(ownerType), method);
+        return declarationLocator.methodTarget(parsed, ownerType, method);
     }
 
     private List<SimpleName> matchingNames(MethodDeclaration method, String symbol) {
@@ -512,53 +472,22 @@ public final class JdtSourceSymbolResolver implements SourceSymbolResolver {
         return List.copyOf(names);
     }
 
-    private Optional<BindingIdentity> bindingIdentity(IBinding binding) {
-        if (Objects.isNull(binding) || binding.isRecovered()) {
-            return Optional.empty();
-        }
-        if (binding instanceof ITypeBinding type && type.isTypeVariable()) {
-            return Optional.of(new BindingIdentity("unsupported", true));
-        }
-        IBinding declaration = binding;
-        if (binding instanceof IVariableBinding variable) {
-            declaration = variable.getVariableDeclaration();
-        } else if (binding instanceof IMethodBinding method) {
-            declaration = method.getMethodDeclaration();
-        } else if (binding instanceof ITypeBinding type) {
-            declaration = type.getTypeDeclaration();
-        }
-        if (Objects.isNull(declaration) || declaration.isRecovered() || !StringUtils.hasText(declaration.getKey())) {
-            return Optional.empty();
-        }
-        return Optional.of(new BindingIdentity(declaration.getKey(), false));
-    }
-
     private SourceRange range(ParsedSource parsed, ASTNode node) {
         return new SourceRange(
                 parsed.source().repositoryRelativePath(),
-                new SourceSlices(parsed.unit(), parsed.text()).range(node));
+                declarationLocator.range(parsed, node));
     }
 
     private boolean contains(ParsedSource parsed, ASTNode node, SyntaxPosition position) {
-        SyntaxRange range = new SourceSlices(parsed.unit(), parsed.text()).range(node);
-        return compare(position, range.start()) >= 0 && compare(position, range.end()) < 0;
-    }
-
-    private int compare(SyntaxPosition left, SyntaxPosition right) {
-        int line = Integer.compare(left.line(), right.line());
-        return line != 0 ? line : Integer.compare(left.character(), right.character());
+        return declarationLocator.contains(parsed, node, position);
     }
 
     private String packageName(ParsedSource parsed) {
-        return Objects.nonNull(parsed.unit().getPackage())
-                ? parsed.unit().getPackage().getName().getFullyQualifiedName()
-                : "";
+        return declarationLocator.packageName(parsed);
     }
 
     private String fullyQualifiedName(ParsedSource parsed, AbstractTypeDeclaration type) {
-        String nestedName = SourceTypes.nestedName(type);
-        String packageName = packageName(parsed);
-        return packageName.isEmpty() ? nestedName : packageName + "." + nestedName;
+        return declarationLocator.fullyQualifiedName(parsed, type);
     }
 
     private Comparator<SourceSymbolCandidate> candidateOrder() {
@@ -628,13 +557,15 @@ public final class JdtSourceSymbolResolver implements SourceSymbolResolver {
         counts.merge(code, 1, Integer::sum);
     }
 
-    private SourceSymbolResolution selectedEmpty(SourceSymbolResolutionStatus status, ContextRef context) {
+    private SourceSymbolResolution selectedEmpty(
+            SourceSymbolResolutionStatus status,
+            JdtSourceDeclarationLocator.LocatedContext context) {
         return selected(status, context, List.of(), List.of(), 0);
     }
 
     private SourceSymbolResolution selected(
             SourceSymbolResolutionStatus status,
-            ContextRef context,
+            JdtSourceDeclarationLocator.LocatedContext context,
             List<SourceSymbolCandidate> candidates,
             List<SourceSymbolIssueSummary> issues,
             int matchingSymbolCount) {
@@ -665,19 +596,6 @@ public final class JdtSourceSymbolResolver implements SourceSymbolResolver {
             }
         }
         return Integer.compare(left.size(), right.size());
-    }
-
-    private record ContextRef(
-            ParsedSource parsed,
-            AbstractTypeDeclaration type,
-            Optional<MethodDeclaration> method,
-            Optional<MethodTarget> target) {
-    }
-
-    private record DirectDeclaration(SimpleName name, ASTNode rangeNode, ASTNode identityNode) {
-    }
-
-    private record BindingIdentity(String key, boolean unsupported) {
     }
 
     private record DeclarationRef(
@@ -740,7 +658,8 @@ public final class JdtSourceSymbolResolver implements SourceSymbolResolver {
                     if (!name.isDeclaration()) {
                         return true;
                     }
-                    Optional<BindingIdentity> identity = bindingIdentity(name.resolveBinding());
+                    Optional<JdtSourceDeclarationLocator.BindingIdentity> identity =
+                            declarationLocator.bindingIdentity(name.resolveBinding());
                     if (identity.isEmpty() || identity.orElseThrow().unsupported()) {
                         return true;
                     }
@@ -748,7 +667,7 @@ public final class JdtSourceSymbolResolver implements SourceSymbolResolver {
                     if (ownerType.isEmpty()) {
                         return true;
                     }
-                    ASTNode rangeNode = declarationRangeNode(name);
+                    ASTNode rangeNode = declarationLocator.declarationRangeNode(name);
                     Optional<MethodTarget> method = enclosingMethod(parsed, ownerType.orElseThrow(), name);
                     declarationsByKey.putIfAbsent(
                             identity.orElseThrow().key(),
@@ -758,42 +677,14 @@ public final class JdtSourceSymbolResolver implements SourceSymbolResolver {
             });
         }
 
-        private List<ContextRef> contexts(
-                SourceSymbolContext requested,
-                JdtCanonicalMethodTargetResolver targetResolver) {
-            List<ContextRef> contexts = new ArrayList<>();
+        private List<JdtSourceDeclarationLocator.LocatedContext> contexts(SourceSymbolContext requested) {
+            List<JdtSourceDeclarationLocator.LocatedContext> contexts = new ArrayList<>();
             for (ParsedSource parsed : parsedSources) {
                 if (requested.sourceFile().isPresent()
                         && !requested.sourceFile().orElseThrow().equals(parsed.source().repositoryRelativePath())) {
                     continue;
                 }
-                for (AbstractTypeDeclaration type : SourceTypes.allTypesOf(parsed.unit())) {
-                    if (type instanceof AnnotationTypeDeclaration
-                            || !requested.javaType().fullyQualifiedName().equals(fullyQualifiedName(parsed, type))) {
-                        continue;
-                    }
-                    if (requested.method().isEmpty()) {
-                        contexts.add(new ContextRef(parsed, type, Optional.empty(), Optional.empty()));
-                        continue;
-                    }
-                    SourceSymbolContext.MethodContext methodContext = requested.method().orElseThrow();
-                    for (MethodDeclaration method : SourceTypes.declaredMethodsOf(type)) {
-                        if (!methodContext.name().equals(method.getName().getIdentifier())) {
-                            continue;
-                        }
-                        MethodTargetResolution resolution = targetResolver.resolve(
-                                parsed.source(), packageName(parsed), SourceTypes.nestedName(type), method);
-                        if (resolution.target().isEmpty()) {
-                            continue;
-                        }
-                        MethodTarget target = resolution.target().orElseThrow();
-                        if (methodContext.parameterTypes().isPresent()
-                                && !methodContext.parameterTypes().orElseThrow().equals(target.parameterTypes())) {
-                            continue;
-                        }
-                        contexts.add(new ContextRef(parsed, type, Optional.of(method), Optional.of(target)));
-                    }
-                }
+                contexts.addAll(declarationLocator.contexts(parsed, requested));
             }
             contexts.sort(Comparator.comparing(
                     context -> context.target().orElseGet(() -> new MethodTarget(
@@ -830,19 +721,6 @@ public final class JdtSourceSymbolResolver implements SourceSymbolResolver {
                 current = current.getParent();
             }
             return Optional.empty();
-        }
-
-        private ASTNode declarationRangeNode(SimpleName name) {
-            ASTNode parent = name.getParent();
-            if (parent instanceof VariableDeclarationFragment fragment
-                    && fragment.getParent() instanceof FieldDeclaration field) {
-                return field;
-            }
-            if (parent instanceof VariableDeclarationFragment fragment
-                    && fragment.getParent() instanceof VariableDeclarationStatement statement) {
-                return statement;
-            }
-            return parent;
         }
 
         private Set<String> sourceTypeNames() {

@@ -7,7 +7,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.ArrayList;
-import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -17,7 +16,6 @@ import java.util.function.Consumer;
 import java.util.concurrent.atomic.AtomicReference;
 
 import org.eclipse.jdt.core.JavaCore;
-import org.eclipse.jdt.core.dom.AbstractTypeDeclaration;
 import org.eclipse.jdt.core.dom.AST;
 import org.eclipse.jdt.core.dom.ASTParser;
 import org.eclipse.jdt.core.dom.CompilationUnit;
@@ -40,9 +38,9 @@ class JdtAstParser {
 
     private static final String COMPLIANCE = JavaCore.VERSION_21;
 
-    private final String[] sourcepathEntries;
-
     private final List<Path> sourceRoots;
+
+    private final JdtSourcepathPartitionResolver partitionResolver = new JdtSourcepathPartitionResolver();
 
     JdtAstParser(List<Path> sourceRoots) {
         this.sourceRoots = sourceRoots.stream()
@@ -50,9 +48,6 @@ class JdtAstParser {
                 .distinct()
                 .sorted()
                 .toList();
-        this.sourcepathEntries = this.sourceRoots.stream()
-                .map(Path::toString)
-                .toArray(String[]::new);
     }
 
     /** 批次解析，所有檔案共用同一組 binding 環境，跨檔案常量因此解析得出來 */
@@ -66,28 +61,26 @@ class JdtAstParser {
             return new JdtParseContext(sourceRoots, List.of(), Set.of(), Map.of());
         }
 
-        Set<String> collidingRootPaths = collidingRootPaths(files);
-        Map<String, List<String>> sourcepathEntriesBySourceFile = new LinkedHashMap<>();
+        JdtParseContext context = partitionResolver.resolve(sourceRoots, files);
         Map<String, List<SourceFile>> filesByRoot = new LinkedHashMap<>();
         for (SourceFile file : files) {
             filesByRoot.computeIfAbsent(file.sourceRoot().toString(), ignored -> new ArrayList<>()).add(file);
         }
         List<SourceFile> filesOutsideCollidingRoots = new ArrayList<>();
         for (Map.Entry<String, List<SourceFile>> rootFiles : filesByRoot.entrySet()) {
-            if (collidingRootPaths.contains(rootFiles.getKey())) {
-                String[] selectedEntries = sourcepathEntriesForCollidingRoot(
-                        rootFiles.getKey(), collidingRootPaths);
-                rememberPartition(rootFiles.getValue(), selectedEntries, sourcepathEntriesBySourceFile);
+            if (context.collidingRootPaths().contains(rootFiles.getKey())) {
+                String[] selectedEntries = context.sourcepathEntriesFor(rootFiles.getValue().getFirst())
+                        .toArray(String[]::new);
                 parseBatch(rootFiles.getValue(), selectedEntries, consumer);
             } else {
                 filesOutsideCollidingRoots.addAll(rootFiles.getValue());
             }
         }
-        String[] nonCollidingEntries = sourcepathEntriesExcluding(collidingRootPaths);
-        rememberPartition(filesOutsideCollidingRoots, nonCollidingEntries, sourcepathEntriesBySourceFile);
+        String[] nonCollidingEntries = filesOutsideCollidingRoots.isEmpty()
+                ? new String[0]
+                : context.sourcepathEntriesFor(filesOutsideCollidingRoots.getFirst()).toArray(String[]::new);
         parseBatch(filesOutsideCollidingRoots, nonCollidingEntries, consumer);
-        return new JdtParseContext(
-                sourceRoots, files, collidingRootPaths, sourcepathEntriesBySourceFile);
+        return context;
     }
 
     /** 使用 request batch 的原始 partition 重解析唯一選定檔案 */
@@ -100,17 +93,6 @@ class JdtAstParser {
             throw new IllegalStateException("selected source was not parsed");
         }
         return parsed;
-    }
-
-    private void rememberPartition(
-            List<SourceFile> files,
-            String[] selectedEntries,
-            Map<String, List<String>> sourcepathEntriesBySourceFile) {
-        List<String> entries = List.of(selectedEntries);
-        for (SourceFile file : files) {
-            sourcepathEntriesBySourceFile.put(
-                    file.path().toAbsolutePath().normalize().toString(), entries);
-        }
     }
 
     private void parseBatch(List<SourceFile> files, String[] sourcepathEntries, Consumer<ParsedSource> consumer) {
@@ -137,53 +119,6 @@ class JdtAstParser {
                 consumer.accept(new ParsedSource(source, unit, readSource(source.path())));
             }
         }, null);
-    }
-
-    private Set<String> collidingRootPaths(List<SourceFile> files) {
-        Map<String, Set<String>> rootPathsByFullyQualifiedName = new LinkedHashMap<>();
-        for (SourceFile file : files) {
-            for (String fullyQualifiedName : topLevelFullyQualifiedNames(file)) {
-                rootPathsByFullyQualifiedName.computeIfAbsent(fullyQualifiedName, ignored -> new HashSet<>())
-                        .add(file.sourceRoot().toString());
-            }
-        }
-        Set<String> roots = new HashSet<>();
-        for (Set<String> rootPaths : rootPathsByFullyQualifiedName.values()) {
-            if (rootPaths.size() > 1) {
-                roots.addAll(rootPaths);
-            }
-        }
-        return Set.copyOf(roots);
-    }
-
-    private Set<String> topLevelFullyQualifiedNames(SourceFile file) {
-        ASTParser parser = ASTParser.newParser(AST.getJLSLatest());
-        parser.setKind(ASTParser.K_COMPILATION_UNIT);
-        parser.setSource(readSource(file.path()).toCharArray());
-        CompilationUnit unit = (CompilationUnit) parser.createAST(null);
-        String packageName = Objects.nonNull(unit.getPackage())
-                ? unit.getPackage().getName().getFullyQualifiedName()
-                : "";
-        Set<String> fullyQualifiedNames = new HashSet<>();
-        for (Object declaration : unit.types()) {
-            if (declaration instanceof AbstractTypeDeclaration type) {
-                String simpleName = type.getName().getIdentifier();
-                fullyQualifiedNames.add(packageName.isEmpty() ? simpleName : packageName + "." + simpleName);
-            }
-        }
-        return Set.copyOf(fullyQualifiedNames);
-    }
-
-    private String[] sourcepathEntriesExcluding(Set<String> excludedRootPaths) {
-        return Arrays.stream(sourcepathEntries)
-                .filter(entry -> !excludedRootPaths.contains(entry))
-                .toArray(String[]::new);
-    }
-
-    private String[] sourcepathEntriesForCollidingRoot(String rootPath, Set<String> collidingRootPaths) {
-        return Arrays.stream(sourcepathEntries)
-                .filter(entry -> entry.equals(rootPath) || !collidingRootPaths.contains(entry))
-                .toArray(String[]::new);
     }
 
     private String readSource(Path path) {

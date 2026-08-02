@@ -36,7 +36,8 @@ class JdtWorkspaceSourceLocatorTest {
     }
 
     @Test
-    void should_reject_symlink_escape_outside_malformed_and_unknown_locations_without_path_leak() throws IOException {
+    void should_classify_proven_external_files_and_reject_invalid_provider_locations_without_path_leak()
+            throws IOException {
         Path outside = Files.createTempFile("outside-source", ".java");
         Path sourceDirectory = root.resolve("src/main/java/com/example");
         Files.createDirectories(sourceDirectory);
@@ -46,7 +47,7 @@ class JdtWorkspaceSourceLocatorTest {
         JdtWorkspaceSourceLocator locator = new JdtWorkspaceSourceLocator();
 
         assertRejected(() -> locator.sourceUri(snapshot, target("src/main/java/com/example/Escape.java")), outside.toString());
-        assertRejected(() -> locator.localSource(snapshot, outside.toUri().toString()), outside.toString());
+        assertThat(locator.localSource(snapshot, outside.toUri().toString())).isEmpty();
         assertRejected(() -> locator.localSource(snapshot, "not a uri"), "not a uri");
         assertRejected(() -> locator.localSource(snapshot, "http://example.invalid/source.java"), "example.invalid");
     }
@@ -84,8 +85,8 @@ class JdtWorkspaceSourceLocatorTest {
 
         assertThat(locator.isExternal(snapshot(), "jdt://contents/java.lang/String.class")).isTrue();
         assertThat(locator.isExternal(snapshot(), source.toUri().toString())).isFalse();
-        assertRejected(() -> locator.isExternal(snapshot(), outside.toUri().toString()), outside.toString());
-        assertRejected(() -> locator.isExternal(snapshot(), escape.toUri().toString()), outside.toString());
+        assertThat(locator.isExternal(snapshot(), outside.toUri().toString())).isTrue();
+        assertThat(locator.isExternal(snapshot(), escape.toUri().toString())).isTrue();
         assertRejected(() -> locator.isExternal(snapshot(), missing.toUri().toString()), missing.toString());
         assertRejected(() -> locator.isExternal(snapshot(), directory.toUri().toString()), directory.toString());
         assertRejected(() -> locator.isExternal(snapshot(), "not a uri"), "not a uri");

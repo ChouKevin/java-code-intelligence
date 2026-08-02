@@ -19,7 +19,7 @@ public record DiscoverConceptsResponse(
         @ApiMonitoringField(ApiMonitoringMode.SIZE) /** 明示結構化探索不搜尋來源本文的固定限制 */
         List<String> limitations,
         @ApiMonitoringField(ApiMonitoringMode.SIZE) List<ConceptCandidateResponse> candidates,
-        @ApiMonitoringField(ApiMonitoringMode.NESTED) ConceptPageResponse page,
+        @ApiMonitoringField(ApiMonitoringMode.NESTED) PageResponse page,
         @ApiMonitoringField(ApiMonitoringMode.NESTED) ConceptCoverageResponse coverage,
         @ApiMonitoringField(ApiMonitoringMode.SIZE) List<ConceptIssueSummaryResponse> issueSummaries,
         @ApiMonitoringField(ApiMonitoringMode.SIZE) /** 可直接執行的分頁後續動作 */

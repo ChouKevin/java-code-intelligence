@@ -2,44 +2,82 @@ package com.java.semantic.semantic.adapter.jdtls;
 
 import com.java.semantic.identity.MethodTarget;
 import com.java.semantic.repository.domain.RepositorySnapshot;
+import com.java.semantic.repository.domain.RepositorySourceContainment;
+import com.java.semantic.repository.domain.RepositorySourceContainmentResult;
 import com.java.semantic.semantic.domain.SemanticProtocolException;
-import java.io.IOException;
+import com.java.semantic.semantic.domain.SemanticSourceClassification;
 import java.net.URI;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Objects;
 import java.util.Optional;
 
-/** Sole adapter boundary for converting repository source identities and local JDT URIs. */
+/** 唯一負責轉換 repository source identity 與分類 JDT URI 的 adapter 邊界 */
 final class JdtWorkspaceSourceLocator {
+
+    private final RepositorySourceContainment containment = new RepositorySourceContainment();
 
     String sourceUri(RepositorySnapshot snapshot, MethodTarget target) {
         Objects.requireNonNull(snapshot, "snapshot is required");
         Objects.requireNonNull(target, "target is required");
-        Path root = realRoot(snapshot);
-        Path source = realPath(root.resolve(target.sourceFile()));
-        requireContainedRegularFile(root, source);
-        return source.toUri().toString();
+        return sourceUri(snapshot, target.sourceFile());
     }
 
-    Optional<Path> localSource(RepositorySnapshot snapshot, String uriText) {
+    String sourceUri(RepositorySnapshot snapshot, String sourceFile) {
         Objects.requireNonNull(snapshot, "snapshot is required");
-        URI uri = parse(uriText);
+        Objects.requireNonNull(sourceFile, "sourceFile is required");
+        RepositorySourceContainmentResult result = containment.classify(
+                snapshot.root(), snapshot.root().resolve(sourceFile));
+        if (result instanceof RepositorySourceContainmentResult.ContainedSource source
+                && source.sourceFile().equals(sourceFile)) {
+            return source.realPath().toUri().toString();
+        }
+        throw new SemanticProtocolException();
+    }
+
+    SemanticSourceClassification classify(RepositorySnapshot snapshot, String uriText) {
+        Objects.requireNonNull(snapshot, "snapshot is required");
+        Objects.requireNonNull(uriText, "uriText is required");
+        URI uri;
+        try {
+            uri = URI.create(uriText);
+        } catch (RuntimeException exception) {
+            if (uriText.regionMatches(true, 0, "file:", 0, "file:".length())) {
+                return SemanticSourceClassification.UnprovableUri.INSTANCE;
+            }
+            throw new SemanticProtocolException();
+        }
         if ("jdt".equalsIgnoreCase(uri.getScheme())) {
-            return Optional.empty();
+            return SemanticSourceClassification.OutsideRepository.INSTANCE;
         }
         if (!"file".equalsIgnoreCase(uri.getScheme())) {
             throw new SemanticProtocolException();
         }
-        Path root = realRoot(snapshot);
-        Path source;
+        Path candidate;
         try {
-            source = realPath(Path.of(uri));
+            candidate = Path.of(uri);
         } catch (RuntimeException exception) {
-            throw new SemanticProtocolException();
+            return SemanticSourceClassification.UnprovableUri.INSTANCE;
         }
-        requireContainedRegularFile(root, source);
-        return Optional.of(source);
+        RepositorySourceContainmentResult result = containment.classify(snapshot.root(), candidate);
+        return switch (result) {
+            case RepositorySourceContainmentResult.ContainedSource source ->
+                    new SemanticSourceClassification.LocalSource(source.sourceFile());
+            case RepositorySourceContainmentResult.OutsideRepository ignored ->
+                    SemanticSourceClassification.OutsideRepository.INSTANCE;
+            case RepositorySourceContainmentResult.UnprovableSource ignored ->
+                    SemanticSourceClassification.UnprovableUri.INSTANCE;
+        };
+    }
+
+    Optional<Path> localSource(RepositorySnapshot snapshot, String uriText) {
+        Objects.requireNonNull(snapshot, "snapshot is required");
+        SemanticSourceClassification classification = classify(snapshot, uriText);
+        return switch (classification) {
+            case SemanticSourceClassification.LocalSource local ->
+                    containedPath(snapshot, local.sourceFile());
+            case SemanticSourceClassification.OutsideRepository ignored -> Optional.empty();
+            case SemanticSourceClassification.UnprovableUri ignored -> throw new SemanticProtocolException();
+        };
     }
 
     String localSourceUri(RepositorySnapshot snapshot, String uriText) {
@@ -49,51 +87,20 @@ final class JdtWorkspaceSourceLocator {
     }
 
     boolean isExternal(RepositorySnapshot snapshot, String uriText) {
-        Objects.requireNonNull(snapshot, "snapshot is required");
-        URI uri = parse(uriText);
-        if ("jdt".equalsIgnoreCase(uri.getScheme())) {
-            return true;
-        }
-        if (!"file".equalsIgnoreCase(uri.getScheme())) {
-            throw new SemanticProtocolException();
-        }
-        Path root = realRoot(snapshot);
-        try {
-            Path source = realPath(Path.of(uri));
-            requireContainedRegularFile(root, source);
-            return false;
-        } catch (RuntimeException exception) {
-            throw new SemanticProtocolException();
-        }
+        return switch (classify(snapshot, uriText)) {
+            case SemanticSourceClassification.LocalSource ignored -> false;
+            case SemanticSourceClassification.OutsideRepository ignored -> true;
+            case SemanticSourceClassification.UnprovableUri ignored -> throw new SemanticProtocolException();
+        };
     }
 
-    private Path realRoot(RepositorySnapshot snapshot) {
-        return realPath(snapshot.root());
-    }
-
-    private URI parse(String uriText) {
-        try {
-            return URI.create(uriText);
-        } catch (RuntimeException exception) {
-            throw new SemanticProtocolException();
+    private Optional<Path> containedPath(RepositorySnapshot snapshot, String sourceFile) {
+        RepositorySourceContainmentResult result = containment.classify(
+                snapshot.root(), snapshot.root().resolve(sourceFile));
+        if (result instanceof RepositorySourceContainmentResult.ContainedSource source
+                && source.sourceFile().equals(sourceFile)) {
+            return Optional.of(source.realPath());
         }
-    }
-
-    private Path realPath(Path path) {
-        try {
-            return path.toRealPath();
-        } catch (IOException | RuntimeException exception) {
-            throw new SemanticProtocolException();
-        }
-    }
-
-    private void requireContainedRegularFile(Path root, Path source) {
-        try {
-            if (!source.startsWith(root) || !Files.isRegularFile(source)) {
-                throw new SemanticProtocolException();
-            }
-        } catch (IllegalArgumentException exception) {
-            throw new SemanticProtocolException();
-        }
+        throw new SemanticProtocolException();
     }
 }

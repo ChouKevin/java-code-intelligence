@@ -17,7 +17,7 @@ public record DiscoverTypeMembersResponse(
         @ApiMonitoringField(ApiMonitoringMode.SIZE) List<String> implementedTypes,
         @ApiMonitoringField(ApiMonitoringMode.SIZE) List<String> extendedTypes,
         @ApiMonitoringField(ApiMonitoringMode.SIZE) List<TypeMemberResponse> members,
-        @ApiMonitoringField(ApiMonitoringMode.NESTED) ConceptPageResponse page,
+        @ApiMonitoringField(ApiMonitoringMode.NESTED) PageResponse page,
         @ApiMonitoringField(ApiMonitoringMode.NESTED) ConceptCoverageResponse coverage,
         @ApiMonitoringField(ApiMonitoringMode.SIZE) List<DiscoveryFollowUpResponse> availableFollowUps) {
 

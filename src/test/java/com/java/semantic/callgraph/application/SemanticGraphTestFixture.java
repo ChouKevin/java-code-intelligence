@@ -9,6 +9,7 @@ import com.java.semantic.semantic.domain.SemanticMethod;
 import com.java.semantic.semantic.domain.SemanticPosition;
 import com.java.semantic.semantic.domain.SemanticRange;
 import com.java.semantic.semantic.domain.SemanticResolutionOrigin;
+import com.java.semantic.semantic.domain.SemanticSourceClassification;
 
 import java.util.List;
 import java.util.Optional;
@@ -45,5 +46,14 @@ final class SemanticGraphTestFixture {
         SemanticRange range = new SemanticRange(new SemanticPosition(line, 0), new SemanticPosition(line, 4));
         return new SemanticCall(Optional.of(target), target.methodName() + "()", List.of(range), false,
                 SemanticResolutionOrigin.CALL_HIERARCHY);
+    }
+
+    static SemanticSourceClassification sourceClassification(SemanticMethod method) {
+        String marker = "file:///fixture/";
+        String uri = method.location().uri();
+        if (!uri.startsWith(marker)) {
+            return SemanticSourceClassification.UnprovableUri.INSTANCE;
+        }
+        return new SemanticSourceClassification.LocalSource(uri.substring(marker.length()));
     }
 }

@@ -68,4 +68,9 @@ public final class SourceLocationHttpMapper {
         TextRangePayload source = Objects.requireNonNull(range, "range is required");
         return new SyntaxRange(toSyntaxPosition(source.start()), toSyntaxPosition(source.end()));
     }
+
+    public SourceRange toSourceRange(SourceRangePayload range) {
+        SourceRangePayload source = Objects.requireNonNull(range, "range is required");
+        return new SourceRange(source.sourceFile(), toSyntaxRange(source.range()));
+    }
 }

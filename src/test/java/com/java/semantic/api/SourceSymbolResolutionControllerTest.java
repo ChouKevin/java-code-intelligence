@@ -109,6 +109,10 @@ class SourceSymbolResolutionControllerTest {
 
         String contextBody = mockMvc.perform(request(validRequest()))
                 .andExpect(status().isOk())
+                .andExpect(jsonPath("$.contextCandidateLimits.limit").value(100))
+                .andExpect(jsonPath("$.contextCandidateLimits.returnedCount").value(2))
+                .andExpect(jsonPath("$.contextCandidateLimits.totalCount").value(2))
+                .andExpect(jsonPath("$.contextCandidateLimits.truncated").value(false))
                 .andExpect(jsonPath("$.contextCandidates[0].kind").value("SOURCE_TYPE"))
                 .andExpect(jsonPath("$.contextCandidates[0].sourceFile").value(SOURCE_FILE))
                 .andExpect(jsonPath("$.contextCandidates[1].kind").value("METHOD"))
@@ -118,6 +122,9 @@ class SourceSymbolResolutionControllerTest {
                         .value("com.acme.Order"))
                 .andReturn().getResponse().getContentAsString();
         JsonNode contexts = OBJECT_MAPPER.readTree(contextBody).path("contextCandidates");
+        assertThat(OBJECT_MAPPER.readTree(contextBody).path("contextCandidateLimits").properties())
+                .extracting(Map.Entry::getKey)
+                .containsExactlyInAnyOrder("limit", "returnedCount", "totalCount", "truncated");
         assertThat(contexts.get(0).properties()).extracting(Map.Entry::getKey)
                 .containsExactlyInAnyOrder("kind", "sourceFile", "retry");
         assertThat(contexts.get(1).properties()).extracting(Map.Entry::getKey)

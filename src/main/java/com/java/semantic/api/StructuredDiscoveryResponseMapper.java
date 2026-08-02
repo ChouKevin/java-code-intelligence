@@ -5,7 +5,7 @@ import com.java.semantic.api.dto.ConceptCandidateDetailsResponse;
 import com.java.semantic.api.dto.ConceptCoverageResponse;
 import com.java.semantic.api.dto.ConceptEvidenceResponse;
 import com.java.semantic.api.dto.ConceptIssueSummaryResponse;
-import com.java.semantic.api.dto.ConceptPageResponse;
+import com.java.semantic.api.dto.PageResponse;
 import com.java.semantic.api.dto.DiscoverConceptsResponse;
 import com.java.semantic.api.dto.DiscoverTypeMembersResponse;
 import com.java.semantic.api.dto.DiscoveryFollowUpResponse;
@@ -18,6 +18,8 @@ import com.java.semantic.api.dto.DiscoveryFollowUpResponse.DiscoverTypeMembersRe
 import com.java.semantic.api.dto.DiscoveryFollowUpResponse.GetMethodSourceRequestResponse;
 import com.java.semantic.api.dto.DiscoveryFollowUpResponse.GetMapperStatementRequestResponse;
 import com.java.semantic.api.dto.DiscoveryFollowUpResponse.GetTypeMembersRequestResponse;
+import com.java.semantic.api.dto.DiscoveryFollowUpResponse.FindInternalReferencesRequestResponse;
+import com.java.semantic.api.dto.DiscoveryFollowUpResponse.GetJavaSourceSegmentRequestResponse;
 import com.java.semantic.api.dto.DiscoveryFollowUpResponse.RequestResponse;
 import com.java.semantic.api.dto.DiscoveryFollowUpResponse.ResolveSourceSymbolRequestResponse;
 import com.java.semantic.api.dto.DiscoveryFollowUpResponse.ResolveConceptRequestResponse;
@@ -50,6 +52,8 @@ import com.java.semantic.syntax.application.DiscoveryFollowUp.DiscoverMethodImpl
 import com.java.semantic.syntax.application.DiscoveryFollowUp.GetMethodSourceRequest;
 import com.java.semantic.syntax.application.DiscoveryFollowUp.GetMapperStatementRequest;
 import com.java.semantic.syntax.application.DiscoveryFollowUp.GetTypeMembersRequest;
+import com.java.semantic.syntax.application.DiscoveryFollowUp.FindInternalReferencesRequest;
+import com.java.semantic.syntax.application.DiscoveryFollowUp.GetJavaSourceSegmentRequest;
 import com.java.semantic.syntax.application.DiscoveryFollowUp.TypeMembersRequest;
 import com.java.semantic.syntax.application.DiscoveryFollowUp.ResolveSourceSymbolRequest;
 import com.java.semantic.syntax.application.DiscoveryFollowUp.ResolveConceptRequest;
@@ -90,12 +94,14 @@ public final class StructuredDiscoveryResponseMapper {
     private final ConceptIdentityHttpMapper conceptIdentityHttpMapper;
     private final MapperIdentityHttpMapper mapperIdentityHttpMapper;
     private final SourceLocationHttpMapper sourceLocationMapper;
+    private final ExactSourceDeclarationTargetHttpMapper exactTargetMapper;
 
     public StructuredDiscoveryResponseMapper(
             DiscoveryFollowUpFactory followUpFactory,
             ConceptIdentityHttpMapper conceptIdentityHttpMapper,
             MapperIdentityHttpMapper mapperIdentityHttpMapper,
-            SourceLocationHttpMapper sourceLocationMapper) {
+            SourceLocationHttpMapper sourceLocationMapper,
+            ExactSourceDeclarationTargetHttpMapper exactTargetMapper) {
         this.followUpFactory = Objects.requireNonNull(
                 followUpFactory, "followUpFactory is required");
         this.conceptIdentityHttpMapper = Objects.requireNonNull(
@@ -103,6 +109,7 @@ public final class StructuredDiscoveryResponseMapper {
         this.mapperIdentityHttpMapper = Objects.requireNonNull(
                 mapperIdentityHttpMapper, "mapperIdentityHttpMapper is required");
         this.sourceLocationMapper = Objects.requireNonNull(sourceLocationMapper, "sourceLocationMapper is required");
+        this.exactTargetMapper = Objects.requireNonNull(exactTargetMapper, "exactTargetMapper is required");
     }
 
     /** 將概念搜尋結果映射為固定版本 HTTP 回應 */
@@ -269,8 +276,8 @@ public final class StructuredDiscoveryResponseMapper {
         };
     }
 
-    private ConceptPageResponse page(ConceptPage page) {
-        return new ConceptPageResponse(
+    private PageResponse page(ConceptPage page) {
+        return new PageResponse(
                 page.offset(),
                 page.limit(),
                 page.returnedCount(),
@@ -337,7 +344,7 @@ public final class StructuredDiscoveryResponseMapper {
                 request);
     }
 
-    DiscoveryFollowUpResponse followUp(DiscoveryFollowUp followUp) {
+    public DiscoveryFollowUpResponse followUp(DiscoveryFollowUp followUp) {
         return new DiscoveryFollowUpResponse(
                 followUp.operation().name(),
                 new ApiResponse(
@@ -397,6 +404,17 @@ public final class StructuredDiscoveryResponseMapper {
                                     method.name(), method.parameterTypes()))),
                     sourceSymbol.symbol(),
                     sourceSymbol.position().map(sourceLocationMapper::toPayload));
+            case FindInternalReferencesRequest references -> new FindInternalReferencesRequestResponse(
+                    references.repoId(),
+                    references.expectedRevision(),
+                    exactTargetMapper.toPayload(references.target()),
+                    references.offset(),
+                    references.limit());
+            case GetJavaSourceSegmentRequest segment -> new GetJavaSourceSegmentRequestResponse(
+                    segment.repoId(),
+                    segment.expectedRevision(),
+                    sourceLocationMapper.toSourceRange(segment.sourceRange()),
+                    segment.contextLines());
         };
     }
 

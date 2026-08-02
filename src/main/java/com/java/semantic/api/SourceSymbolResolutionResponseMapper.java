@@ -3,7 +3,7 @@ package com.java.semantic.api;
 import com.java.semantic.api.dto.DeclaredTypeResponse;
 import com.java.semantic.api.dto.DiscoveryFollowUpResponse;
 import com.java.semantic.api.dto.MethodSourceSymbolCandidateResponse;
-import com.java.semantic.api.dto.SourceContextCandidateLimitsResponse;
+import com.java.semantic.api.dto.BoundedResultResponse;
 import com.java.semantic.api.dto.SourceContextCandidateResponse;
 import com.java.semantic.api.dto.SourceMethodContextCandidateResponse;
 import com.java.semantic.api.dto.SourceSymbolCandidateResponse;
@@ -51,8 +51,8 @@ public final class SourceSymbolResolutionResponseMapper {
                 resolution.analyzedRevision().value(),
                 resolution.status().name(),
                 resolution.contextCandidates().stream().map(this::contextCandidate).toList(),
-                new SourceContextCandidateLimitsResponse(
-                        resolution.contextCandidateLimits().candidateLimit(),
+                new BoundedResultResponse(
+                        resolution.contextCandidateLimits().limit(),
                         resolution.contextCandidateLimits().returnedCount(),
                         resolution.contextCandidateLimits().totalCount(),
                         resolution.contextCandidateLimits().truncated()),

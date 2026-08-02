@@ -12,6 +12,7 @@ import com.java.semantic.semantic.domain.SemanticLocation;
 import com.java.semantic.semantic.domain.SemanticMethod;
 import com.java.semantic.semantic.domain.SemanticPosition;
 import com.java.semantic.semantic.domain.SemanticRange;
+import com.java.semantic.semantic.domain.SemanticSourceClassification;
 import com.java.semantic.syntax.domain.SourceTypeMetadata;
 import com.java.semantic.syntax.domain.SourceMethodMetadata;
 import com.java.semantic.syntax.domain.MethodTargetResolution;
@@ -45,7 +46,9 @@ class CanonicalTargetProjectionTest {
         SyntaxRange exactTargetRange = new SyntaxRange(new SyntaxPosition(4, 1), new SyntaxPosition(4, 4));
 
         Optional<MethodTarget> projected = projection.project(
-                SNAPSHOT, index(type(exactTarget, exactTargetRange), type(rangeTarget)), method);
+                new SemanticSourceClassification.LocalSource(sourceFile),
+                index(type(exactTarget, exactTargetRange), type(rangeTarget)),
+                method);
 
         assertThat(projected).contains(exactTarget);
     }
@@ -57,7 +60,8 @@ class CanonicalTargetProjectionTest {
         SemanticMethod method = semanticMethod(
                 "file:///fixture/src/main/java/com/example/Port.java", "Port", "handle", List.of("Request"));
 
-        Optional<MethodTarget> projected = projection.project(SNAPSHOT, index(type(target)), method);
+        Optional<MethodTarget> projected = projection.project(
+                new SemanticSourceClassification.LocalSource(target.sourceFile()), index(type(target)), method);
 
         assertThat(projected).contains(target);
     }
@@ -68,7 +72,8 @@ class CanonicalTargetProjectionTest {
                 "file:///fixture/src/main/java/com/example/Missing.java", "Missing", "handle", List.of("Request"));
         MethodTarget indexedTarget = target("src/main/java/com/example/Port.java", "Port", "handle", List.of("Request"));
 
-        Optional<MethodTarget> projected = projection.project(SNAPSHOT, index(type(indexedTarget)), method);
+        Optional<MethodTarget> projected = projection.project(
+                SemanticSourceClassification.UnprovableUri.INSTANCE, index(type(indexedTarget)), method);
 
         assertThat(projected).isEmpty();
     }

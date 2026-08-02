@@ -12,10 +12,15 @@ import com.java.semantic.callgraph.application.SemanticCallGraphBuilder;
 import com.java.semantic.callgraph.application.SpringImplementationSelector;
 import com.java.semantic.callgraph.domain.ReadPolicy;
 import com.java.semantic.repository.application.RepositoryApplicationService;
+import com.java.semantic.repository.domain.RepositorySourceContainment;
 import com.java.semantic.semantic.application.MethodImplementationDiscoveryApplicationService;
+import com.java.semantic.semantic.application.InternalReferenceAnalysisCache;
+import com.java.semantic.semantic.application.InternalSourceReferenceApplicationService;
 import com.java.semantic.semantic.application.SemanticAnalysisApplicationService;
+import com.java.semantic.semantic.adapter.cache.CaffeineInternalReferenceAnalysisCache;
 import com.java.semantic.semantic.domain.JavaSemanticService;
 import com.java.semantic.syntax.domain.CanonicalMethodDeclarationResolver;
+import com.java.semantic.syntax.domain.ExactSourceDeclarationResolver;
 import com.java.semantic.syntax.domain.SyntaxExtractionService;
 import com.java.semantic.syntax.application.concept.ConceptDiscoveryApplicationService;
 import com.java.semantic.syntax.application.concept.ConceptSearchDocumentProjector;
@@ -31,6 +36,7 @@ import com.java.semantic.syntax.application.TypeMemberDiscoveryApplicationServic
 import com.java.semantic.syntax.application.concept.TypeUsageConceptProvider;
 import com.java.semantic.syntax.application.SourceSymbolResolutionApplicationService;
 import com.java.semantic.syntax.application.SourceSymbolResolver;
+import com.java.semantic.syntax.application.JavaSourceSegmentApplicationService;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
@@ -43,9 +49,47 @@ import org.springframework.context.annotation.Configuration;
         ReadPolicyProperties.class,
         ImplementationDiscoveryProperties.class,
         ExactContentProperties.class,
-        SourceSymbolResolutionProperties.class
+        SourceSymbolResolutionProperties.class,
+        InternalReferenceCacheProperties.class
 })
 public class SemanticAnalysisConfiguration {
+
+    @Bean
+    public InternalReferenceAnalysisCache internalReferenceAnalysisCache(
+            InternalReferenceCacheProperties properties) {
+        return new CaffeineInternalReferenceAnalysisCache(properties);
+    }
+
+    @Bean
+    @ConditionalOnBean({
+            RepositoryApplicationService.class,
+            ExactSourceDeclarationResolver.class,
+            JavaSemanticService.class,
+            SyntaxExtractionService.class,
+            InternalReferenceAnalysisCache.class
+    })
+    public InternalSourceReferenceApplicationService internalSourceReferenceApplicationService(
+            RepositoryApplicationService repositoryApplicationService,
+            ExactSourceDeclarationResolver declarationResolver,
+            JavaSemanticService semanticService,
+            SyntaxExtractionService syntaxExtractionService,
+            InternalReferenceAnalysisCache cache) {
+        return new InternalSourceReferenceApplicationService(
+                repositoryApplicationService,
+                declarationResolver,
+                semanticService,
+                syntaxExtractionService,
+                cache);
+    }
+
+    @Bean
+    @ConditionalOnBean(RepositoryApplicationService.class)
+    public JavaSourceSegmentApplicationService javaSourceSegmentApplicationService(
+            RepositoryApplicationService repositoryApplicationService) {
+        return new JavaSourceSegmentApplicationService(
+                repositoryApplicationService,
+                new RepositorySourceContainment());
+    }
 
     @Bean
     @ConditionalOnBean({RepositoryApplicationService.class, SyntaxExtractionService.class})

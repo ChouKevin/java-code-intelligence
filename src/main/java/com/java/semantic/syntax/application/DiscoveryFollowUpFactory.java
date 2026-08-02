@@ -25,11 +25,14 @@ import com.java.semantic.syntax.application.DiscoveryFollowUp.DiscoverMethodImpl
 import com.java.semantic.syntax.application.DiscoveryFollowUp.GetMethodSourceRequest;
 import com.java.semantic.syntax.application.DiscoveryFollowUp.GetMapperStatementRequest;
 import com.java.semantic.syntax.application.DiscoveryFollowUp.GetTypeMembersRequest;
+import com.java.semantic.syntax.application.DiscoveryFollowUp.FindInternalReferencesRequest;
+import com.java.semantic.syntax.application.DiscoveryFollowUp.GetJavaSourceSegmentRequest;
 import com.java.semantic.syntax.application.DiscoveryFollowUp.Operation;
 import com.java.semantic.syntax.application.DiscoveryFollowUp.ResolveSourceSymbolRequest;
 import com.java.semantic.syntax.application.DiscoveryFollowUp.ResolveConceptRequest;
 import com.java.semantic.syntax.application.DiscoveryFollowUp.TypeMembersRequest;
 import com.java.semantic.syntax.domain.SyntaxPosition;
+import com.java.semantic.syntax.domain.ExactSourceDeclarationTarget;
 
 import java.util.Comparator;
 import java.util.List;
@@ -89,6 +92,36 @@ public final class DiscoveryFollowUpFactory {
         String expectedRevision = revision(revision);
         MethodTarget methodTarget = Objects.requireNonNull(target, "target is required");
         return executableMethodAnalysis(repoId, expectedRevision, methodTarget);
+    }
+
+    /** 建立內部 reference 的 exact source segment 續讀 */
+    public DiscoveryFollowUp forJavaSourceSegment(
+            RepositoryId repositoryId,
+            RepositoryRevision revision,
+            SourceRange sourceRange,
+            int contextLines) {
+        GetJavaSourceSegmentRequest request = new GetJavaSourceSegmentRequest(
+                repositoryId(repositoryId),
+                revision(revision),
+                Objects.requireNonNull(sourceRange, "sourceRange is required"),
+                contextLines);
+        return followUp(Operation.GET_JAVA_SOURCE_SEGMENT, request);
+    }
+
+    /** 建立保留 exact target 與 limit 的內部 reference 下一頁 */
+    public DiscoveryFollowUp nextInternalReferencePage(
+            RepositoryId repositoryId,
+            RepositoryRevision revision,
+            ExactSourceDeclarationTarget target,
+            int nextOffset,
+            int limit) {
+        FindInternalReferencesRequest request = new FindInternalReferencesRequest(
+                repositoryId(repositoryId),
+                revision(revision),
+                Objects.requireNonNull(target, "target is required"),
+                nextOffset,
+                limit);
+        return followUp(Operation.FIND_INTERNAL_REFERENCES, request);
     }
 
     /** source type identity 導向完整 type-member 與 typed concept resolve */

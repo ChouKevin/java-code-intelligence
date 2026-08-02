@@ -291,7 +291,8 @@ public final class IncomingSemanticCallGraphBuilder {
         Map<MethodTarget, IncomingCaller> callers = new LinkedHashMap<>();
         int rejectedCount = 0;
         for (SemanticIncomingCall call : calls) {
-            Optional<MethodTarget> target = canonicalTargetProjection.project(snapshot, index, call.caller());
+            Optional<MethodTarget> target = canonicalTargetProjection.project(
+                    semanticService.classifySource(snapshot, call.caller()), index, call.caller());
             if (target.isPresent()) {
                 MethodTarget callerTarget = target.orElseThrow();
                 callers.merge(

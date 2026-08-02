@@ -2,13 +2,13 @@ package com.java.semantic.semantic.application;
 
 /** 固定 revision 單次探索的候選數量界限 */
 public record MethodImplementationLimits(
-        int candidateLimit,
+        int limit,
         int returnedCount,
         int totalCount,
         boolean truncated) {
 
     public MethodImplementationLimits {
-        if (candidateLimit < 0) {
+        if (limit < 0) {
             throw new IllegalArgumentException("candidateLimit must not be negative");
         }
         if (returnedCount < 0) {
@@ -17,7 +17,7 @@ public record MethodImplementationLimits(
         if (totalCount < 0) {
             throw new IllegalArgumentException("totalCount must not be negative");
         }
-        if (returnedCount > candidateLimit) {
+        if (returnedCount > limit) {
             throw new IllegalArgumentException("returnedCount must not exceed candidateLimit");
         }
         if (returnedCount > totalCount) {

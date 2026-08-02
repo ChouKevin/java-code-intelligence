@@ -17,6 +17,9 @@ import com.java.semantic.semantic.domain.SemanticMethod;
 import com.java.semantic.semantic.domain.SemanticPosition;
 import com.java.semantic.semantic.domain.SemanticRange;
 import com.java.semantic.semantic.domain.SemanticResolutionOrigin;
+import com.java.semantic.semantic.domain.SemanticSourceClassification;
+import com.java.semantic.semantic.domain.SemanticReferenceAnchor;
+import com.java.semantic.semantic.domain.SemanticReferenceLocation;
 import com.java.semantic.syntax.domain.SourceTypeMetadata;
 import com.java.semantic.syntax.domain.SourceMethodMetadata;
 import com.java.semantic.syntax.domain.SourceTypeKind;
@@ -38,6 +41,7 @@ import java.util.Optional;
 
 import static com.java.semantic.callgraph.application.SemanticGraphTestFixture.outgoingMethod;
 import static com.java.semantic.callgraph.application.SemanticGraphTestFixture.resolvedCall;
+import static com.java.semantic.callgraph.application.SemanticGraphTestFixture.sourceClassification;
 import static com.java.semantic.callgraph.application.SemanticGraphTestFixture.target;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -521,6 +525,17 @@ class DirectCallRelationshipResolverTest {
     }
 
     private static final class FakeSemanticService implements JavaSemanticService {
+
+        @Override
+        public SemanticSourceClassification classifySource(RepositorySnapshot snapshot, SemanticMethod method) {
+            return sourceClassification(method);
+        }
+
+        @Override
+        public List<SemanticReferenceLocation> findReferences(
+                RepositorySnapshot snapshot, SemanticReferenceAnchor anchor) {
+            return List.of();
+        }
 
         private final Map<SemanticMethod, List<SemanticCall>> outgoing = new HashMap<>();
         private final List<SemanticMethod> failingImplementations = new ArrayList<>();

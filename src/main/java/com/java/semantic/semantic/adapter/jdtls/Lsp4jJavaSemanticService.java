@@ -21,7 +21,10 @@ import com.java.semantic.semantic.domain.SemanticMethod;
 import com.java.semantic.semantic.domain.SemanticPosition;
 import com.java.semantic.semantic.domain.SemanticProtocolException;
 import com.java.semantic.semantic.domain.SemanticRange;
+import com.java.semantic.semantic.domain.SemanticReferenceAnchor;
+import com.java.semantic.semantic.domain.SemanticReferenceLocation;
 import com.java.semantic.semantic.domain.SemanticResolutionOrigin;
+import com.java.semantic.semantic.domain.SemanticSourceClassification;
 import org.eclipse.lsp4j.CallHierarchyItem;
 import org.eclipse.lsp4j.CallHierarchyIncomingCall;
 import org.eclipse.lsp4j.CallHierarchyIncomingCallsParams;
@@ -38,6 +41,8 @@ import org.eclipse.lsp4j.Location;
 import org.eclipse.lsp4j.LocationLink;
 import org.eclipse.lsp4j.Position;
 import org.eclipse.lsp4j.Range;
+import org.eclipse.lsp4j.ReferenceContext;
+import org.eclipse.lsp4j.ReferenceParams;
 import org.eclipse.lsp4j.SymbolInformation;
 import org.eclipse.lsp4j.SymbolKind;
 import org.eclipse.lsp4j.TextDocumentIdentifier;
@@ -115,6 +120,52 @@ public class Lsp4jJavaSemanticService implements JavaSemanticService {
     public Lsp4jJavaSemanticService(JdtWorkspaceManager workspaceManager) {
         this.workspaceManager = Objects.requireNonNull(workspaceManager, "workspaceManager is required");
         this.sourceLocator = new JdtWorkspaceSourceLocator();
+    }
+
+    @Override
+    public SemanticSourceClassification classifySource(RepositorySnapshot snapshot, SemanticMethod method) {
+        Assert.notNull(snapshot, "snapshot is required");
+        Assert.notNull(method, "method is required");
+        return sourceLocator.classify(snapshot, method.location().uri());
+    }
+
+    @Override
+    public List<SemanticReferenceLocation> findReferences(
+            RepositorySnapshot snapshot, SemanticReferenceAnchor anchor) {
+        return JdtLsSemanticExceptionNormalizer.normalize(() -> findReferencesInternal(snapshot, anchor));
+    }
+
+    private List<SemanticReferenceLocation> findReferencesInternal(
+            RepositorySnapshot snapshot, SemanticReferenceAnchor anchor) {
+        Assert.notNull(snapshot, "snapshot is required");
+        Assert.notNull(anchor, "anchor is required");
+        String uri = sourceLocator.sourceUri(snapshot, anchor.sourceFile());
+        JdtWorkspaceSession session = workspaceManager.getOrStart(snapshot);
+        return session.withDocumentUri(uri, () -> withOpenedDocument(session, snapshot, uri, () -> {
+            ReferenceParams params = new ReferenceParams(
+                    new TextDocumentIdentifier(uri),
+                    toPosition(anchor.identifierPosition()),
+                    new ReferenceContext(false));
+            List<? extends Location> locations = session.call(
+                    "textDocument/references",
+                    server -> server.getTextDocumentService().references(params));
+            return nullSafe(locations).stream()
+                    .map(location -> toSemanticReferenceLocation(snapshot, location))
+                    .toList();
+        }));
+    }
+
+    private SemanticReferenceLocation toSemanticReferenceLocation(
+            RepositorySnapshot snapshot, Location location) {
+        Objects.requireNonNull(location, "location is required");
+        return switch (sourceLocator.classify(snapshot, location.getUri())) {
+            case SemanticSourceClassification.LocalSource local ->
+                    new SemanticReferenceLocation.LocalSource(local.sourceFile(), toRange(location.getRange()));
+            case SemanticSourceClassification.OutsideRepository ignored ->
+                    SemanticReferenceLocation.OutsideRepository.INSTANCE;
+            case SemanticSourceClassification.UnprovableUri ignored ->
+                    SemanticReferenceLocation.UnprovableUri.INSTANCE;
+        };
     }
 
     @Override

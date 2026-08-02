@@ -402,6 +402,70 @@ paths:
           $ref: '#/components/responses/Conflict'
         '500':
           $ref: '#/components/responses/MutationFailed'
+  /v1/discovery/internal-references:
+    post:
+      operationId: findInternalReferences
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InternalSourceReferenceRequest'
+      responses:
+        '200':
+          description: Revision-pinned repository-local Java references grouped by exact context
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InternalSourceReferenceResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/AuthDisabled'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '502':
+          $ref: '#/components/responses/BadGateway'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+        '504':
+          $ref: '#/components/responses/GatewayTimeout'
+  /v1/discovery/java-source-segment:
+    post:
+      operationId: getJavaSourceSegment
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/JavaSourceSegmentRequest'
+      responses:
+        '200':
+          description: Repository-contained Java source segment limited to 64 KiB UTF-8
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JavaSourceSegmentResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/AuthDisabled'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '413':
+          description: Exact requested source range exceeds 64 KiB UTF-8
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
   /v1/discovery/method-source:
     post:
       operationId: getMethodSource
@@ -872,7 +936,7 @@ components:
           items:
             $ref: '#/components/schemas/SourceContextCandidateResponse'
         contextCandidateLimits:
-          $ref: '#/components/schemas/SourceContextCandidateLimitsResponse'
+          $ref: '#/components/schemas/BoundedResultResponse'
         candidates:
           type: array
           items:
@@ -892,19 +956,18 @@ components:
         - AMBIGUOUS_OCCURRENCE
         - UNRESOLVED_BINDING
         - POSITION_MISMATCH
-    SourceContextCandidateLimitsResponse:
+    BoundedResultResponse:
       type: object
       additionalProperties: false
       required:
-        - candidateLimit
+        - limit
         - returnedCount
         - totalCount
         - truncated
       properties:
-        candidateLimit:
+        limit:
           type: integer
-          minimum: 2
-          default: 100
+          minimum: 1
         returnedCount:
           type: integer
           minimum: 0
@@ -1498,7 +1561,7 @@ components:
           items:
             $ref: '#/components/schemas/EventListenerCandidateResponse'
         page:
-          $ref: '#/components/schemas/CandidatePageResponse'
+          $ref: '#/components/schemas/PageResponse'
         observationSummaries:
           type: array
           items:
@@ -1544,7 +1607,7 @@ components:
           items:
             $ref: '#/components/schemas/MethodImplementationCandidateResponse'
         limits:
-          $ref: '#/components/schemas/MethodImplementationLimitsResponse'
+          $ref: '#/components/schemas/BoundedResultResponse'
         resolution:
           $ref: '#/components/schemas/MethodImplementationResolutionResponse'
     MethodImplementationCandidateResponse:
@@ -1568,26 +1631,6 @@ components:
           type: array
           items:
             type: string
-    MethodImplementationLimitsResponse:
-      type: object
-      additionalProperties: false
-      required:
-        - candidateLimit
-        - returnedCount
-        - totalCount
-        - truncated
-      properties:
-        candidateLimit:
-          type: integer
-          minimum: 1
-        returnedCount:
-          type: integer
-          minimum: 0
-        totalCount:
-          type: integer
-          minimum: 0
-        truncated:
-          type: boolean
     MethodImplementationResolutionResponse:
       type: object
       additionalProperties: false
@@ -1751,7 +1794,7 @@ components:
           items:
             $ref: '#/components/schemas/ConceptCandidateResponse'
         page:
-          $ref: '#/components/schemas/ConceptPageResponse'
+          $ref: '#/components/schemas/PageResponse'
         coverage:
           $ref: '#/components/schemas/ConceptCoverageResponse'
         issueSummaries:
@@ -2328,7 +2371,258 @@ components:
           type: array
           items: {$ref: '#/components/schemas/FieldTypeReferenceResponse'}
         sourceDefined: {type: boolean}
-    ConceptPageResponse:
+    InternalSourceReferenceRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - repoId
+        - expectedRevision
+        - target
+      properties:
+        repoId:
+          type: string
+          minLength: 1
+          pattern: '^[a-z0-9][a-z0-9._-]{0,63}$'
+        expectedRevision:
+          type: string
+          pattern: '^[0-9a-f]{40}$|^FIXTURE$'
+        target:
+          $ref: '#/components/schemas/InternalSourceReferenceTargetPayload'
+        offset:
+          type: integer
+          minimum: 0
+          default: 0
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 20
+    InternalSourceReferenceTargetPayload:
+      oneOf:
+        - $ref: '#/components/schemas/InternalSourceReferenceTypeTargetPayload'
+        - $ref: '#/components/schemas/InternalSourceReferenceMethodTargetPayload'
+        - $ref: '#/components/schemas/InternalSourceReferenceMemberTargetPayload'
+      discriminator:
+        propertyName: kind
+        mapping:
+          TYPE: '#/components/schemas/InternalSourceReferenceTypeTargetPayload'
+          METHOD: '#/components/schemas/InternalSourceReferenceMethodTargetPayload'
+          MEMBER: '#/components/schemas/InternalSourceReferenceMemberTargetPayload'
+    InternalSourceReferenceTypeTargetPayload:
+      type: object
+      additionalProperties: false
+      required: [kind, identity]
+      properties:
+        kind:
+          type: string
+          enum: [TYPE]
+        identity:
+          $ref: '#/components/schemas/SourceTypeIdentityPayload'
+    InternalSourceReferenceMethodTargetPayload:
+      type: object
+      additionalProperties: false
+      required: [kind, identity]
+      properties:
+        kind:
+          type: string
+          enum: [METHOD]
+        identity:
+          $ref: '#/components/schemas/MethodTargetPayload'
+    InternalSourceReferenceMemberTargetPayload:
+      type: object
+      additionalProperties: false
+      required: [kind, identity]
+      properties:
+        kind:
+          type: string
+          enum: [MEMBER]
+        identity:
+          $ref: '#/components/schemas/SourceMemberIdentityPayload'
+    InternalSourceReferenceResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - repoId
+        - analyzedRevision
+        - status
+        - targetDeclaration
+        - totalReferenceCount
+        - referenceGroups
+        - page
+        - issueSummaries
+        - availableFollowUps
+      properties:
+        repoId:
+          type: string
+        analyzedRevision:
+          type: string
+          pattern: '^[0-9a-f]{40}$|^FIXTURE$'
+        status:
+          type: string
+          enum: [COMPLETE, PARTIAL]
+        targetDeclaration:
+          $ref: '#/components/schemas/InternalSourceReferenceTargetDeclarationResponse'
+        totalReferenceCount:
+          type: integer
+          minimum: 0
+        referenceGroups:
+          type: array
+          items:
+            $ref: '#/components/schemas/InternalSourceReferenceGroupResponse'
+        page:
+          $ref: '#/components/schemas/PageResponse'
+        issueSummaries:
+          type: array
+          items:
+            $ref: '#/components/schemas/InternalSourceReferenceIssueSummaryResponse'
+        availableFollowUps:
+          type: array
+          items:
+            $ref: '#/components/schemas/DiscoveryFollowUpResponse'
+    InternalSourceReferenceTargetDeclarationResponse:
+      type: object
+      additionalProperties: false
+      required: [target, declarationRange, availableFollowUps]
+      properties:
+        target:
+          $ref: '#/components/schemas/InternalSourceReferenceTargetPayload'
+        declarationRange:
+          $ref: '#/components/schemas/TextRangePayload'
+        availableFollowUps:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/DiscoveryFollowUpResponse'
+    InternalSourceReferenceContextPayload:
+      oneOf:
+        - $ref: '#/components/schemas/InternalSourceReferenceTypeContextPayload'
+        - $ref: '#/components/schemas/InternalSourceReferenceMethodContextPayload'
+      discriminator:
+        propertyName: kind
+        mapping:
+          TYPE: '#/components/schemas/InternalSourceReferenceTypeContextPayload'
+          METHOD: '#/components/schemas/InternalSourceReferenceMethodContextPayload'
+    InternalSourceReferenceTypeContextPayload:
+      type: object
+      additionalProperties: false
+      required: [kind, sourceType]
+      properties:
+        kind:
+          type: string
+          enum: [TYPE]
+        sourceType:
+          $ref: '#/components/schemas/SourceTypeIdentityPayload'
+    InternalSourceReferenceMethodContextPayload:
+      type: object
+      additionalProperties: false
+      required: [kind, method]
+      properties:
+        kind:
+          type: string
+          enum: [METHOD]
+        method:
+          $ref: '#/components/schemas/MethodTargetPayload'
+    InternalSourceReferenceGroupResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - context
+        - representativeReferences
+        - limits
+        - availableFollowUps
+        - unavailableFollowUps
+      properties:
+        context:
+          $ref: '#/components/schemas/InternalSourceReferenceContextPayload'
+        representativeReferences:
+          type: array
+          maxItems: 3
+          items:
+            $ref: '#/components/schemas/InternalSourceReferenceOccurrenceResponse'
+        limits:
+          $ref: '#/components/schemas/BoundedResultResponse'
+        availableFollowUps:
+          type: array
+          items:
+            $ref: '#/components/schemas/DiscoveryFollowUpResponse'
+        unavailableFollowUps:
+          type: array
+          items:
+            $ref: '#/components/schemas/UnavailableDiscoveryFollowUpResponse'
+    InternalSourceReferenceOccurrenceResponse:
+      type: object
+      additionalProperties: false
+      required: [range, availableFollowUps]
+      properties:
+        range:
+          $ref: '#/components/schemas/TextRangePayload'
+        availableFollowUps:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/DiscoveryFollowUpResponse'
+    InternalSourceReferenceIssueSummaryResponse:
+      type: object
+      additionalProperties: false
+      required: [code, count]
+      properties:
+        code:
+          type: string
+          enum:
+            - REFERENCE_SOURCE_NOT_JAVA
+            - REFERENCE_SOURCE_OUTSIDE_SNAPSHOT
+            - REFERENCE_CONTEXT_UNRESOLVED
+            - REFERENCE_RANGE_INVALID
+        count:
+          type: integer
+          minimum: 1
+    JavaSourceSegmentRequest:
+      type: object
+      additionalProperties: false
+      required: [repoId, expectedRevision, sourceRange]
+      properties:
+        repoId:
+          type: string
+          minLength: 1
+          pattern: '^[a-z0-9][a-z0-9._-]{0,63}$'
+        expectedRevision:
+          type: string
+          pattern: '^[0-9a-f]{40}$|^FIXTURE$'
+        sourceRange:
+          $ref: '#/components/schemas/SourceRangePayload'
+        contextLines:
+          type: integer
+          minimum: 0
+          maximum: 20
+          default: 3
+    JavaSourceSegmentResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - repoId
+        - analyzedRevision
+        - contentRange
+        - content
+        - contextTruncated
+        - returnedUtf8Bytes
+      properties:
+        repoId:
+          type: string
+        analyzedRevision:
+          type: string
+          pattern: '^[0-9a-f]{40}$|^FIXTURE$'
+        contentRange:
+          $ref: '#/components/schemas/SourceRangePayload'
+        content:
+          type: string
+          description: Exact unchanged Java source substring bounded to 64 KiB UTF-8
+        contextTruncated:
+          type: boolean
+        returnedUtf8Bytes:
+          type: integer
+          minimum: 0
+          maximum: 65536
+    PageResponse:
       type: object
       additionalProperties: false
       required:
@@ -2351,6 +2645,7 @@ components:
         totalCount:
           type: integer
           minimum: 0
+          format: int64
         hasMore:
           type: boolean
     ConceptCoverageResponse:
@@ -2380,10 +2675,10 @@ components:
       type: object
       additionalProperties: false
       required:
-        - reason
+        - code
         - count
       properties:
-        reason:
+        code:
           type: string
           enum:
             - MQ_DESTINATION_UNRESOLVED
@@ -2492,7 +2787,7 @@ components:
           items:
             $ref: '#/components/schemas/TypeMemberResponse'
         page:
-          $ref: '#/components/schemas/ConceptPageResponse'
+          $ref: '#/components/schemas/PageResponse'
         coverage:
           $ref: '#/components/schemas/ConceptCoverageResponse'
         availableFollowUps:
@@ -2779,6 +3074,8 @@ components:
             - GET_TYPE_MEMBERS
             - GET_NEXT_PAGE
             - RESOLVE_SOURCE_SYMBOL
+            - FIND_INTERNAL_REFERENCES
+            - GET_JAVA_SOURCE_SEGMENT
         api:
           $ref: '#/components/schemas/DiscoveryFollowUpApiResponse'
         request:
@@ -2820,6 +3117,43 @@ components:
         - $ref: '#/components/schemas/GetTypeMembersRequestResponse'
         - $ref: '#/components/schemas/DiscoverTypeMembersRequestResponse'
         - $ref: '#/components/schemas/ResolveSourceSymbolRequestResponse'
+        - $ref: '#/components/schemas/FindInternalReferencesRequestResponse'
+        - $ref: '#/components/schemas/GetJavaSourceSegmentRequestResponse'
+    FindInternalReferencesRequestResponse:
+      type: object
+      additionalProperties: false
+      required: [repoId, expectedRevision, target, offset, limit]
+      properties:
+        repoId:
+          type: string
+        expectedRevision:
+          type: string
+          pattern: '^[0-9a-f]{40}$|^FIXTURE$'
+        target:
+          $ref: '#/components/schemas/InternalSourceReferenceTargetPayload'
+        offset:
+          type: integer
+          minimum: 0
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 100
+    GetJavaSourceSegmentRequestResponse:
+      type: object
+      additionalProperties: false
+      required: [repoId, expectedRevision, sourceRange, contextLines]
+      properties:
+        repoId:
+          type: string
+        expectedRevision:
+          type: string
+          pattern: '^[0-9a-f]{40}$|^FIXTURE$'
+        sourceRange:
+          $ref: '#/components/schemas/SourceRangePayload'
+        contextLines:
+          type: integer
+          minimum: 0
+          maximum: 20
     ResolveSourceSymbolRequestResponse:
       type: object
       additionalProperties: false
@@ -3106,31 +3440,6 @@ components:
           type: integer
           minimum: 1
           maximum: 100
-    CandidatePageResponse:
-      type: object
-      additionalProperties: false
-      required:
-        - offset
-        - limit
-        - returnedCount
-        - totalCount
-        - hasMore
-      properties:
-        offset:
-          type: integer
-          minimum: 0
-        limit:
-          type: integer
-          minimum: 1
-          maximum: 100
-        returnedCount:
-          type: integer
-          minimum: 0
-        totalCount:
-          type: integer
-          minimum: 0
-        hasMore:
-          type: boolean
     EventListenerCandidateResponse:
       type: object
       additionalProperties: false
@@ -3805,6 +4114,8 @@ components:
             - SEMANTIC_BINDING_AMBIGUOUS
             - SEMANTIC_TARGET_NOT_FOUND
             - EXACT_CONTENT_NOT_FOUND
+            - SOURCE_DECLARATION_NOT_FOUND
+            - SOURCE_SEGMENT_TOO_LARGE
             - TYPE_MEMBER_TYPE_NOT_FOUND
             - SEMANTIC_BINDING_UNRESOLVED
             - IMPLEMENTATION_TARGET_UNSUPPORTED

@@ -1,5 +1,21 @@
 package com.java.semantic.api;
 
+import com.java.semantic.api.dto.BoundedResultResponse;
+import com.java.semantic.api.dto.InternalSourceReferenceContextPayload;
+import com.java.semantic.api.dto.InternalSourceReferenceRequest;
+import com.java.semantic.api.dto.InternalSourceReferenceResponse;
+import com.java.semantic.api.dto.InternalSourceReferenceResponse.ReferenceGroupResponse;
+import com.java.semantic.api.dto.InternalSourceReferenceResponse.TargetDeclarationResponse;
+import com.java.semantic.api.dto.InternalSourceReferenceTargetPayload;
+import com.java.semantic.api.dto.JavaSourceSegmentRequest;
+import com.java.semantic.api.dto.JavaSourceSegmentResponse;
+import com.java.semantic.api.dto.PageResponse;
+import com.java.semantic.api.dto.identity.JavaTypeIdentityPayload;
+import com.java.semantic.api.dto.identity.MethodTargetPayload;
+import com.java.semantic.api.dto.identity.SourceTypeIdentityPayload;
+import com.java.semantic.api.dto.location.PositionPayload;
+import com.java.semantic.api.dto.location.SourceRangePayload;
+import com.java.semantic.api.dto.location.TextRangePayload;
 import com.java.semantic.api.monitoring.ApiMonitoringField;
 import com.java.semantic.api.monitoring.ApiMonitoringMode;
 import com.java.semantic.api.ApiMonitoringRenderer.RenderedApiMonitoring;
@@ -8,6 +24,7 @@ import org.junit.jupiter.api.Test;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Optional;
+import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -192,6 +209,107 @@ class ApiMonitoringRendererTest {
         assertThatThrownBy(() -> renderer.render("request", new UnsafePayload("select * from users")))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("OMIT");
+    }
+
+    @Test
+    void should_render_approved_internal_reference_and_source_segment_contract_fields() {
+        SourceTypeIdentityPayload sourceType = new SourceTypeIdentityPayload(
+                new JavaTypeIdentityPayload("com.secret.orders", "SensitiveOrderService"),
+                "src/main/java/com/secret/orders/SensitiveOrderService.java");
+        MethodTargetPayload method = new MethodTargetPayload(
+                sourceType, "sensitiveMethod", List.of("com.secret.Order"));
+        InternalSourceReferenceTargetPayload target = new InternalSourceReferenceTargetPayload.Method(
+                "METHOD", method);
+        TextRangePayload textRange = new TextRangePayload(
+                new PositionPayload(7, 4), new PositionPayload(7, 19));
+        SourceRangePayload sourceRange = new SourceRangePayload(sourceType.sourceFile(), textRange);
+        InternalSourceReferenceRequest referenceRequest = new InternalSourceReferenceRequest(
+                "orders", "a".repeat(40), target, 0, 20);
+        InternalSourceReferenceResponse referenceResponse = new InternalSourceReferenceResponse(
+                "orders",
+                "a".repeat(40),
+                "COMPLETE",
+                new TargetDeclarationResponse(target, textRange, List.of()),
+                3,
+                List.of(),
+                new PageResponse(0, 20, 0, 0, false),
+                List.of(),
+                List.of());
+        ReferenceGroupResponse referenceGroup = new ReferenceGroupResponse(
+                new InternalSourceReferenceContextPayload.Type("TYPE", sourceType),
+                List.of(),
+                new BoundedResultResponse(3, 0, 0, false),
+                List.of(),
+                List.of());
+        JavaSourceSegmentRequest segmentRequest = new JavaSourceSegmentRequest(
+                "orders", "a".repeat(40), sourceRange, 3);
+        String sourceContent = String.join(
+                " ",
+                "private source content",
+                "/srv/private",
+                "file:///srv/private",
+                "SEMANTIC_API_TOKEN=token",
+                "JAVA_HOME=/opt/java",
+                "JDT LS diagnostic");
+        JavaSourceSegmentResponse segmentResponse = new JavaSourceSegmentResponse(
+                "orders",
+                "a".repeat(40),
+                sourceRange,
+                sourceContent,
+                false,
+                42);
+
+        String output = List.of(
+                        renderer.render("referenceRequest", referenceRequest),
+                        renderer.render("referenceResponse", referenceResponse),
+                        renderer.render("referenceGroup", referenceGroup),
+                        renderer.render("segmentRequest", segmentRequest),
+                        renderer.render("segmentResponse", segmentResponse))
+                .stream()
+                .flatMap(rendered -> rendered.segments().stream())
+                .collect(Collectors.joining("\n"));
+
+        assertThat(output)
+                .contains("referenceRequest.repoId=orders")
+                .contains("referenceRequest.target.kind=METHOD")
+                .contains("referenceRequest.target.identity.sourceType.javaType.packageName=com.secret.orders")
+                .contains("referenceRequest.target.identity.sourceType.javaType.className=SensitiveOrderService")
+                .contains("referenceRequest.target.identity.sourceType.sourceFile="
+                        + "src/main/java/com/secret/orders/SensitiveOrderService.java")
+                .contains("referenceRequest.target.identity.methodName=sensitiveMethod")
+                .contains("referenceRequest.target.identity.parameterTypes.size=1")
+                .contains("referenceResponse.status=COMPLETE")
+                .contains("referenceResponse.targetDeclaration.target.kind=METHOD")
+                .contains("referenceResponse.targetDeclaration.declarationRange.start.line=7")
+                .contains("referenceResponse.targetDeclaration.declarationRange.start.character=4")
+                .contains("referenceResponse.targetDeclaration.declarationRange.end.line=7")
+                .contains("referenceResponse.targetDeclaration.declarationRange.end.character=19")
+                .contains("referenceResponse.totalReferenceCount=3")
+                .contains("referenceResponse.page.limit=20")
+                .contains("referenceGroup.context.kind=TYPE")
+                .contains("referenceGroup.context.sourceType.javaType.packageName=com.secret.orders")
+                .contains("referenceGroup.context.sourceType.javaType.className=SensitiveOrderService")
+                .contains("referenceGroup.context.sourceType.sourceFile="
+                        + "src/main/java/com/secret/orders/SensitiveOrderService.java")
+                .contains("referenceGroup.limits.limit=3")
+                .contains("segmentRequest.sourceRange.sourceFile="
+                        + "src/main/java/com/secret/orders/SensitiveOrderService.java")
+                .contains("segmentRequest.sourceRange.range.start.line=7")
+                .contains("segmentRequest.sourceRange.range.end.character=19")
+                .contains("segmentRequest.contextLines=3")
+                .contains("segmentResponse.contentRange.sourceFile="
+                        + "src/main/java/com/secret/orders/SensitiveOrderService.java")
+                .contains("segmentResponse.contentRange.range.start.character=4")
+                .contains("segmentResponse.contentRange.range.end.line=7")
+                .contains("segmentResponse.contextTruncated=false")
+                .contains("segmentResponse.returnedUtf8Bytes=42")
+                .doesNotContain(
+                        "private source content",
+                        "/srv/private",
+                        "file:///srv/private",
+                        "SEMANTIC_API_TOKEN",
+                        "JAVA_HOME",
+                        "JDT LS diagnostic");
     }
 
     private record RequestPayload(

@@ -15,6 +15,11 @@ semantic:
       segment-utf8-bytes: ${EXACT_CONTENT_SEGMENT_UTF8_BYTES:32768}
     source-symbol-resolution:
       context-candidate-limit: ${SOURCE_SYMBOL_CONTEXT_CANDIDATE_LIMIT:100}
+    internal-references:
+      cache:
+        maximum-weight: ${INTERNAL_REFERENCE_CACHE_MAXIMUM_WEIGHT:10000}
+        expire-after-access: ${INTERNAL_REFERENCE_CACHE_EXPIRE_AFTER_ACCESS:10m}
+        maximum-entry-weight: ${INTERNAL_REFERENCE_CACHE_MAXIMUM_ENTRY_WEIGHT:1000}
   api:
     api-token: ${SEMANTIC_API_TOKEN:}
   jdtls:

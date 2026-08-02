@@ -18,6 +18,7 @@ import com.java.semantic.semantic.domain.SemanticLocation;
 import com.java.semantic.semantic.domain.SemanticMethod;
 import com.java.semantic.semantic.domain.SemanticPosition;
 import com.java.semantic.semantic.domain.SemanticRange;
+import com.java.semantic.semantic.domain.SemanticSourceClassification;
 import com.java.semantic.syntax.adapter.jdt.JdtSyntaxExtractionService;
 import com.java.semantic.syntax.domain.CanonicalMethodDeclarationResolver;
 import com.java.semantic.syntax.domain.SourceTypeMetadata;
@@ -40,6 +41,7 @@ import org.mockito.InOrder;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.io.IOException;
+import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
@@ -190,6 +192,7 @@ class MethodImplementationDiscoveryApplicationServiceTest {
         JavaSemanticService semantic = mock(JavaSemanticService.class);
         RepositorySnapshot snapshot = new RepositorySnapshot(REPOSITORY_ID, root, REVISION);
         SemanticMethod requestedSemantic = semantic(requested);
+        SemanticMethod implementationSemantic = semantic(implementation);
         when(repository.withSnapshot(eq(REPOSITORY_ID), eq(Optional.of(REVISION)), any()))
                 .thenAnswer(invocation -> {
                     Function<RepositorySnapshot, RevisionBoundMethodImplementations> operation = invocation.getArgument(2);
@@ -197,8 +200,10 @@ class MethodImplementationDiscoveryApplicationServiceTest {
                 });
         when(semantic.resolveExactMethod(eq(snapshot), any(SemanticDeclarationAnchor.class)))
                 .thenReturn(requestedSemantic);
+        when(semantic.classifySource(snapshot, implementationSemantic))
+                .thenReturn(new SemanticSourceClassification.LocalSource(implementation.sourceFile()));
         when(semantic.implementations(snapshot, requestedSemantic))
-                .thenReturn(new SemanticImplementationResult(List.of(semantic(implementation)), List.of()));
+                .thenReturn(new SemanticImplementationResult(List.of(implementationSemantic), List.of()));
         MethodImplementationDiscoveryApplicationService service = new MethodImplementationDiscoveryApplicationService(
                 repository,
                 syntaxExtraction,
@@ -390,7 +395,21 @@ class MethodImplementationDiscoveryApplicationServiceTest {
                 .thenReturn(requestedSemantic);
         lenient().when(semantic.implementations(snapshot, requestedSemantic))
                 .thenReturn(new SemanticImplementationResult(implementations, adapterIssues));
+        for (SemanticMethod implementation : implementations) {
+            lenient().when(semantic.classifySource(snapshot, implementation))
+                    .thenReturn(classificationOf(implementation));
+        }
         return new DiscoveryFixture(repository, syntaxExtraction, semantic, snapshot, requestedSemantic, requested);
+    }
+
+    private SemanticSourceClassification classificationOf(SemanticMethod method) {
+        URI uri = URI.create(method.location().uri());
+        Path source = Path.of(uri).normalize();
+        if (!source.startsWith(root.normalize())) {
+            return SemanticSourceClassification.OutsideRepository.INSTANCE;
+        }
+        String sourceFile = root.normalize().relativize(source).toString().replace('\\', '/');
+        return new SemanticSourceClassification.LocalSource(sourceFile);
     }
 
     private MethodImplementationDiscoveryApplicationService service(

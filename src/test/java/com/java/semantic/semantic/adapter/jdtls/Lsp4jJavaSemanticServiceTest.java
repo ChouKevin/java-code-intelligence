@@ -22,6 +22,8 @@ import com.java.semantic.semantic.domain.SemanticLocation;
 import com.java.semantic.semantic.domain.SemanticMethod;
 import com.java.semantic.semantic.domain.SemanticPosition;
 import com.java.semantic.semantic.domain.SemanticProtocolException;
+import com.java.semantic.semantic.domain.SemanticReferenceAnchor;
+import com.java.semantic.semantic.domain.SemanticReferenceLocation;
 import com.java.semantic.semantic.domain.SemanticRange;
 import com.java.semantic.semantic.domain.SemanticRequestTimeoutException;
 import com.java.semantic.semantic.domain.SemanticResolutionOrigin;
@@ -47,6 +49,7 @@ import org.eclipse.lsp4j.Location;
 import org.eclipse.lsp4j.LocationLink;
 import org.eclipse.lsp4j.Position;
 import org.eclipse.lsp4j.Range;
+import org.eclipse.lsp4j.ReferenceParams;
 import org.eclipse.lsp4j.SymbolInformation;
 import org.eclipse.lsp4j.SymbolKind;
 import org.eclipse.lsp4j.WorkspaceSymbol;
@@ -100,6 +103,9 @@ class Lsp4jJavaSemanticServiceTest {
     @TempDir
     Path root;
 
+    @TempDir
+    Path externalRoot;
+
     private FakeLanguageServer server;
     private Lsp4jJavaSemanticService service;
     private RepositorySnapshot snapshot;
@@ -109,6 +115,50 @@ class Lsp4jJavaSemanticServiceTest {
         server = new FakeLanguageServer();
         service = new Lsp4jJavaSemanticService(new FakeWorkspaceManager(session(server)));
         snapshot = new RepositorySnapshot(REPOSITORY_ID, root, REVISION);
+    }
+
+    @Test
+    void should_find_references_at_identifier_and_return_only_classified_domain_locations() throws IOException {
+        String sourceFile = "src/main/java/com/example/generic/OrderService.java";
+        writeClassFile("com/example/generic/OrderService.java", PACKAGE, "OrderService");
+        String localUri = root.resolve(sourceFile).toUri().toString();
+        Path externalFile = externalRoot.resolve("External.java");
+        Files.writeString(externalFile, "public class External {}\n");
+        String missingFileUri = root.resolve("src/main/java/com/example/generic/Missing.java").toUri().toString();
+        String nonregularFileUri = root.resolve("src/main/java/com/example/generic").toUri().toString();
+        server.referenceResponse = List.of(
+                location(localUri, 4, 8, 4, 20),
+                location(localUri, 4, 8, 4, 20),
+                location("jdt://contents/java.base/java/lang/String.class", 2, 1, 2, 7),
+                location(externalFile.toUri().toString(), 1, 2, 1, 8),
+                location(missingFileUri, 0, 0, 0, 1),
+                location(nonregularFileUri, 0, 0, 0, 1),
+                location("file://[malformed", 0, 0, 0, 1));
+        SemanticReferenceAnchor anchor = new SemanticReferenceAnchor(
+                sourceFile, new SemanticPosition(1, 13));
+
+        List<SemanticReferenceLocation> references = service.findReferences(snapshot, anchor);
+
+        assertThat(server.referenceParams)
+                .singleElement()
+                .satisfies(params -> {
+                    assertThat(params.getTextDocument().getUri()).isEqualTo(localUri);
+                    assertThat(params.getPosition()).isEqualTo(new Position(1, 13));
+                    assertThat(params.getContext().isIncludeDeclaration()).isFalse();
+                });
+        assertThat(references).containsExactly(
+                new SemanticReferenceLocation.LocalSource(sourceFile, semanticRange(4, 8, 4, 20)),
+                new SemanticReferenceLocation.LocalSource(sourceFile, semanticRange(4, 8, 4, 20)),
+                SemanticReferenceLocation.OutsideRepository.INSTANCE,
+                SemanticReferenceLocation.OutsideRepository.INSTANCE,
+                SemanticReferenceLocation.UnprovableUri.INSTANCE,
+                SemanticReferenceLocation.UnprovableUri.INSTANCE,
+                SemanticReferenceLocation.UnprovableUri.INSTANCE);
+
+        server.referenceResponse = List.of(location("https://example.test/OrderService.java", 0, 0, 0, 1));
+
+        assertThatThrownBy(() -> service.findReferences(snapshot, anchor))
+                .isExactlyInstanceOf(SemanticProtocolException.class);
     }
 
     @Test
@@ -1260,6 +1310,7 @@ class Lsp4jJavaSemanticServiceTest {
                 Either.forLeft(List.of());
         private Either<List<? extends Location>, List<? extends LocationLink>> definitionResponse =
                 Either.forLeft(List.of());
+        private List<? extends Location> referenceResponse = List.of();
         private Throwable closeFailure;
         private Throwable prepareFailure;
         private RuntimeException incomingFailure;
@@ -1270,6 +1321,7 @@ class Lsp4jJavaSemanticServiceTest {
         private final List<Position> preparePositions = Collections.synchronizedList(new ArrayList<>());
         private final List<CallHierarchyItem> incomingItems = Collections.synchronizedList(new ArrayList<>());
         private final List<Position> definitionPositions = Collections.synchronizedList(new ArrayList<>());
+        private final List<ReferenceParams> referenceParams = Collections.synchronizedList(new ArrayList<>());
         private final List<String> closedUris = Collections.synchronizedList(new ArrayList<>());
         private final List<String> lifecycleEvents = Collections.synchronizedList(new ArrayList<>());
 
@@ -1394,6 +1446,12 @@ class Lsp4jJavaSemanticServiceTest {
                     definition(DefinitionParams params) {
                 definitionPositions.add(params.getPosition());
                 return CompletableFuture.completedFuture(definitionResponse);
+            }
+
+            @Override
+            public CompletableFuture<List<? extends Location>> references(ReferenceParams params) {
+                referenceParams.add(params);
+                return CompletableFuture.completedFuture(referenceResponse);
             }
 
             @Override

@@ -9,6 +9,7 @@ import com.fasterxml.jackson.annotation.JsonInclude;
 import com.java.semantic.api.monitoring.ApiMonitoringField;
 import com.java.semantic.api.monitoring.ApiMonitoringMode;
 import com.java.semantic.api.dto.location.PositionPayload;
+import com.java.semantic.api.dto.location.SourceRangePayload;
 
 import java.util.List;
 import java.util.Objects;
@@ -43,7 +44,9 @@ public record DiscoveryFollowUpResponse(
             ConceptSearchPageRequestResponse,
             GetTypeMembersRequestResponse,
             DiscoverTypeMembersRequestResponse,
-            ResolveSourceSymbolRequestResponse {
+            ResolveSourceSymbolRequestResponse,
+            FindInternalReferencesRequestResponse,
+            GetJavaSourceSegmentRequestResponse {
     }
 
     /** exact method source 後續動作的完整請求 */
@@ -242,5 +245,22 @@ public record DiscoveryFollowUpResponse(
             context = Objects.requireNonNull(context, "context is required");
             position = Objects.requireNonNull(position, "position is required");
         }
+    }
+
+    /** 內部 reference 下一頁的完整 exact target 請求 */
+    public record FindInternalReferencesRequestResponse(
+            @ApiMonitoringField(ApiMonitoringMode.VALUE) String repoId,
+            @ApiMonitoringField(ApiMonitoringMode.VALUE) String expectedRevision,
+            @ApiMonitoringField(ApiMonitoringMode.NESTED) InternalSourceReferenceTargetPayload target,
+            @ApiMonitoringField(ApiMonitoringMode.VALUE) int offset,
+            @ApiMonitoringField(ApiMonitoringMode.VALUE) int limit) implements RequestResponse {
+    }
+
+    /** bounded Java source segment 的完整 exact range 請求 */
+    public record GetJavaSourceSegmentRequestResponse(
+            @ApiMonitoringField(ApiMonitoringMode.VALUE) String repoId,
+            @ApiMonitoringField(ApiMonitoringMode.VALUE) String expectedRevision,
+            @ApiMonitoringField(ApiMonitoringMode.NESTED) SourceRangePayload sourceRange,
+            @ApiMonitoringField(ApiMonitoringMode.VALUE) int contextLines) implements RequestResponse {
     }
 }

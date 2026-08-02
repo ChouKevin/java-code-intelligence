@@ -1,6 +1,6 @@
 package com.java.semantic.api;
 
-import com.java.semantic.api.dto.CandidatePageResponse;
+import com.java.semantic.api.dto.PageResponse;
 import com.java.semantic.api.dto.DiscoverEventListenersResponse;
 import com.java.semantic.api.dto.EventListenerCandidateResponse;
 import com.java.semantic.api.dto.ListenerAnnotationEvidenceResponse;
@@ -42,8 +42,8 @@ public final class EventListenerDiscoveryResponseMapper {
                 discovery.discovery().observations().stream().map(this::observation).toList());
     }
 
-    private CandidatePageResponse page(CandidatePage page) {
-        return new CandidatePageResponse(
+    private PageResponse page(CandidatePage page) {
+        return new PageResponse(
                 page.offset(),
                 page.limit(),
                 page.returnedCount(),

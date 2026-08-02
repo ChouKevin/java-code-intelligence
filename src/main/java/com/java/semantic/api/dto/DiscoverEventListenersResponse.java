@@ -12,7 +12,7 @@ public record DiscoverEventListenersResponse(
         @ApiMonitoringField(ApiMonitoringMode.VALUE) String analyzedRevision,
         @ApiMonitoringField(ApiMonitoringMode.VALUE) String requestedEventType,
         @ApiMonitoringField(ApiMonitoringMode.SIZE) List<EventListenerCandidateResponse> candidates,
-        @ApiMonitoringField(ApiMonitoringMode.NESTED) CandidatePageResponse page,
+        @ApiMonitoringField(ApiMonitoringMode.NESTED) PageResponse page,
         @ApiMonitoringField(ApiMonitoringMode.SIZE) List<ListenerObservationSummaryResponse> observationSummaries) {
 
     public DiscoverEventListenersResponse {

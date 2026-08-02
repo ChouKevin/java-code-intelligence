@@ -4,6 +4,7 @@ import com.java.semantic.syntax.application.concept.ConceptIdentity;
 import com.java.semantic.identity.MethodTarget;
 import com.java.semantic.identity.SourceTypeIdentity;
 import com.java.semantic.syntax.domain.SyntaxPosition;
+import com.java.semantic.syntax.domain.ExactSourceDeclarationTarget;
 
 import java.util.List;
 import java.util.Objects;
@@ -65,7 +66,15 @@ public record DiscoveryFollowUp(
         RESOLVE_SOURCE_SYMBOL(
                 "/v1/discovery/source-symbols/resolve",
                 "resolveSourceSymbol",
-                ResolveSourceSymbolRequest.class);
+                ResolveSourceSymbolRequest.class),
+        FIND_INTERNAL_REFERENCES(
+                "/v1/discovery/internal-references",
+                "findInternalReferences",
+                FindInternalReferencesRequest.class),
+        GET_JAVA_SOURCE_SEGMENT(
+                "/v1/discovery/java-source-segment",
+                "getJavaSourceSegment",
+                GetJavaSourceSegmentRequest.class);
 
         private final ApiProjection api;
         private final Class<? extends RequestProjection> requestType;
@@ -107,7 +116,9 @@ public record DiscoveryFollowUp(
             ResolveConceptRequest,
             GetTypeMembersRequest,
             TypeMembersRequest,
-            ResolveSourceSymbolRequest {
+            ResolveSourceSymbolRequest,
+            FindInternalReferencesRequest,
+            GetJavaSourceSegmentRequest {
     }
 
     /** Phase 1 固定供 Phase 2 實作的 exact method source 完整請求 */
@@ -244,6 +255,41 @@ public record DiscoveryFollowUp(
             context = Objects.requireNonNull(context, "context is required");
             symbol = requiredText(symbol, "symbol");
             position = Objects.requireNonNull(position, "position is required");
+        }
+    }
+
+    /** 內部 reference 下一頁保留 exact target 與 revision 的完整請求 */
+    public record FindInternalReferencesRequest(
+            String repoId,
+            String expectedRevision,
+            ExactSourceDeclarationTarget target,
+            int offset,
+            int limit) implements RequestProjection {
+
+        public FindInternalReferencesRequest {
+            repoId = requiredText(repoId, "repoId");
+            expectedRevision = requiredText(expectedRevision, "expectedRevision");
+            target = Objects.requireNonNull(target, "target is required");
+            if (offset < 0 || limit < 1 || limit > 100) {
+                throw new IllegalArgumentException("internal reference page is invalid");
+            }
+        }
+    }
+
+    /** exact source range 與 bounded context 的完整續讀請求 */
+    public record GetJavaSourceSegmentRequest(
+            String repoId,
+            String expectedRevision,
+            SourceRange sourceRange,
+            int contextLines) implements RequestProjection {
+
+        public GetJavaSourceSegmentRequest {
+            repoId = requiredText(repoId, "repoId");
+            expectedRevision = requiredText(expectedRevision, "expectedRevision");
+            sourceRange = Objects.requireNonNull(sourceRange, "sourceRange is required");
+            if (contextLines < 0 || contextLines > 20) {
+                throw new IllegalArgumentException("contextLines must be between 0 and 20");
+            }
         }
     }
 

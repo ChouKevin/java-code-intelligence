@@ -11,7 +11,7 @@ public record SourceSymbolResolutionResponse(
         @ApiMonitoringField(ApiMonitoringMode.VALUE) String analyzedRevision,
         @ApiMonitoringField(ApiMonitoringMode.VALUE) String status,
         @ApiMonitoringField(ApiMonitoringMode.SIZE) List<SourceContextCandidateResponse> contextCandidates,
-        @ApiMonitoringField(ApiMonitoringMode.NESTED) SourceContextCandidateLimitsResponse contextCandidateLimits,
+        @ApiMonitoringField(ApiMonitoringMode.NESTED) BoundedResultResponse contextCandidateLimits,
         @ApiMonitoringField(ApiMonitoringMode.SIZE) List<SourceSymbolCandidateResponse> candidates,
         @ApiMonitoringField(ApiMonitoringMode.SIZE) List<SourceSymbolIssueSummaryResponse> issues) {
 

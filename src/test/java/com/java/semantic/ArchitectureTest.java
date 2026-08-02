@@ -285,12 +285,90 @@ class ArchitectureTest {
     }
 
     @Test
+    void should_keep_caffeine_behind_the_internal_reference_cache_adapter() {
+        classes()
+                .that().haveSimpleName("InternalSourceReferenceApplicationService")
+                .should().dependOnClassesThat().haveSimpleName("InternalReferenceAnalysisCache")
+                .as("internal-reference orchestration must use only the application cache abstraction")
+                .allowEmptyShould(false)
+                .check(classes);
+        noClasses()
+                .that().resideOutsideOfPackage("..semantic.adapter.cache..")
+                .and().resideOutsideOfPackage("..config..")
+                .should().dependOnClassesThat().resideInAnyPackage("com.github.benmanes.caffeine..")
+                .as("Caffeine types belong only to the cache adapter and composition root")
+                .allowEmptyShould(false)
+                .check(classes);
+        noClasses()
+                .that().resideOutsideOfPackage("..semantic.adapter.cache..")
+                .and().resideOutsideOfPackage("..config..")
+                .should().dependOnClassesThat().resideInAPackage("..semantic.adapter.cache..")
+                .as("cache adapter types belong only to the cache adapter and composition root")
+                .allowEmptyShould(false)
+                .check(classes);
+        noClasses()
+                .that().resideInAPackage("..semantic.application..")
+                .should().dependOnClassesThat().resideInAnyPackage("com.github.benmanes.caffeine..")
+                .as("semantic application contracts and orchestration must remain Caffeine-free")
+                .allowEmptyShould(false)
+                .check(classes);
+    }
+
+    @Test
     void should_confine_jdt_core_to_its_two_adapters_when_service_is_imported() {
         noClasses()
                 .that().resideOutsideOfPackage("..semantic.adapter.jdtls..")
                 .and().resideOutsideOfPackage("..syntax.adapter.jdt..")
                 .should().dependOnClassesThat().resideInAnyPackage("org.eclipse.jdt..")
                 .as("JDT types live in the JDT LS adapter and the syntax adapter, nowhere else")
+                .allowEmptyShould(false)
+                .check(classes);
+    }
+
+    @Test
+    void should_keep_repository_source_containment_free_of_jdt_lsp_and_web_types() {
+        noClasses()
+                .that().haveSimpleNameStartingWith("RepositorySourceContainment")
+                .should().dependOnClassesThat().resideInAnyPackage(
+                        "org.eclipse.jdt..",
+                        "org.eclipse.lsp4j..",
+                        "org.springframework.web..",
+                        "com.java.semantic.api..")
+                .as("repository source containment must remain independent of parsers, protocols, and HTTP")
+                .allowEmptyShould(false)
+                .check(classes);
+    }
+
+    @Test
+    void should_share_source_declaration_matching_without_coupling_the_facades() {
+        classes()
+                .that().haveSimpleName("JdtSourceSymbolResolver")
+                .or().haveSimpleName("JdtExactSourceDeclarationResolver")
+                .should().dependOnClassesThat().haveSimpleName("JdtSourceDeclarationLocator")
+                .as("both JDT resolution facades must reuse the shared declaration locator")
+                .allowEmptyShould(false)
+                .check(classes);
+        noClasses()
+                .that().haveSimpleName("JdtSourceSymbolResolver")
+                .should().dependOnClassesThat().haveSimpleName("JdtExactSourceDeclarationResolver")
+                .as("source-symbol resolution must not depend on exact-declaration resolution")
+                .allowEmptyShould(false)
+                .check(classes);
+        noClasses()
+                .that().haveSimpleName("JdtExactSourceDeclarationResolver")
+                .should().dependOnClassesThat().haveSimpleName("JdtSourceSymbolResolver")
+                .as("exact-declaration resolution must not depend on source-symbol resolution")
+                .allowEmptyShould(false)
+                .check(classes);
+    }
+
+    @Test
+    void should_confine_source_declaration_matching_helpers_to_the_jdt_syntax_adapter() {
+        noClasses()
+                .that().resideOutsideOfPackage("..syntax.adapter.jdt..")
+                .should().dependOnClassesThat()
+                .haveNameMatching("com\\.java\\.semantic\\.syntax\\.adapter\\.jdt\\.JdtSourceDeclarationLocator(\\$.*)?")
+                .as("source-declaration matching helpers must remain private to the JDT syntax adapter")
                 .allowEmptyShould(false)
                 .check(classes);
     }
@@ -506,6 +584,8 @@ class ArchitectureTest {
                 .or().haveSimpleName("EntryPointDiscoveryApplicationService")
                 .or().haveSimpleName("EventListenerDiscoveryApplicationService")
                 .or().haveSimpleName("MethodImplementationDiscoveryApplicationService")
+                .or().haveSimpleName("InternalSourceReferenceApplicationService")
+                .or().haveSimpleName("JavaSourceSegmentApplicationService")
                 .or().areAssignableTo(ConceptDiscoveryApplicationService.class)
                 .or().areAssignableTo(ExactContentApplicationService.class)
                 .or().areAssignableTo(SourceSymbolResolutionApplicationService.class)

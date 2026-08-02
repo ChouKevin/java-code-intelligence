@@ -11,6 +11,13 @@ import java.util.List;
  */
 public interface JavaSemanticService {
 
+    /** 由 adapter 將語意方法位置分類為 repository-local、外部或不可證實 */
+    SemanticSourceClassification classifySource(RepositorySnapshot snapshot, SemanticMethod method);
+
+    /** 由精確宣告識別字位置尋找並分類所有 reference */
+    List<SemanticReferenceLocation> findReferences(
+            RepositorySnapshot snapshot, SemanticReferenceAnchor anchor);
+
     /** Resolves a syntax-proven declaration through the semantic engine. */
     SemanticMethod resolveExactMethod(RepositorySnapshot snapshot, SemanticDeclarationAnchor anchor);
 

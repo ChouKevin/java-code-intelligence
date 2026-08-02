@@ -91,6 +91,8 @@ class OpenApiContractTest {
                 "/v1/discovery/event-listeners",
                 "/v1/discovery/method-implementations",
                 "/v1/discovery/source-symbols/resolve",
+                "/v1/discovery/internal-references",
+                "/v1/discovery/java-source-segment",
                 "/v1/discovery/concepts",
                 "/v1/discovery/concepts/resolve",
                 "/v1/discovery/type-members",
@@ -121,6 +123,59 @@ class OpenApiContractTest {
         assertRequiredRequestBody(
                 operation(paths, "/v1/analyses/call-graphs/incoming", "post"),
                 "#/components/schemas/AnalyzeIncomingCallGraphRequest");
+    }
+
+    @Test
+    void should_describe_closed_internal_reference_and_bounded_source_segment_contracts() {
+        Map<String, Object> paths = map(document.get("paths"));
+        Map<String, Object> references = operation(paths, "/v1/discovery/internal-references", "post");
+        Map<String, Object> segment = operation(paths, "/v1/discovery/java-source-segment", "post");
+        assertThat(references.get("operationId")).isEqualTo("findInternalReferences");
+        assertThat(segment.get("operationId")).isEqualTo("getJavaSourceSegment");
+        assertRequiredRequestBody(references, "#/components/schemas/InternalSourceReferenceRequest");
+        assertRequiredRequestBody(segment, "#/components/schemas/JavaSourceSegmentRequest");
+        assertResponseCodes(references, "200", "400", "401", "403", "404", "409", "502", "503", "504");
+        assertResponseCodes(segment, "200", "400", "401", "403", "404", "409", "413");
+
+        Map<String, Object> schemas = schemas();
+        Map<String, Object> request = schema(schemas, "InternalSourceReferenceRequest");
+        assertClosedObject(request);
+        assertExactProperties(request, "repoId", "expectedRevision", "target", "offset", "limit");
+        assertThat(required(request)).containsExactlyInAnyOrder("repoId", "expectedRevision", "target");
+        assertThat(schema(properties(request), "offset")).containsEntry("default", 0);
+        assertThat(schema(properties(request), "limit")).contains(entry("default", 20), entry("maximum", 100));
+        assertThat(list(schema(schemas, "InternalSourceReferenceTargetPayload").get("oneOf"))).containsExactly(
+                Map.of("$ref", "#/components/schemas/InternalSourceReferenceTypeTargetPayload"),
+                Map.of("$ref", "#/components/schemas/InternalSourceReferenceMethodTargetPayload"),
+                Map.of("$ref", "#/components/schemas/InternalSourceReferenceMemberTargetPayload"));
+        assertClosedFollowUpRequest(schemas, "InternalSourceReferenceTypeTargetPayload", "kind", "identity");
+        assertClosedFollowUpRequest(schemas, "InternalSourceReferenceMethodTargetPayload", "kind", "identity");
+        assertClosedFollowUpRequest(schemas, "InternalSourceReferenceMemberTargetPayload", "kind", "identity");
+
+        Map<String, Object> response = schema(schemas, "InternalSourceReferenceResponse");
+        assertClosedObject(response);
+        assertExactPropertiesAndRequired(response,
+                "repoId", "analyzedRevision", "status", "targetDeclaration", "totalReferenceCount",
+                "referenceGroups", "page", "issueSummaries", "availableFollowUps");
+        Map<String, Object> group = schema(schemas, "InternalSourceReferenceGroupResponse");
+        assertClosedObject(group);
+        assertThat(schema(properties(group), "representativeReferences")).containsEntry("maxItems", 3);
+        assertThat(schema(properties(group), "limits"))
+                .isEqualTo(Map.of("$ref", "#/components/schemas/BoundedResultResponse"));
+        assertExactPropertiesAndRequired(schema(schemas, "InternalSourceReferenceIssueSummaryResponse"),
+                "code", "count");
+
+        Map<String, Object> segmentRequest = schema(schemas, "JavaSourceSegmentRequest");
+        assertClosedObject(segmentRequest);
+        assertExactProperties(segmentRequest, "repoId", "expectedRevision", "sourceRange", "contextLines");
+        assertThat(required(segmentRequest)).containsExactlyInAnyOrder("repoId", "expectedRevision", "sourceRange");
+        assertThat(schema(properties(segmentRequest), "contextLines"))
+                .contains(entry("minimum", 0), entry("maximum", 20), entry("default", 3));
+        Map<String, Object> segmentResponse = schema(schemas, "JavaSourceSegmentResponse");
+        assertClosedObject(segmentResponse);
+        assertExactPropertiesAndRequired(segmentResponse,
+                "repoId", "analyzedRevision", "contentRange", "content", "contextTruncated", "returnedUtf8Bytes");
+        assertThat(schema(properties(segmentResponse), "returnedUtf8Bytes")).containsEntry("maximum", 65536);
     }
 
     @Test
@@ -303,7 +358,7 @@ class OpenApiContractTest {
         assertThat(schema(properties(response), "supportedKinds"))
                 .containsEntry("items", Map.of("$ref", "#/components/schemas/ConceptKind"));
         assertThat(schema(properties(response), "page"))
-                .isEqualTo(Map.of("$ref", "#/components/schemas/ConceptPageResponse"));
+                .isEqualTo(Map.of("$ref", "#/components/schemas/PageResponse"));
         assertThat(schema(properties(response), "coverage"))
                 .isEqualTo(Map.of("$ref", "#/components/schemas/ConceptCoverageResponse"));
 
@@ -704,7 +759,7 @@ class OpenApiContractTest {
                 .containsEntry("type", "array")
                 .containsEntry("items", Map.of("$ref", "#/components/schemas/EventListenerCandidateResponse"));
         assertThat(schema(properties(response), "page"))
-                .isEqualTo(Map.of("$ref", "#/components/schemas/CandidatePageResponse"));
+                .isEqualTo(Map.of("$ref", "#/components/schemas/PageResponse"));
         assertThat(schema(properties(response), "observationSummaries"))
                 .containsEntry("type", "array")
                 .containsEntry("items", Map.of("$ref", "#/components/schemas/ListenerObservationSummaryResponse"));
@@ -720,7 +775,7 @@ class OpenApiContractTest {
         assertThat(schema(properties(candidate), "sourceRange"))
                 .isEqualTo(Map.of("$ref", "#/components/schemas/TextRangePayload"));
 
-        Map<String, Object> page = schema(schemas, "CandidatePageResponse");
+        Map<String, Object> page = schema(schemas, "PageResponse");
         assertClosedObject(page);
         assertExactPropertiesAndRequired(page, "offset", "limit", "returnedCount", "totalCount", "hasMore");
 
@@ -785,7 +840,7 @@ class OpenApiContractTest {
         assertThat(schema(schema(properties(response), "candidates"), "items"))
                 .isEqualTo(Map.of("$ref", "#/components/schemas/MethodImplementationCandidateResponse"));
         assertThat(schema(properties(response), "limits"))
-                .isEqualTo(Map.of("$ref", "#/components/schemas/MethodImplementationLimitsResponse"));
+                .isEqualTo(Map.of("$ref", "#/components/schemas/BoundedResultResponse"));
         assertThat(schema(properties(response), "resolution"))
                 .isEqualTo(Map.of("$ref", "#/components/schemas/MethodImplementationResolutionResponse"));
 
@@ -799,9 +854,9 @@ class OpenApiContractTest {
         assertThat(schema(schema(properties(candidate), "profiles"), "items"))
                 .isEqualTo(Map.of("type", "string"));
 
-        Map<String, Object> limits = schema(schemas, "MethodImplementationLimitsResponse");
+        Map<String, Object> limits = schema(schemas, "BoundedResultResponse");
         assertClosedObject(limits);
-        assertExactPropertiesAndRequired(limits, "candidateLimit", "returnedCount", "totalCount", "truncated");
+        assertExactPropertiesAndRequired(limits, "limit", "returnedCount", "totalCount", "truncated");
 
         Map<String, Object> resolution = schema(schemas, "MethodImplementationResolutionResponse");
         assertClosedObject(resolution);
@@ -1007,7 +1062,7 @@ class OpenApiContractTest {
 
         assertThat(schemas.keySet()).noneMatch(name -> name.matches(".*(Flattened|Recursive|Cursor|Session|AnalysisStatus).*"));
         assertThat(schemas.keySet().stream().filter(name -> name.contains("Page")).toList())
-                .containsExactly("ConceptPageResponse", "ConceptSearchPageRequestResponse", "CandidatePageResponse");
+                .containsExactly("PageResponse", "ConceptSearchPageRequestResponse");
     }
 
     @Test
@@ -1026,6 +1081,8 @@ class OpenApiContractTest {
                 "SEMANTIC_BINDING_AMBIGUOUS",
                 "SEMANTIC_TARGET_NOT_FOUND",
                 "EXACT_CONTENT_NOT_FOUND",
+                "SOURCE_DECLARATION_NOT_FOUND",
+                "SOURCE_SEGMENT_TOO_LARGE",
                 "TYPE_MEMBER_TYPE_NOT_FOUND",
                 "SEMANTIC_BINDING_UNRESOLVED",
                 "IMPLEMENTATION_TARGET_UNSUPPORTED",
@@ -1520,7 +1577,7 @@ class OpenApiContractTest {
     }
 
     private void assertPageCoverageAndFollowUpSchemas(Map<String, Object> schemas) {
-        Map<String, Object> page = schema(schemas, "ConceptPageResponse");
+        Map<String, Object> page = schema(schemas, "PageResponse");
         assertClosedObject(page);
         assertExactPropertiesAndRequired(page, "offset", "limit", "returnedCount", "totalCount", "hasMore");
         assertThat(schema(properties(page), "offset")).containsEntry("minimum", 0);
@@ -1537,8 +1594,8 @@ class OpenApiContractTest {
 
         Map<String, Object> issue = schema(schemas, "ConceptIssueSummaryResponse");
         assertClosedObject(issue);
-        assertExactPropertiesAndRequired(issue, "reason", "count");
-        assertThat(list(schema(properties(issue), "reason").get("enum")))
+        assertExactPropertiesAndRequired(issue, "code", "count");
+        assertThat(list(schema(properties(issue), "code").get("enum")))
                 .containsExactly("MQ_DESTINATION_UNRESOLVED", "SCHEDULE_TRIGGER_VALUE_UNRESOLVED");
 
         Map<String, Object> unavailable = schema(schemas, "UnavailableDiscoveryFollowUpResponse");
@@ -1570,7 +1627,7 @@ class OpenApiContractTest {
                 "GET_MAPPER_FRAGMENT_SEGMENT",
                 "ANALYZE_OUTGOING_CALL_GRAPH", "ANALYZE_INCOMING_CALL_GRAPH",
                 "DISCOVER_METHOD_IMPLEMENTATIONS", "RESOLVE_CONCEPT", "GET_TYPE_MEMBERS", "GET_NEXT_PAGE",
-                "RESOLVE_SOURCE_SYMBOL");
+                "RESOLVE_SOURCE_SYMBOL", "FIND_INTERNAL_REFERENCES", "GET_JAVA_SOURCE_SEGMENT");
         assertThat(schema(properties(followUp), "api"))
                 .isEqualTo(Map.of("$ref", "#/components/schemas/DiscoveryFollowUpApiResponse"));
         assertThat(schema(properties(followUp), "request"))
@@ -1615,6 +1672,10 @@ class OpenApiContractTest {
                 "repoId", "expectedRevision", "sourceType", "memberKinds", "namePrefix", "offset", "limit");
         assertClosedFollowUpRequest(schemas, "DiscoverTypeMembersRequestResponse",
                 "repoId", "expectedRevision", "sourceType", "memberKinds", "namePrefix", "offset", "limit");
+        assertClosedFollowUpRequest(schemas, "FindInternalReferencesRequestResponse",
+                "repoId", "expectedRevision", "target", "offset", "limit");
+        assertClosedFollowUpRequest(schemas, "GetJavaSourceSegmentRequestResponse",
+                "repoId", "expectedRevision", "sourceRange", "contextLines");
         assertThat(properties(schema(schemas, "GetTypeMembersRequestResponse")))
                 .containsKey("sourceType")
                 .doesNotContainKeys("sourceFile", "fullyQualifiedName", "fullyQualifiedTypeName");

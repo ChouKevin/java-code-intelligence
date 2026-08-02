@@ -104,7 +104,7 @@ class MethodImplementationDiscoveryControllerTest {
                 .andExpect(jsonPath("$.candidates[0].primary").value(true))
                 .andExpect(jsonPath("$.candidates[0].qualifiers[0]").value("ordersHandler"))
                 .andExpect(jsonPath("$.candidates[0].profiles[0]").value("prod"))
-                .andExpect(jsonPath("$.limits.candidateLimit").value(100))
+                .andExpect(jsonPath("$.limits.limit").value(100))
                 .andExpect(jsonPath("$.limits.returnedCount").value(1))
                 .andExpect(jsonPath("$.limits.totalCount").value(2))
                 .andExpect(jsonPath("$.limits.truncated").value(true))
@@ -133,7 +133,7 @@ class MethodImplementationDiscoveryControllerTest {
                     "qualifiers":["ordersHandler"],
                     "profiles":["prod"]
                   }],
-                  "limits":{"candidateLimit":100,"returnedCount":1,"totalCount":2,"truncated":true},
+                  "limits":{"limit":100,"returnedCount":1,"totalCount":2,"truncated":true},
                   "resolution":{
                     "status":"PARTIAL",
                     "issueSummaries":[

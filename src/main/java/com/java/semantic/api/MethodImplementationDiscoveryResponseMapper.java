@@ -2,7 +2,7 @@ package com.java.semantic.api;
 
 import com.java.semantic.api.dto.DiscoverMethodImplementationsResponse;
 import com.java.semantic.api.dto.MethodImplementationCandidateResponse;
-import com.java.semantic.api.dto.MethodImplementationLimitsResponse;
+import com.java.semantic.api.dto.BoundedResultResponse;
 import com.java.semantic.api.dto.MethodImplementationResolutionResponse;
 import com.java.semantic.api.dto.SemanticImplementationIssueSummaryResponse;
 import com.java.semantic.callgraph.application.ImplementationCandidate;
@@ -40,9 +40,9 @@ public final class MethodImplementationDiscoveryResponseMapper {
                 candidate.profiles());
     }
 
-    private MethodImplementationLimitsResponse limits(MethodImplementationLimits limits) {
-        return new MethodImplementationLimitsResponse(
-                limits.candidateLimit(),
+    private BoundedResultResponse limits(MethodImplementationLimits limits) {
+        return new BoundedResultResponse(
+                limits.limit(),
                 limits.returnedCount(),
                 limits.totalCount(),
                 limits.truncated());

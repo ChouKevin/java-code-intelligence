@@ -155,7 +155,8 @@ public final class MethodImplementationDiscoveryApplicationService {
         Map<MethodTarget, SemanticMethod> distinct = new LinkedHashMap<>();
         List<MethodImplementationIssueReason> issues = new ArrayList<>();
         for (SemanticMethod method : methods) {
-            Optional<MethodTarget> target = canonicalTargetProjection.project(snapshot, index, method);
+            Optional<MethodTarget> target = canonicalTargetProjection.project(
+                    semanticService.classifySource(snapshot, method), index, method);
             if (target.isEmpty()) {
                 issues.add(MethodImplementationIssueReason.CANONICAL_TARGET_UNRESOLVED);
                 continue;

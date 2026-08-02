@@ -212,7 +212,7 @@ public final class DirectCallRelationshipResolver {
         }
         if (SemanticCallResolutionStatus.AMBIGUOUS.equals(resolution.status())) {
             List<MethodTarget> candidates = resolution.candidates().stream()
-                    .map(candidate -> canonicalTargetProjection.project(snapshot, index, candidate))
+                    .map(candidate -> canonicalTarget(snapshot, index, candidate))
                     .flatMap(Optional::stream)
                     .sorted(TARGET_ORDER)
                     .toList();
@@ -252,7 +252,7 @@ public final class DirectCallRelationshipResolver {
                     callSite, expression, strategy, Optional.of(invocation), Optional.empty());
         }
         SemanticMethod semanticTarget = call.target().orElseThrow();
-        Optional<MethodTarget> target = canonicalTargetProjection.project(snapshot, index, semanticTarget);
+        Optional<MethodTarget> target = canonicalTarget(snapshot, index, semanticTarget);
         if (!target.isPresent()) {
             log.debug("phase=callgraph-resolution outcome=unresolved reason=syntax-index-miss callerTargetId={}",
                     MethodTargetDiagnosticId.from(callerTarget));
@@ -285,7 +285,7 @@ public final class DirectCallRelationshipResolver {
         }
         try {
             for (SemanticMethod implementation : semanticService.implementations(snapshot, declarationMethod).methods()) {
-                canonicalTargetProjection.project(snapshot, index, implementation)
+                canonicalTarget(snapshot, index, implementation)
                         .map(target -> candidate(index, implementation, target))
                         .ifPresent(candidates::add);
             }
@@ -351,10 +351,17 @@ public final class DirectCallRelationshipResolver {
             RepositorySnapshot snapshot,
             RepositorySyntaxIndex index,
             SemanticMethod caller) {
-        return canonicalTargetProjection.project(snapshot, index, caller)
+        return canonicalTarget(snapshot, index, caller)
                 .flatMap(index::method)
                 .map(SourceMethodMetadata::invocations)
                 .orElse(List.of());
+    }
+
+    private Optional<MethodTarget> canonicalTarget(
+            RepositorySnapshot snapshot,
+            RepositorySyntaxIndex index,
+            SemanticMethod method) {
+        return canonicalTargetProjection.project(semanticService.classifySource(snapshot, method), index, method);
     }
 
     private boolean interfaceDeclaration(RepositorySyntaxIndex index, MethodTarget target) {

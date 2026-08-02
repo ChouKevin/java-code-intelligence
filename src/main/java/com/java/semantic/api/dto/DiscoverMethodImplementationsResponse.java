@@ -14,7 +14,7 @@ public record DiscoverMethodImplementationsResponse(
         @ApiMonitoringField(ApiMonitoringMode.VALUE) String revision,
         @ApiMonitoringField(ApiMonitoringMode.NESTED) MethodTargetPayload requestedTarget,
         @ApiMonitoringField(ApiMonitoringMode.SIZE) List<MethodImplementationCandidateResponse> candidates,
-        @ApiMonitoringField(ApiMonitoringMode.NESTED) MethodImplementationLimitsResponse limits,
+        @ApiMonitoringField(ApiMonitoringMode.NESTED) BoundedResultResponse limits,
         @ApiMonitoringField(ApiMonitoringMode.NESTED) MethodImplementationResolutionResponse resolution) {
 
     public DiscoverMethodImplementationsResponse {

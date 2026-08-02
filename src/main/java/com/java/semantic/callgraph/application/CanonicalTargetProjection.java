@@ -1,10 +1,10 @@
 package com.java.semantic.callgraph.application;
 
 import com.java.semantic.identity.MethodTarget;
-import com.java.semantic.repository.domain.RepositorySnapshot;
 import com.java.semantic.semantic.domain.SemanticMethod;
 import com.java.semantic.semantic.domain.SemanticPosition;
 import com.java.semantic.semantic.domain.SemanticRange;
+import com.java.semantic.semantic.domain.SemanticSourceClassification;
 import com.java.semantic.syntax.domain.SyntaxPosition;
 import com.java.semantic.syntax.domain.SyntaxRange;
 
@@ -14,10 +14,12 @@ import java.util.Optional;
 public final class CanonicalTargetProjection {
 
     public Optional<MethodTarget> project(
-            RepositorySnapshot snapshot,
+            SemanticSourceClassification source,
             RepositorySyntaxIndex index,
             SemanticMethod method) {
-        Optional<String> sourceFile = snapshot.relativeSourceFile(method.location().uri());
+        Optional<String> sourceFile = source instanceof SemanticSourceClassification.LocalSource local
+                ? Optional.of(local.sourceFile())
+                : Optional.empty();
         return sourceFile.flatMap(file -> index.target(
                         file,
                         method.packageName(),

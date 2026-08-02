@@ -32,6 +32,8 @@ import com.java.semantic.syntax.domain.MapperFragmentIdentity;
 import com.java.semantic.syntax.domain.MapperStatementEvidence;
 import com.java.semantic.syntax.domain.MapperStatementIdentity;
 import com.java.semantic.syntax.domain.MapperStatementKey;
+import com.java.semantic.repository.domain.RepositorySourceContainment;
+import com.java.semantic.repository.domain.RepositorySourceContainmentResult;
 
 import org.springframework.util.CollectionUtils;
 import org.springframework.util.StringUtils;
@@ -89,7 +91,7 @@ class MapperXmlSqlExtractor {
             return new Extraction(SqlIndex.empty(), MapperEvidenceIndex.empty());
         }
 
-        RepositoryContainment containment = RepositoryContainment.of(repositoryRoot);
+        RepositorySourceContainment containment = new RepositorySourceContainment();
         Map<String, Map<String, String>> byNamespace = new HashMap<>();
         List<MapperStatementEvidence> statements = new ArrayList<>();
         List<MapperFragmentEvidence> fragments = new ArrayList<>();
@@ -100,7 +102,7 @@ class MapperXmlSqlExtractor {
     }
 
     private void indexRoot(
-            RepositoryContainment containment,
+            RepositorySourceContainment containment,
             Path repositoryRoot,
             Path resourceRoot,
             Map<String, Map<String, String>> byNamespace,
@@ -109,7 +111,8 @@ class MapperXmlSqlExtractor {
         try (Stream<Path> walk = Files.walk(resourceRoot)) {
             walk.filter(Files::isRegularFile)
                     .filter(path -> path.toString().endsWith(".xml"))
-                    .filter(containment::contains)
+                    .filter(path -> containment.classify(repositoryRoot, path)
+                            instanceof RepositorySourceContainmentResult.ContainedSource)
                     .sorted()
                     .forEach(path -> indexFile(repositoryRoot, path, byNamespace, statementEvidence, fragments));
         } catch (IOException e) {
