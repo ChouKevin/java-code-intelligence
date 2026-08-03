@@ -26,6 +26,7 @@ import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
 
 import java.util.List;
+import tools.jackson.databind.ObjectMapper;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -141,7 +142,7 @@ class ApiMonitoringFilterTest {
         try {
             ApiSecurityProperties properties = new ApiSecurityProperties();
             properties.setApiToken("configured");
-            ApiTokenFilter tokenFilter = new ApiTokenFilter(properties);
+            ApiTokenFilter tokenFilter = new ApiTokenFilter(properties, new ObjectMapper());
 
             FilterResult result = invoke((request, response) -> tokenFilter.doFilter(
                     request, response, (downstreamRequest, downstreamResponse) -> {

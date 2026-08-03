@@ -1,6 +1,6 @@
 package com.java.semantic.api.security;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.ObjectMapper;
 import com.java.semantic.api.RequestCorrelationFilter;
 import com.java.semantic.api.ApiMonitoringContext;
 import com.java.semantic.api.dto.ApiErrorResponse;
@@ -27,12 +27,12 @@ public class ApiTokenFilter extends OncePerRequestFilter {
     public static final String API_TOKEN_HEADER = "X-Api-Token";
 
     private static final String HEALTH_PATH = "/actuator/health";
-    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
-
     private final ApiSecurityProperties properties;
+    private final ObjectMapper objectMapper;
 
-    public ApiTokenFilter(ApiSecurityProperties properties) {
+    public ApiTokenFilter(ApiSecurityProperties properties, ObjectMapper objectMapper) {
         this.properties = properties;
+        this.objectMapper = objectMapper;
     }
 
     /** health 供 compose 探測,是唯一豁免項 */
@@ -69,7 +69,7 @@ public class ApiTokenFilter extends OncePerRequestFilter {
         response.setContentType(MediaType.APPLICATION_JSON_VALUE);
         String requestId = Objects.toString(
                 request.getAttribute(RequestCorrelationFilter.REQUEST_ID_ATTRIBUTE), "");
-        OBJECT_MAPPER.writeValue(response.getWriter(), ApiErrorResponse.withContext(
+        objectMapper.writeValue(response.getWriter(), ApiErrorResponse.withContext(
                 errorCode,
                 message,
                 null,

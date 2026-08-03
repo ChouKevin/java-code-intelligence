@@ -1,7 +1,7 @@
 package com.java.semantic.api.security;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -128,7 +128,7 @@ class ApiTokenFilterTest {
     private ApiTokenFilter filterWith(String token) {
         ApiSecurityProperties properties = new ApiSecurityProperties();
         properties.setApiToken(token);
-        return new ApiTokenFilter(properties);
+        return new ApiTokenFilter(properties, OBJECT_MAPPER);
     }
 
     private FilterResult invoke(ApiTokenFilter filter, String method, String uri, String token)

@@ -7,6 +7,7 @@ import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.Ordered;
+import tools.jackson.databind.ObjectMapper;
 
 /** 以 /* 註冊而非逐條列舉,新端點預設即受保護 */
 @Configuration
@@ -32,9 +33,11 @@ public class ApiSecurityConfig {
     }
 
     @Bean
-    public FilterRegistrationBean<ApiTokenFilter> apiTokenFilter(ApiSecurityProperties properties) {
+    public FilterRegistrationBean<ApiTokenFilter> apiTokenFilter(
+            ApiSecurityProperties properties,
+            ObjectMapper objectMapper) {
         FilterRegistrationBean<ApiTokenFilter> registration =
-                new FilterRegistrationBean<>(new ApiTokenFilter(properties));
+                new FilterRegistrationBean<>(new ApiTokenFilter(properties, objectMapper));
         registration.addUrlPatterns("/*");
         registration.setOrder(Ordered.HIGHEST_PRECEDENCE + 2);
         return registration;

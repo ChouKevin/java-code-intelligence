@@ -2,8 +2,8 @@ package com.java.semantic.api.security;
 
 import com.java.semantic.api.RequestCorrelationFilter;
 import com.java.semantic.api.ApiMonitoringFilter;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 import jakarta.servlet.FilterChain;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -28,7 +28,7 @@ class ApiSecurityConfigTest {
         ApiSecurityConfig config = new ApiSecurityConfig();
         ApiSecurityProperties properties = new ApiSecurityProperties();
 
-        FilterRegistrationBean<ApiTokenFilter> registration = config.apiTokenFilter(properties);
+        FilterRegistrationBean<ApiTokenFilter> registration = config.apiTokenFilter(properties, OBJECT_MAPPER);
 
         assertThat(registration.getUrlPatterns()).containsExactly("/*");
         assertThat(registration.getOrder()).isEqualTo(Ordered.HIGHEST_PRECEDENCE + 2);
@@ -132,7 +132,7 @@ class ApiSecurityConfigTest {
             String apiToken)
             throws Exception {
         RequestCorrelationFilter correlation = config.requestCorrelationFilter().getFilter();
-        ApiTokenFilter token = config.apiTokenFilter(properties).getFilter();
+        ApiTokenFilter token = config.apiTokenFilter(properties, OBJECT_MAPPER).getFilter();
         MockHttpServletRequest request = new MockHttpServletRequest(method, path);
         request.addHeader(RequestCorrelationFilter.REQUEST_ID_HEADER, suppliedRequestId);
         Optional.ofNullable(apiToken).ifPresent(value -> request.addHeader(ApiTokenFilter.API_TOKEN_HEADER, value));
