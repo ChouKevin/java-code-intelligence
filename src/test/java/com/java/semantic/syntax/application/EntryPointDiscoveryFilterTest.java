@@ -20,7 +20,7 @@ import com.java.semantic.syntax.domain.MethodTargetResolution;
 import com.java.semantic.syntax.domain.RepositorySyntax;
 import com.java.semantic.syntax.domain.ScheduleEntryPoint;
 import com.java.semantic.syntax.domain.ScheduleTriggerKind;
-import com.java.semantic.syntax.domain.SourceSlice;
+import com.java.semantic.syntax.domain.SourceRange;
 import com.java.semantic.syntax.domain.SyntaxPosition;
 import com.java.semantic.syntax.domain.SyntaxRange;
 import org.junit.jupiter.api.BeforeEach;
@@ -230,7 +230,7 @@ class EntryPointDiscoveryFilterTest {
                 false,
                 List.of(),
                 range,
-                new SourceSlice(range, source),
+                new SourceRange("com/acme/secret/" + className + ".java", range),
                 false,
                 List.of());
     }

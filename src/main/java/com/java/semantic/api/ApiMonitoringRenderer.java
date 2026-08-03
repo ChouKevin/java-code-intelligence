@@ -222,6 +222,12 @@ public final class ApiMonitoringRenderer {
                 optionalValue.ifPresent(value -> renderRecord(fieldName, value));
                 return;
             }
+            if (componentValue instanceof List<?> nestedRecords) {
+                for (int index = 0; index < nestedRecords.size(); index++) {
+                    renderRecord(fieldName + "[" + index + "]", nestedRecords.get(index));
+                }
+                return;
+            }
             renderRecord(fieldName, componentValue);
         }
 

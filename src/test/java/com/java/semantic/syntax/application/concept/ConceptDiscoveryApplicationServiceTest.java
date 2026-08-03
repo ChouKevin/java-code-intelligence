@@ -11,7 +11,7 @@ import com.java.semantic.syntax.application.concept.EntryPointConceptIdentity.Ap
 import com.java.semantic.syntax.application.concept.DeclarationConceptIdentity.MethodConceptIdentity;
 import com.java.semantic.syntax.domain.RepositorySyntax;
 import com.java.semantic.syntax.domain.SourceExtractionOutcome;
-import com.java.semantic.syntax.domain.SyntaxExtractionService;
+import com.java.semantic.syntax.domain.RevisionBoundRepositorySyntaxProvider;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -50,7 +50,7 @@ class ConceptDiscoveryApplicationServiceTest {
     private RepositoryApplicationService repositoryApplicationService;
 
     @Mock
-    private SyntaxExtractionService syntaxExtractionService;
+    private RevisionBoundRepositorySyntaxProvider repositorySyntaxProvider;
 
     private RepositorySyntax syntax;
     private ConceptDiscoveryApplicationService service;
@@ -65,7 +65,7 @@ class ConceptDiscoveryApplicationServiceTest {
                         SourceExtractionOutcome.syntaxFailed("src/main/java/com/acme/order/Broken.java", "SYNTAX_ERROR")));
         service = new ConceptDiscoveryApplicationService(
                 repositoryApplicationService,
-                syntaxExtractionService,
+                repositorySyntaxProvider,
                 new StructuredConceptCatalogProjector(List.of(new TestConceptProvider())),
                 new ConceptSearchDocumentProjector(),
                 new ConceptSearchMatcher());
@@ -85,7 +85,7 @@ class ConceptDiscoveryApplicationServiceTest {
                 1,
                 2);
         delegateSnapshot(snapshot, query);
-        when(syntaxExtractionService.extract(REPOSITORY_ROOT)).thenReturn(syntax);
+        when(repositorySyntaxProvider.get(snapshot)).thenReturn(syntax);
 
         ConceptSearchResult result = service.search(query);
 
@@ -114,8 +114,8 @@ class ConceptDiscoveryApplicationServiceTest {
                 Set.of("com.acme.order"),
                 3,
                 2));
-        InOrder order = inOrder(syntaxExtractionService);
-        order.verify(syntaxExtractionService).extract(REPOSITORY_ROOT);
+        InOrder order = inOrder(repositorySyntaxProvider);
+        order.verify(repositorySyntaxProvider).get(snapshot);
     }
 
     @Test
@@ -130,7 +130,7 @@ class ConceptDiscoveryApplicationServiceTest {
         ConceptResolveQuery query = new ConceptResolveQuery(
                 REPOSITORY_ID, REVISION, new MethodConceptIdentity(target));
         delegateResolveSnapshot(snapshot, query);
-        when(syntaxExtractionService.extract(REPOSITORY_ROOT)).thenReturn(syntax);
+        when(repositorySyntaxProvider.get(snapshot)).thenReturn(syntax);
 
         RevisionBoundConceptResolution result = service.resolve(query);
 
@@ -157,7 +157,7 @@ class ConceptDiscoveryApplicationServiceTest {
                 0,
                 50);
         delegateSnapshot(snapshot, query);
-        when(syntaxExtractionService.extract(REPOSITORY_ROOT)).thenReturn(zeroResultSyntax);
+        when(repositorySyntaxProvider.get(snapshot)).thenReturn(zeroResultSyntax);
 
         ConceptSearchResult result = service.search(query);
 
@@ -183,7 +183,7 @@ class ConceptDiscoveryApplicationServiceTest {
                     assertThat(exception.unavailableKinds()).containsExactly(ConceptKind.MAPPER_STATEMENT);
                     assertThat(exception.supportedKinds()).containsExactly(ConceptKind.METHOD, ConceptKind.API_ROUTE);
                 });
-        verifyNoInteractions(repositoryApplicationService, syntaxExtractionService);
+        verifyNoInteractions(repositoryApplicationService, repositorySyntaxProvider);
     }
 
     @Test
@@ -192,7 +192,7 @@ class ConceptDiscoveryApplicationServiceTest {
         StructuredConceptCatalogProjector projector = new StructuredConceptCatalogProjector();
         ConceptDiscoveryApplicationService defaultService = new ConceptDiscoveryApplicationService(
                 repositoryApplicationService,
-                syntaxExtractionService,
+                repositorySyntaxProvider,
                 projector,
                 new ConceptSearchDocumentProjector(),
                 new ConceptSearchMatcher());
@@ -214,7 +214,7 @@ class ConceptDiscoveryApplicationServiceTest {
                 0,
                 50);
         delegateSnapshot(snapshot, query);
-        when(syntaxExtractionService.extract(REPOSITORY_ROOT)).thenReturn(syntax);
+        when(repositorySyntaxProvider.get(snapshot)).thenReturn(syntax);
 
         ConceptSearchResult result = defaultService.search(query);
 

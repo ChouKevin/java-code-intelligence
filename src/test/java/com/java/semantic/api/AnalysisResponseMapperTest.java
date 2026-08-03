@@ -1,6 +1,9 @@
 package com.java.semantic.api;
 
 import com.java.semantic.api.dto.OutgoingCallGraphResponse;
+import com.java.semantic.api.dto.DiscoveryFollowUpResponse;
+import com.java.semantic.syntax.application.DiscoveryFollowUpFactory;
+import com.java.semantic.repository.domain.RepositoryId;
 import com.java.semantic.callgraph.domain.CallNodeId;
 import com.java.semantic.callgraph.domain.CallSiteRange;
 import com.java.semantic.callgraph.domain.DispatchKind;
@@ -9,6 +12,7 @@ import com.java.semantic.callgraph.domain.GraphEdge;
 import com.java.semantic.callgraph.domain.GraphLimitReason;
 import com.java.semantic.callgraph.domain.GraphNode;
 import com.java.semantic.callgraph.domain.GraphTraversal;
+import com.java.semantic.callgraph.domain.GraphWarning;
 import com.java.semantic.callgraph.domain.NodeContentState;
 import com.java.semantic.callgraph.domain.NodeTraversalState;
 import com.java.semantic.callgraph.domain.OutgoingGraphFragment;
@@ -34,7 +38,50 @@ class AnalysisResponseMapperTest {
                 "place",
                 List.of());
 
-    private final AnalysisResponseMapper mapper = new AnalysisResponseMapper(new SourceLocationHttpMapper());
+    private final AnalysisResponseMapper mapper = new AnalysisResponseMapper(
+            sourceLocationMapper(),
+            new DiscoveryFollowUpFactory(),
+            followUpMapper());
+
+    @Test
+    void should_offer_only_method_source_for_internal_graph_nodes_without_reading_graph_source() {
+        CallNodeId localNode = new CallNodeId("node-local");
+        CallNodeId externalNode = new CallNodeId("node-external");
+        OutgoingGraphFragment fragment = new OutgoingGraphFragment(
+                GraphAnalysisStatus.SUCCESS,
+                RepositoryRevision.fixture(),
+                localNode,
+                new GraphTraversal(2, 0, 40, true, GraphLimitReason.NONE),
+                List.of(
+                        new GraphNode(
+                                localNode,
+                                Optional.of(TARGET),
+                                "",
+                                NodeContentState.TARGET_ONLY,
+                                NodeTraversalState.BUDGET_CUTOFF,
+                                DispatchKind.SYNCHRONOUS,
+                                Optional.empty()),
+                        new GraphNode(
+                                externalNode,
+                                Optional.empty(),
+                                "java.util.List#size",
+                                NodeContentState.EXTERNAL,
+                                NodeTraversalState.EXTERNAL,
+                                DispatchKind.SYNCHRONOUS,
+                                Optional.empty())),
+                List.of(),
+                List.of(),
+                List.of());
+
+        OutgoingCallGraphResponse response = mapper.toResponse(RepositoryId.of("orders"), fragment);
+
+        assertThat(response.nodes().get(0).availableFollowUps())
+                .extracting(followUp -> followUp.operation())
+                .containsExactly("GET_METHOD_SOURCE");
+        assertThat(response.nodes().get(0).availableFollowUps().getFirst().request())
+                .isInstanceOf(DiscoveryFollowUpResponse.GetMethodSourceRequestResponse.class);
+        assertThat(response.nodes().get(1).availableFollowUps()).isEmpty();
+    }
 
     @Test
     void should_map_resolution_strategy_to_its_resolution_category() {
@@ -55,7 +102,6 @@ class AnalysisResponseMapperTest {
                         NodeContentState.TARGET_ONLY,
                         NodeTraversalState.BUDGET_CUTOFF,
                         DispatchKind.SYNCHRONOUS,
-                        Optional.empty(),
                         Optional.empty())),
                 List.of(
                         new GraphEdge(
@@ -75,7 +121,7 @@ class AnalysisResponseMapperTest {
                 List.of(),
                 List.of());
 
-        OutgoingCallGraphResponse response = mapper.toResponse(fragment);
+        OutgoingCallGraphResponse response = mapper.toResponse(RepositoryId.of("orders"), fragment);
 
         assertThat(response.edges()).hasSize(2);
         assertThat(response.edges().get(0).resolutionStrategy()).isEqualTo("LOMBOK_GENERATED");
@@ -83,5 +129,60 @@ class AnalysisResponseMapperTest {
         assertThat(response.edges().get(1).resolutionStrategy()).isEqualTo("JDT_CALL_HIERARCHY");
         assertThat(response.edges().get(1).category()).isEqualTo("RESOLVED_ANALYZABLE");
         assertThat(response.nodes().get(0).dispatchKind()).isEqualTo("SYNCHRONOUS");
+    }
+
+    @Test
+    void should_offer_exact_java_range_read_for_graph_warning_call_site() {
+        CallNodeId root = new CallNodeId("node-root");
+        CallSiteRange callSite = new CallSiteRange(TARGET.sourceFile(), 12, 3, 12, 15);
+        OutgoingGraphFragment fragment = new OutgoingGraphFragment(
+                GraphAnalysisStatus.PARTIAL,
+                RepositoryRevision.fixture(),
+                root,
+                new GraphTraversal(2, 0, 40, true, GraphLimitReason.NONE),
+                List.of(new GraphNode(
+                        root,
+                        Optional.of(TARGET),
+                        "",
+                        NodeContentState.TARGET_ONLY,
+                        NodeTraversalState.BUDGET_CUTOFF,
+                        DispatchKind.SYNCHRONOUS,
+                        Optional.empty())),
+                List.of(),
+                List.of(new GraphWarning(
+                        "DESCENDANT_CALL_UNRESOLVED",
+                        "unresolved",
+                        root,
+                        Optional.of("place(orderId)"),
+                        Optional.of(callSite),
+                        List.of())),
+                List.of());
+
+        OutgoingCallGraphResponse response = mapper.toResponse(RepositoryId.of("orders"), fragment);
+
+        assertThat(response.warnings().getFirst().availableFollowUps()).singleElement().satisfies(followUp -> {
+            assertThat(followUp.operation()).isEqualTo("GET_SOURCE_SEGMENT");
+            assertThat(followUp.request())
+                    .isInstanceOf(DiscoveryFollowUpResponse.GetSourceSegmentRequestResponse.class);
+            DiscoveryFollowUpResponse.GetSourceSegmentRequestResponse request =
+                    (DiscoveryFollowUpResponse.GetSourceSegmentRequestResponse) followUp.request();
+            assertThat(request.location().sourceFile()).isEqualTo(TARGET.sourceFile());
+            assertThat(request.contextLines()).isZero();
+        });
+    }
+
+    private static SourceLocationHttpMapper sourceLocationMapper() {
+        return new SourceLocationHttpMapper();
+    }
+
+    private static StructuredDiscoveryResponseMapper followUpMapper() {
+        SourceLocationHttpMapper sourceLocationMapper = sourceLocationMapper();
+        MapperIdentityHttpMapper mapperIdentityHttpMapper = new MapperIdentityHttpMapper();
+        return new StructuredDiscoveryResponseMapper(
+                new DiscoveryFollowUpFactory(),
+                new ConceptIdentityHttpMapper(sourceLocationMapper, mapperIdentityHttpMapper),
+                mapperIdentityHttpMapper,
+                sourceLocationMapper,
+                new ExactSourceDeclarationTargetHttpMapper(sourceLocationMapper));
     }
 }

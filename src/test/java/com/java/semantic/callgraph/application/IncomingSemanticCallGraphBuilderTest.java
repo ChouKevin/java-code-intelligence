@@ -35,7 +35,7 @@ import com.java.semantic.syntax.domain.AnnotationEvidence;
 import com.java.semantic.syntax.domain.SqlSourceKind;
 import com.java.semantic.syntax.domain.MethodTargetResolution;
 import com.java.semantic.syntax.domain.RepositorySyntax;
-import com.java.semantic.syntax.domain.SourceSlice;
+import com.java.semantic.syntax.domain.SourceRange;
 import com.java.semantic.syntax.domain.SyntaxInvocation;
 import com.java.semantic.syntax.domain.SyntaxPosition;
 import com.java.semantic.syntax.domain.SyntaxRange;
@@ -62,7 +62,7 @@ class IncomingSemanticCallGraphBuilderTest {
             RepositoryId.of("orders"), Path.of("/fixture"), RepositoryRevision.fixture());
 
     @Test
-    void should_build_caller_to_callee_edges_for_each_distinct_call_site_with_full_bodies() {
+    void should_build_caller_to_callee_edges_for_each_distinct_call_site_with_full_source_state() {
         MethodTarget calleeTarget = target("Callee", "work");
         MethodTarget callerTarget = target("Caller", "run");
         SemanticMethod callee = incomingMethod(calleeTarget, 10);
@@ -82,7 +82,7 @@ class IncomingSemanticCallGraphBuilderTest {
         assertThat(fragment.edges()).extracting(edge -> edge.callSite().startLine()).containsExactly(2, 4);
         assertThat(fragment.nodes()).allSatisfy(node -> {
             assertThat(node.contentState()).isEqualTo(NodeContentState.FULL_SOURCE);
-            assertThat(node.methodBody()).isPresent();
+            assertThat(node.declarationRange()).isPresent();
         });
     }
 
@@ -485,13 +485,13 @@ class IncomingSemanticCallGraphBuilderTest {
         IncomingGraphFragment fragment = builder(semantic)
                 .build(SNAPSHOT,
                         syntax(dataAccessInterfaceType(
-                                        mapperTarget, "select xml from orders", SqlSourceKind.MAPPER_XML, List.of()),
+                                        mapperTarget, SqlSourceKind.MAPPER_XML, List.of()),
                                 type(callerTarget)),
                         mapperTarget, mapper, 1, 0);
 
         assertThat(fragment.edges()).singleElement().satisfies(edge -> {
             assertThat(edge.resolutionStrategy()).isEqualTo(ResolutionStrategy.MYBATIS_MAPPER);
-            assertThat(edge.evidence()).anySatisfy(entry -> assertThat(entry).contains("select xml from orders"));
+            assertThat(edge.evidence()).contains("mapper SQL evidence: MAPPER_XML");
         });
         assertThat(fragment.nodes()).anySatisfy(node -> assertThat(node.target()).contains(callerTarget));
         assertThat(fragment.warnings()).noneMatch(warning -> "DESCENDANT_CALL_UNRESOLVED".equals(warning.code()));
@@ -510,7 +510,7 @@ class IncomingSemanticCallGraphBuilderTest {
 
         IncomingGraphFragment fragment = builder(semantic)
                 .build(SNAPSHOT,
-                        syntax(dataAccessInterfaceType(daoTarget, null, null, List.of("Mapper")), type(callerTarget)),
+                        syntax(dataAccessInterfaceType(daoTarget, null, List.of("Mapper")), type(callerTarget)),
                         daoTarget, dao, 1, 0);
 
         assertThat(fragment.edges()).isEmpty();
@@ -519,18 +519,20 @@ class IncomingSemanticCallGraphBuilderTest {
     }
 
     private static SourceTypeMetadata dataAccessInterfaceType(
-            MethodTarget target, String sql, SqlSourceKind sqlSource, List<String> annotations) {
+            MethodTarget target, SqlSourceKind sqlSource, List<String> annotations) {
         SyntaxRange range = new SyntaxRange(new SyntaxPosition(0, 0), new SyntaxPosition(30, 0));
+        SourceRange declarationLocation = new SourceRange(target.sourceFile(), range);
         SourceMethodMetadata method = new SourceMethodMetadata(
-                target.methodName(), target.parameterTypes(), sql, sqlSource, 1, 6,
-                range, new SourceSlice(range, target.methodName() + "();"), List.<TypeReference>of(),
+                target.methodName(), target.parameterTypes(), sqlSource,
+                sqlSource == SqlSourceKind.ANNOTATION ? Optional.of(declarationLocation) : Optional.empty(),
+                declarationLocation, List.<TypeReference>of(),
                 Optional.empty(), List.of(), List.of(), List.of(), range.start(),
                 MethodTargetResolution.resolved(target), false, true, true);
         return com.java.semantic.syntax.domain.SourceTypeMetadataFixture.sourceType(
                 target.className(), target.packageName(), target.packageName() + "." + target.className(),
                 target.sourceFile(), SourceTypeKind.INTERFACE, false,
                 List.of(), List.of(), annotations, List.of(), List.of(), List.of(method), false, false, List.of(), range,
-                new SourceSlice(range, "interface " + target.className() + " {}"), false, List.of());
+                new SourceRange(target.sourceFile(), range), false, List.of());
     }
 
     private static IncomingSemanticCallGraphBuilder builder(FakeSemanticService semanticService) {
@@ -553,15 +555,15 @@ class IncomingSemanticCallGraphBuilderTest {
         List<SyntaxInvocation> invocations = List.of(
                 invocation(1), invocation(2), invocation(3), invocation(4), invocation(5), invocation(7), invocation(12));
         SourceMethodMetadata method = new SourceMethodMetadata(
-                target.methodName(), target.parameterTypes(), null, null, 1, 6,
-                range, new SourceSlice(range, "void " + target.methodName() + "() {}"), List.<TypeReference>of(),
+                target.methodName(), target.parameterTypes(), null, Optional.empty(),
+                new SourceRange(target.sourceFile(), range), List.<TypeReference>of(),
                 Optional.empty(), invocations, List.of(), List.of(), range.start(),
                 MethodTargetResolution.resolved(target), true, false, true);
         return com.java.semantic.syntax.domain.SourceTypeMetadataFixture.sourceType(
                 target.className(), target.packageName(), target.packageName() + "." + target.className(),
                 target.sourceFile(), SourceTypeKind.CLASS, false,
                 List.of(), List.of(), List.of(), List.of(), List.of(), List.of(method), false, false, List.of(), range,
-                new SourceSlice(range, "class " + target.className() + " {}"), false, List.of());
+                new SourceRange(target.sourceFile(), range), false, List.of());
     }
 
     private static SourceTypeMetadata asyncType(MethodTarget target) {
@@ -569,8 +571,8 @@ class IncomingSemanticCallGraphBuilderTest {
         List<SyntaxInvocation> invocations = List.of(
                 invocation(1), invocation(2), invocation(3), invocation(4), invocation(5), invocation(7), invocation(12));
         SourceMethodMetadata method = new SourceMethodMetadata(
-                target.methodName(), target.parameterTypes(), null, null, 1, 6,
-                range, new SourceSlice(range, "@Async\nvoid " + target.methodName() + "() {}"),
+                target.methodName(), target.parameterTypes(), null, Optional.empty(),
+                new SourceRange(target.sourceFile(), range),
                 List.<TypeReference>of(), Optional.empty(), invocations,
                 List.of(new AnnotationEvidence("Async", Optional.empty())), List.of(), range.start(),
                 MethodTargetResolution.resolved(target), true, false, true);
@@ -578,21 +580,21 @@ class IncomingSemanticCallGraphBuilderTest {
                 target.className(), target.packageName(), target.packageName() + "." + target.className(),
                 target.sourceFile(), SourceTypeKind.CLASS, false,
                 List.of(), List.of(), List.of(), List.of(), List.of(), List.of(method), false, false, List.of(), range,
-                new SourceSlice(range, "class " + target.className() + " {}"), false, List.of());
+                new SourceRange(target.sourceFile(), range), false, List.of());
     }
 
     private static SourceTypeMetadata interfaceType(MethodTarget target) {
         SyntaxRange range = new SyntaxRange(new SyntaxPosition(0, 0), new SyntaxPosition(30, 0));
         SourceMethodMetadata method = new SourceMethodMetadata(
-                target.methodName(), target.parameterTypes(), null, null, 1, 6,
-                range, new SourceSlice(range, "void " + target.methodName() + "() {}"), List.<TypeReference>of(),
+                target.methodName(), target.parameterTypes(), null, Optional.empty(),
+                new SourceRange(target.sourceFile(), range), List.<TypeReference>of(),
                 Optional.empty(), List.of(), List.of(), List.of(), range.start(),
                 MethodTargetResolution.resolved(target), false, true, true);
         return com.java.semantic.syntax.domain.SourceTypeMetadataFixture.sourceType(
                 target.className(), target.packageName(), target.packageName() + "." + target.className(),
                 target.sourceFile(), SourceTypeKind.INTERFACE, false,
                 List.of(), List.of(), List.of(), List.of(), List.of(), List.of(method), false, false, List.of(), range,
-                new SourceSlice(range, "interface " + target.className() + " {}"), false, List.of());
+                new SourceRange(target.sourceFile(), range), false, List.of());
     }
 
     private static SyntaxInvocation invocation(int line) {

@@ -13,7 +13,7 @@ import com.java.semantic.semantic.domain.JavaSemanticService;
 import com.java.semantic.syntax.domain.ExactSourceDeclaration;
 import com.java.semantic.syntax.domain.ExactSourceDeclarationResolver;
 import com.java.semantic.syntax.domain.ExactSourceDeclarationTarget;
-import com.java.semantic.syntax.domain.SyntaxExtractionService;
+import com.java.semantic.syntax.domain.RevisionBoundRepositorySyntaxProvider;
 import com.java.semantic.syntax.domain.SyntaxPosition;
 import com.java.semantic.syntax.domain.SyntaxRange;
 import org.junit.jupiter.api.Test;
@@ -66,7 +66,7 @@ class ApiMonitoringAspectTest {
                 repositories,
                 mock(ExactSourceDeclarationResolver.class),
                 mock(JavaSemanticService.class),
-                mock(SyntaxExtractionService.class),
+                mock(RevisionBoundRepositorySyntaxProvider.class),
                 cache);
         CapturedLogs captured = captureLogs();
         try {

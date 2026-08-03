@@ -14,6 +14,8 @@ import java.util.Set;
 public record ConceptSearchResult(
         RepositoryId repositoryId,
         RepositoryRevision analyzedRevision,
+        /** 保留完整原始 typed query 供 response 重送或精煉既有搜尋 */
+        ConceptSearchQuery query,
         /** 保留正規化搜尋條件及原始請求順序供 matchedTerms 與分頁投影 */
         List<ConceptSearchTerm> normalizedTerms,
         /** 保留本次實際搜尋 kind 並固定為 ConceptKind enum 順序 */
@@ -29,6 +31,7 @@ public record ConceptSearchResult(
     public ConceptSearchResult {
         repositoryId = Objects.requireNonNull(repositoryId, "repositoryId is required");
         analyzedRevision = Objects.requireNonNull(analyzedRevision, "analyzedRevision is required");
+        query = Objects.requireNonNull(query, "query is required");
         normalizedTerms = List.copyOf(Objects.requireNonNull(
                 normalizedTerms, "normalizedTerms are required"));
         searchedKinds = List.copyOf(Objects.requireNonNull(
@@ -49,6 +52,18 @@ public record ConceptSearchResult(
                 "supportedKinds must follow ConceptKind enum order");
         Assert.isTrue(supportedKinds.containsAll(searchedKinds),
                 "supportedKinds must include searchedKinds");
+        Assert.isTrue(query.repositoryId().equals(repositoryId),
+                "query repositoryId must match result");
+        Assert.isTrue(query.expectedRevision().equals(analyzedRevision),
+                "query expectedRevision must match analyzedRevision");
+        Assert.isTrue(query.terms().equals(normalizedTerms),
+                "query terms must match normalizedTerms");
+        Assert.isTrue(query.kinds().equals(Set.copyOf(searchedKinds)),
+                "query kinds must match searchedKinds");
+        Assert.isTrue(query.offset() == page.offset(),
+                "query offset must match result page");
+        Assert.isTrue(query.limit() == page.limit(),
+                "query limit must match result page");
         if (page.hasMore()) {
             ConceptSearchQuery nextQuery = nextPageQuery.orElseThrow();
             Assert.isTrue(nextQuery.repositoryId().equals(repositoryId),

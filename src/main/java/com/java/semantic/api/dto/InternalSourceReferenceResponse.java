@@ -16,13 +16,13 @@ public record InternalSourceReferenceResponse(
         @ApiMonitoringField(ApiMonitoringMode.SIZE) List<ReferenceGroupResponse> referenceGroups,
         @ApiMonitoringField(ApiMonitoringMode.NESTED) PageResponse page,
         @ApiMonitoringField(ApiMonitoringMode.SIZE) List<IssueSummaryResponse> issueSummaries,
-        @ApiMonitoringField(ApiMonitoringMode.SIZE) List<DiscoveryFollowUpResponse> availableFollowUps) {
+        @ApiMonitoringField(ApiMonitoringMode.NESTED) List<DiscoveryFollowUpResponse> availableFollowUps) {
 
     /** exact target 的宣告證據與可執行來源續讀 */
     public record TargetDeclarationResponse(
             @ApiMonitoringField(ApiMonitoringMode.NESTED) InternalSourceReferenceTargetPayload target,
             @ApiMonitoringField(ApiMonitoringMode.NESTED) TextRangePayload declarationRange,
-            @ApiMonitoringField(ApiMonitoringMode.SIZE) List<DiscoveryFollowUpResponse> availableFollowUps) {
+            @ApiMonitoringField(ApiMonitoringMode.NESTED) List<DiscoveryFollowUpResponse> availableFollowUps) {
     }
 
     /** 同一 METHOD 或 TYPE context 的 reference 群組 */
@@ -30,7 +30,7 @@ public record InternalSourceReferenceResponse(
             @ApiMonitoringField(ApiMonitoringMode.NESTED) InternalSourceReferenceContextPayload context,
             @ApiMonitoringField(ApiMonitoringMode.SIZE) List<RepresentativeReferenceResponse> representativeReferences,
             @ApiMonitoringField(ApiMonitoringMode.NESTED) BoundedResultResponse limits,
-            @ApiMonitoringField(ApiMonitoringMode.SIZE) List<DiscoveryFollowUpResponse> availableFollowUps,
+            @ApiMonitoringField(ApiMonitoringMode.NESTED) List<DiscoveryFollowUpResponse> availableFollowUps,
             @ApiMonitoringField(ApiMonitoringMode.SIZE)
             List<UnavailableDiscoveryFollowUpResponse> unavailableFollowUps) {
     }
@@ -38,7 +38,7 @@ public record InternalSourceReferenceResponse(
     /** context 已擁有 sourceFile 的代表 reference 範圍 */
     public record RepresentativeReferenceResponse(
             @ApiMonitoringField(ApiMonitoringMode.NESTED) TextRangePayload range,
-            @ApiMonitoringField(ApiMonitoringMode.SIZE) List<DiscoveryFollowUpResponse> availableFollowUps) {
+            @ApiMonitoringField(ApiMonitoringMode.NESTED) List<DiscoveryFollowUpResponse> availableFollowUps) {
     }
 
     /** 內部 reference 分析損失原因與完整計數 */

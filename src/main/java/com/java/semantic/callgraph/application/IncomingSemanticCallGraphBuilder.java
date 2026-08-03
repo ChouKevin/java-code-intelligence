@@ -676,15 +676,15 @@ public final class IncomingSemanticCallGraphBuilder {
                 if (NodeContentState.TARGET_ONLY.equals(contentState)) {
                     return new GraphNode(
                             nodeId, Optional.of(target), "", contentState, traversalState,
-                            dispatchKind(index), Optional.empty(), Optional.empty());
+                            dispatchKind(index), Optional.empty());
                 }
                 SourceMethodMetadata method = index.method(target).orElseThrow();
                 CallSiteRange range = new CallSiteRange(
                         target.sourceFile(),
-                        method.range().start().line(),
-                        method.range().start().character(),
-                        method.range().end().line(),
-                        method.range().end().character());
+                        method.declarationLocation().range().start().line(),
+                        method.declarationLocation().range().start().character(),
+                        method.declarationLocation().range().end().line(),
+                        method.declarationLocation().range().end().character());
                 return new GraphNode(
                         nodeId,
                         Optional.of(target),
@@ -692,7 +692,6 @@ public final class IncomingSemanticCallGraphBuilder {
                         contentState,
                         traversalState,
                         dispatchKind(index),
-                        Optional.of(method.source().text()),
                         Optional.of(range));
             }
 

@@ -33,8 +33,9 @@ public final class AnalysisController {
     @PostMapping("/call-graphs/outgoing")
     public OutgoingCallGraphResponse analyzeOutgoing(
             @Valid @RequestBody AnalyzeOutgoingCallGraphRequest request) {
-        return mapper.toResponse(service.analyzeOutgoing(
-                RepositoryId.of(request.repoId()),
+        RepositoryId repositoryId = RepositoryId.of(request.repoId());
+        return mapper.toResponse(repositoryId, service.analyzeOutgoing(
+                repositoryId,
                 new RepositoryRevision(request.expectedRevision()),
                 JavaSourceIdentityHttpMapper.toDomain(request.target()),
                 request.depth()));
@@ -43,8 +44,9 @@ public final class AnalysisController {
     @PostMapping("/call-graphs/incoming")
     public IncomingCallGraphResponse analyzeIncoming(
             @Valid @RequestBody AnalyzeIncomingCallGraphRequest request) {
-        return mapper.toResponse(service.analyzeIncoming(
-                RepositoryId.of(request.repoId()),
+        RepositoryId repositoryId = RepositoryId.of(request.repoId());
+        return mapper.toResponse(repositoryId, service.analyzeIncoming(
+                repositoryId,
                 new RepositoryRevision(request.expectedRevision()),
                 JavaSourceIdentityHttpMapper.toDomain(request.target()),
                 request.depth()));

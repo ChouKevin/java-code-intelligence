@@ -1,5 +1,7 @@
 package com.java.semantic.syntax.application;
 
+import com.java.semantic.syntax.domain.SourceRange;
+
 import com.java.semantic.identity.MethodTarget;
 import com.java.semantic.identity.JavaTypeIdentity;
 import com.java.semantic.syntax.domain.AnalysisTargetStatus;
@@ -65,7 +67,7 @@ public final class EventListenerDiscoveryPolicy {
                 }
                 MethodTargetResolution resolution = method.analysisTarget();
                 if (!AnalysisTargetStatus.RESOLVED.equals(resolution.status())) {
-                    unresolvedLocations.add(new SourceRange(metadata.declaration().identity().sourceFile(), method.range()));
+                    unresolvedLocations.add(method.declarationLocation());
                     continue;
                 }
                 MethodTarget target = resolution.target().orElseThrow();
@@ -73,7 +75,7 @@ public final class EventListenerDiscoveryPolicy {
                 if (!target.parameterTypes().contains(eventType)) {
                     continue;
                 }
-                SourceRange declarationRange = new SourceRange(metadata.declaration().identity().sourceFile(), method.range());
+                SourceRange declarationRange = method.declarationLocation();
                 candidates.add(new EventListenerCandidate(target, declarationRange, annotationEvidence));
             }
         }

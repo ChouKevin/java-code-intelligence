@@ -27,8 +27,8 @@ import com.java.semantic.syntax.domain.CanonicalMethodDeclarationResolver;
 import com.java.semantic.syntax.domain.SourceTypeMetadata;
 import com.java.semantic.syntax.domain.MethodTargetResolution;
 import com.java.semantic.syntax.domain.RepositorySyntax;
-import com.java.semantic.syntax.domain.SourceSlice;
-import com.java.semantic.syntax.domain.SyntaxExtractionService;
+import com.java.semantic.syntax.domain.SourceRange;
+import com.java.semantic.syntax.domain.RevisionBoundRepositorySyntaxProvider;
 import com.java.semantic.syntax.domain.SyntaxPosition;
 import com.java.semantic.syntax.domain.SyntaxRange;
 import com.java.semantic.syntax.domain.TypeReference;
@@ -59,7 +59,7 @@ class SemanticAnalysisApplicationServiceTest {
     @Mock
     private RepositoryApplicationService repositoryApplicationService;
     @Mock
-    private SyntaxExtractionService syntaxExtractionService;
+    private RevisionBoundRepositorySyntaxProvider repositorySyntaxProvider;
     @Mock
     private JavaSemanticService semanticService;
     @Mock
@@ -90,7 +90,7 @@ class SemanticAnalysisApplicationServiceTest {
                     Function<RepositorySnapshot, OutgoingGraphFragment> operation = invocation.getArgument(2);
                     return operation.apply(snapshot);
                 });
-        when(syntaxExtractionService.extract(root)).thenReturn(syntax);
+        when(repositorySyntaxProvider.get(snapshot)).thenReturn(syntax);
         CanonicalMethodDeclarationResolver declarationResolver = mock(CanonicalMethodDeclarationResolver.class);
         when(declarationResolver.resolve(syntax, target)).thenReturn(MethodTargetResolution.resolved(target));
         when(semanticService.resolveExactMethod(eq(snapshot), any(SemanticDeclarationAnchor.class))).thenReturn(method);
@@ -98,7 +98,7 @@ class SemanticAnalysisApplicationServiceTest {
 
         SemanticAnalysisApplicationService service = new SemanticAnalysisApplicationService(
                 repositoryApplicationService,
-                syntaxExtractionService,
+                repositorySyntaxProvider,
                 declarationResolver,
                 semanticService,
                 builder,
@@ -107,9 +107,9 @@ class SemanticAnalysisApplicationServiceTest {
                 new IncomingGraphProperties(11));
         service.analyzeOutgoing(repositoryId, revision, target, 2);
 
-        InOrder calls = inOrder(repositoryApplicationService, syntaxExtractionService, semanticService, builder);
+        InOrder calls = inOrder(repositoryApplicationService, repositorySyntaxProvider, semanticService, builder);
         calls.verify(repositoryApplicationService).withSnapshot(eq(repositoryId), eq(Optional.of(revision)), any());
-        calls.verify(syntaxExtractionService).extract(root);
+        calls.verify(repositorySyntaxProvider).get(snapshot);
         calls.verify(semanticService).resolveExactMethod(eq(snapshot), any(SemanticDeclarationAnchor.class));
         calls.verify(builder).build(snapshot, syntax, target, method, 2, 7);
     }
@@ -138,7 +138,7 @@ class SemanticAnalysisApplicationServiceTest {
                     Function<RepositorySnapshot, IncomingGraphFragment> operation = invocation.getArgument(2);
                     return operation.apply(snapshot);
                 });
-        when(syntaxExtractionService.extract(root)).thenReturn(syntax);
+        when(repositorySyntaxProvider.get(snapshot)).thenReturn(syntax);
         CanonicalMethodDeclarationResolver declarationResolver = mock(CanonicalMethodDeclarationResolver.class);
         when(declarationResolver.resolve(syntax, target)).thenReturn(MethodTargetResolution.resolved(target));
         when(semanticService.resolveExactMethod(eq(snapshot), any(SemanticDeclarationAnchor.class))).thenReturn(method);
@@ -146,7 +146,7 @@ class SemanticAnalysisApplicationServiceTest {
 
         SemanticAnalysisApplicationService service = new SemanticAnalysisApplicationService(
                 repositoryApplicationService,
-                syntaxExtractionService,
+                repositorySyntaxProvider,
                 declarationResolver,
                 semanticService,
                 builder,
@@ -156,9 +156,9 @@ class SemanticAnalysisApplicationServiceTest {
 
         service.analyzeIncoming(repositoryId, revision, target, 2);
 
-        InOrder calls = inOrder(repositoryApplicationService, syntaxExtractionService, semanticService, incomingBuilder);
+        InOrder calls = inOrder(repositoryApplicationService, repositorySyntaxProvider, semanticService, incomingBuilder);
         calls.verify(repositoryApplicationService).withSnapshot(eq(repositoryId), eq(Optional.of(revision)), any());
-        calls.verify(syntaxExtractionService).extract(root);
+        calls.verify(repositorySyntaxProvider).get(snapshot);
         calls.verify(semanticService).resolveExactMethod(eq(snapshot), any(SemanticDeclarationAnchor.class));
         calls.verify(incomingBuilder).build(snapshot, syntax, target, method, 2, 11);
     }
@@ -169,11 +169,8 @@ class SemanticAnalysisApplicationServiceTest {
                 target.methodName(),
                 target.parameterTypes(),
                 null,
-                null,
-                1,
-                1,
-                range,
-                new SourceSlice(range, "void place() {}"),
+                Optional.empty(),
+                new SourceRange(target.sourceFile(), range),
                 List.<TypeReference>of(),
                 Optional.empty(),
                 List.of(),
@@ -201,7 +198,7 @@ class SemanticAnalysisApplicationServiceTest {
                 false,
                 List.of(),
                 range,
-                new SourceSlice(range, "class OrderService {}"),
+                new SourceRange(target.sourceFile(), range),
                 false,
                 List.of());
         return new RepositorySyntax(List.of(), List.of(metadata));

@@ -111,22 +111,21 @@ public class JdtSyntaxExtractionService implements SyntaxExtractionService {
             List<SourceMethodMetadata> methods = metadata.members().methods();
             for (int documentOrdinal = 0; documentOrdinal < methods.size(); documentOrdinal++) {
                 SourceMethodMetadata method = methods.get(documentOrdinal);
-                if (method.sqlSource() != SqlSourceKind.ANNOTATION || Objects.isNull(method.sql())) {
+                if (method.sqlSource() != SqlSourceKind.ANNOTATION || method.annotationSqlLocation().isEmpty()) {
                     continue;
                 }
                 MapperStatementIdentity identity = new MapperStatementIdentity(
                         new MapperStatementKey(
                                 metadata.declaration().identity().fullyQualifiedName(),
                                 method.name()),
-                        method.analysisTarget().target().map(target -> target.sourceFile())
-                                .orElse(metadata.declaration().identity().sourceFile()),
+                        method.declarationLocation().sourceFile(),
                         Optional.empty(),
                         documentOrdinal,
                         MapperEvidenceRepresentation.ANNOTATION_SQL_TEXT);
                 statements.add(new MapperStatementEvidence(
                         identity,
                         "annotation",
-                        method.sql(),
+                        method.annotationSqlLocation().orElseThrow(),
                         List.of(),
                         method.analysisTarget().target()));
             }

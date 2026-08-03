@@ -12,7 +12,7 @@ import com.java.semantic.syntax.domain.SourceMethodMetadata;
 import com.java.semantic.syntax.domain.SourceTypeKind;
 import com.java.semantic.syntax.domain.SqlSourceKind;
 import com.java.semantic.syntax.domain.MethodTargetResolution;
-import com.java.semantic.syntax.domain.SourceSlice;
+import com.java.semantic.syntax.domain.SourceRange;
 import com.java.semantic.syntax.domain.SyntaxPosition;
 import com.java.semantic.syntax.domain.SyntaxRange;
 
@@ -29,8 +29,7 @@ class DataAccessEvidenceTest {
         SourceTypeMetadata orderMapper = metadata(
                 "com.example.OrderMapper", SourceTypeKind.INTERFACE, List.of(), List.of());
         SourceMethodMetadata selectOrder = method(
-                "selectOrder", List.of("String"), "select * from orders where id = #{id}",
-                SqlSourceKind.ANNOTATION);
+                "selectOrder", List.of("String"), SqlSourceKind.ANNOTATION);
         MethodTarget declarationTarget = target("com.example.OrderMapper", "selectOrder");
 
         Optional<EvidenceMatch> match = evidence.evaluate(orderMapper, selectOrder, declarationTarget);
@@ -39,7 +38,7 @@ class DataAccessEvidenceTest {
         assertThat(match.orElseThrow().strategy()).isEqualTo(ResolutionStrategy.MYBATIS_MAPPER);
         assertThat(match.orElseThrow().opaqueSymbol()).isEqualTo("com.example.OrderMapper#selectOrder(String)");
         assertThat(match.orElseThrow().evidence())
-                .containsExactly("mapper SQL: select * from orders where id = #{id}");
+                .containsExactly("mapper SQL evidence: ANNOTATION");
         assertThat(match.orElseThrow().declarationTarget()).contains(declarationTarget);
     }
 
@@ -49,8 +48,7 @@ class DataAccessEvidenceTest {
                 "com.example.HybridMapper", SourceTypeKind.INTERFACE,
                 List.of(), List.of("JpaRepository"));
         SourceMethodMetadata selectOrder = method(
-                "selectOrder", List.of("String"), "select * from orders where id = #{id}",
-                SqlSourceKind.ANNOTATION);
+                "selectOrder", List.of("String"), SqlSourceKind.ANNOTATION);
         MethodTarget declarationTarget = target("com.example.HybridMapper", "selectOrder");
 
         Optional<EvidenceMatch> match = evidence.evaluate(hybridMapper, selectOrder, declarationTarget);
@@ -59,7 +57,7 @@ class DataAccessEvidenceTest {
         assertThat(match.orElseThrow().strategy()).isEqualTo(ResolutionStrategy.MYBATIS_MAPPER);
         assertThat(match.orElseThrow().opaqueSymbol()).isEqualTo("com.example.HybridMapper#selectOrder(String)");
         assertThat(match.orElseThrow().evidence())
-                .containsExactly("mapper SQL: select * from orders where id = #{id}");
+                .containsExactly("mapper SQL evidence: ANNOTATION");
         assertThat(match.orElseThrow().declarationTarget()).contains(declarationTarget);
     }
 
@@ -68,7 +66,7 @@ class DataAccessEvidenceTest {
         SourceTypeMetadata orderRepository = metadata(
                 "com.example.OrderRepository", SourceTypeKind.INTERFACE,
                 List.of(), List.of("JpaRepository"), List.of());
-        SourceMethodMetadata findById = method("findById", List.of("Long"), null, null);
+        SourceMethodMetadata findById = method("findById", List.of("Long"), null);
         MethodTarget declarationTarget = target("com.example.OrderRepository", "findById");
 
         Optional<EvidenceMatch> match = evidence.evaluate(orderRepository, findById, declarationTarget);
@@ -85,7 +83,7 @@ class DataAccessEvidenceTest {
         SourceTypeMetadata orderRepository = metadata(
                 "com.example.OrderRepository", SourceTypeKind.INTERFACE,
                 List.of(), List.of(), List.of("CrudRepository"));
-        SourceMethodMetadata findById = method("findById", List.of("Long"), null, null);
+        SourceMethodMetadata findById = method("findById", List.of("Long"), null);
         MethodTarget declarationTarget = target("com.example.OrderRepository", "findById");
 
         Optional<EvidenceMatch> match = evidence.evaluate(orderRepository, findById, declarationTarget);
@@ -100,7 +98,7 @@ class DataAccessEvidenceTest {
         SourceTypeMetadata paymentMapper = metadata(
                 "com.example.PaymentMapper", SourceTypeKind.INTERFACE,
                 List.of("Mapper"), List.of());
-        SourceMethodMetadata insertPayment = method("insertPayment", List.of("Payment"), null, null);
+        SourceMethodMetadata insertPayment = method("insertPayment", List.of("Payment"), null);
         MethodTarget declarationTarget = target("com.example.PaymentMapper", "insertPayment");
 
         Optional<EvidenceMatch> match = evidence.evaluate(paymentMapper, insertPayment, declarationTarget);
@@ -119,8 +117,7 @@ class DataAccessEvidenceTest {
                 "com.example.OrderMapperImpl", SourceTypeKind.CLASS,
                 List.of("Repository"), List.of("JpaRepository"));
         SourceMethodMetadata selectOrder = method(
-                "selectOrder", List.of("String"), "select * from orders where id = #{id}",
-                SqlSourceKind.ANNOTATION);
+                "selectOrder", List.of("String"), SqlSourceKind.ANNOTATION);
         MethodTarget declarationTarget = target("com.example.OrderMapperImpl", "selectOrder");
 
         assertThat(evidence.evaluate(orderMapperImpl, selectOrder, declarationTarget)).isEmpty();
@@ -149,15 +146,16 @@ class DataAccessEvidenceTest {
                 "src/main/java/" + fullyQualifiedName.replace('.', '/') + ".java",
                 kind, false, implementedTypes, extendedTypes, annotations, List.of(),
                 List.of(), List.of(), false, false, List.of(), range,
-                new SourceSlice(range, "interface " + simpleName + " {}"), false, List.of());
+                new SourceRange("src/main/java/" + fullyQualifiedName.replace('.', '/') + ".java", range), false, List.of());
     }
 
-    private static SourceMethodMetadata method(
-            String name, List<String> paramTypes, String sql, SqlSourceKind sqlSource) {
+    private static SourceMethodMetadata method(String name, List<String> paramTypes, SqlSourceKind sqlSource) {
         SyntaxRange range = range(0, 0, 1, 0);
+        SourceRange declarationLocation = new SourceRange("Test.java", range);
         return new SourceMethodMetadata(
-                name, paramTypes, sql, sqlSource, 1, 2, range,
-                new SourceSlice(range, name + "();"), List.of(), Optional.empty(), List.of(), List.of(),
+                name, paramTypes, sqlSource,
+                sqlSource == SqlSourceKind.ANNOTATION ? Optional.of(declarationLocation) : Optional.empty(),
+                declarationLocation, List.of(), Optional.empty(), List.of(), List.of(),
                 List.of(), range.start(), MethodTargetResolution.unresolved("test-fixture"), true, false, true);
     }
 

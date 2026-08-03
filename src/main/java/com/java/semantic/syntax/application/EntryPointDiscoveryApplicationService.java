@@ -7,7 +7,7 @@ import com.java.semantic.repository.domain.RepositorySnapshot;
 import com.java.semantic.syntax.domain.EntryPointClass;
 import com.java.semantic.syntax.domain.EntryPointType;
 import com.java.semantic.syntax.domain.RepositorySyntax;
-import com.java.semantic.syntax.domain.SyntaxExtractionService;
+import com.java.semantic.syntax.domain.RevisionBoundRepositorySyntaxProvider;
 import org.springframework.stereotype.Service;
 
 import java.util.Comparator;
@@ -20,17 +20,17 @@ import java.util.Set;
 public final class EntryPointDiscoveryApplicationService {
 
     private final RepositoryApplicationService repositoryApplicationService;
-    private final SyntaxExtractionService syntaxExtractionService;
+    private final RevisionBoundRepositorySyntaxProvider repositorySyntaxProvider;
     private final EntryPointDiscoveryFilter discoveryFilter;
 
     public EntryPointDiscoveryApplicationService(
             RepositoryApplicationService repositoryApplicationService,
-            SyntaxExtractionService syntaxExtractionService,
+            RevisionBoundRepositorySyntaxProvider repositorySyntaxProvider,
             EntryPointDiscoveryFilter discoveryFilter) {
         this.repositoryApplicationService = Objects.requireNonNull(
                 repositoryApplicationService, "repositoryApplicationService is required");
-        this.syntaxExtractionService = Objects.requireNonNull(
-                syntaxExtractionService, "syntaxExtractionService is required");
+        this.repositorySyntaxProvider = Objects.requireNonNull(
+                repositorySyntaxProvider, "repositorySyntaxProvider is required");
         this.discoveryFilter = Objects.requireNonNull(
                 discoveryFilter, "discoveryFilter is required");
     }
@@ -52,7 +52,7 @@ public final class EntryPointDiscoveryApplicationService {
     private RevisionBoundEntryPoints listSnapshot(
             RepositorySnapshot snapshot,
             Set<EntryPointType> requestedTypes) {
-        RepositorySyntax extracted = syntaxExtractionService.extract(snapshot.root());
+        RepositorySyntax extracted = repositorySyntaxProvider.get(snapshot);
         RepositorySyntax filtered = discoveryFilter.filter(
                 snapshot.repositoryId(), extracted, requestedTypes);
         List<EntryPointClass> sortedEntryPoints = filtered.entryPoints().stream()

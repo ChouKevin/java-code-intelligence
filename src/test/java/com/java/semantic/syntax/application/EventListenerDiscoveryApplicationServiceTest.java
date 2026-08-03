@@ -6,7 +6,7 @@ import com.java.semantic.repository.domain.RepositoryId;
 import com.java.semantic.repository.domain.RepositoryRevision;
 import com.java.semantic.repository.domain.RepositorySnapshot;
 import com.java.semantic.syntax.domain.RepositorySyntax;
-import com.java.semantic.syntax.domain.SyntaxExtractionService;
+import com.java.semantic.syntax.domain.RevisionBoundRepositorySyntaxProvider;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.api.io.TempDir;
@@ -37,7 +37,7 @@ class EventListenerDiscoveryApplicationServiceTest {
     @Mock
     private RepositoryApplicationService repositories;
     @Mock
-    private SyntaxExtractionService extractionService;
+    private RevisionBoundRepositorySyntaxProvider repositorySyntaxProvider;
     @Mock
     private EventListenerDiscoveryPolicy policy;
 
@@ -54,21 +54,21 @@ class EventListenerDiscoveryApplicationServiceTest {
                     Function<RepositorySnapshot, RevisionBoundEventListenerDiscovery> callback = invocation.getArgument(2);
                     return callback.apply(snapshot);
                 });
-        when(extractionService.extract(root)).thenReturn(RepositorySyntax.empty());
+        when(repositorySyntaxProvider.get(snapshot)).thenReturn(RepositorySyntax.empty());
         when(policy.discover(RepositorySyntax.empty(), "com.acme.OrderPlaced", 0, 50)).thenReturn(page);
         EventListenerDiscoveryApplicationService service = new EventListenerDiscoveryApplicationService(
-                repositories, extractionService, policy);
+                repositories, repositorySyntaxProvider, policy);
 
         RevisionBoundEventListenerDiscovery result = service.discover(query);
 
         assertThat(result.repositoryId()).isEqualTo(repositoryId);
         assertThat(result.analyzedRevision()).isEqualTo(expectedRevision);
         assertThat(result.discovery()).isSameAs(page);
-        InOrder order = inOrder(repositories, extractionService, policy);
+        InOrder order = inOrder(repositories, repositorySyntaxProvider, policy);
         order.verify(repositories).withSnapshot(eq(repositoryId), eq(Optional.of(expectedRevision)), any());
-        order.verify(extractionService).extract(root);
+        order.verify(repositorySyntaxProvider).get(snapshot);
         order.verify(policy).discover(RepositorySyntax.empty(), "com.acme.OrderPlaced", 0, 50);
-        verify(extractionService).extract(root);
+        verify(repositorySyntaxProvider).get(snapshot);
     }
 
     @Test
@@ -81,14 +81,14 @@ class EventListenerDiscoveryApplicationServiceTest {
                 expectedRevision, RepositoryRevision.ofSha("0123456789012345678901234567890123456789"));
         when(repositories.withSnapshot(eq(repositoryId), eq(Optional.of(expectedRevision)), any())).thenThrow(mismatch);
         EventListenerDiscoveryApplicationService service = new EventListenerDiscoveryApplicationService(
-                repositories, extractionService, policy);
+                repositories, repositorySyntaxProvider, policy);
 
         assertThatThrownBy(() -> service.discover(query)).isSameAs(mismatch);
-        verifyNoInteractions(extractionService, policy);
+        verifyNoInteractions(repositorySyntaxProvider, policy);
     }
 
     @Test
-    void should_reparse_each_request_and_keep_empty_results_bound_to_the_requested_event_type() {
+    void should_request_revision_bound_syntax_for_each_query_and_keep_empty_results_bound_to_the_requested_event_type() {
         RepositoryId repositoryId = RepositoryId.of("orders");
         RepositoryRevision revision = RepositoryRevision.fixture();
         RepositorySnapshot snapshot = new RepositorySnapshot(repositoryId, root, revision);
@@ -101,19 +101,19 @@ class EventListenerDiscoveryApplicationServiceTest {
                     Function<RepositorySnapshot, RevisionBoundEventListenerDiscovery> callback = invocation.getArgument(2);
                     return callback.apply(snapshot);
                 });
-        when(extractionService.extract(root)).thenReturn(RepositorySyntax.empty());
+        when(repositorySyntaxProvider.get(snapshot)).thenReturn(RepositorySyntax.empty());
         when(policy.discover(RepositorySyntax.empty(), "com.acme.OrderPlaced", 0, 50))
                 .thenReturn(EventListenerDiscoveryPage.empty(0, 50));
         when(policy.discover(RepositorySyntax.empty(), "com.acme.PaymentCaptured", 0, 50))
                 .thenReturn(EventListenerDiscoveryPage.empty(0, 50));
         EventListenerDiscoveryApplicationService service = new EventListenerDiscoveryApplicationService(
-                repositories, extractionService, policy);
+                repositories, repositorySyntaxProvider, policy);
 
         RevisionBoundEventListenerDiscovery orderResult = service.discover(orderQuery);
         RevisionBoundEventListenerDiscovery paymentResult = service.discover(paymentQuery);
 
         assertThat(orderResult.requestedEventType()).isEqualTo("com.acme.OrderPlaced");
         assertThat(paymentResult.requestedEventType()).isEqualTo("com.acme.PaymentCaptured");
-        verify(extractionService, times(2)).extract(root);
+        verify(repositorySyntaxProvider, times(2)).get(snapshot);
     }
 }

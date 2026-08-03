@@ -1,4 +1,10 @@
 semantic:
+  syntax:
+    cache:
+      # weight 為 RepositorySyntax 結構性 metadata 數量，不是原始碼位元組數
+      maximum-weight: ${REPOSITORY_SYNTAX_CACHE_MAXIMUM_WEIGHT:10000}
+      maximum-entry-weight: ${REPOSITORY_SYNTAX_CACHE_MAXIMUM_ENTRY_WEIGHT:1000}
+      expire-after-access: ${REPOSITORY_SYNTAX_CACHE_EXPIRE_AFTER_ACCESS:10m}
   analysis:
     outgoing:
       depth-two-node-budget: ${OUTGOING_DEPTH_TWO_NODE_BUDGET:40}
@@ -10,9 +16,6 @@ semantic:
       forbidden-classes: []
       forbidden-methods: []
   discovery:
-    exact-content:
-      inline-utf8-bytes: ${EXACT_CONTENT_INLINE_UTF8_BYTES:32768}
-      segment-utf8-bytes: ${EXACT_CONTENT_SEGMENT_UTF8_BYTES:32768}
     source-symbol-resolution:
       context-candidate-limit: ${SOURCE_SYMBOL_CONTEXT_CANDIDATE_LIMIT:100}
     internal-references:

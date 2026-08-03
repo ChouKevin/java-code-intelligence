@@ -4,6 +4,7 @@ import com.java.semantic.identity.MethodTarget;
 import com.java.semantic.syntax.application.concept.MapperConceptIdentity.MapperStatementConceptIdentity;
 import com.java.semantic.syntax.domain.AnalysisTargetStatus;
 import com.java.semantic.syntax.domain.MapperStatementEvidence;
+import com.java.semantic.syntax.domain.MapperFragmentIdentity;
 import com.java.semantic.syntax.domain.MapperStatementKey;
 import com.java.semantic.syntax.domain.MethodTargetResolution;
 import com.java.semantic.syntax.domain.RepositorySyntax;
@@ -20,7 +21,8 @@ public record MapperStatementMethodMapping(
         MapperStatementConceptIdentity statementIdentity,
         Status status,
         List<MethodTarget> targets,
-        Optional<Reason> reason) {
+        Optional<Reason> reason,
+        List<MapperFragmentIdentity> includedFragments) {
 
     private static final Comparator<MethodTarget> TARGET_ORDER = Comparator
             .comparing(MethodTarget::sourceFile)
@@ -37,6 +39,8 @@ public record MapperStatementMethodMapping(
                 .sorted(TARGET_ORDER)
                 .toList();
         reason = Objects.requireNonNull(reason, "reason is required");
+        includedFragments = List.copyOf(Objects.requireNonNull(
+                includedFragments, "includedFragments are required"));
         if (status == Status.RESOLVED && targets.size() != 1) {
             throw new IllegalArgumentException("resolved mapper mapping requires one target");
         }
@@ -68,7 +72,8 @@ public record MapperStatementMethodMapping(
                     statementIdentity,
                     Status.RESOLVED,
                     completeTargets,
-                    Optional.empty());
+                    Optional.empty(),
+                    List.of());
         }
         if (!incompleteMethodResolution
                 && declarationCount >= 2
@@ -77,13 +82,15 @@ public record MapperStatementMethodMapping(
                     statementIdentity,
                     Status.AMBIGUOUS,
                     completeTargets,
-                    Optional.empty());
+                    Optional.empty(),
+                    List.of());
         }
         return new MapperStatementMethodMapping(
                 statementIdentity,
                 Status.UNRESOLVED,
                 completeTargets,
-                Optional.of(Reason.INCOMPLETE_METHOD_RESOLUTION));
+                Optional.of(Reason.INCOMPLETE_METHOD_RESOLUTION),
+                List.of());
     }
 
     /** 由同一份 production syntax 證據判定 logical mapper statement 的方法對應狀態 */
@@ -100,17 +107,27 @@ public record MapperStatementMethodMapping(
                 .filter(method -> method.name().equals(statementKey.statementId()))
                 .map(SourceMethodMetadata::analysisTarget)
                 .toList();
+        List<MapperFragmentIdentity> includedFragments = repositorySyntax.mapperEvidenceIndex()
+                .stream()
+                .flatMap(index -> index.statements().stream()
+                        .filter(statement -> statement.identity().statementKey().equals(statementKey))
+                        .flatMap(statement -> statement.includeRefIds().stream()
+                                .flatMap(refId -> index.fragmentIdentitiesForInclude(statement.identity(), refId).stream())))
+                .distinct()
+                .toList();
         if (!declarationResolutions.isEmpty()) {
             boolean incompleteResolution = declarationResolutions.stream()
                     .anyMatch(resolution -> resolution.status() != AnalysisTargetStatus.RESOLVED);
             List<MethodTarget> completeTargets = declarationResolutions.stream()
                     .flatMap(resolution -> resolution.target().stream())
                     .toList();
-            return fromDeclarations(
+            MapperStatementMethodMapping mapping = fromDeclarations(
                     statementIdentity,
                     declarationResolutions.size(),
                     incompleteResolution,
                     completeTargets);
+            return new MapperStatementMethodMapping(
+                    mapping.statementIdentity(), mapping.status(), mapping.targets(), mapping.reason(), includedFragments);
         }
         List<MethodTarget> evidenceTargets = repositorySyntax.mapperEvidenceIndex().stream()
                 .flatMap(index -> index.statements().stream())
@@ -119,11 +136,13 @@ public record MapperStatementMethodMapping(
                 .flatMap(Optional::stream)
                 .distinct()
                 .toList();
-        return fromDeclarations(
+        MapperStatementMethodMapping mapping = fromDeclarations(
                 statementIdentity,
                 evidenceTargets.size(),
                 evidenceTargets.isEmpty(),
                 evidenceTargets);
+        return new MapperStatementMethodMapping(
+                mapping.statementIdentity(), mapping.status(), mapping.targets(), mapping.reason(), includedFragments);
     }
 
     /** 合併同一 logical mapper statement 的完整方法目標 */
@@ -143,7 +162,10 @@ public record MapperStatementMethodMapping(
                 statementIdentity,
                 Status.UNRESOLVED,
                 mergedTargets,
-                Optional.of(Reason.INCOMPLETE_METHOD_RESOLUTION));
+                Optional.of(Reason.INCOMPLETE_METHOD_RESOLUTION),
+                Stream.concat(includedFragments.stream(), mapping.includedFragments.stream())
+                        .distinct()
+                        .toList());
     }
 
     /** mapper method mapping 狀態 */

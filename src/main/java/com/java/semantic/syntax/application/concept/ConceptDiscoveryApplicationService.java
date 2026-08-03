@@ -3,7 +3,7 @@ package com.java.semantic.syntax.application.concept;
 import com.java.semantic.repository.application.RepositoryApplicationService;
 import com.java.semantic.repository.domain.RepositorySnapshot;
 import com.java.semantic.syntax.domain.RepositorySyntax;
-import com.java.semantic.syntax.domain.SyntaxExtractionService;
+import com.java.semantic.syntax.domain.RevisionBoundRepositorySyntaxProvider;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
@@ -24,21 +24,21 @@ public final class ConceptDiscoveryApplicationService {
     private static final Logger log = LoggerFactory.getLogger(ConceptDiscoveryApplicationService.class);
 
     private final RepositoryApplicationService repositoryApplicationService;
-    private final SyntaxExtractionService syntaxExtractionService;
+    private final RevisionBoundRepositorySyntaxProvider repositorySyntaxProvider;
     private final StructuredConceptCatalogProjector catalogProjector;
     private final ConceptSearchDocumentProjector searchDocumentProjector;
     private final ConceptSearchMatcher searchMatcher;
 
     public ConceptDiscoveryApplicationService(
             RepositoryApplicationService repositoryApplicationService,
-            SyntaxExtractionService syntaxExtractionService,
+            RevisionBoundRepositorySyntaxProvider repositorySyntaxProvider,
             StructuredConceptCatalogProjector catalogProjector,
             ConceptSearchDocumentProjector searchDocumentProjector,
             ConceptSearchMatcher searchMatcher) {
         this.repositoryApplicationService = Objects.requireNonNull(
                 repositoryApplicationService, "repositoryApplicationService is required");
-        this.syntaxExtractionService = Objects.requireNonNull(
-                syntaxExtractionService, "syntaxExtractionService is required");
+        this.repositorySyntaxProvider = Objects.requireNonNull(
+                repositorySyntaxProvider, "repositorySyntaxProvider is required");
         this.catalogProjector = Objects.requireNonNull(catalogProjector, "catalogProjector is required");
         this.searchDocumentProjector = Objects.requireNonNull(
                 searchDocumentProjector, "searchDocumentProjector is required");
@@ -92,7 +92,7 @@ public final class ConceptDiscoveryApplicationService {
     private RevisionBoundConceptResolution resolveSnapshot(
             RepositorySnapshot snapshot,
             ConceptResolveQuery query) {
-        RepositorySyntax syntax = syntaxExtractionService.extract(snapshot.root());
+        RepositorySyntax syntax = repositorySyntaxProvider.get(snapshot);
         StructuredConceptCatalog catalog = catalogProjector.project(syntax);
         ConceptCatalogEntry candidate = catalog.entries().stream()
                 .filter(entry -> entry.identity().equals(query.identity()))
@@ -110,7 +110,7 @@ public final class ConceptDiscoveryApplicationService {
             Set<ConceptKind> activeKinds) {
         timing.snapshotAcquired(snapshot.revision().value());
         timing.syntaxExtractionStarted();
-        RepositorySyntax syntax = syntaxExtractionService.extract(snapshot.root());
+        RepositorySyntax syntax = repositorySyntaxProvider.get(snapshot);
         timing.syntaxExtractionCompleted();
         timing.catalogProjectionStarted();
         StructuredConceptCatalog catalog = catalogProjector.project(syntax);
@@ -133,6 +133,7 @@ public final class ConceptDiscoveryApplicationService {
         ConceptSearchResult result = new ConceptSearchResult(
                 snapshot.repositoryId(),
                 snapshot.revision(),
+                query,
                 query.terms(),
                 query.kinds().stream().sorted().toList(),
                 activeKinds.stream().sorted().toList(),

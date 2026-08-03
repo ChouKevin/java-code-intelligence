@@ -6,12 +6,21 @@ import com.java.semantic.api.dto.ApiRouteObservationResponse;
 import com.java.semantic.trie.ApiRouteCandidate;
 import com.java.semantic.trie.ApiRouteMatchBatch;
 import com.java.semantic.trie.ApiRouteObservation;
+import com.java.semantic.repository.domain.RepositoryId;
+import com.java.semantic.repository.domain.RepositoryRevision;
 import org.springframework.stereotype.Component;
 
 import java.util.Objects;
 
 @Component
 public final class ApiRouteResponseMapper {
+
+    private final EntryPointResponseMapper entryPointResponseMapper;
+
+    public ApiRouteResponseMapper(EntryPointResponseMapper entryPointResponseMapper) {
+        this.entryPointResponseMapper = Objects.requireNonNull(
+                entryPointResponseMapper, "entryPointResponseMapper is required");
+    }
 
     public ApiRouteCandidatesResponse toResponse(ApiRouteMatchBatch batch) {
         Objects.requireNonNull(batch, "batch is required");
@@ -29,7 +38,10 @@ public final class ApiRouteResponseMapper {
                 candidate.routeTemplate(),
                 JavaSourceIdentityHttpMapper.toPayload(candidate.sourceType()),
                 candidate.methodName(),
-                EntryPointResponseMapper.toResponse(candidate.analysisTarget()),
+                entryPointResponseMapper.toResponse(
+                        RepositoryId.of(candidate.repoId()),
+                        new RepositoryRevision(candidate.analyzedRevision()),
+                        candidate.analysisTarget()),
                 candidate.matchReasons());
     }
 

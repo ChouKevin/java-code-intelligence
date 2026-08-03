@@ -13,11 +13,14 @@ public record MethodImplementationCandidateResponse(
         @ApiMonitoringField(ApiMonitoringMode.NESTED) MethodTargetPayload target,
         @ApiMonitoringField(ApiMonitoringMode.VALUE) boolean primary,
         @ApiMonitoringField(ApiMonitoringMode.SIZE) List<String> qualifiers,
-        @ApiMonitoringField(ApiMonitoringMode.SIZE) List<String> profiles) {
+        @ApiMonitoringField(ApiMonitoringMode.SIZE) List<String> profiles,
+        @ApiMonitoringField(ApiMonitoringMode.NESTED) List<DiscoveryFollowUpResponse> availableFollowUps) {
 
     public MethodImplementationCandidateResponse {
         target = Objects.requireNonNull(target, "target is required");
         qualifiers = List.copyOf(Objects.requireNonNull(qualifiers, "qualifiers are required"));
         profiles = List.copyOf(Objects.requireNonNull(profiles, "profiles are required"));
+        availableFollowUps = List.copyOf(Objects.requireNonNull(
+                availableFollowUps, "availableFollowUps are required"));
     }
 }

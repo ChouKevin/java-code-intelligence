@@ -3,19 +3,24 @@ package com.java.semantic.syntax.application;
 import com.java.semantic.syntax.application.concept.ConceptPage;
 import com.java.semantic.syntax.application.concept.DeclarationConceptIdentity.TypeConceptIdentity;
 import com.java.semantic.identity.MethodTarget;
+import com.java.semantic.identity.SourceTypeIdentity;
 import com.java.semantic.repository.application.RepositoryApplicationService;
 import com.java.semantic.repository.domain.RepositorySnapshot;
 import com.java.semantic.syntax.domain.AnnotationEvidence;
 import com.java.semantic.syntax.domain.SourceFieldMetadata;
+import com.java.semantic.syntax.domain.SourceMethodMetadata;
+import com.java.semantic.syntax.domain.SourceMemberIdentity;
+import com.java.semantic.syntax.domain.MethodImplementationEligibilityPolicy;
 import com.java.semantic.syntax.domain.SourceTypeMetadata;
 import com.java.semantic.syntax.domain.RepositorySyntax;
-import com.java.semantic.syntax.domain.SyntaxExtractionService;
+import com.java.semantic.syntax.domain.RevisionBoundRepositorySyntaxProvider;
 
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.stream.Stream;
 
 /** 在固定儲存庫快照內依來源限定型別 identity 建立一個合併成員頁 */
 public final class TypeMemberDiscoveryApplicationService {
@@ -30,17 +35,17 @@ public final class TypeMemberDiscoveryApplicationService {
             .thenComparing(FieldTypeMember::writtenType);
 
     private final RepositoryApplicationService repositoryApplicationService;
-    private final SyntaxExtractionService syntaxExtractionService;
+    private final RevisionBoundRepositorySyntaxProvider repositorySyntaxProvider;
     private final DiscoveryFollowUpFactory followUpFactory;
 
     public TypeMemberDiscoveryApplicationService(
             RepositoryApplicationService repositoryApplicationService,
-            SyntaxExtractionService syntaxExtractionService,
+            RevisionBoundRepositorySyntaxProvider repositorySyntaxProvider,
             DiscoveryFollowUpFactory followUpFactory) {
         this.repositoryApplicationService = Objects.requireNonNull(
                 repositoryApplicationService, "repositoryApplicationService is required");
-        this.syntaxExtractionService = Objects.requireNonNull(
-                syntaxExtractionService, "syntaxExtractionService is required");
+        this.repositorySyntaxProvider = Objects.requireNonNull(
+                repositorySyntaxProvider, "repositorySyntaxProvider is required");
         this.followUpFactory = Objects.requireNonNull(followUpFactory, "followUpFactory is required");
     }
 
@@ -54,7 +59,7 @@ public final class TypeMemberDiscoveryApplicationService {
     }
 
     private TypeMemberResult discoverSnapshot(RepositorySnapshot snapshot, TypeMemberQuery query) {
-        RepositorySyntax syntax = syntaxExtractionService.extract(snapshot.root());
+        RepositorySyntax syntax = repositorySyntaxProvider.get(snapshot);
         SourceTypeMetadata metadata = resolveType(syntax, query);
         List<TypeMember> combined = combinedMembers(snapshot, syntax, metadata, query);
         int start = Math.min(query.offset(), combined.size());
@@ -88,8 +93,8 @@ public final class TypeMemberDiscoveryApplicationService {
         List<TypeMember> combined = new ArrayList<>();
         if (query.memberKinds().contains(TypeMemberKind.METHOD)) {
             List<MethodTypeMember> methods = metadata.members().methods().stream()
-                    .flatMap(method -> method.analysisTarget().target().stream())
-                    .map(target -> methodMember(snapshot, metadata, target))
+                    .flatMap(method -> method.analysisTarget().target().stream()
+                            .map(target -> methodMember(snapshot, metadata, method, target)))
                     .filter(member -> matchesPrefix(member.target().methodName(), query.namePrefix()))
                     .sorted(METHOD_ORDER)
                     .toList();
@@ -97,7 +102,7 @@ public final class TypeMemberDiscoveryApplicationService {
         }
         if (query.memberKinds().contains(TypeMemberKind.FIELD)) {
             List<FieldTypeMember> fields = metadata.members().fields().stream()
-                    .map(field -> fieldMember(snapshot, syntax, field))
+                    .map(field -> fieldMember(snapshot, syntax, metadata.declaration().identity(), field))
                     .filter(member -> matchesPrefix(member.fieldName(), query.namePrefix()))
                     .sorted(FIELD_ORDER)
                     .toList();
@@ -109,16 +114,24 @@ public final class TypeMemberDiscoveryApplicationService {
     private MethodTypeMember methodMember(
             RepositorySnapshot snapshot,
             SourceTypeMetadata metadata,
+            SourceMethodMetadata declaration,
             MethodTarget target) {
         assertTargetBelongsToType(metadata, target);
+        List<DiscoveryFollowUp> navigation = followUpFactory.forMethod(
+                snapshot.repositoryId(), snapshot.revision(), target);
+        List<DiscoveryFollowUp> followUps = MethodImplementationEligibilityPolicy.isEligible(metadata, declaration)
+                ? Stream.concat(navigation.stream(), Stream.of(followUpFactory.forMethodImplementations(
+                        snapshot.repositoryId(), snapshot.revision(), target))).toList()
+                : navigation;
         return new MethodTypeMember(
                 target,
-                followUpFactory.forMethod(snapshot.repositoryId(), snapshot.revision(), target));
+                followUps);
     }
 
     private FieldTypeMember fieldMember(
             RepositorySnapshot snapshot,
             RepositorySyntax syntax,
+            SourceTypeIdentity ownerType,
             SourceFieldMetadata field) {
         Optional<String> resolvedType = field.typeReference().resolvedTypeName();
         return new FieldTypeMember(
@@ -127,8 +140,23 @@ public final class TypeMemberDiscoveryApplicationService {
                 resolvedType,
                 field.annotationEvidence().stream().map(AnnotationEvidence::writtenName).toList(),
                 List.of(TypeMemberLimitation.FIELD_USAGE_NOT_INDEXED),
-                followUpFactory.forResolvedFieldType(
-                        snapshot.repositoryId(), snapshot.revision(), sourceTypeIdentity(syntax, resolvedType)));
+                fieldFollowUps(snapshot, syntax, ownerType, field, resolvedType));
+    }
+
+    private List<DiscoveryFollowUp> fieldFollowUps(
+            RepositorySnapshot snapshot,
+            RepositorySyntax syntax,
+            SourceTypeIdentity ownerType,
+            SourceFieldMetadata field,
+            Optional<String> resolvedType) {
+        List<DiscoveryFollowUp> resolvedTypeFollowUps = followUpFactory.forResolvedFieldType(
+                snapshot.repositoryId(), snapshot.revision(), sourceTypeIdentity(syntax, resolvedType));
+        DiscoveryFollowUp selfReferences = followUpFactory.internalSourceReferences(
+                snapshot.repositoryId(),
+                snapshot.revision(),
+                new SourceMemberIdentity.TypeMember(ownerType, field.name()));
+        return Stream.concat(resolvedTypeFollowUps.stream(), Stream.of(selfReferences))
+                .toList();
     }
 
     private static Optional<TypeConceptIdentity> sourceTypeIdentity(

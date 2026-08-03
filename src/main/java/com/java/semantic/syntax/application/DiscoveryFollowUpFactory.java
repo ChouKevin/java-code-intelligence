@@ -1,6 +1,10 @@
 package com.java.semantic.syntax.application;
 
+import com.java.semantic.syntax.domain.SourceRange;
+
 import com.java.semantic.syntax.application.concept.ConceptIdentity;
+import com.java.semantic.syntax.application.concept.ConceptSearchQuery;
+import com.java.semantic.syntax.application.concept.ConceptSearchTerm;
 import com.java.semantic.identity.MethodTarget;
 import com.java.semantic.identity.SourceTypeIdentity;
 import com.java.semantic.repository.domain.RepositoryId;
@@ -22,17 +26,20 @@ import com.java.semantic.syntax.application.concept.UsageConceptIdentity.TypeUsa
 import com.java.semantic.syntax.application.concept.UsageConceptIdentity.UnresolvedMethodDeclarationSubjectIdentity;
 import com.java.semantic.syntax.application.DiscoveryFollowUp.AnalyzeCallGraphRequest;
 import com.java.semantic.syntax.application.DiscoveryFollowUp.DiscoverMethodImplementationsRequest;
+import com.java.semantic.syntax.application.DiscoveryFollowUp.DiscoverConceptsRequest;
+import com.java.semantic.syntax.application.DiscoveryFollowUp.DiscoverEventListenersRequest;
 import com.java.semantic.syntax.application.DiscoveryFollowUp.GetMethodSourceRequest;
-import com.java.semantic.syntax.application.DiscoveryFollowUp.GetMapperStatementRequest;
 import com.java.semantic.syntax.application.DiscoveryFollowUp.GetTypeMembersRequest;
 import com.java.semantic.syntax.application.DiscoveryFollowUp.FindInternalReferencesRequest;
-import com.java.semantic.syntax.application.DiscoveryFollowUp.GetJavaSourceSegmentRequest;
+import com.java.semantic.syntax.application.DiscoveryFollowUp.GetSourceSegmentRequest;
+import com.java.semantic.syntax.application.DiscoveryFollowUp.GetEvidenceSourceRequest;
 import com.java.semantic.syntax.application.DiscoveryFollowUp.Operation;
 import com.java.semantic.syntax.application.DiscoveryFollowUp.ResolveSourceSymbolRequest;
 import com.java.semantic.syntax.application.DiscoveryFollowUp.ResolveConceptRequest;
 import com.java.semantic.syntax.application.DiscoveryFollowUp.TypeMembersRequest;
 import com.java.semantic.syntax.domain.SyntaxPosition;
 import com.java.semantic.syntax.domain.ExactSourceDeclarationTarget;
+import com.java.semantic.syntax.domain.SourceMemberIdentity;
 
 import java.util.Comparator;
 import java.util.List;
@@ -46,6 +53,10 @@ public final class DiscoveryFollowUpFactory {
     private static final int GRAPH_DEPTH = 2;
 
     private static final int DEFAULT_LIMIT = 50;
+
+    private static final int INTERNAL_REFERENCE_DEFAULT_LIMIT = 20;
+
+    private static final int SOURCE_CONTINUATION_CONTEXT_LINES = 0;
 
     /** 依 typed identity 建立方法分析或安全型別成員 follow-up */
     public List<DiscoveryFollowUp> forConcept(
@@ -91,21 +102,79 @@ public final class DiscoveryFollowUpFactory {
         String repoId = repositoryId(repositoryId);
         String expectedRevision = revision(revision);
         MethodTarget methodTarget = Objects.requireNonNull(target, "target is required");
-        return executableMethodAnalysis(repoId, expectedRevision, methodTarget);
+        return methodNavigation(repoId, expectedRevision, methodTarget);
+    }
+
+    /** 由已判定 eligible 的呼叫端追加實作探索，不在 factory 內判斷業務資格 */
+    public DiscoveryFollowUp forMethodImplementations(
+            RepositoryId repositoryId,
+            RepositoryRevision revision,
+            MethodTarget target) {
+        return followUp(
+                Operation.DISCOVER_METHOD_IMPLEMENTATIONS,
+                new DiscoverMethodImplementationsRequest(
+                        repositoryId(repositoryId),
+                        revision(revision),
+                        Objects.requireNonNull(target, "target is required")));
+    }
+
+    /**
+     * 方法 source 回應保留完整單一方法導航，並在有下一段時附加可直接續讀的 operation 與 arguments
+     */
+    public List<DiscoveryFollowUp> forMethodSource(
+            RepositoryId repositoryId,
+            RepositoryRevision revision,
+            MethodTarget target,
+            Optional<SourceRange> nextLocation) {
+        List<DiscoveryFollowUp> methodNavigation = forMethod(repositoryId, revision, target);
+        Optional<SourceRange> continuation = Objects.requireNonNull(nextLocation, "nextLocation is required");
+        return Stream.concat(
+                methodNavigation.stream(),
+                continuation.map(location -> forSourceSegment(
+                                repositoryId,
+                                revision,
+                                location,
+                                SOURCE_CONTINUATION_CONTEXT_LINES))
+                        .stream())
+                .toList();
+    }
+
+    /** 已確認 internal canonical 方法僅提供直接讀取完整 source 的導航契約 */
+    public List<DiscoveryFollowUp> methodSourceOnly(
+            RepositoryId repositoryId,
+            RepositoryRevision revision,
+            MethodTarget target) {
+        GetMethodSourceRequest request = new GetMethodSourceRequest(
+                repositoryId(repositoryId),
+                revision(revision),
+                Objects.requireNonNull(target, "target is required"));
+        return List.of(followUp(Operation.GET_METHOD_SOURCE, request));
     }
 
     /** 建立內部 reference 的 exact source segment 續讀 */
-    public DiscoveryFollowUp forJavaSourceSegment(
+    public DiscoveryFollowUp forSourceSegment(
             RepositoryId repositoryId,
             RepositoryRevision revision,
             SourceRange sourceRange,
             int contextLines) {
-        GetJavaSourceSegmentRequest request = new GetJavaSourceSegmentRequest(
+        GetSourceSegmentRequest request = new GetSourceSegmentRequest(
                 repositoryId(repositoryId),
                 revision(revision),
                 Objects.requireNonNull(sourceRange, "sourceRange is required"),
                 contextLines);
-        return followUp(Operation.GET_JAVA_SOURCE_SEGMENT, request);
+        return followUp(Operation.GET_SOURCE_SEGMENT, request);
+    }
+
+    /** 以已抽取的 typed identity 建立 evidence-source follow-up */
+    public DiscoveryFollowUp forEvidenceSource(
+            RepositoryId repositoryId,
+            RepositoryRevision revision,
+            EvidenceSourceQuery.EvidenceIdentity identity) {
+        GetEvidenceSourceRequest request = new GetEvidenceSourceRequest(
+                repositoryId(repositoryId),
+                revision(revision),
+                Objects.requireNonNull(identity, "identity is required"));
+        return followUp(Operation.GET_EVIDENCE_SOURCE, request);
     }
 
     /** 建立保留 exact target 與 limit 的內部 reference 下一頁 */
@@ -121,6 +190,21 @@ public final class DiscoveryFollowUpFactory {
                 Objects.requireNonNull(target, "target is required"),
                 nextOffset,
                 limit);
+        return followUp(Operation.FIND_INTERNAL_REFERENCES, request);
+    }
+
+    /** internal field/member self target 可直接查詢 repository-contained references */
+    public DiscoveryFollowUp internalSourceReferences(
+            RepositoryId repositoryId,
+            RepositoryRevision revision,
+            SourceMemberIdentity identity) {
+        FindInternalReferencesRequest request = new FindInternalReferencesRequest(
+                repositoryId(repositoryId),
+                revision(revision),
+                new ExactSourceDeclarationTarget.Member(
+                        Objects.requireNonNull(identity, "identity is required")),
+                0,
+                INTERNAL_REFERENCE_DEFAULT_LIMIT);
         return followUp(Operation.FIND_INTERNAL_REFERENCES, request);
     }
 
@@ -186,18 +270,6 @@ public final class DiscoveryFollowUpFactory {
                 Optional.of(selectedCandidate.representativeOccurrence().range().start()));
     }
 
-    /** 唯一 mapper method 可直接取得其 exact SQL variants */
-    public List<DiscoveryFollowUp> forResolvedMapperStatement(
-            RepositoryId repositoryId,
-            RepositoryRevision revision,
-            MethodTarget target) {
-        GetMapperStatementRequest request = new GetMapperStatementRequest(
-                repositoryId(repositoryId),
-                revision(revision),
-                Objects.requireNonNull(target, "target is required"));
-        return List.of(followUp(Operation.GET_METHOD_SQL, request));
-    }
-
     /** 歧義 mapper method 僅允許逐一檢視 exact source 以供判讀 */
     public List<DiscoveryFollowUp> forAmbiguousMapperMethod(
             RepositoryId repositoryId,
@@ -214,13 +286,13 @@ public final class DiscoveryFollowUpFactory {
             RepositoryId repositoryId,
             RepositoryRevision revision,
             MethodTarget target) {
-        return executableMethodAnalysis(
+        return methodNavigation(
                 repositoryId(repositoryId),
                 revision(revision),
                 Objects.requireNonNull(target, "target is required"));
     }
 
-    private List<DiscoveryFollowUp> executableMethodAnalysis(
+    private List<DiscoveryFollowUp> methodNavigation(
             String repoId,
             String expectedRevision,
             MethodTarget methodTarget) {
@@ -233,10 +305,7 @@ public final class DiscoveryFollowUpFactory {
                         new AnalyzeCallGraphRequest(repoId, expectedRevision, GRAPH_DEPTH, methodTarget)),
                 followUp(
                         Operation.ANALYZE_INCOMING_CALL_GRAPH,
-                        new AnalyzeCallGraphRequest(repoId, expectedRevision, GRAPH_DEPTH, methodTarget)),
-                followUp(
-                        Operation.DISCOVER_METHOD_IMPLEMENTATIONS,
-                        new DiscoverMethodImplementationsRequest(repoId, expectedRevision, methodTarget)));
+                        new AnalyzeCallGraphRequest(repoId, expectedRevision, GRAPH_DEPTH, methodTarget)));
     }
 
     /**
@@ -272,7 +341,48 @@ public final class DiscoveryFollowUpFactory {
                 nextQuery.namePrefix(),
                 nextQuery.offset(),
                 nextQuery.limit());
-        return followUp(Operation.GET_NEXT_PAGE, request);
+        return followUp(Operation.DISCOVER_TYPE_MEMBERS, request);
+    }
+
+    /** 保留完整 typed query 建立可直接重送或由 Agent 精煉的 concept discovery 請求 */
+    public DiscoveryFollowUp forConceptSearch(ConceptSearchQuery query) {
+        ConceptSearchQuery searchQuery = Objects.requireNonNull(query, "query is required");
+        List<ConceptSearchTerm> terms = searchQuery.terms();
+        List<String> kinds = searchQuery.kinds().stream()
+                .sorted(Comparator.comparing(Enum::name))
+                .map(Enum::name)
+                .toList();
+        DiscoverConceptsRequest request = new DiscoverConceptsRequest(
+                searchQuery.repositoryId().value(),
+                searchQuery.expectedRevision().value(),
+                terms,
+                kinds,
+                "ALL",
+                searchQuery.packagePrefix(),
+                searchQuery.offset(),
+                searchQuery.limit());
+        return followUp(Operation.DISCOVER_CONCEPTS, request);
+    }
+
+    /** 保留原始 concept terms、kinds、filter 與 revision 的下一頁 HTTP 操作 */
+    public DiscoveryFollowUp nextConceptPage(ConceptSearchQuery query) {
+        return forConceptSearch(Objects.requireNonNull(query, "query is required"));
+    }
+
+    /** 依 response page metadata 續查下一頁事件監聽器，不推測任何篩選條件 */
+    public DiscoveryFollowUp nextEventListenerPage(
+            RepositoryId repositoryId,
+            RepositoryRevision revision,
+            String eventType,
+            int nextOffset,
+            int limit) {
+        DiscoverEventListenersRequest request = new DiscoverEventListenersRequest(
+                repositoryId(repositoryId),
+                revision(revision),
+                eventType,
+                nextOffset,
+                limit);
+        return followUp(Operation.DISCOVER_EVENT_LISTENERS, request);
     }
 
     private List<DiscoveryFollowUp> forDeclaration(

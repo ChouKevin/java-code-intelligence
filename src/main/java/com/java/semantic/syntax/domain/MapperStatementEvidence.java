@@ -10,16 +10,19 @@ import com.java.semantic.identity.MethodTarget;
 public record MapperStatementEvidence(
         MapperStatementIdentity identity,
         String statementKind,
-        String content,
+        SourceRange location,
         List<String> includeRefIds,
         Optional<MethodTarget> mappedMethodTarget) {
 
     public MapperStatementEvidence {
         identity = Objects.requireNonNull(identity, "identity is required");
         statementKind = requiredText(statementKind, "statementKind");
-        content = Objects.requireNonNull(content, "content is required");
+        location = Objects.requireNonNull(location, "location is required");
         includeRefIds = List.copyOf(Objects.requireNonNull(includeRefIds, "includeRefIds are required"));
         mappedMethodTarget = Objects.requireNonNull(mappedMethodTarget, "mappedMethodTarget is required");
+        if (!identity.resourcePath().equals(location.sourceFile())) {
+            throw new IllegalArgumentException("location sourceFile must match mapper statement identity");
+        }
     }
 
     private static String requiredText(String value, String fieldName) {

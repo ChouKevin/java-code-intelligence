@@ -13,19 +13,22 @@ import com.java.semantic.repository.domain.RepositoryRevision;
 import com.java.semantic.repository.domain.RepositorySnapshot;
 import com.java.semantic.syntax.application.DiscoveryFollowUp.AnalyzeCallGraphRequest;
 import com.java.semantic.syntax.application.DiscoveryFollowUp.DiscoverMethodImplementationsRequest;
+import com.java.semantic.syntax.application.DiscoveryFollowUp.FindInternalReferencesRequest;
 import com.java.semantic.syntax.application.DiscoveryFollowUp.GetMethodSourceRequest;
 import com.java.semantic.syntax.application.DiscoveryFollowUp.Operation;
 import com.java.semantic.syntax.application.DiscoveryFollowUp.TypeMembersRequest;
 import com.java.semantic.syntax.domain.AnnotationEvidence;
 import com.java.semantic.syntax.domain.ArrayTypeReference;
+import com.java.semantic.syntax.domain.ExactSourceDeclarationTarget;
 import com.java.semantic.syntax.domain.SourceTypeMetadata;
 import com.java.semantic.syntax.domain.SourceFieldMetadata;
+import com.java.semantic.syntax.domain.SourceMemberIdentity;
 import com.java.semantic.syntax.domain.SourceMethodMetadata;
 import com.java.semantic.syntax.domain.SourceTypeKind;
 import com.java.semantic.syntax.domain.MethodTargetResolution;
 import com.java.semantic.syntax.domain.RepositorySyntax;
-import com.java.semantic.syntax.domain.SourceSlice;
-import com.java.semantic.syntax.domain.SyntaxExtractionService;
+import com.java.semantic.syntax.domain.SourceRange;
+import com.java.semantic.syntax.domain.RevisionBoundRepositorySyntaxProvider;
 import com.java.semantic.syntax.domain.SyntaxPosition;
 import com.java.semantic.syntax.domain.SyntaxRange;
 import com.java.semantic.syntax.domain.NamedTypeReference;
@@ -75,7 +78,7 @@ class TypeMemberDiscoveryApplicationServiceTest {
     private RepositoryApplicationService repositoryApplicationService;
 
     @Mock
-    private SyntaxExtractionService syntaxExtractionService;
+    private RevisionBoundRepositorySyntaxProvider repositorySyntaxProvider;
 
     private TypeMemberDiscoveryApplicationService service;
 
@@ -83,7 +86,7 @@ class TypeMemberDiscoveryApplicationServiceTest {
     void setUp() {
         service = new TypeMemberDiscoveryApplicationService(
                 repositoryApplicationService,
-                syntaxExtractionService,
+                repositorySyntaxProvider,
                 new DiscoveryFollowUpFactory());
     }
 
@@ -100,7 +103,7 @@ class TypeMemberDiscoveryApplicationServiceTest {
                 101,
                 5);
         delegateSnapshot(snapshot);
-        when(syntaxExtractionService.extract(REPOSITORY_ROOT)).thenReturn(syntax);
+        when(repositorySyntaxProvider.get(snapshot)).thenReturn(syntax);
 
         TypeMemberResult first = service.discover(firstQuery);
 
@@ -131,8 +134,7 @@ class TypeMemberDiscoveryApplicationServiceTest {
                 .containsExactly(
                         Operation.GET_METHOD_SOURCE,
                         Operation.ANALYZE_OUTGOING_CALL_GRAPH,
-                        Operation.ANALYZE_INCOMING_CALL_GRAPH,
-                        Operation.DISCOVER_METHOD_IMPLEMENTATIONS);
+                        Operation.ANALYZE_INCOMING_CALL_GRAPH);
         assertThat(method.availableFollowUps()).extracting(DiscoveryFollowUp::api)
                 .containsExactly(
                         new DiscoveryFollowUp.ApiProjection(
@@ -140,10 +142,7 @@ class TypeMemberDiscoveryApplicationServiceTest {
                         new DiscoveryFollowUp.ApiProjection(
                                 "POST", "/v1/analyses/call-graphs/outgoing", "analyzeOutgoingCallGraph"),
                         new DiscoveryFollowUp.ApiProjection(
-                                "POST", "/v1/analyses/call-graphs/incoming", "analyzeIncomingCallGraph"),
-                        new DiscoveryFollowUp.ApiProjection(
-                                "POST", "/v1/discovery/method-implementations",
-                                "discoverMethodImplementations"));
+                                "POST", "/v1/analyses/call-graphs/incoming", "analyzeIncomingCallGraph"));
         assertThat(method.availableFollowUps().getFirst().request())
                 .isEqualTo(new GetMethodSourceRequest(
                         REPOSITORY_ID.value(), REVISION.value(), method.target()));
@@ -153,9 +152,6 @@ class TypeMemberDiscoveryApplicationServiceTest {
         assertThat(method.availableFollowUps().get(2).request())
                 .isEqualTo(new AnalyzeCallGraphRequest(
                         REPOSITORY_ID.value(), REVISION.value(), 2, method.target()));
-        assertThat(method.availableFollowUps().get(3).request())
-                .isEqualTo(new DiscoverMethodImplementationsRequest(
-                        REPOSITORY_ID.value(), REVISION.value(), method.target()));
 
         List<FieldTypeMember> fields = first.members().stream()
                 .filter(FieldTypeMember.class::isInstance)
@@ -169,13 +165,15 @@ class TypeMemberDiscoveryApplicationServiceTest {
         assertThat(fields.getFirst().resolvedType()).contains("com.acme.type.AlphaType");
         assertThat(fields.getFirst().annotations()).containsExactly("Autowired");
         assertThat(fields.getFirst().limitations()).containsExactly(TypeMemberLimitation.FIELD_USAGE_NOT_INDEXED);
-        assertThat(fields.getFirst().availableFollowUps()).isEmpty();
+        assertThat(fields.getFirst().availableFollowUps()).singleElement()
+                .satisfies(followUp -> assertSelfReference(followUp, "aShared"));
         assertThat(fields.get(1).resolvedType()).isEmpty();
-        assertThat(fields.get(1).availableFollowUps()).isEmpty();
+        assertThat(fields.get(1).availableFollowUps()).singleElement()
+                .satisfies(followUp -> assertSelfReference(followUp, "aShared"));
 
         assertThat(first.availableFollowUps()).singleElement()
                 .satisfies(followUp -> {
-                    assertThat(followUp.operation()).isEqualTo(Operation.GET_NEXT_PAGE);
+                    assertThat(followUp.operation()).isEqualTo(Operation.DISCOVER_TYPE_MEMBERS);
                     assertThat(followUp.api()).isEqualTo(new DiscoveryFollowUp.ApiProjection(
                             "POST", "/v1/discovery/type-members", "discoverTypeMembers"));
                     assertThat(followUp.request()).isEqualTo(new TypeMembersRequest(
@@ -211,14 +209,14 @@ class TypeMemberDiscoveryApplicationServiceTest {
                 0,
                 1);
         delegateSnapshot(snapshot);
-        when(syntaxExtractionService.extract(REPOSITORY_ROOT)).thenReturn(syntax());
+        when(repositorySyntaxProvider.get(any())).thenReturn(syntax());
 
         TypeMemberResult first = service.discover(firstQuery);
 
         assertThat(first.page()).isEqualTo(new ConceptPage(0, 1, 1, 2, true));
         assertThat(first.availableFollowUps()).singleElement()
                 .satisfies(followUp -> {
-                    assertThat(followUp.operation()).isEqualTo(Operation.GET_NEXT_PAGE);
+                    assertThat(followUp.operation()).isEqualTo(Operation.DISCOVER_TYPE_MEMBERS);
                     assertThat(followUp.request()).isEqualTo(new TypeMembersRequest(
                             REPOSITORY_ID.value(),
                             REVISION.value(),
@@ -228,6 +226,48 @@ class TypeMemberDiscoveryApplicationServiceTest {
                             1,
                             1));
                 });
+    }
+
+    @Test
+    void should_offer_implementation_discovery_only_for_an_eligible_abstract_declaration() {
+        RepositorySnapshot snapshot = new RepositorySnapshot(REPOSITORY_ID, REPOSITORY_ROOT, REVISION);
+        SourceMethodMetadata declaration = abstractMethod(SOURCE_FILE, "shared", List.of());
+        SourceTypeMetadata metadata = SourceTypeMetadataFixture.sourceType(
+                "OrderService",
+                "com.acme.order",
+                TYPE_NAME,
+                SOURCE_FILE,
+                SourceTypeKind.INTERFACE,
+                false,
+                List.of(),
+                List.of(),
+                List.of(),
+                List.of(),
+                List.of(),
+                List.of(declaration),
+                false,
+                false,
+                List.of(),
+                range(),
+                source(SOURCE_FILE),
+                false,
+                List.of());
+        delegateSnapshot(snapshot);
+        when(repositorySyntaxProvider.get(snapshot)).thenReturn(new RepositorySyntax(List.of(), List.of(metadata), List.of()));
+
+        TypeMemberResult result = service.discover(new TypeMemberQuery(
+                REPOSITORY_ID, REVISION, SOURCE_TYPE, Set.of(TypeMemberKind.METHOD), Optional.empty(), 0, 10));
+
+        MethodTypeMember member = (MethodTypeMember) result.members().getFirst();
+        assertThat(member.availableFollowUps()).extracting(DiscoveryFollowUp::operation)
+                .containsExactly(
+                        Operation.GET_METHOD_SOURCE,
+                        Operation.ANALYZE_OUTGOING_CALL_GRAPH,
+                        Operation.ANALYZE_INCOMING_CALL_GRAPH,
+                        Operation.DISCOVER_METHOD_IMPLEMENTATIONS);
+        assertThat(member.availableFollowUps().get(3).request())
+                .isEqualTo(new DiscoverMethodImplementationsRequest(
+                        REPOSITORY_ID.value(), REVISION.value(), member.target()));
     }
 
     @Test
@@ -258,7 +298,7 @@ class TypeMemberDiscoveryApplicationServiceTest {
                 0,
                 10);
         delegateSnapshot(snapshot);
-        when(syntaxExtractionService.extract(REPOSITORY_ROOT)).thenReturn(new RepositorySyntax(
+        when(repositorySyntaxProvider.get(any())).thenReturn(new RepositorySyntax(
                 List.of(),
                 List.of(arrayMetadata()),
                 List.of()));
@@ -270,7 +310,8 @@ class TypeMemberDiscoveryApplicationServiceTest {
                 field -> {
                     assertThat(field.writtenType()).isEqualTo("Order[][]");
                     assertThat(field.resolvedType()).contains("com.acme.order.Order[][]");
-                    assertThat(field.availableFollowUps()).isEmpty();
+                    assertThat(field.availableFollowUps()).singleElement()
+                            .satisfies(followUp -> assertSelfReference(followUp, "orders"));
                 });
     }
 
@@ -286,7 +327,7 @@ class TypeMemberDiscoveryApplicationServiceTest {
                 0,
                 10);
         delegateSnapshot(snapshot);
-        when(syntaxExtractionService.extract(REPOSITORY_ROOT)).thenReturn(new RepositorySyntax(
+        when(repositorySyntaxProvider.get(any())).thenReturn(new RepositorySyntax(
                 List.of(),
                 List.of(arrayMetadata(), referencedOrderMetadata(REFERENCED_SOURCE_FILE)),
                 List.of()));
@@ -297,7 +338,7 @@ class TypeMemberDiscoveryApplicationServiceTest {
                 FieldTypeMember.class,
                 field -> {
                     assertThat(field.resolvedType()).contains("com.acme.order.Order[][]");
-                    assertThat(field.availableFollowUps()).singleElement().satisfies(followUp -> {
+                    assertThat(field.availableFollowUps()).satisfiesExactly(followUp -> {
                         assertThat(followUp.operation()).isEqualTo(Operation.RESOLVE_CONCEPT);
                         assertThat(followUp.request()).isEqualTo(new DiscoveryFollowUp.ResolveConceptRequest(
                                 REPOSITORY_ID.value(),
@@ -305,7 +346,7 @@ class TypeMemberDiscoveryApplicationServiceTest {
                                 new TypeConceptIdentity(new SourceTypeIdentity(
                                         new JavaTypeIdentity("com.acme.order", "Order"),
                                         REFERENCED_SOURCE_FILE))));
-                    });
+                    }, followUp -> assertSelfReference(followUp, "orders"));
                 });
     }
 
@@ -321,7 +362,7 @@ class TypeMemberDiscoveryApplicationServiceTest {
                 0,
                 10);
         delegateSnapshot(snapshot);
-        when(syntaxExtractionService.extract(REPOSITORY_ROOT)).thenReturn(new RepositorySyntax(
+        when(repositorySyntaxProvider.get(any())).thenReturn(new RepositorySyntax(
                 List.of(),
                 List.of(
                         arrayMetadata(),
@@ -336,8 +377,19 @@ class TypeMemberDiscoveryApplicationServiceTest {
                 field -> {
                     assertThat(field.writtenType()).isEqualTo("Order[][]");
                     assertThat(field.resolvedType()).contains("com.acme.order.Order[][]");
-                    assertThat(field.availableFollowUps()).isEmpty();
+                    assertThat(field.availableFollowUps()).singleElement()
+                            .satisfies(followUp -> assertSelfReference(followUp, "orders"));
                 });
+    }
+
+    private static void assertSelfReference(DiscoveryFollowUp followUp, String fieldName) {
+        assertThat(followUp.operation()).isEqualTo(Operation.FIND_INTERNAL_REFERENCES);
+        assertThat(followUp.request()).isEqualTo(new FindInternalReferencesRequest(
+                REPOSITORY_ID.value(),
+                REVISION.value(),
+                new ExactSourceDeclarationTarget.Member(new SourceMemberIdentity.TypeMember(SOURCE_TYPE, fieldName)),
+                0,
+                20));
     }
 
     private void delegateSnapshot(RepositorySnapshot snapshot) {
@@ -391,7 +443,7 @@ class TypeMemberDiscoveryApplicationServiceTest {
                 false,
                 List.of(),
                 range(),
-                source(),
+                source(sourceFile),
                 false,
                 List.of());
     }
@@ -414,7 +466,7 @@ class TypeMemberDiscoveryApplicationServiceTest {
                 false,
                 List.of(),
                 range(),
-                source(),
+                source(DUPLICATE_SOURCE_FILE),
                 false,
                 List.of());
     }
@@ -446,7 +498,7 @@ class TypeMemberDiscoveryApplicationServiceTest {
                 false,
                 List.of(),
                 range(),
-                source(),
+                source(SOURCE_FILE),
                 false,
                 List.of());
     }
@@ -469,7 +521,7 @@ class TypeMemberDiscoveryApplicationServiceTest {
                 false,
                 List.of(),
                 range(),
-                source(),
+                source(sourceFile),
                 false,
                 List.of());
     }
@@ -484,12 +536,9 @@ class TypeMemberDiscoveryApplicationServiceTest {
         return new SourceMethodMetadata(
                 name,
                 parameterTypes,
-                "",
                 null,
-                1,
-                2,
-                range(),
-                source(),
+                Optional.empty(),
+                source(sourceFile),
                 List.of(),
                 Optional.empty(),
                 List.of(),
@@ -500,6 +549,31 @@ class TypeMemberDiscoveryApplicationServiceTest {
                 true,
                 false,
                 false);
+    }
+
+    private static SourceMethodMetadata abstractMethod(String sourceFile, String name, List<String> parameterTypes) {
+        MethodTarget target = new MethodTarget(
+                new SourceTypeIdentity(
+                        new JavaTypeIdentity("com.acme.order", "OrderService"),
+                        sourceFile),
+                name,
+                parameterTypes);
+        return new SourceMethodMetadata(
+                name,
+                parameterTypes,
+                null,
+                Optional.empty(),
+                source(sourceFile),
+                List.of(),
+                Optional.empty(),
+                List.of(),
+                List.of(),
+                List.of(),
+                new SyntaxPosition(1, 1),
+                MethodTargetResolution.resolved(target),
+                false,
+                true,
+                true);
     }
 
     private static SourceFieldMetadata field(String name, String writtenType, String resolvedType) {
@@ -526,7 +600,7 @@ class TypeMemberDiscoveryApplicationServiceTest {
         return new SyntaxRange(new SyntaxPosition(1, 0), new SyntaxPosition(2, 0));
     }
 
-    private static SourceSlice source() {
-        return new SourceSlice(range(), "");
+    private static SourceRange source(String sourceFile) {
+        return new SourceRange(sourceFile, range());
     }
 }

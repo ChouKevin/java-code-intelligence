@@ -1,5 +1,7 @@
 package com.java.semantic.syntax.application;
 
+import com.java.semantic.syntax.domain.SourceRange;
+
 import com.java.semantic.identity.MethodTarget;
 import com.java.semantic.syntax.domain.SourceMemberIdentity;
 import com.java.semantic.identity.SourceTypeIdentity;

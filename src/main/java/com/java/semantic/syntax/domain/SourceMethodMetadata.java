@@ -10,12 +10,9 @@ import java.util.Optional;
 public record SourceMethodMetadata(
         String name,
         List<String> paramTypes,
-        String sql,
         SqlSourceKind sqlSource,
-        int startLine,
-        int endLine,
-        SyntaxRange range,
-        SourceSlice source,
+        Optional<SourceRange> annotationSqlLocation,
+        SourceRange declarationLocation,
         List<TypeReference> parameterTypeReferences,
         Optional<TypeReference> returnType,
         List<SyntaxInvocation> invocations,
@@ -29,8 +26,8 @@ public record SourceMethodMetadata(
 
     public SourceMethodMetadata {
         paramTypes = List.copyOf(paramTypes);
-        range = Objects.requireNonNull(range, "range is required");
-        source = Objects.requireNonNull(source, "source is required");
+        annotationSqlLocation = Objects.requireNonNull(annotationSqlLocation, "annotationSqlLocation is required");
+        declarationLocation = Objects.requireNonNull(declarationLocation, "declarationLocation is required");
         parameterTypeReferences = List.copyOf(parameterTypeReferences);
         returnType = Objects.requireNonNull(returnType, "returnType is required");
         invocations = List.copyOf(invocations);
@@ -38,6 +35,16 @@ public record SourceMethodMetadata(
         bodyTypeReferences = List.copyOf(bodyTypeReferences);
         namePosition = Objects.requireNonNull(namePosition, "namePosition is required");
         analysisTarget = Objects.requireNonNull(analysisTarget, "analysisTarget is required");
+        if (sqlSource == SqlSourceKind.ANNOTATION && annotationSqlLocation.isEmpty()) {
+            throw new IllegalArgumentException("annotation SQL requires annotationSqlLocation");
+        }
+        if (sqlSource != SqlSourceKind.ANNOTATION && annotationSqlLocation.isPresent()) {
+            throw new IllegalArgumentException("annotationSqlLocation requires annotation SQL");
+        }
+        if (analysisTarget.target().isPresent()
+                && !analysisTarget.target().orElseThrow().sourceFile().equals(declarationLocation.sourceFile())) {
+            throw new IllegalArgumentException("analysis target sourceFile must match declarationLocation");
+        }
     }
 
     /** 參數個數 */

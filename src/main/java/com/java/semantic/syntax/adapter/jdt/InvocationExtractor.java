@@ -46,7 +46,7 @@ final class InvocationExtractor {
     private InvocationExtractor() {
     }
 
-    static List<SyntaxInvocation> extract(CompilationUnit unit, ASTNode method, SourceSlices slices) {
+    static List<SyntaxInvocation> extract(CompilationUnit unit, ASTNode method, String source) {
         List<SyntaxInvocation> invocations = new ArrayList<>();
         method.accept(new ASTVisitor() {
             @Override
@@ -54,38 +54,38 @@ final class InvocationExtractor {
                 Expression receiver = node.getExpression();
                 IMethodBinding binding = node.resolveMethodBinding();
                 InvocationKind kind = invocationKind(unit, binding);
-                invocations.add(invocation(kind, node, receiver, unit, slices));
+                invocations.add(invocation(kind, node, receiver, unit, source));
                 return true;
             }
 
             @Override
             public boolean visit(ClassInstanceCreation node) {
                 invocations.add(invocation(InvocationKind.CONSTRUCTOR, node, node.getType(),
-                        unit, slices));
+                        unit, source));
                 return true;
             }
 
             @Override
             public boolean visit(CreationReference node) {
-                invocations.add(methodReference(node, node.getType(), unit, slices));
+                invocations.add(methodReference(node, node.getType(), unit, source));
                 return true;
             }
 
             @Override
             public boolean visit(ExpressionMethodReference node) {
-                invocations.add(methodReference(node, node.getExpression(), unit, slices));
+                invocations.add(methodReference(node, node.getExpression(), unit, source));
                 return true;
             }
 
             @Override
             public boolean visit(TypeMethodReference node) {
-                invocations.add(methodReference(node, node.getType(), unit, slices));
+                invocations.add(methodReference(node, node.getType(), unit, source));
                 return true;
             }
 
             @Override
             public boolean visit(SuperMethodReference node) {
-                invocations.add(superMethodReference(node, unit, slices));
+                invocations.add(superMethodReference(node, unit, source));
                 return true;
             }
         });
@@ -97,48 +97,48 @@ final class InvocationExtractor {
     }
 
     private static SyntaxInvocation methodReference(MethodReference node, ASTNode receiver,
-            CompilationUnit unit, SourceSlices slices) {
-        return invocation(InvocationKind.METHOD_REFERENCE, node, receiver, unit, slices);
+            CompilationUnit unit, String source) {
+        return invocation(InvocationKind.METHOD_REFERENCE, node, receiver, unit, source);
     }
 
     private static SyntaxInvocation superMethodReference(
-            SuperMethodReference node, CompilationUnit unit, SourceSlices slices) {
+            SuperMethodReference node, CompilationUnit unit, String source) {
         Name qualifier = node.getQualifier();
         String receiver = Objects.isNull(qualifier)
                 ? "super"
-                : slices.slice(qualifier).text() + ".super";
+                : AstSourceRanges.text(source, qualifier) + ".super";
         IMethodBinding method = node.resolveMethodBinding();
         String declaration = validMethod(method)
                 ? canonicalName(method.getMethodDeclaration().getDeclaringClass())
                 : "";
         return new SyntaxInvocation(
                 InvocationKind.METHOD_REFERENCE,
-                slices.range(node),
-                slices.slice(node).text(),
+                AstSourceRanges.range(unit, node),
+                AstSourceRanges.text(source, node),
                 receiver,
                 declaration,
                 "",
                 invocationTarget(method),
-                slices.range(node.getName()).start());
+                AstSourceRanges.range(unit, node.getName()).start());
     }
 
     private static SyntaxInvocation invocation(InvocationKind kind, ASTNode node, ASTNode receiver,
-            CompilationUnit unit, SourceSlices slices) {
-        String receiverText = Objects.isNull(receiver) ? "" : slices.slice(receiver).text();
+            CompilationUnit unit, String source) {
+        String receiverText = Objects.isNull(receiver) ? "" : AstSourceRanges.text(source, receiver);
         String receiverDeclaration = resolvedReceiverType(receiver);
         String qualifier = receiver instanceof Expression expression ? qualifierOf(expression, unit) : "";
         return new SyntaxInvocation(
                 kind,
-                slices.range(node),
-                slices.slice(node).text(),
+                AstSourceRanges.range(unit, node),
+                AstSourceRanges.text(source, node),
                 receiverText,
                 receiverDeclaration,
                 qualifier,
                 invocationTarget(node),
-                resolutionAnchor(node, slices));
+                resolutionAnchor(node, unit));
     }
 
-    private static SyntaxPosition resolutionAnchor(ASTNode node, SourceSlices slices) {
+    private static SyntaxPosition resolutionAnchor(ASTNode node, CompilationUnit unit) {
         ASTNode anchor = switch (node) {
             case MethodInvocation invocation -> invocation.getName();
             case ClassInstanceCreation creation -> creation.getType();
@@ -148,7 +148,7 @@ final class InvocationExtractor {
             case CreationReference reference -> reference.getType();
             default -> node;
         };
-        return slices.range(anchor).start();
+        return AstSourceRanges.range(unit, anchor).start();
     }
 
     private static Optional<InvocationTarget> invocationTarget(ASTNode node) {

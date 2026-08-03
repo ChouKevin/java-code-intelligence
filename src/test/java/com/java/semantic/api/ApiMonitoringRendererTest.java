@@ -7,8 +7,9 @@ import com.java.semantic.api.dto.InternalSourceReferenceResponse;
 import com.java.semantic.api.dto.InternalSourceReferenceResponse.ReferenceGroupResponse;
 import com.java.semantic.api.dto.InternalSourceReferenceResponse.TargetDeclarationResponse;
 import com.java.semantic.api.dto.InternalSourceReferenceTargetPayload;
-import com.java.semantic.api.dto.JavaSourceSegmentRequest;
-import com.java.semantic.api.dto.JavaSourceSegmentResponse;
+import com.java.semantic.api.dto.SourceSegmentRequest;
+import com.java.semantic.api.dto.SourceSegmentPayload;
+import com.java.semantic.api.dto.SourceSegmentResponse;
 import com.java.semantic.api.dto.PageResponse;
 import com.java.semantic.api.dto.identity.JavaTypeIdentityPayload;
 import com.java.semantic.api.dto.identity.MethodTargetPayload;
@@ -23,6 +24,7 @@ import org.junit.jupiter.api.Test;
 
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.Optional;
 import java.util.Optional;
 import java.util.stream.Collectors;
 
@@ -97,6 +99,18 @@ class ApiMonitoringRendererTest {
 
         assertThat(String.join("\n", rendered.segments()))
                 .contains("request.nested.revision=revision-8");
+    }
+
+    @Test
+    void should_render_each_nested_project_record_in_a_follow_up_list() {
+        RenderedApiMonitoring rendered = renderer.render(
+                "response", new NestedRecordListPayload(List.of(
+                        new NestedPayload("revision-9"),
+                        new NestedPayload("revision-10"))));
+
+        assertThat(String.join("\n", rendered.segments()))
+                .contains("response.availableFollowUps[0].revision=revision-9")
+                .contains("response.availableFollowUps[1].revision=revision-10");
     }
 
     @Test
@@ -241,7 +255,7 @@ class ApiMonitoringRendererTest {
                 new BoundedResultResponse(3, 0, 0, false),
                 List.of(),
                 List.of());
-        JavaSourceSegmentRequest segmentRequest = new JavaSourceSegmentRequest(
+        SourceSegmentRequest segmentRequest = new SourceSegmentRequest(
                 "orders", "a".repeat(40), sourceRange, 3);
         String sourceContent = String.join(
                 " ",
@@ -251,13 +265,11 @@ class ApiMonitoringRendererTest {
                 "SEMANTIC_API_TOKEN=token",
                 "JAVA_HOME=/opt/java",
                 "JDT LS diagnostic");
-        JavaSourceSegmentResponse segmentResponse = new JavaSourceSegmentResponse(
+        SourceSegmentResponse segmentResponse = new SourceSegmentResponse(
                 "orders",
                 "a".repeat(40),
-                sourceRange,
-                sourceContent,
-                false,
-                42);
+                new SourceSegmentPayload(sourceRange, sourceContent, Optional.empty()),
+                false);
 
         String output = List.of(
                         renderer.render("referenceRequest", referenceRequest),
@@ -292,17 +304,16 @@ class ApiMonitoringRendererTest {
                 .contains("referenceGroup.context.sourceType.sourceFile="
                         + "src/main/java/com/secret/orders/SensitiveOrderService.java")
                 .contains("referenceGroup.limits.limit=3")
-                .contains("segmentRequest.sourceRange.sourceFile="
+                .contains("segmentRequest.location.sourceFile="
                         + "src/main/java/com/secret/orders/SensitiveOrderService.java")
-                .contains("segmentRequest.sourceRange.range.start.line=7")
-                .contains("segmentRequest.sourceRange.range.end.character=19")
+                .contains("segmentRequest.location.range.start.line=7")
+                .contains("segmentRequest.location.range.end.character=19")
                 .contains("segmentRequest.contextLines=3")
-                .contains("segmentResponse.contentRange.sourceFile="
+                .contains("segmentResponse.segment.location.sourceFile="
                         + "src/main/java/com/secret/orders/SensitiveOrderService.java")
-                .contains("segmentResponse.contentRange.range.start.character=4")
-                .contains("segmentResponse.contentRange.range.end.line=7")
+                .contains("segmentResponse.segment.location.range.start.character=4")
+                .contains("segmentResponse.segment.location.range.end.line=7")
                 .contains("segmentResponse.contextTruncated=false")
-                .contains("segmentResponse.returnedUtf8Bytes=42")
                 .doesNotContain(
                         "private source content",
                         "/srv/private",
@@ -334,6 +345,10 @@ class ApiMonitoringRendererTest {
 
     private record OptionalNestedPayload(
             @ApiMonitoringField(ApiMonitoringMode.NESTED) Optional<NestedPayload> nested) {
+    }
+
+    private record NestedRecordListPayload(
+            @ApiMonitoringField(ApiMonitoringMode.NESTED) List<NestedPayload> availableFollowUps) {
     }
 
     private record OptionalScalarPayload(

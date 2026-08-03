@@ -21,43 +21,76 @@ import com.java.semantic.callgraph.domain.NodeTraversalState;
 import com.java.semantic.callgraph.domain.OutgoingGraphFragment;
 import com.java.semantic.callgraph.domain.ResolutionStrategy;
 import com.java.semantic.callgraph.domain.ResolutionStrategyPartition;
+import com.java.semantic.repository.domain.RepositoryId;
+import com.java.semantic.repository.domain.RepositoryRevision;
+import com.java.semantic.syntax.application.DiscoveryFollowUp;
+import com.java.semantic.syntax.application.DiscoveryFollowUpFactory;
+import com.java.semantic.syntax.domain.SourceRange;
+import com.java.semantic.syntax.domain.SyntaxPosition;
+import com.java.semantic.syntax.domain.SyntaxRange;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import java.util.Objects;
+import java.util.List;
 
 /** Maps the domain-only normalized fragment through the API-owned Task 3 response contract. */
 @Component
 public final class AnalysisResponseMapper {
 
     private final SourceLocationHttpMapper sourceLocationMapper;
+    private final DiscoveryFollowUpFactory followUpFactory;
+    private final StructuredDiscoveryResponseMapper followUpMapper;
 
-    public AnalysisResponseMapper(SourceLocationHttpMapper sourceLocationMapper) {
+    @Autowired
+    public AnalysisResponseMapper(
+            SourceLocationHttpMapper sourceLocationMapper,
+            DiscoveryFollowUpFactory followUpFactory,
+            StructuredDiscoveryResponseMapper followUpMapper) {
         this.sourceLocationMapper = Objects.requireNonNull(sourceLocationMapper, "sourceLocationMapper is required");
+        this.followUpFactory = Objects.requireNonNull(followUpFactory, "followUpFactory is required");
+        this.followUpMapper = Objects.requireNonNull(followUpMapper, "followUpMapper is required");
     }
 
-    public OutgoingCallGraphResponse toResponse(OutgoingGraphFragment fragment) {
+    public AnalysisResponseMapper(SourceLocationHttpMapper sourceLocationMapper) {
+        this(sourceLocationMapper, new DiscoveryFollowUpFactory(), followUpMapper(sourceLocationMapper));
+    }
+
+    private static StructuredDiscoveryResponseMapper followUpMapper(SourceLocationHttpMapper sourceLocationMapper) {
+        MapperIdentityHttpMapper mapperIdentityHttpMapper = new MapperIdentityHttpMapper();
+        return new StructuredDiscoveryResponseMapper(
+                new DiscoveryFollowUpFactory(),
+                new ConceptIdentityHttpMapper(sourceLocationMapper, mapperIdentityHttpMapper),
+                mapperIdentityHttpMapper,
+                sourceLocationMapper,
+                new ExactSourceDeclarationTargetHttpMapper(sourceLocationMapper));
+    }
+
+    public OutgoingCallGraphResponse toResponse(RepositoryId repositoryId, OutgoingGraphFragment fragment) {
         Objects.requireNonNull(fragment, "fragment is required");
+        RepositoryId requiredRepositoryId = Objects.requireNonNull(repositoryId, "repositoryId is required");
         return new OutgoingCallGraphResponse(
                 status(fragment.status()),
                 fragment.analyzedRevision().value(),
                 fragment.rootNodeId().value(),
                 traversal(fragment.traversal()),
-                fragment.nodes().stream().map(this::node).toList(),
+                fragment.nodes().stream().map(node -> node(requiredRepositoryId, fragment.analyzedRevision(), node)).toList(),
                 fragment.edges().stream().map(this::edge).toList(),
-                fragment.warnings().stream().map(this::warning).toList(),
+                fragment.warnings().stream().map(warning -> warning(requiredRepositoryId, fragment.analyzedRevision(), warning)).toList(),
                 fragment.errors().stream().map(this::error).toList());
     }
 
-    public IncomingCallGraphResponse toResponse(IncomingGraphFragment fragment) {
+    public IncomingCallGraphResponse toResponse(RepositoryId repositoryId, IncomingGraphFragment fragment) {
         Objects.requireNonNull(fragment, "fragment is required");
+        RepositoryId requiredRepositoryId = Objects.requireNonNull(repositoryId, "repositoryId is required");
         return new IncomingCallGraphResponse(
                 status(fragment.status()),
                 fragment.analyzedRevision().value(),
                 fragment.rootNodeId().value(),
                 traversal(fragment.traversal()),
-                fragment.nodes().stream().map(this::node).toList(),
+                fragment.nodes().stream().map(node -> node(requiredRepositoryId, fragment.analyzedRevision(), node)).toList(),
                 fragment.edges().stream().map(this::edge).toList(),
-                fragment.warnings().stream().map(this::warning).toList(),
+                fragment.warnings().stream().map(warning -> warning(requiredRepositoryId, fragment.analyzedRevision(), warning)).toList(),
                 fragment.errors().stream().map(this::error).toList());
     }
 
@@ -77,7 +110,11 @@ public final class AnalysisResponseMapper {
                 limitReason(traversal.limitReason()));
     }
 
-    private GraphNodeResponse node(GraphNode node) {
+    private GraphNodeResponse node(RepositoryId repositoryId, RepositoryRevision revision, GraphNode node) {
+        List<DiscoveryFollowUp> followUps = node.target()
+                .filter(target -> !NodeContentState.EXTERNAL.equals(node.contentState()))
+                .map(target -> followUpFactory.methodSourceOnly(repositoryId, revision, target))
+                .orElseGet(List::of);
         return new GraphNodeResponse(
                 node.nodeId().value(),
                 node.target().map(JavaSourceIdentityHttpMapper::toPayload).orElse(null),
@@ -85,8 +122,8 @@ public final class AnalysisResponseMapper {
                 contentState(node.contentState()),
                 traversalState(node.traversalState()),
                 dispatchKind(node.dispatchKind()),
-                node.methodBody().orElse(null),
-                node.declarationRange().map(sourceLocationMapper::toTextRange).orElse(null));
+                node.declarationRange().map(sourceLocationMapper::toTextRange).orElse(null),
+                followUps.stream().map(followUpMapper::followUp).toList());
     }
 
     private GraphEdgeResponse edge(GraphEdge edge) {
@@ -100,14 +137,27 @@ public final class AnalysisResponseMapper {
                 edge.evidence());
     }
 
-    private GraphWarningResponse warning(GraphWarning warning) {
+    private GraphWarningResponse warning(RepositoryId repositoryId, RepositoryRevision revision, GraphWarning warning) {
+        List<DiscoveryFollowUp> followUps = warning.callSite()
+                .map(callSite -> followUpFactory.forSourceSegment(
+                        repositoryId,
+                        revision,
+                        new SourceRange(
+                                callSite.sourceFile(),
+                                new SyntaxRange(
+                                        new SyntaxPosition(callSite.startLine(), callSite.startCharacter()),
+                                        new SyntaxPosition(callSite.endLine(), callSite.endCharacter()))),
+                        0))
+                .stream()
+                .toList();
         return new GraphWarningResponse(
                 warning.code(),
                 warning.message(),
                 warning.nodeId().value(),
                 warning.callExpression().orElse(null),
                 warning.callSite().map(sourceLocationMapper::toSourceRange).orElse(null),
-                warning.candidates().stream().map(JavaSourceIdentityHttpMapper::toPayload).toList());
+                warning.candidates().stream().map(JavaSourceIdentityHttpMapper::toPayload).toList(),
+                followUps.stream().map(followUpMapper::followUp).toList());
     }
 
     private GraphErrorResponse error(GraphError error) {

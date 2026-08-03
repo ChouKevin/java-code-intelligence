@@ -15,7 +15,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 
-/** 可直接執行且帶完整 HTTP authority 與請求投影的後續動作回應 */
+/** operation 與 request 是 Agent 可直接提交的下一輪 HTTP 契約，不是建議文字 */
 public record DiscoveryFollowUpResponse(
         @ApiMonitoringField(ApiMonitoringMode.VALUE) String operation,
         @ApiMonitoringField(ApiMonitoringMode.NESTED) ApiResponse api,
@@ -33,20 +33,17 @@ public record DiscoveryFollowUpResponse(
     /** 後續動作可攜帶的封閉完整請求投影 */
     public sealed interface RequestResponse permits
             GetMethodSourceRequestResponse,
-            GetMapperStatementRequestResponse,
-            GetMapperFragmentRequestResponse,
-            GetMethodSourceSegmentRequestResponse,
-            GetMapperStatementSegmentRequestResponse,
-            GetMapperFragmentSegmentRequestResponse,
             AnalyzeCallGraphRequestResponse,
             DiscoverMethodImplementationsRequestResponse,
             ResolveConceptRequestResponse,
-            ConceptSearchPageRequestResponse,
             GetTypeMembersRequestResponse,
             DiscoverTypeMembersRequestResponse,
+            DiscoverConceptsRequestResponse,
+            DiscoverEventListenersRequestResponse,
             ResolveSourceSymbolRequestResponse,
             FindInternalReferencesRequestResponse,
-            GetJavaSourceSegmentRequestResponse {
+            GetSourceSegmentRequestResponse,
+            GetEvidenceSourceRequestResponse {
     }
 
     /** exact method source 後續動作的完整請求 */
@@ -57,82 +54,6 @@ public record DiscoveryFollowUpResponse(
 
         public GetMethodSourceRequestResponse {
             target = Objects.requireNonNull(target, "target is required");
-        }
-    }
-
-    /** 已唯一解析 mapper statement 導向 exact SQL variants 的完整請求 */
-    public record GetMapperStatementRequestResponse(
-            @ApiMonitoringField(ApiMonitoringMode.VALUE) String repoId,
-            @ApiMonitoringField(ApiMonitoringMode.VALUE) String expectedRevision,
-            @ApiMonitoringField(ApiMonitoringMode.NESTED) MethodTargetPayload target)
-            implements RequestResponse {
-
-        public GetMapperStatementRequestResponse {
-            target = Objects.requireNonNull(target, "target is required");
-        }
-    }
-
-    /**
-     * typed mapper evidence 提供完整 fragment identity 的 stateless exact XML 請求
-     * 此請求不依賴 cache、session 或 operator 補填 authority
-     */
-    public record GetMapperFragmentRequestResponse(
-            @ApiMonitoringField(ApiMonitoringMode.VALUE) String repoId,
-            @ApiMonitoringField(ApiMonitoringMode.VALUE) String expectedRevision,
-            @ApiMonitoringField(ApiMonitoringMode.NESTED)
-            MapperFragmentIdentityPayload fragmentIdentity) implements RequestResponse {
-
-        public GetMapperFragmentRequestResponse {
-            fragmentIdentity = Objects.requireNonNull(fragmentIdentity, "fragmentIdentity is required");
-        }
-    }
-
-    /**
-     * 重送原始 method authority 的 stateless source segment 完整請求
-     * contentRef 僅驗證內容一致性且不是 cache lookup key
-     */
-    public record GetMethodSourceSegmentRequestResponse(
-            @ApiMonitoringField(ApiMonitoringMode.VALUE) String repoId,
-            @ApiMonitoringField(ApiMonitoringMode.VALUE) String expectedRevision,
-            @ApiMonitoringField(ApiMonitoringMode.NESTED) MethodTargetPayload target,
-            @ApiMonitoringField(ApiMonitoringMode.OMIT) String contentRef,
-            @ApiMonitoringField(ApiMonitoringMode.VALUE) int segmentIndex) implements RequestResponse {
-
-        public GetMethodSourceSegmentRequestResponse {
-            target = Objects.requireNonNull(target, "target is required");
-        }
-    }
-
-    /**
-     * 重送原始 mapper method authority 的 stateless statement segment 完整請求
-     * contentRef 僅驗證內容一致性且不是 cache lookup key
-     */
-    public record GetMapperStatementSegmentRequestResponse(
-            @ApiMonitoringField(ApiMonitoringMode.VALUE) String repoId,
-            @ApiMonitoringField(ApiMonitoringMode.VALUE) String expectedRevision,
-            @ApiMonitoringField(ApiMonitoringMode.NESTED) MethodTargetPayload target,
-            @ApiMonitoringField(ApiMonitoringMode.OMIT) String contentRef,
-            @ApiMonitoringField(ApiMonitoringMode.VALUE) int segmentIndex) implements RequestResponse {
-
-        public GetMapperStatementSegmentRequestResponse {
-            target = Objects.requireNonNull(target, "target is required");
-        }
-    }
-
-    /**
-     * 重送原始 fragment authority 的 stateless mapper XML segment 完整請求
-     * contentRef 僅驗證內容一致性且不是 cache lookup key
-     */
-    public record GetMapperFragmentSegmentRequestResponse(
-            @ApiMonitoringField(ApiMonitoringMode.VALUE) String repoId,
-            @ApiMonitoringField(ApiMonitoringMode.VALUE) String expectedRevision,
-            @ApiMonitoringField(ApiMonitoringMode.NESTED)
-            MapperFragmentIdentityPayload fragmentIdentity,
-            @ApiMonitoringField(ApiMonitoringMode.OMIT) String contentRef,
-            @ApiMonitoringField(ApiMonitoringMode.VALUE) int segmentIndex) implements RequestResponse {
-
-        public GetMapperFragmentSegmentRequestResponse {
-            fragmentIdentity = Objects.requireNonNull(fragmentIdentity, "fragmentIdentity is required");
         }
     }
 
@@ -177,24 +98,6 @@ public record DiscoveryFollowUpResponse(
             @ApiMonitoringField(ApiMonitoringMode.VALUE) String matchMode) {
     }
 
-    /** 保留原始結構化搜尋條件的概念下一頁完整請求 */
-    public record ConceptSearchPageRequestResponse(
-            @ApiMonitoringField(ApiMonitoringMode.VALUE) String repoId,
-            @ApiMonitoringField(ApiMonitoringMode.VALUE) String expectedRevision,
-            @ApiMonitoringField(ApiMonitoringMode.VALUE) String operator,
-            @ApiMonitoringField(ApiMonitoringMode.SIZE) List<ConceptSearchTermResponse> terms,
-            @ApiMonitoringField(ApiMonitoringMode.SIZE) List<String> kinds,
-            @ApiMonitoringField(ApiMonitoringMode.VALUE) Optional<String> packagePrefix,
-            @ApiMonitoringField(ApiMonitoringMode.VALUE) int offset,
-            @ApiMonitoringField(ApiMonitoringMode.VALUE) int limit) implements RequestResponse {
-
-        public ConceptSearchPageRequestResponse {
-            terms = List.copyOf(Objects.requireNonNull(terms, "terms are required"));
-            kinds = List.copyOf(Objects.requireNonNull(kinds, "kinds are required"));
-            packagePrefix = Objects.requireNonNull(packagePrefix, "packagePrefix is required");
-        }
-    }
-
     /** 宣告型概念導向型別成員探索的完整請求 */
     public record GetTypeMembersRequestResponse(
             @ApiMonitoringField(ApiMonitoringMode.VALUE) String repoId,
@@ -231,6 +134,33 @@ public record DiscoveryFollowUpResponse(
         }
     }
 
+    /** 直接重送固定搜尋條件的概念下一頁完整 HTTP request */
+    public record DiscoverConceptsRequestResponse(
+            @ApiMonitoringField(ApiMonitoringMode.VALUE) String repoId,
+            @ApiMonitoringField(ApiMonitoringMode.VALUE) String expectedRevision,
+            @ApiMonitoringField(ApiMonitoringMode.NESTED) List<ConceptSearchTermResponse> terms,
+            @ApiMonitoringField(ApiMonitoringMode.SIZE) List<String> kinds,
+            @ApiMonitoringField(ApiMonitoringMode.VALUE) String operator,
+            @ApiMonitoringField(ApiMonitoringMode.VALUE) Optional<String> packagePrefix,
+            @ApiMonitoringField(ApiMonitoringMode.VALUE) int offset,
+            @ApiMonitoringField(ApiMonitoringMode.VALUE) int limit) implements RequestResponse {
+
+        public DiscoverConceptsRequestResponse {
+            terms = List.copyOf(Objects.requireNonNull(terms, "terms are required"));
+            kinds = List.copyOf(Objects.requireNonNull(kinds, "kinds are required"));
+            packagePrefix = Objects.requireNonNull(packagePrefix, "packagePrefix is required");
+        }
+    }
+
+    /** 直接重送固定 event type 與頁碼的事件監聽器下一頁完整 HTTP request */
+    public record DiscoverEventListenersRequestResponse(
+            @ApiMonitoringField(ApiMonitoringMode.VALUE) String repoId,
+            @ApiMonitoringField(ApiMonitoringMode.VALUE) String expectedRevision,
+            @ApiMonitoringField(ApiMonitoringMode.VALUE) String eventType,
+            @ApiMonitoringField(ApiMonitoringMode.VALUE) int offset,
+            @ApiMonitoringField(ApiMonitoringMode.VALUE) int limit) implements RequestResponse {
+    }
+
     /** RESOLVE_SOURCE_SYMBOL 後續動作的完整請求 */
     public record ResolveSourceSymbolRequestResponse(
             @ApiMonitoringField(ApiMonitoringMode.VALUE) String repoId,
@@ -256,11 +186,23 @@ public record DiscoveryFollowUpResponse(
             @ApiMonitoringField(ApiMonitoringMode.VALUE) int limit) implements RequestResponse {
     }
 
-    /** bounded Java source segment 的完整 exact range 請求 */
-    public record GetJavaSourceSegmentRequestResponse(
+    /** bounded source segment 的完整 exact range 請求 */
+    public record GetSourceSegmentRequestResponse(
             @ApiMonitoringField(ApiMonitoringMode.VALUE) String repoId,
             @ApiMonitoringField(ApiMonitoringMode.VALUE) String expectedRevision,
-            @ApiMonitoringField(ApiMonitoringMode.NESTED) SourceRangePayload sourceRange,
+            @ApiMonitoringField(ApiMonitoringMode.NESTED) SourceRangePayload location,
             @ApiMonitoringField(ApiMonitoringMode.VALUE) int contextLines) implements RequestResponse {
+    }
+
+    /** evidence-source follow-up 的完整封閉 typed request */
+    public record GetEvidenceSourceRequestResponse(
+            @ApiMonitoringField(ApiMonitoringMode.VALUE) String repoId,
+            @ApiMonitoringField(ApiMonitoringMode.VALUE) String expectedRevision,
+            @ApiMonitoringField(ApiMonitoringMode.NESTED) EvidenceSourceIdentityPayload identity)
+            implements RequestResponse {
+
+        public GetEvidenceSourceRequestResponse {
+            identity = Objects.requireNonNull(identity, "identity is required");
+        }
     }
 }

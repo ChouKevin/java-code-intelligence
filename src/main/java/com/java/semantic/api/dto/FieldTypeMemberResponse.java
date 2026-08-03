@@ -16,7 +16,7 @@ public record FieldTypeMemberResponse(
         @ApiMonitoringField(ApiMonitoringMode.OMIT) Optional<String> resolvedType,
         @ApiMonitoringField(ApiMonitoringMode.SIZE) List<String> annotations,
         @ApiMonitoringField(ApiMonitoringMode.SIZE) List<String> limitations,
-        @ApiMonitoringField(ApiMonitoringMode.SIZE) List<DiscoveryFollowUpResponse> availableFollowUps) implements TypeMemberResponse {
+        @ApiMonitoringField(ApiMonitoringMode.NESTED) List<DiscoveryFollowUpResponse> availableFollowUps) implements TypeMemberResponse {
 
     public FieldTypeMemberResponse {
         identity = Objects.requireNonNull(identity, "identity is required");

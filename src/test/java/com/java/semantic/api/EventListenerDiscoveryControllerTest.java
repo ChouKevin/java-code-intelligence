@@ -21,7 +21,7 @@ import com.java.semantic.syntax.application.ListenerAnnotationKind;
 import com.java.semantic.syntax.application.ListenerObservationCode;
 import com.java.semantic.syntax.application.ListenerObservationSummary;
 import com.java.semantic.syntax.application.RevisionBoundEventListenerDiscovery;
-import com.java.semantic.syntax.application.SourceRange;
+import com.java.semantic.syntax.domain.SourceRange;
 import com.java.semantic.syntax.domain.SyntaxPosition;
 import com.java.semantic.syntax.domain.SyntaxRange;
 import org.junit.jupiter.api.Test;
@@ -98,6 +98,13 @@ class EventListenerDiscoveryControllerTest {
                 .andExpect(jsonPath("$.page.returnedCount").value(1))
                 .andExpect(jsonPath("$.page.totalCount").value(3))
                 .andExpect(jsonPath("$.page.hasMore").value(true))
+                .andExpect(jsonPath("$.availableFollowUps[0].operation").value("DISCOVER_EVENT_LISTENERS"))
+                .andExpect(jsonPath("$.availableFollowUps[0].api.path")
+                        .value("/v1/discovery/event-listeners"))
+                .andExpect(jsonPath("$.availableFollowUps[0].request.offset").value(1))
+                .andExpect(jsonPath("$.availableFollowUps[0].request.limit").value(50))
+                .andExpect(jsonPath("$.availableFollowUps[0].request.expectedRevision")
+                        .value("2222222222222222222222222222222222222222"))
                 .andExpect(jsonPath("$.observationSummaries[0].code").value("LISTENER_TARGET_UNRESOLVED"))
                 .andExpect(jsonPath("$.observationSummaries[0].samples[0].sourceFile")
                         .value("src/main/java/com/example/BrokenListener.java"))
@@ -108,9 +115,10 @@ class EventListenerDiscoveryControllerTest {
         JsonNode response = OBJECT_MAPPER.readTree(body);
         assertThat(response.properties()).extracting(Map.Entry::getKey)
                 .containsExactlyInAnyOrder(
-                        "repoId", "analyzedRevision", "requestedEventType", "candidates", "page", "observationSummaries");
+                        "repoId", "analyzedRevision", "requestedEventType", "candidates", "page", "observationSummaries",
+                        "availableFollowUps");
         assertThat(response.path("candidates").get(0).properties()).extracting(Map.Entry::getKey)
-                .containsExactlyInAnyOrder("target", "listenerAnnotations", "sourceRange");
+                .containsExactlyInAnyOrder("target", "listenerAnnotations", "sourceRange", "availableFollowUps");
         assertThat(response.path("page").properties()).extracting(Map.Entry::getKey)
                 .containsExactlyInAnyOrder("offset", "limit", "returnedCount", "totalCount", "hasMore");
         assertThat(response.path("observationSummaries").get(0).properties()).extracting(Map.Entry::getKey)
@@ -210,7 +218,8 @@ class EventListenerDiscoveryControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.candidates").isEmpty())
                 .andExpect(jsonPath("$.page.totalCount").value(0))
-                .andExpect(jsonPath("$.page.hasMore").value(false));
+                .andExpect(jsonPath("$.page.hasMore").value(false))
+                .andExpect(jsonPath("$.availableFollowUps").isEmpty());
     }
 
     @Test

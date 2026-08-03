@@ -13,6 +13,7 @@ import com.java.semantic.syntax.domain.MapperFragmentIdentity;
 import com.java.semantic.syntax.domain.MapperStatementEvidence;
 import com.java.semantic.syntax.domain.MapperStatementIdentity;
 import com.java.semantic.syntax.domain.MapperStatementKey;
+import com.java.semantic.syntax.domain.SourceRange;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -144,17 +145,36 @@ class MapperXmlSqlExtractorTest {
 
         assertThat(evidenceIndex.statement(postgresIdentity)).isPresent();
         assertThat(evidenceIndex.statement(oracleIdentity)).isPresent();
-        assertThat(evidenceIndex.statement(dynamicIdentity).orElseThrow().content())
-                .contains("<if test=\"enabled\">SELECT ${schema}.orders WHERE name = #{name}</if>")
-                .contains("<include refid=\"sharedColumns\"/>");
+        assertThat(evidenceIndex.statement(dynamicIdentity).orElseThrow().location().sourceFile())
+                .isEqualTo(dynamicIdentity.resourcePath());
         assertThat(evidenceIndex.statement(dynamicIdentity).orElseThrow().includeRefIds())
                 .containsExactly("sharedColumns");
-        assertThat(evidenceIndex.fragment(fragmentIdentity).orElseThrow().content())
-                .contains("訂單名稱");
+        assertThat(segmentOf(VARIANT_MAPPER, evidenceIndex.statement(dynamicIdentity).orElseThrow().location()))
+                .isEqualTo("""
+                        <select id="findDynamic">
+                            <if test="enabled">SELECT ${schema}.orders WHERE name = #{name}</if>
+                            <include refid="sharedColumns"/>
+                          </select>""");
+        assertThat(segmentOf(VARIANT_MAPPER, evidenceIndex.fragment(fragmentIdentity).orElseThrow().location()))
+                .isEqualTo("<sql id=\"sharedColumns\">id, 訂單名稱</sql>");
         assertThat(extraction.sqlIndex().find("com.example.OrderMapper", "findById"))
                 .contains("SELECT * FROM orders WHERE id = #{id}");
         MapperStatementEvidence postgresEvidence = evidenceIndex.statement(postgresIdentity).orElseThrow();
         assertThatIllegalStateException().isThrownBy(() -> new MapperEvidenceIndex(
                 List.of(postgresEvidence, postgresEvidence), List.of()));
+    }
+
+    private static String segmentOf(String source, SourceRange location) {
+        int start = offsetOf(source, location.range().start().line(), location.range().start().character());
+        int end = offsetOf(source, location.range().end().line(), location.range().end().character());
+        return source.substring(start, end);
+    }
+
+    private static int offsetOf(String source, int line, int character) {
+        int offset = 0;
+        for (int currentLine = 0; currentLine < line; currentLine++) {
+            offset = source.indexOf('\n', offset) + 1;
+        }
+        return offset + character;
     }
 }

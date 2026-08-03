@@ -13,12 +13,15 @@ public record DiscoverEventListenersResponse(
         @ApiMonitoringField(ApiMonitoringMode.VALUE) String requestedEventType,
         @ApiMonitoringField(ApiMonitoringMode.SIZE) List<EventListenerCandidateResponse> candidates,
         @ApiMonitoringField(ApiMonitoringMode.NESTED) PageResponse page,
-        @ApiMonitoringField(ApiMonitoringMode.SIZE) List<ListenerObservationSummaryResponse> observationSummaries) {
+        @ApiMonitoringField(ApiMonitoringMode.SIZE) List<ListenerObservationSummaryResponse> observationSummaries,
+        @ApiMonitoringField(ApiMonitoringMode.NESTED) List<DiscoveryFollowUpResponse> availableFollowUps) {
 
     public DiscoverEventListenersResponse {
         candidates = List.copyOf(Objects.requireNonNull(candidates, "candidates are required"));
         page = Objects.requireNonNull(page, "page is required");
         observationSummaries = List.copyOf(Objects.requireNonNull(
                 observationSummaries, "observationSummaries are required"));
+        availableFollowUps = List.copyOf(Objects.requireNonNull(
+                availableFollowUps, "availableFollowUps are required"));
     }
 }

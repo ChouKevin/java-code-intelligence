@@ -7,7 +7,7 @@ import com.java.semantic.identity.SourceTypeIdentity;
 import com.java.semantic.repository.domain.RepositorySnapshot;
 import com.java.semantic.syntax.application.SourceContextCandidate;
 import com.java.semantic.syntax.application.SourceMethodContextCandidate;
-import com.java.semantic.syntax.application.SourceRange;
+import com.java.semantic.syntax.domain.SourceRange;
 import com.java.semantic.syntax.application.SourceSymbolCandidate;
 import com.java.semantic.syntax.application.SourceSymbolContext;
 import com.java.semantic.syntax.application.SourceSymbolIssueCode;
@@ -366,7 +366,7 @@ public final class JdtSourceSymbolResolver implements SourceSymbolResolver {
                 return ResolutionAttempt.unresolved(SourceSymbolIssueCode.SOURCE_BINDING_UNRESOLVED);
             }
             identity = new SourceMemberIdentity.MethodScoped(
-                    methodTarget.orElseThrow(), new SourceSlices(parsed.unit(), parsed.text()).range(declarationName),
+                    methodTarget.orElseThrow(), AstSourceRanges.range(parsed.unit(), declarationName),
                     declarationName.getIdentifier());
         } else {
             identity = new SourceMemberIdentity.TypeMember(
@@ -380,8 +380,7 @@ public final class JdtSourceSymbolResolver implements SourceSymbolResolver {
         SourceRange declarationRange = range(parsed, rangeNode);
         if (isCompileTimeConstant(fieldFragment)) {
             VariableDeclarationFragment fragment = fieldFragment.orElseThrow();
-            String initializerSource = new SourceSlices(parsed.unit(), parsed.text())
-                    .slice(fragment.getInitializer()).text();
+            String initializerSource = AstSourceRanges.text(parsed.text(), fragment.getInitializer());
             return ResolutionAttempt.resolved(new SourceSymbolCandidate.StaticConstant(
                     declarationName.getIdentifier(), identity, writtenType, resolvedType, initializerSource,
                     declarationRange, representativeOccurrence, occurrenceCount));

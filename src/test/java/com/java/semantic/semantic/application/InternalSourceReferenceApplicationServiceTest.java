@@ -18,11 +18,11 @@ import com.java.semantic.syntax.domain.ExactSourceDeclarationTarget;
 import com.java.semantic.syntax.domain.MethodTargetResolution;
 import com.java.semantic.syntax.domain.RepositorySyntax;
 import com.java.semantic.syntax.domain.SourceMethodMetadata;
-import com.java.semantic.syntax.domain.SourceSlice;
+import com.java.semantic.syntax.domain.SourceRange;
 import com.java.semantic.syntax.domain.SourceTypeKind;
 import com.java.semantic.syntax.domain.SourceTypeMetadata;
 import com.java.semantic.syntax.domain.SourceTypeMetadataFixture;
-import com.java.semantic.syntax.domain.SyntaxExtractionService;
+import com.java.semantic.syntax.domain.RevisionBoundRepositorySyntaxProvider;
 import com.java.semantic.syntax.domain.SyntaxPosition;
 import com.java.semantic.syntax.domain.SyntaxRange;
 import com.java.semantic.syntax.domain.TypeReference;
@@ -74,10 +74,10 @@ class InternalSourceReferenceApplicationServiceTest {
                         local("src/main/resources/reference.txt", 0, 0, 0, 5),
                         SemanticReferenceLocation.OutsideRepository.INSTANCE,
                         SemanticReferenceLocation.UnprovableUri.INSTANCE));
-        SyntaxExtractionService syntaxExtractionService = mock(SyntaxExtractionService.class);
-        when(syntaxExtractionService.extract(root)).thenReturn(new RepositorySyntax(
-                List.of(), List.of(sourceMetadata(sourceType, methodTarget))));
         RepositorySnapshot snapshot = new RepositorySnapshot(REPOSITORY_ID, root, REVISION);
+        RevisionBoundRepositorySyntaxProvider repositorySyntaxProvider = mock(RevisionBoundRepositorySyntaxProvider.class);
+        when(repositorySyntaxProvider.get(snapshot)).thenReturn(new RepositorySyntax(
+                List.of(), List.of(sourceMetadata(sourceType, methodTarget))));
         List<InternalReferenceAnalysisCache.Key> cacheKeys = new ArrayList<>();
         InternalReferenceAnalysisCache cache = (key, loader) -> {
             cacheKeys.add(key);
@@ -89,7 +89,7 @@ class InternalSourceReferenceApplicationServiceTest {
                 new SnapshotRepositoryApplicationService(snapshot),
                 declarationResolver,
                 semanticService,
-                syntaxExtractionService,
+                repositorySyntaxProvider,
                 cache);
 
         InternalSourceReferenceResult complete = service.find(new InternalSourceReferenceQuery(
@@ -135,8 +135,8 @@ class InternalSourceReferenceApplicationServiceTest {
         SyntaxRange typeRange = syntaxRange(0, 0, 40, 1);
         SyntaxRange methodRange = syntaxRange(10, 4, 20, 5);
         SourceMethodMetadata method = new SourceMethodMetadata(
-                target.methodName(), target.parameterTypes(), null, null, 11, 21,
-                methodRange, new SourceSlice(methodRange, "void submit(SubmitOrder order) {}"),
+                target.methodName(), target.parameterTypes(), null, Optional.empty(),
+                new SourceRange(target.sourceFile(), methodRange),
                 List.<TypeReference>of(), Optional.empty(), List.of(), List.of(), List.of(),
                 new SyntaxPosition(10, 9), MethodTargetResolution.resolved(target), true, false, true);
         return SourceTypeMetadataFixture.sourceType(
@@ -148,7 +148,7 @@ class InternalSourceReferenceApplicationServiceTest {
                 false,
                 List.of(), List.of(), List.of(), List.of(), List.of(), List.of(method),
                 false, false, List.of(), typeRange,
-                new SourceSlice(typeRange, "class OrderService {}"), false, List.of());
+                new SourceRange(target.sourceFile(), typeRange), false, List.of());
     }
 
     private SemanticReferenceLocation.LocalSource local(

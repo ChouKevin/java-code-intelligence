@@ -55,6 +55,7 @@ import com.java.semantic.syntax.application.TypeMemberResult;
 import com.java.semantic.syntax.application.TypeMemberTypeNotFoundException;
 import com.java.semantic.syntax.domain.SourceTypeKind;
 import com.java.semantic.syntax.domain.MapperEvidenceRepresentation;
+import com.java.semantic.syntax.domain.MapperFragmentIdentity;
 import com.java.semantic.syntax.domain.MapperStatementIdentity;
 import com.java.semantic.syntax.domain.MapperStatementKey;
 import com.java.semantic.syntax.domain.MqBroker;
@@ -227,7 +228,7 @@ class StructuredDiscoveryControllerTest {
                         .value("OrderService"))
                 .andExpect(jsonPath("$.candidates[1].identity.target.methodName").value("createOrder"))
                 .andExpect(jsonPath("$.candidates[1].identity.target.parameterTypes[0]").value("com.example.Order"))
-                .andExpect(jsonPath("$.candidates[1].availableFollowUps.length()").value(4))
+                .andExpect(jsonPath("$.candidates[1].availableFollowUps.length()").value(3))
                 .andExpect(jsonPath("$.candidates[1].availableFollowUps[0].operation")
                         .value("GET_METHOD_SOURCE"))
                 .andExpect(jsonPath("$.candidates[1].availableFollowUps[0].api.path")
@@ -236,8 +237,6 @@ class StructuredDiscoveryControllerTest {
                         .value("ANALYZE_OUTGOING_CALL_GRAPH"))
                 .andExpect(jsonPath("$.candidates[1].availableFollowUps[2].operation")
                         .value("ANALYZE_INCOMING_CALL_GRAPH"))
-                .andExpect(jsonPath("$.candidates[1].availableFollowUps[3].operation")
-                        .value("DISCOVER_METHOD_IMPLEMENTATIONS"))
                 .andExpect(jsonPath("$.page.offset").value(0))
                 .andExpect(jsonPath("$.page.limit").value(2))
                 .andExpect(jsonPath("$.page.returnedCount").value(2))
@@ -250,7 +249,7 @@ class StructuredDiscoveryControllerTest {
                 .andExpect(jsonPath("$.issueSummaries[0].code")
                         .value("MQ_DESTINATION_UNRESOLVED"))
                 .andExpect(jsonPath("$.issueSummaries[0].reason").doesNotExist())
-                .andExpect(jsonPath("$.availableFollowUps[0].operation").value("GET_NEXT_PAGE"))
+                .andExpect(jsonPath("$.availableFollowUps[0].operation").value("DISCOVER_CONCEPTS"))
                 .andExpect(jsonPath("$.availableFollowUps[0].api.method").value("POST"))
                 .andExpect(jsonPath("$.availableFollowUps[0].api.path").value("/v1/discovery/concepts"))
                 .andExpect(jsonPath("$.availableFollowUps[0].api.operationId").value("discoverConcepts"))
@@ -356,7 +355,17 @@ class StructuredDiscoveryControllerTest {
                         .value("com.example.OrderMapper"))
                 .andExpect(jsonPath("$.candidates[0].identity.identity.statementId")
                         .value("findOrders"))
-                .andExpect(jsonPath("$.candidates[0].availableFollowUps").isEmpty())
+                .andExpect(jsonPath("$.candidates[0].availableFollowUps.length()").value(2))
+                .andExpect(jsonPath("$.candidates[0].availableFollowUps[0].operation")
+                        .value("GET_EVIDENCE_SOURCE"))
+                .andExpect(jsonPath("$.candidates[0].availableFollowUps[0].api.method").value("POST"))
+                .andExpect(jsonPath("$.candidates[0].availableFollowUps[0].api.path")
+                        .value("/v1/discovery/evidence-source"))
+                .andExpect(jsonPath("$.candidates[0].availableFollowUps[0].request.repoId").value("orders"))
+                .andExpect(jsonPath("$.candidates[0].availableFollowUps[0].request.expectedRevision")
+                        .value(ANALYZED_REVISION.value()))
+                .andExpect(jsonPath("$.candidates[0].availableFollowUps[0].request.identity.kind")
+                        .value("MAPPER_STATEMENT"))
                 .andExpect(jsonPath("$.candidates[0].details.mapping.statement.namespace")
                         .value("com.example.OrderMapper"))
                 .andExpect(jsonPath("$.candidates[0].details.mapping.statement.statementId")
@@ -374,16 +383,7 @@ class StructuredDiscoveryControllerTest {
                         .value(MAPPER_TARGET_A.sourceFile()))
                 .andExpect(jsonPath(
                         "$.candidates[0].details.mapping.candidates[0].availableFollowUps.length()")
-                        .value(1))
-                .andExpect(jsonPath(
-                        "$.candidates[0].details.mapping.candidates[0].availableFollowUps[0].operation")
-                        .value("GET_METHOD_SQL"))
-                .andExpect(jsonPath(
-                        "$.candidates[0].details.mapping.candidates[0].availableFollowUps[0].api.path")
-                        .value("/v1/discovery/method-sql"))
-                .andExpect(jsonPath(
-                        "$.candidates[0].details.mapping.candidates[0].availableFollowUps[0].request.target.parameterTypes[0]")
-                        .value("java.lang.String"))
+                        .value(0))
                 .andExpect(jsonPath("$.candidates[0].evidence[1].identity.identity.resourcePath")
                         .value("module-a/src/main/resources/mapper/OrderMapper.xml"))
                 .andExpect(jsonPath("$.candidates[0].evidence[1].identity.identity.databaseId").value("postgres"))
@@ -468,7 +468,7 @@ class StructuredDiscoveryControllerTest {
                         .value("INCOMPLETE_METHOD_RESOLUTION"))
                 .andExpect(jsonPath("$.candidates[0].details.mapping.candidates")
                         .isEmpty())
-                .andExpect(jsonPath("$.candidates[0].availableFollowUps").isEmpty());
+                .andExpect(jsonPath("$.candidates[0].availableFollowUps.length()").value(2));
     }
 
     @Test
@@ -480,7 +480,13 @@ class StructuredDiscoveryControllerTest {
                 identity,
                 MapperStatementMethodMapping.Status.UNRESOLVED,
                 List.of(MAPPER_TARGET_A),
-                Optional.of(MapperStatementMethodMapping.Reason.INCOMPLETE_METHOD_RESOLUTION));
+                Optional.of(MapperStatementMethodMapping.Reason.INCOMPLETE_METHOD_RESOLUTION),
+                List.of(new MapperFragmentIdentity(
+                        "com.example.OrderMapper",
+                        "baseColumns",
+                        "module-a/src/main/resources/mapper/OrderFragments.xml",
+                        0,
+                        MapperEvidenceRepresentation.MAPPER_XML_ELEMENT)));
         given(conceptDiscoveryApplicationService.search(any())).willReturn(mapperConceptResult(mapping));
 
         mockMvc.perform(conceptRequest("""
@@ -504,26 +510,47 @@ class StructuredDiscoveryControllerTest {
                 .andExpect(jsonPath(
                         "$.candidates[0].details.mapping.candidates[0].availableFollowUps[0].operation")
                         .value("GET_METHOD_SOURCE"))
-                .andExpect(jsonPath(
-                        "$.candidates[0].details.mapping.candidates[0].availableFollowUps[?(@.operation == 'GET_METHOD_SQL')]")
-                        .isEmpty());
+                .andExpect(jsonPath("$.candidates[0].availableFollowUps.length()").value(3))
+                .andExpect(jsonPath("$.candidates[0].availableFollowUps[2].operation")
+                        .value("GET_EVIDENCE_SOURCE"))
+                .andExpect(jsonPath("$.candidates[0].availableFollowUps[2].request.identity.kind")
+                        .value("MAPPER_FRAGMENT"))
+                .andExpect(jsonPath("$.candidates[0].availableFollowUps[2].request.identity.fragmentIdentity.namespace")
+                        .value("com.example.OrderMapper"))
+                .andExpect(jsonPath("$.candidates[0].availableFollowUps[2].request.identity.fragmentIdentity.fragmentId")
+                        .value("baseColumns"))
+                .andExpect(jsonPath("$.candidates[0].availableFollowUps[2].request.identity.fragmentIdentity.documentOrdinal")
+                        .value(0));
     }
 
     @Test
-    void should_return_refinement_guidance_for_complete_zero_result_search() throws Exception {
+    void should_return_executable_refinement_follow_up_for_complete_zero_result_search() throws Exception {
         given(conceptDiscoveryApplicationService.search(any())).willReturn(
                 emptyConceptResult(completeCoverage()));
 
-        mockMvc.perform(conceptRequest(validConceptRequest()))
+        mockMvc.perform(conceptRequest(unavailableConceptRequest()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.candidates").isEmpty())
-                .andExpect(jsonPath("$.page.offset").value(0))
-                .andExpect(jsonPath("$.page.limit").value(50))
+                .andExpect(jsonPath("$.page.offset").value(7))
+                .andExpect(jsonPath("$.page.limit").value(25))
                 .andExpect(jsonPath("$.page.returnedCount").value(0))
                 .andExpect(jsonPath("$.page.totalCount").value(0))
                 .andExpect(jsonPath("$.page.hasMore").value(false))
                 .andExpect(jsonPath("$.coverage.status").value("COMPLETE"))
-                .andExpect(jsonPath("$.availableFollowUps").isEmpty())
+                .andExpect(jsonPath("$.availableFollowUps[0].operation")
+                        .value("DISCOVER_CONCEPTS"))
+                .andExpect(jsonPath("$.availableFollowUps[0].api.method").value("POST"))
+                .andExpect(jsonPath("$.availableFollowUps[0].api.path")
+                        .value("/v1/discovery/concepts"))
+                .andExpect(jsonPath("$.availableFollowUps[0].request.repoId").value("orders"))
+                .andExpect(jsonPath("$.availableFollowUps[0].request.expectedRevision")
+                        .value(ANALYZED_REVISION.value()))
+                .andExpect(jsonPath("$.availableFollowUps[0].request.kinds[0]").value("FIELD"))
+                .andExpect(jsonPath("$.availableFollowUps[0].request.kinds[1]").value("METHOD"))
+                .andExpect(jsonPath("$.availableFollowUps[0].request.packagePrefix")
+                        .value("com.example.narrow"))
+                .andExpect(jsonPath("$.availableFollowUps[0].request.offset").value(7))
+                .andExpect(jsonPath("$.availableFollowUps[0].request.limit").value(25))
                 .andExpect(jsonPath("$.unavailableFollowUps[0].reason")
                         .value("NO_MATCHING_STRUCTURED_CONCEPT"))
                 .andExpect(jsonPath("$.unavailableFollowUps[0].recommendedAction")
@@ -537,7 +564,7 @@ class StructuredDiscoveryControllerTest {
         given(conceptDiscoveryApplicationService.search(any())).willReturn(
                 emptyConceptResult(coverage()));
 
-        mockMvc.perform(conceptRequest(validConceptRequest()))
+        mockMvc.perform(conceptRequest(unavailableConceptRequest()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.candidates").isEmpty())
                 .andExpect(jsonPath("$.coverage.status").value("PARTIAL"))
@@ -592,11 +619,6 @@ class StructuredDiscoveryControllerTest {
                         .value("com.example.Order"))
                 .andExpect(jsonPath("$.members[0].availableFollowUps[2].operation")
                         .value("ANALYZE_INCOMING_CALL_GRAPH"))
-                .andExpect(jsonPath("$.members[0].availableFollowUps[3].operation")
-                        .value("DISCOVER_METHOD_IMPLEMENTATIONS"))
-                .andExpect(jsonPath(
-                        "$.members[0].availableFollowUps[3].request.declarationTarget.sourceType.sourceFile")
-                        .value(SOURCE_FILE))
                 .andExpect(jsonPath("$.members[1].kind").value("FIELD"))
                 .andExpect(jsonPath("$.members[1].identity.scope").value("TYPE"))
                 .andExpect(jsonPath("$.members[1].identity.name").value("repository"))
@@ -617,7 +639,7 @@ class StructuredDiscoveryControllerTest {
                         .value("com.example"))
                 .andExpect(jsonPath("$.members[1].availableFollowUps[0].request.identity.sourceType.javaType.className")
                         .value("OrderRepository"))
-                .andExpect(jsonPath("$.availableFollowUps[0].operation").value("GET_NEXT_PAGE"))
+                .andExpect(jsonPath("$.availableFollowUps[0].operation").value("DISCOVER_TYPE_MEMBERS"))
                 .andExpect(jsonPath("$.availableFollowUps[0].api.path")
                         .value("/v1/discovery/type-members"))
                 .andExpect(jsonPath("$.availableFollowUps[0].api.operationId")
@@ -1096,6 +1118,21 @@ class StructuredDiscoveryControllerTest {
                 """;
     }
 
+    private static String unavailableConceptRequest() {
+        return """
+                {
+                  "operator":"ALL",
+                  "repoId":"orders",
+                  "expectedRevision":"2222222222222222222222222222222222222222",
+                  "terms":[{"value":"order","matchMode":"TOKEN_PREFIX"}],
+                  "kinds":["FIELD","METHOD"],
+                  "packagePrefix":"com.example.narrow",
+                  "offset":7,
+                  "limit":25
+                }
+                """;
+    }
+
     private static String withAllOperator(String body) {
         return body.contains("\"operator\"") ? body
                 : body.replaceFirst("\\{", "{\n  \"operator\":\"ALL\",");
@@ -1124,9 +1161,20 @@ class StructuredDiscoveryControllerTest {
                 Set.of("com.example"),
                 2,
                 2);
+        ConceptSearchQuery query = new ConceptSearchQuery(
+                REPOSITORY_ID,
+                ANALYZED_REVISION,
+                List.of(
+                        new ConceptSearchTerm("order", ConceptMatchMode.TOKEN_PREFIX),
+                        new ConceptSearchTerm("service", ConceptMatchMode.TOKEN_EXACT)),
+                Set.of(ConceptKind.FIELD, ConceptKind.METHOD),
+                Optional.of("com.example"),
+                0,
+                2);
         return new ConceptSearchResult(
                 REPOSITORY_ID,
                 ANALYZED_REVISION,
+                query,
                 List.of(
                         new ConceptSearchTerm("order", ConceptMatchMode.TOKEN_PREFIX),
                         new ConceptSearchTerm("service", ConceptMatchMode.TOKEN_EXACT)),
@@ -1177,6 +1225,14 @@ class StructuredDiscoveryControllerTest {
         return new ConceptSearchResult(
                 REPOSITORY_ID,
                 ANALYZED_REVISION,
+                new ConceptSearchQuery(
+                        REPOSITORY_ID,
+                        ANALYZED_REVISION,
+                        List.of(new ConceptSearchTerm("order", ConceptMatchMode.TOKEN_PREFIX)),
+                        Set.copyOf(ACTIVE_CONCEPT_KINDS),
+                        Optional.empty(),
+                        0,
+                        50),
                 List.of(new ConceptSearchTerm("order", ConceptMatchMode.TOKEN_PREFIX)),
                 ACTIVE_CONCEPT_KINDS,
                 ACTIVE_CONCEPT_KINDS,
@@ -1189,14 +1245,23 @@ class StructuredDiscoveryControllerTest {
 
     private static ConceptSearchResult emptyConceptResult(
             List<SourceExtractionOutcome> extractionOutcomes) {
-        return new ConceptSearchResult(
+        ConceptSearchQuery query = new ConceptSearchQuery(
                 REPOSITORY_ID,
                 ANALYZED_REVISION,
                 List.of(new ConceptSearchTerm("order", ConceptMatchMode.TOKEN_PREFIX)),
-                List.of(ConceptKind.METHOD),
-                List.of(ConceptKind.METHOD),
+                Set.of(ConceptKind.FIELD, ConceptKind.METHOD),
+                Optional.of("com.example.narrow"),
+                7,
+                25);
+        return new ConceptSearchResult(
+                REPOSITORY_ID,
+                ANALYZED_REVISION,
+                query,
+                query.terms(),
+                List.of(ConceptKind.METHOD, ConceptKind.FIELD),
+                List.of(ConceptKind.METHOD, ConceptKind.FIELD),
                 List.of(),
-                new ConceptPage(0, 50, 0, 0, false),
+                new ConceptPage(7, 25, 0, 0, false),
                 extractionOutcomes,
                 List.of(),
                 Optional.empty());
@@ -1250,6 +1315,14 @@ class StructuredDiscoveryControllerTest {
         return new ConceptSearchResult(
                 REPOSITORY_ID,
                 ANALYZED_REVISION,
+                new ConceptSearchQuery(
+                        REPOSITORY_ID,
+                        ANALYZED_REVISION,
+                        List.of(new ConceptSearchTerm("findOrders", ConceptMatchMode.TOKEN_EXACT)),
+                        Set.of(ConceptKind.MAPPER_STATEMENT),
+                        Optional.empty(),
+                        0,
+                        50),
                 List.of(new ConceptSearchTerm("findOrders", ConceptMatchMode.TOKEN_EXACT)),
                 List.of(ConceptKind.MAPPER_STATEMENT),
                 ACTIVE_CONCEPT_KINDS,

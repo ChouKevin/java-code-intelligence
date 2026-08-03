@@ -6,25 +6,36 @@ import com.java.semantic.identity.SourceTypeIdentity;
 import com.java.semantic.repository.domain.RepositoryId;
 import com.java.semantic.repository.domain.RepositoryRevision;
 import com.java.semantic.repository.domain.RepositorySnapshot;
+import com.java.semantic.repository.application.RepositoryApplicationService;
+import com.java.semantic.config.RepositorySyntaxCacheProperties;
 import com.java.semantic.syntax.application.EntryPointDiscoveryFilter;
+import com.java.semantic.syntax.application.EntryPointDiscoveryApplicationService;
 import com.java.semantic.syntax.domain.ApiEntryPoint;
 import com.java.semantic.syntax.domain.EntryPointClass;
 import com.java.semantic.syntax.domain.EntryPointMethod;
 import com.java.semantic.syntax.domain.EntryPointType;
 import com.java.semantic.syntax.domain.MethodTargetResolution;
 import com.java.semantic.syntax.domain.RepositorySyntax;
+import com.java.semantic.syntax.domain.RevisionBoundRepositorySyntaxProvider;
 import com.java.semantic.syntax.domain.SyntaxExtractionService;
+import com.java.semantic.syntax.adapter.cache.CaffeineRevisionBoundRepositorySyntaxProvider;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.EnumSet;
 import java.util.List;
+import java.util.Optional;
+import java.util.Set;
+import java.util.function.Function;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
@@ -40,7 +51,7 @@ class ApiTrieRepositorySnapshotPublicationListenerTest {
             "2222222222222222222222222222222222222222");
 
     @Mock
-    private SyntaxExtractionService syntaxExtractionService;
+    private RevisionBoundRepositorySyntaxProvider repositorySyntaxProvider;
 
     @Mock
     private EntryPointDiscoveryFilter filter;
@@ -53,7 +64,7 @@ class ApiTrieRepositorySnapshotPublicationListenerTest {
         RepositorySyntax newSyntax = syntax(route("UnfilteredController", "unfiltered", "GET", "/unfiltered"));
         RepositorySyntax filteredSyntax = syntax(route("NewController", "newRoute", "GET", "/new"));
         trie.reload(oldSnapshot, syntax(route("OldController", "old", "GET", "/old")));
-        when(syntaxExtractionService.extract(newSnapshot.root())).thenReturn(newSyntax);
+        when(repositorySyntaxProvider.get(newSnapshot)).thenReturn(newSyntax);
         when(filter.filter(
                 newSnapshot.repositoryId(), newSyntax, EnumSet.of(EntryPointType.API)))
                 .thenReturn(filteredSyntax);
@@ -69,9 +80,40 @@ class ApiTrieRepositorySnapshotPublicationListenerTest {
                 .singleElement()
                 .extracting(ApiEntryPointRef::analyzedRevision)
                 .isEqualTo(SHA_TWO.value());
-        verify(syntaxExtractionService).extract(newSnapshot.root());
+        verify(repositorySyntaxProvider).get(newSnapshot);
         verify(filter).filter(
                 newSnapshot.repositoryId(), newSyntax, EnumSet.of(EntryPointType.API));
+    }
+
+    @Test
+    void should_warm_the_exact_revision_syntax_before_a_following_entry_point_query() {
+        ApiTrieService trie = new ApiTrieService();
+        RepositorySnapshot snapshot = snapshot("orders", SHA_TWO);
+        RepositorySyntax extracted = syntax(route("OrdersController", "find", "GET", "/orders"));
+        RepositorySyntax filtered = syntax(route("OrdersController", "find", "GET", "/orders"));
+        SyntaxExtractionService extractionService = mock(SyntaxExtractionService.class);
+        RevisionBoundRepositorySyntaxProvider provider = new CaffeineRevisionBoundRepositorySyntaxProvider(
+                extractionService,
+                new RepositorySyntaxCacheProperties(100, 100, Duration.ofMinutes(1)));
+        RepositoryApplicationService repositories = mock(RepositoryApplicationService.class);
+        when(extractionService.extract(snapshot.root())).thenReturn(extracted);
+        when(filter.filter(snapshot.repositoryId(), extracted, EnumSet.of(EntryPointType.API)))
+                .thenReturn(filtered);
+        when(repositories.withSnapshot(
+                eq(snapshot.repositoryId()), eq(Optional.of(snapshot.revision())), any()))
+                .thenAnswer(invocation -> {
+                    Function<RepositorySnapshot, ?> operation = invocation.getArgument(2);
+                    return operation.apply(snapshot);
+                });
+        ApiTrieRepositorySnapshotPublicationListener listener =
+                new ApiTrieRepositorySnapshotPublicationListener(trie, provider, filter);
+        EntryPointDiscoveryApplicationService entryPoints = new EntryPointDiscoveryApplicationService(
+                repositories, provider, filter);
+
+        listener.afterPublication(snapshot);
+        entryPoints.list(snapshot.repositoryId(), snapshot.revision(), Set.of(EntryPointType.API));
+
+        verify(extractionService).extract(snapshot.root());
     }
 
     @Test
@@ -90,7 +132,7 @@ class ApiTrieRepositorySnapshotPublicationListenerTest {
                 .singleElement()
                 .extracting(ApiEntryPointRef::repoId, ApiEntryPointRef::analyzedRevision)
                 .containsExactly("catalog", SHA_TWO.value());
-        verifyNoInteractions(syntaxExtractionService, filter);
+        verifyNoInteractions(repositorySyntaxProvider, filter);
     }
 
     @Test
@@ -102,7 +144,7 @@ class ApiTrieRepositorySnapshotPublicationListenerTest {
         trie.reload(oldSnapshot, syntax(route("OldController", "old", "GET", "/old")));
         ApiTrieRepositorySnapshotPublicationListener listener = listener(trie);
         listener.beforePublication(newSnapshot.repositoryId());
-        when(syntaxExtractionService.extract(newSnapshot.root())).thenThrow(failure);
+        when(repositorySyntaxProvider.get(newSnapshot)).thenThrow(failure);
 
         assertThatThrownBy(() -> listener.afterPublication(newSnapshot)).isSameAs(failure);
 
@@ -121,7 +163,7 @@ class ApiTrieRepositorySnapshotPublicationListenerTest {
         trie.reload(oldSnapshot, syntax(route("OldController", "old", "GET", "/old")));
         ApiTrieRepositorySnapshotPublicationListener listener = listener(trie);
         listener.beforePublication(newSnapshot.repositoryId());
-        when(syntaxExtractionService.extract(newSnapshot.root())).thenReturn(extracted);
+        when(repositorySyntaxProvider.get(newSnapshot)).thenReturn(extracted);
         when(filter.filter(
                 newSnapshot.repositoryId(), extracted, EnumSet.of(EntryPointType.API)))
                 .thenThrow(failure);
@@ -139,7 +181,7 @@ class ApiTrieRepositorySnapshotPublicationListenerTest {
         RepositorySyntax extracted = syntax(route("NewController", "newRoute", "GET", "/new"));
         RepositorySyntax filtered = syntax(route("AllowedController", "allowed", "GET", "/allowed"));
         IllegalStateException failure = new IllegalStateException("sensitive rebuild detail");
-        when(syntaxExtractionService.extract(snapshot.root())).thenReturn(extracted);
+        when(repositorySyntaxProvider.get(snapshot)).thenReturn(extracted);
         when(filter.filter(
                 snapshot.repositoryId(), extracted, EnumSet.of(EntryPointType.API)))
                 .thenReturn(filtered);
@@ -163,7 +205,7 @@ class ApiTrieRepositorySnapshotPublicationListenerTest {
         trie.reload(catalog, syntax(route("CatalogController", "catalog", "GET", "/shared")));
         ApiTrieRepositorySnapshotPublicationListener listener = listener(trie);
         listener.beforePublication(ordersNew.repositoryId());
-        when(syntaxExtractionService.extract(ordersNew.root())).thenThrow(failure);
+        when(repositorySyntaxProvider.get(ordersNew)).thenThrow(failure);
 
         assertThatThrownBy(() -> listener.afterPublication(ordersNew)).isSameAs(failure);
 
@@ -176,7 +218,7 @@ class ApiTrieRepositorySnapshotPublicationListenerTest {
 
     private ApiTrieRepositorySnapshotPublicationListener listener(ApiTrieService trie) {
         return new ApiTrieRepositorySnapshotPublicationListener(
-                trie, syntaxExtractionService, filter);
+                trie, repositorySyntaxProvider, filter);
     }
 
     private static List<ApiEntryPointRef> refs(ApiRouteMatchBatch batch) {

@@ -2,6 +2,7 @@ package com.java.semantic.api;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.java.semantic.api.security.ApiTokenFilter;
 import com.java.semantic.callgraph.application.ImplementationCandidate;
 import com.java.semantic.identity.JavaTypeIdentity;
@@ -53,6 +54,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 })
 @AutoConfigureMockMvc
 class MethodImplementationDiscoveryControllerTest {
+
+    @Autowired
+    private MethodImplementationDiscoveryResponseMapper mapper;
 
     private static final String TOKEN = "test-token";
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
@@ -114,7 +118,19 @@ class MethodImplementationDiscoveryControllerTest {
                 .andReturn().getResponse().getContentAsString();
 
         JsonNode response = OBJECT_MAPPER.readTree(body);
-        assertThat(response).isEqualTo(OBJECT_MAPPER.readTree("""
+        JsonNode followUps = response.at("/candidates/0/availableFollowUps");
+        assertThat(followUps).hasSize(3);
+        assertThat(followUps.get(0).path("operation").asText()).isEqualTo("GET_METHOD_SOURCE");
+        assertThat(followUps.get(0).at("/api/method").asText()).isEqualTo("POST");
+        assertThat(followUps.get(0).at("/api/path").asText()).isEqualTo("/v1/discovery/method-source");
+        assertThat(followUps.get(0).at("/request/target/sourceType/sourceFile").asText())
+                .isEqualTo(IMPLEMENTATION_TARGET.sourceFile());
+        assertThat(followUps.get(1).path("operation").asText()).isEqualTo("ANALYZE_OUTGOING_CALL_GRAPH");
+        assertThat(followUps.get(2).path("operation").asText()).isEqualTo("ANALYZE_INCOMING_CALL_GRAPH");
+        ObjectNode comparableResponse = response.deepCopy();
+        ObjectNode comparableCandidate = (ObjectNode) comparableResponse.at("/candidates/0");
+        comparableCandidate.remove("availableFollowUps");
+        assertThat(comparableResponse).isEqualTo(OBJECT_MAPPER.readTree("""
                 {
                   "repoId":"orders",
                   "revision":"2222222222222222222222222222222222222222",
@@ -274,8 +290,6 @@ class MethodImplementationDiscoveryControllerTest {
                         MethodImplementationIssueReason.NON_EXECUTABLE_TARGET,
                         MethodImplementationIssueReason.EXTERNAL_TARGET,
                         MethodImplementationIssueReason.EXTERNAL_TARGET));
-
-        MethodImplementationDiscoveryResponseMapper mapper = new MethodImplementationDiscoveryResponseMapper();
 
         assertThat(mapper.toResponse(discovery).resolution().status().name()).isEqualTo("COMPLETE");
         assertThat(mapper.toResponse(discovery).resolution().issueSummaries())

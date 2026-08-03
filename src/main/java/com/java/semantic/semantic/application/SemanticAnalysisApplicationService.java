@@ -23,7 +23,7 @@ import com.java.semantic.semantic.domain.SemanticTargetNotFoundException;
 import com.java.semantic.syntax.domain.CanonicalMethodDeclarationResolver;
 import com.java.semantic.syntax.domain.MethodTargetResolution;
 import com.java.semantic.syntax.domain.RepositorySyntax;
-import com.java.semantic.syntax.domain.SyntaxExtractionService;
+import com.java.semantic.syntax.domain.RevisionBoundRepositorySyntaxProvider;
 import lombok.extern.slf4j.Slf4j;
 import org.slf4j.MDC;
 
@@ -37,7 +37,7 @@ import java.util.concurrent.TimeUnit;
 public final class SemanticAnalysisApplicationService {
 
     private final RepositoryApplicationService repositoryApplicationService;
-    private final SyntaxExtractionService syntaxExtractionService;
+    private final RevisionBoundRepositorySyntaxProvider repositorySyntaxProvider;
     private final CanonicalMethodDeclarationResolver declarationResolver;
     private final JavaSemanticService semanticService;
     private final SemanticCallGraphBuilder outgoingBuilder;
@@ -47,7 +47,7 @@ public final class SemanticAnalysisApplicationService {
 
     public SemanticAnalysisApplicationService(
             RepositoryApplicationService repositoryApplicationService,
-            SyntaxExtractionService syntaxExtractionService,
+            RevisionBoundRepositorySyntaxProvider repositorySyntaxProvider,
             CanonicalMethodDeclarationResolver declarationResolver,
             JavaSemanticService semanticService,
             SemanticCallGraphBuilder outgoingBuilder,
@@ -56,8 +56,8 @@ public final class SemanticAnalysisApplicationService {
             IncomingGraphProperties incomingGraphProperties) {
         this.repositoryApplicationService = Objects.requireNonNull(
                 repositoryApplicationService, "repositoryApplicationService is required");
-        this.syntaxExtractionService = Objects.requireNonNull(
-                syntaxExtractionService, "syntaxExtractionService is required");
+        this.repositorySyntaxProvider = Objects.requireNonNull(
+                repositorySyntaxProvider, "repositorySyntaxProvider is required");
         this.declarationResolver = Objects.requireNonNull(
                 declarationResolver, "declarationResolver is required");
         this.semanticService = Objects.requireNonNull(semanticService, "semanticService is required");
@@ -144,7 +144,7 @@ public final class SemanticAnalysisApplicationService {
             int depth,
             int depthTwoNodeBudget,
             GraphFragmentBuilder<T> graphBuilder) {
-        RepositorySyntax syntax = syntaxExtractionService.extract(snapshot.root());
+        RepositorySyntax syntax = repositorySyntaxProvider.get(snapshot);
         MethodTargetResolution resolution = declarationResolver.resolve(syntax, target);
         SemanticDeclarationAnchor anchor = declarationAnchor(syntax, target, resolution);
         SemanticMethod root = semanticService.resolveExactMethod(snapshot, anchor);

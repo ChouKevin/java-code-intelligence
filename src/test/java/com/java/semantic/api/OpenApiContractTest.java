@@ -33,9 +33,12 @@ import org.yaml.snakeyaml.LoaderOptions;
 import org.yaml.snakeyaml.Yaml;
 import org.yaml.snakeyaml.constructor.SafeConstructor;
 
+import java.io.IOException;
 import java.io.InputStream;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Method;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -92,20 +95,17 @@ class OpenApiContractTest {
                 "/v1/discovery/method-implementations",
                 "/v1/discovery/source-symbols/resolve",
                 "/v1/discovery/internal-references",
-                "/v1/discovery/java-source-segment",
+                "/v1/discovery/source-segment",
                 "/v1/discovery/concepts",
                 "/v1/discovery/concepts/resolve",
                 "/v1/discovery/type-members",
                 "/v1/discovery/method-source",
-                "/v1/discovery/method-source-segment",
-                "/v1/discovery/method-sql",
-                "/v1/discovery/method-sql-segment",
-                "/v1/discovery/mapper-sql-fragment",
-                "/v1/discovery/mapper-fragment-segment"));
+                "/v1/discovery/evidence-source"));
         assertThat(paths.keySet()).doesNotContain(
                 "/v1/analyses/call-graph",
                 "/v1/analyses/call-graph/flatten",
-                "/v1/analyses/call-graphs/expand");
+                "/v1/analyses/call-graphs/expand",
+                "/v1/discovery/java-source-segment");
         assertThat(map(paths.get("/v1/analyses/call-graphs/outgoing"))).containsOnlyKeys("post");
         assertThat(map(paths.get("/v1/analyses/call-graphs/incoming"))).containsOnlyKeys("post");
         assertResponseCodes(operation(paths, "/v1/analyses/call-graphs/outgoing", "post"),
@@ -129,13 +129,13 @@ class OpenApiContractTest {
     void should_describe_closed_internal_reference_and_bounded_source_segment_contracts() {
         Map<String, Object> paths = map(document.get("paths"));
         Map<String, Object> references = operation(paths, "/v1/discovery/internal-references", "post");
-        Map<String, Object> segment = operation(paths, "/v1/discovery/java-source-segment", "post");
+        Map<String, Object> segment = operation(paths, "/v1/discovery/source-segment", "post");
         assertThat(references.get("operationId")).isEqualTo("findInternalReferences");
-        assertThat(segment.get("operationId")).isEqualTo("getJavaSourceSegment");
+        assertThat(segment.get("operationId")).isEqualTo("getSourceSegment");
         assertRequiredRequestBody(references, "#/components/schemas/InternalSourceReferenceRequest");
-        assertRequiredRequestBody(segment, "#/components/schemas/JavaSourceSegmentRequest");
+        assertRequiredRequestBody(segment, "#/components/schemas/SourceSegmentRequest");
         assertResponseCodes(references, "200", "400", "401", "403", "404", "409", "502", "503", "504");
-        assertResponseCodes(segment, "200", "400", "401", "403", "404", "409", "413");
+        assertResponseCodes(segment, "200", "400", "401", "403", "404", "409");
 
         Map<String, Object> schemas = schemas();
         Map<String, Object> request = schema(schemas, "InternalSourceReferenceRequest");
@@ -165,17 +165,33 @@ class OpenApiContractTest {
         assertExactPropertiesAndRequired(schema(schemas, "InternalSourceReferenceIssueSummaryResponse"),
                 "code", "count");
 
-        Map<String, Object> segmentRequest = schema(schemas, "JavaSourceSegmentRequest");
+        Map<String, Object> segmentRequest = schema(schemas, "SourceSegmentRequest");
         assertClosedObject(segmentRequest);
-        assertExactProperties(segmentRequest, "repoId", "expectedRevision", "sourceRange", "contextLines");
-        assertThat(required(segmentRequest)).containsExactlyInAnyOrder("repoId", "expectedRevision", "sourceRange");
+        assertExactProperties(segmentRequest, "repoId", "expectedRevision", "location", "contextLines");
+        assertThat(required(segmentRequest)).containsExactlyInAnyOrder("repoId", "expectedRevision", "location");
         assertThat(schema(properties(segmentRequest), "contextLines"))
-                .contains(entry("minimum", 0), entry("maximum", 20), entry("default", 3));
-        Map<String, Object> segmentResponse = schema(schemas, "JavaSourceSegmentResponse");
+                .contains(
+                        entry("minimum", 0),
+                        entry("maximum", 20),
+                        entry("default", 0),
+                        entry("description",
+                                "Surrounding context for canonical Java ranges; mapper XML evidence requires 0"));
+        Map<String, Object> segmentResponse = schema(schemas, "SourceSegmentResponse");
         assertClosedObject(segmentResponse);
         assertExactPropertiesAndRequired(segmentResponse,
-                "repoId", "analyzedRevision", "contentRange", "content", "contextTruncated", "returnedUtf8Bytes");
-        assertThat(schema(properties(segmentResponse), "returnedUtf8Bytes")).containsEntry("maximum", 65536);
+                "repoId", "analyzedRevision", "segment", "contextTruncated", "availableFollowUps");
+        assertRequiredNonNullableArray(segmentResponse, "availableFollowUps");
+        Map<String, Object> payload = schema(schemas, "SourceSegmentPayload");
+        assertClosedObject(payload);
+        assertExactProperties(payload, "location", "content", "nextLocation");
+        assertThat(required(payload)).containsExactlyInAnyOrder("location", "content");
+        assertThat(schemas.keySet()).doesNotContain(
+                "JavaSourceSegmentRequest", "JavaSourceSegmentResponse", "JavaSourceSegmentPayload");
+        Map<String, Object> methodSource = schema(schemas, "MethodSourceResponse");
+        assertClosedObject(methodSource);
+        assertExactPropertiesAndRequired(methodSource,
+                "repoId", "analyzedRevision", "declarationLocation", "segment", "availableFollowUps");
+        assertRequiredNonNullableArray(methodSource, "availableFollowUps");
     }
 
     @Test
@@ -378,55 +394,6 @@ class OpenApiContractTest {
         assertClosedConceptIdentitySchemas(schemas);
         assertClosedFieldTypeReferenceSchemas(schemas);
 
-        Map<String, Object> mapperMapping = schema(schemas, "MapperStatementMappingResponse");
-        assertThat(mapperMapping).containsOnlyKeys("description", "oneOf", "discriminator");
-        assertThat(list(mapperMapping.get("oneOf"))).containsExactly(
-                Map.of("$ref", "#/components/schemas/ResolvedMapperStatementMappingResponse"),
-                Map.of("$ref", "#/components/schemas/AmbiguousMapperStatementMappingResponse"),
-                Map.of("$ref", "#/components/schemas/UnresolvedMapperStatementMappingResponse"));
-        assertThat(map(schema(mapperMapping, "discriminator").get("mapping"))).containsExactlyInAnyOrderEntriesOf(Map.of(
-                "RESOLVED", "#/components/schemas/ResolvedMapperStatementMappingResponse",
-                "AMBIGUOUS", "#/components/schemas/AmbiguousMapperStatementMappingResponse",
-                "UNRESOLVED", "#/components/schemas/UnresolvedMapperStatementMappingResponse"));
-        assertThat(schema(mapperMapping, "discriminator")).containsEntry("propertyName", "status");
-
-        assertMapperMappingStateSchema(
-                schemas,
-                "ResolvedMapperStatementMappingResponse",
-                "RESOLVED",
-                "MapperSqlMethodCandidateResponse",
-                1,
-                Optional.of(1),
-                false);
-        assertMapperMappingStateSchema(
-                schemas,
-                "AmbiguousMapperStatementMappingResponse",
-                "AMBIGUOUS",
-                "MapperSourceMethodCandidateResponse",
-                2,
-                Optional.empty(),
-                false);
-        assertMapperMappingStateSchema(
-                schemas,
-                "UnresolvedMapperStatementMappingResponse",
-                "UNRESOLVED",
-                "MapperSourceMethodCandidateResponse",
-                0,
-                Optional.empty(),
-                true);
-        assertMapperMethodCandidateSchema(
-                schemas,
-                "MapperSqlMethodCandidateResponse",
-                "GET_METHOD_SQL",
-                "/v1/discovery/method-sql",
-                "getMethodSql");
-        assertMapperMethodCandidateSchema(
-                schemas,
-                "MapperSourceMethodCandidateResponse",
-                "GET_METHOD_SOURCE",
-                "/v1/discovery/method-source",
-                "getMethodSource");
-
         Map<String, Object> evidence = schema(schemas, "ConceptEvidenceResponse");
         assertClosedObject(evidence);
         assertExactPropertiesAndRequired(evidence, "identity");
@@ -434,55 +401,6 @@ class OpenApiContractTest {
                 .isEqualTo(Map.of("$ref", "#/components/schemas/ConceptIdentityResponse"));
 
         assertPageCoverageAndFollowUpSchemas(schemas);
-    }
-
-    @Test
-    void should_accept_both_method_follow_up_operations_through_one_shared_request_shape() throws Exception {
-        Map<String, Object> sourceRequest = methodFollowUpRequest("src/main/java/com/example/OrderMapper.java");
-        Map<String, Object> sqlRequest = methodFollowUpRequest("src/main/java/com/example/OrderMapper.java");
-
-        assertOpenApiPayloadValid("ConceptCandidateFollowUpRequestResponse", sourceRequest);
-        assertOpenApiPayloadValid("ConceptCandidateFollowUpRequestResponse", sqlRequest);
-    }
-
-    @Test
-    void should_validate_mapper_mapping_payloads_against_status_specific_shapes() throws Exception {
-        Map<String, Object> targetA = methodTargetPayload("src/main/java/com/example/OrderMapper.java", "java.lang.String");
-        Map<String, Object> targetB = methodTargetPayload("src/main/java/com/example/ArchiveMapper.java", "long");
-        Map<String, Object> sourceCandidateA = mapperCandidate(
-                targetA,
-                mapperFollowUp("GET_METHOD_SOURCE", "/v1/discovery/method-source", "getMethodSource", targetA));
-        Map<String, Object> sourceCandidateB = mapperCandidate(
-                targetB,
-                mapperFollowUp("GET_METHOD_SOURCE", "/v1/discovery/method-source", "getMethodSource", targetB));
-        Map<String, Object> sqlCandidate = mapperCandidate(
-                targetA,
-                mapperFollowUp("GET_METHOD_SQL", "/v1/discovery/method-sql", "getMethodSql", targetA));
-
-        assertOpenApiPayloadValid("MapperStatementMappingResponse", mapperMapping("RESOLVED", List.of(sqlCandidate)));
-        assertOpenApiPayloadValid(
-                "MapperStatementMappingResponse",
-                mapperMapping("AMBIGUOUS", List.of(sourceCandidateA, sourceCandidateB)));
-        assertOpenApiPayloadValid(
-                "MapperStatementMappingResponse",
-                unresolvedMapperMapping(List.of(sourceCandidateA)));
-
-        assertOpenApiPayloadInvalid(
-                "MapperStatementMappingResponse",
-                mapperMapping("RESOLVED", List.of(sourceCandidateA)));
-        assertOpenApiPayloadInvalid(
-                "MapperStatementMappingResponse",
-                mapperMapping("AMBIGUOUS", List.of(sourceCandidateA)));
-        assertOpenApiPayloadInvalid(
-                "MapperStatementMappingResponse",
-                mapperMapping("AMBIGUOUS", List.of(sourceCandidateA, sqlCandidate)));
-        assertOpenApiPayloadInvalid(
-                "MapperStatementMappingResponse",
-                Map.of(
-                        "namespace", "com.example.OrderMapper",
-                        "statementId", "findOrders",
-                        "status", "UNRESOLVED",
-                        "candidates", List.of(sqlCandidate)));
     }
 
     @Test
@@ -539,187 +457,56 @@ class OpenApiContractTest {
     }
 
     @Test
-    void should_describe_only_closed_typed_exact_content_and_stateless_segment_contracts() {
+    void should_describe_closed_typed_evidence_source_and_bounded_method_source_contracts() {
         Map<String, Object> paths = map(document.get("paths"));
         Map<String, Object> schemas = schemas();
 
-        assertExactContentOperation(
-                paths,
-                "/v1/discovery/method-source",
-                "getMethodSource",
-                "GetMethodSourceRequest",
-                "ExactContent");
-        assertExactContentOperation(
-                paths,
-                "/v1/discovery/method-sql",
-                "getMethodSql",
-                "GetMapperStatementRequest",
-                "ExactContent");
-        assertExactContentOperation(
-                paths,
-                "/v1/discovery/mapper-sql-fragment",
-                "getMapperFragment",
-                "GetMapperFragmentRequest",
-                "ExactContent");
-        assertExactContentOperation(
-                paths,
-                "/v1/discovery/method-source-segment",
-                "getMethodSourceSegment",
-                "GetMethodSourceSegmentRequest",
-                "ExactContentSegment");
-        assertExactContentOperation(
-                paths,
-                "/v1/discovery/method-sql-segment",
-                "getMethodSqlSegment",
-                "GetMapperStatementSegmentRequest",
-                "ExactContentSegment");
-        assertExactContentOperation(
-                paths,
-                "/v1/discovery/mapper-fragment-segment",
-                "getMapperFragmentSegment",
-                "GetMapperFragmentSegmentRequest",
-                "ExactContentSegment");
-        assertThat(paths.keySet()).doesNotContain(
-                "/v1/discovery/content",
-                "/v1/discovery/content-segment",
-                "/v1/discovery/literal-search");
+        assertSourceOperation(paths, "/v1/discovery/method-source", "getMethodSource",
+                "GetMethodSourceRequest", "MethodSource");
+        assertSourceOperation(paths, "/v1/discovery/evidence-source", "getEvidenceSource",
+                "EvidenceSourceRequest", "EvidenceSource");
+        assertThat(paths.keySet()).contains("/v1/discovery/method-source", "/v1/discovery/evidence-source");
 
-        assertClosedExactRequest(schemas, "GetMethodSourceRequest", "target");
-        assertClosedExactRequest(schemas, "GetMapperStatementRequest", "target");
-        assertClosedExactRequest(schemas, "GetMapperFragmentRequest", "fragmentIdentity");
-        assertClosedExactSegmentRequest(schemas, "GetMethodSourceSegmentRequest", "target");
-        assertClosedExactSegmentRequest(schemas, "GetMapperStatementSegmentRequest", "target");
-        assertClosedExactSegmentRequest(schemas, "GetMapperFragmentSegmentRequest", "fragmentIdentity");
+        assertClosedSourceRequest(schemas, "GetMethodSourceRequest", "target");
+        assertClosedSourceRequest(schemas, "EvidenceSourceRequest", "identity");
 
-        Map<String, Object> target = schema(schemas, "MethodTargetPayload");
-        assertClosedObject(target);
-        assertExactPropertiesAndRequired(
-                target, "sourceType", "methodName", "parameterTypes");
+        Map<String, Object> identity = schema(schemas, "EvidenceSourceIdentityPayload");
+        assertClosedObject(identity);
+        assertExactProperties(identity, "kind", "statementIdentity", "fragmentIdentity");
+        assertThat(required(identity)).containsExactly("kind");
+        assertThat(list(schema(properties(identity), "kind").get("enum")))
+                .containsExactly("ANNOTATION_SQL", "MAPPER_STATEMENT", "MAPPER_FRAGMENT");
+        assertThat(list(identity.get("oneOf"))).hasSize(2);
 
-        Map<String, Object> fragmentRequest = schema(schemas, "MapperFragmentIdentityPayload");
-        assertClosedObject(fragmentRequest);
-        assertExactPropertiesAndRequired(
-                fragmentRequest,
-                "namespace",
-                "fragmentId",
-                "resourcePath",
-                "documentOrdinal",
-                "representation");
-        assertThat(list(schema(properties(fragmentRequest), "representation").get("enum")))
-                .containsExactly("MAPPER_XML_ELEMENT");
-
-        Map<String, Object> response = schema(schemas, "ExactContentResponse");
+        Map<String, Object> response = schema(schemas, "EvidenceSourceResponse");
         assertClosedObject(response);
-        assertExactPropertiesAndRequired(response, "repoId", "analyzedRevision", "variants");
-        assertThat(schema(schema(properties(response), "variants"), "items"))
-                .isEqualTo(Map.of("$ref", "#/components/schemas/ExactContentVariantResponse"));
+        assertExactPropertiesAndRequired(response,
+                "repoId", "analyzedRevision", "identity", "location", "segment", "availableFollowUps");
+        assertRequiredNonNullableArray(response, "availableFollowUps");
+        assertThat(schema(properties(response), "location"))
+                .isEqualTo(Map.of("$ref", "#/components/schemas/SourceRangePayload"));
+        assertThat(schema(properties(response), "segment"))
+                .isEqualTo(Map.of("$ref", "#/components/schemas/SourceSegmentPayload"));
+        assertThat(schemas.keySet()).contains("EvidenceSourceRequest", "EvidenceSourceIdentityPayload");
+    }
 
-        Map<String, Object> variant = schema(schemas, "ExactContentVariantResponse");
-        assertClosedObject(variant);
-        assertExactProperties(
-                variant,
-                "statementIdentity",
-                "fragmentIdentity",
-                "content",
-                "contentRef",
-                "utf8ByteCount",
-                "segmentCount",
-                "includeResolutions",
-                "availableFollowUps");
-        assertThat(required(variant)).containsExactlyInAnyOrder(
-                "utf8ByteCount", "segmentCount", "includeResolutions", "availableFollowUps");
-        List<Object> invariantGroups = list(variant.get("allOf"));
-        assertThat(invariantGroups).hasSize(2);
-        List<Object> identityBranches = list(map(invariantGroups.get(0)).get("oneOf"));
-        assertThat(identityBranches).containsExactly(
-                Map.of(
-                        "not", Map.of("anyOf", List.of(
-                                Map.of("required", List.of("statementIdentity")),
-                                Map.of("required", List.of("fragmentIdentity")))),
-                        "properties", Map.of(
-                                "includeResolutions", Map.of("maxItems", 0))),
-                Map.of(
-                        "required", List.of("statementIdentity"),
-                        "not", Map.of("required", List.of("fragmentIdentity"))),
-                Map.of(
-                        "required", List.of("fragmentIdentity"),
-                        "not", Map.of("required", List.of("statementIdentity")),
-                        "properties", Map.of(
-                                "includeResolutions", Map.of("maxItems", 0))));
-        List<Object> contentBranches = list(map(invariantGroups.get(1)).get("oneOf"));
-        assertThat(contentBranches).containsExactly(
-                Map.of(
-                        "required", List.of("content"),
-                        "not", Map.of("required", List.of("contentRef")),
-                        "properties", Map.of(
-                                "segmentCount", Map.of("enum", List.of(0)),
-                                "availableFollowUps", Map.of("maxItems", 0))),
-                Map.of(
-                        "required", List.of("contentRef"),
-                        "not", Map.of("required", List.of("content")),
-                        "properties", Map.of(
-                                "segmentCount", Map.of("minimum", 1),
-                                "availableFollowUps", Map.of("minItems", 1, "maxItems", 1))));
-        assertThat(schema(schema(properties(variant), "includeResolutions"), "items"))
-                .isEqualTo(Map.of("$ref", "#/components/schemas/MapperIncludeResolutionResponse"));
-        assertThat(schema(schema(properties(variant), "availableFollowUps"), "items"))
-                .isEqualTo(Map.of("$ref", "#/components/schemas/DiscoveryFollowUpResponse"));
+    @Test
+    void should_keep_tracked_uat_on_typed_evidence_and_shared_source_segment_routes() throws IOException {
+        String uat = Files.readString(Path.of("uat", "structured-concept-discovery.http"));
+        Map<String, Object> paths = map(document.get("paths"));
+        List<String> postRoutes = uat.lines()
+                .filter(line -> line.startsWith("POST {{baseUrl}}"))
+                .map(line -> line.substring("POST {{baseUrl}}".length()))
+                .toList();
 
-        Map<String, Object> includeResolution = schema(schemas, "MapperIncludeResolutionResponse");
-        assertClosedObject(includeResolution);
-        assertExactPropertiesAndRequired(
-                includeResolution, "refId", "status", "availableFollowUps");
-        assertThat(list(schema(properties(includeResolution), "status").get("enum")))
-                .containsExactly("RESOLVED", "AMBIGUOUS", "UNRESOLVED");
-        assertThat(schema(schema(properties(includeResolution), "availableFollowUps"), "items"))
-                .isEqualTo(Map.of("$ref", "#/components/schemas/DiscoveryFollowUpResponse"));
-
-        Map<String, Object> statementKey = schema(schemas, "MapperStatementKeyPayload");
-        assertClosedObject(statementKey);
-        assertExactPropertiesAndRequired(statementKey, "namespace", "statementId");
-
-        Map<String, Object> statement = schema(schemas, "MapperStatementIdentityPayload");
-        assertClosedObject(statement);
-        assertExactProperties(
-                statement,
-                "statementKey",
-                "resourcePath",
-                "databaseId",
-                "documentOrdinal",
-                "representation");
-        assertThat(required(statement)).containsExactlyInAnyOrder(
-                "statementKey", "resourcePath", "documentOrdinal", "representation");
-        assertThat(schema(properties(statement), "statementKey"))
-                .isEqualTo(Map.of("$ref", "#/components/schemas/MapperStatementKeyPayload"));
-        assertThat(list(schema(properties(statement), "representation").get("enum")))
-                .containsExactly("MAPPER_XML_ELEMENT", "ANNOTATION_SQL_TEXT");
-
-        Map<String, Object> fragment = schema(schemas, "MapperFragmentIdentityPayload");
-        assertClosedObject(fragment);
-        assertExactPropertiesAndRequired(
-                fragment,
-                "namespace",
-                "fragmentId",
-                "resourcePath",
-                "documentOrdinal",
-                "representation");
-        assertThat(list(schema(properties(fragment), "representation").get("enum")))
-                .containsExactly("MAPPER_XML_ELEMENT");
-
-        Map<String, Object> segment = schema(schemas, "ExactContentSegmentResponse");
-        assertClosedObject(segment);
-        assertExactProperties(
-                segment,
-                "contentRef",
-                "segmentIndex",
-                "segmentCount",
-                "utf8ByteCount",
-                "content",
-                "nextSegmentFollowUp");
-        assertThat(required(segment)).containsExactlyInAnyOrder(
-                "contentRef", "segmentIndex", "segmentCount", "utf8ByteCount", "content");
-        assertThat(schema(properties(segment), "nextSegmentFollowUp"))
-                .isEqualTo(Map.of("$ref", "#/components/schemas/DiscoveryFollowUpResponse"));
+        assertThat(postRoutes)
+                .contains("/v1/discovery/evidence-source", "/v1/discovery/source-segment")
+                .allMatch(paths::containsKey);
+        assertThat(List.of(
+                occurrenceCount(uat, "client.global.set(\"methodSourceSegmentRequest\""),
+                occurrenceCount(uat, "client.global.set(\"statementSourceSegmentRequest\""),
+                occurrenceCount(uat, "client.global.set(\"fragmentSourceSegmentRequest\"")))
+                .containsExactly(2L, 2L, 2L);
     }
 
     @Test
@@ -754,7 +541,9 @@ class OpenApiContractTest {
         Map<String, Object> response = schema(schemas, "DiscoverEventListenersResponse");
         assertClosedObject(response);
         assertExactPropertiesAndRequired(response,
-                "repoId", "analyzedRevision", "requestedEventType", "candidates", "page", "observationSummaries");
+                "repoId", "analyzedRevision", "requestedEventType", "candidates", "page", "observationSummaries",
+                "availableFollowUps");
+        assertRequiredNonNullableArray(response, "availableFollowUps");
         assertThat(schema(properties(response), "candidates"))
                 .containsEntry("type", "array")
                 .containsEntry("items", Map.of("$ref", "#/components/schemas/EventListenerCandidateResponse"));
@@ -766,7 +555,8 @@ class OpenApiContractTest {
 
         Map<String, Object> candidate = schema(schemas, "EventListenerCandidateResponse");
         assertClosedObject(candidate);
-        assertExactPropertiesAndRequired(candidate, "target", "listenerAnnotations", "sourceRange");
+        assertExactPropertiesAndRequired(candidate, "target", "listenerAnnotations", "sourceRange", "availableFollowUps");
+        assertRequiredNonNullableArray(candidate, "availableFollowUps");
         assertThat(schema(properties(candidate), "target"))
                 .isEqualTo(Map.of("$ref", "#/components/schemas/MethodTargetPayload"));
         assertThat(schema(properties(candidate), "listenerAnnotations"))
@@ -846,7 +636,8 @@ class OpenApiContractTest {
 
         Map<String, Object> candidate = schema(schemas, "MethodImplementationCandidateResponse");
         assertClosedObject(candidate);
-        assertExactPropertiesAndRequired(candidate, "target", "primary", "qualifiers", "profiles");
+        assertExactPropertiesAndRequired(candidate, "target", "primary", "qualifiers", "profiles", "availableFollowUps");
+        assertRequiredNonNullableArray(candidate, "availableFollowUps");
         assertThat(schema(properties(candidate), "target"))
                 .isEqualTo(Map.of("$ref", "#/components/schemas/MethodTargetPayload"));
         assertThat(schema(schema(properties(candidate), "qualifiers"), "items"))
@@ -970,13 +761,13 @@ class OpenApiContractTest {
         Map<String, Object> node = schema(schemas, "GraphNode");
         assertClosedObject(node);
         assertExactProperties(node,
-                "nodeId", "target", "externalSymbol", "contentState", "traversalState", "dispatchKind", "methodBody",
-                "declarationRange");
+                "nodeId", "target", "externalSymbol", "contentState", "traversalState", "dispatchKind",
+                "declarationRange", "availableFollowUps");
         assertThat(required(node)).containsExactlyInAnyOrder(
-                "nodeId", "contentState", "traversalState", "dispatchKind");
+                "nodeId", "contentState", "traversalState", "dispatchKind", "availableFollowUps");
+        assertRequiredNonNullableArray(node, "availableFollowUps");
         assertNullableReference(properties(node), "target", "MethodTargetPayload");
         assertNullableString(properties(node), "externalSymbol");
-        assertNullableString(properties(node), "methodBody");
         assertNullableReference(properties(node), "declarationRange", "TextRangePayload");
         assertThat(schema(properties(node), "contentState"))
                 .isEqualTo(Map.of("$ref", "#/components/schemas/GraphContentState"));
@@ -1019,8 +810,10 @@ class OpenApiContractTest {
         Map<String, Object> warning = schema(schemas, "GraphWarning");
         assertClosedObject(warning);
         assertExactProperties(warning,
-                "code", "message", "nodeId", "callExpression", "callSite", "candidates");
-        assertThat(required(warning)).containsExactlyInAnyOrder("code", "message", "nodeId", "candidates");
+                "code", "message", "nodeId", "callExpression", "callSite", "candidates", "availableFollowUps");
+        assertThat(required(warning)).containsExactlyInAnyOrder(
+                "code", "message", "nodeId", "candidates", "availableFollowUps");
+        assertRequiredNonNullableArray(warning, "availableFollowUps");
         assertThat(list(schema(properties(warning), "code").get("enum"))).containsExactly(
                 "DESCENDANT_CALL_AMBIGUOUS",
                 "DESCENDANT_CALL_UNRESOLVED",
@@ -1062,7 +855,7 @@ class OpenApiContractTest {
 
         assertThat(schemas.keySet()).noneMatch(name -> name.matches(".*(Flattened|Recursive|Cursor|Session|AnalysisStatus).*"));
         assertThat(schemas.keySet().stream().filter(name -> name.contains("Page")).toList())
-                .containsExactly("PageResponse", "ConceptSearchPageRequestResponse");
+                .containsExactly("PageResponse");
     }
 
     @Test
@@ -1080,9 +873,7 @@ class OpenApiContractTest {
                 "REPOSITORY_REVISION_MISMATCH",
                 "SEMANTIC_BINDING_AMBIGUOUS",
                 "SEMANTIC_TARGET_NOT_FOUND",
-                "EXACT_CONTENT_NOT_FOUND",
                 "SOURCE_DECLARATION_NOT_FOUND",
-                "SOURCE_SEGMENT_TOO_LARGE",
                 "TYPE_MEMBER_TYPE_NOT_FOUND",
                 "SEMANTIC_BINDING_UNRESOLVED",
                 "IMPLEMENTATION_TARGET_UNSUPPORTED",
@@ -1272,7 +1063,7 @@ class OpenApiContractTest {
         assertThatThrownBy(() -> new GraphWarningResponse("AMBIGUOUS", "ambiguous", "node", null, null, null))
                 .isInstanceOf(NullPointerException.class);
 
-        GraphNodeResponse node = new GraphNodeResponse("node", null, null, "FULL_SOURCE", "EXPANDED", "SYNCHRONOUS", null, null);
+        GraphNodeResponse node = new GraphNodeResponse("node", null, null, "FULL_SOURCE", "EXPANDED", "SYNCHRONOUS", null);
         List<GraphNodeResponse> nodes = new ArrayList<>();
         List<GraphEdgeResponse> edges = new ArrayList<>(List.of(edge));
         List<GraphWarningResponse> warnings = new ArrayList<>(List.of(warning));
@@ -1347,7 +1138,7 @@ class OpenApiContractTest {
         assertThat(incomingResponse.getClass()).isNotEqualTo(response.getClass());
         assertThat(incomingResponse.nodes()).hasSize(0);
 
-        assertThat(new GraphNodeResponse("node", null, null, "FULL_SOURCE", "EXPANDED", "SYNCHRONOUS", null, null).target()).isNull();
+        assertThat(new GraphNodeResponse("node", null, null, "FULL_SOURCE", "EXPANDED", "SYNCHRONOUS", null).target()).isNull();
         assertThat(new GraphWarningResponse("AMBIGUOUS", "ambiguous", "node", null, null, List.of()).callExpression())
                 .isNull();
         assertThat(new GraphWarningResponse("AMBIGUOUS", "ambiguous", "node", null, null, List.of()).callSite())
@@ -1495,8 +1286,10 @@ class OpenApiContractTest {
 
         Map<String, Object> targetResolution = schema(schemas, "MethodTargetResolutionResponse");
         assertClosedObject(targetResolution);
-        assertExactProperties(targetResolution, "status", "target", "candidates", "reasonCode");
-        assertThat(required(targetResolution)).containsExactlyInAnyOrder("status", "candidates", "reasonCode");
+        assertExactProperties(targetResolution, "status", "target", "candidates", "reasonCode", "availableFollowUps");
+        assertThat(required(targetResolution)).containsExactlyInAnyOrder(
+                "status", "candidates", "reasonCode", "availableFollowUps");
+        assertRequiredNonNullableArray(targetResolution, "availableFollowUps");
         assertThat(list(schema(properties(targetResolution), "status").get("enum")))
                 .containsExactly("RESOLVED", "UNRESOLVED", "AMBIGUOUS");
         assertNullableReference(properties(targetResolution), "target", "MethodTargetPayload");
@@ -1610,8 +1403,8 @@ class OpenApiContractTest {
         assertClosedObject(candidateFollowUp);
         assertExactPropertiesAndRequired(candidateFollowUp, "operation", "api", "request");
         assertThat(list(schema(properties(candidateFollowUp), "operation").get("enum"))).containsExactly(
-                "GET_METHOD_SOURCE", "GET_METHOD_SQL", "ANALYZE_OUTGOING_CALL_GRAPH", "ANALYZE_INCOMING_CALL_GRAPH",
-                "DISCOVER_METHOD_IMPLEMENTATIONS", "RESOLVE_CONCEPT", "GET_TYPE_MEMBERS", "GET_NEXT_PAGE");
+                "GET_METHOD_SOURCE", "ANALYZE_OUTGOING_CALL_GRAPH", "ANALYZE_INCOMING_CALL_GRAPH",
+                "DISCOVER_METHOD_IMPLEMENTATIONS", "RESOLVE_CONCEPT", "GET_TYPE_MEMBERS");
         assertThat(schema(properties(candidateFollowUp), "request"))
                 .isEqualTo(Map.of("$ref", "#/components/schemas/ConceptCandidateFollowUpRequestResponse"));
 
@@ -1620,14 +1413,10 @@ class OpenApiContractTest {
         assertExactPropertiesAndRequired(followUp, "operation", "api", "request");
         assertThat(list(schema(properties(followUp), "operation").get("enum"))).containsExactly(
                 "GET_METHOD_SOURCE",
-                "GET_METHOD_SQL",
-                "GET_MAPPER_FRAGMENT",
-                "GET_METHOD_SOURCE_SEGMENT",
-                "GET_METHOD_SQL_SEGMENT",
-                "GET_MAPPER_FRAGMENT_SEGMENT",
                 "ANALYZE_OUTGOING_CALL_GRAPH", "ANALYZE_INCOMING_CALL_GRAPH",
-                "DISCOVER_METHOD_IMPLEMENTATIONS", "RESOLVE_CONCEPT", "GET_TYPE_MEMBERS", "GET_NEXT_PAGE",
-                "RESOLVE_SOURCE_SYMBOL", "FIND_INTERNAL_REFERENCES", "GET_JAVA_SOURCE_SEGMENT");
+                "DISCOVER_METHOD_IMPLEMENTATIONS", "RESOLVE_CONCEPT", "GET_TYPE_MEMBERS", "DISCOVER_TYPE_MEMBERS",
+                "DISCOVER_CONCEPTS", "DISCOVER_EVENT_LISTENERS",
+                "RESOLVE_SOURCE_SYMBOL", "FIND_INTERNAL_REFERENCES", "GET_SOURCE_SEGMENT", "GET_EVIDENCE_SOURCE");
         assertThat(schema(properties(followUp), "api"))
                 .isEqualTo(Map.of("$ref", "#/components/schemas/DiscoveryFollowUpApiResponse"));
         assertThat(schema(properties(followUp), "request"))
@@ -1640,109 +1429,37 @@ class OpenApiContractTest {
 
         assertClosedFollowUpRequest(
                 schemas, "MethodTargetFollowUpRequestResponse", "repoId", "expectedRevision", "target");
-        assertThat(schemas)
-                .doesNotContainKeys("GetMethodSourceRequestResponse", "GetMapperStatementRequestResponse");
         Map<String, String> sharedMethodRequest =
                 Map.of("$ref", "#/components/schemas/MethodTargetFollowUpRequestResponse");
         assertThat(list(schema(schemas, "ConceptCandidateFollowUpRequestResponse").get("oneOf")))
                 .containsOnlyOnce(sharedMethodRequest);
         assertThat(list(schema(schemas, "DiscoveryFollowUpRequestResponse").get("oneOf")))
                 .containsOnlyOnce(sharedMethodRequest);
-        assertClosedFollowUpRequest(schemas, "GetMapperFragmentRequestResponse",
-                "repoId", "expectedRevision", "fragmentIdentity");
-        assertThat(required(schema(schemas, "GetMapperFragmentRequestResponse")))
-                .containsExactlyInAnyOrder("repoId", "expectedRevision", "fragmentIdentity");
-        assertClosedFollowUpRequest(schemas, "GetMethodSourceSegmentRequestResponse",
-                "repoId", "expectedRevision", "target", "contentRef", "segmentIndex");
-        assertClosedFollowUpRequest(schemas, "GetMapperStatementSegmentRequestResponse",
-                "repoId", "expectedRevision", "target", "contentRef", "segmentIndex");
-        assertClosedFollowUpRequest(schemas, "GetMapperFragmentSegmentRequestResponse",
-                "repoId", "expectedRevision", "fragmentIdentity", "contentRef", "segmentIndex");
         assertClosedFollowUpRequest(schemas, "AnalyzeCallGraphRequestResponse", "repoId", "expectedRevision", "depth", "target");
         assertClosedFollowUpRequest(schemas, "DiscoverMethodImplementationsRequestResponse",
                 "repoId", "expectedRevision", "declarationTarget");
         assertClosedFollowUpRequest(schemas, "ResolveConceptRequestResponse",
                 "repoId", "expectedRevision", "identity");
-        assertClosedFollowUpRequest(schemas, "ConceptSearchPageRequestResponse",
+        assertClosedFollowUpRequest(schemas, "DiscoverConceptsRequestResponse",
                 "operator", "repoId", "expectedRevision", "terms", "kinds", "packagePrefix", "offset", "limit");
-        assertThat(schema(properties(schema(schemas, "ConceptSearchPageRequestResponse")), "kinds"))
+        assertThat(schema(properties(schema(schemas, "DiscoverConceptsRequestResponse")), "kinds"))
                 .contains(entry("minItems", 1), entry("uniqueItems", Boolean.TRUE))
                 .doesNotContainKey("maxItems");
+        assertClosedFollowUpRequest(schemas, "DiscoverEventListenersRequestResponse",
+                "repoId", "expectedRevision", "eventType", "offset", "limit");
         assertClosedFollowUpRequest(schemas, "GetTypeMembersRequestResponse",
                 "repoId", "expectedRevision", "sourceType", "memberKinds", "namePrefix", "offset", "limit");
         assertClosedFollowUpRequest(schemas, "DiscoverTypeMembersRequestResponse",
                 "repoId", "expectedRevision", "sourceType", "memberKinds", "namePrefix", "offset", "limit");
         assertClosedFollowUpRequest(schemas, "FindInternalReferencesRequestResponse",
                 "repoId", "expectedRevision", "target", "offset", "limit");
-        assertClosedFollowUpRequest(schemas, "GetJavaSourceSegmentRequestResponse",
-                "repoId", "expectedRevision", "sourceRange", "contextLines");
+        assertClosedFollowUpRequest(schemas, "GetSourceSegmentRequestResponse",
+                "repoId", "expectedRevision", "location", "contextLines");
+        assertClosedFollowUpRequest(schemas, "GetEvidenceSourceRequestResponse",
+                "repoId", "expectedRevision", "identity");
         assertThat(properties(schema(schemas, "GetTypeMembersRequestResponse")))
                 .containsKey("sourceType")
                 .doesNotContainKeys("sourceFile", "fullyQualifiedName", "fullyQualifiedTypeName");
-        assertThat(list(schema(schemas, "DiscoveryFollowUpRequestResponse").get("oneOf")))
-                .contains(Map.of("$ref", "#/components/schemas/GetMapperFragmentRequestResponse"));
-    }
-
-    private void assertMapperMappingStateSchema(
-            Map<String, Object> schemas,
-            String schemaName,
-            String status,
-            String candidateSchema,
-            int minimumCandidates,
-            Optional<Integer> maximumCandidates,
-            boolean unresolved) {
-        Map<String, Object> mapping = schema(schemas, schemaName);
-        assertClosedObject(mapping);
-        if (unresolved) {
-            assertExactPropertiesAndRequired(mapping, "statement", "status", "reason", "candidates");
-            assertThat(list(schema(properties(mapping), "reason").get("enum")))
-                    .containsExactly("INCOMPLETE_METHOD_RESOLUTION");
-        } else {
-            assertExactPropertiesAndRequired(mapping, "statement", "status", "candidates");
-        }
-        assertThat(schema(properties(mapping), "statement"))
-                .isEqualTo(Map.of("$ref", "#/components/schemas/MapperStatementKeyPayload"));
-        assertThat(list(schema(properties(mapping), "status").get("enum"))).containsExactly(status);
-        Map<String, Object> candidates = schema(properties(mapping), "candidates");
-        assertThat(candidates).containsEntry("uniqueItems", Boolean.TRUE);
-        if (minimumCandidates > 0) {
-            assertThat(candidates).containsEntry("minItems", minimumCandidates);
-        } else {
-            assertThat(candidates).doesNotContainKey("minItems");
-        }
-        maximumCandidates.ifPresent(maximum -> assertThat(candidates).containsEntry("maxItems", maximum));
-        assertThat(schema(candidates, "items"))
-                .isEqualTo(Map.of("$ref", "#/components/schemas/" + candidateSchema));
-    }
-
-    private void assertMapperMethodCandidateSchema(
-            Map<String, Object> schemas,
-            String schemaName,
-            String operation,
-            String path,
-            String operationId) {
-        Map<String, Object> candidate = schema(schemas, schemaName);
-        assertClosedObject(candidate);
-        assertExactPropertiesAndRequired(candidate, "target", "availableFollowUps");
-        assertThat(schema(properties(candidate), "target"))
-                .isEqualTo(Map.of("$ref", "#/components/schemas/MethodTargetPayload"));
-        Map<String, Object> followUps = schema(properties(candidate), "availableFollowUps");
-        assertThat(followUps).contains(entry("minItems", 1), entry("maxItems", 1));
-        List<Object> followUpConstraints = list(schema(followUps, "items").get("allOf"));
-        assertThat(followUpConstraints.getFirst())
-                .isEqualTo(Map.of("$ref", "#/components/schemas/ConceptCandidateFollowUpResponse"));
-        Map<String, Object> operationConstraint = map(followUpConstraints.get(1));
-        assertThat(list(schema(properties(operationConstraint), "operation").get("enum")))
-                .containsExactly(operation);
-        assertThat(schema(properties(operationConstraint), "request"))
-                .isEqualTo(Map.of("$ref", "#/components/schemas/MethodTargetFollowUpRequestResponse"));
-        List<Object> apiConstraints = list(schema(properties(operationConstraint), "api").get("allOf"));
-        assertThat(apiConstraints.getFirst())
-                .isEqualTo(Map.of("$ref", "#/components/schemas/DiscoveryFollowUpApiResponse"));
-        Map<String, Object> apiValueConstraints = map(apiConstraints.get(1));
-        assertThat(list(schema(properties(apiValueConstraints), "path").get("enum"))).containsExactly(path);
-        assertThat(list(schema(properties(apiValueConstraints), "operationId").get("enum")))
-                .containsExactly(operationId);
     }
 
     private void assertClosedConceptIdentitySchemas(Map<String, Object> schemas) {
@@ -1942,68 +1659,13 @@ class OpenApiContractTest {
         return JsonSchemaFactory.byDefault().getJsonSchema(rootSchema);
     }
 
-    private static Map<String, Object> methodFollowUpRequest(String sourceFile) {
-        return Map.of(
-                "repoId", "orders",
-                "expectedRevision", "1111111111111111111111111111111111111111",
-                "target", methodTargetPayload(sourceFile, "java.lang.String"));
-    }
-
-    private static Map<String, Object> methodTargetPayload(String sourceFile, String parameterType) {
-        return Map.of(
-                "sourceType", Map.of(
-                        "javaType", Map.of("packageName", "com.example", "className", "p"),
-                        "sourceFile", sourceFile),
-                "methodName", "p",
-                "parameterTypes", List.of(parameterType));
-    }
-
-    private static Map<String, Object> mapperFollowUp(
-            String operation,
-            String path,
-            String operationId,
-            Map<String, Object> target) {
-        return Map.of(
-                "operation", operation,
-                "api", Map.of("method", "POST", "path", path, "operationId", operationId),
-                "request", Map.of(
-                        "repoId", "orders",
-                        "expectedRevision", "1111111111111111111111111111111111111111",
-                        "target", target));
-    }
-
-    private static Map<String, Object> mapperCandidate(
-            Map<String, Object> target,
-            Map<String, Object> followUp) {
-        return Map.of("target", target, "availableFollowUps", List.of(followUp));
-    }
-
-    private static Map<String, Object> mapperMapping(String status, List<Map<String, Object>> candidates) {
-        return Map.of(
-                "statement", Map.of(
-                        "namespace", "com.example.OrderMapper",
-                        "statementId", "findOrders"),
-                "status", status,
-                "candidates", candidates);
-    }
-
-    private static Map<String, Object> unresolvedMapperMapping(List<Map<String, Object>> candidates) {
-        return Map.of(
-                "statement", Map.of(
-                        "namespace", "com.example.OrderMapper",
-                        "statementId", "findOrders"),
-                "status", "UNRESOLVED",
-                "reason", "INCOMPLETE_METHOD_RESOLUTION",
-                "candidates", candidates);
-    }
-
     private void assertClosedFollowUpRequest(Map<String, Object> schemas, String name, String... properties) {
         Map<String, Object> request = schema(schemas, name);
         assertClosedObject(request);
         assertExactProperties(request, properties);
     }
 
-    private void assertExactContentOperation(
+    private void assertSourceOperation(
             Map<String, Object> paths,
             String path,
             String operationId,
@@ -2018,7 +1680,7 @@ class OpenApiContractTest {
                 .isEqualTo(Map.of("$ref", "#/components/responses/" + responseName));
     }
 
-    private void assertClosedExactRequest(
+    private void assertClosedSourceRequest(
             Map<String, Object> schemas,
             String schemaName,
             String authorityName) {
@@ -2027,19 +1689,6 @@ class OpenApiContractTest {
         assertExactPropertiesAndRequired(request, "repoId", "expectedRevision", authorityName);
         assertThat(schema(properties(request), "expectedRevision"))
                 .containsEntry("pattern", REVISION_PATTERN);
-    }
-
-    private void assertClosedExactSegmentRequest(
-            Map<String, Object> schemas,
-            String schemaName,
-            String authorityName) {
-        Map<String, Object> request = schema(schemas, schemaName);
-        assertClosedObject(request);
-        assertExactPropertiesAndRequired(
-                request, "repoId", "expectedRevision", authorityName, "contentRef", "segmentIndex");
-        assertThat(schema(properties(request), "contentRef"))
-                .contains(entry("minLength", 1), entry("maxLength", 128));
-        assertThat(schema(properties(request), "segmentIndex")).containsEntry("minimum", 0);
     }
 
     private Map<String, Object> operation(Map<String, Object> paths, String path, String method) {
@@ -2137,6 +1786,10 @@ class OpenApiContractTest {
         assertThat(content).containsOnlyKeys("application/json");
         Map<String, Object> mediaType = map(content.get("application/json"));
         assertThat(map(mediaType.get("schema"))).containsOnly(entry("$ref", expectedReference));
+    }
+
+    private long occurrenceCount(String value, String marker) {
+        return Pattern.compile(Pattern.quote(marker)).matcher(value).results().count();
     }
 
     @SuppressWarnings("unchecked")

@@ -8,7 +8,7 @@ import com.java.semantic.repository.domain.RepositoryId;
 import com.java.semantic.repository.domain.RepositoryRevision;
 import com.java.semantic.repository.domain.RepositorySnapshot;
 import com.java.semantic.syntax.domain.RepositorySyntax;
-import com.java.semantic.syntax.domain.SyntaxExtractionService;
+import com.java.semantic.syntax.domain.RevisionBoundRepositorySyntaxProvider;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.slf4j.LoggerFactory;
@@ -48,10 +48,10 @@ class ConceptDiscoveryLoggingTest {
     @Test
     void should_emit_one_failed_phase_event_when_an_inactive_kind_is_rejected() {
         RepositoryApplicationService repositoryApplicationService = mock(RepositoryApplicationService.class);
-        SyntaxExtractionService syntaxExtractionService = mock(SyntaxExtractionService.class);
+        RevisionBoundRepositorySyntaxProvider repositorySyntaxProvider = mock(RevisionBoundRepositorySyntaxProvider.class);
         ConceptDiscoveryApplicationService service = new ConceptDiscoveryApplicationService(
                 repositoryApplicationService,
-                syntaxExtractionService,
+                repositorySyntaxProvider,
                 loggingProjector(),
                 new ConceptSearchDocumentProjector(),
                 new ConceptSearchMatcher());
@@ -67,7 +67,7 @@ class ConceptDiscoveryLoggingTest {
                     .contains("requestId=request-42")
                     .contains("repositoryRevision=" + REVISION.value())
                     .contains("outcome=FAILED");
-            verifyNoInteractions(repositoryApplicationService, syntaxExtractionService);
+            verifyNoInteractions(repositoryApplicationService, repositorySyntaxProvider);
         } finally {
             MDC.remove("requestId");
             capturedLogs.stop();
@@ -77,10 +77,10 @@ class ConceptDiscoveryLoggingTest {
     @Test
     void should_emit_one_revision_bound_phase_event_with_safe_query_context_and_timings() {
         RepositoryApplicationService repositoryApplicationService = mock(RepositoryApplicationService.class);
-        SyntaxExtractionService syntaxExtractionService = mock(SyntaxExtractionService.class);
+        RevisionBoundRepositorySyntaxProvider repositorySyntaxProvider = mock(RevisionBoundRepositorySyntaxProvider.class);
         ConceptDiscoveryApplicationService service = new ConceptDiscoveryApplicationService(
                 repositoryApplicationService,
-                syntaxExtractionService,
+                repositorySyntaxProvider,
                 loggingProjector(),
                 new ConceptSearchDocumentProjector(),
                 new ConceptSearchMatcher());
@@ -94,7 +94,7 @@ class ConceptDiscoveryLoggingTest {
                 10);
         RepositorySnapshot snapshot = new RepositorySnapshot(REPOSITORY_ID, REPOSITORY_ROOT, REVISION);
         delegateSnapshot(repositoryApplicationService, snapshot, query);
-        when(syntaxExtractionService.extract(REPOSITORY_ROOT))
+        when(repositorySyntaxProvider.get(any()))
                 .thenReturn(new RepositorySyntax(List.of(), List.of(), List.of()));
         CapturedLogs capturedLogs = captureLogs();
         MDC.put("requestId", "request-42");
@@ -131,10 +131,10 @@ class ConceptDiscoveryLoggingTest {
     @Test
     void should_render_requested_kinds_in_concept_kind_enum_order() {
         RepositoryApplicationService repositoryApplicationService = mock(RepositoryApplicationService.class);
-        SyntaxExtractionService syntaxExtractionService = mock(SyntaxExtractionService.class);
+        RevisionBoundRepositorySyntaxProvider repositorySyntaxProvider = mock(RevisionBoundRepositorySyntaxProvider.class);
         ConceptDiscoveryApplicationService service = new ConceptDiscoveryApplicationService(
                 repositoryApplicationService,
-                syntaxExtractionService,
+                repositorySyntaxProvider,
                 loggingProjector(),
                 new ConceptSearchDocumentProjector(),
                 new ConceptSearchMatcher());
@@ -147,7 +147,7 @@ class ConceptDiscoveryLoggingTest {
                 repositoryApplicationService,
                 new RepositorySnapshot(REPOSITORY_ID, REPOSITORY_ROOT, REVISION),
                 query);
-        when(syntaxExtractionService.extract(REPOSITORY_ROOT))
+        when(repositorySyntaxProvider.get(any()))
                 .thenReturn(new RepositorySyntax(List.of(), List.of(), List.of()));
         CapturedLogs capturedLogs = captureLogs();
         try {
@@ -163,10 +163,10 @@ class ConceptDiscoveryLoggingTest {
     @Test
     void should_record_elapsed_extraction_and_unstarted_later_stages_when_extraction_fails() {
         RepositoryApplicationService repositoryApplicationService = mock(RepositoryApplicationService.class);
-        SyntaxExtractionService syntaxExtractionService = mock(SyntaxExtractionService.class);
+        RevisionBoundRepositorySyntaxProvider repositorySyntaxProvider = mock(RevisionBoundRepositorySyntaxProvider.class);
         ConceptDiscoveryApplicationService service = new ConceptDiscoveryApplicationService(
                 repositoryApplicationService,
-                syntaxExtractionService,
+                repositorySyntaxProvider,
                 loggingProjector(),
                 new ConceptSearchDocumentProjector(),
                 new ConceptSearchMatcher());
@@ -176,7 +176,7 @@ class ConceptDiscoveryLoggingTest {
                 new RepositorySnapshot(REPOSITORY_ID, REPOSITORY_ROOT, REVISION),
                 query);
         IllegalStateException failure = new IllegalStateException("extraction failed");
-        when(syntaxExtractionService.extract(REPOSITORY_ROOT)).thenThrow(failure);
+        when(repositorySyntaxProvider.get(any())).thenThrow(failure);
         CapturedLogs capturedLogs = captureLogs();
         try {
             Throwable thrown = catchThrowable(() -> service.search(query));
@@ -198,12 +198,12 @@ class ConceptDiscoveryLoggingTest {
     @Test
     void should_record_elapsed_projection_and_leave_matching_unstarted_when_projection_fails() {
         RepositoryApplicationService repositoryApplicationService = mock(RepositoryApplicationService.class);
-        SyntaxExtractionService syntaxExtractionService = mock(SyntaxExtractionService.class);
+        RevisionBoundRepositorySyntaxProvider repositorySyntaxProvider = mock(RevisionBoundRepositorySyntaxProvider.class);
         StructuredConceptCatalogProjector catalogProjector = mock(StructuredConceptCatalogProjector.class);
         when(catalogProjector.supportedKinds()).thenReturn(Set.of(ConceptKind.TYPE));
         ConceptDiscoveryApplicationService service = new ConceptDiscoveryApplicationService(
                 repositoryApplicationService,
-                syntaxExtractionService,
+                repositorySyntaxProvider,
                 catalogProjector,
                 new ConceptSearchDocumentProjector(),
                 new ConceptSearchMatcher());
@@ -213,7 +213,7 @@ class ConceptDiscoveryLoggingTest {
                 new RepositorySnapshot(REPOSITORY_ID, REPOSITORY_ROOT, REVISION),
                 query);
         RepositorySyntax syntax = new RepositorySyntax(List.of(), List.of(), List.of());
-        when(syntaxExtractionService.extract(REPOSITORY_ROOT)).thenReturn(syntax);
+        when(repositorySyntaxProvider.get(any())).thenReturn(syntax);
         IllegalArgumentException failure = new IllegalArgumentException("projection failed");
         when(catalogProjector.project(syntax)).thenThrow(failure);
         CapturedLogs capturedLogs = captureLogs();

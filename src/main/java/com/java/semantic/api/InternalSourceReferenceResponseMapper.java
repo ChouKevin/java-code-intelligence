@@ -19,7 +19,7 @@ import com.java.semantic.semantic.application.InternalSourceReferenceQuery;
 import com.java.semantic.semantic.application.InternalSourceReferenceResult;
 import com.java.semantic.syntax.application.DiscoveryFollowUp;
 import com.java.semantic.syntax.application.DiscoveryFollowUpFactory;
-import com.java.semantic.syntax.application.SourceRange;
+import com.java.semantic.syntax.domain.SourceRange;
 import com.java.semantic.syntax.domain.ExactSourceDeclaration;
 import com.java.semantic.syntax.domain.ExactSourceDeclarationTarget;
 import com.java.semantic.syntax.domain.SourceMemberIdentity;
@@ -144,7 +144,7 @@ public final class InternalSourceReferenceResponseMapper {
             RepositoryId repositoryId,
             RepositoryRevision revision,
             SourceRange sourceRange) {
-        return followUpMapper.followUp(followUpFactory.forJavaSourceSegment(
+        return followUpMapper.followUp(followUpFactory.forSourceSegment(
                 repositoryId, revision, sourceRange, SOURCE_CONTEXT_LINES));
     }
 

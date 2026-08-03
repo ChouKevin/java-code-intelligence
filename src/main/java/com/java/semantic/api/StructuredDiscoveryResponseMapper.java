@@ -5,21 +5,23 @@ import com.java.semantic.api.dto.ConceptCandidateDetailsResponse;
 import com.java.semantic.api.dto.ConceptCoverageResponse;
 import com.java.semantic.api.dto.ConceptEvidenceResponse;
 import com.java.semantic.api.dto.ConceptIssueSummaryResponse;
+import com.java.semantic.api.dto.EvidenceSourceIdentityPayload;
 import com.java.semantic.api.dto.PageResponse;
 import com.java.semantic.api.dto.DiscoverConceptsResponse;
 import com.java.semantic.api.dto.DiscoverTypeMembersResponse;
 import com.java.semantic.api.dto.DiscoveryFollowUpResponse;
 import com.java.semantic.api.dto.DiscoveryFollowUpResponse.AnalyzeCallGraphRequestResponse;
 import com.java.semantic.api.dto.DiscoveryFollowUpResponse.ApiResponse;
-import com.java.semantic.api.dto.DiscoveryFollowUpResponse.ConceptSearchPageRequestResponse;
 import com.java.semantic.api.dto.DiscoveryFollowUpResponse.ConceptSearchTermResponse;
+import com.java.semantic.api.dto.DiscoveryFollowUpResponse.DiscoverConceptsRequestResponse;
+import com.java.semantic.api.dto.DiscoveryFollowUpResponse.DiscoverEventListenersRequestResponse;
 import com.java.semantic.api.dto.DiscoveryFollowUpResponse.DiscoverMethodImplementationsRequestResponse;
 import com.java.semantic.api.dto.DiscoveryFollowUpResponse.DiscoverTypeMembersRequestResponse;
 import com.java.semantic.api.dto.DiscoveryFollowUpResponse.GetMethodSourceRequestResponse;
-import com.java.semantic.api.dto.DiscoveryFollowUpResponse.GetMapperStatementRequestResponse;
 import com.java.semantic.api.dto.DiscoveryFollowUpResponse.GetTypeMembersRequestResponse;
 import com.java.semantic.api.dto.DiscoveryFollowUpResponse.FindInternalReferencesRequestResponse;
-import com.java.semantic.api.dto.DiscoveryFollowUpResponse.GetJavaSourceSegmentRequestResponse;
+import com.java.semantic.api.dto.DiscoveryFollowUpResponse.GetSourceSegmentRequestResponse;
+import com.java.semantic.api.dto.DiscoveryFollowUpResponse.GetEvidenceSourceRequestResponse;
 import com.java.semantic.api.dto.DiscoveryFollowUpResponse.RequestResponse;
 import com.java.semantic.api.dto.DiscoveryFollowUpResponse.ResolveSourceSymbolRequestResponse;
 import com.java.semantic.api.dto.DiscoveryFollowUpResponse.ResolveConceptRequestResponse;
@@ -40,20 +42,20 @@ import com.java.semantic.syntax.application.concept.ConceptCatalogEntry;
 import com.java.semantic.syntax.application.concept.ConceptIdentity;
 import com.java.semantic.syntax.application.concept.ConceptIdentityOrdering;
 import com.java.semantic.syntax.application.concept.ConceptIssueSummary;
-import com.java.semantic.syntax.application.concept.ConceptKind;
 import com.java.semantic.syntax.application.concept.ConceptPage;
-import com.java.semantic.syntax.application.concept.ConceptSearchQuery;
 import com.java.semantic.syntax.application.concept.ConceptSearchResult;
 import com.java.semantic.syntax.application.concept.ConceptSearchTerm;
+import com.java.semantic.syntax.application.concept.MapperConceptIdentity;
 import com.java.semantic.syntax.application.concept.RevisionBoundConceptResolution;
 import com.java.semantic.syntax.application.DiscoveryFollowUp;
 import com.java.semantic.syntax.application.DiscoveryFollowUp.AnalyzeCallGraphRequest;
 import com.java.semantic.syntax.application.DiscoveryFollowUp.DiscoverMethodImplementationsRequest;
 import com.java.semantic.syntax.application.DiscoveryFollowUp.GetMethodSourceRequest;
-import com.java.semantic.syntax.application.DiscoveryFollowUp.GetMapperStatementRequest;
 import com.java.semantic.syntax.application.DiscoveryFollowUp.GetTypeMembersRequest;
 import com.java.semantic.syntax.application.DiscoveryFollowUp.FindInternalReferencesRequest;
-import com.java.semantic.syntax.application.DiscoveryFollowUp.GetJavaSourceSegmentRequest;
+import com.java.semantic.syntax.application.DiscoveryFollowUp.GetSourceSegmentRequest;
+import com.java.semantic.syntax.application.DiscoveryFollowUp.GetEvidenceSourceRequest;
+import com.java.semantic.syntax.application.EvidenceSourceQuery;
 import com.java.semantic.syntax.application.DiscoveryFollowUp.TypeMembersRequest;
 import com.java.semantic.syntax.application.DiscoveryFollowUp.ResolveSourceSymbolRequest;
 import com.java.semantic.syntax.application.DiscoveryFollowUp.ResolveConceptRequest;
@@ -68,17 +70,14 @@ import com.java.semantic.syntax.domain.SourceExtractionStatus;
 import com.java.semantic.syntax.domain.SourceMemberIdentity;
 import org.springframework.stereotype.Component;
 
-import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.stream.Stream;
 
 /** 將結構化探索應用結果轉換為穩定且唯讀衍生 identity 的 HTTP 回應 */
 @Component
 public final class StructuredDiscoveryResponseMapper {
-
-    private static final String CONCEPTS_PATH = "/v1/discovery/concepts";
-    private static final String CONCEPTS_OPERATION_ID = "discoverConcepts";
 
     private static final List<String> LIMITATIONS = List.of("SOURCE_BODY_NOT_SEARCHED");
 
@@ -115,10 +114,7 @@ public final class StructuredDiscoveryResponseMapper {
     /** 將概念搜尋結果映射為固定版本 HTTP 回應 */
     public DiscoverConceptsResponse toResponse(ConceptSearchResult result) {
         ConceptSearchResult searchResult = Objects.requireNonNull(result, "result is required");
-        List<DiscoveryFollowUpResponse> followUps = searchResult.nextPageQuery()
-                .map(this::conceptNextPage)
-                .stream()
-                .toList();
+        List<DiscoveryFollowUpResponse> followUps = availableFollowUps(searchResult);
         return new DiscoverConceptsResponse(
                 searchResult.repositoryId().value(),
                 searchResult.analyzedRevision().value(),
@@ -192,11 +188,9 @@ public final class StructuredDiscoveryResponseMapper {
                         .sorted(ConceptIdentityOrdering.comparator())
                         .map(this::evidence)
                         .toList(),
-                followUpFactory.forConcept(
-                                repositoryId,
-                                revision,
-                                identity)
-                        .stream()
+                Stream.concat(
+                                followUpFactory.forConcept(repositoryId, revision, identity).stream(),
+                                evidenceFollowUps(repositoryId, revision, entry).stream())
                         .map(this::followUp)
                         .toList());
     }
@@ -241,8 +235,7 @@ public final class StructuredDiscoveryResponseMapper {
             MapperStatementMethodMapping mapping,
             MethodTarget mappedTarget) {
         List<DiscoveryFollowUp> followUps = switch (mapping.status()) {
-            case RESOLVED -> followUpFactory.forResolvedMapperStatement(
-                    repositoryId, revision, mappedTarget);
+            case RESOLVED -> List.of();
             case AMBIGUOUS -> followUpFactory.forAmbiguousMapperMethod(
                     repositoryId, revision, mappedTarget);
             case UNRESOLVED -> followUpFactory.forAmbiguousMapperMethod(
@@ -255,6 +248,30 @@ public final class StructuredDiscoveryResponseMapper {
 
     private ConceptEvidenceResponse evidence(ConceptIdentity identity) {
         return new ConceptEvidenceResponse(conceptIdentityHttpMapper.toResponse(identity));
+    }
+
+    private List<DiscoveryFollowUp> evidenceFollowUps(
+            RepositoryId repositoryId,
+            RepositoryRevision revision,
+            ConceptCatalogEntry entry) {
+        Stream<EvidenceSourceQuery.EvidenceIdentity> variants = entry.evidence().stream()
+                .filter(MapperConceptIdentity.MapperStatementVariantEvidenceIdentity.class::isInstance)
+                .map(MapperConceptIdentity.MapperStatementVariantEvidenceIdentity.class::cast)
+                .map(variant -> evidenceIdentity(variant.mapperStatement()));
+        Stream<EvidenceSourceQuery.EvidenceIdentity> fragments = entry.mapperStatementMapping().stream()
+                .flatMap(mapping -> mapping.includedFragments().stream())
+                .map(EvidenceSourceQuery.MapperFragment::new);
+        return Stream.concat(variants, fragments)
+                .map(identity -> followUpFactory.forEvidenceSource(repositoryId, revision, identity))
+                .toList();
+    }
+
+    private EvidenceSourceQuery.EvidenceIdentity evidenceIdentity(
+            com.java.semantic.syntax.domain.MapperStatementIdentity identity) {
+        return switch (identity.representation()) {
+            case ANNOTATION_SQL_TEXT -> new EvidenceSourceQuery.AnnotationSql(identity);
+            case MAPPER_XML_ELEMENT -> new EvidenceSourceQuery.MapperStatement(identity);
+        };
     }
 
     private TypeMemberResponse member(SourceTypeIdentity sourceType, TypeMember member) {
@@ -321,27 +338,15 @@ public final class StructuredDiscoveryResponseMapper {
                 REFINE_SEARCH));
     }
 
-    private DiscoveryFollowUpResponse conceptNextPage(ConceptSearchQuery query) {
-        List<ConceptSearchTermResponse> terms = query.terms().stream()
-                .map(this::conceptTerm)
+    private List<DiscoveryFollowUpResponse> availableFollowUps(ConceptSearchResult result) {
+        if (result.page().totalCount() == 0) {
+            return List.of(followUp(followUpFactory.forConceptSearch(result.query())));
+        }
+        return result.nextPageQuery()
+                .map(followUpFactory::nextConceptPage)
+                .map(this::followUp)
+                .stream()
                 .toList();
-        List<String> kinds = query.kinds().stream()
-                .sorted(Comparator.comparing(ConceptKind::name))
-                .map(Enum::name)
-                .toList();
-        ConceptSearchPageRequestResponse request = new ConceptSearchPageRequestResponse(
-                query.repositoryId().value(),
-                query.expectedRevision().value(),
-                "ALL",
-                terms,
-                kinds,
-                query.packagePrefix(),
-                query.offset(),
-                query.limit());
-        return new DiscoveryFollowUpResponse(
-                DiscoveryFollowUp.Operation.GET_NEXT_PAGE.name(),
-                new ApiResponse("POST", CONCEPTS_PATH, CONCEPTS_OPERATION_ID),
-                request);
     }
 
     public DiscoveryFollowUpResponse followUp(DiscoveryFollowUp followUp) {
@@ -360,10 +365,6 @@ public final class StructuredDiscoveryResponseMapper {
                     source.repoId(),
                     source.expectedRevision(),
                     JavaSourceIdentityHttpMapper.toPayload(source.target()));
-            case GetMapperStatementRequest statement -> new GetMapperStatementRequestResponse(
-                    statement.repoId(),
-                    statement.expectedRevision(),
-                    JavaSourceIdentityHttpMapper.toPayload(statement.target()));
             case AnalyzeCallGraphRequest graph -> new AnalyzeCallGraphRequestResponse(
                     graph.repoId(),
                     graph.expectedRevision(),
@@ -394,6 +395,22 @@ public final class StructuredDiscoveryResponseMapper {
                     members.namePrefix(),
                     members.offset(),
                     members.limit());
+            case DiscoveryFollowUp.DiscoverConceptsRequest concepts -> new DiscoverConceptsRequestResponse(
+                    concepts.repoId(),
+                    concepts.expectedRevision(),
+                    concepts.terms().stream().map(this::conceptTerm).toList(),
+                    concepts.kinds(),
+                    concepts.operator(),
+                    concepts.packagePrefix(),
+                    concepts.offset(),
+                    concepts.limit());
+            case DiscoveryFollowUp.DiscoverEventListenersRequest listeners ->
+                    new DiscoverEventListenersRequestResponse(
+                            listeners.repoId(),
+                            listeners.expectedRevision(),
+                            listeners.eventType(),
+                            listeners.offset(),
+                            listeners.limit());
             case ResolveSourceSymbolRequest sourceSymbol -> new ResolveSourceSymbolRequestResponse(
                     sourceSymbol.repoId(),
                     sourceSymbol.expectedRevision(),
@@ -410,11 +427,26 @@ public final class StructuredDiscoveryResponseMapper {
                     exactTargetMapper.toPayload(references.target()),
                     references.offset(),
                     references.limit());
-            case GetJavaSourceSegmentRequest segment -> new GetJavaSourceSegmentRequestResponse(
+            case GetSourceSegmentRequest segment -> new GetSourceSegmentRequestResponse(
                     segment.repoId(),
                     segment.expectedRevision(),
-                    sourceLocationMapper.toSourceRange(segment.sourceRange()),
+                    sourceLocationMapper.toSourceRange(segment.location()),
                     segment.contextLines());
+            case GetEvidenceSourceRequest evidence -> new GetEvidenceSourceRequestResponse(
+                    evidence.repoId(),
+                    evidence.expectedRevision(),
+                    evidenceIdentityPayload(evidence.identity()));
+        };
+    }
+
+    private EvidenceSourceIdentityPayload evidenceIdentityPayload(EvidenceSourceQuery.EvidenceIdentity identity) {
+        return switch (identity) {
+            case EvidenceSourceQuery.AnnotationSql annotation -> new EvidenceSourceIdentityPayload(
+                    "ANNOTATION_SQL", Optional.of(mapperIdentityHttpMapper.toPayload(annotation.identity())), Optional.empty());
+            case EvidenceSourceQuery.MapperStatement statement -> new EvidenceSourceIdentityPayload(
+                    "MAPPER_STATEMENT", Optional.of(mapperIdentityHttpMapper.toPayload(statement.identity())), Optional.empty());
+            case EvidenceSourceQuery.MapperFragment fragment -> new EvidenceSourceIdentityPayload(
+                    "MAPPER_FRAGMENT", Optional.empty(), Optional.of(mapperIdentityHttpMapper.toPayload(fragment.identity())));
         };
     }
 

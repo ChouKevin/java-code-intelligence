@@ -13,13 +13,17 @@ import com.java.semantic.api.dto.identity.SourceTypeIdentityPayload;
 import com.java.semantic.api.dto.location.PositionPayload;
 import com.java.semantic.api.dto.location.SourceRangePayload;
 import com.java.semantic.api.dto.location.TextRangePayload;
+import com.java.semantic.config.SemanticAnalysisConfiguration;
 import com.java.semantic.repository.application.RepositoryApplicationService;
 import com.java.semantic.repository.domain.RepositoryId;
 import com.java.semantic.api.monitoring.ApiMonitoringField;
 import com.java.semantic.syntax.application.concept.ConceptDiscoveryApplicationService;
-import com.java.semantic.syntax.application.ExactContentApplicationService;
+import com.java.semantic.syntax.application.EvidenceSourceApplicationService;
 import com.java.semantic.syntax.application.SourceSymbolResolutionApplicationService;
 import com.java.semantic.syntax.application.TypeMemberDiscoveryApplicationService;
+import com.java.semantic.syntax.adapter.cache.CaffeineRevisionBoundRepositorySyntaxProvider;
+import com.java.semantic.syntax.adapter.jdt.JdtSyntaxExtractionService;
+import com.java.semantic.syntax.domain.SyntaxExtractionService;
 import com.tngtech.archunit.core.domain.JavaClass;
 import com.tngtech.archunit.core.domain.JavaClasses;
 import com.tngtech.archunit.core.domain.Dependency;
@@ -285,7 +289,7 @@ class ArchitectureTest {
     }
 
     @Test
-    void should_keep_caffeine_behind_the_internal_reference_cache_adapter() {
+    void should_keep_caffeine_and_cache_adapters_behind_the_cache_adapter_boundary() {
         classes()
                 .that().haveSimpleName("InternalSourceReferenceApplicationService")
                 .should().dependOnClassesThat().haveSimpleName("InternalReferenceAnalysisCache")
@@ -293,17 +297,17 @@ class ArchitectureTest {
                 .allowEmptyShould(false)
                 .check(classes);
         noClasses()
-                .that().resideOutsideOfPackage("..semantic.adapter.cache..")
+                .that().resideOutsideOfPackage("..adapter.cache..")
                 .and().resideOutsideOfPackage("..config..")
                 .should().dependOnClassesThat().resideInAnyPackage("com.github.benmanes.caffeine..")
-                .as("Caffeine types belong only to the cache adapter and composition root")
+                .as("Caffeine types belong only to cache adapters and the composition root")
                 .allowEmptyShould(false)
                 .check(classes);
         noClasses()
-                .that().resideOutsideOfPackage("..semantic.adapter.cache..")
+                .that().resideOutsideOfPackage("..adapter.cache..")
                 .and().resideOutsideOfPackage("..config..")
-                .should().dependOnClassesThat().resideInAPackage("..semantic.adapter.cache..")
-                .as("cache adapter types belong only to the cache adapter and composition root")
+                .should().dependOnClassesThat().resideInAPackage("..adapter.cache..")
+                .as("cache adapter types belong only to cache adapters and the composition root")
                 .allowEmptyShould(false)
                 .check(classes);
         noClasses()
@@ -311,6 +315,19 @@ class ArchitectureTest {
                 .should().dependOnClassesThat().resideInAnyPackage("com.github.benmanes.caffeine..")
                 .as("semantic application contracts and orchestration must remain Caffeine-free")
                 .allowEmptyShould(false)
+                .check(classes);
+    }
+
+    @Test
+    void should_limit_syntax_extraction_to_revision_cache_loading_boundaries() {
+        noClasses()
+                .that().doNotHaveFullyQualifiedName(
+                        CaffeineRevisionBoundRepositorySyntaxProvider.class.getName())
+                .and().doNotHaveFullyQualifiedName(JdtSyntaxExtractionService.class.getName())
+                .and().doNotHaveFullyQualifiedName(SemanticAnalysisConfiguration.class.getName())
+                .should().dependOnClassesThat().haveFullyQualifiedName(
+                        SyntaxExtractionService.class.getName())
+                .as("production syntax consumers must use the revision-bound syntax provider")
                 .check(classes);
     }
 
@@ -585,9 +602,10 @@ class ArchitectureTest {
                 .or().haveSimpleName("EventListenerDiscoveryApplicationService")
                 .or().haveSimpleName("MethodImplementationDiscoveryApplicationService")
                 .or().haveSimpleName("InternalSourceReferenceApplicationService")
-                .or().haveSimpleName("JavaSourceSegmentApplicationService")
+                .or().haveSimpleName("SourceSegmentApplicationService")
+                .or().haveSimpleName("MethodSourceApplicationService")
                 .or().areAssignableTo(ConceptDiscoveryApplicationService.class)
-                .or().areAssignableTo(ExactContentApplicationService.class)
+                .or().areAssignableTo(EvidenceSourceApplicationService.class)
                 .or().areAssignableTo(SourceSymbolResolutionApplicationService.class)
                 .or().areAssignableTo(TypeMemberDiscoveryApplicationService.class)
                 .should().callMethod(

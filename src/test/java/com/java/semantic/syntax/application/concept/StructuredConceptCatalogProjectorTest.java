@@ -35,7 +35,7 @@ import com.java.semantic.syntax.domain.NamedTypeReference;
 import com.java.semantic.syntax.domain.RepositorySyntax;
 import com.java.semantic.syntax.domain.ScheduleEntryPoint;
 import com.java.semantic.syntax.domain.ScheduleTriggerKind;
-import com.java.semantic.syntax.domain.SourceSlice;
+import com.java.semantic.syntax.domain.SourceRange;
 import com.java.semantic.syntax.domain.SyntaxPosition;
 import com.java.semantic.syntax.domain.SyntaxRange;
 
@@ -242,11 +242,8 @@ class StructuredConceptCatalogProjectorTest {
         SourceMethodMetadata method = new SourceMethodMetadata(
                 "handleOrder",
                 List.of("com.acme.order.OrderCommand"),
-                "",
                 null,
-                1,
-                2,
-                range(),
+                Optional.empty(),
                 source(),
                 List.of(namedTypeReference("OrderCommand", "com.acme.order.OrderCommand")),
                 Optional.of(namedTypeReference("OrderReceipt", "com.acme.order.OrderReceipt")),
@@ -372,8 +369,8 @@ class StructuredConceptCatalogProjectorTest {
         return new SyntaxRange(new SyntaxPosition(0, 0), new SyntaxPosition(0, 1));
     }
 
-    private static SourceSlice source() {
-        return new SourceSlice(range(), "x");
+    private static SourceRange source() {
+        return new SourceRange(SOURCE_FILE, range());
     }
 
     private static final String SOURCE_FILE = "src/main/java/com/acme/order/OrderHandler.java";

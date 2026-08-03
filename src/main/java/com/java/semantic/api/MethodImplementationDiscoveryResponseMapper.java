@@ -9,6 +9,7 @@ import com.java.semantic.callgraph.application.ImplementationCandidate;
 import com.java.semantic.semantic.application.MethodImplementationIssueReason;
 import com.java.semantic.semantic.application.MethodImplementationLimits;
 import com.java.semantic.semantic.application.RevisionBoundMethodImplementations;
+import com.java.semantic.syntax.application.DiscoveryFollowUpFactory;
 import org.springframework.stereotype.Component;
 
 import java.util.Arrays;
@@ -27,17 +28,31 @@ public final class MethodImplementationDiscoveryResponseMapper {
                 discovery.repositoryId().value(),
                 discovery.revision().value(),
                 JavaSourceIdentityHttpMapper.toPayload(discovery.requestedTarget()),
-                discovery.candidates().stream().map(this::candidate).toList(),
+                discovery.candidates().stream().map(candidate -> candidate(discovery, candidate)).toList(),
                 limits(discovery.limits()),
                 resolution(discovery.issues()));
     }
 
-    private MethodImplementationCandidateResponse candidate(ImplementationCandidate candidate) {
+    private final DiscoveryFollowUpFactory followUpFactory;
+    private final StructuredDiscoveryResponseMapper followUpMapper;
+
+    public MethodImplementationDiscoveryResponseMapper(
+            DiscoveryFollowUpFactory followUpFactory,
+            StructuredDiscoveryResponseMapper followUpMapper) {
+        this.followUpFactory = Objects.requireNonNull(followUpFactory, "followUpFactory is required");
+        this.followUpMapper = Objects.requireNonNull(followUpMapper, "followUpMapper is required");
+    }
+
+    private MethodImplementationCandidateResponse candidate(
+            RevisionBoundMethodImplementations discovery,
+            ImplementationCandidate candidate) {
         return new MethodImplementationCandidateResponse(
                 JavaSourceIdentityHttpMapper.toPayload(candidate.target()),
                 candidate.primary(),
                 candidate.qualifiers(),
-                candidate.profiles());
+                candidate.profiles(),
+                followUpFactory.forMethod(discovery.repositoryId(), discovery.revision(), candidate.target())
+                        .stream().map(followUpMapper::followUp).toList());
     }
 
     private BoundedResultResponse limits(MethodImplementationLimits limits) {

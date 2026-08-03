@@ -29,7 +29,7 @@ import com.java.semantic.syntax.domain.SourceTypeMetadata;
 import com.java.semantic.syntax.domain.SourceTypeMetadataFixture;
 import com.java.semantic.syntax.domain.MethodTargetResolution;
 import com.java.semantic.syntax.domain.RepositorySyntax;
-import com.java.semantic.syntax.domain.SyntaxExtractionService;
+import com.java.semantic.syntax.domain.RevisionBoundRepositorySyntaxProvider;
 import com.java.semantic.syntax.domain.SyntaxPosition;
 import org.junit.jupiter.api.Test;
 import org.slf4j.LoggerFactory;
@@ -60,7 +60,7 @@ class SemanticAnalysisLoggingTest {
                 List.of("METHOD_BODY_PARAMETER_SENTINEL"));
         RepositorySnapshot snapshot = new RepositorySnapshot(repositoryId, Path.of("safe-root"), revision);
         RepositoryApplicationService repositories = mock(RepositoryApplicationService.class);
-        SyntaxExtractionService syntax = mock(SyntaxExtractionService.class);
+        RevisionBoundRepositorySyntaxProvider syntax = mock(RevisionBoundRepositorySyntaxProvider.class);
         CanonicalMethodDeclarationResolver resolver = mock(CanonicalMethodDeclarationResolver.class);
         JavaSemanticService semantic = mock(JavaSemanticService.class);
         SemanticCallGraphBuilder builder = mock(SemanticCallGraphBuilder.class);
@@ -77,7 +77,7 @@ class SemanticAnalysisLoggingTest {
                 return operation.apply(snapshot);
             });
             RepositorySyntax repositorySyntax = syntax(target);
-            when(syntax.extract(snapshot.root())).thenReturn(repositorySyntax);
+            when(syntax.get(snapshot)).thenReturn(repositorySyntax);
             when(resolver.resolve(repositorySyntax, target)).thenReturn(MethodTargetResolution.resolved(target));
             when(semantic.resolveExactMethod(eq(snapshot), any())).thenReturn(mock());
             when(builder.build(any(), any(), any(), any(), eq(2), eq(7))).thenReturn(result);
@@ -180,7 +180,7 @@ class SemanticAnalysisLoggingTest {
                 List.of());
         RepositorySnapshot snapshot = new RepositorySnapshot(repositoryId, Path.of("safe-root"), revision);
         RepositoryApplicationService repositories = mock(RepositoryApplicationService.class);
-        SyntaxExtractionService syntax = mock(SyntaxExtractionService.class);
+        RevisionBoundRepositorySyntaxProvider syntax = mock(RevisionBoundRepositorySyntaxProvider.class);
         CanonicalMethodDeclarationResolver resolver = mock(CanonicalMethodDeclarationResolver.class);
         JavaSemanticService semantic = mock(JavaSemanticService.class);
         SemanticCallGraphBuilder builder = mock(SemanticCallGraphBuilder.class);
@@ -197,7 +197,7 @@ class SemanticAnalysisLoggingTest {
                 return operation.apply(snapshot);
             });
             RepositorySyntax repositorySyntax = syntax(target);
-            when(syntax.extract(snapshot.root())).thenReturn(repositorySyntax);
+            when(syntax.get(snapshot)).thenReturn(repositorySyntax);
             when(resolver.resolve(repositorySyntax, target)).thenReturn(MethodTargetResolution.resolved(target));
             when(semantic.resolveExactMethod(eq(snapshot), any())).thenReturn(mock());
             when(builder.build(any(), any(), any(), any(), eq(2), eq(7))).thenReturn(result);
@@ -234,7 +234,7 @@ class SemanticAnalysisLoggingTest {
                 List.of());
         RepositorySnapshot snapshot = new RepositorySnapshot(repositoryId, Path.of("safe-root"), revision);
         RepositoryApplicationService repositories = mock(RepositoryApplicationService.class);
-        SyntaxExtractionService syntax = mock(SyntaxExtractionService.class);
+        RevisionBoundRepositorySyntaxProvider syntax = mock(RevisionBoundRepositorySyntaxProvider.class);
         CanonicalMethodDeclarationResolver resolver = mock(CanonicalMethodDeclarationResolver.class);
         JavaSemanticService semantic = mock(JavaSemanticService.class);
         SemanticCallGraphBuilder outgoingBuilder = mock(SemanticCallGraphBuilder.class);
@@ -253,7 +253,7 @@ class SemanticAnalysisLoggingTest {
                 return operation.apply(snapshot);
             });
             RepositorySyntax repositorySyntax = syntax(target);
-            when(syntax.extract(snapshot.root())).thenReturn(repositorySyntax);
+            when(syntax.get(snapshot)).thenReturn(repositorySyntax);
             when(resolver.resolve(repositorySyntax, target)).thenReturn(MethodTargetResolution.resolved(target));
             when(semantic.resolveExactMethod(eq(snapshot), any())).thenReturn(mock());
             when(incomingBuilder.build(any(), any(), any(), any(), eq(2), eq(11)))
@@ -370,7 +370,7 @@ class SemanticAnalysisLoggingTest {
     private SemanticAnalysisApplicationService service(RepositoryApplicationService repositories) {
         return new SemanticAnalysisApplicationService(
                 repositories,
-                mock(SyntaxExtractionService.class),
+                mock(RevisionBoundRepositorySyntaxProvider.class),
                 mock(CanonicalMethodDeclarationResolver.class),
                 mock(JavaSemanticService.class),
                 mock(SemanticCallGraphBuilder.class),

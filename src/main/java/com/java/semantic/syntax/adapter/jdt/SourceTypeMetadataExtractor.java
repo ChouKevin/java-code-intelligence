@@ -28,6 +28,7 @@ import com.java.semantic.syntax.domain.SourceTypeKind;
 import com.java.semantic.syntax.domain.SourceTypeMembers;
 import com.java.semantic.syntax.domain.SourceTypeMetadata;
 import com.java.semantic.syntax.domain.SourceTypeRelationships;
+import com.java.semantic.syntax.domain.SourceRange;
 import com.java.semantic.syntax.domain.SqlSourceKind;
 import com.java.semantic.syntax.domain.TypeReference;
 import com.java.semantic.syntax.domain.TypeVariableReference;
@@ -85,7 +86,8 @@ final class SourceTypeMetadataExtractor {
         String packageName = PackageNames.of(parsed);
         String className = SourceTypes.nestedName(type);
         String fullyQualifiedName = PackageNames.qualify(packageName, className);
-        SourceSlices slices = new SourceSlices(parsed.unit(), parsed.text());
+        CompilationUnit unit = parsed.unit();
+        String sourceFile = parsed.source().repositoryRelativePath();
 
         return new SourceTypeMetadata(
                 new SourceTypeDeclaration(
@@ -94,13 +96,13 @@ final class SourceTypeMetadataExtractor {
                                 parsed.source().repositoryRelativePath()),
                         kindOf(type),
                         isAbstract(type),
-                        slices.slice(type)),
+                        new SourceRange(sourceFile, AstSourceRanges.declarationRange(unit, type))),
                 new SourceTypeRelationships(
-                        extendedTypeReferencesOf(type, slices),
-                        implementedTypeReferencesOf(type, slices)),
+                        extendedTypeReferencesOf(type),
+                        implementedTypeReferencesOf(type)),
                 new SourceTypeMembers(
-                        fieldsOf(type, slices),
-                        methodsOf(parsed, type, fullyQualifiedName, sqlIndex, slices, analysisTargetOf),
+                        fieldsOf(type),
+                        methodsOf(parsed, type, fullyQualifiedName, sqlIndex, analysisTargetOf),
                         hasFluentAccessors(type),
                         hasChainedAccessors(type)),
                 new FrameworkTypeFacts(
@@ -133,45 +135,43 @@ final class SourceTypeMetadataExtractor {
     }
 
     private static List<NominalTypeReference> implementedTypeReferencesOf(
-            AbstractTypeDeclaration type,
-            SourceSlices slices) {
+            AbstractTypeDeclaration type) {
         List<NominalTypeReference> references = new ArrayList<>();
         if (type instanceof RecordDeclaration record) {
-            addTypeReferences(references, record.superInterfaceTypes(), slices);
+            addTypeReferences(references, record.superInterfaceTypes());
         } else if (type instanceof EnumDeclaration enumDeclaration) {
-            addTypeReferences(references, enumDeclaration.superInterfaceTypes(), slices);
+            addTypeReferences(references, enumDeclaration.superInterfaceTypes());
         } else if (type instanceof TypeDeclaration typeDeclaration) {
             if (!typeDeclaration.isInterface()) {
-                addTypeReferences(references, typeDeclaration.superInterfaceTypes(), slices);
+                addTypeReferences(references, typeDeclaration.superInterfaceTypes());
             }
         }
         return List.copyOf(references);
     }
 
     private static List<NominalTypeReference> extendedTypeReferencesOf(
-            AbstractTypeDeclaration type,
-            SourceSlices slices) {
+            AbstractTypeDeclaration type) {
         if (type instanceof TypeDeclaration typeDeclaration && !(type instanceof RecordDeclaration)) {
             if (typeDeclaration.isInterface()) {
                 List<NominalTypeReference> references = new ArrayList<>();
-                addTypeReferences(references, typeDeclaration.superInterfaceTypes(), slices);
+                addTypeReferences(references, typeDeclaration.superInterfaceTypes());
                 return List.copyOf(references);
             }
             Type superclass = typeDeclaration.getSuperclassType();
-            return Objects.nonNull(superclass) ? List.of(nominalTypeReferenceOf(superclass, slices)) : List.of();
+            return Objects.nonNull(superclass) ? List.of(nominalTypeReferenceOf(superclass)) : List.of();
         }
         return List.of();
     }
 
-    private static void addTypeReferences(List<NominalTypeReference> references, List<?> types, SourceSlices slices) {
+    private static void addTypeReferences(List<NominalTypeReference> references, List<?> types) {
         for (Object type : types) {
-            references.add(nominalTypeReferenceOf((Type) type, slices));
+            references.add(nominalTypeReferenceOf((Type) type));
         }
     }
 
     // --- 成員 ---
 
-    private static List<SourceFieldMetadata> fieldsOf(AbstractTypeDeclaration type, SourceSlices slices) {
+    private static List<SourceFieldMetadata> fieldsOf(AbstractTypeDeclaration type) {
         List<SourceFieldMetadata> fields = new ArrayList<>();
         if (type instanceof RecordDeclaration record) {
             for (Object component : record.recordComponents()) {
@@ -180,7 +180,7 @@ final class SourceTypeMetadataExtractor {
                         parameter.getName().getIdentifier(),
                         TypeNames.simpleNameOf(parameter.getType()),
                         qualifierValueOf(parameter),
-                        typeReferenceOf(parameter.getType(), slices),
+                        typeReferenceOf(parameter.getType()),
                         annotationEvidenceOf(parameter)));
             }
         }
@@ -194,7 +194,7 @@ final class SourceTypeMetadataExtractor {
                         ((VariableDeclarationFragment) variable).getName().getIdentifier(),
                         typeName,
                         qualifierValueOf(field),
-                        typeReferenceOf(field.getType(), slices),
+                        typeReferenceOf(field.getType()),
                         annotationEvidenceOf(field)));
             }
         }
@@ -203,7 +203,7 @@ final class SourceTypeMetadataExtractor {
 
     private static List<SourceMethodMetadata> methodsOf(ParsedSource parsed, AbstractTypeDeclaration type,
             String fullyQualifiedName,
-            MapperXmlSqlExtractor.SqlIndex sqlIndex, SourceSlices slices,
+            MapperXmlSqlExtractor.SqlIndex sqlIndex,
             Function<MethodDeclaration, MethodTargetResolution> analysisTargetOf) {
         CompilationUnit unit = parsed.unit();
         List<SourceMethodMetadata> methods = new ArrayList<>();
@@ -212,29 +212,30 @@ final class SourceTypeMetadataExtractor {
 
             // annotation SQL 優先於 XML，判準是「有沒有 @Select 之類的註解」而非解析出的字串是否為空
             Optional<Annotation> sqlAnnotation = AnnotationReader.findAny(method, SQL_ANNOTATIONS);
-            Optional<String> resolvedAnnotationSql = sqlAnnotation
+            boolean annotationSql = sqlAnnotation
                     .map(annotation -> String.join(" ", AnnotationReader.stringValues(annotation, "value")))
-                    .filter(StringUtils::hasText);
-            String sql = sqlAnnotation.isPresent()
-                    ? resolvedAnnotationSql.orElse(null)
-                    : sqlIndex.find(fullyQualifiedName, name).orElse(null);
-            SqlSourceKind sqlSource = sqlSourceOf(sqlAnnotation.isPresent(), sql);
+                    .filter(value -> !value.isBlank())
+                    .isPresent();
+            boolean mapperSql = !annotationSql && sqlIndex.find(fullyQualifiedName, name).isPresent();
+            SqlSourceKind sqlSource = sqlSourceOf(annotationSql, mapperSql);
+            Optional<SourceRange> annotationSqlLocation = annotationSql
+                    ? sqlAnnotation.map(annotation -> new SourceRange(
+                            parsed.source().repositoryRelativePath(), AstSourceRanges.range(unit, annotation)))
+                    : Optional.empty();
 
             methods.add(new SourceMethodMetadata(
                     name,
                     parameterTypesOf(method),
-                    sql,
                     sqlSource,
-                    unit.getLineNumber(method.getStartPosition()),
-                    unit.getLineNumber(method.getStartPosition() + method.getLength() - 1),
-                    slices.range(method),
-                    slices.slice(method),
-                    parameterTypeReferencesOf(method, slices),
-                    returnTypeReferenceOf(method, slices),
-                    InvocationExtractor.extract(unit, method, slices),
+                    annotationSqlLocation,
+                    new SourceRange(
+                            parsed.source().repositoryRelativePath(), AstSourceRanges.declarationRange(unit, method)),
+                    parameterTypeReferencesOf(method),
+                    returnTypeReferenceOf(method),
+                    InvocationExtractor.extract(unit, method, parsed.text()),
                     annotationEvidenceOf(method),
                     BodyTypeReferenceExtractor.extract(method),
-                    slices.range(method.getName()).start(),
+                    AstSourceRanges.range(unit, method.getName()).start(),
                     analysisTargetOf.apply(method),
                     Objects.nonNull(method.getBody()),
                     isAbstractDeclaration(type, method),
@@ -279,11 +280,11 @@ final class SourceTypeMetadataExtractor {
         return false;
     }
 
-    private static SqlSourceKind sqlSourceOf(boolean fromAnnotation, String sql) {
-        if (Objects.isNull(sql)) {
+    private static SqlSourceKind sqlSourceOf(boolean annotationSql, boolean mapperSql) {
+        if (!annotationSql && !mapperSql) {
             return null;
         }
-        return fromAnnotation ? SqlSourceKind.ANNOTATION : SqlSourceKind.MAPPER_XML;
+        return annotationSql ? SqlSourceKind.ANNOTATION : SqlSourceKind.MAPPER_XML;
     }
 
     private static List<String> parameterTypesOf(MethodDeclaration method) {
@@ -297,29 +298,28 @@ final class SourceTypeMetadataExtractor {
         return List.copyOf(types);
     }
 
-    private static List<TypeReference> parameterTypeReferencesOf(MethodDeclaration method, SourceSlices slices) {
+    private static List<TypeReference> parameterTypeReferencesOf(MethodDeclaration method) {
         List<TypeReference> types = new ArrayList<>();
         for (Object parameter : method.parameters()) {
-            types.add(typeReferenceOf(((SingleVariableDeclaration) parameter).getType(), slices));
+            types.add(typeReferenceOf(((SingleVariableDeclaration) parameter).getType()));
         }
         return List.copyOf(types);
     }
 
-    private static Optional<TypeReference> returnTypeReferenceOf(MethodDeclaration method, SourceSlices slices) {
+    private static Optional<TypeReference> returnTypeReferenceOf(MethodDeclaration method) {
         Type returnType = method.getReturnType2();
-        return Objects.isNull(returnType) ? Optional.empty() : Optional.of(typeReferenceOf(returnType, slices));
+        return Objects.isNull(returnType) ? Optional.empty() : Optional.of(typeReferenceOf(returnType));
     }
 
-    static TypeReference typeReferenceOf(Type type, SourceSlices slices) {
-        return typeReferenceOf(type, slices, new HashSet<>());
+    static TypeReference typeReferenceOf(Type type) {
+        return typeReferenceOf(type, new HashSet<>());
     }
 
     private static TypeReference typeReferenceOf(
             Type type,
-            SourceSlices slices,
             Set<String> visitingBindings) {
         ITypeBinding binding = type.resolveBinding();
-        String writtenType = slices.slice(type).text();
+        String writtenType = type.toString();
         if (type instanceof SimpleType simple && simple.isVar()) {
             return new InferredTypeReference(writtenType, sourceDefinedOf(binding));
         }
@@ -334,22 +334,22 @@ final class SourceTypeMetadataExtractor {
                     sourceDefinedOf(binding));
         }
         if (type instanceof ParameterizedType parameterized) {
-            NamedTypeReference rawType = namedTypeReferenceOf(parameterized.getType(), slices);
+            NamedTypeReference rawType = namedTypeReferenceOf(parameterized.getType());
             List<TypeReference> arguments = new ArrayList<>();
             for (Object argument : parameterized.typeArguments()) {
-                arguments.add(typeReferenceOf((Type) argument, slices, visitingBindings));
+                arguments.add(typeReferenceOf((Type) argument, visitingBindings));
             }
             return new ParameterizedTypeReference(writtenType, rawType, arguments);
         }
         if (type instanceof ArrayType array) {
             return new ArrayTypeReference(
                     writtenType,
-                    typeReferenceOf(array.getElementType(), slices, visitingBindings),
+                    typeReferenceOf(array.getElementType(), visitingBindings),
                     array.getDimensions());
         }
         if (type instanceof WildcardType wildcard) {
             Optional<TypeReference> bound = Objects.nonNull(wildcard.getBound())
-                    ? Optional.of(typeReferenceOf(wildcard.getBound(), slices, visitingBindings))
+                    ? Optional.of(typeReferenceOf(wildcard.getBound(), visitingBindings))
                     : Optional.empty();
             if (wildcard.isUpperBound()) {
                 return new WildcardTypeReference(
@@ -359,29 +359,29 @@ final class SourceTypeMetadataExtractor {
                     writtenType, Optional.empty(), bound, sourceDefinedOf(binding));
         }
         if (type instanceof UnionType union) {
-            return compositeTypeReferenceOf(writtenType, CompositeKind.UNION, union.types(), slices, binding,
+            return compositeTypeReferenceOf(writtenType, CompositeKind.UNION, union.types(), binding,
                     visitingBindings);
         }
         if (type instanceof IntersectionType intersection) {
-            return compositeTypeReferenceOf(writtenType, CompositeKind.INTERSECTION, intersection.types(), slices,
+            return compositeTypeReferenceOf(writtenType, CompositeKind.INTERSECTION, intersection.types(),
                     binding, visitingBindings);
         }
-        return nominalTypeReferenceOf(type, slices);
+        return nominalTypeReferenceOf(type);
     }
 
-    static NominalTypeReference nominalTypeReferenceOf(Type type, SourceSlices slices) {
+    static NominalTypeReference nominalTypeReferenceOf(Type type) {
         if (type instanceof ParameterizedType parameterized) {
-            NamedTypeReference rawType = namedTypeReferenceOf(parameterized.getType(), slices);
+            NamedTypeReference rawType = namedTypeReferenceOf(parameterized.getType());
             List<TypeReference> arguments = new ArrayList<>();
             for (Object argument : parameterized.typeArguments()) {
-                arguments.add(typeReferenceOf((Type) argument, slices));
+                arguments.add(typeReferenceOf((Type) argument));
             }
-            return new ParameterizedTypeReference(slices.slice(type).text(), rawType, arguments);
+            return new ParameterizedTypeReference(type.toString(), rawType, arguments);
         }
-        return namedTypeReferenceOf(type, slices);
+        return namedTypeReferenceOf(type);
     }
 
-    private static NamedTypeReference namedTypeReferenceOf(Type type, SourceSlices slices) {
+    private static NamedTypeReference namedTypeReferenceOf(Type type) {
         if (!(type instanceof SimpleType || type instanceof QualifiedType || type instanceof NameQualifiedType)) {
             throw new UnsupportedTypeFormException(type.getClass().getSimpleName());
         }
@@ -390,7 +390,7 @@ final class SourceTypeMetadataExtractor {
             throw new UnsupportedTypeFormException(type.getClass().getSimpleName());
         }
         return new NamedTypeReference(
-                slices.slice(type).text(),
+                type.toString(),
                 TypeNames.simpleNameOf(type),
                 resolvedNamedTypeOf(binding),
                 sourceDefinedOf(binding));
@@ -400,12 +400,11 @@ final class SourceTypeMetadataExtractor {
             String writtenType,
             CompositeKind kind,
             List<?> types,
-            SourceSlices slices,
             ITypeBinding binding,
             Set<String> visitingBindings) {
         List<TypeReference> alternatives = new ArrayList<>();
         for (Object type : types) {
-            alternatives.add(typeReferenceOf((Type) type, slices, visitingBindings));
+            alternatives.add(typeReferenceOf((Type) type, visitingBindings));
         }
         return new CompositeTypeReference(writtenType, kind, alternatives, sourceDefinedOf(binding));
     }

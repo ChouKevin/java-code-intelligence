@@ -19,7 +19,7 @@ public record DiscoverTypeMembersResponse(
         @ApiMonitoringField(ApiMonitoringMode.SIZE) List<TypeMemberResponse> members,
         @ApiMonitoringField(ApiMonitoringMode.NESTED) PageResponse page,
         @ApiMonitoringField(ApiMonitoringMode.NESTED) ConceptCoverageResponse coverage,
-        @ApiMonitoringField(ApiMonitoringMode.SIZE) List<DiscoveryFollowUpResponse> availableFollowUps) {
+        @ApiMonitoringField(ApiMonitoringMode.NESTED) List<DiscoveryFollowUpResponse> availableFollowUps) {
 
     public DiscoverTypeMembersResponse {
         annotations = List.copyOf(Objects.requireNonNull(annotations, "annotations are required"));

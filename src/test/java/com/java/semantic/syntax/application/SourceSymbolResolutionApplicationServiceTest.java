@@ -11,6 +11,7 @@ import com.java.semantic.repository.domain.RepositorySnapshot;
 import com.java.semantic.repository.domain.RepositoryStatus;
 import com.java.semantic.syntax.domain.SyntaxPosition;
 import com.java.semantic.syntax.domain.SyntaxRange;
+import com.java.semantic.syntax.domain.SourceRange;
 import org.junit.jupiter.api.Test;
 
 import java.nio.file.Path;
@@ -140,8 +141,7 @@ class SourceSymbolResolutionApplicationServiceTest {
                 .containsExactly(
                         DiscoveryFollowUp.Operation.GET_METHOD_SOURCE,
                         DiscoveryFollowUp.Operation.ANALYZE_OUTGOING_CALL_GRAPH,
-                        DiscoveryFollowUp.Operation.ANALYZE_INCOMING_CALL_GRAPH,
-                        DiscoveryFollowUp.Operation.DISCOVER_METHOD_IMPLEMENTATIONS);
+                        DiscoveryFollowUp.Operation.ANALYZE_INCOMING_CALL_GRAPH);
     }
 
     private SourceSymbolResolutionQuery query(

@@ -118,7 +118,7 @@ class DataAccessParityJdtLsIT {
                 });
 
         List<GraphEdgeResponse> mappedEdges = new AnalysisResponseMapper(new SourceLocationHttpMapper())
-                .toResponse(fragment)
+                .toResponse(REPOSITORY_ID, fragment)
                 .edges();
         assertThat(mappedEdges)
                 .filteredOn(edge -> "MYBATIS_MAPPER".equals(edge.resolutionStrategy()))
@@ -150,7 +150,7 @@ class DataAccessParityJdtLsIT {
                 });
 
         List<GraphEdgeResponse> mappedEdges = new AnalysisResponseMapper(new SourceLocationHttpMapper())
-                .toResponse(fragment)
+                .toResponse(REPOSITORY_ID, fragment)
                 .edges();
         assertThat(mappedEdges)
                 .filteredOn(edge -> "SPRING_DATA_REPOSITORY".equals(edge.resolutionStrategy()))

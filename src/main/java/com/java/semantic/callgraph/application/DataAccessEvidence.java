@@ -62,7 +62,7 @@ public final class DataAccessEvidence {
         }
         return Optional.of(matched(
                 ResolutionStrategy.MYBATIS_MAPPER, declaringType, declaredMethod, declarationTarget,
-                List.of("mapper SQL: " + declaredMethod.sql())));
+                List.of("mapper SQL evidence: " + declaredMethod.sqlSource().name())));
     }
 
     /**

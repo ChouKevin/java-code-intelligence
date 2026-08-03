@@ -13,14 +13,18 @@ import com.java.semantic.repository.domain.RepositoryMode;
 import com.java.semantic.repository.domain.RepositoryRevision;
 import com.java.semantic.repository.domain.RepositoryStatus;
 import com.java.semantic.syntax.application.EntryPointDiscoveryApplicationService;
-import com.java.semantic.syntax.application.ExactContentApplicationService;
-import com.java.semantic.syntax.application.ExactContentQuery;
-import com.java.semantic.syntax.application.ExactContentResult;
+import com.java.semantic.syntax.application.MethodSourceApplicationService;
+import com.java.semantic.syntax.application.MethodSourceQuery;
+import com.java.semantic.syntax.application.MethodSourceResult;
 import com.java.semantic.syntax.application.RevisionBoundEntryPoints;
 import com.java.semantic.syntax.domain.ApiEntryPoint;
 import com.java.semantic.syntax.domain.EntryPointClass;
 import com.java.semantic.syntax.domain.EntryPointType;
 import com.java.semantic.syntax.domain.MethodTargetResolution;
+import com.java.semantic.syntax.domain.SourceRange;
+import com.java.semantic.syntax.domain.SourceRangeSegment;
+import com.java.semantic.syntax.domain.SyntaxPosition;
+import com.java.semantic.syntax.domain.SyntaxRange;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
@@ -30,7 +34,6 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 
-import java.nio.charset.StandardCharsets;
 import java.util.EnumSet;
 import java.util.List;
 import java.util.Optional;
@@ -75,7 +78,7 @@ class SemanticNavigationContractTest {
     private EntryPointDiscoveryApplicationService entryPointDiscoveryApplicationService;
 
     @MockitoBean
-    private ExactContentApplicationService exactContentApplicationService;
+    private MethodSourceApplicationService methodSourceApplicationService;
 
     @Test
     void should_compose_status_revision_and_resolved_target_into_exact_method_source_request() throws Exception {
@@ -91,11 +94,11 @@ class SemanticNavigationContractTest {
                 REVISION,
                 EnumSet.allOf(EntryPointType.class)))
                 .willReturn(entryPoints());
-        given(exactContentApplicationService.retrieve(eq(new ExactContentQuery.MethodSource(
+        given(methodSourceApplicationService.read(eq(new MethodSourceQuery(
                 REPOSITORY_ID,
                 REVISION,
                 TARGET))))
-                .willReturn(exactContent());
+                .willReturn(methodSource());
 
         MvcResult statusResult = mockMvc.perform(get("/v1/repositories/orders")
                         .header(ApiTokenFilter.API_TOKEN_HEADER, TOKEN))
@@ -125,7 +128,81 @@ class SemanticNavigationContractTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.repoId").value(REPOSITORY_ID.value()))
                 .andExpect(jsonPath("$.analyzedRevision").value(currentRevision))
-                .andExpect(jsonPath("$.variants[0].content").value("return orderService.place(id);"));
+                .andExpect(jsonPath("$.declarationLocation.sourceFile").value(SOURCE_TYPE.sourceFile()))
+                .andExpect(jsonPath("$.segment.content").value("return orderService.place(id);"))
+                .andExpect(jsonPath("$.availableFollowUps.length()").value(3))
+                .andExpect(jsonPath("$.availableFollowUps[0].operation").value("GET_METHOD_SOURCE"))
+                .andExpect(jsonPath("$.availableFollowUps[1].operation")
+                        .value("ANALYZE_OUTGOING_CALL_GRAPH"))
+                .andExpect(jsonPath("$.availableFollowUps[2].operation")
+                        .value("ANALYZE_INCOMING_CALL_GRAPH"))
+                .andExpect(jsonPath("$.availableFollowUps[3]").doesNotExist());
+    }
+
+    @Test
+    void should_append_exact_java_source_continuation_after_complete_method_navigation() throws Exception {
+        SourceRange nextLocation = new SourceRange(
+                SOURCE_TYPE.sourceFile(),
+                new SyntaxRange(new SyntaxPosition(4, 0), new SyntaxPosition(8, 1)));
+        given(methodSourceApplicationService.read(eq(new MethodSourceQuery(
+                REPOSITORY_ID,
+                REVISION,
+                TARGET))))
+                .willReturn(methodSource(Optional.of(nextLocation)));
+        ObjectNode request = objectMapper.createObjectNode();
+        request.put("repoId", REPOSITORY_ID.value());
+        request.put("expectedRevision", REVISION.value());
+        request.set("target", objectMapper.valueToTree(TARGET));
+
+        mockMvc.perform(post("/v1/discovery/method-source")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsBytes(request))
+                        .header(ApiTokenFilter.API_TOKEN_HEADER, TOKEN))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.availableFollowUps.length()").value(4))
+                .andExpect(jsonPath("$.availableFollowUps[0].operation").value("GET_METHOD_SOURCE"))
+                .andExpect(jsonPath("$.availableFollowUps[1].operation")
+                        .value("ANALYZE_OUTGOING_CALL_GRAPH"))
+                .andExpect(jsonPath("$.availableFollowUps[2].operation")
+                        .value("ANALYZE_INCOMING_CALL_GRAPH"))
+                .andExpect(jsonPath("$.availableFollowUps[3].operation")
+                        .value("GET_SOURCE_SEGMENT"))
+                .andExpect(jsonPath("$.availableFollowUps[3].api.method").value("POST"))
+                .andExpect(jsonPath("$.availableFollowUps[3].api.path")
+                        .value("/v1/discovery/source-segment"))
+                .andExpect(jsonPath("$.availableFollowUps[3].request.repoId")
+                        .value(REPOSITORY_ID.value()))
+                .andExpect(jsonPath("$.availableFollowUps[3].request.expectedRevision")
+                        .value(REVISION.value()))
+                .andExpect(jsonPath("$.availableFollowUps[3].request.location.sourceFile")
+                        .value(SOURCE_TYPE.sourceFile()))
+                .andExpect(jsonPath("$.availableFollowUps[3].request.location.range.start.line").value(4))
+                .andExpect(jsonPath("$.availableFollowUps[3].request.location.range.start.character").value(0))
+                .andExpect(jsonPath("$.availableFollowUps[3].request.location.range.end.line").value(8))
+                .andExpect(jsonPath("$.availableFollowUps[3].request.location.range.end.character").value(1))
+                .andExpect(jsonPath("$.availableFollowUps[3].request.contextLines").value(0));
+    }
+
+    @Test
+    void should_offer_implementation_discovery_for_an_eligible_method_source_declaration() throws Exception {
+        given(methodSourceApplicationService.read(eq(new MethodSourceQuery(
+                REPOSITORY_ID,
+                REVISION,
+                TARGET))))
+                .willReturn(methodSource(Optional.empty(), true));
+        ObjectNode request = objectMapper.createObjectNode();
+        request.put("repoId", REPOSITORY_ID.value());
+        request.put("expectedRevision", REVISION.value());
+        request.set("target", objectMapper.valueToTree(TARGET));
+
+        mockMvc.perform(post("/v1/discovery/method-source")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsBytes(request))
+                        .header(ApiTokenFilter.API_TOKEN_HEADER, TOKEN))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.availableFollowUps.length()").value(4))
+                .andExpect(jsonPath("$.availableFollowUps[3].operation")
+                        .value("DISCOVER_METHOD_IMPLEMENTATIONS"));
     }
 
     private static RevisionBoundEntryPoints entryPoints() {
@@ -144,17 +221,25 @@ class SemanticNavigationContractTest {
         return new RevisionBoundEntryPoints(REPOSITORY_ID, REVISION, List.of(entryPointClass));
     }
 
-    private static ExactContentResult exactContent() {
+    private static MethodSourceResult methodSource() {
+        return methodSource(Optional.empty());
+    }
+
+    private static MethodSourceResult methodSource(Optional<SourceRange> nextLocation) {
+        return methodSource(nextLocation, false);
+    }
+
+    private static MethodSourceResult methodSource(
+            Optional<SourceRange> nextLocation,
+            boolean implementationDiscoveryEligible) {
         String content = "return orderService.place(id);";
-        ExactContentResult.Content inlineContent = new ExactContentResult.Content(
-                Optional.of(content),
-                Optional.empty(),
-                content.getBytes(StandardCharsets.UTF_8).length,
-                0);
-        ExactContentResult.ContentVariant variant = new ExactContentResult.ContentVariant(
-                Optional.empty(),
-                Optional.empty(),
-                inlineContent);
-        return new ExactContentResult(REPOSITORY_ID, REVISION, List.of(variant));
+        SourceRange location = new SourceRange(
+                SOURCE_TYPE.sourceFile(),
+                new SyntaxRange(new SyntaxPosition(3, 4), new SyntaxPosition(3, 35)));
+        return new MethodSourceResult(
+                REPOSITORY_ID,
+                REVISION,
+                location,
+                new SourceRangeSegment(location, content, nextLocation, false), implementationDiscoveryEligible);
     }
 }

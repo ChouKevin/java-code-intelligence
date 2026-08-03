@@ -9,11 +9,14 @@ public record SourceTypeDeclaration(
         SourceTypeIdentity identity,
         SourceTypeKind kind,
         boolean abstractType,
-        SourceSlice source) {
+        SourceRange declarationLocation) {
 
     public SourceTypeDeclaration {
         identity = Objects.requireNonNull(identity, "identity is required");
         kind = Objects.requireNonNull(kind, "kind is required");
-        source = Objects.requireNonNull(source, "source is required");
+        declarationLocation = Objects.requireNonNull(declarationLocation, "declarationLocation is required");
+        if (!identity.sourceFile().equals(declarationLocation.sourceFile())) {
+            throw new IllegalArgumentException("declarationLocation sourceFile must match identity");
+        }
     }
 }

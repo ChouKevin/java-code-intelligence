@@ -10,7 +10,8 @@ import com.java.semantic.syntax.domain.SourceMethodMetadata;
 import com.java.semantic.syntax.domain.SourceTypeKind;
 import com.java.semantic.syntax.domain.MethodTargetResolution;
 import com.java.semantic.syntax.domain.RepositorySyntax;
-import com.java.semantic.syntax.domain.SourceSlice;
+import com.java.semantic.syntax.domain.SourceRange;
+import com.java.semantic.syntax.domain.SourceRange;
 import com.java.semantic.syntax.domain.SyntaxPosition;
 import com.java.semantic.syntax.domain.SyntaxRange;
 import com.java.semantic.syntax.domain.NamedTypeReference;
@@ -178,14 +179,16 @@ class EventListenerDiscoveryPolicyTest {
     void should_report_unresolved_and_ambiguous_listeners_under_one_complete_diagnostic() {
         MethodTarget firstCandidate = resolvedTarget("a.java", "first", List.of(EVENT_TYPE));
         MethodTarget secondCandidate = resolvedTarget("b.java", "second", List.of(EVENT_TYPE));
+        String unresolvedSourceFile = "module-b/src/main/java/com/acme/UnresolvedListener.java";
+        String ambiguousSourceFile = "module-a/src/main/java/com/acme/AmbiguousListener.java";
         SourceMethodMetadata unresolved = method(
-                "unresolved", MethodTargetResolution.unresolved("BINDING_UNAVAILABLE"), eventListener());
-        SourceMethodMetadata ambiguous = method("ambiguous", new MethodTargetResolution(
+                "unresolved", unresolvedSourceFile, MethodTargetResolution.unresolved("BINDING_UNAVAILABLE"), eventListener());
+        SourceMethodMetadata ambiguous = method("ambiguous", ambiguousSourceFile, new MethodTargetResolution(
                 AnalysisTargetStatus.AMBIGUOUS, Optional.empty(), List.of(firstCandidate, secondCandidate),
                 "OVERLOAD_AMBIGUOUS"), eventListener());
         RepositorySyntax syntax = new RepositorySyntax(List.of(), List.of(
-                metadata(unresolved, "module-b/src/main/java/com/acme/UnresolvedListener.java"),
-                metadata(ambiguous, "module-a/src/main/java/com/acme/AmbiguousListener.java")));
+                metadata(unresolved, unresolvedSourceFile),
+                metadata(ambiguous, ambiguousSourceFile)));
 
         EventListenerDiscoveryPage page = policy.discover(syntax, EVENT_TYPE, 0, 50);
 
@@ -285,7 +288,7 @@ class EventListenerDiscoveryPolicyTest {
         return com.java.semantic.syntax.domain.SourceTypeMetadataFixture.sourceType(
                 "OrderListeners", "com.acme.events", "com.acme.events.OrderListeners",
                 sourceFile, SourceTypeKind.CLASS, false, List.of(), List.of(), List.of(), List.of(),
-                List.of(), List.of(method), false, false, List.of(), range(), new SourceSlice(range(), ""),
+                List.of(), List.of(method), false, false, List.of(), range(), new SourceRange(sourceFile, range()),
                 false, List.of());
     }
 
@@ -299,15 +302,27 @@ class EventListenerDiscoveryPolicyTest {
 
     private static SourceMethodMetadata method(
             String name, MethodTargetResolution targetResolution, List<AnnotationEvidence> annotations) {
-        return new SourceMethodMetadata(name, List.of("DifferentReference"), "", null, 3, 4,
-                range(), new SourceSlice(range(), ""),
+        return method(
+                name,
+                targetResolution.target().map(MethodTarget::sourceFile).orElse(name + ".java"),
+                targetResolution,
+                annotations);
+    }
+
+    private static SourceMethodMetadata method(
+            String name,
+            String sourceFile,
+            MethodTargetResolution targetResolution,
+            List<AnnotationEvidence> annotations) {
+        return new SourceMethodMetadata(name, List.of("DifferentReference"), null, Optional.empty(),
+                new SourceRange(sourceFile, range()),
                 List.of(new NamedTypeReference(EVENT_TYPE, EVENT_TYPE, Optional.empty(), false)), Optional.empty(), List.of(),
                 annotations, List.of(), new SyntaxPosition(2, 4), targetResolution, true, false, false);
     }
 
     private static SourceMethodMetadata unresolvedMethod(String name) {
-        return new SourceMethodMetadata(name, List.of(), "", null, 3, 4,
-                range(), new SourceSlice(range(), ""), List.of(), Optional.empty(), List.of(), eventListener(),
+        return new SourceMethodMetadata(name, List.of(), null, Optional.empty(),
+                new SourceRange(name + ".java", range()), List.of(), Optional.empty(), List.of(), eventListener(),
                 List.of(), new SyntaxPosition(2, 4), MethodTargetResolution.unresolved("BINDING_UNAVAILABLE"),
                 true, false, false);
     }

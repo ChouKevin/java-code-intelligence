@@ -12,7 +12,7 @@ import java.util.Objects;
 public record MethodTypeMemberResponse(
         @ApiMonitoringField(ApiMonitoringMode.VALUE) String kind,
         @ApiMonitoringField(ApiMonitoringMode.NESTED) MethodTargetPayload target,
-        @ApiMonitoringField(ApiMonitoringMode.SIZE) List<DiscoveryFollowUpResponse> availableFollowUps) implements TypeMemberResponse {
+        @ApiMonitoringField(ApiMonitoringMode.NESTED) List<DiscoveryFollowUpResponse> availableFollowUps) implements TypeMemberResponse {
 
     public MethodTypeMemberResponse {
         target = Objects.requireNonNull(target, "target is required");

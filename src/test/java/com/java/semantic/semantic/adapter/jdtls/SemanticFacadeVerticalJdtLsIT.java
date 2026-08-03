@@ -396,7 +396,6 @@ class SemanticFacadeVerticalJdtLsIT {
 
     private void assertFullSource(JsonNode node) {
         assertThat(node.path("contentState").asText()).isEqualTo("FULL_SOURCE");
-        assertThat(node.path("methodBody").asText()).isNotBlank();
         assertThat(node.path("declarationRange").path("sourceFile").asText()).isNotBlank();
         assertThat(node.path("declarationRange").path("start").path("line").asInt()).isGreaterThanOrEqualTo(0);
         assertThat(node.path("declarationRange").path("end").path("line").asInt()).isGreaterThanOrEqualTo(0);

@@ -1,14 +1,12 @@
 package com.java.semantic.callgraph.application;
 
 import com.java.semantic.callgraph.domain.MethodId;
+import com.java.semantic.identity.JavaIdentityNormalizer;
 import com.java.semantic.identity.MethodTarget;
-import com.java.semantic.syntax.domain.AnnotationEvidence;
 import com.java.semantic.syntax.domain.RepositorySyntax;
 import com.java.semantic.syntax.domain.SourceMethodMetadata;
 import com.java.semantic.syntax.domain.SourceTypeMetadata;
 import com.java.semantic.syntax.domain.SyntaxRange;
-import com.java.semantic.syntax.domain.TypeReference;
-import com.java.semantic.identity.JavaIdentityNormalizer;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -19,7 +17,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.stream.Collectors;
 
 /** Immutable deterministic lookup over one repository syntax snapshot. */
 public final class RepositorySyntaxIndex {
@@ -27,32 +24,25 @@ public final class RepositorySyntaxIndex {
     private static final Comparator<SourceTypeMetadata> SOURCE_TYPE_ORDER = Comparator
             .comparing((SourceTypeMetadata metadata) -> metadata.declaration().identity().fullyQualifiedName())
             .thenComparing(metadata -> metadata.declaration().identity().sourceFile())
-            .thenComparingInt(metadata -> metadata.declaration().source().range().start().line())
-            .thenComparingInt(metadata -> metadata.declaration().source().range().start().character())
-            .thenComparing(metadata -> metadata.declaration().source().text());
+            .thenComparingInt(metadata -> metadata.declaration().declarationLocation().range().start().line())
+            .thenComparingInt(metadata -> metadata.declaration().declarationLocation().range().start().character())
+            .thenComparingInt(metadata -> metadata.declaration().declarationLocation().range().end().line())
+            .thenComparingInt(metadata -> metadata.declaration().declarationLocation().range().end().character());
 
     private static final Comparator<IndexedMethod> METHOD_ORDER = Comparator
             .comparing((IndexedMethod indexed) -> indexed.sourceType().declaration().identity().fullyQualifiedName())
             .thenComparing(indexed -> indexed.sourceType().declaration().identity().sourceFile())
-            .thenComparingInt(indexed -> indexed.method().range().start().line())
-            .thenComparingInt(indexed -> indexed.method().range().start().character())
-            .thenComparingInt(indexed -> indexed.method().range().end().line())
-            .thenComparingInt(indexed -> indexed.method().range().end().character())
-            .thenComparing(indexed -> annotationNames(indexed.method().annotationEvidence()))
-            .thenComparing(indexed -> Objects.toString(indexed.method().sql(), ""))
-            .thenComparing(indexed -> Objects.toString(indexed.method().sqlSource(), ""))
-            .thenComparing(indexed -> indexed.method().source().text())
-            .thenComparing(indexed -> writtenTypeProjection(indexed.method().parameterTypeReferences()))
-            .thenComparing(indexed -> indexed.method().returnType()
-                    .map(TypeReference::writtenType)
-                    .orElse(""))
-            .thenComparing(indexed -> indexed.method().invocations().toString())
-            .thenComparingInt(indexed -> indexed.sourceType().declaration().source().range().start().line())
-            .thenComparingInt(indexed -> indexed.sourceType().declaration().source().range().start().character())
-            .thenComparingInt(indexed -> indexed.sourceType().declaration().source().range().end().line())
-            .thenComparingInt(indexed -> indexed.sourceType().declaration().source().range().end().character())
-            .thenComparing(indexed -> annotationNames(indexed.sourceType().frameworkFacts().annotations()))
-            .thenComparing(indexed -> indexed.sourceType().declaration().source().text());
+            .thenComparing(indexed -> indexed.method().declarationLocation().sourceFile())
+            .thenComparingInt(indexed -> indexed.method().declarationLocation().range().start().line())
+            .thenComparingInt(indexed -> indexed.method().declarationLocation().range().start().character())
+            .thenComparingInt(indexed -> indexed.method().declarationLocation().range().end().line())
+            .thenComparingInt(indexed -> indexed.method().declarationLocation().range().end().character())
+            .thenComparing(indexed -> indexed.method().name())
+            .thenComparing(indexed -> parameterProjection(indexed.method().paramTypes()))
+            .thenComparingInt(indexed -> indexed.sourceType().declaration().declarationLocation().range().start().line())
+            .thenComparingInt(indexed -> indexed.sourceType().declaration().declarationLocation().range().start().character())
+            .thenComparingInt(indexed -> indexed.sourceType().declaration().declarationLocation().range().end().line())
+            .thenComparingInt(indexed -> indexed.sourceType().declaration().declarationLocation().range().end().character());
 
     private final String repoId;
     private final Map<String, List<SourceTypeMetadata>> sourceTypesByFqn;
@@ -165,7 +155,10 @@ public final class RepositorySyntaxIndex {
         Map<SourceRange, SourceMethodMetadata> indexed = new LinkedHashMap<>();
         for (IndexedMethod indexedMethod : sortedMethods(sourceTypes)) {
             indexedMethod.method().analysisTarget().target().ifPresent(target -> indexed.putIfAbsent(
-                    new SourceRange(target.sourceFile(), indexedMethod.method().range()), indexedMethod.method()));
+                    new SourceRange(
+                            indexedMethod.method().declarationLocation().sourceFile(),
+                            indexedMethod.method().declarationLocation().range()),
+                    indexedMethod.method()));
         }
         return Collections.unmodifiableMap(indexed);
     }
@@ -180,12 +173,8 @@ public final class RepositorySyntaxIndex {
         return methods.stream().sorted(METHOD_ORDER).toList();
     }
 
-    private static String writtenTypeProjection(List<TypeReference> references) {
-        return references.stream().map(TypeReference::writtenType).collect(Collectors.joining("\u0000"));
-    }
-
-    private static String annotationNames(List<AnnotationEvidence> annotations) {
-        return annotations.stream().map(AnnotationEvidence::writtenName).collect(Collectors.joining("\u0000"));
+    private static String parameterProjection(List<String> parameterTypes) {
+        return String.join("\u0000", parameterTypes);
     }
 
     private record IndexedMethod(SourceTypeMetadata sourceType, SourceMethodMetadata method) {

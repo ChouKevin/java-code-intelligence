@@ -138,7 +138,7 @@ final class JdtSourceDeclarationLocator {
     }
 
     SyntaxRange range(ParsedSource parsed, ASTNode node) {
-        return new SourceSlices(parsed.unit(), parsed.text()).range(node);
+        return AstSourceRanges.range(parsed.unit(), node);
     }
 
     String packageName(ParsedSource parsed) {

@@ -11,7 +11,7 @@ import java.util.Objects;
 /** mapper statement 對應之完整 method target 與狀態限定 follow-up */
 public record MapperMethodCandidateResponse(
         @ApiMonitoringField(ApiMonitoringMode.NESTED) MethodTargetPayload target,
-        @ApiMonitoringField(ApiMonitoringMode.SIZE)
+        @ApiMonitoringField(ApiMonitoringMode.NESTED)
         List<DiscoveryFollowUpResponse> availableFollowUps) {
 
     public MapperMethodCandidateResponse {

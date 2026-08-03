@@ -12,12 +12,25 @@ import java.util.Optional;
 /** repository syntax 快照中所有 mapper statement 與 fragment 的不可變多值證據索引 */
 public final class MapperEvidenceIndex {
 
-    private static final Comparator<MapperFragmentIdentity> FRAGMENT_IDENTITY_ORDER =
-            Comparator.comparing(MapperFragmentIdentity::namespace)
-                    .thenComparing(MapperFragmentIdentity::fragmentId)
-                    .thenComparing(MapperFragmentIdentity::resourcePath)
-                    .thenComparingInt(MapperFragmentIdentity::documentOrdinal)
-                    .thenComparing(MapperFragmentIdentity::representation);
+    private static final Comparator<MapperStatementEvidence> STATEMENT_LOCATION_ORDER =
+            Comparator.comparing((MapperStatementEvidence evidence) -> evidence.location().sourceFile())
+                    .thenComparingInt(evidence -> evidence.location().range().start().line())
+                    .thenComparingInt(evidence -> evidence.location().range().start().character())
+                    .thenComparingInt(evidence -> evidence.location().range().end().line())
+                    .thenComparingInt(evidence -> evidence.location().range().end().character())
+                    .thenComparing(evidence -> evidence.identity().statementKey().namespace())
+                    .thenComparing(evidence -> evidence.identity().statementKey().statementId())
+                    .thenComparing(evidence -> evidence.identity().representation());
+
+    private static final Comparator<MapperFragmentEvidence> FRAGMENT_LOCATION_ORDER =
+            Comparator.comparing((MapperFragmentEvidence evidence) -> evidence.location().sourceFile())
+                    .thenComparingInt(evidence -> evidence.location().range().start().line())
+                    .thenComparingInt(evidence -> evidence.location().range().start().character())
+                    .thenComparingInt(evidence -> evidence.location().range().end().line())
+                    .thenComparingInt(evidence -> evidence.location().range().end().character())
+                    .thenComparing(evidence -> evidence.identity().namespace())
+                    .thenComparing(evidence -> evidence.identity().fragmentId())
+                    .thenComparing(evidence -> evidence.identity().representation());
 
     private final Map<MapperStatementIdentity, MapperStatementEvidence> statementsByIdentity;
 
@@ -54,17 +67,18 @@ public final class MapperEvidenceIndex {
                 matches.add(evidence);
             }
         }
+        matches.sort(STATEMENT_LOCATION_ORDER);
         return List.copyOf(matches);
     }
 
     /** 保存 extraction 順序的所有 statement 證據 */
     public List<MapperStatementEvidence> statements() {
-        return List.copyOf(statementsByIdentity.values());
+        return statementsByIdentity.values().stream().sorted(STATEMENT_LOCATION_ORDER).toList();
     }
 
     /** 保存 extraction 順序的所有 fragment 證據 */
     public List<MapperFragmentEvidence> fragments() {
-        return List.copyOf(fragmentsByIdentity.values());
+        return fragmentsByIdentity.values().stream().sorted(FRAGMENT_LOCATION_ORDER).toList();
     }
 
     /**
@@ -80,7 +94,7 @@ public final class MapperEvidenceIndex {
         return fragmentsByIdentity.keySet().stream()
                 .filter(identity -> matchesInclude(statement, reference, identity))
                 .distinct()
-                .sorted(FRAGMENT_IDENTITY_ORDER)
+                .sorted(Comparator.comparing(fragmentsByIdentity::get, FRAGMENT_LOCATION_ORDER))
                 .toList();
     }
 
@@ -109,7 +123,7 @@ public final class MapperEvidenceIndex {
         for (MapperStatementEvidence value : Objects.requireNonNull(evidence, "statementEvidence is required")) {
             MapperStatementEvidence existing = indexed.putIfAbsent(value.identity(), value);
             if (Objects.nonNull(existing)) {
-                throw new IllegalStateException("duplicate mapper statement identity");
+                throw new IllegalStateException("duplicate mapper statement identity: " + value.identity());
             }
         }
         return Collections.unmodifiableMap(new LinkedHashMap<>(indexed));
@@ -121,7 +135,7 @@ public final class MapperEvidenceIndex {
         for (MapperFragmentEvidence value : Objects.requireNonNull(evidence, "fragmentEvidence is required")) {
             MapperFragmentEvidence existing = indexed.putIfAbsent(value.identity(), value);
             if (Objects.nonNull(existing)) {
-                throw new IllegalStateException("duplicate mapper fragment identity");
+                throw new IllegalStateException("duplicate mapper fragment identity: " + value.identity());
             }
         }
         return Collections.unmodifiableMap(new LinkedHashMap<>(indexed));

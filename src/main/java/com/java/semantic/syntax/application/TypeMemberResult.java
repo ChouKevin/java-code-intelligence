@@ -43,8 +43,8 @@ public record TypeMemberResult(
         }
         if (page.hasMore()) {
             if (availableFollowUps.size() != 1
-                    || availableFollowUps.getFirst().operation() != DiscoveryFollowUp.Operation.GET_NEXT_PAGE) {
-                throw new IllegalArgumentException("non-final page requires one GET_NEXT_PAGE follow-up");
+                    || availableFollowUps.getFirst().operation() != DiscoveryFollowUp.Operation.DISCOVER_TYPE_MEMBERS) {
+                throw new IllegalArgumentException("non-final page requires one type member continuation follow-up");
             }
         } else if (availableFollowUps.size() > 0) {
             throw new IllegalArgumentException("final page must not contain a page follow-up");

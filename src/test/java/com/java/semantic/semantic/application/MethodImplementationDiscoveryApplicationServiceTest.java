@@ -26,8 +26,8 @@ import com.java.semantic.syntax.domain.SourceMethodMetadata;
 import com.java.semantic.syntax.domain.SourceTypeKind;
 import com.java.semantic.syntax.domain.MethodTargetResolution;
 import com.java.semantic.syntax.domain.RepositorySyntax;
-import com.java.semantic.syntax.domain.SourceSlice;
-import com.java.semantic.syntax.domain.SyntaxExtractionService;
+import com.java.semantic.syntax.domain.SourceRange;
+import com.java.semantic.syntax.domain.RevisionBoundRepositorySyntaxProvider;
 import com.java.semantic.syntax.domain.SyntaxPosition;
 import com.java.semantic.syntax.domain.SyntaxRange;
 import com.java.semantic.syntax.domain.TypeReference;
@@ -99,9 +99,9 @@ class MethodImplementationDiscoveryApplicationServiceTest {
         });
         assertThat(result.limits()).isEqualTo(new MethodImplementationLimits(10, 2, 2, false));
         assertThat(result.issues()).isEmpty();
-        InOrder calls = inOrder(fixture.repository, fixture.syntaxExtraction, fixture.semantic);
+        InOrder calls = inOrder(fixture.repository, fixture.repositorySyntaxProvider, fixture.semantic);
         calls.verify(fixture.repository).withSnapshot(eq(REPOSITORY_ID), eq(Optional.of(REVISION)), any());
-        calls.verify(fixture.syntaxExtraction).extract(root);
+        calls.verify(fixture.repositorySyntaxProvider).get(fixture.snapshot);
         calls.verify(fixture.semantic).resolveExactMethod(eq(fixture.snapshot), any(SemanticDeclarationAnchor.class));
         calls.verify(fixture.semantic).implementations(fixture.snapshot, fixture.requestedSemantic);
     }
@@ -206,7 +206,7 @@ class MethodImplementationDiscoveryApplicationServiceTest {
                 .thenReturn(new SemanticImplementationResult(List.of(implementationSemantic), List.of()));
         MethodImplementationDiscoveryApplicationService service = new MethodImplementationDiscoveryApplicationService(
                 repository,
-                syntaxExtraction,
+                ignoredSnapshot -> syntax,
                 new CanonicalMethodDeclarationResolver(),
                 semantic,
                 new CanonicalTargetProjection(),
@@ -346,14 +346,14 @@ class MethodImplementationDiscoveryApplicationServiceTest {
     void should_propagate_revision_mismatch_without_extracting_syntax() {
         MethodTarget requested = target("Port.java", "Port", "handle");
         RepositoryApplicationService repository = mock(RepositoryApplicationService.class);
-        SyntaxExtractionService syntaxExtraction = mock(SyntaxExtractionService.class);
+        RevisionBoundRepositorySyntaxProvider repositorySyntaxProvider = mock(RevisionBoundRepositorySyntaxProvider.class);
         JavaSemanticService semantic = mock(JavaSemanticService.class);
         RepositoryRevision currentRevision = RepositoryRevision.ofSha("a".repeat(40));
         RepositoryRevisionMismatchException mismatch = new RepositoryRevisionMismatchException(REVISION, currentRevision);
         when(repository.withSnapshot(eq(REPOSITORY_ID), eq(Optional.of(REVISION)), any())).thenThrow(mismatch);
         MethodImplementationDiscoveryApplicationService service = new MethodImplementationDiscoveryApplicationService(
                 repository,
-                syntaxExtraction,
+                repositorySyntaxProvider,
                 new CanonicalMethodDeclarationResolver(),
                 semantic,
                 new CanonicalTargetProjection(),
@@ -362,7 +362,7 @@ class MethodImplementationDiscoveryApplicationServiceTest {
 
         assertThatThrownBy(() -> service.discover(new MethodImplementationDiscoveryQuery(REPOSITORY_ID, REVISION, requested)))
                 .isSameAs(mismatch);
-        verify(syntaxExtraction, never()).extract(any());
+        verify(repositorySyntaxProvider, never()).get(any());
     }
 
     private static Stream<Arguments> unsupportedDeclarations() {
@@ -380,7 +380,7 @@ class MethodImplementationDiscoveryApplicationServiceTest {
             List<SemanticMethod> implementations,
             List<SemanticImplementationIssueReason> adapterIssues) {
         RepositoryApplicationService repository = mock(RepositoryApplicationService.class);
-        SyntaxExtractionService syntaxExtraction = mock(SyntaxExtractionService.class);
+        RevisionBoundRepositorySyntaxProvider repositorySyntaxProvider = mock(RevisionBoundRepositorySyntaxProvider.class);
         JavaSemanticService semantic = mock(JavaSemanticService.class);
         RepositorySnapshot snapshot = new RepositorySnapshot(REPOSITORY_ID, root, REVISION);
         RepositorySyntax syntax = new RepositorySyntax(List.of(), classes);
@@ -390,7 +390,7 @@ class MethodImplementationDiscoveryApplicationServiceTest {
                     Function<RepositorySnapshot, RevisionBoundMethodImplementations> operation = invocation.getArgument(2);
                     return operation.apply(snapshot);
                 });
-        when(syntaxExtraction.extract(root)).thenReturn(syntax);
+        when(repositorySyntaxProvider.get(snapshot)).thenReturn(syntax);
         lenient().when(semantic.resolveExactMethod(eq(snapshot), any(SemanticDeclarationAnchor.class)))
                 .thenReturn(requestedSemantic);
         lenient().when(semantic.implementations(snapshot, requestedSemantic))
@@ -399,7 +399,8 @@ class MethodImplementationDiscoveryApplicationServiceTest {
             lenient().when(semantic.classifySource(snapshot, implementation))
                     .thenReturn(classificationOf(implementation));
         }
-        return new DiscoveryFixture(repository, syntaxExtraction, semantic, snapshot, requestedSemantic, requested);
+        return new DiscoveryFixture(
+                repository, repositorySyntaxProvider, semantic, snapshot, requestedSemantic, requested);
     }
 
     private SemanticSourceClassification classificationOf(SemanticMethod method) {
@@ -418,7 +419,7 @@ class MethodImplementationDiscoveryApplicationServiceTest {
             ImplementationCandidateFactory factory) {
         return new MethodImplementationDiscoveryApplicationService(
                 fixture.repository,
-                fixture.syntaxExtraction,
+                fixture.repositorySyntaxProvider,
                 new CanonicalMethodDeclarationResolver(),
                 fixture.semantic,
                 new CanonicalTargetProjection(),
@@ -491,11 +492,8 @@ class MethodImplementationDiscoveryApplicationServiceTest {
                 target.methodName(),
                 target.parameterTypes(),
                 null,
-                null,
-                1,
-                2,
-                range,
-                new SourceSlice(range, "void " + target.methodName() + "() {}"),
+                Optional.empty(),
+                new SourceRange(target.sourceFile(), range),
                 List.<TypeReference>of(),
                 Optional.empty(),
                 List.of(),
@@ -523,7 +521,7 @@ class MethodImplementationDiscoveryApplicationServiceTest {
                 false,
                 profiles,
                 range,
-                new SourceSlice(range, "class " + target.className() + " {}"),
+                new SourceRange(target.sourceFile(), range),
                 primary,
                 qualifiers);
     }
@@ -531,7 +529,7 @@ class MethodImplementationDiscoveryApplicationServiceTest {
     private final class DiscoveryFixture {
 
         private final RepositoryApplicationService repository;
-        private final SyntaxExtractionService syntaxExtraction;
+        private final RevisionBoundRepositorySyntaxProvider repositorySyntaxProvider;
         private final JavaSemanticService semantic;
         private final RepositorySnapshot snapshot;
         private final SemanticMethod requestedSemantic;
@@ -539,13 +537,13 @@ class MethodImplementationDiscoveryApplicationServiceTest {
 
         private DiscoveryFixture(
                 RepositoryApplicationService repository,
-                SyntaxExtractionService syntaxExtraction,
+                RevisionBoundRepositorySyntaxProvider repositorySyntaxProvider,
                 JavaSemanticService semantic,
                 RepositorySnapshot snapshot,
                 SemanticMethod requestedSemantic,
                 MethodTarget requested) {
             this.repository = repository;
-            this.syntaxExtraction = syntaxExtraction;
+            this.repositorySyntaxProvider = repositorySyntaxProvider;
             this.semantic = semantic;
             this.snapshot = snapshot;
             this.requestedSemantic = requestedSemantic;

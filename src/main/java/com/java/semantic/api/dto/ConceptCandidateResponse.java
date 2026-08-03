@@ -20,7 +20,7 @@ public record ConceptCandidateResponse(
         Optional<ConceptCandidateDetailsResponse> details,
         @ApiMonitoringField(ApiMonitoringMode.SIZE) /** 依精確 typed identity 排序的最小 identity 投影 */
         List<ConceptEvidenceResponse> evidence,
-        @ApiMonitoringField(ApiMonitoringMode.SIZE) /** 可直接執行且不需重建參數的候選後續動作 */
+        @ApiMonitoringField(ApiMonitoringMode.NESTED) /** 可直接執行且不需重建參數的候選後續動作 */
         List<DiscoveryFollowUpResponse> availableFollowUps) {
 
     public ConceptCandidateResponse {

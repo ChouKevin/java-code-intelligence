@@ -3,7 +3,7 @@ package com.java.semantic.syntax.application;
 import com.java.semantic.repository.application.RepositoryApplicationService;
 import com.java.semantic.repository.domain.RepositorySnapshot;
 import com.java.semantic.syntax.domain.RepositorySyntax;
-import com.java.semantic.syntax.domain.SyntaxExtractionService;
+import com.java.semantic.syntax.domain.RevisionBoundRepositorySyntaxProvider;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
@@ -19,24 +19,24 @@ import java.util.Optional;
 public final class EventListenerDiscoveryApplicationService {
 
     private final RepositoryApplicationService repositoryApplicationService;
-    private final SyntaxExtractionService syntaxExtractionService;
+    private final RevisionBoundRepositorySyntaxProvider repositorySyntaxProvider;
     private final EventListenerDiscoveryPolicy discoveryPolicy;
 
     @Autowired
     public EventListenerDiscoveryApplicationService(
             RepositoryApplicationService repositoryApplicationService,
-            SyntaxExtractionService syntaxExtractionService) {
-        this(repositoryApplicationService, syntaxExtractionService, new EventListenerDiscoveryPolicy());
+            RevisionBoundRepositorySyntaxProvider repositorySyntaxProvider) {
+        this(repositoryApplicationService, repositorySyntaxProvider, new EventListenerDiscoveryPolicy());
     }
 
     EventListenerDiscoveryApplicationService(
             RepositoryApplicationService repositoryApplicationService,
-            SyntaxExtractionService syntaxExtractionService,
+            RevisionBoundRepositorySyntaxProvider repositorySyntaxProvider,
             EventListenerDiscoveryPolicy discoveryPolicy) {
         this.repositoryApplicationService = Objects.requireNonNull(
                 repositoryApplicationService, "repositoryApplicationService is required");
-        this.syntaxExtractionService = Objects.requireNonNull(
-                syntaxExtractionService, "syntaxExtractionService is required");
+        this.repositorySyntaxProvider = Objects.requireNonNull(
+                repositorySyntaxProvider, "repositorySyntaxProvider is required");
         this.discoveryPolicy = Objects.requireNonNull(discoveryPolicy, "discoveryPolicy is required");
     }
 
@@ -50,8 +50,7 @@ public final class EventListenerDiscoveryApplicationService {
 
     private RevisionBoundEventListenerDiscovery discoverSnapshot(
             RepositorySnapshot snapshot, EventListenerDiscoveryQuery query) {
-        // 不快取語法結果，確保每次請求都以目前受鎖保護的 repository 內容解析
-        RepositorySyntax syntax = syntaxExtractionService.extract(snapshot.root());
+        RepositorySyntax syntax = repositorySyntaxProvider.get(snapshot);
         EventListenerDiscoveryPage discovery = discoveryPolicy.discover(
                 syntax, query.eventType(), query.offset(), query.limit());
         return new RevisionBoundEventListenerDiscovery(

@@ -27,6 +27,7 @@ import com.java.semantic.syntax.domain.ParameterizedTypeReference;
 import com.java.semantic.syntax.domain.PrimitiveTypeReference;
 import com.java.semantic.syntax.domain.RepositorySyntax;
 import com.java.semantic.syntax.domain.SourceMethodMetadata;
+import com.java.semantic.syntax.domain.SourceRange;
 import com.java.semantic.syntax.domain.SqlSourceKind;
 import com.java.semantic.syntax.domain.SourceTypeKind;
 import com.java.semantic.syntax.domain.SyntaxInvocation;
@@ -70,10 +71,9 @@ class SourceTypeMetadataExtractorTest {
             Class<? extends TypeReference> expectedType,
             @TempDir Path tempDir) throws IOException {
         ParsedSource parsed = parseTypeReferenceFixture(tempDir);
-        SourceSlices slices = new SourceSlices(parsed.unit(), parsed.text());
-        Type type = typeOf(parsed, slices, writtenType);
+        Type type = typeOf(parsed, writtenType);
 
-        TypeReference reference = SourceTypeMetadataExtractor.typeReferenceOf(type, slices);
+        TypeReference reference = SourceTypeMetadataExtractor.typeReferenceOf(type);
 
         assertThat(reference).isInstanceOf(expectedType);
         assertThat(reference.writtenType()).isEqualTo(writtenType);
@@ -88,7 +88,7 @@ class SourceTypeMetadataExtractorTest {
                 Arguments.of("Order[][]", ArrayTypeReference.class),
                 Arguments.of("? extends Order", WildcardTypeReference.class),
                 Arguments.of("T", TypeVariableReference.class),
-                Arguments.of("IllegalArgumentException | IllegalStateException", CompositeTypeReference.class),
+                Arguments.of("IllegalArgumentException|IllegalStateException", CompositeTypeReference.class),
                 Arguments.of("Order & Runnable", CompositeTypeReference.class),
                 Arguments.of("var", InferredTypeReference.class));
     }
@@ -127,10 +127,8 @@ class SourceTypeMetadataExtractorTest {
     void should_reject_a_non_nominal_type_when_a_hierarchy_requires_nominal_evidence(@TempDir Path tempDir)
             throws IOException {
         ParsedSource parsed = parseTypeReferenceFixture(tempDir);
-        SourceSlices slices = new SourceSlices(parsed.unit(), parsed.text());
-
         assertThatThrownBy(() -> SourceTypeMetadataExtractor.nominalTypeReferenceOf(
-                typeOf(parsed, slices, "Order[][]"), slices))
+                typeOf(parsed, "Order[][]")))
                 .isInstanceOf(UnsupportedTypeFormException.class)
                 .hasMessageContaining("ArrayType");
     }
@@ -187,6 +185,7 @@ class SourceTypeMetadataExtractorTest {
                     final void finalMethod() {
                     }
 
+                    /** 可由 agent 回讀的完整宣告 */
                     void /* 😀 */ open(String text) {
                         String emoji = "😀";
                     }
@@ -213,13 +212,13 @@ class SourceTypeMetadataExtractorTest {
         SourceMethodMetadata unresolved = methodOf(List.of(metadata), "com.example.FlagFixture", "unresolved");
 
         assertThat(metadata.declaration().identity().sourceFile()).isEqualTo("src/main/java/com/example/FlagFixture.java");
-        assertThat(open.source().text()).isEqualTo("""
-                void /* 😀 */ open(String text) {
-                        String emoji = "😀";
-                    }""");
-        assertThat(open.range()).isEqualTo(new SyntaxRange(
-                new SyntaxPosition(15, 4), new SyntaxPosition(17, 5)));
-        assertThat(open.namePosition()).isEqualTo(new SyntaxPosition(15, source.lines().toList().get(15).indexOf("open")));
+        assertThat(open.declarationLocation().sourceFile()).isEqualTo("src/main/java/com/example/FlagFixture.java");
+        assertThat(open.declarationLocation().range()).isEqualTo(new SyntaxRange(
+                new SyntaxPosition(15, 4), new SyntaxPosition(18, 5)));
+        assertThat(segmentOf(source, open.declarationLocation()))
+                .startsWith("/** 可由 agent 回讀的完整宣告 */")
+                .endsWith("}");
+        assertThat(open.namePosition()).isEqualTo(new SyntaxPosition(16, source.lines().toList().get(16).indexOf("open")));
         assertThat(open.analysisTarget().status()).isEqualTo(AnalysisTargetStatus.RESOLVED);
         assertThat(open.analysisTarget().target()).get().satisfies(target -> {
             assertThat(target.sourceFile()).isEqualTo("src/main/java/com/example/FlagFixture.java");
@@ -241,11 +240,11 @@ class SourceTypeMetadataExtractorTest {
                 "orders", new RepositorySyntax(List.of(), List.of(metadata)));
         MethodTarget target = open.analysisTarget().target().orElseThrow();
         assertThat(index.method(target)).contains(open);
-        assertThat(index.method(target.sourceFile(), open.range())).contains(open);
-        assertThat(index.method("src/main/java/com/example/Other.java", open.range())).isEmpty();
+        assertThat(index.method(target.sourceFile(), open.declarationLocation().range())).contains(open);
+        assertThat(index.method("src/main/java/com/example/Other.java", open.declarationLocation().range())).isEmpty();
         assertThat(index.method(target.sourceFile(), new SyntaxRange(
-                new SyntaxPosition(open.range().start().line(), open.range().start().character() + 1),
-                open.range().end()))).isEmpty();
+                new SyntaxPosition(open.declarationLocation().range().start().line(), open.declarationLocation().range().start().character() + 1),
+                open.declarationLocation().range().end()))).isEmpty();
         assertThat(index.method(new MethodTarget(
                 new SourceTypeIdentity(
                         new JavaTypeIdentity(target.packageName(), target.className()),
@@ -277,7 +276,7 @@ class SourceTypeMetadataExtractorTest {
                 target.methodName(),
                 List.of("int")))).isEmpty();
         assertThat(unresolved.analysisTarget().status()).isEqualTo(AnalysisTargetStatus.UNRESOLVED);
-        assertThat(index.method(target.sourceFile(), unresolved.range())).isEmpty();
+        assertThat(index.method(target.sourceFile(), unresolved.declarationLocation().range())).isEmpty();
     }
 
     @Test
@@ -387,10 +386,8 @@ class SourceTypeMetadataExtractorTest {
 
         assertThat(service.frameworkFacts().primary()).isTrue();
         assertThat(service.frameworkFacts().beanQualifiers()).containsExactly("fastOrderService");
-        assertThat(service.declaration().source().text())
-                .isEqualTo("@Qualifier(\"fastOrderService\")\n@Primary\nclass FastOrderService {\n}");
-        assertThat(service.declaration().source().range().start().line()).isEqualTo(8);
-        assertThat(service.declaration().source().range().start().character()).isZero();
+        assertThat(service.declaration().declarationLocation().range().start().line()).isEqualTo(8);
+        assertThat(service.declaration().declarationLocation().range().start().character()).isZero();
 
         assertThat(mapper.type()).isEqualTo("OrderMapper");
         assertThat(mapper.annotationEvidence()).extracting(AnnotationEvidence::writtenName)
@@ -428,10 +425,8 @@ class SourceTypeMetadataExtractorTest {
             assertThat(parameterized.typeArguments()).singleElement().satisfies(argument ->
                     assertThat(argument.resolvedTypeName()).contains("com.example.evidence.OrderLine"));
         });
-        assertThat(process.source().text()).startsWith("Receipt<OrderLine> process(OrderLine order) {")
-                .contains("mapper.save(order)", "OrderLine::new", "record(\"saved\")");
-        assertThat(process.range().start().line()).isEqualTo(22);
-        assertThat(process.range().start().character()).isEqualTo(4);
+        assertThat(process.declarationLocation().range().start().line()).isEqualTo(22);
+        assertThat(process.declarationLocation().range().start().character()).isEqualTo(4);
 
         assertThat(process.invocations()).hasSize(9);
         assertThat(process.invocations())
@@ -601,10 +596,7 @@ class SourceTypeMetadataExtractorTest {
                 "com.example.persistence.OrderMapper", "findByOrderNo");
 
         assertThat(method.sqlSource()).isEqualTo(SqlSourceKind.ANNOTATION);
-        assertThat(method.sql())
-                .as("fixture 的 XML 已改成 xml_marker，優先序反轉時這個斷言會變紅")
-                .isEqualTo("SELECT * FROM orders WHERE order_no = #{orderNo}")
-                .doesNotContain("xml_marker");
+        assertThat(method.annotationSqlLocation()).isPresent();
     }
 
     @Test
@@ -613,21 +605,26 @@ class SourceTypeMetadataExtractorTest {
                 "com.example.persistence.OrderMapper", "xmlOnly");
 
         assertThat(method.sqlSource()).isEqualTo(SqlSourceKind.MAPPER_XML);
-        assertThat(method.sql()).isEqualTo("SELECT * FROM orders WHERE customer_id = #{customerId}");
+        assertThat(method.annotationSqlLocation()).isEmpty();
     }
 
     @Test
     void should_read_the_value_attribute_form_when_a_select_is_written_with_a_named_attribute() {
-        assertThat(methodOf(classes, "com.example.syntax.AccountMapper", "findByCode").sql())
-                .as("舊分析器只讀 single-member 形式，@Select(value=...) 會得到 null")
-                .isEqualTo("SELECT * FROM accounts WHERE code = #{code}");
+        SourceMethodMetadata method = methodOf(classes, "com.example.syntax.AccountMapper", "findByCode");
+
+        assertThat(method.annotationSqlLocation()).isPresent().get()
+                .satisfies(location -> {
+                    assertThat(location.sourceFile())
+                            .isEqualTo("src/main/java/com/example/syntax/AccountMapper.java");
+                    assertThat(segmentOf(fixtureSource(location.sourceFile()), location))
+                            .isEqualTo("@Select(value = \"SELECT * FROM accounts WHERE code = #{code}\")");
+                });
     }
 
     @Test
     void should_join_the_elements_when_a_select_is_written_as_a_string_array() {
-        assertThat(methodOf(classes, "com.example.syntax.AccountMapper", "findByStatus").sql())
-                .as("舊分析器會得到字面的大括號字串")
-                .isEqualTo("SELECT * FROM accounts WHERE status = #{status}");
+        assertThat(methodOf(classes, "com.example.syntax.AccountMapper", "findByStatus").annotationSqlLocation())
+                .isPresent();
     }
 
     @Test
@@ -642,7 +639,7 @@ class SourceTypeMetadataExtractorTest {
     void should_leave_sql_source_unset_when_a_method_has_no_sql_at_all() {
         SourceMethodMetadata method = methodOf(classes, "com.example.syntax.AccountShapes", "name");
 
-        assertThat(method.sql()).isNull();
+        assertThat(method.annotationSqlLocation()).isEmpty();
         assertThat(method.sqlSource()).isNull();
     }
 
@@ -717,8 +714,9 @@ class SourceTypeMetadataExtractorTest {
     void should_record_one_based_line_numbers_when_a_method_is_scanned() {
         SourceMethodMetadata method = methodOf(classes, "com.example.syntax.AccountShapes", "name");
 
-        assertThat(method.startLine()).isPositive();
-        assertThat(method.endLine()).isGreaterThanOrEqualTo(method.startLine());
+        assertThat(method.declarationLocation().range().start().line()).isGreaterThanOrEqualTo(0);
+        assertThat(method.declarationLocation().range().end().line())
+                .isGreaterThanOrEqualTo(method.declarationLocation().range().start().line());
     }
 
     @Test
@@ -744,8 +742,8 @@ class SourceTypeMetadataExtractorTest {
                 .as("JDT Core 的 ASTParser 不讀 pom；source root 由目錄結構決定")
                 .flatExtracting(entry -> entry.methods().stream().map(EntryPointMethod::name).toList())
                 .containsExactly("getBasic");
-        assertThat(methodOf(syntax.sourceTypes(), "com.example.basic.BasicRepository", "findById").sql())
-                .isEqualTo("SELECT name FROM basic_orders WHERE id = #{id}");
+        assertThat(methodOf(syntax.sourceTypes(), "com.example.basic.BasicRepository", "findById")
+                .sqlSource()).isEqualTo(SqlSourceKind.MAPPER_XML);
     }
 
     private SourceTypeMetadata classOf(List<SourceTypeMetadata> source, String fullyQualifiedName) {
@@ -824,13 +822,13 @@ class SourceTypeMetadataExtractorTest {
         return parsed.getFirst();
     }
 
-    private Type typeOf(ParsedSource parsed, SourceSlices slices, String writtenType) {
+    private Type typeOf(ParsedSource parsed, String writtenType) {
         AtomicReference<Type> found = new AtomicReference<>();
         parsed.unit().accept(new ASTVisitor() {
             @Override
             public void preVisit(ASTNode node) {
                 if (node instanceof Type type && Objects.isNull(found.get())
-                        && writtenType.equals(slices.slice(type).text())) {
+                        && writtenType.replace("|", " | ").equals(AstSourceRanges.text(parsed.text(), type))) {
                     found.set(type);
                 }
             }
@@ -882,6 +880,28 @@ class SourceTypeMetadataExtractorTest {
         }
         InferredTypeReference inferred = (InferredTypeReference) reference;
         assertThat(inferred.resolvedNamedType()).isEmpty();
+    }
+
+    private static String fixtureSource(String sourceFile) {
+        try {
+            return Files.readString(Path.of("src/test/resources/fixtures/syntax-extraction").resolve(sourceFile));
+        } catch (IOException exception) {
+            throw new AssertionError("fixture source cannot be read", exception);
+        }
+    }
+
+    private static String segmentOf(String source, SourceRange location) {
+        int start = offsetOf(source, location.range().start().line(), location.range().start().character());
+        int end = offsetOf(source, location.range().end().line(), location.range().end().character());
+        return source.substring(start, end);
+    }
+
+    private static int offsetOf(String source, int line, int character) {
+        int offset = 0;
+        for (int currentLine = 0; currentLine < line; currentLine++) {
+            offset = source.indexOf('\n', offset) + 1;
+        }
+        return offset + character;
     }
 
     private SyntaxRange syntaxRange(int startLine, int startCharacter, int endLine, int endCharacter) {

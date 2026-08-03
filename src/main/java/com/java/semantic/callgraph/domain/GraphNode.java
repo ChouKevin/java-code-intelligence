@@ -15,7 +15,6 @@ public record GraphNode(
         NodeContentState contentState,
         NodeTraversalState traversalState,
         DispatchKind dispatchKind,
-        Optional<String> methodBody,
         Optional<CallSiteRange> declarationRange) {
 
     public GraphNode {
@@ -26,13 +25,10 @@ public record GraphNode(
         contentState = Objects.requireNonNull(contentState, "contentState is required");
         traversalState = Objects.requireNonNull(traversalState, "traversalState is required");
         dispatchKind = Objects.requireNonNull(dispatchKind, "dispatchKind is required");
-        methodBody = Objects.requireNonNull(methodBody, "methodBody is required");
         declarationRange = Objects.requireNonNull(declarationRange, "declarationRange is required");
         switch (contentState) {
             case FULL_SOURCE -> {
                 Assert.isTrue(target.isPresent(), "full source node target is required");
-                Assert.isTrue(methodBody.filter(StringUtils::hasText).isPresent(),
-                        "full source node body is required");
                 Assert.isTrue(declarationRange.isPresent(), "full source node declaration range is required");
                 Assert.isTrue(!StringUtils.hasText(externalSymbol), "full source node external symbol is forbidden");
                 Assert.isTrue(NodeTraversalState.EXPANDED.equals(traversalState)
@@ -41,7 +37,6 @@ public record GraphNode(
             }
             case TARGET_ONLY -> {
                 Assert.isTrue(target.isPresent(), "target-only node target is required");
-                Assert.isTrue(methodBody.isEmpty(), "target-only node body is forbidden");
                 Assert.isTrue(declarationRange.isEmpty(), "target-only node range is forbidden");
                 Assert.isTrue(!StringUtils.hasText(externalSymbol), "target-only node external symbol is forbidden");
                 Assert.isTrue(NodeTraversalState.BUDGET_CUTOFF.equals(traversalState)
@@ -50,7 +45,6 @@ public record GraphNode(
             }
             case EXTERNAL -> {
                 Assert.isTrue(target.isEmpty(), "external node target is forbidden");
-                Assert.isTrue(methodBody.isEmpty(), "external node body is forbidden");
                 Assert.isTrue(declarationRange.isEmpty(), "external node range is forbidden");
                 Assert.hasText(externalSymbol, "external node symbol is required");
                 Assert.isTrue(NodeTraversalState.EXTERNAL.equals(traversalState)

@@ -21,7 +21,7 @@ import com.java.semantic.syntax.domain.ParameterizedTypeReference;
 import com.java.semantic.syntax.domain.RepositorySyntax;
 import com.java.semantic.syntax.domain.SourceFieldMetadata;
 import com.java.semantic.syntax.domain.SourceMethodMetadata;
-import com.java.semantic.syntax.domain.SourceSlice;
+import com.java.semantic.syntax.domain.SourceRange;
 import com.java.semantic.syntax.domain.SourceTypeDeclaration;
 import com.java.semantic.syntax.domain.SourceTypeKind;
 import com.java.semantic.syntax.domain.SourceTypeMembers;
@@ -135,11 +135,8 @@ class TypeUsageConceptProviderTest {
         return new SourceMethodMetadata(
                 "process",
                 List.of("T"),
-                "",
                 null,
-                1,
-                1,
-                range(),
+                Optional.empty(),
                 source(),
                 List.of(bounds),
                 Optional.of(bounds),
@@ -205,8 +202,8 @@ class TypeUsageConceptProviderTest {
         return new SyntaxRange(new SyntaxPosition(0, 0), new SyntaxPosition(0, 1));
     }
 
-    private static SourceSlice source() {
-        return new SourceSlice(range(), "class UsageFixture {}");
+    private static SourceRange source() {
+        return new SourceRange(SOURCE_FILE, range());
     }
 
     private static final String PACKAGE_NAME = "com.acme.usage";

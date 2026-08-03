@@ -13,11 +13,22 @@ public record MethodTargetResolutionResponse(
         @ApiMonitoringField(ApiMonitoringMode.VALUE) String status,
         @ApiMonitoringField(ApiMonitoringMode.NESTED) MethodTargetPayload target,
         @ApiMonitoringField(ApiMonitoringMode.SIZE) List<MethodTargetPayload> candidates,
-        @ApiMonitoringField(ApiMonitoringMode.VALUE) String reasonCode) {
+        @ApiMonitoringField(ApiMonitoringMode.VALUE) String reasonCode,
+        @ApiMonitoringField(ApiMonitoringMode.NESTED) List<DiscoveryFollowUpResponse> availableFollowUps) {
 
     public MethodTargetResolutionResponse {
         status = Objects.requireNonNull(status, "status is required");
         candidates = List.copyOf(Objects.requireNonNull(candidates, "candidates are required"));
         reasonCode = Objects.requireNonNull(reasonCode, "reasonCode is required");
+        availableFollowUps = List.copyOf(Objects.requireNonNull(
+                availableFollowUps, "availableFollowUps are required"));
+    }
+
+    public MethodTargetResolutionResponse(
+            String status,
+            MethodTargetPayload target,
+            List<MethodTargetPayload> candidates,
+            String reasonCode) {
+        this(status, target, candidates, reasonCode, List.of());
     }
 }

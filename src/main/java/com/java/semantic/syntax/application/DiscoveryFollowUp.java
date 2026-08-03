@@ -1,6 +1,9 @@
 package com.java.semantic.syntax.application;
 
+import com.java.semantic.syntax.domain.SourceRange;
+
 import com.java.semantic.syntax.application.concept.ConceptIdentity;
+import com.java.semantic.syntax.application.concept.ConceptSearchTerm;
 import com.java.semantic.identity.MethodTarget;
 import com.java.semantic.identity.SourceTypeIdentity;
 import com.java.semantic.syntax.domain.SyntaxPosition;
@@ -35,10 +38,6 @@ public record DiscoveryFollowUp(
                 "/v1/discovery/method-source",
                 "getMethodSource",
                 GetMethodSourceRequest.class),
-        GET_METHOD_SQL(
-                "/v1/discovery/method-sql",
-                "getMethodSql",
-                GetMapperStatementRequest.class),
         ANALYZE_OUTGOING_CALL_GRAPH(
                 "/v1/analyses/call-graphs/outgoing",
                 "analyzeOutgoingCallGraph",
@@ -59,10 +58,18 @@ public record DiscoveryFollowUp(
                 "/v1/discovery/type-members",
                 "discoverTypeMembers",
                 GetTypeMembersRequest.class),
-        GET_NEXT_PAGE(
+        DISCOVER_TYPE_MEMBERS(
                 "/v1/discovery/type-members",
                 "discoverTypeMembers",
                 TypeMembersRequest.class),
+        DISCOVER_CONCEPTS(
+                "/v1/discovery/concepts",
+                "discoverConcepts",
+                DiscoverConceptsRequest.class),
+        DISCOVER_EVENT_LISTENERS(
+                "/v1/discovery/event-listeners",
+                "discoverEventListeners",
+                DiscoverEventListenersRequest.class),
         RESOLVE_SOURCE_SYMBOL(
                 "/v1/discovery/source-symbols/resolve",
                 "resolveSourceSymbol",
@@ -71,10 +78,14 @@ public record DiscoveryFollowUp(
                 "/v1/discovery/internal-references",
                 "findInternalReferences",
                 FindInternalReferencesRequest.class),
-        GET_JAVA_SOURCE_SEGMENT(
-                "/v1/discovery/java-source-segment",
-                "getJavaSourceSegment",
-                GetJavaSourceSegmentRequest.class);
+        GET_SOURCE_SEGMENT(
+                "/v1/discovery/source-segment",
+                "getSourceSegment",
+                GetSourceSegmentRequest.class),
+        GET_EVIDENCE_SOURCE(
+                "/v1/discovery/evidence-source",
+                "getEvidenceSource",
+                GetEvidenceSourceRequest.class);
 
         private final ApiProjection api;
         private final Class<? extends RequestProjection> requestType;
@@ -110,15 +121,17 @@ public record DiscoveryFollowUp(
     /** follow-up 可接受的封閉 HTTP request projection */
     public sealed interface RequestProjection permits
             GetMethodSourceRequest,
-            GetMapperStatementRequest,
             AnalyzeCallGraphRequest,
             DiscoverMethodImplementationsRequest,
             ResolveConceptRequest,
             GetTypeMembersRequest,
             TypeMembersRequest,
+            DiscoverConceptsRequest,
+            DiscoverEventListenersRequest,
             ResolveSourceSymbolRequest,
             FindInternalReferencesRequest,
-            GetJavaSourceSegmentRequest {
+            GetSourceSegmentRequest,
+            GetEvidenceSourceRequest {
     }
 
     /** Phase 1 固定供 Phase 2 實作的 exact method source 完整請求 */
@@ -128,19 +141,6 @@ public record DiscoveryFollowUp(
             MethodTarget target) implements RequestProjection {
 
         public GetMethodSourceRequest {
-            repoId = requiredText(repoId, "repoId");
-            expectedRevision = requiredText(expectedRevision, "expectedRevision");
-            target = Objects.requireNonNull(target, "target is required");
-        }
-    }
-
-    /** 已唯一解析 mapper statement 導向 exact SQL variants 的完整請求 */
-    public record GetMapperStatementRequest(
-            String repoId,
-            String expectedRevision,
-            MethodTarget target) implements RequestProjection {
-
-        public GetMapperStatementRequest {
             repoId = requiredText(repoId, "repoId");
             expectedRevision = requiredText(expectedRevision, "expectedRevision");
             target = Objects.requireNonNull(target, "target is required");
@@ -216,7 +216,7 @@ public record DiscoveryFollowUp(
         }
     }
 
-    /** GET_NEXT_PAGE 重複原始型別 identity、篩選與固定 revision 的完整請求 */
+    /** type member 下一頁重複原始 identity、篩選與固定 revision 的完整請求 */
     public record TypeMembersRequest(
             String repoId,
             String expectedRevision,
@@ -237,6 +237,54 @@ public record DiscoveryFollowUp(
             }
             if (offset < 0 || limit < 1 || limit > 100) {
                 throw new IllegalArgumentException("type member page is invalid");
+            }
+        }
+    }
+
+    /** 保留結構化搜尋條件與固定 revision 的概念探索續頁請求 */
+    public record DiscoverConceptsRequest(
+            String repoId,
+            String expectedRevision,
+            List<ConceptSearchTerm> terms,
+            List<String> kinds,
+            String operator,
+            Optional<String> packagePrefix,
+            int offset,
+            int limit) implements RequestProjection {
+
+        public DiscoverConceptsRequest {
+            repoId = requiredText(repoId, "repoId");
+            expectedRevision = requiredText(expectedRevision, "expectedRevision");
+            terms = List.copyOf(Objects.requireNonNull(terms, "terms are required"));
+            kinds = List.copyOf(Objects.requireNonNull(kinds, "kinds are required"));
+            operator = requiredText(operator, "operator");
+            packagePrefix = Objects.requireNonNull(packagePrefix, "packagePrefix is required");
+            if (!"ALL".equals(operator)) {
+                throw new IllegalArgumentException("concept search operator must be ALL");
+            }
+            if (terms.size() < 1 || kinds.size() < 1) {
+                throw new IllegalArgumentException("concept search terms and kinds are required");
+            }
+            if (offset < 0 || limit < 1 || limit > 100) {
+                throw new IllegalArgumentException("concept search page is invalid");
+            }
+        }
+    }
+
+    /** 保留事件型別、固定 revision 與分頁參數的事件監聽器續頁請求 */
+    public record DiscoverEventListenersRequest(
+            String repoId,
+            String expectedRevision,
+            String eventType,
+            int offset,
+            int limit) implements RequestProjection {
+
+        public DiscoverEventListenersRequest {
+            repoId = requiredText(repoId, "repoId");
+            expectedRevision = requiredText(expectedRevision, "expectedRevision");
+            eventType = requiredText(eventType, "eventType");
+            if (offset < 0 || limit < 1 || limit > 100) {
+                throw new IllegalArgumentException("event listener page is invalid");
             }
         }
     }
@@ -277,19 +325,32 @@ public record DiscoveryFollowUp(
     }
 
     /** exact source range 與 bounded context 的完整續讀請求 */
-    public record GetJavaSourceSegmentRequest(
+    public record GetSourceSegmentRequest(
             String repoId,
             String expectedRevision,
-            SourceRange sourceRange,
+            SourceRange location,
             int contextLines) implements RequestProjection {
 
-        public GetJavaSourceSegmentRequest {
+        public GetSourceSegmentRequest {
             repoId = requiredText(repoId, "repoId");
             expectedRevision = requiredText(expectedRevision, "expectedRevision");
-            sourceRange = Objects.requireNonNull(sourceRange, "sourceRange is required");
+            location = Objects.requireNonNull(location, "location is required");
             if (contextLines < 0 || contextLines > 20) {
                 throw new IllegalArgumentException("contextLines must be between 0 and 20");
             }
+        }
+    }
+
+    /** typed evidence source endpoint 的完整既有 identity 請求 */
+    public record GetEvidenceSourceRequest(
+            String repoId,
+            String expectedRevision,
+            EvidenceSourceQuery.EvidenceIdentity identity) implements RequestProjection {
+
+        public GetEvidenceSourceRequest {
+            repoId = requiredText(repoId, "repoId");
+            expectedRevision = requiredText(expectedRevision, "expectedRevision");
+            identity = Objects.requireNonNull(identity, "identity is required");
         }
     }
 

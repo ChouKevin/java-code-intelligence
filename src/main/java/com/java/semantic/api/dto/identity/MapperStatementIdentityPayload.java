@@ -24,7 +24,7 @@ public record MapperStatementIdentityPayload(
         @NotBlank @Size(max = 1024) @Pattern(regexp = "[^\\p{javaISOControl}]+") String resourcePath,
         @JsonInclude(JsonInclude.Include.NON_ABSENT)
         @ApiMonitoringField(ApiMonitoringMode.OMIT)
-        Optional<@NotBlank @Size(max = 255) String> databaseId,
+        Optional<@Size(max = 255) @Pattern(regexp = "[^\\p{javaISOControl}]+") String> databaseId,
         @ApiMonitoringField(ApiMonitoringMode.VALUE) @PositiveOrZero int documentOrdinal,
         @ApiMonitoringField(ApiMonitoringMode.VALUE)
         @NotBlank @Pattern(regexp = "MAPPER_XML_ELEMENT|ANNOTATION_SQL_TEXT") String representation) {
@@ -32,8 +32,18 @@ public record MapperStatementIdentityPayload(
     public MapperStatementIdentityPayload {
         statementKey = Objects.requireNonNull(statementKey, "statementKey is required");
         resourcePath = Objects.requireNonNull(resourcePath, "resourcePath is required");
-        databaseId = Objects.requireNonNull(databaseId, "databaseId is required");
+        databaseId = Optional.ofNullable(databaseId)
+                .orElse(Optional.empty())
+                .map(MapperStatementIdentityPayload::requiredDatabaseId);
         representation = Objects.requireNonNull(representation, "representation is required");
+    }
+
+    private static String requiredDatabaseId(String value) {
+        String database = Objects.requireNonNull(value, "databaseId is required");
+        if (database.isBlank()) {
+            throw new IllegalArgumentException("databaseId is required");
+        }
+        return database;
     }
 
     @JsonAnySetter

@@ -17,7 +17,7 @@ import com.java.semantic.syntax.domain.SourceTypeMetadata;
 import com.java.semantic.syntax.domain.SourceMethodMetadata;
 import com.java.semantic.syntax.domain.MethodTargetResolution;
 import com.java.semantic.syntax.domain.RepositorySyntax;
-import com.java.semantic.syntax.domain.SourceSlice;
+import com.java.semantic.syntax.domain.SourceRange;
 import com.java.semantic.syntax.domain.SyntaxPosition;
 import com.java.semantic.syntax.domain.SyntaxRange;
 import com.java.semantic.syntax.domain.TypeReference;
@@ -104,8 +104,8 @@ class CanonicalTargetProjectionTest {
 
     private static SourceTypeMetadata type(MethodTarget target, SyntaxRange methodRange) {
         SourceMethodMetadata method = new SourceMethodMetadata(
-                target.methodName(), target.parameterTypes(), null, null, 2, 5,
-                methodRange, new SourceSlice(methodRange, "void " + target.methodName() + "() {}"),
+                target.methodName(), target.parameterTypes(), null, Optional.empty(),
+                new SourceRange(target.sourceFile(), methodRange),
                 List.<TypeReference>of(), Optional.empty(), List.of(), List.of(), List.of(), methodRange.start(),
                 MethodTargetResolution.resolved(target), true, false, true);
         SyntaxRange typeRange = new SyntaxRange(new SyntaxPosition(0, 0), new SyntaxPosition(5, 0));
@@ -113,6 +113,6 @@ class CanonicalTargetProjectionTest {
                 target.className(), target.packageName(), target.packageName() + "." + target.className(),
                 target.sourceFile(), SourceTypeKind.CLASS, false,
                 List.of(), List.of(), List.of(), List.of(), List.of(), List.of(method), false, false, List.of(), typeRange,
-                new SourceSlice(typeRange, "class " + target.className() + " {}"), false, List.of());
+                new SourceRange(target.sourceFile(), typeRange), false, List.of());
     }
 }

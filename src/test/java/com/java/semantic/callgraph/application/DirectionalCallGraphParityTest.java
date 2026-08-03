@@ -28,7 +28,7 @@ import com.java.semantic.syntax.domain.SourceTypeMetadata;
 import com.java.semantic.syntax.domain.SourceMethodMetadata;
 import com.java.semantic.syntax.domain.MethodTargetResolution;
 import com.java.semantic.syntax.domain.RepositorySyntax;
-import com.java.semantic.syntax.domain.SourceSlice;
+import com.java.semantic.syntax.domain.SourceRange;
 import com.java.semantic.syntax.domain.SyntaxInvocation;
 import com.java.semantic.syntax.domain.SyntaxPosition;
 import com.java.semantic.syntax.domain.SyntaxRange;
@@ -108,15 +108,15 @@ class DirectionalCallGraphParityTest {
     private static SourceTypeMetadata type(MethodTarget target, List<SyntaxInvocation> invocations) {
         SyntaxRange range = new SyntaxRange(new SyntaxPosition(0, 0), new SyntaxPosition(20, 0));
         SourceMethodMetadata method = new SourceMethodMetadata(
-                target.methodName(), target.parameterTypes(), null, null, 1, 6,
-                range, new SourceSlice(range, "void " + target.methodName() + "() {}"), List.<TypeReference>of(),
+                target.methodName(), target.parameterTypes(), null, Optional.empty(),
+                new SourceRange(target.sourceFile(), range), List.<TypeReference>of(),
                 Optional.empty(), invocations, List.of(), List.of(), range.start(),
                 MethodTargetResolution.resolved(target), true, false, true);
         return com.java.semantic.syntax.domain.SourceTypeMetadataFixture.sourceType(
                 target.className(), target.packageName(), target.packageName() + "." + target.className(),
                 target.sourceFile(), SourceTypeKind.CLASS, false,
                 List.of(), List.of(), List.of(), List.of(), List.of(), List.of(method), false, false, List.of(), range,
-                new SourceSlice(range, "class " + target.className() + " {}"), false, List.of());
+                new SourceRange(target.sourceFile(), range), false, List.of());
     }
 
     private static SyntaxInvocation invocation(SemanticRange range) {

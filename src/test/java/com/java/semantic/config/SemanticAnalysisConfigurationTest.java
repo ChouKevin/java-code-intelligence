@@ -9,6 +9,9 @@ import com.java.semantic.semantic.domain.JavaSemanticService;
 import com.java.semantic.syntax.application.concept.ConceptKind;
 import com.java.semantic.syntax.application.concept.MapperStatementConceptProvider;
 import com.java.semantic.syntax.application.concept.StructuredConceptCatalogProjector;
+import com.java.semantic.syntax.application.SourceSegmentApplicationService;
+import com.java.semantic.syntax.application.MethodSourceApplicationService;
+import com.java.semantic.syntax.domain.RevisionPinnedSourceRangeReader;
 import com.java.semantic.syntax.domain.SyntaxExtractionService;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
@@ -32,6 +35,9 @@ class SemanticAnalysisConfigurationTest {
                     assertThat(context).hasSingleBean(SemanticCallGraphBuilder.class);
                     assertThat(context).hasSingleBean(IncomingSemanticCallGraphBuilder.class);
                     assertThat(context).hasSingleBean(SemanticAnalysisApplicationService.class);
+                    assertThat(context).hasSingleBean(RevisionPinnedSourceRangeReader.class);
+                    assertThat(context).hasSingleBean(SourceSegmentApplicationService.class);
+                    assertThat(context).hasSingleBean(MethodSourceApplicationService.class);
                     assertThat(context).hasSingleBean(MapperStatementConceptProvider.class);
                     assertThat(context.getBean(StructuredConceptCatalogProjector.class).supportedKinds())
                             .contains(ConceptKind.MAPPER_STATEMENT);

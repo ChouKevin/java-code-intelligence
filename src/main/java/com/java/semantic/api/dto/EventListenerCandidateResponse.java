@@ -13,12 +13,15 @@ import java.util.Objects;
 public record EventListenerCandidateResponse(
         @ApiMonitoringField(ApiMonitoringMode.NESTED) MethodTargetPayload target,
         @ApiMonitoringField(ApiMonitoringMode.SIZE) List<ListenerAnnotationEvidenceResponse> listenerAnnotations,
-        @ApiMonitoringField(ApiMonitoringMode.NESTED) TextRangePayload sourceRange) {
+        @ApiMonitoringField(ApiMonitoringMode.NESTED) TextRangePayload sourceRange,
+        @ApiMonitoringField(ApiMonitoringMode.NESTED) List<DiscoveryFollowUpResponse> availableFollowUps) {
 
     public EventListenerCandidateResponse {
         target = Objects.requireNonNull(target, "target is required");
         listenerAnnotations = List.copyOf(Objects.requireNonNull(
                 listenerAnnotations, "listenerAnnotations are required"));
         sourceRange = Objects.requireNonNull(sourceRange, "sourceRange is required");
+        availableFollowUps = List.copyOf(Objects.requireNonNull(
+                availableFollowUps, "availableFollowUps are required"));
     }
 }

@@ -80,7 +80,7 @@ class InternalSourceReferenceControllerTest {
                 .andExpect(jsonPath("$.targetDeclaration.target.identity.methodName").value("submit"))
                 .andExpect(jsonPath("$.targetDeclaration.declarationRange.start.line").value(10))
                 .andExpect(jsonPath("$.targetDeclaration.availableFollowUps[0].operation")
-                        .value("GET_JAVA_SOURCE_SEGMENT"))
+                        .value("GET_SOURCE_SEGMENT"))
                 .andExpect(jsonPath("$.referenceGroups[0].context.kind").value("METHOD"))
                 .andExpect(jsonPath("$.referenceGroups[0].representativeReferences[0].range.start.line")
                         .value(30))

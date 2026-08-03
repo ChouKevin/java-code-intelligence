@@ -112,13 +112,13 @@ class MapperConceptProjectionTest {
                         new MapperStatementEvidence(
                                 oracleIdentity,
                                 "select",
-                                "<select id=\"findOrders\">SELECT secret_marker FROM orders</select>",
+                                location(oracleIdentity.resourcePath()),
                                 List.of(),
                                 Optional.of(mappedMethod)),
                         new MapperStatementEvidence(
                                 postgresIdentity,
                                 "select",
-                                "SELECT annotation_secret FROM orders",
+                                location(postgresIdentity.resourcePath()),
                                 List.of(),
                                 Optional.empty())),
                 List.of());
@@ -170,13 +170,13 @@ class MapperConceptProjectionTest {
                         new MapperStatementEvidence(
                                 pathDelimiterIdentity,
                                 "select",
-                                "<select id=\"findOrders\">SELECT 1</select>",
+                                location(pathDelimiterIdentity.resourcePath()),
                                 List.of(),
                                 Optional.empty()),
                         new MapperStatementEvidence(
                                 databaseDelimiterIdentity,
                                 "select",
-                                "<select id=\"findOrders\">SELECT 2</select>",
+                                location(databaseDelimiterIdentity.resourcePath()),
                                 List.of(),
                                 Optional.empty())),
                 List.of());
@@ -217,8 +217,8 @@ class MapperConceptProjectionTest {
                 MapperEvidenceRepresentation.ANNOTATION_SQL_TEXT);
 
         assertThat(syntax.mapperEvidenceIndex()).isPresent();
-        assertThat(syntax.mapperEvidenceIndex().orElseThrow().statement(annotationIdentity).orElseThrow().content())
-                .contains("SELECT 訂單名稱 FROM orders WHERE id = #{id}");
+        assertThat(syntax.mapperEvidenceIndex().orElseThrow().statement(annotationIdentity).orElseThrow()
+                .location().sourceFile()).isEqualTo(annotationIdentity.resourcePath());
     }
 
     @Test
@@ -321,5 +321,12 @@ class MapperConceptProjectionTest {
                             assertThat(mapping.targets()).singleElement().satisfies(target ->
                                     assertThat(target.parameterTypes()).containsExactly("java.lang.String"));
                         }));
+    }
+    private static com.java.semantic.syntax.domain.SourceRange location(String sourceFile) {
+        return new com.java.semantic.syntax.domain.SourceRange(
+                sourceFile,
+                new com.java.semantic.syntax.domain.SyntaxRange(
+                        new com.java.semantic.syntax.domain.SyntaxPosition(0, 0),
+                        new com.java.semantic.syntax.domain.SyntaxPosition(0, 1)));
     }
 }

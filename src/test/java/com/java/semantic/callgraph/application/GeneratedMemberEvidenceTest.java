@@ -11,7 +11,7 @@ import com.java.semantic.syntax.domain.SourceTypeMetadata;
 import com.java.semantic.syntax.domain.SourceFieldMetadata;
 import com.java.semantic.syntax.domain.SourceMethodMetadata;
 import com.java.semantic.syntax.domain.MethodTargetResolution;
-import com.java.semantic.syntax.domain.SourceSlice;
+import com.java.semantic.syntax.domain.SourceRange;
 import com.java.semantic.syntax.domain.SyntaxInvocation;
 import com.java.semantic.syntax.domain.SyntaxInvocation.InvocationKind;
 import com.java.semantic.syntax.domain.SyntaxPosition;
@@ -150,13 +150,14 @@ class GeneratedMemberEvidenceTest {
         int lastDot = fullyQualifiedName.lastIndexOf('.');
         String simpleName = fullyQualifiedName.substring(lastDot + 1);
         String packageName = lastDot >= 0 ? fullyQualifiedName.substring(0, lastDot) : "";
+        String sourceFile = "src/main/java/" + fullyQualifiedName.replace('.', '/') + ".java";
         SyntaxRange range = range(0, 0, 10, 0);
         return com.java.semantic.syntax.domain.SourceTypeMetadataFixture.sourceType(
                 simpleName, packageName, fullyQualifiedName,
-                "src/main/java/" + fullyQualifiedName.replace('.', '/') + ".java",
+                sourceFile,
                 SourceTypeKind.CLASS, false, List.of(), List.of(), annotations, List.of(),
                 fields, methods, fluent, fluent, List.of(), range,
-                new SourceSlice(range, "class " + simpleName + " {}"), false, List.of());
+                new SourceRange(sourceFile, range), false, List.of());
     }
 
     private static SourceFieldMetadata field(String name, String type) {
@@ -167,8 +168,8 @@ class GeneratedMemberEvidenceTest {
     private static SourceMethodMetadata method(String name, List<String> paramTypes) {
         SyntaxRange range = range(0, 0, 1, 0);
         return new SourceMethodMetadata(
-                name, paramTypes, null, null, 1, 2, range,
-                new SourceSlice(range, "void " + name + "() {}"), List.of(), Optional.empty(), List.of(), List.of(),
+                name, paramTypes, null, Optional.empty(),
+                new SourceRange("Generated.java", range), List.of(), Optional.empty(), List.of(), List.of(),
                 List.of(), range.start(), MethodTargetResolution.unresolved("test-fixture"), true, false, true);
     }
 

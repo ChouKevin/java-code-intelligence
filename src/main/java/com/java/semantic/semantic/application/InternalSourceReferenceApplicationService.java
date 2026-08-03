@@ -14,7 +14,7 @@ import com.java.semantic.syntax.domain.ExactSourceDeclarationResolver;
 import com.java.semantic.syntax.domain.RepositorySyntax;
 import com.java.semantic.syntax.domain.SourceMethodMetadata;
 import com.java.semantic.syntax.domain.SourceTypeMetadata;
-import com.java.semantic.syntax.domain.SyntaxExtractionService;
+import com.java.semantic.syntax.domain.RevisionBoundRepositorySyntaxProvider;
 import com.java.semantic.syntax.domain.SyntaxPosition;
 import com.java.semantic.syntax.domain.SyntaxRange;
 import org.slf4j.Logger;
@@ -60,21 +60,21 @@ public final class InternalSourceReferenceApplicationService {
     private final RepositoryApplicationService repositoryApplicationService;
     private final ExactSourceDeclarationResolver declarationResolver;
     private final JavaSemanticService semanticService;
-    private final SyntaxExtractionService syntaxExtractionService;
+    private final RevisionBoundRepositorySyntaxProvider repositorySyntaxProvider;
     private final InternalReferenceAnalysisCache cache;
 
     public InternalSourceReferenceApplicationService(
             RepositoryApplicationService repositoryApplicationService,
             ExactSourceDeclarationResolver declarationResolver,
             JavaSemanticService semanticService,
-            SyntaxExtractionService syntaxExtractionService,
+            RevisionBoundRepositorySyntaxProvider repositorySyntaxProvider,
             InternalReferenceAnalysisCache cache) {
         this.repositoryApplicationService = Objects.requireNonNull(
                 repositoryApplicationService, "repositoryApplicationService is required");
         this.declarationResolver = Objects.requireNonNull(declarationResolver, "declarationResolver is required");
         this.semanticService = Objects.requireNonNull(semanticService, "semanticService is required");
-        this.syntaxExtractionService = Objects.requireNonNull(
-                syntaxExtractionService, "syntaxExtractionService is required");
+        this.repositorySyntaxProvider = Objects.requireNonNull(
+                repositorySyntaxProvider, "repositorySyntaxProvider is required");
         this.cache = Objects.requireNonNull(cache, "cache is required");
     }
 
@@ -187,7 +187,7 @@ public final class InternalSourceReferenceApplicationService {
                 declaration.target().sourceFile(), declaration.identifierRange());
         deduplicated.remove(declarationIdentifier);
         int repositoryLocalReferenceCount = deduplicated.size();
-        RepositorySyntax syntax = syntaxExtractionService.extract(snapshot.root());
+        RepositorySyntax syntax = repositorySyntaxProvider.get(snapshot);
         Map<InternalReferenceContext, List<InternalReferenceOccurrence>> grouped = new LinkedHashMap<>();
         Set<String> hitFiles = new LinkedHashSet<>();
         int totalReferenceCount = 0;
@@ -243,11 +243,11 @@ public final class InternalSourceReferenceApplicationService {
             RepositorySyntax syntax, LocalReference reference) {
         List<SourceTypeMetadata> containingTypes = syntax.sourceTypes().stream()
                 .filter(metadata -> reference.sourceFile().equals(metadata.declaration().identity().sourceFile()))
-                .filter(metadata -> contains(metadata.declaration().source().range(), reference.range()))
+                .filter(metadata -> contains(metadata.declaration().declarationLocation().range(), reference.range()))
                 .sorted(Comparator
-                        .comparing((SourceTypeMetadata metadata) -> metadata.declaration().source().range().start(),
+                        .comparing((SourceTypeMetadata metadata) -> metadata.declaration().declarationLocation().range().start(),
                                 POSITION_ORDER.reversed())
-                        .thenComparing(metadata -> metadata.declaration().source().range().end(), POSITION_ORDER)
+                        .thenComparing(metadata -> metadata.declaration().declarationLocation().range().end(), POSITION_ORDER)
                         .thenComparing(metadata -> metadata.declaration().identity().fullyQualifiedName()))
                 .toList();
         if (containingTypes.isEmpty()) {
@@ -255,10 +255,10 @@ public final class InternalSourceReferenceApplicationService {
         }
         SourceTypeMetadata containingType = containingTypes.getFirst();
         Optional<MethodTarget> method = containingType.members().methods().stream()
-                .filter(candidate -> contains(candidate.range(), reference.range()))
+                .filter(candidate -> contains(candidate.declarationLocation().range(), reference.range()))
                 .filter(candidate -> candidate.analysisTarget().target().isPresent())
                 .sorted(Comparator
-                        .comparing(SourceMethodMetadata::range,
+                        .comparing((SourceMethodMetadata candidate) -> candidate.declarationLocation().range(),
                                 Comparator.comparing(SyntaxRange::start, POSITION_ORDER.reversed())
                                         .thenComparing(SyntaxRange::end, POSITION_ORDER))
                         .thenComparing(SourceMethodMetadata::name)

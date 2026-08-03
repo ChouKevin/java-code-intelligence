@@ -205,8 +205,8 @@ class CanonicalMethodDeclarationResolverTest {
     private SourceTypeMetadata withResolution(SourceTypeMetadata metadata, MethodTargetResolution resolution) {
         SourceMethodMetadata method = metadata.members().methods().getFirst();
         SourceMethodMetadata replacement = new SourceMethodMetadata(
-                method.name(), method.paramTypes(), method.sql(), method.sqlSource(),
-                method.startLine(), method.endLine(), method.range(), method.source(),
+                method.name(), method.paramTypes(), method.sqlSource(), method.annotationSqlLocation(),
+                method.declarationLocation(),
                 method.parameterTypeReferences(), method.returnType(), method.invocations(), method.annotationEvidence(),
                 method.bodyTypeReferences(), method.namePosition(), resolution,
                 method.executableDeclaration(), method.abstractDeclaration(), method.overridableDeclaration());

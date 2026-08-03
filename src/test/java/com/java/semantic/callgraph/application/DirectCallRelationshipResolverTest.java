@@ -25,7 +25,7 @@ import com.java.semantic.syntax.domain.SourceMethodMetadata;
 import com.java.semantic.syntax.domain.SourceTypeKind;
 import com.java.semantic.syntax.domain.MethodTargetResolution;
 import com.java.semantic.syntax.domain.RepositorySyntax;
-import com.java.semantic.syntax.domain.SourceSlice;
+import com.java.semantic.syntax.domain.SourceRange;
 import com.java.semantic.syntax.domain.SyntaxInvocation;
 import com.java.semantic.syntax.domain.SyntaxPosition;
 import com.java.semantic.syntax.domain.SyntaxRange;
@@ -484,15 +484,15 @@ class DirectCallRelationshipResolverTest {
         SyntaxRange range = range(0, 0, 30, 0);
         SyntaxRange methodRange = range(0, 0, 5, 0);
         SourceMethodMetadata method = new SourceMethodMetadata(
-                target.methodName(), target.parameterTypes(), null, null, 1, 6,
-                methodRange, new SourceSlice(methodRange, "void " + target.methodName() + "() {}"),
+                target.methodName(), target.parameterTypes(), null, Optional.empty(),
+                new SourceRange(target.sourceFile(), methodRange),
                 List.<TypeReference>of(), Optional.empty(), invocations, List.of(), List.of(), methodRange.start(),
                 MethodTargetResolution.resolved(target), executableDeclaration, !executableDeclaration, true);
         return com.java.semantic.syntax.domain.SourceTypeMetadataFixture.sourceType(
                 target.className(), target.packageName(), target.packageName() + "." + target.className(),
                 target.sourceFile(), kind, false, List.of(), List.of(), List.of(), List.of(), List.of(),
                 List.of(method), false, false, List.of(), range,
-                new SourceSlice(range, "class " + target.className() + " {}"), false, beanQualifiers);
+                new SourceRange(target.sourceFile(), range), false, beanQualifiers);
     }
 
     private static SemanticCall externalCall(String rawSignature, int line) {

@@ -2,8 +2,8 @@ package com.java.semantic.syntax.adapter.jdt;
 
 import java.io.IOException;
 import java.io.StringReader;
-import java.io.StringWriter;
 import java.io.UncheckedIOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -18,13 +18,6 @@ import javax.xml.XMLConstants;
 import javax.xml.parsers.DocumentBuilder;
 import javax.xml.parsers.DocumentBuilderFactory;
 import javax.xml.parsers.ParserConfigurationException;
-import javax.xml.transform.OutputKeys;
-import javax.xml.transform.Transformer;
-import javax.xml.transform.TransformerException;
-import javax.xml.transform.TransformerFactory;
-import javax.xml.transform.dom.DOMSource;
-import javax.xml.transform.stream.StreamResult;
-
 import com.java.semantic.syntax.domain.MapperEvidenceIndex;
 import com.java.semantic.syntax.domain.MapperEvidenceRepresentation;
 import com.java.semantic.syntax.domain.MapperFragmentEvidence;
@@ -32,6 +25,7 @@ import com.java.semantic.syntax.domain.MapperFragmentIdentity;
 import com.java.semantic.syntax.domain.MapperStatementEvidence;
 import com.java.semantic.syntax.domain.MapperStatementIdentity;
 import com.java.semantic.syntax.domain.MapperStatementKey;
+import com.java.semantic.syntax.domain.SourceRange;
 import com.java.semantic.repository.domain.RepositorySourceContainment;
 import com.java.semantic.repository.domain.RepositorySourceContainmentResult;
 
@@ -131,6 +125,7 @@ class MapperXmlSqlExtractor {
             builder.setEntityResolver((publicId, systemId) -> new InputSource(new StringReader("")));
             builder.setErrorHandler(new ThrowingErrorHandler());
 
+            String source = Files.readString(xmlPath, StandardCharsets.UTF_8);
             Document document = builder.parse(xmlPath.toFile());
             Element root = document.getDocumentElement();
             if (!MAPPER_ELEMENT.equals(root.getNodeName())) {
@@ -146,7 +141,12 @@ class MapperXmlSqlExtractor {
             for (String tag : SQL_TAGS) {
                 indexTag(root, tag, normalizedStatements);
             }
-            indexEvidence(root, namespace, repositoryRelativePath(repositoryRoot, xmlPath), statementEvidence, fragments);
+            indexEvidence(
+                    MapperXmlElementLocations.directMapperChildren(source),
+                    namespace,
+                    repositoryRelativePath(repositoryRoot, xmlPath),
+                    statementEvidence,
+                    fragments);
         } catch (Exception exception) {
             log.warn("Mapper XML skipped category={} exceptionType={}",
                     "MAPPER_XML_PARSE_FAILED", exception.getClass().getSimpleName());
@@ -154,19 +154,16 @@ class MapperXmlSqlExtractor {
     }
 
     private void indexEvidence(
-            Element root,
+            List<MapperXmlElementLocations.ElementLocation> elements,
             String namespace,
             String resourcePath,
             List<MapperStatementEvidence> statements,
-            List<MapperFragmentEvidence> fragments) throws TransformerException {
+            List<MapperFragmentEvidence> fragments) {
         int documentOrdinal = 0;
-        for (Node child = root.getFirstChild(); Objects.nonNull(child); child = child.getNextSibling()) {
-            if (!(child instanceof Element element)) {
-                continue;
-            }
-            if (SQL_TAGS.contains(element.getNodeName())) {
+        for (MapperXmlElementLocations.ElementLocation element : elements) {
+            if (SQL_TAGS.contains(element.name())) {
                 statementEvidenceOf(namespace, resourcePath, documentOrdinal, element).ifPresent(statements::add);
-            } else if (FRAGMENT_ELEMENT.equals(element.getNodeName())) {
+            } else if (FRAGMENT_ELEMENT.equals(element.name())) {
                 fragmentEvidenceOf(namespace, resourcePath, documentOrdinal, element).ifPresent(fragments::add);
             }
             documentOrdinal++;
@@ -177,8 +174,8 @@ class MapperXmlSqlExtractor {
             String namespace,
             String resourcePath,
             int documentOrdinal,
-            Element element) throws TransformerException {
-        String statementId = element.getAttribute("id");
+            MapperXmlElementLocations.ElementLocation element) {
+        String statementId = element.attributes().get("id");
         if (!StringUtils.hasText(statementId)) {
             return Optional.empty();
         }
@@ -190,9 +187,9 @@ class MapperXmlSqlExtractor {
                 MapperEvidenceRepresentation.MAPPER_XML_ELEMENT);
         return Optional.of(new MapperStatementEvidence(
                 identity,
-                element.getNodeName(),
-                serialize(element),
-                includeRefIdsOf(element),
+                element.name(),
+                new SourceRange(resourcePath, element.range()),
+                element.descendantAttributeValues("include", "refid"),
                 Optional.empty()));
     }
 
@@ -200,8 +197,8 @@ class MapperXmlSqlExtractor {
             String namespace,
             String resourcePath,
             int documentOrdinal,
-            Element element) throws TransformerException {
-        String fragmentId = element.getAttribute("id");
+            MapperXmlElementLocations.ElementLocation element) {
+        String fragmentId = element.attributes().get("id");
         if (!StringUtils.hasText(fragmentId)) {
             return Optional.empty();
         }
@@ -211,33 +208,12 @@ class MapperXmlSqlExtractor {
                 resourcePath,
                 documentOrdinal,
                 MapperEvidenceRepresentation.MAPPER_XML_ELEMENT);
-        return Optional.of(new MapperFragmentEvidence(identity, serialize(element)));
+        return Optional.of(new MapperFragmentEvidence(identity, new SourceRange(resourcePath, element.range())));
     }
 
-    private static Optional<String> optionalAttribute(Element element, String name) {
-        String value = element.getAttribute(name);
+    private static Optional<String> optionalAttribute(MapperXmlElementLocations.ElementLocation element, String name) {
+        String value = element.attributes().get(name);
         return StringUtils.hasText(value) ? Optional.of(value) : Optional.empty();
-    }
-
-    private static List<String> includeRefIdsOf(Element element) {
-        List<String> refIds = new ArrayList<>();
-        NodeList includes = element.getElementsByTagName("include");
-        for (int index = 0; index < includes.getLength(); index++) {
-            Element include = (Element) includes.item(index);
-            optionalAttribute(include, "refid").ifPresent(refIds::add);
-        }
-        return List.copyOf(refIds);
-    }
-
-    private static String serialize(Element element) throws TransformerException {
-        TransformerFactory factory = TransformerFactory.newInstance();
-        factory.setFeature(XMLConstants.FEATURE_SECURE_PROCESSING, true);
-        Transformer transformer = factory.newTransformer();
-        transformer.setOutputProperty(OutputKeys.OMIT_XML_DECLARATION, "yes");
-        transformer.setOutputProperty(OutputKeys.INDENT, "no");
-        StringWriter output = new StringWriter();
-        transformer.transform(new DOMSource(element), new StreamResult(output));
-        return output.toString();
     }
 
     private static String repositoryRelativePath(Path repositoryRoot, Path xmlPath) {

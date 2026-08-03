@@ -122,7 +122,7 @@ Content-Type: application/json
     const implementations = method.availableFollowUps.find(
       item => item.operation === "DISCOVER_METHOD_IMPLEMENTATIONS");
     if (source) {
-      client.global.set("exactMethodSourceRequest", JSON.stringify(source.request));
+      client.global.set("methodSourceRequest", JSON.stringify(source.request));
     }
     if (implementations) {
       client.global.set("implementationDiscoveryRequest", JSON.stringify(implementations.request));
@@ -130,29 +130,35 @@ Content-Type: application/json
   }
 %}
 
-### Exact method source from the complete GET_METHOD_SOURCE projection captured above.
+### Method source from the complete GET_METHOD_SOURCE projection captured above.
 POST {{baseUrl}}/v1/discovery/method-source
 X-Api-Token: {{apiToken}}
 Content-Type: application/json
 
-{{exactMethodSourceRequest}}
+{{methodSourceRequest}}
 
 > {%
-  const variant = response.body.variants[0];
-  const next = variant.availableFollowUps.find(
-    item => item.operation === "GET_METHOD_SOURCE_SEGMENT");
-  if (next) {
-    client.global.set("sourceSegmentRequest", JSON.stringify(next.request));
+  const continuation = response.body.availableFollowUps.find(
+    item => item.operation === "GET_SOURCE_SEGMENT");
+  if (continuation) {
+    client.global.set("methodSourceSegmentRequest", JSON.stringify(continuation.request));
   }
 %}
 
-### Oversized source only: execute the complete stateless segment projection and repeat with nextSegmentFollowUp.request.
-### Skip this request when the exact source was inline and had no GET_METHOD_SOURCE_SEGMENT follow-up.
-POST {{baseUrl}}/v1/discovery/method-source-segment
+### Oversized method source only: repeat with each returned segment.nextLocation.
+POST {{baseUrl}}/v1/discovery/source-segment
 X-Api-Token: {{apiToken}}
 Content-Type: application/json
 
-{{sourceSegmentRequest}}
+{{methodSourceSegmentRequest}}
+
+> {%
+  const continuation = response.body.availableFollowUps.find(
+    item => item.operation === "GET_SOURCE_SEGMENT");
+  if (continuation) {
+    client.global.set("methodSourceSegmentRequest", JSON.stringify(continuation.request));
+  }
+%}
 
 ### Type member continuation: retain the same canonical fullyQualifiedName and fixed revision.
 POST {{baseUrl}}/v1/discovery/type-members
@@ -216,81 +222,84 @@ Content-Type: application/json
 
 > {%
   const mapper = response.body.candidates.find(
-    candidate => candidate.kind === "MAPPER_STATEMENT"
-      && candidate.mapperStatementMapping?.status === "RESOLVED");
-  if (mapper) {
-    const mappedMethod = mapper.mapperStatementMapping.candidates[0];
-    const methodSql = mappedMethod.availableFollowUps.find(
-      item => item.operation === "GET_METHOD_SQL");
-    if (methodSql) {
-      client.global.set("mapperStatementRequest", JSON.stringify(methodSql.request));
-    }
+    candidate => candidate.identity?.kind === "MAPPER_STATEMENT");
+  const statementEvidence = mapper?.availableFollowUps.find(
+    item => item.operation === "GET_EVIDENCE_SOURCE"
+      && item.request.identity.kind !== "MAPPER_FRAGMENT");
+  const fragmentEvidence = mapper?.availableFollowUps.find(
+    item => item.operation === "GET_EVIDENCE_SOURCE"
+      && item.request.identity.kind === "MAPPER_FRAGMENT");
+  if (statementEvidence) {
+    client.global.set("mapperStatementEvidenceRequest", JSON.stringify(statementEvidence.request));
+  }
+  if (fragmentEvidence) {
+    client.global.set("mapperFragmentEvidenceRequest", JSON.stringify(fragmentEvidence.request));
   }
 %}
 
-### Fetch every legal XML/annotation statement variant for the mapped MethodTarget.
-POST {{baseUrl}}/v1/discovery/method-sql
+### Read one exact annotation or mapper statement variant using its complete typed evidence identity.
+POST {{baseUrl}}/v1/discovery/evidence-source
 X-Api-Token: {{apiToken}}
 Content-Type: application/json
 
-{{mapperStatementRequest}}
+{{mapperStatementEvidenceRequest}}
 
 > {%
-  const variants = response.body.variants;
-  const include = variants
-    .flatMap(variant => variant.includeResolutions)
-    .find(resolution =>
-      (resolution.status === "RESOLVED" || resolution.status === "AMBIGUOUS")
-      && resolution.availableFollowUps.length > 0);
-  const segmented = variants.find(
-    variant => variant.availableFollowUps.some(item => item.operation === "GET_METHOD_SQL_SEGMENT"));
-  if (include) {
-    const fragment = include.availableFollowUps.find(
-      item => item.operation === "GET_MAPPER_FRAGMENT");
-    client.global.set("mapperFragmentRequest", JSON.stringify(fragment.request));
-  }
-  if (segmented) {
-    const segment = segmented.availableFollowUps.find(
-      item => item.operation === "GET_METHOD_SQL_SEGMENT");
-    client.global.set("statementSegmentRequest", JSON.stringify(segment.request));
+  const continuation = response.body.availableFollowUps.find(
+    item => item.operation === "GET_SOURCE_SEGMENT");
+  if (continuation) {
+    client.global.set("statementSourceSegmentRequest", JSON.stringify(continuation.request));
   }
 %}
 
-### Follow the first resolved or ambiguous include using the complete request emitted by the statement response.
-### No fragment identity is supplied or reconstructed by the operator; for AMBIGUOUS, run every emitted follow-up.
-POST {{baseUrl}}/v1/discovery/mapper-sql-fragment
+### Read the exact mapper fragment using the complete typed evidence follow-up returned above.
+POST {{baseUrl}}/v1/discovery/evidence-source
 X-Api-Token: {{apiToken}}
 Content-Type: application/json
 
-{{mapperFragmentRequest}}
+{{mapperFragmentEvidenceRequest}}
 
 > {%
-  const variant = response.body.variants[0];
-  const next = variant.availableFollowUps.find(
-    item => item.operation === "GET_MAPPER_FRAGMENT_SEGMENT");
-  if (next) {
-    client.global.set("fragmentSegmentRequest", JSON.stringify(next.request));
+  const continuation = response.body.availableFollowUps.find(
+    item => item.operation === "GET_SOURCE_SEGMENT");
+  if (continuation) {
+    client.global.set("fragmentSourceSegmentRequest", JSON.stringify(continuation.request));
   }
 %}
 
-### Oversized statement only: execute this request, then repeat with nextSegmentFollowUp.request.
-### Repeat the sequence for every statement variant that emitted GET_METHOD_SQL_SEGMENT.
-POST {{baseUrl}}/v1/discovery/method-sql-segment
+### Oversized statement evidence only: repeat with each returned segment.nextLocation.
+POST {{baseUrl}}/v1/discovery/source-segment
 X-Api-Token: {{apiToken}}
 Content-Type: application/json
 
-{{statementSegmentRequest}}
+{{statementSourceSegmentRequest}}
 
-### Oversized fragment only: execute this request, then repeat with nextSegmentFollowUp.request.
-POST {{baseUrl}}/v1/discovery/mapper-fragment-segment
+> {%
+  const continuation = response.body.availableFollowUps.find(
+    item => item.operation === "GET_SOURCE_SEGMENT");
+  if (continuation) {
+    client.global.set("statementSourceSegmentRequest", JSON.stringify(continuation.request));
+  }
+%}
+
+### Oversized fragment evidence only: repeat with each returned segment.nextLocation.
+POST {{baseUrl}}/v1/discovery/source-segment
 X-Api-Token: {{apiToken}}
 Content-Type: application/json
 
-{{fragmentSegmentRequest}}
+{{fragmentSourceSegmentRequest}}
+
+> {%
+  const continuation = response.body.availableFollowUps.find(
+    item => item.operation === "GET_SOURCE_SEGMENT");
+  if (continuation) {
+    client.global.set("fragmentSourceSegmentRequest", JSON.stringify(continuation.request));
+  }
+%}
 
 ### Compare evidence semantics.
-### Confirm the outgoing graph SQL is normalized while method-sql and mapper-sql-fragment remain exact raw evidence.
-### Confirm inline content is complete; oversized content has no inline prefix and uses only its typed segment follow-up.
+### Confirm outgoing graph SQL remains typed/derived while evidence-source content preserves exact annotation/XML text.
+### Confirm oversized content continues only through segment.nextLocation at the same fixed revision.
 
 ### Partial extraction coverage.
 ### Run this against a representative repository/revision containing a known syntax-failed production Java file.

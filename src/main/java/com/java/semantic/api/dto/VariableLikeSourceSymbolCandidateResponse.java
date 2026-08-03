@@ -16,7 +16,7 @@ public record VariableLikeSourceSymbolCandidateResponse(
         @ApiMonitoringField(ApiMonitoringMode.NESTED) TextRangePayload declarationRange,
         @ApiMonitoringField(ApiMonitoringMode.NESTED) TextRangePayload representativeOccurrence,
         @ApiMonitoringField(ApiMonitoringMode.VALUE) int occurrenceCount,
-        @ApiMonitoringField(ApiMonitoringMode.SIZE) List<DiscoveryFollowUpResponse> availableFollowUps)
+        @ApiMonitoringField(ApiMonitoringMode.NESTED) List<DiscoveryFollowUpResponse> availableFollowUps)
         implements SourceSymbolCandidateResponse {
 
     public VariableLikeSourceSymbolCandidateResponse {

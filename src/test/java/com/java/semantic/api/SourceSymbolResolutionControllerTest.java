@@ -16,7 +16,7 @@ import com.java.semantic.syntax.application.NavigableSourceSymbolCandidate;
 import com.java.semantic.syntax.application.RevisionBoundSourceSymbolResolution;
 import com.java.semantic.syntax.application.SourceContextCandidateLimits;
 import com.java.semantic.syntax.application.SourceMethodContextCandidate;
-import com.java.semantic.syntax.application.SourceRange;
+import com.java.semantic.syntax.domain.SourceRange;
 import com.java.semantic.syntax.application.SourceSymbolCandidate;
 import com.java.semantic.syntax.application.SourceSymbolContext;
 import com.java.semantic.syntax.application.SourceSymbolResolutionApplicationService;

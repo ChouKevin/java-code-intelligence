@@ -22,7 +22,7 @@ public record DiscoverConceptsResponse(
         @ApiMonitoringField(ApiMonitoringMode.NESTED) PageResponse page,
         @ApiMonitoringField(ApiMonitoringMode.NESTED) ConceptCoverageResponse coverage,
         @ApiMonitoringField(ApiMonitoringMode.SIZE) List<ConceptIssueSummaryResponse> issueSummaries,
-        @ApiMonitoringField(ApiMonitoringMode.SIZE) /** 可直接執行的分頁後續動作 */
+        @ApiMonitoringField(ApiMonitoringMode.NESTED) /** 可直接執行的分頁後續動作 */
         List<DiscoveryFollowUpResponse> availableFollowUps,
         @ApiMonitoringField(ApiMonitoringMode.SIZE) /** 無結果且無下一頁時提供不含 API/request 的精煉指引 */
         List<UnavailableDiscoveryFollowUpResponse> unavailableFollowUps) {

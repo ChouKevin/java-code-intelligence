@@ -17,11 +17,11 @@ import com.java.semantic.semantic.domain.SemanticPosition;
 import com.java.semantic.semantic.domain.SemanticTargetNotFoundException;
 import com.java.semantic.syntax.domain.CanonicalMethodDeclarationResolver;
 import com.java.semantic.syntax.domain.SourceMethodMetadata;
-import com.java.semantic.syntax.domain.SourceTypeKind;
+import com.java.semantic.syntax.domain.MethodImplementationEligibilityPolicy;
 import com.java.semantic.syntax.domain.SourceTypeMetadata;
 import com.java.semantic.syntax.domain.MethodTargetResolution;
 import com.java.semantic.syntax.domain.RepositorySyntax;
-import com.java.semantic.syntax.domain.SyntaxExtractionService;
+import com.java.semantic.syntax.domain.RevisionBoundRepositorySyntaxProvider;
 
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -44,7 +44,7 @@ public final class MethodImplementationDiscoveryApplicationService {
             .thenComparing(MethodTarget::parameterTypes, MethodImplementationDiscoveryApplicationService::compareParameters);
 
     private final RepositoryApplicationService repositoryApplicationService;
-    private final SyntaxExtractionService syntaxExtractionService;
+    private final RevisionBoundRepositorySyntaxProvider repositorySyntaxProvider;
     private final CanonicalMethodDeclarationResolver declarationResolver;
     private final JavaSemanticService semanticService;
     private final CanonicalTargetProjection canonicalTargetProjection;
@@ -53,7 +53,7 @@ public final class MethodImplementationDiscoveryApplicationService {
 
     public MethodImplementationDiscoveryApplicationService(
             RepositoryApplicationService repositoryApplicationService,
-            SyntaxExtractionService syntaxExtractionService,
+            RevisionBoundRepositorySyntaxProvider repositorySyntaxProvider,
             CanonicalMethodDeclarationResolver declarationResolver,
             JavaSemanticService semanticService,
             CanonicalTargetProjection canonicalTargetProjection,
@@ -61,8 +61,8 @@ public final class MethodImplementationDiscoveryApplicationService {
             int candidateLimit) {
         this.repositoryApplicationService = Objects.requireNonNull(
                 repositoryApplicationService, "repositoryApplicationService is required");
-        this.syntaxExtractionService = Objects.requireNonNull(
-                syntaxExtractionService, "syntaxExtractionService is required");
+        this.repositorySyntaxProvider = Objects.requireNonNull(
+                repositorySyntaxProvider, "repositorySyntaxProvider is required");
         this.declarationResolver = Objects.requireNonNull(declarationResolver, "declarationResolver is required");
         this.semanticService = Objects.requireNonNull(semanticService, "semanticService is required");
         this.canonicalTargetProjection = Objects.requireNonNull(
@@ -85,7 +85,7 @@ public final class MethodImplementationDiscoveryApplicationService {
     private RevisionBoundMethodImplementations discoverSnapshot(
             RepositorySnapshot snapshot,
             MethodImplementationDiscoveryQuery query) {
-        RepositorySyntax syntax = syntaxExtractionService.extract(snapshot.root());
+        RepositorySyntax syntax = repositorySyntaxProvider.get(snapshot);
         RepositorySyntaxIndex index = new RepositorySyntaxIndex(snapshot.repositoryId().value(), syntax);
         MethodTargetResolution resolution = declarationResolver.resolve(syntax, query.declarationTarget());
         SemanticDeclarationAnchor anchor = declarationAnchor(syntax, query.declarationTarget(), resolution);
@@ -117,14 +117,7 @@ public final class MethodImplementationDiscoveryApplicationService {
                 .orElseThrow(() -> new ImplementationDiscoveryContractException(target));
         SourceTypeMetadata metadata = index.sourceType(target)
                 .orElseThrow(() -> new ImplementationDiscoveryContractException(target));
-        boolean abstractDeclaration = declaration.abstractDeclaration()
-                && !declaration.executableDeclaration();
-        boolean abstractInterfaceMethod = SourceTypeKind.INTERFACE.equals(metadata.declaration().kind())
-                && abstractDeclaration;
-        boolean abstractClassMethod = SourceTypeKind.CLASS.equals(metadata.declaration().kind())
-                && metadata.declaration().abstractType()
-                && abstractDeclaration;
-        if (!abstractInterfaceMethod && !abstractClassMethod) {
+        if (!MethodImplementationEligibilityPolicy.isEligible(metadata, declaration)) {
             throw new ImplementationTargetUnsupportedException(target);
         }
     }

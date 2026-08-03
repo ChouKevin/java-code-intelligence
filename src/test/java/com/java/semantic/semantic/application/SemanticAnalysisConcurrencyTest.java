@@ -25,7 +25,7 @@ import com.java.semantic.syntax.domain.SourceTypeMetadata;
 import com.java.semantic.syntax.domain.SourceTypeMetadataFixture;
 import com.java.semantic.syntax.domain.MethodTargetResolution;
 import com.java.semantic.syntax.domain.RepositorySyntax;
-import com.java.semantic.syntax.domain.SyntaxExtractionService;
+import com.java.semantic.syntax.domain.RevisionBoundRepositorySyntaxProvider;
 import com.java.semantic.syntax.domain.SyntaxPosition;
 import com.java.semantic.support.ConcurrencyTestSupport;
 import org.junit.jupiter.api.Test;
@@ -66,7 +66,7 @@ class SemanticAnalysisConcurrencyTest {
         OutgoingGraphFragment firstResult = mock(OutgoingGraphFragment.class);
         OutgoingGraphFragment secondResult = mock(OutgoingGraphFragment.class);
         RepositoryApplicationService repositories = mock(RepositoryApplicationService.class);
-        SyntaxExtractionService syntax = mock(SyntaxExtractionService.class);
+        RevisionBoundRepositorySyntaxProvider syntax = mock(RevisionBoundRepositorySyntaxProvider.class);
         CanonicalMethodDeclarationResolver resolver = mock(CanonicalMethodDeclarationResolver.class);
         JavaSemanticService semantic = mock(JavaSemanticService.class);
         SemanticCallGraphBuilder builder = mock(SemanticCallGraphBuilder.class);
@@ -82,8 +82,8 @@ class SemanticAnalysisConcurrencyTest {
             Function<RepositorySnapshot, OutgoingGraphFragment> callback = invocation.getArgument(2);
             return callback.apply(snapshot);
         });
-        when(syntax.extract(firstSnapshot.root())).thenReturn(firstSyntax);
-        when(syntax.extract(secondSnapshot.root())).thenReturn(secondSyntax);
+        when(syntax.get(firstSnapshot)).thenReturn(firstSyntax);
+        when(syntax.get(secondSnapshot)).thenReturn(secondSyntax);
         when(resolver.resolve(firstSyntax, firstTarget)).thenReturn(MethodTargetResolution.resolved(firstTarget));
         when(resolver.resolve(secondSyntax, secondTarget)).thenReturn(MethodTargetResolution.resolved(secondTarget));
         when(semantic.resolveExactMethod(eq(firstSnapshot), any())).thenReturn(firstMethod);
@@ -127,7 +127,7 @@ class SemanticAnalysisConcurrencyTest {
         IncomingGraphFragment firstResult = mock(IncomingGraphFragment.class);
         IncomingGraphFragment secondResult = mock(IncomingGraphFragment.class);
         RepositoryApplicationService repositories = mock(RepositoryApplicationService.class);
-        SyntaxExtractionService syntax = mock(SyntaxExtractionService.class);
+        RevisionBoundRepositorySyntaxProvider syntax = mock(RevisionBoundRepositorySyntaxProvider.class);
         CanonicalMethodDeclarationResolver resolver = mock(CanonicalMethodDeclarationResolver.class);
         JavaSemanticService semantic = mock(JavaSemanticService.class);
         SemanticCallGraphBuilder outgoingBuilder = mock(SemanticCallGraphBuilder.class);
@@ -143,8 +143,8 @@ class SemanticAnalysisConcurrencyTest {
             Function<RepositorySnapshot, IncomingGraphFragment> callback = invocation.getArgument(2);
             return callback.apply(snapshot);
         });
-        when(syntax.extract(firstSnapshot.root())).thenReturn(firstSyntax);
-        when(syntax.extract(secondSnapshot.root())).thenReturn(secondSyntax);
+        when(syntax.get(firstSnapshot)).thenReturn(firstSyntax);
+        when(syntax.get(secondSnapshot)).thenReturn(secondSyntax);
         when(resolver.resolve(firstSyntax, firstTarget)).thenReturn(MethodTargetResolution.resolved(firstTarget));
         when(resolver.resolve(secondSyntax, secondTarget)).thenReturn(MethodTargetResolution.resolved(secondTarget));
         when(semantic.resolveExactMethod(eq(firstSnapshot), any())).thenReturn(firstMethod);

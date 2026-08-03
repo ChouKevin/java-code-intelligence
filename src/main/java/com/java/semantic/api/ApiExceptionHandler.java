@@ -20,12 +20,11 @@ import com.java.semantic.semantic.domain.SemanticEngineStartFailedException;
 import com.java.semantic.semantic.domain.SemanticProtocolException;
 import com.java.semantic.semantic.domain.SemanticRequestTimeoutException;
 import com.java.semantic.semantic.domain.SemanticTargetNotFoundException;
-import com.java.semantic.syntax.application.ExactContentApplicationService.ExactContentNotFoundException;
+import com.java.semantic.syntax.application.EvidenceSourceNotFoundException;
 import com.java.semantic.syntax.application.concept.ConceptKindUnavailableException;
 import com.java.semantic.syntax.application.concept.ConceptIdentityNotFoundException;
 import com.java.semantic.syntax.application.TypeMemberTypeNotFoundException;
 import com.java.semantic.syntax.application.SourceSegmentNotFoundException;
-import com.java.semantic.syntax.application.SourceSegmentTooLargeException;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -62,12 +61,12 @@ public class ApiExceptionHandler {
         return response(HttpStatus.NOT_FOUND, "REPOSITORY_NOT_FOUND", "repository is not configured", request);
     }
 
-    @ExceptionHandler({ExactContentHttpNotFoundException.class, ExactContentNotFoundException.class})
-    public ResponseEntity<ApiErrorResponse> exactContentNotFound(HttpServletRequest request) {
+    @ExceptionHandler(EvidenceSourceNotFoundException.class)
+    public ResponseEntity<ApiErrorResponse> evidenceSourceNotFound(HttpServletRequest request) {
         return response(
                 HttpStatus.NOT_FOUND,
-                "EXACT_CONTENT_NOT_FOUND",
-                "exact content was not found",
+                "EVIDENCE_SOURCE_NOT_FOUND",
+                "typed evidence was not found",
                 request);
     }
 
@@ -84,17 +83,8 @@ public class ApiExceptionHandler {
     public ResponseEntity<ApiErrorResponse> sourceSegmentNotFound(HttpServletRequest request) {
         return response(
                 HttpStatus.NOT_FOUND,
-                "EXACT_CONTENT_NOT_FOUND",
-                "exact content was not found",
-                request);
-    }
-
-    @ExceptionHandler(SourceSegmentTooLargeException.class)
-    public ResponseEntity<ApiErrorResponse> sourceSegmentTooLarge(HttpServletRequest request) {
-        return response(
-                HttpStatus.PAYLOAD_TOO_LARGE,
-                "SOURCE_SEGMENT_TOO_LARGE",
-                "exact source segment exceeds the byte limit",
+                "SOURCE_SEGMENT_NOT_FOUND",
+                "source segment was not found",
                 request);
     }
 

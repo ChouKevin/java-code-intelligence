@@ -31,7 +31,7 @@ import com.java.semantic.syntax.application.EventListenerDiscoveryPage;
 import com.java.semantic.syntax.application.ListenerAnnotationEvidence;
 import com.java.semantic.syntax.application.ListenerAnnotationKind;
 import com.java.semantic.syntax.application.RevisionBoundEventListenerDiscovery;
-import com.java.semantic.syntax.application.SourceRange;
+import com.java.semantic.syntax.domain.SourceRange;
 import com.java.semantic.syntax.domain.SyntaxPosition;
 import com.java.semantic.syntax.domain.SyntaxRange;
 import org.junit.jupiter.api.Test;
@@ -456,7 +456,6 @@ class AnalysisControllerTest {
                 NodeContentState.FULL_SOURCE,
                 NodeTraversalState.EXPANDED,
                 DispatchKind.SYNCHRONOUS,
-                Optional.of("void place() {}"),
                 Optional.of(new CallSiteRange(TARGET.sourceFile(), 0, 0, 1, 0))));
     }
 
@@ -469,7 +468,6 @@ class AnalysisControllerTest {
                 NodeContentState.FULL_SOURCE,
                 NodeTraversalState.EXPANDED,
                 DispatchKind.SYNCHRONOUS,
-                Optional.of("void checkout() {}"),
                 Optional.of(new CallSiteRange(CALLER_TARGET.sourceFile(), 0, 0, 1, 0))));
         return nodes;
     }

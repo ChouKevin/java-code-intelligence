@@ -11,7 +11,7 @@ import com.java.semantic.syntax.domain.EntryPointClass;
 import com.java.semantic.syntax.domain.EntryPointType;
 import com.java.semantic.syntax.domain.MethodTargetResolution;
 import com.java.semantic.syntax.domain.RepositorySyntax;
-import com.java.semantic.syntax.domain.SyntaxExtractionService;
+import com.java.semantic.syntax.domain.RevisionBoundRepositorySyntaxProvider;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -44,7 +44,7 @@ class EntryPointDiscoveryApplicationServiceTest {
     private RepositoryApplicationService repositoryApplicationService;
 
     @Mock
-    private SyntaxExtractionService syntaxExtractionService;
+    private RevisionBoundRepositorySyntaxProvider repositorySyntaxProvider;
 
     @Mock
     private EntryPointDiscoveryFilter discoveryFilter;
@@ -58,7 +58,7 @@ class EntryPointDiscoveryApplicationServiceTest {
         extracted = new RepositorySyntax(List.of(entryPointClass("read")), List.of());
         filtered = new RepositorySyntax(List.of(entryPointClass("read")), List.of());
         service = new EntryPointDiscoveryApplicationService(
-                repositoryApplicationService, syntaxExtractionService, discoveryFilter);
+                repositoryApplicationService, repositorySyntaxProvider, discoveryFilter);
     }
 
     @Test
@@ -70,7 +70,7 @@ class EntryPointDiscoveryApplicationServiceTest {
                     Function<RepositorySnapshot, RevisionBoundEntryPoints> operation = invocation.getArgument(2);
                     return operation.apply(snapshot);
                 });
-        when(syntaxExtractionService.extract(REPOSITORY_ROOT)).thenReturn(extracted);
+        when(repositorySyntaxProvider.get(snapshot)).thenReturn(extracted);
         when(discoveryFilter.filter(REPOSITORY_ID, extracted, requested)).thenReturn(filtered);
 
         RevisionBoundEntryPoints result = service.list(REPOSITORY_ID, REVISION, requested);
@@ -78,8 +78,8 @@ class EntryPointDiscoveryApplicationServiceTest {
         assertThat(result.repositoryId()).isEqualTo(REPOSITORY_ID);
         assertThat(result.analyzedRevision()).isEqualTo(REVISION);
         assertThat(result.entryPoints()).isEqualTo(filtered.entryPoints());
-        InOrder order = inOrder(syntaxExtractionService, discoveryFilter);
-        order.verify(syntaxExtractionService).extract(REPOSITORY_ROOT);
+        InOrder order = inOrder(repositorySyntaxProvider, discoveryFilter);
+        order.verify(repositorySyntaxProvider).get(snapshot);
         order.verify(discoveryFilter).filter(REPOSITORY_ID, extracted, requested);
     }
 
@@ -88,7 +88,7 @@ class EntryPointDiscoveryApplicationServiceTest {
         RepositorySnapshot snapshot = new RepositorySnapshot(
                 REPOSITORY_ID, REPOSITORY_ROOT, RepositoryRevision.fixture());
         delegateSnapshot(snapshot);
-        when(syntaxExtractionService.extract(REPOSITORY_ROOT)).thenReturn(extracted);
+        when(repositorySyntaxProvider.get(snapshot)).thenReturn(extracted);
         when(discoveryFilter.filter(
                 REPOSITORY_ID, extracted, EnumSet.allOf(EntryPointType.class)))
                 .thenReturn(RepositorySyntax.empty());
@@ -109,7 +109,7 @@ class EntryPointDiscoveryApplicationServiceTest {
                 "module-a/src/main/java/com/acme/order/OrderController.java", "moduleA");
         RepositorySyntax unsorted = new RepositorySyntax(List.of(moduleB, moduleA), List.of());
         delegateSnapshot(snapshot);
-        when(syntaxExtractionService.extract(REPOSITORY_ROOT)).thenReturn(extracted);
+        when(repositorySyntaxProvider.get(snapshot)).thenReturn(extracted);
         when(discoveryFilter.filter(REPOSITORY_ID, extracted, EnumSet.of(EntryPointType.API)))
                 .thenReturn(unsorted);
 

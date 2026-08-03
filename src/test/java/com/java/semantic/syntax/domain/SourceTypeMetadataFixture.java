@@ -30,7 +30,7 @@ public final class SourceTypeMetadataFixture {
             boolean chainedAccessors,
             List<String> profiles,
             SyntaxRange range,
-            SourceSlice source,
+            SourceRange declarationLocation,
             boolean primary,
             List<String> beanQualifiers) {
         JavaTypeIdentity javaType = new JavaTypeIdentity(packageName, className);
@@ -38,7 +38,7 @@ public final class SourceTypeMetadataFixture {
             throw new IllegalArgumentException("fullyQualifiedName must match packageName and className");
         }
         return new SourceTypeMetadata(
-                new SourceTypeDeclaration(new SourceTypeIdentity(javaType, sourceFile), kind, abstractType, source),
+                new SourceTypeDeclaration(new SourceTypeIdentity(javaType, sourceFile), kind, abstractType, declarationLocation),
                 new SourceTypeRelationships(nominalTypes(extendedTypes), nominalTypes(implementedTypes)),
                 new SourceTypeMembers(fields, methods, fluentSetters, chainedAccessors),
                 new FrameworkTypeFacts(annotationNames.stream()
@@ -66,7 +66,7 @@ public final class SourceTypeMetadataFixture {
                 false,
                 List.of(),
                 range,
-                new SourceSlice(range, "class " + target.className() + " {}"),
+                new SourceRange(target.sourceFile(), range),
                 false,
                 List.of());
     }

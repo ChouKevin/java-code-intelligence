@@ -2,6 +2,8 @@ package com.java.semantic.api;
 
 import com.java.semantic.api.monitoring.ApiMonitoringField;
 import com.java.semantic.api.monitoring.ApiMonitoringMode;
+import com.java.semantic.api.dto.EvidenceSourceResponse;
+import com.java.semantic.api.dto.SourceSegmentPayload;
 import com.tngtech.archunit.core.domain.JavaClass;
 import com.tngtech.archunit.core.importer.ClassFileImporter;
 import com.tngtech.archunit.core.importer.ImportOption;
@@ -46,6 +48,7 @@ class ApiMonitoringContractTest {
     @Test
     void should_accept_only_project_owned_records_or_closed_record_only_nested_hierarchies() {
         assertThat(isSupportedNested(component(DirectRecordPayload.class))).isTrue();
+        assertThat(isSupportedNested(component(NestedRecordListPayload.class))).isTrue();
         assertThat(isSupportedNested(component(ClosedInterfacePayload.class))).isTrue();
         assertThat(isSupportedNested(component(OptionalClosedInterfacePayload.class))).isTrue();
         assertThat(isSupportedNested(component(NestedOptionalPayload.class))).isFalse();
@@ -53,9 +56,27 @@ class ApiMonitoringContractTest {
         assertThat(isSupportedNested(component(NonRecordPermittedPayload.class))).isFalse();
     }
 
+    @Test
+    void should_omit_evidence_source_content_while_nesting_its_location_and_segment() {
+        assertThat(monitoringMode(EvidenceSourceResponse.class, "location")).isEqualTo(ApiMonitoringMode.NESTED);
+        assertThat(monitoringMode(EvidenceSourceResponse.class, "segment")).isEqualTo(ApiMonitoringMode.NESTED);
+        assertThat(monitoringMode(SourceSegmentPayload.class, "location")).isEqualTo(ApiMonitoringMode.NESTED);
+        assertThat(monitoringMode(SourceSegmentPayload.class, "content")).isEqualTo(ApiMonitoringMode.OMIT);
+        assertThat(monitoringMode(SourceSegmentPayload.class, "nextLocation")).isEqualTo(ApiMonitoringMode.NESTED);
+    }
+
     private static RecordComponent component(Class<?> recordType) {
         return Arrays.stream(recordType.getRecordComponents())
                 .filter(component -> "nested".equals(component.getName()))
+                .findFirst()
+                .orElseThrow();
+    }
+
+    private static ApiMonitoringMode monitoringMode(Class<?> recordType, String componentName) {
+        return Arrays.stream(recordType.getRecordComponents())
+                .filter(component -> componentName.equals(component.getName()))
+                .map(component -> component.getAnnotation(ApiMonitoringField.class))
+                .map(ApiMonitoringField::value)
                 .findFirst()
                 .orElseThrow();
     }
@@ -90,7 +111,9 @@ class ApiMonitoringContractTest {
         if ("sourceFile".equals(component.getName()) && mode != ApiMonitoringMode.VALUE) {
             violations.add(componentId + " must use VALUE for a repository-relative source file");
         }
-        if (Collection.class.isAssignableFrom(component.getType()) && mode != ApiMonitoringMode.SIZE) {
+        if (Collection.class.isAssignableFrom(component.getType())
+                && mode != ApiMonitoringMode.SIZE
+                && !(mode == ApiMonitoringMode.NESTED && isSupportedNested(component))) {
             violations.add(componentId + " must use SIZE for a collection");
         }
         if (isSensitiveContent(component.getName()) && mode != ApiMonitoringMode.OMIT) {
@@ -155,14 +178,17 @@ class ApiMonitoringContractTest {
         if (nestedType instanceof Class<?> nestedClass) {
             return isSupportedNestedClass(nestedClass);
         }
-        if (!(nestedType instanceof ParameterizedType parameterizedType)
-                || parameterizedType.getRawType() != Optional.class) {
+        if (!(nestedType instanceof ParameterizedType parameterizedType)) {
             return false;
         }
         Type[] typeArguments = parameterizedType.getActualTypeArguments();
-        return typeArguments.length == 1
-                && typeArguments[0] instanceof Class<?> nestedClass
-                && isSupportedNestedClass(nestedClass);
+        if (parameterizedType.getRawType() == Optional.class
+                || parameterizedType.getRawType() == List.class) {
+            return typeArguments.length == 1
+                    && typeArguments[0] instanceof Class<?> nestedClass
+                    && isSupportedNestedClass(nestedClass);
+        }
+        return false;
     }
 
     private static boolean isSupportedNestedClass(Class<?> nestedClass) {
@@ -209,6 +235,10 @@ class ApiMonitoringContractTest {
 
     private record DirectRecordPayload(
             @ApiMonitoringField(ApiMonitoringMode.NESTED) DirectNestedRecord nested) {
+    }
+
+    private record NestedRecordListPayload(
+            @ApiMonitoringField(ApiMonitoringMode.NESTED) List<DirectNestedRecord> nested) {
     }
 
     private record ClosedInterfacePayload(

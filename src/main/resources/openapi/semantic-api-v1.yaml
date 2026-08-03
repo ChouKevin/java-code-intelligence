@@ -434,22 +434,22 @@ paths:
           $ref: '#/components/responses/ServiceUnavailable'
         '504':
           $ref: '#/components/responses/GatewayTimeout'
-  /v1/discovery/java-source-segment:
+  /v1/discovery/source-segment:
     post:
-      operationId: getJavaSourceSegment
+      operationId: getSourceSegment
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/JavaSourceSegmentRequest'
+              $ref: '#/components/schemas/SourceSegmentRequest'
       responses:
         '200':
-          description: Repository-contained Java source segment limited to 64 KiB UTF-8
+          description: RepositorySyntax-authorized source segment limited to 64 KiB UTF-8
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/JavaSourceSegmentResponse'
+                $ref: '#/components/schemas/SourceSegmentResponse'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -460,16 +460,10 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           $ref: '#/components/responses/Conflict'
-        '413':
-          description: Exact requested source range exceeds 64 KiB UTF-8
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ApiErrorResponse'
   /v1/discovery/method-source:
     post:
       operationId: getMethodSource
-      description: Returns exact method source for one canonical composed MethodTargetPayload
+      description: Returns the canonical declaration and its first bounded Java source segment
       requestBody:
         required: true
         content:
@@ -478,7 +472,7 @@ paths:
               $ref: '#/components/schemas/GetMethodSourceRequest'
       responses:
         '200':
-          $ref: '#/components/responses/ExactContent'
+          $ref: '#/components/responses/MethodSource'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -491,119 +485,19 @@ paths:
           $ref: '#/components/responses/Conflict'
         '500':
           $ref: '#/components/responses/MutationFailed'
-  /v1/discovery/method-sql:
+  /v1/discovery/evidence-source:
     post:
-      operationId: getMethodSql
-      description: Returns every legal mapper statement variant for one canonical method identity
+      operationId: getEvidenceSource
+      description: Returns one revision-pinned typed evidence source and its first bounded raw source segment
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/GetMapperStatementRequest'
+              $ref: '#/components/schemas/EvidenceSourceRequest'
       responses:
         '200':
-          $ref: '#/components/responses/ExactContent'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/AuthDisabled'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        '409':
-          $ref: '#/components/responses/Conflict'
-        '500':
-          $ref: '#/components/responses/MutationFailed'
-  /v1/discovery/mapper-sql-fragment:
-    post:
-      operationId: getMapperFragment
-      description: Returns exact serialized mapper XML for one indexed fragment identity
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/GetMapperFragmentRequest'
-      responses:
-        '200':
-          $ref: '#/components/responses/ExactContent'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/AuthDisabled'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        '409':
-          $ref: '#/components/responses/Conflict'
-        '500':
-          $ref: '#/components/responses/MutationFailed'
-  /v1/discovery/method-source-segment:
-    post:
-      operationId: getMethodSourceSegment
-      description: Statelessly reconstructs exact method source and validates contentRef before returning one Unicode-safe segment
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/GetMethodSourceSegmentRequest'
-      responses:
-        '200':
-          $ref: '#/components/responses/ExactContentSegment'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/AuthDisabled'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        '409':
-          $ref: '#/components/responses/Conflict'
-        '500':
-          $ref: '#/components/responses/MutationFailed'
-  /v1/discovery/method-sql-segment:
-    post:
-      operationId: getMethodSqlSegment
-      description: Statelessly reconstructs mapper statement evidence and validates contentRef before returning one Unicode-safe segment
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/GetMapperStatementSegmentRequest'
-      responses:
-        '200':
-          $ref: '#/components/responses/ExactContentSegment'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/AuthDisabled'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        '409':
-          $ref: '#/components/responses/Conflict'
-        '500':
-          $ref: '#/components/responses/MutationFailed'
-  /v1/discovery/mapper-fragment-segment:
-    post:
-      operationId: getMapperFragmentSegment
-      description: Statelessly reconstructs mapper fragment XML and validates contentRef before returning one Unicode-safe segment
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/GetMapperFragmentSegmentRequest'
-      responses:
-        '200':
-          $ref: '#/components/responses/ExactContentSegment'
+          $ref: '#/components/responses/EvidenceSource'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -697,18 +591,18 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/DiscoverTypeMembersResponse'
-    ExactContent:
-      description: Revision-bound exact source or mapper evidence without inline truncation
+    EvidenceSource:
+      description: Revision-bound typed evidence identity, canonical location, and bounded source segment
       content:
         application/json:
           schema:
-            $ref: '#/components/schemas/ExactContentResponse'
-    ExactContentSegment:
-      description: One Unicode code-point-safe exact content segment with typed stateless continuation
+            $ref: '#/components/schemas/EvidenceSourceResponse'
+    MethodSource:
+      description: Revision-bound canonical method declaration with its first bounded Java source segment
       content:
         application/json:
           schema:
-            $ref: '#/components/schemas/ExactContentSegmentResponse'
+            $ref: '#/components/schemas/MethodSourceResponse'
     SourceSymbolResolution:
       description: Revision-bound source-only symbol resolution and executable retries
       content:
@@ -1205,13 +1099,13 @@ components:
           pattern: '^[0-9a-f]{40}$|^FIXTURE$'
         target:
           $ref: '#/components/schemas/MethodTargetPayload'
-    GetMapperStatementRequest:
+    EvidenceSourceRequest:
       type: object
       additionalProperties: false
       required:
         - repoId
         - expectedRevision
-        - target
+        - identity
       properties:
         repoId:
           type: string
@@ -1221,113 +1115,37 @@ components:
           type: string
           minLength: 1
           pattern: '^[0-9a-f]{40}$|^FIXTURE$'
-        target:
-          $ref: '#/components/schemas/MethodTargetPayload'
-    GetMapperFragmentRequest:
+        identity:
+          $ref: '#/components/schemas/EvidenceSourceIdentityPayload'
+    EvidenceSourceIdentityPayload:
       type: object
       additionalProperties: false
       required:
-        - repoId
-        - expectedRevision
-        - fragmentIdentity
+        - kind
       properties:
-        repoId:
+        kind:
           type: string
-          minLength: 1
-          pattern: '^[a-z0-9][a-z0-9._-]{0,63}$'
-        expectedRevision:
-          type: string
-          minLength: 1
-          pattern: '^[0-9a-f]{40}$|^FIXTURE$'
+          enum:
+            - ANNOTATION_SQL
+            - MAPPER_STATEMENT
+            - MAPPER_FRAGMENT
+        statementIdentity:
+          $ref: '#/components/schemas/MapperStatementIdentityPayload'
         fragmentIdentity:
           $ref: '#/components/schemas/MapperFragmentIdentityPayload'
-    GetMethodSourceSegmentRequest:
-      type: object
-      additionalProperties: false
-      description: Stateless continuation carrying the original exact method authority; contentRef is consistency validation, not a lookup key
-      required:
-        - repoId
-        - expectedRevision
-        - target
-        - contentRef
-        - segmentIndex
-      properties:
-        repoId:
-          type: string
-          minLength: 1
-          pattern: '^[a-z0-9][a-z0-9._-]{0,63}$'
-        expectedRevision:
-          type: string
-          minLength: 1
-          pattern: '^[0-9a-f]{40}$|^FIXTURE$'
-        target:
-          $ref: '#/components/schemas/MethodTargetPayload'
-        contentRef:
-          type: string
-          minLength: 1
-          maxLength: 128
-          pattern: '^[^\u0000-\u001F\u007F-\u009F]+$'
-        segmentIndex:
-          type: integer
-          minimum: 0
-    GetMapperStatementSegmentRequest:
-      type: object
-      additionalProperties: false
-      description: Stateless continuation carrying the original exact mapper method authority; contentRef is consistency validation, not a lookup key
-      required:
-        - repoId
-        - expectedRevision
-        - target
-        - contentRef
-        - segmentIndex
-      properties:
-        repoId:
-          type: string
-          minLength: 1
-          pattern: '^[a-z0-9][a-z0-9._-]{0,63}$'
-        expectedRevision:
-          type: string
-          minLength: 1
-          pattern: '^[0-9a-f]{40}$|^FIXTURE$'
-        target:
-          $ref: '#/components/schemas/MethodTargetPayload'
-        contentRef:
-          type: string
-          minLength: 1
-          maxLength: 128
-          pattern: '^[^\u0000-\u001F\u007F-\u009F]+$'
-        segmentIndex:
-          type: integer
-          minimum: 0
-    GetMapperFragmentSegmentRequest:
-      type: object
-      additionalProperties: false
-      description: Stateless continuation carrying the original exact fragment authority; contentRef is consistency validation, not a lookup key
-      required:
-        - repoId
-        - expectedRevision
-        - fragmentIdentity
-        - contentRef
-        - segmentIndex
-      properties:
-        repoId:
-          type: string
-          minLength: 1
-          pattern: '^[a-z0-9][a-z0-9._-]{0,63}$'
-        expectedRevision:
-          type: string
-          minLength: 1
-          pattern: '^[0-9a-f]{40}$|^FIXTURE$'
-        fragmentIdentity:
-          $ref: '#/components/schemas/MapperFragmentIdentityPayload'
-        contentRef:
-          type: string
-          minLength: 1
-          maxLength: 128
-          pattern: '^[^\u0000-\u001F\u007F-\u009F]+$'
-        segmentIndex:
-          type: integer
-          minimum: 0
+      oneOf:
+        - properties:
+            kind:
+              enum: [ANNOTATION_SQL, MAPPER_STATEMENT]
+          required: [statementIdentity]
+          not:
+            required: [fragmentIdentity]
+        - properties:
+            kind:
+              enum: [MAPPER_FRAGMENT]
+          required: [fragmentIdentity]
+          not:
+            required: [statementIdentity]
     MapperFragmentIdentityPayload:
       type: object
       additionalProperties: false
@@ -1456,6 +1274,7 @@ components:
         - status
         - candidates
         - reasonCode
+        - availableFollowUps
       properties:
         status:
           type: string
@@ -1473,6 +1292,11 @@ components:
             $ref: '#/components/schemas/MethodTargetPayload'
         reasonCode:
           type: string
+        availableFollowUps:
+          type: array
+          description: Complete executable HTTP operations for the next Agent request, not suggestion text
+          items:
+            $ref: '#/components/schemas/DiscoveryFollowUpResponse'
     ApiRouteLookupRequest:
       type: object
       required:
@@ -1548,6 +1372,7 @@ components:
         - candidates
         - page
         - observationSummaries
+        - availableFollowUps
       properties:
         repoId:
           type: string
@@ -1566,6 +1391,10 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/ListenerObservationSummaryResponse'
+        availableFollowUps:
+          type: array
+          items:
+            $ref: '#/components/schemas/DiscoveryFollowUpResponse'
     DiscoverMethodImplementationsRequest:
       type: object
       additionalProperties: false
@@ -1618,6 +1447,7 @@ components:
         - primary
         - qualifiers
         - profiles
+        - availableFollowUps
       properties:
         target:
           $ref: '#/components/schemas/MethodTargetPayload'
@@ -1631,6 +1461,10 @@ components:
           type: array
           items:
             type: string
+        availableFollowUps:
+          type: array
+          items:
+            $ref: '#/components/schemas/DiscoveryFollowUpResponse'
     MethodImplementationResolutionResponse:
       type: object
       additionalProperties: false
@@ -1878,7 +1712,7 @@ components:
           maxItems: 1
           uniqueItems: true
           items:
-            $ref: '#/components/schemas/MapperSqlMethodCandidateResponse'
+            $ref: '#/components/schemas/MapperSourceMethodCandidateResponse'
     AmbiguousMapperStatementMappingResponse:
       type: object
       additionalProperties: false
@@ -1923,43 +1757,6 @@ components:
           uniqueItems: true
           items:
             $ref: '#/components/schemas/MapperSourceMethodCandidateResponse'
-    MapperSqlMethodCandidateResponse:
-      type: object
-      additionalProperties: false
-      required:
-        - target
-        - availableFollowUps
-      properties:
-        target:
-          $ref: '#/components/schemas/MethodTargetPayload'
-        availableFollowUps:
-          type: array
-          minItems: 1
-          maxItems: 1
-          items:
-            allOf:
-              - $ref: '#/components/schemas/ConceptCandidateFollowUpResponse'
-              - type: object
-                properties:
-                  operation:
-                    type: string
-                    enum:
-                      - GET_METHOD_SQL
-                  api:
-                    allOf:
-                      - $ref: '#/components/schemas/DiscoveryFollowUpApiResponse'
-                      - type: object
-                        properties:
-                          path:
-                            type: string
-                            enum:
-                              - /v1/discovery/method-sql
-                          operationId:
-                            type: string
-                            enum:
-                              - getMethodSql
-                  request:
-                    $ref: '#/components/schemas/MethodTargetFollowUpRequestResponse'
     MapperSourceMethodCandidateResponse:
       type: object
       additionalProperties: false
@@ -1971,8 +1768,6 @@ components:
           $ref: '#/components/schemas/MethodTargetPayload'
         availableFollowUps:
           type: array
-          minItems: 1
-          maxItems: 1
           items:
             allOf:
               - $ref: '#/components/schemas/ConceptCandidateFollowUpResponse'
@@ -2576,10 +2371,10 @@ components:
         count:
           type: integer
           minimum: 1
-    JavaSourceSegmentRequest:
+    SourceSegmentRequest:
       type: object
       additionalProperties: false
-      required: [repoId, expectedRevision, sourceRange]
+      required: [repoId, expectedRevision, location]
       properties:
         repoId:
           type: string
@@ -2588,40 +2383,85 @@ components:
         expectedRevision:
           type: string
           pattern: '^[0-9a-f]{40}$|^FIXTURE$'
-        sourceRange:
+        location:
           $ref: '#/components/schemas/SourceRangePayload'
         contextLines:
           type: integer
           minimum: 0
           maximum: 20
-          default: 3
-    JavaSourceSegmentResponse:
+          default: 0
+          description: Surrounding context for canonical Java ranges; mapper XML evidence requires 0
+    SourceSegmentResponse:
       type: object
       additionalProperties: false
-      required:
-        - repoId
-        - analyzedRevision
-        - contentRange
-        - content
-        - contextTruncated
-        - returnedUtf8Bytes
+      required: [repoId, analyzedRevision, segment, contextTruncated, availableFollowUps]
       properties:
         repoId:
           type: string
         analyzedRevision:
           type: string
           pattern: '^[0-9a-f]{40}$|^FIXTURE$'
-        contentRange:
+        segment:
+          $ref: '#/components/schemas/SourceSegmentPayload'
+        contextTruncated:
+          type: boolean
+        availableFollowUps:
+          type: array
+          description: Complete executable continuation operation when another source segment exists
+          items:
+            $ref: '#/components/schemas/DiscoveryFollowUpResponse'
+    SourceSegmentPayload:
+      type: object
+      additionalProperties: false
+      required: [location, content]
+      properties:
+        location:
           $ref: '#/components/schemas/SourceRangePayload'
         content:
           type: string
-          description: Exact unchanged Java source substring bounded to 64 KiB UTF-8
-        contextTruncated:
-          type: boolean
-        returnedUtf8Bytes:
-          type: integer
-          minimum: 0
-          maximum: 65536
+          description: Exact unchanged source substring bounded to 65,536 UTF-8 bytes
+        nextLocation:
+          $ref: '#/components/schemas/SourceRangePayload'
+    EvidenceSourceResponse:
+      type: object
+      additionalProperties: false
+      required: [repoId, analyzedRevision, identity, location, segment, availableFollowUps]
+      properties:
+        repoId:
+          type: string
+        analyzedRevision:
+          type: string
+          pattern: '^[0-9a-f]{40}$|^FIXTURE$'
+        identity:
+          $ref: '#/components/schemas/EvidenceSourceIdentityPayload'
+        location:
+          $ref: '#/components/schemas/SourceRangePayload'
+        segment:
+          $ref: '#/components/schemas/SourceSegmentPayload'
+        availableFollowUps:
+          type: array
+          description: Complete executable continuation operation when another source segment exists
+          items:
+            $ref: '#/components/schemas/DiscoveryFollowUpResponse'
+    MethodSourceResponse:
+      type: object
+      additionalProperties: false
+      required: [repoId, analyzedRevision, declarationLocation, segment, availableFollowUps]
+      properties:
+        repoId:
+          type: string
+        analyzedRevision:
+          type: string
+          pattern: '^[0-9a-f]{40}$|^FIXTURE$'
+        declarationLocation:
+          $ref: '#/components/schemas/SourceRangePayload'
+        segment:
+          $ref: '#/components/schemas/SourceSegmentPayload'
+        availableFollowUps:
+          type: array
+          description: Complete executable HTTP operations for this resolved method
+          items:
+            $ref: '#/components/schemas/DiscoveryFollowUpResponse'
     PageResponse:
       type: object
       additionalProperties: false
@@ -2857,126 +2697,6 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/DiscoveryFollowUpResponse'
-    ExactContentResponse:
-      type: object
-      additionalProperties: false
-      required:
-        - repoId
-        - analyzedRevision
-        - variants
-      properties:
-        repoId:
-          type: string
-        analyzedRevision:
-          type: string
-          pattern: '^[0-9a-f]{40}$|^FIXTURE$'
-        variants:
-          type: array
-          minItems: 1
-          items:
-            $ref: '#/components/schemas/ExactContentVariantResponse'
-    ExactContentVariantResponse:
-      type: object
-      additionalProperties: false
-      required:
-        - utf8ByteCount
-        - segmentCount
-        - includeResolutions
-        - availableFollowUps
-      properties:
-        statementIdentity:
-          $ref: '#/components/schemas/MapperStatementIdentityPayload'
-        fragmentIdentity:
-          $ref: '#/components/schemas/MapperFragmentIdentityPayload'
-        content:
-          type: string
-          description: Complete untruncated source, mapper XML, or annotation SQL content
-        contentRef:
-          type: string
-          description: Opaque deterministic consistency reference emitted only for oversized content
-        utf8ByteCount:
-          type: integer
-          minimum: 0
-        segmentCount:
-          type: integer
-          minimum: 0
-        includeResolutions:
-          type: array
-          description: Ordered include resolutions derived from typed mapper evidence
-          items:
-            $ref: '#/components/schemas/MapperIncludeResolutionResponse'
-        availableFollowUps:
-          type: array
-          items:
-            $ref: '#/components/schemas/DiscoveryFollowUpResponse'
-      allOf:
-        - oneOf:
-            - not:
-                anyOf:
-                  - required:
-                      - statementIdentity
-                  - required:
-                      - fragmentIdentity
-              properties:
-                includeResolutions:
-                  maxItems: 0
-            - required:
-                - statementIdentity
-              not:
-                required:
-                  - fragmentIdentity
-            - required:
-                - fragmentIdentity
-              not:
-                required:
-                  - statementIdentity
-              properties:
-                includeResolutions:
-                  maxItems: 0
-        - oneOf:
-            - required:
-                - content
-              not:
-                required:
-                  - contentRef
-              properties:
-                segmentCount:
-                  enum:
-                    - 0
-                availableFollowUps:
-                  maxItems: 0
-            - required:
-                - contentRef
-              not:
-                required:
-                  - content
-              properties:
-                segmentCount:
-                  minimum: 1
-                availableFollowUps:
-                  minItems: 1
-                  maxItems: 1
-    MapperIncludeResolutionResponse:
-      type: object
-      additionalProperties: false
-      description: Complete executable fragment candidates are retained for ambiguous typed include evidence
-      required:
-        - refId
-        - status
-        - availableFollowUps
-      properties:
-        refId:
-          type: string
-        status:
-          type: string
-          enum:
-            - RESOLVED
-            - AMBIGUOUS
-            - UNRESOLVED
-        availableFollowUps:
-          type: array
-          items:
-            $ref: '#/components/schemas/DiscoveryFollowUpResponse'
     MapperStatementIdentityPayload:
       type: object
       additionalProperties: false
@@ -3001,32 +2721,6 @@ components:
           enum:
             - MAPPER_XML_ELEMENT
             - ANNOTATION_SQL_TEXT
-    ExactContentSegmentResponse:
-      type: object
-      additionalProperties: false
-      required:
-        - contentRef
-        - segmentIndex
-        - segmentCount
-        - utf8ByteCount
-        - content
-      properties:
-        contentRef:
-          type: string
-        segmentIndex:
-          type: integer
-          minimum: 0
-        segmentCount:
-          type: integer
-          minimum: 1
-        utf8ByteCount:
-          type: integer
-          minimum: 0
-        content:
-          type: string
-          description: Complete Unicode code-point-safe segment without truncation
-        nextSegmentFollowUp:
-          $ref: '#/components/schemas/DiscoveryFollowUpResponse'
     ConceptCandidateFollowUpResponse:
       type: object
       additionalProperties: false
@@ -3039,13 +2733,11 @@ components:
           type: string
           enum:
             - GET_METHOD_SOURCE
-            - GET_METHOD_SQL
             - ANALYZE_OUTGOING_CALL_GRAPH
             - ANALYZE_INCOMING_CALL_GRAPH
             - DISCOVER_METHOD_IMPLEMENTATIONS
             - RESOLVE_CONCEPT
             - GET_TYPE_MEMBERS
-            - GET_NEXT_PAGE
         api:
           $ref: '#/components/schemas/DiscoveryFollowUpApiResponse'
         request:
@@ -3062,20 +2754,18 @@ components:
           type: string
           enum:
             - GET_METHOD_SOURCE
-            - GET_METHOD_SQL
-            - GET_MAPPER_FRAGMENT
-            - GET_METHOD_SOURCE_SEGMENT
-            - GET_METHOD_SQL_SEGMENT
-            - GET_MAPPER_FRAGMENT_SEGMENT
             - ANALYZE_OUTGOING_CALL_GRAPH
             - ANALYZE_INCOMING_CALL_GRAPH
             - DISCOVER_METHOD_IMPLEMENTATIONS
             - RESOLVE_CONCEPT
             - GET_TYPE_MEMBERS
-            - GET_NEXT_PAGE
+            - DISCOVER_TYPE_MEMBERS
+            - DISCOVER_CONCEPTS
+            - DISCOVER_EVENT_LISTENERS
             - RESOLVE_SOURCE_SYMBOL
             - FIND_INTERNAL_REFERENCES
-            - GET_JAVA_SOURCE_SEGMENT
+            - GET_SOURCE_SEGMENT
+            - GET_EVIDENCE_SOURCE
         api:
           $ref: '#/components/schemas/DiscoveryFollowUpApiResponse'
         request:
@@ -3106,19 +2796,17 @@ components:
     DiscoveryFollowUpRequestResponse:
       oneOf:
         - $ref: '#/components/schemas/MethodTargetFollowUpRequestResponse'
-        - $ref: '#/components/schemas/GetMapperFragmentRequestResponse'
-        - $ref: '#/components/schemas/GetMethodSourceSegmentRequestResponse'
-        - $ref: '#/components/schemas/GetMapperStatementSegmentRequestResponse'
-        - $ref: '#/components/schemas/GetMapperFragmentSegmentRequestResponse'
         - $ref: '#/components/schemas/AnalyzeCallGraphRequestResponse'
         - $ref: '#/components/schemas/DiscoverMethodImplementationsRequestResponse'
         - $ref: '#/components/schemas/ResolveConceptRequestResponse'
-        - $ref: '#/components/schemas/ConceptSearchPageRequestResponse'
+        - $ref: '#/components/schemas/DiscoverConceptsRequestResponse'
         - $ref: '#/components/schemas/GetTypeMembersRequestResponse'
         - $ref: '#/components/schemas/DiscoverTypeMembersRequestResponse'
+        - $ref: '#/components/schemas/DiscoverEventListenersRequestResponse'
         - $ref: '#/components/schemas/ResolveSourceSymbolRequestResponse'
         - $ref: '#/components/schemas/FindInternalReferencesRequestResponse'
-        - $ref: '#/components/schemas/GetJavaSourceSegmentRequestResponse'
+        - $ref: '#/components/schemas/GetSourceSegmentRequestResponse'
+        - $ref: '#/components/schemas/GetEvidenceSourceRequestResponse'
     FindInternalReferencesRequestResponse:
       type: object
       additionalProperties: false
@@ -3138,22 +2826,34 @@ components:
           type: integer
           minimum: 1
           maximum: 100
-    GetJavaSourceSegmentRequestResponse:
+    GetSourceSegmentRequestResponse:
       type: object
       additionalProperties: false
-      required: [repoId, expectedRevision, sourceRange, contextLines]
+      required: [repoId, expectedRevision, location, contextLines]
       properties:
         repoId:
           type: string
         expectedRevision:
           type: string
           pattern: '^[0-9a-f]{40}$|^FIXTURE$'
-        sourceRange:
+        location:
           $ref: '#/components/schemas/SourceRangePayload'
         contextLines:
           type: integer
           minimum: 0
           maximum: 20
+    GetEvidenceSourceRequestResponse:
+      type: object
+      additionalProperties: false
+      required: [repoId, expectedRevision, identity]
+      properties:
+        repoId:
+          type: string
+        expectedRevision:
+          type: string
+          pattern: '^[0-9a-f]{40}$|^FIXTURE$'
+        identity:
+          $ref: '#/components/schemas/EvidenceSourceIdentityPayload'
     ResolveSourceSymbolRequestResponse:
       type: object
       additionalProperties: false
@@ -3177,7 +2877,7 @@ components:
     MethodTargetFollowUpRequestResponse:
       type: object
       additionalProperties: false
-      description: Shared complete composed method authority for method source and mapper statement SQL follow-ups
+      description: Shared complete composed method source authority
       required:
         - repoId
         - expectedRevision
@@ -3190,91 +2890,6 @@ components:
           pattern: '^[0-9a-f]{40}$|^FIXTURE$'
         target:
           $ref: '#/components/schemas/MethodTargetPayload'
-    GetMapperFragmentRequestResponse:
-      type: object
-      additionalProperties: false
-      description: Complete stateless mapper fragment request projected from typed mapper evidence
-      required:
-        - repoId
-        - expectedRevision
-        - fragmentIdentity
-      properties:
-        repoId:
-          type: string
-        expectedRevision:
-          type: string
-          pattern: '^[0-9a-f]{40}$|^FIXTURE$'
-        fragmentIdentity:
-          $ref: '#/components/schemas/MapperFragmentIdentityPayload'
-    GetMethodSourceSegmentRequestResponse:
-      type: object
-      additionalProperties: false
-      description: Complete stateless source segment request projection; contentRef is consistency validation, not a lookup key
-      required:
-        - repoId
-        - expectedRevision
-        - target
-        - contentRef
-        - segmentIndex
-      properties:
-        repoId:
-          type: string
-        expectedRevision:
-          type: string
-          pattern: '^[0-9a-f]{40}$|^FIXTURE$'
-        target:
-          $ref: '#/components/schemas/MethodTargetPayload'
-        contentRef:
-          type: string
-        segmentIndex:
-          type: integer
-          minimum: 0
-    GetMapperStatementSegmentRequestResponse:
-      type: object
-      additionalProperties: false
-      description: Complete stateless mapper statement segment request projection; contentRef is consistency validation, not a lookup key
-      required:
-        - repoId
-        - expectedRevision
-        - target
-        - contentRef
-        - segmentIndex
-      properties:
-        repoId:
-          type: string
-        expectedRevision:
-          type: string
-          pattern: '^[0-9a-f]{40}$|^FIXTURE$'
-        target:
-          $ref: '#/components/schemas/MethodTargetPayload'
-        contentRef:
-          type: string
-        segmentIndex:
-          type: integer
-          minimum: 0
-    GetMapperFragmentSegmentRequestResponse:
-      type: object
-      additionalProperties: false
-      description: Complete stateless mapper fragment segment request projection; contentRef is consistency validation, not a lookup key
-      required:
-        - repoId
-        - expectedRevision
-        - fragmentIdentity
-        - contentRef
-        - segmentIndex
-      properties:
-        repoId:
-          type: string
-        expectedRevision:
-          type: string
-          pattern: '^[0-9a-f]{40}$|^FIXTURE$'
-        fragmentIdentity:
-          $ref: '#/components/schemas/MapperFragmentIdentityPayload'
-        contentRef:
-          type: string
-        segmentIndex:
-          type: integer
-          minimum: 0
     AnalyzeCallGraphRequestResponse:
       type: object
       additionalProperties: false
@@ -3325,7 +2940,7 @@ components:
           pattern: '^[0-9a-f]{40}$|^FIXTURE$'
         identity:
           $ref: '#/components/schemas/ConceptIdentityResponse'
-    ConceptSearchPageRequestResponse:
+    DiscoverConceptsRequestResponse:
       type: object
       additionalProperties: false
       required:
@@ -3376,6 +2991,25 @@ components:
           type: string
         matchMode:
           $ref: '#/components/schemas/ConceptMatchMode'
+    DiscoverEventListenersRequestResponse:
+      type: object
+      additionalProperties: false
+      required: [repoId, expectedRevision, eventType, offset, limit]
+      properties:
+        repoId:
+          type: string
+        expectedRevision:
+          type: string
+          pattern: '^[0-9a-f]{40}$|^FIXTURE$'
+        eventType:
+          type: string
+        offset:
+          type: integer
+          minimum: 0
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 100
     GetTypeMembersRequestResponse:
       type: object
       additionalProperties: false
@@ -3447,6 +3081,7 @@ components:
         - target
         - listenerAnnotations
         - sourceRange
+        - availableFollowUps
       properties:
         target:
           $ref: '#/components/schemas/MethodTargetPayload'
@@ -3457,6 +3092,11 @@ components:
             $ref: '#/components/schemas/ListenerAnnotationEvidenceResponse'
         sourceRange:
           $ref: '#/components/schemas/TextRangePayload'
+        availableFollowUps:
+          type: array
+          description: Complete executable HTTP operations for this resolved listener method
+          items:
+            $ref: '#/components/schemas/DiscoveryFollowUpResponse'
     ListenerAnnotationEvidenceResponse:
       type: object
       additionalProperties: false
@@ -3615,6 +3255,7 @@ components:
         - contentState
         - traversalState
         - dispatchKind
+        - availableFollowUps
       properties:
         nodeId:
           type: string
@@ -3631,13 +3272,15 @@ components:
           $ref: '#/components/schemas/GraphTraversalState'
         dispatchKind:
           $ref: '#/components/schemas/DispatchKind'
-        methodBody:
-          type: string
-          nullable: true
         declarationRange:
           nullable: true
           allOf:
             - $ref: '#/components/schemas/TextRangePayload'
+        availableFollowUps:
+          type: array
+          description: Complete executable method-source operation only when this node has an internal canonical target
+          items:
+            $ref: '#/components/schemas/DiscoveryFollowUpResponse'
     GraphEdge:
       type: object
       additionalProperties: false
@@ -3714,6 +3357,7 @@ components:
         - message
         - nodeId
         - candidates
+        - availableFollowUps
       properties:
         code:
           type: string
@@ -3742,6 +3386,11 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/MethodTargetPayload'
+        availableFollowUps:
+          type: array
+          description: Complete executable Java range read when the warning includes a source range
+          items:
+            $ref: '#/components/schemas/DiscoveryFollowUpResponse'
     GraphError:
       type: object
       additionalProperties: false
@@ -4113,9 +3762,7 @@ components:
             - REPOSITORY_REVISION_MISMATCH
             - SEMANTIC_BINDING_AMBIGUOUS
             - SEMANTIC_TARGET_NOT_FOUND
-            - EXACT_CONTENT_NOT_FOUND
             - SOURCE_DECLARATION_NOT_FOUND
-            - SOURCE_SEGMENT_TOO_LARGE
             - TYPE_MEMBER_TYPE_NOT_FOUND
             - SEMANTIC_BINDING_UNRESOLVED
             - IMPLEMENTATION_TARGET_UNSUPPORTED
