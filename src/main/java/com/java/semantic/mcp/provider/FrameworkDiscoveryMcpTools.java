@@ -14,6 +14,7 @@ import org.springframework.stereotype.Component;
 
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 
 /** 發布 framework event 與 implementation discovery MCP 查詢 */
 @Component
@@ -57,7 +58,7 @@ public final class FrameworkDiscoveryMcpTools implements McpQueryProvider {
                 RepositoryId.of(input.repoId()),
                 new RepositoryRevision(input.expectedRevision()),
                 input.eventType(),
-                input.offset(),
+                Optional.ofNullable(input.offset()).orElse(0),
                 input.limit())));
     }
 

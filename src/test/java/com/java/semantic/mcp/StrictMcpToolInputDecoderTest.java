@@ -53,6 +53,20 @@ class StrictMcpToolInputDecoderTest {
     }
 
     @Test
+    void should_accept_missing_or_null_optional_arguments() {
+        OptionalInput omitted = decoder.decode(Map.of("name", "orders", "limit", 5), OptionalInput.class);
+        Map<String, Object> nullArguments = new HashMap<>();
+        nullArguments.put("name", "orders");
+        nullArguments.put("limit", 5);
+        nullArguments.put("filter", null);
+
+        OptionalInput nullValue = decoder.decode(nullArguments, OptionalInput.class);
+
+        assertThat(omitted.filter()).isNull();
+        assertThat(nullValue.filter()).isNull();
+    }
+
+    @Test
     void should_reject_jakarta_constraint_violations_as_invalid_tool_input() {
         assertInvalidInput(Map.of("name", "", "limit", 21));
     }
@@ -65,5 +79,11 @@ class StrictMcpToolInputDecoderTest {
     }
 
     private record SampleInput(@NotBlank String name, @NotNull @Min(1) @Max(20) Integer limit) {
+    }
+
+    private record OptionalInput(
+            @NotBlank String name,
+            @NotNull @Min(1) @Max(20) Integer limit,
+            String filter) {
     }
 }

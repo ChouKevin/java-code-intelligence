@@ -71,7 +71,7 @@ public final class ConceptDiscoveryMcpTools implements McpQueryProvider {
 
     private ConceptDiscoveryMcpDtos.ResolveOutput resolve(ConceptDiscoveryMcpDtos.ResolveInput input) {
         return mapper.resolve(conceptDiscoveryApplicationService.resolve(new ConceptResolveQuery(
-                RepositoryId.of(input.repoId()), new RepositoryRevision(input.expectedRevision()), input.identity())));
+                RepositoryId.of(input.repoId()), new RepositoryRevision(input.expectedRevision()), mapper.toDomain(input.identity()))));
     }
 
     private ConceptDiscoveryMcpDtos.TypeMembersOutput typeMembers(ConceptDiscoveryMcpDtos.TypeMembersInput input) {

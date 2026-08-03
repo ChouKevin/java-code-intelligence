@@ -24,8 +24,7 @@ public final class StrictMcpToolInputDecoder {
         this.objectMapper = objectMapper.rebuild()
                 .enable(
                         DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES,
-                        DeserializationFeature.FAIL_ON_MISSING_CREATOR_PROPERTIES,
-                        DeserializationFeature.FAIL_ON_NULL_CREATOR_PROPERTIES)
+                        DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
                 .withCoercionConfigDefaults(configuration -> {
                     configuration.setCoercion(CoercionInputShape.String, CoercionAction.Fail);
                     configuration.setCoercion(CoercionInputShape.Integer, CoercionAction.Fail);

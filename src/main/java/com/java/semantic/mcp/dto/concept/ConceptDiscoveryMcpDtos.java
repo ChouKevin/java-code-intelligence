@@ -5,7 +5,6 @@ import com.java.semantic.monitoring.MonitoringField;
 import com.java.semantic.monitoring.MonitoringMode;
 import com.java.semantic.syntax.application.TypeMemberKind;
 import com.java.semantic.syntax.application.TypeMemberResult;
-import com.java.semantic.syntax.application.concept.ConceptIdentity;
 import com.java.semantic.syntax.application.concept.ConceptKind;
 import com.java.semantic.syntax.application.concept.ConceptSearchResult;
 import com.java.semantic.syntax.application.concept.ConceptSearchTerm;
@@ -53,7 +52,7 @@ public final class ConceptDiscoveryMcpDtos {
             @Pattern(regexp = "^[a-z0-9][a-z0-9._-]{0,63}$") String repoId,
             @MonitoringField(MonitoringMode.VALUE) @NotBlank
             @Pattern(regexp = "^[0-9a-f]{40}$|^FIXTURE$") String expectedRevision,
-            @MonitoringField(MonitoringMode.NESTED) @NotNull @Valid ConceptIdentity identity) {
+            @MonitoringField(MonitoringMode.NESTED) @NotNull @Valid McpConceptIdentityPayload identity) {
     }
 
     /** exact concept resolution 結果 */

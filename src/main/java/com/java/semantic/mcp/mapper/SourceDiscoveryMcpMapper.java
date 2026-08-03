@@ -1,13 +1,19 @@
 package com.java.semantic.mcp.mapper;
 
 import com.java.semantic.mcp.dto.source.SourceDiscoveryMcpDtos;
+import com.java.semantic.mcp.dto.source.McpEvidenceIdentityPayload;
+import com.java.semantic.mcp.dto.source.McpExactSourceDeclarationTargetPayload;
+import com.java.semantic.mcp.dto.identity.McpJavaIdentityPayloads;
+import com.java.semantic.mcp.dto.identity.McpMapperIdentityPayloads;
 import com.java.semantic.semantic.application.InternalSourceReferenceResult;
 import com.java.semantic.syntax.application.EvidenceSourceResult;
+import com.java.semantic.syntax.application.EvidenceSourceQuery;
 import com.java.semantic.syntax.application.MethodSourceResult;
 import com.java.semantic.syntax.application.RevisionBoundSourceSymbolResolution;
 import com.java.semantic.syntax.application.SourceSegmentResult;
 import com.java.semantic.syntax.domain.SourceRange;
 import com.java.semantic.syntax.domain.SourceRangeSegment;
+import com.java.semantic.syntax.domain.ExactSourceDeclarationTarget;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
@@ -17,6 +23,30 @@ import java.util.Optional;
 /** 將 source navigation 結果投影為 MCP transport DTO */
 @Component
 public final class SourceDiscoveryMcpMapper {
+
+    /** 將封閉 MCP target 還原為 exact declaration domain target */
+    public ExactSourceDeclarationTarget toDomain(McpExactSourceDeclarationTargetPayload payload) {
+        return switch (Objects.requireNonNull(payload, "payload is required")) {
+            case McpExactSourceDeclarationTargetPayload.Type type -> new ExactSourceDeclarationTarget.Type(
+                    McpJavaIdentityPayloads.toDomain(type.identity()));
+            case McpExactSourceDeclarationTargetPayload.Method method -> new ExactSourceDeclarationTarget.Method(
+                    McpJavaIdentityPayloads.toDomain(method.identity()));
+            case McpExactSourceDeclarationTargetPayload.Member member -> new ExactSourceDeclarationTarget.Member(
+                    McpJavaIdentityPayloads.toDomain(member.identity()));
+        };
+    }
+
+    /** 將封閉 MCP evidence identity 還原為既有 evidence domain identity */
+    public EvidenceSourceQuery.EvidenceIdentity toDomain(McpEvidenceIdentityPayload payload) {
+        return switch (Objects.requireNonNull(payload, "payload is required")) {
+            case McpEvidenceIdentityPayload.AnnotationSql annotationSql -> new EvidenceSourceQuery.AnnotationSql(
+                    McpMapperIdentityPayloads.toDomain(annotationSql.identity()));
+            case McpEvidenceIdentityPayload.MapperStatement statement -> new EvidenceSourceQuery.MapperStatement(
+                    McpMapperIdentityPayloads.toDomain(statement.identity()));
+            case McpEvidenceIdentityPayload.MapperFragment fragment -> new EvidenceSourceQuery.MapperFragment(
+                    McpMapperIdentityPayloads.toDomain(fragment.identity()));
+        };
+    }
 
     public SourceDiscoveryMcpDtos.ResolveSymbolOutput symbol(RevisionBoundSourceSymbolResolution result) {
         return new SourceDiscoveryMcpDtos.ResolveSymbolOutput(result);

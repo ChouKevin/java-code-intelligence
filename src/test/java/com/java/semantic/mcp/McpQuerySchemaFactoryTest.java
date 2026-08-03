@@ -5,6 +5,10 @@ import com.fasterxml.jackson.annotation.JsonTypeInfo;
 import io.swagger.v3.oas.annotations.media.ArraySchema;
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.Max;
+import com.java.semantic.mcp.dto.framework.FrameworkDiscoveryMcpDtos;
+import com.java.semantic.mcp.dto.route.ApiRouteMcpDtos;
+import jakarta.validation.Validation;
+import jakarta.validation.Validator;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
@@ -14,8 +18,10 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
 import java.util.List;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class McpQuerySchemaFactoryTest {
 
@@ -42,6 +48,30 @@ class McpQuerySchemaFactoryTest {
         JsonNode schema = objectMapper.readTree(schemaFactory.generateForType(RepresentativeOutput.class));
 
         assertThat(schema.at("/properties/result/anyOf").isArray()).isTrue();
+    }
+
+    @Test
+    void should_share_optional_and_required_input_contracts_with_the_decoder() throws Exception {
+        JsonNode lookupSchema = objectMapper.readTree(schemaFactory.generateForType(ApiRouteMcpDtos.LookupInput.class));
+        JsonNode listenersSchema = objectMapper.readTree(
+                schemaFactory.generateForType(FrameworkDiscoveryMcpDtos.EventListenersInput.class));
+        Validator validator = Validation.buildDefaultValidatorFactory().getValidator();
+        StrictMcpToolInputDecoder decoder = new StrictMcpToolInputDecoder(new JsonMapper(), validator);
+
+        assertThat(lookupSchema.at("/required").toString()).contains("repoId", "expectedRevision", "apiPath")
+                .doesNotContain("httpMethod");
+        assertThat(listenersSchema.at("/required").toString()).contains(
+                "repoId", "expectedRevision", "eventType", "limit").doesNotContain("offset");
+        assertThat(decoder.decode(
+                Map.of("repoId", "orders", "expectedRevision", "FIXTURE", "apiPath", "/orders"),
+                ApiRouteMcpDtos.LookupInput.class).httpMethod()).isNull();
+        assertThat(decoder.decode(
+                Map.of("repoId", "orders", "expectedRevision", "FIXTURE", "eventType", "created", "limit", 5),
+                FrameworkDiscoveryMcpDtos.EventListenersInput.class).offset()).isNull();
+        assertThatThrownBy(() -> decoder.decode(
+                Map.of("repoId", "orders", "expectedRevision", "FIXTURE", "apiPath", "/orders"),
+                ApiRouteMcpDtos.SuggestInput.class))
+                .isInstanceOf(McpToolContractException.class);
     }
 
     private record RepresentativeInput(

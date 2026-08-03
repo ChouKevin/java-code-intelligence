@@ -102,7 +102,7 @@ public final class SourceDiscoveryMcpTools implements McpQueryProvider {
         return mapper.references(internalSourceReferenceApplicationService.find(new InternalSourceReferenceQuery(
                 RepositoryId.of(input.repoId()),
                 new RepositoryRevision(input.expectedRevision()),
-                input.target(),
+                mapper.toDomain(input.target()),
                 input.offset(),
                 input.limit())));
     }
@@ -123,7 +123,7 @@ public final class SourceDiscoveryMcpTools implements McpQueryProvider {
     private SourceDiscoveryMcpDtos.EvidenceSourceOutput evidenceSource(
             SourceDiscoveryMcpDtos.EvidenceSourceInput input) {
         EvidenceSourceQuery query = new EvidenceSourceQuery(
-                RepositoryId.of(input.repoId()), new RepositoryRevision(input.expectedRevision()), input.identity());
+                RepositoryId.of(input.repoId()), new RepositoryRevision(input.expectedRevision()), mapper.toDomain(input.identity()));
         return mapper.evidence(evidenceSourceApplicationService.read(query));
     }
 }

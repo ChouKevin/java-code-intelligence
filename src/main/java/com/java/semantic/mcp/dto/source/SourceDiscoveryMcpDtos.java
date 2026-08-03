@@ -7,7 +7,6 @@ import com.java.semantic.semantic.application.InternalSourceReferenceResult;
 import com.java.semantic.syntax.application.EvidenceSourceQuery;
 import com.java.semantic.syntax.application.RevisionBoundSourceSymbolResolution;
 import com.java.semantic.syntax.application.SourceSymbolContext;
-import com.java.semantic.syntax.domain.ExactSourceDeclarationTarget;
 import com.java.semantic.syntax.domain.SourceRange;
 import com.java.semantic.syntax.domain.SyntaxPosition;
 import jakarta.validation.Valid;
@@ -49,7 +48,7 @@ public final class SourceDiscoveryMcpDtos {
             @Pattern(regexp = "^[a-z0-9][a-z0-9._-]{0,63}$") String repoId,
             @MonitoringField(MonitoringMode.VALUE) @NotBlank
             @Pattern(regexp = "^[0-9a-f]{40}$|^FIXTURE$") String expectedRevision,
-            @MonitoringField(MonitoringMode.NESTED) @NotNull @Valid ExactSourceDeclarationTarget target,
+            @MonitoringField(MonitoringMode.NESTED) @NotNull @Valid McpExactSourceDeclarationTargetPayload target,
             @MonitoringField(MonitoringMode.VALUE) @NotNull @Min(0) Integer offset,
             @MonitoringField(MonitoringMode.VALUE) @NotNull @Min(1) @Max(100) Integer limit) {
     }
@@ -113,7 +112,7 @@ public final class SourceDiscoveryMcpDtos {
             @Pattern(regexp = "^[a-z0-9][a-z0-9._-]{0,63}$") String repoId,
             @MonitoringField(MonitoringMode.VALUE) @NotBlank
             @Pattern(regexp = "^[0-9a-f]{40}$|^FIXTURE$") String expectedRevision,
-            @MonitoringField(MonitoringMode.NESTED) @NotNull @Valid EvidenceSourceQuery.EvidenceIdentity identity) {
+            @MonitoringField(MonitoringMode.NESTED) @NotNull @Valid McpEvidenceIdentityPayload identity) {
     }
 
     /** evidence source 結果 */
