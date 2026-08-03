@@ -1,3 +1,22 @@
+spring:
+  ai:
+    mcp:
+      server:
+        enabled: true
+        protocol: STATELESS
+        type: SYNC
+        stdio: false
+        annotation-scanner:
+          enabled: false
+        streamable-http:
+          # STATELESS mode still uses this Spring AI endpoint property
+          mcp-endpoint: /mcp
+        capabilities:
+          tool: true
+          resource: false
+          prompt: false
+          completion: false
+
 semantic:
   syntax:
     cache:
