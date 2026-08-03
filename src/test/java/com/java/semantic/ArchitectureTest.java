@@ -605,6 +605,7 @@ class ArchitectureTest {
                 .or().haveSimpleName("InternalSourceReferenceApplicationService")
                 .or().haveSimpleName("SourceSegmentApplicationService")
                 .or().haveSimpleName("MethodSourceApplicationService")
+                .or().haveSimpleName("ApiRouteApplicationService")
                 .or().areAssignableTo(ConceptDiscoveryApplicationService.class)
                 .or().areAssignableTo(EvidenceSourceApplicationService.class)
                 .or().areAssignableTo(SourceSymbolResolutionApplicationService.class)

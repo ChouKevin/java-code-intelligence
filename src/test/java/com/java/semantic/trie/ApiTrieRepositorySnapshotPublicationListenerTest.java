@@ -71,12 +71,12 @@ class ApiTrieRepositorySnapshotPublicationListenerTest {
         ApiTrieRepositorySnapshotPublicationListener listener = listener(trie);
 
         listener.beforeMutation(newSnapshot.repositoryId());
-        assertThat(refs(trie.lookupMatches("/old", "GET", ""))).isEmpty();
+        assertThatThrownBy(() -> lookup(trie, oldSnapshot, "/old"))
+                .isInstanceOf(ApiRouteIndexNotReadyException.class);
 
         listener.afterPublication(newSnapshot);
 
-        assertThat(refs(trie.lookupMatches("/unfiltered", "GET", ""))).isEmpty();
-        assertThat(refs(trie.lookupMatches("/new", "GET", "")))
+        assertThat(refs(lookup(trie, newSnapshot, "/new")))
                 .singleElement()
                 .extracting(ApiEntryPointRef::analyzedRevision)
                 .isEqualTo(SHA_TWO.value());
@@ -127,8 +127,9 @@ class ApiTrieRepositorySnapshotPublicationListenerTest {
 
         listener.beforePublication(orders.repositoryId());
 
-        assertThat(refs(trie.lookupMatches("/old", "GET", ""))).isEmpty();
-        assertThat(refs(trie.lookupMatches("/catalog", "GET", "")))
+        assertThatThrownBy(() -> lookup(trie, orders, "/old"))
+                .isInstanceOf(ApiRouteIndexNotReadyException.class);
+        assertThat(refs(lookup(trie, catalog, "/catalog")))
                 .singleElement()
                 .extracting(ApiEntryPointRef::repoId, ApiEntryPointRef::analyzedRevision)
                 .containsExactly("catalog", SHA_TWO.value());
@@ -148,8 +149,10 @@ class ApiTrieRepositorySnapshotPublicationListenerTest {
 
         assertThatThrownBy(() -> listener.afterPublication(newSnapshot)).isSameAs(failure);
 
-        assertThat(refs(trie.lookupMatches("/old", "GET", ""))).isEmpty();
-        assertThat(refs(trie.lookupMatches("/new", "GET", ""))).isEmpty();
+        assertThatThrownBy(() -> lookup(trie, oldSnapshot, "/old"))
+                .isInstanceOf(ApiRouteIndexNotReadyException.class);
+        assertThatThrownBy(() -> lookup(trie, newSnapshot, "/new"))
+                .isInstanceOf(ApiRouteIndexNotReadyException.class);
         verifyNoInteractions(filter);
     }
 
@@ -170,8 +173,10 @@ class ApiTrieRepositorySnapshotPublicationListenerTest {
 
         assertThatThrownBy(() -> listener.afterPublication(newSnapshot)).isSameAs(failure);
 
-        assertThat(refs(trie.lookupMatches("/old", "GET", ""))).isEmpty();
-        assertThat(refs(trie.lookupMatches("/new", "GET", ""))).isEmpty();
+        assertThatThrownBy(() -> lookup(trie, oldSnapshot, "/old"))
+                .isInstanceOf(ApiRouteIndexNotReadyException.class);
+        assertThatThrownBy(() -> lookup(trie, newSnapshot, "/new"))
+                .isInstanceOf(ApiRouteIndexNotReadyException.class);
     }
 
     @Test
@@ -209,11 +214,12 @@ class ApiTrieRepositorySnapshotPublicationListenerTest {
 
         assertThatThrownBy(() -> listener.afterPublication(ordersNew)).isSameAs(failure);
 
-        assertThat(refs(trie.lookupMatches("/shared", "GET", "")))
+        assertThat(refs(lookup(trie, catalog, "/shared")))
                 .singleElement()
                 .extracting(ApiEntryPointRef::repoId, ApiEntryPointRef::analyzedRevision)
                 .containsExactly("catalog", SHA_ONE.value());
-        assertThat(refs(trie.lookupMatches("/shared", "GET", "orders"))).isEmpty();
+        assertThatThrownBy(() -> lookup(trie, ordersNew, "/shared"))
+                .isInstanceOf(ApiRouteIndexNotReadyException.class);
     }
 
     private ApiTrieRepositorySnapshotPublicationListener listener(ApiTrieService trie) {
@@ -223,6 +229,14 @@ class ApiTrieRepositorySnapshotPublicationListenerTest {
 
     private static List<ApiEntryPointRef> refs(ApiRouteMatchBatch batch) {
         return batch.matches().stream().map(ApiRouteMatch::ref).toList();
+    }
+
+    private static ApiRouteMatchBatch lookup(
+            ApiTrieService trie,
+            RepositorySnapshot snapshot,
+            String apiPath) {
+        return trie.lookupMatches(
+                snapshot.repositoryId(), snapshot.revision(), apiPath, "GET");
     }
 
     private static RepositorySnapshot snapshot(String repoId, RepositoryRevision revision) {

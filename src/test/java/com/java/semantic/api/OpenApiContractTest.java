@@ -871,6 +871,7 @@ class OpenApiContractTest {
                 "REPOSITORY_NOT_FOUND",
                 "REPOSITORY_NOT_READY",
                 "REPOSITORY_REVISION_MISMATCH",
+                "API_ROUTE_INDEX_NOT_READY",
                 "SEMANTIC_BINDING_AMBIGUOUS",
                 "SEMANTIC_TARGET_NOT_FOUND",
                 "SOURCE_DECLARATION_NOT_FOUND",
@@ -1174,8 +1175,8 @@ class OpenApiContractTest {
                 "200", "400", "401", "403", "404", "409", "500");
         assertResponseCodes(operation(paths, "/v1/repositories/{repoId}/entry-points", "get"),
                 "200", "400", "401", "403", "404", "409", "500");
-        assertResponseCodes(operation(paths, "/v1/api-routes/lookup", "post"), "200", "400", "401", "403", "500");
-        assertResponseCodes(operation(paths, "/v1/api-routes/suggest", "post"), "200", "400", "401", "403", "500");
+        assertResponseCodes(operation(paths, "/v1/api-routes/lookup", "post"), "200", "400", "401", "403", "409", "500");
+        assertResponseCodes(operation(paths, "/v1/api-routes/suggest", "post"), "200", "400", "401", "403", "409", "500");
         assertResponseCodes(operation(paths, "/v1/discovery/event-listeners", "post"),
                 "200", "400", "401", "403", "404", "409", "500");
         assertResponseCodes(operation(paths, "/v1/discovery/method-implementations", "post"),
@@ -1245,18 +1246,24 @@ class OpenApiContractTest {
 
         Map<String, Object> schemas = schemas();
         Map<String, Object> lookupRequest = schema(schemas, "ApiRouteLookupRequest");
-        assertThat(required(lookupRequest)).containsExactly("apiPath");
-        assertExactProperties(lookupRequest, "apiPath", "httpMethod", "repoScope");
+        assertClosedObject(lookupRequest);
+        assertThat(required(lookupRequest)).containsExactly("repoId", "expectedRevision", "apiPath");
+        assertExactProperties(lookupRequest, "repoId", "expectedRevision", "apiPath", "httpMethod");
+        assertNonBlankString(properties(lookupRequest), "repoId");
+        assertThat(schema(properties(lookupRequest), "expectedRevision"))
+                .containsEntry("pattern", REVISION_PATTERN);
         assertNonBlankString(properties(lookupRequest), "apiPath");
         assertNullableString(properties(lookupRequest), "httpMethod");
-        assertNullableString(properties(lookupRequest), "repoScope");
 
         Map<String, Object> suggestRequest = schema(schemas, "ApiRouteSuggestRequest");
-        assertThat(required(suggestRequest)).containsExactly("apiPath", "limit");
-        assertExactProperties(suggestRequest, "apiPath", "httpMethod", "repoScope", "limit");
+        assertClosedObject(suggestRequest);
+        assertThat(required(suggestRequest)).containsExactly("repoId", "expectedRevision", "apiPath", "limit");
+        assertExactProperties(suggestRequest, "repoId", "expectedRevision", "apiPath", "httpMethod", "limit");
+        assertNonBlankString(properties(suggestRequest), "repoId");
+        assertThat(schema(properties(suggestRequest), "expectedRevision"))
+                .containsEntry("pattern", REVISION_PATTERN);
         assertNonBlankString(properties(suggestRequest), "apiPath");
         assertNullableString(properties(suggestRequest), "httpMethod");
-        assertNullableString(properties(suggestRequest), "repoScope");
         assertThat(schema(properties(suggestRequest), "limit"))
                 .containsEntry("minimum", 1)
                 .containsEntry("maximum", 20);

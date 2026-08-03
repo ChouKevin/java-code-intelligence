@@ -25,6 +25,7 @@ import com.java.semantic.syntax.application.concept.ConceptKindUnavailableExcept
 import com.java.semantic.syntax.application.concept.ConceptIdentityNotFoundException;
 import com.java.semantic.syntax.application.TypeMemberTypeNotFoundException;
 import com.java.semantic.syntax.application.SourceSegmentNotFoundException;
+import com.java.semantic.trie.ApiRouteIndexNotReadyException;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -121,6 +122,12 @@ public class ApiExceptionHandler {
                 null,
                 List.of(),
                 requestId(request)));
+    }
+
+    @ExceptionHandler(ApiRouteIndexNotReadyException.class)
+    public ResponseEntity<ApiErrorResponse> apiRouteIndexNotReady(HttpServletRequest request) {
+        return response(HttpStatus.CONFLICT,
+                "API_ROUTE_INDEX_NOT_READY", "API route index is not ready", request);
     }
 
     @ExceptionHandler(RepositoryMutationException.class)

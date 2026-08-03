@@ -1,6 +1,7 @@
 package com.java.semantic.trie;
 
 import com.java.semantic.repository.domain.RepositoryId;
+import com.java.semantic.repository.domain.RepositoryRevision;
 import com.java.semantic.repository.domain.RepositorySnapshot;
 import com.java.semantic.identity.MethodTarget;
 import com.java.semantic.syntax.domain.ApiEntryPoint;
@@ -25,7 +26,7 @@ import java.util.Objects;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 
-/** 以原子方式發布不可變重建結果，提供不需鎖定的跨儲存庫路由查詢 */
+/** 以原子方式發布不可變的儲存庫版本路由索引 */
 @Component
 public class ApiTrieService {
 
@@ -58,15 +59,16 @@ public class ApiTrieService {
             Supplier<RepositorySyntax> syntaxSupplier) {
         Objects.requireNonNull(snapshot, "snapshot is required");
         Objects.requireNonNull(syntaxSupplier, "syntaxSupplier is required");
-        String repoId = snapshot.repositoryId().value();
+        RepositoryId repositoryId = snapshot.repositoryId();
         TrieState previous = current.get();
-        Map<String, List<ApiEntryPointRef>> available = withoutRepo(previous.entriesByRepo(), repoId);
+        Map<RepositoryId, PublishedRoutes> available = withoutRepository(
+                previous.routesByRepository(), repositoryId);
         TrieState cleared = buildState(available);
         current.set(cleared);
         try {
             RepositorySyntax syntax = Objects.requireNonNull(syntaxSupplier.get(), "syntax is required");
-            Map<String, List<ApiEntryPointRef>> rebuilt = new HashMap<>(available);
-            rebuilt.put(repoId, extractRefs(snapshot, syntax));
+            Map<RepositoryId, PublishedRoutes> rebuilt = new HashMap<>(available);
+            rebuilt.put(repositoryId, new PublishedRoutes(snapshot.revision(), extractRefs(snapshot, syntax)));
             current.set(buildState(rebuilt));
         } catch (RuntimeException exception) {
             current.set(previous);
@@ -77,18 +79,25 @@ public class ApiTrieService {
     public synchronized void clear(RepositoryId repositoryId) {
         Objects.requireNonNull(repositoryId, "repositoryId is required");
         TrieState snapshot = current.get();
-        current.set(buildState(withoutRepo(
-                snapshot.entriesByRepo(), repositoryId.value())));
+        current.set(buildState(withoutRepository(snapshot.routesByRepository(), repositoryId)));
     }
 
-    public ApiRouteMatchBatch lookupMatches(String apiPath, String httpMethod, String repoScope) {
+    public ApiRouteMatchBatch lookupMatches(
+            RepositoryId repositoryId,
+            RepositoryRevision expectedRevision,
+            String apiPath,
+            String httpMethod) {
+        Objects.requireNonNull(repositoryId, "repositoryId is required");
+        Objects.requireNonNull(expectedRevision, "expectedRevision is required");
+        TrieState state = current.get();
+        requirePublishedRoutes(state, repositoryId, expectedRevision);
         NormalizedApiPath normalized = ApiPathNormalizer.normalize(apiPath, httpMethod);
         List<ApiRouteMatch> matches = search(
-                current.get().root(),
+                state.root(),
                 splitPath(normalized.path()),
                 0,
                 normalized.httpMethod(),
-                repoScope).stream()
+                repositoryId.value()).stream()
                 .map(ref -> new ApiRouteMatch(
                         ref,
                         ApiRouteCandidateMatcher.lookupReasons(normalized.path(), normalized.httpMethod(), ref)))
@@ -97,17 +106,20 @@ public class ApiTrieService {
     }
 
     public ApiRouteMatchBatch suggestMatches(
+            RepositoryId repositoryId,
+            RepositoryRevision expectedRevision,
             String apiPath,
             String httpMethod,
-            String repoScope,
             int limit) {
+        Objects.requireNonNull(repositoryId, "repositoryId is required");
+        Objects.requireNonNull(expectedRevision, "expectedRevision is required");
         if (limit <= 0) {
             throw new IllegalArgumentException("limit must be greater than zero");
         }
+        TrieState state = current.get();
+        PublishedRoutes publishedRoutes = requirePublishedRoutes(state, repositoryId, expectedRevision);
         NormalizedApiPath normalized = ApiPathNormalizer.normalize(apiPath, httpMethod);
-        List<ApiRouteMatch> bounded = current.get().entriesByRepo().values().stream()
-                .flatMap(List::stream)
-                .filter(ref -> matchesScope(ref, repoScope))
+        List<ApiRouteMatch> bounded = publishedRoutes.entries().stream()
                 .filter(ref -> matchesSuggestionMethod(ref, normalized.httpMethod()))
                 .map(ref -> new ApiRouteMatch(
                         ref,
@@ -179,13 +191,14 @@ public class ApiTrieService {
         return winner;
     }
 
-    private TrieState buildState(Map<String, List<ApiEntryPointRef>> entriesByRepo) {
-        Map<String, List<ApiEntryPointRef>> copied = new HashMap<>();
+    private TrieState buildState(Map<RepositoryId, PublishedRoutes> routesByRepository) {
+        Map<RepositoryId, PublishedRoutes> copied = new HashMap<>();
         ApiTrieNode root = new ApiTrieNode();
-        entriesByRepo.forEach((repoId, refs) -> {
-            List<ApiEntryPointRef> immutableRefs = List.copyOf(refs);
-            copied.put(repoId, immutableRefs);
-            immutableRefs.forEach(ref -> insert(root, ref));
+        routesByRepository.forEach((repositoryId, publishedRoutes) -> {
+            PublishedRoutes immutableRoutes = new PublishedRoutes(
+                    publishedRoutes.revision(), publishedRoutes.entries());
+            copied.put(repositoryId, immutableRoutes);
+            immutableRoutes.entries().forEach(ref -> insert(root, ref));
         });
         return new TrieState(root, Map.copyOf(copied));
     }
@@ -210,19 +223,19 @@ public class ApiTrieService {
             String[] segments,
             int index,
             String httpMethod,
-            String repoScope) {
+            String repositoryId) {
         if (index == segments.length) {
-            List<ApiEntryPointRef> direct = resolveRefs(node, httpMethod, repoScope);
+            List<ApiEntryPointRef> direct = resolveRefs(node, httpMethod, repositoryId);
             if (!CollectionUtils.isEmpty(direct)) {
                 return direct;
             }
             ApiTrieNode rest = node.children.get(ApiTrieNode.REST_WILDCARD);
-            return Objects.nonNull(rest) ? resolveRefs(rest, httpMethod, repoScope) : List.of();
+            return Objects.nonNull(rest) ? resolveRefs(rest, httpMethod, repositoryId) : List.of();
         }
         ApiTrieNode exact = node.children.get(segments[index]);
         if (Objects.nonNull(exact)) {
             List<ApiEntryPointRef> exactResult = search(
-                    exact, segments, index + 1, httpMethod, repoScope);
+                    exact, segments, index + 1, httpMethod, repositoryId);
             if (!CollectionUtils.isEmpty(exactResult)) {
                 return exactResult;
             }
@@ -230,47 +243,47 @@ public class ApiTrieService {
         ApiTrieNode wildcard = node.children.get(ApiTrieNode.WILDCARD);
         if (Objects.nonNull(wildcard) && wildcard != exact) {
             List<ApiEntryPointRef> wildcardResult = search(
-                    wildcard, segments, index + 1, httpMethod, repoScope);
+                    wildcard, segments, index + 1, httpMethod, repositoryId);
             if (!CollectionUtils.isEmpty(wildcardResult)) {
                 return wildcardResult;
             }
         }
         ApiTrieNode rest = node.children.get(ApiTrieNode.REST_WILDCARD);
-        return Objects.nonNull(rest) ? resolveRefs(rest, httpMethod, repoScope) : List.of();
+        return Objects.nonNull(rest) ? resolveRefs(rest, httpMethod, repositoryId) : List.of();
     }
 
     private List<ApiEntryPointRef> resolveRefs(
             ApiTrieNode node,
             String httpMethod,
-            String repoScope) {
+            String repositoryId) {
         if (StringUtils.hasText(httpMethod)) {
-            List<ApiEntryPointRef> exact = sortedRefs(node.methodMap.get(httpMethod), repoScope);
+            List<ApiEntryPointRef> exact = sortedRefs(node.methodMap.get(httpMethod), repositoryId);
             if (!CollectionUtils.isEmpty(exact)) {
                 return exact;
             }
-            return sortedRefs(node.methodMap.get(ApiTrieNode.METHOD_ALL), repoScope);
+            return sortedRefs(node.methodMap.get(ApiTrieNode.METHOD_ALL), repositoryId);
         }
         return node.methodMap.values().stream()
                 .flatMap(refs -> refs.values().stream())
-                .filter(ref -> matchesScope(ref, repoScope))
+                .filter(ref -> matchesScope(ref, repositoryId))
                 .sorted(CANDIDATE_COMPARATOR)
                 .toList();
     }
 
     private List<ApiEntryPointRef> sortedRefs(
             Map<String, ApiEntryPointRef> refsByRepo,
-            String repoScope) {
+            String repositoryId) {
         if (CollectionUtils.isEmpty(refsByRepo)) {
             return List.of();
         }
         return refsByRepo.values().stream()
-                .filter(ref -> matchesScope(ref, repoScope))
+                .filter(ref -> matchesScope(ref, repositoryId))
                 .sorted(CANDIDATE_COMPARATOR)
                 .toList();
     }
 
-    private boolean matchesScope(ApiEntryPointRef ref, String repoScope) {
-        return !StringUtils.hasText(repoScope) || repoScope.equals(ref.repoId());
+    private boolean matchesScope(ApiEntryPointRef ref, String repositoryId) {
+        return repositoryId.equals(ref.repoId());
     }
 
     private boolean matchesSuggestionMethod(ApiEntryPointRef ref, String httpMethod) {
@@ -279,11 +292,22 @@ public class ApiTrieService {
                 || ApiTrieNode.METHOD_ALL.equals(ref.httpMethod());
     }
 
-    private static Map<String, List<ApiEntryPointRef>> withoutRepo(
-            Map<String, List<ApiEntryPointRef>> source,
-            String repoId) {
-        Map<String, List<ApiEntryPointRef>> result = new HashMap<>(source);
-        result.remove(repoId);
+    private PublishedRoutes requirePublishedRoutes(
+            TrieState state,
+            RepositoryId repositoryId,
+            RepositoryRevision expectedRevision) {
+        PublishedRoutes publishedRoutes = state.routesByRepository().get(repositoryId);
+        if (Objects.isNull(publishedRoutes) || !expectedRevision.equals(publishedRoutes.revision())) {
+            throw new ApiRouteIndexNotReadyException(repositoryId, expectedRevision);
+        }
+        return publishedRoutes;
+    }
+
+    private static Map<RepositoryId, PublishedRoutes> withoutRepository(
+            Map<RepositoryId, PublishedRoutes> source,
+            RepositoryId repositoryId) {
+        Map<RepositoryId, PublishedRoutes> result = new HashMap<>(source);
+        result.remove(repositoryId);
         return result;
     }
 
@@ -357,7 +381,15 @@ public class ApiTrieService {
     private record RouteKey(String repoId, String httpMethod, String routeTemplate) {
     }
 
-    private record TrieState(ApiTrieNode root, Map<String, List<ApiEntryPointRef>> entriesByRepo) {
+    private record PublishedRoutes(RepositoryRevision revision, List<ApiEntryPointRef> entries) {
+
+        private PublishedRoutes {
+            Objects.requireNonNull(revision, "revision is required");
+            entries = List.copyOf(entries);
+        }
+    }
+
+    private record TrieState(ApiTrieNode root, Map<RepositoryId, PublishedRoutes> routesByRepository) {
 
         private static TrieState empty() {
             return new TrieState(new ApiTrieNode(), Map.of());

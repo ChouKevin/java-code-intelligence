@@ -4,6 +4,7 @@ import com.java.semantic.api.dto.ApiRouteCandidatesResponse;
 import com.java.semantic.api.dto.ApiRouteLookupRequest;
 import com.java.semantic.api.dto.ApiRouteSuggestRequest;
 import com.java.semantic.repository.domain.RepositoryId;
+import com.java.semantic.repository.domain.RepositoryRevision;
 import com.java.semantic.trie.ApiRouteApplicationService;
 import jakarta.validation.Valid;
 import org.springframework.util.StringUtils;
@@ -33,18 +34,20 @@ public final class ApiRouteController {
     public ApiRouteCandidatesResponse lookup(
             @Valid @RequestBody ApiRouteLookupRequest request) {
         return mapper.toResponse(service.lookupMatches(
+                RepositoryId.of(request.repoId()),
+                new RepositoryRevision(request.expectedRevision()),
                 request.apiPath(),
-                optionalText(request.httpMethod()),
-                optionalRepository(request.repoScope())));
+                optionalText(request.httpMethod())));
     }
 
     @PostMapping("/suggest")
     public ApiRouteCandidatesResponse suggest(
             @Valid @RequestBody ApiRouteSuggestRequest request) {
         return mapper.toResponse(service.suggestMatches(
+                RepositoryId.of(request.repoId()),
+                new RepositoryRevision(request.expectedRevision()),
                 request.apiPath(),
                 optionalText(request.httpMethod()),
-                optionalRepository(request.repoScope()),
                 request.limit()));
     }
 
@@ -52,7 +55,4 @@ public final class ApiRouteController {
         return Optional.ofNullable(value).filter(StringUtils::hasText);
     }
 
-    private Optional<RepositoryId> optionalRepository(String value) {
-        return optionalText(value).map(RepositoryId::of);
-    }
 }
