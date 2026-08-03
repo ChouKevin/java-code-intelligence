@@ -1,6 +1,7 @@
 package com.java.semantic.mcp.provider;
 
 import com.java.semantic.mcp.McpQueryRegistration;
+import com.java.semantic.mcp.McpToolContractException;
 import com.java.semantic.mcp.StrictMcpToolInputDecoder;
 import com.java.semantic.mcp.dto.framework.FrameworkDiscoveryMcpDtos;
 import com.java.semantic.mcp.dto.source.SourceDiscoveryMcpDtos;
@@ -11,10 +12,14 @@ import com.java.semantic.repository.domain.RepositoryRevision;
 import com.java.semantic.syntax.application.EventListenerDiscoveryApplicationService;
 import com.java.semantic.syntax.application.EventListenerDiscoveryQuery;
 import com.java.semantic.syntax.application.RevisionBoundEventListenerDiscovery;
+import com.java.semantic.syntax.application.concept.ConceptDiscoveryApplicationService;
+import io.modelcontextprotocol.server.McpStatelessServerFeatures;
+import io.modelcontextprotocol.spec.McpSchema;
 import jakarta.validation.Validation;
 import jakarta.validation.Validator;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import tools.jackson.databind.json.JsonMapper;
@@ -24,6 +29,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.then;
@@ -42,8 +48,15 @@ class DiscoveryMcpToolsTest {
     @Autowired
     private SourceDiscoveryMcpTools sourceTools;
 
+    @Autowired
+    @Qualifier("mcpQueryToolSpecifications")
+    private List<McpStatelessServerFeatures.SyncToolSpecification> specifications;
+
     @MockitoBean
     private EventListenerDiscoveryApplicationService eventListenerDiscoveryApplicationService;
+
+    @MockitoBean
+    private ConceptDiscoveryApplicationService conceptDiscoveryApplicationService;
 
     @Test
     void should_register_the_ten_discovery_queries_with_stateless_revision_inputs() {
@@ -103,6 +116,28 @@ class DiscoveryMcpToolsTest {
                 20));
     }
 
+    @Test
+    void should_reject_an_invalid_method_identity_before_the_concept_handler_runs() {
+        assertInvalidConceptInput(Map.of(
+                "kind", "METHOD",
+                "target", invalidMethodTarget()));
+
+        then(conceptDiscoveryApplicationService).shouldHaveNoInteractions();
+    }
+
+    @Test
+    void should_reject_a_method_scoped_field_identity_before_the_concept_handler_runs() {
+        assertInvalidConceptInput(Map.of(
+                "kind", "FIELD",
+                "field", Map.of(
+                        "scope", "METHOD",
+                        "declaringMethod", methodTarget(),
+                        "declarationRange", syntaxRange(),
+                        "name", "request")));
+
+        then(conceptDiscoveryApplicationService).shouldHaveNoInteractions();
+    }
+
     private List<String> names(List<McpQueryRegistration<?, ?>> registrations) {
         return registrations.stream().map(McpQueryRegistration::name).toList();
     }
@@ -124,5 +159,46 @@ class DiscoveryMcpToolsTest {
 
     private static <I, O> O invoke(McpQueryRegistration<I, O> registration, I input) {
         return registration.handler().apply(input);
+    }
+
+    private void assertInvalidConceptInput(Map<String, Object> identity) {
+        McpStatelessServerFeatures.SyncToolSpecification specification = specifications.stream()
+                .filter(candidate -> candidate.tool().name().equals("semantic_resolve_concept"))
+                .findFirst()
+                .orElseThrow();
+
+        assertThatThrownBy(() -> specification.callHandler().apply(
+                null,
+                new McpSchema.CallToolRequest("semantic_resolve_concept", Map.of(
+                        "repoId", "orders",
+                        "expectedRevision", "FIXTURE",
+                        "identity", identity))))
+                .isInstanceOf(McpToolContractException.class)
+                .extracting(exception -> ((McpToolContractException) exception).code())
+                .isEqualTo("INVALID_TOOL_INPUT");
+    }
+
+    private static Map<String, Object> invalidMethodTarget() {
+        return Map.of(
+                "sourceType", Map.of(
+                        "javaType", Map.of("packageName", "com.example", "className", "OrderController"),
+                        "sourceFile", "src/main/java/com/example/OrderController.java"),
+                "methodName", "not-a-method",
+                "parameterTypes", List.of());
+    }
+
+    private static Map<String, Object> methodTarget() {
+        return Map.of(
+                "sourceType", Map.of(
+                        "javaType", Map.of("packageName", "com.example", "className", "OrderController"),
+                        "sourceFile", "src/main/java/com/example/OrderController.java"),
+                "methodName", "getOrder",
+                "parameterTypes", List.of("java.lang.String"));
+    }
+
+    private static Map<String, Object> syntaxRange() {
+        return Map.of(
+                "start", Map.of("line", 10, "character", 4),
+                "end", Map.of("line", 10, "character", 11));
     }
 }

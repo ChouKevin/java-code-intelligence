@@ -9,6 +9,7 @@ import com.java.semantic.mcp.dto.identity.McpJavaIdentityPayloads.SourceMember;
 import com.java.semantic.mcp.dto.identity.McpJavaIdentityPayloads.SourceType;
 import com.java.semantic.mcp.dto.identity.McpMapperIdentityPayloads.Statement;
 import com.java.semantic.mcp.dto.identity.McpMapperIdentityPayloads.StatementKey;
+import com.java.semantic.mcp.dto.identity.TypeMemberScope;
 import com.java.semantic.monitoring.MonitoringField;
 import com.java.semantic.monitoring.MonitoringMode;
 import com.java.semantic.syntax.application.concept.UsageConceptIdentity.TypeUsageSlot;
@@ -59,7 +60,7 @@ public sealed interface McpConceptIdentityPayload permits
     }
 
     /** 欄位概念 identity */
-    record FieldIdentity(@MonitoringField(MonitoringMode.NESTED) @NotNull @Valid SourceMember field)
+    record FieldIdentity(@MonitoringField(MonitoringMode.NESTED) @NotNull @Valid @TypeMemberScope SourceMember field)
             implements McpConceptIdentityPayload {
     }
 
@@ -150,7 +151,7 @@ public sealed interface McpConceptIdentityPayload permits
         }
 
         /** 欄位宣告 subject */
-        record Field(@MonitoringField(MonitoringMode.NESTED) @NotNull @Valid SourceMember field)
+        record Field(@MonitoringField(MonitoringMode.NESTED) @NotNull @Valid @TypeMemberScope SourceMember field)
                 implements DeclarationSubject {
         }
     }

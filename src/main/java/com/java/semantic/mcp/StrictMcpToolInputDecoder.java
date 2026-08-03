@@ -4,6 +4,7 @@ import jakarta.validation.ConstraintViolation;
 import jakarta.validation.Validator;
 import org.springframework.util.Assert;
 import tools.jackson.databind.DeserializationFeature;
+import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.cfg.CoercionAction;
 import tools.jackson.databind.cfg.CoercionInputShape;
@@ -39,7 +40,9 @@ public final class StrictMcpToolInputDecoder {
         Assert.notNull(arguments, "arguments are required");
         Assert.notNull(inputType, "inputType is required");
         try {
-            I input = objectMapper.convertValue(arguments, inputType);
+            JsonNode argumentTree = objectMapper.valueToTree(arguments);
+            I input = objectMapper.treeToValue(argumentTree, inputType);
+            McpInputRequiredness.validate(arguments, input);
             Set<ConstraintViolation<I>> violations = validator.validate(input);
             if (!violations.isEmpty()) {
                 throw McpToolContractException.invalidToolInput(new IllegalArgumentException("input validation failed"));
@@ -48,8 +51,6 @@ public final class StrictMcpToolInputDecoder {
         } catch (McpToolContractException exception) {
             throw exception;
         } catch (JacksonException exception) {
-            throw McpToolContractException.invalidToolInput(exception);
-        } catch (IllegalArgumentException exception) {
             throw McpToolContractException.invalidToolInput(exception);
         }
     }

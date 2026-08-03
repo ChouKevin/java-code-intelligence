@@ -1,8 +1,5 @@
 package com.java.semantic.mcp;
 
-import jakarta.validation.constraints.NotBlank;
-import jakarta.validation.constraints.NotEmpty;
-import jakarta.validation.constraints.NotNull;
 import org.springframework.ai.util.json.schema.JsonSchemaGenerator;
 import org.springframework.util.Assert;
 import tools.jackson.core.JacksonException;
@@ -34,7 +31,7 @@ public final class McpQuerySchemaFactory {
             ArrayNode required = objectSchema.withArray("required");
             required.removeAll();
             for (RecordComponent component : recordType.getRecordComponents()) {
-                if (isRequired(component)) {
+                if (McpInputRequiredness.isRequired(component)) {
                     required.add(component.getName());
                 }
             }
@@ -44,13 +41,4 @@ public final class McpQuerySchemaFactory {
         }
     }
 
-    private boolean isRequired(RecordComponent component) {
-        return component.isAnnotationPresent(NotNull.class)
-                || component.isAnnotationPresent(NotBlank.class)
-                || component.isAnnotationPresent(NotEmpty.class)
-                || component.getAnnotatedType().isAnnotationPresent(NotNull.class)
-                || component.getAnnotatedType().isAnnotationPresent(NotBlank.class)
-                || component.getAnnotatedType().isAnnotationPresent(NotEmpty.class)
-                || component.getType().isPrimitive();
-    }
 }

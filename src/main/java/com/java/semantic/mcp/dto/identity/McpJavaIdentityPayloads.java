@@ -12,13 +12,25 @@ import com.java.semantic.syntax.domain.SyntaxPosition;
 import com.java.semantic.syntax.domain.SyntaxRange;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Pattern;
+import jakarta.validation.constraints.Size;
 
 import java.util.List;
 import java.util.Objects;
 
 /** MCP 專用 Java 與來源宣告 identity transport 集合 */
 public final class McpJavaIdentityPayloads {
+
+    private static final String JAVA_IDENTIFIER_PATTERN =
+            "(?!.*\\p{javaIdentifierIgnorable})\\p{javaJavaIdentifierStart}\\p{javaJavaIdentifierPart}*";
+    private static final String QUALIFIED_JAVA_IDENTIFIER_PATTERN =
+            "(?!.*\\p{javaIdentifierIgnorable})\\p{javaJavaIdentifierStart}\\p{javaJavaIdentifierPart}*"
+                    + "(?:\\.\\p{javaJavaIdentifierStart}\\p{javaJavaIdentifierPart}*)*";
+    private static final String REPOSITORY_RELATIVE_SOURCE_PATTERN =
+            "(?=.{1,1024}$)(?!/)(?!.*[\\\\:])(?!.*[\\p{javaWhitespace}\\p{Z}\\p{Cntrl}])"
+                    + "(?!.*//)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*/$).+";
 
     private McpJavaIdentityPayloads() {
         throw new UnsupportedOperationException("utility class");
@@ -27,26 +39,29 @@ public final class McpJavaIdentityPayloads {
     /** MCP Java 型別 identity */
     public record JavaType(
             @MonitoringField(MonitoringMode.VALUE) @NotNull String packageName,
-            @MonitoringField(MonitoringMode.VALUE) @NotBlank String className) {
+            @MonitoringField(MonitoringMode.VALUE) @NotBlank @Size(max = 255)
+            @Pattern(regexp = QUALIFIED_JAVA_IDENTIFIER_PATTERN) String className) {
     }
 
     /** MCP 來源型別 identity */
     public record SourceType(
             @MonitoringField(MonitoringMode.NESTED) @NotNull @Valid JavaType javaType,
-            @MonitoringField(MonitoringMode.VALUE) @NotBlank String sourceFile) {
+            @MonitoringField(MonitoringMode.VALUE) @NotBlank @Size(max = 1024)
+            @Pattern(regexp = REPOSITORY_RELATIVE_SOURCE_PATTERN) String sourceFile) {
     }
 
     /** MCP canonical 方法 identity */
     public record Method(
             @MonitoringField(MonitoringMode.NESTED) @NotNull @Valid SourceType sourceType,
-            @MonitoringField(MonitoringMode.VALUE) @NotBlank String methodName,
+            @MonitoringField(MonitoringMode.VALUE) @NotBlank @Size(max = 255)
+            @Pattern(regexp = JAVA_IDENTIFIER_PATTERN) String methodName,
             @MonitoringField(MonitoringMode.SIZE) @NotNull List<@NotBlank String> parameterTypes) {
     }
 
     /** MCP 零基原始碼位置 */
     public record Position(
-            @MonitoringField(MonitoringMode.VALUE) int line,
-            @MonitoringField(MonitoringMode.VALUE) int character) {
+            @MonitoringField(MonitoringMode.VALUE) @Min(0) int line,
+            @MonitoringField(MonitoringMode.VALUE) @Min(0) int character) {
     }
 
     /** MCP 半開原始碼範圍 */
@@ -66,14 +81,16 @@ public final class McpJavaIdentityPayloads {
         /** MCP 型別直接成員 identity */
         record TypeMember(
                 @MonitoringField(MonitoringMode.NESTED) @NotNull @Valid SourceType ownerType,
-                @MonitoringField(MonitoringMode.VALUE) @NotBlank String name) implements SourceMember {
+                @MonitoringField(MonitoringMode.VALUE) @NotBlank @Size(max = 255)
+                @Pattern(regexp = JAVA_IDENTIFIER_PATTERN) String name) implements SourceMember {
         }
 
         /** MCP 方法範圍成員 identity */
         record MethodScoped(
                 @MonitoringField(MonitoringMode.NESTED) @NotNull @Valid Method declaringMethod,
                 @MonitoringField(MonitoringMode.NESTED) @NotNull @Valid Range declarationRange,
-                @MonitoringField(MonitoringMode.VALUE) @NotBlank String name) implements SourceMember {
+                @MonitoringField(MonitoringMode.VALUE) @NotBlank @Size(max = 255)
+                @Pattern(regexp = JAVA_IDENTIFIER_PATTERN) String name) implements SourceMember {
         }
     }
 
