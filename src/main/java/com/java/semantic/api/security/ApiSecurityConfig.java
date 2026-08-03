@@ -2,6 +2,7 @@ package com.java.semantic.api.security;
 
 import com.java.semantic.api.RequestCorrelationFilter;
 import com.java.semantic.api.ApiMonitoringFilter;
+import com.java.semantic.mcp.monitoring.McpTransportMonitoringFilter;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.context.annotation.Bean;
@@ -33,13 +34,22 @@ public class ApiSecurityConfig {
     }
 
     @Bean
+    public FilterRegistrationBean<McpTransportMonitoringFilter> mcpTransportMonitoringFilter() {
+        FilterRegistrationBean<McpTransportMonitoringFilter> registration =
+                new FilterRegistrationBean<>(new McpTransportMonitoringFilter());
+        registration.addUrlPatterns("/*");
+        registration.setOrder(Ordered.HIGHEST_PRECEDENCE + 2);
+        return registration;
+    }
+
+    @Bean
     public FilterRegistrationBean<ApiTokenFilter> apiTokenFilter(
             ApiSecurityProperties properties,
             ObjectMapper objectMapper) {
         FilterRegistrationBean<ApiTokenFilter> registration =
                 new FilterRegistrationBean<>(new ApiTokenFilter(properties, objectMapper));
         registration.addUrlPatterns("/*");
-        registration.setOrder(Ordered.HIGHEST_PRECEDENCE + 2);
+        registration.setOrder(Ordered.HIGHEST_PRECEDENCE + 3);
         return registration;
     }
 }

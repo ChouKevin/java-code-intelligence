@@ -108,6 +108,16 @@ class ApiTokenFilterTest {
     }
 
     @Test
+    void should_record_the_mcp_authentication_error_code_for_transport_monitoring() throws Exception {
+        MockHttpServletRequest request = new MockHttpServletRequest("POST", "/mcp");
+
+        invoke(filterWith(CONFIGURED_TOKEN), request);
+
+        assertThat(request.getAttribute(ApiTokenFilter.AUTH_ERROR_CODE_ATTRIBUTE))
+                .isEqualTo("SEMANTIC_UNAUTHORIZED");
+    }
+
+    @Test
     void should_reject_new_analysis_endpoint_when_token_is_wrong() throws Exception {
         FilterResult result = invoke(
                 filterWith(CONFIGURED_TOKEN), "POST", "/v1/analyses/call-graph", "wrong");

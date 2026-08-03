@@ -3,6 +3,7 @@ package com.java.semantic.mcp;
 import jakarta.validation.Validation;
 import jakarta.validation.Validator;
 import io.modelcontextprotocol.server.McpStatelessServerFeatures;
+import com.java.semantic.mcp.monitoring.McpInvocationMonitor;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import tools.jackson.databind.ObjectMapper;
@@ -80,6 +81,7 @@ class McpQueryRegistryTest {
                 registry,
                 new StrictMcpToolInputDecoder(new JsonMapper(), validator),
                 new McpQuerySchemaFactory(),
+                new McpInvocationMonitor(),
                 new JsonMapper());
 
         assertThat(specifications)

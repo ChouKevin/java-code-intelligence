@@ -2,6 +2,7 @@ package com.java.semantic.api.security;
 
 import com.java.semantic.api.RequestCorrelationFilter;
 import com.java.semantic.api.ApiMonitoringFilter;
+import com.java.semantic.mcp.monitoring.McpTransportMonitoringFilter;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 import jakarta.servlet.FilterChain;
@@ -31,7 +32,7 @@ class ApiSecurityConfigTest {
         FilterRegistrationBean<ApiTokenFilter> registration = config.apiTokenFilter(properties, OBJECT_MAPPER);
 
         assertThat(registration.getUrlPatterns()).containsExactly("/*");
-        assertThat(registration.getOrder()).isEqualTo(Ordered.HIGHEST_PRECEDENCE + 2);
+        assertThat(registration.getOrder()).isEqualTo(Ordered.HIGHEST_PRECEDENCE + 3);
         assertThat(registration.getFilter()).isInstanceOf(ApiTokenFilter.class);
     }
 
@@ -55,6 +56,17 @@ class ApiSecurityConfigTest {
         assertThat(registration.getUrlPatterns()).containsExactly("/*");
         assertThat(registration.getOrder()).isEqualTo(Ordered.HIGHEST_PRECEDENCE + 1);
         assertThat(registration.getFilter()).isInstanceOf(ApiMonitoringFilter.class);
+    }
+
+    @Test
+    void should_register_mcp_monitoring_between_http_monitoring_and_token_authentication() {
+        ApiSecurityConfig config = new ApiSecurityConfig();
+
+        FilterRegistrationBean<McpTransportMonitoringFilter> registration = config.mcpTransportMonitoringFilter();
+
+        assertThat(registration.getUrlPatterns()).containsExactly("/*");
+        assertThat(registration.getOrder()).isEqualTo(Ordered.HIGHEST_PRECEDENCE + 2);
+        assertThat(registration.getFilter()).isInstanceOf(McpTransportMonitoringFilter.class);
     }
 
     @ParameterizedTest

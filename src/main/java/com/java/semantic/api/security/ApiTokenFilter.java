@@ -25,6 +25,7 @@ import java.util.Objects;
 public class ApiTokenFilter extends OncePerRequestFilter {
 
     public static final String API_TOKEN_HEADER = "X-Api-Token";
+    public static final String AUTH_ERROR_CODE_ATTRIBUTE = "semantic.apiAuthenticationErrorCode";
 
     private static final String HEALTH_PATH = "/actuator/health";
     private final ApiSecurityProperties properties;
@@ -64,6 +65,7 @@ public class ApiTokenFilter extends OncePerRequestFilter {
             String errorCode,
             String message)
             throws IOException {
+        request.setAttribute(AUTH_ERROR_CODE_ATTRIBUTE, errorCode);
         ApiMonitoringContext.find(request).ifPresent(context -> context.recordErrorCode(errorCode));
         response.setStatus(status.value());
         response.setContentType(MediaType.APPLICATION_JSON_VALUE);
