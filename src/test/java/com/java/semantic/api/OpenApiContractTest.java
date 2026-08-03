@@ -1161,8 +1161,8 @@ class OpenApiContractTest {
                 "200", "400", "401", "403", "404", "409", "500");
         assertResponseCodes(operation(paths, "/v1/repositories/{repoId}/entry-points", "get"),
                 "200", "400", "401", "403", "404", "409", "500");
-        assertResponseCodes(operation(paths, "/v1/api-routes/lookup", "post"), "200", "400", "401", "403", "409", "500");
-        assertResponseCodes(operation(paths, "/v1/api-routes/suggest", "post"), "200", "400", "401", "403", "409", "500");
+        assertResponseCodes(operation(paths, "/v1/api-routes/lookup", "post"), "200", "400", "401", "403", "404", "409", "500");
+        assertResponseCodes(operation(paths, "/v1/api-routes/suggest", "post"), "200", "400", "401", "403", "404", "409", "500");
         assertResponseCodes(operation(paths, "/v1/discovery/event-listeners", "post"),
                 "200", "400", "401", "403", "404", "409", "500");
         assertResponseCodes(operation(paths, "/v1/discovery/method-implementations", "post"),
@@ -1235,7 +1235,8 @@ class OpenApiContractTest {
         assertClosedObject(lookupRequest);
         assertThat(required(lookupRequest)).containsExactly("repoId", "expectedRevision", "apiPath");
         assertExactProperties(lookupRequest, "repoId", "expectedRevision", "apiPath", "httpMethod");
-        assertNonBlankString(properties(lookupRequest), "repoId");
+        assertThat(schema(properties(lookupRequest), "repoId"))
+                .containsEntry("pattern", "^[a-z0-9][a-z0-9._-]{0,63}$");
         assertThat(schema(properties(lookupRequest), "expectedRevision"))
                 .containsEntry("pattern", REVISION_PATTERN);
         assertNonBlankString(properties(lookupRequest), "apiPath");
@@ -1245,7 +1246,8 @@ class OpenApiContractTest {
         assertClosedObject(suggestRequest);
         assertThat(required(suggestRequest)).containsExactly("repoId", "expectedRevision", "apiPath", "limit");
         assertExactProperties(suggestRequest, "repoId", "expectedRevision", "apiPath", "httpMethod", "limit");
-        assertNonBlankString(properties(suggestRequest), "repoId");
+        assertThat(schema(properties(suggestRequest), "repoId"))
+                .containsEntry("pattern", "^[a-z0-9][a-z0-9._-]{0,63}$");
         assertThat(schema(properties(suggestRequest), "expectedRevision"))
                 .containsEntry("pattern", REVISION_PATTERN);
         assertNonBlankString(properties(suggestRequest), "apiPath");

@@ -20,6 +20,7 @@ import tools.jackson.databind.module.SimpleModule;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.function.Function;
 
 /** 將已驗證的 MCP 查詢目錄顯式投影為無狀態 server 工具 */
@@ -114,15 +115,32 @@ public class McpToolCatalogConfiguration {
             McpInvocationMonitor invocationMonitor,
             Map<String, Object> arguments) {
         McpQueryRegistration<I, O> typedRegistration = (McpQueryRegistration<I, O>) registration;
-        return invocationMonitor.monitor(typedRegistration.name(), () -> {
-            I input = inputDecoder.decode(arguments, typedRegistration.inputType());
-            Function<I, O> handler = typedRegistration.handler();
-            O output = handler.apply(input);
-            McpSchema.CallToolResult result = McpSchema.CallToolResult.builder()
-                    .structuredContent(output)
-                    .build();
-            return new McpInvocationMonitor.MonitoredInvocation<>(input, output, result);
-        });
+        try {
+            return invocationMonitor.monitor(typedRegistration.name(), () -> {
+                I input = inputDecoder.decode(arguments, typedRegistration.inputType());
+                Function<I, O> handler = typedRegistration.handler();
+                O output = handler.apply(input);
+                McpSchema.CallToolResult result = McpSchema.CallToolResult.builder()
+                        .structuredContent(output)
+                        .build();
+                return new McpInvocationMonitor.MonitoredInvocation<>(input, output, result);
+            });
+        } catch (RuntimeException exception) {
+            if (exception instanceof McpToolContractException contractException) {
+                throw contractException;
+            }
+            Optional<McpToolFailure> knownFailure = McpToolFailureMapper.failureFor(exception);
+            McpToolFailure failure = knownFailure.orElseGet(McpToolFailureMapper::internalFailure);
+            return failureResult(failure);
+        }
+    }
+
+    private static McpSchema.CallToolResult failureResult(McpToolFailure failure) {
+        return McpSchema.CallToolResult.builder()
+                .addTextContent(failure.errorCode())
+                .structuredContent(failure)
+                .isError(true)
+                .build();
     }
 
     private static void validatePublishedSpecifications(

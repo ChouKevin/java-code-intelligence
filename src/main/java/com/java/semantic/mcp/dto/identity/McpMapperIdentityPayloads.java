@@ -10,6 +10,7 @@ import jakarta.validation.Valid;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Pattern;
 
 import java.util.Objects;
 import java.util.Optional;
@@ -31,7 +32,7 @@ public final class McpMapperIdentityPayloads {
     public record Statement(
             @MonitoringField(MonitoringMode.NESTED) @NotNull @Valid StatementKey statementKey,
             @MonitoringField(MonitoringMode.OMIT) @NotBlank String resourcePath,
-            @MonitoringField(MonitoringMode.OMIT) Optional<@NotBlank String> databaseId,
+            @MonitoringField(MonitoringMode.OMIT) Optional<@Pattern(regexp = ".*\\S.*") String> databaseId,
             @MonitoringField(MonitoringMode.VALUE) @NotNull @Min(0) Integer documentOrdinal,
             @MonitoringField(MonitoringMode.VALUE) @NotNull MapperEvidenceRepresentation representation) {
 

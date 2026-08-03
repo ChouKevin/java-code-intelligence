@@ -6,6 +6,8 @@ import ch.qos.logback.core.read.ListAppender;
 import com.java.semantic.mcp.McpToolContractException;
 import com.java.semantic.monitoring.MonitoringField;
 import com.java.semantic.monitoring.MonitoringMode;
+import com.java.semantic.repository.application.RepositoryNotReadyException;
+import com.java.semantic.repository.domain.RepositoryId;
 import org.junit.jupiter.api.Test;
 import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
@@ -58,6 +60,23 @@ class McpInvocationMonitorTest {
                     .anyMatch(message -> message.startsWith(
                             "mcp_tool_completed requestId= toolName=semantic_get_repository resultCategory=INVALID_TOOL_INPUT"))
                     .noneMatch(message -> message.contains("private-invalid-input"));
+        } finally {
+            capturedLogs.stop();
+        }
+    }
+
+    @Test
+    void should_classify_known_query_failure_without_logging_exception_details() {
+        CapturedLogs capturedLogs = captureLogs();
+        try {
+            assertThatThrownBy(() -> new McpInvocationMonitor().monitor("semantic_get_repository", () -> {
+                throw new RepositoryNotReadyException(RepositoryId.of("orders"));
+            })).isInstanceOf(RepositoryNotReadyException.class);
+
+            assertThat(capturedLogs.messages())
+                    .anyMatch(message -> message.startsWith(
+                            "mcp_tool_completed requestId= toolName=semantic_get_repository resultCategory=EXPECTED_TOOL_FAILURE"))
+                    .noneMatch(message -> message.contains("orders"));
         } finally {
             capturedLogs.stop();
         }

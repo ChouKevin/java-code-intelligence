@@ -1,6 +1,7 @@
 package com.java.semantic.mcp.monitoring;
 
 import com.java.semantic.mcp.McpToolContractException;
+import com.java.semantic.mcp.McpToolFailureMapper;
 import com.java.semantic.monitoring.MonitoringMode;
 import com.java.semantic.monitoring.MonitoringProjection;
 import org.slf4j.Logger;
@@ -38,7 +39,9 @@ public final class McpInvocationMonitor {
             resultCategory = ResultCategory.INVALID_TOOL_INPUT;
             throw exception;
         } catch (RuntimeException exception) {
-            resultCategory = ResultCategory.APPLICATION_FAILURE;
+            resultCategory = McpToolFailureMapper.isKnownFailure(exception)
+                    ? ResultCategory.EXPECTED_TOOL_FAILURE
+                    : ResultCategory.APPLICATION_FAILURE;
             throw exception;
         } catch (Error error) {
             resultCategory = ResultCategory.APPLICATION_FAILURE;
@@ -79,6 +82,7 @@ public final class McpInvocationMonitor {
     private enum ResultCategory {
         SUCCESS,
         INVALID_TOOL_INPUT,
+        EXPECTED_TOOL_FAILURE,
         APPLICATION_FAILURE
     }
 

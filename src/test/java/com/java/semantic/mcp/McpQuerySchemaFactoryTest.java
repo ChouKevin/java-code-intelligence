@@ -2,16 +2,17 @@ package com.java.semantic.mcp;
 
 import com.fasterxml.jackson.annotation.JsonSubTypes;
 import com.fasterxml.jackson.annotation.JsonTypeInfo;
-import io.swagger.v3.oas.annotations.media.ArraySchema;
-import io.swagger.v3.oas.annotations.media.Schema;
-import jakarta.validation.constraints.Max;
 import com.java.semantic.mcp.dto.framework.FrameworkDiscoveryMcpDtos;
 import com.java.semantic.mcp.dto.route.ApiRouteMcpDtos;
 import jakarta.validation.Validation;
 import jakarta.validation.Validator;
+import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Pattern;
+import jakarta.validation.constraints.PositiveOrZero;
 import jakarta.validation.constraints.Size;
 import org.junit.jupiter.api.Test;
 import tools.jackson.databind.JsonNode;
@@ -33,13 +34,18 @@ class McpQuerySchemaFactoryTest {
         JsonNode schema = objectMapper.readTree(schemaFactory.generateForType(RepresentativeInput.class));
 
         assertThat(schema.at("/additionalProperties").asBoolean()).isFalse();
-        assertThat(schema.at("/required").toString()).contains("name", "mode", "limit", "children");
+        assertThat(schema.at("/required").toString()).contains("name", "label", "mode", "limit", "children");
         assertThat(schema.at("/properties/name/minLength").asInt()).isEqualTo(1);
+        assertThat(schema.at("/properties/name/pattern").asText()).isEqualTo(".*\\S.*");
         assertThat(schema.at("/properties/mode/enum").toString()).contains("FAST", "SAFE");
         assertThat(schema.at("/properties/limit/minimum").asInt()).isEqualTo(1);
         assertThat(schema.at("/properties/limit/maximum").asInt()).isEqualTo(20);
         assertThat(schema.at("/properties/children/minItems").asInt()).isEqualTo(1);
         assertThat(schema.at("/properties/children/maxItems").asInt()).isEqualTo(3);
+        assertThat(schema.at("/properties/code/pattern").asText()).isEqualTo("[A-Z]+");
+        assertThat(schema.at("/properties/label/pattern").asText()).isEqualTo("[A-Z]+");
+        assertThat(schema.at("/properties/label/allOf/0/pattern").asText()).isEqualTo(".*\\S.*");
+        assertThat(schema.at("/properties/offset/minimum").asInt()).isZero();
         assertThat(schema.at("/properties/children/items/additionalProperties").asBoolean()).isFalse();
     }
 
@@ -75,10 +81,13 @@ class McpQuerySchemaFactoryTest {
     }
 
     private record RepresentativeInput(
-            @NotBlank @Schema(minLength = 1) String name,
+            @NotBlank String name,
             @NotNull Mode mode,
-            @NotNull @Min(1) @Max(20) @Schema(minimum = "1", maximum = "20") Integer limit,
-            @NotNull @Size(min = 1, max = 3) @ArraySchema(minItems = 1, maxItems = 3) List<Child> children) {
+            @NotNull @Min(1) @Max(20) Integer limit,
+            @NotEmpty @Size(min = 1, max = 3) List<Child> children,
+            @Pattern(regexp = "[A-Z]+") String code,
+            @NotBlank @Pattern(regexp = "[A-Z]+") String label,
+            @PositiveOrZero int offset) {
     }
 
     private record Child(@NotBlank String value) {

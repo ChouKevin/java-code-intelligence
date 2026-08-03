@@ -6,6 +6,8 @@ import com.java.semantic.mcp.mapper.ConceptDiscoveryMcpMapper;
 import com.java.semantic.mcp.mapper.SourceDiscoveryMcpMapper;
 import com.java.semantic.syntax.application.EvidenceSourceQuery;
 import com.java.semantic.syntax.application.concept.EntryPointConceptIdentity.ApiRouteConceptIdentity;
+import com.java.semantic.syntax.application.concept.EntryPointConceptIdentity.ScheduleConceptIdentity;
+import com.java.semantic.syntax.application.concept.MapperConceptIdentity.MapperStatementVariantEvidenceIdentity;
 import com.java.semantic.syntax.domain.ExactSourceDeclarationTarget;
 import jakarta.validation.Validation;
 import jakarta.validation.Validator;
@@ -46,6 +48,24 @@ class McpDiscoveryInputDecodingTest {
                 .isInstanceOf(EvidenceSourceQuery.MapperFragment.class);
     }
 
+    @Test
+    void should_decode_optional_schedule_and_mapper_identity_values_when_omitted() {
+        ConceptDiscoveryMcpDtos.ResolveInput schedule = decoder.decode(
+                scheduleConceptResolveArguments(), ConceptDiscoveryMcpDtos.ResolveInput.class);
+        JsonMapper objectMapper = new JsonMapper();
+        Validator validator = Validation.buildDefaultValidatorFactory().getValidator();
+        ConceptDiscoveryMcpDtos.ResolveInput directMapper = objectMapper.convertValue(
+                mapperConceptResolveArguments(), ConceptDiscoveryMcpDtos.ResolveInput.class);
+        assertThat(validator.validate(directMapper)).isEmpty();
+        ConceptDiscoveryMcpDtos.ResolveInput mapper = decoder.decode(
+                mapperConceptResolveArguments(), ConceptDiscoveryMcpDtos.ResolveInput.class);
+
+        assertThat(new ConceptDiscoveryMcpMapper().toDomain(schedule.identity()))
+                .isInstanceOf(ScheduleConceptIdentity.class);
+        assertThat(new ConceptDiscoveryMcpMapper().toDomain(mapper.identity()))
+                .isInstanceOf(MapperStatementVariantEvidenceIdentity.class);
+    }
+
     private static Map<String, Object> conceptResolveArguments() {
         return Map.of(
                 "repoId", "orders",
@@ -81,6 +101,29 @@ class McpDiscoveryInputDecodingTest {
                         "identity", Map.of(
                                 "namespace", "com.example.OrderMapper",
                                 "fragmentId", "columns",
+                                "resourcePath", "mapper/OrderMapper.xml",
+                                "documentOrdinal", 0,
+                                "representation", "MAPPER_XML_ELEMENT")));
+    }
+
+    private static Map<String, Object> scheduleConceptResolveArguments() {
+        return Map.of(
+                "repoId", "orders",
+                "expectedRevision", "FIXTURE",
+                "identity", Map.of(
+                        "kind", "SCHEDULE",
+                        "target", methodTarget(),
+                        "triggerKind", "CRON"));
+    }
+
+    private static Map<String, Object> mapperConceptResolveArguments() {
+        return Map.of(
+                "repoId", "orders",
+                "expectedRevision", "FIXTURE",
+                "identity", Map.of(
+                        "kind", "MAPPER_STATEMENT_VARIANT",
+                        "identity", Map.of(
+                                "statementKey", Map.of("namespace", "com.example.OrderMapper", "statementId", "findOrder"),
                                 "resourcePath", "mapper/OrderMapper.xml",
                                 "documentOrdinal", 0,
                                 "representation", "MAPPER_XML_ELEMENT")));
