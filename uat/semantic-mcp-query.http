@@ -1,0 +1,194 @@
+### Stateless MCP manual UAT
+### Set these process environment variables before running the requests:
+### SEMANTIC_BASE_URL, SEMANTIC_API_TOKEN, SEMANTIC_REPO_ID,
+### SEMANTIC_EXPECTED_REVISION, SEMANTIC_MISMATCHED_REVISION,
+### SEMANTIC_SOURCE_FILE, SEMANTIC_PACKAGE_NAME, SEMANTIC_CLASS_NAME,
+### SEMANTIC_METHOD_NAME
+### SEMANTIC_MISMATCHED_REVISION must differ from the repository's current revision.
+
+@baseUrl = {{$processEnv SEMANTIC_BASE_URL}}
+@apiToken = {{$processEnv SEMANTIC_API_TOKEN}}
+@repoId = {{$processEnv SEMANTIC_REPO_ID}}
+@revision = {{$processEnv SEMANTIC_EXPECTED_REVISION}}
+@mismatchedRevision = {{$processEnv SEMANTIC_MISMATCHED_REVISION}}
+@sourceFile = {{$processEnv SEMANTIC_SOURCE_FILE}}
+@packageName = {{$processEnv SEMANTIC_PACKAGE_NAME}}
+@className = {{$processEnv SEMANTIC_CLASS_NAME}}
+@methodName = {{$processEnv SEMANTIC_METHOD_NAME}}
+
+### 1. Authenticated MCP initialization for the stateless SDK transport.
+POST {{baseUrl}}/mcp
+X-Api-Token: {{apiToken}}
+MCP-Protocol-Version: 2025-06-18
+Content-Type: application/json
+Accept: application/json, text/event-stream
+
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "initialize",
+  "params": {
+    "protocolVersion": "2025-06-18",
+    "capabilities": {},
+    "clientInfo": {
+      "name": "manual-uat",
+      "version": "1"
+    }
+  }
+}
+
+### 2. The catalog must contain exactly the 17 published semantic tools.
+POST {{baseUrl}}/mcp
+X-Api-Token: {{apiToken}}
+MCP-Protocol-Version: 2025-06-18
+Content-Type: application/json
+Accept: application/json, text/event-stream
+
+{
+  "jsonrpc": "2.0",
+  "id": 2,
+  "method": "tools/list",
+  "params": {}
+}
+
+### 3. Repository catalog lookup.
+POST {{baseUrl}}/mcp
+X-Api-Token: {{apiToken}}
+MCP-Protocol-Version: 2025-06-18
+Content-Type: application/json
+Accept: application/json, text/event-stream
+
+{
+  "jsonrpc": "2.0",
+  "id": 3,
+  "method": "tools/call",
+  "params": {
+    "name": "semantic_list_repositories",
+    "arguments": {}
+  }
+}
+
+### 4. Read one repository status and obtain/verify its currentRevision.
+POST {{baseUrl}}/mcp
+X-Api-Token: {{apiToken}}
+MCP-Protocol-Version: 2025-06-18
+Content-Type: application/json
+Accept: application/json, text/event-stream
+
+{
+  "jsonrpc": "2.0",
+  "id": 4,
+  "method": "tools/call",
+  "params": {
+    "name": "semantic_get_repository",
+    "arguments": {
+      "repoId": "{{repoId}}"
+    }
+  }
+}
+
+### 5. Revision-pinned discovery query.
+POST {{baseUrl}}/mcp
+X-Api-Token: {{apiToken}}
+MCP-Protocol-Version: 2025-06-18
+Content-Type: application/json
+Accept: application/json, text/event-stream
+
+{
+  "jsonrpc": "2.0",
+  "id": 5,
+  "method": "tools/call",
+  "params": {
+    "name": "semantic_list_entry_points",
+    "arguments": {
+      "repoId": "{{repoId}}",
+      "expectedRevision": "{{revision}}",
+      "types": ["API", "MQ", "SCHEDULE"]
+    }
+  }
+}
+
+### 6. Read a method source projection and capture one server-provided follow-up.
+### Populate the method identity from a returned typed candidate whose source
+### is segmented (the result has a nextLocation); no source body or private
+### repository metadata is stored in this committed request file.
+POST {{baseUrl}}/mcp
+X-Api-Token: {{apiToken}}
+MCP-Protocol-Version: 2025-06-18
+Content-Type: application/json
+Accept: application/json, text/event-stream
+
+{
+  "jsonrpc": "2.0",
+  "id": 6,
+  "method": "tools/call",
+  "params": {
+    "name": "semantic_get_method_source",
+    "arguments": {
+      "repoId": "{{repoId}}",
+      "expectedRevision": "{{revision}}",
+      "target": {
+        "sourceType": {
+          "javaType": {
+            "packageName": "{{packageName}}",
+            "className": "{{className}}"
+          },
+          "sourceFile": "{{sourceFile}}"
+        },
+        "methodName": "{{methodName}}",
+        "parameterTypes": []
+      }
+    }
+  }
+}
+
+> {%
+  const structuredContent = response.body.result.structuredContent;
+  const followUp = structuredContent.availableFollowUps.find(
+    item => item.toolName === "semantic_get_source_segment");
+  if (!followUp) {
+    throw new Error("The method source result did not provide a source-segment follow-up");
+  }
+  client.global.set("followUpToolName", followUp.toolName);
+  client.global.set("followUpArguments", JSON.stringify(followUp.arguments));
+%}
+
+### 7. Invoke the captured availableFollowUp without translating its typed arguments.
+POST {{baseUrl}}/mcp
+X-Api-Token: {{apiToken}}
+MCP-Protocol-Version: 2025-06-18
+Content-Type: application/json
+Accept: application/json, text/event-stream
+
+{
+  "jsonrpc": "2.0",
+  "id": 7,
+  "method": "tools/call",
+  "params": {
+    "name": "{{followUpToolName}}",
+    "arguments": {{followUpArguments}}
+  }
+}
+
+### 8. Expected failure: pin a route lookup to a deliberately stale revision.
+### The response should classify this as REPOSITORY_REVISION_MISMATCH. If the
+### requested revision matches, choose another stale 40-hex value.
+POST {{baseUrl}}/mcp
+X-Api-Token: {{apiToken}}
+MCP-Protocol-Version: 2025-06-18
+Content-Type: application/json
+Accept: application/json, text/event-stream
+
+{
+  "jsonrpc": "2.0",
+  "id": 8,
+  "method": "tools/call",
+  "params": {
+    "name": "semantic_lookup_api_routes",
+    "arguments": {
+      "repoId": "{{repoId}}",
+      "expectedRevision": "{{mismatchedRevision}}",
+      "apiPath": "/replace-with-a-known-route"
+    }
+  }
+}
