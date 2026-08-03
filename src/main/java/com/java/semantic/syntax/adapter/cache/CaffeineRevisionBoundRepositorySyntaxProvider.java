@@ -23,7 +23,7 @@ public final class CaffeineRevisionBoundRepositorySyntaxProvider
 
     private static final Logger LOG = LoggerFactory.getLogger(CaffeineRevisionBoundRepositorySyntaxProvider.class);
 
-    /** 接收 RepositorySyntax 快取的安全監控結果 */
+    /** 接收 RepositorySyntax 快取的安全監控結果，LOADED 記 extraction 時間，其餘結果記 lookup wall time或零 */
     @FunctionalInterface
     interface CacheMonitor {
 
@@ -37,7 +37,7 @@ public final class CaffeineRevisionBoundRepositorySyntaxProvider
 
     private final SyntaxExtractionService syntaxExtractionService;
     private final RepositorySyntaxWeightEstimator weightEstimator;
-    private final Cache<RepositorySyntaxCacheKey, RepositorySyntax> cache;
+    private final Cache<RepositorySyntaxCacheKey, CachedRepositorySyntax> cache;
     private final int maximumEntryWeight;
     private final CacheMonitor cacheMonitor;
 
@@ -60,6 +60,15 @@ public final class CaffeineRevisionBoundRepositorySyntaxProvider
             RepositorySyntaxCacheProperties properties,
             Ticker ticker,
             CacheMonitor cacheMonitor) {
+        this(syntaxExtractionService, properties, ticker, cacheMonitor, new RepositorySyntaxWeightEstimator());
+    }
+
+    CaffeineRevisionBoundRepositorySyntaxProvider(
+            SyntaxExtractionService syntaxExtractionService,
+            RepositorySyntaxCacheProperties properties,
+            Ticker ticker,
+            CacheMonitor cacheMonitor,
+            RepositorySyntaxWeightEstimator weightEstimator) {
         this.syntaxExtractionService = Objects.requireNonNull(
                 syntaxExtractionService, "syntaxExtractionService is required");
         RepositorySyntaxCacheProperties requiredProperties = Objects.requireNonNull(
@@ -67,12 +76,13 @@ public final class CaffeineRevisionBoundRepositorySyntaxProvider
         Ticker requiredTicker = Objects.requireNonNull(ticker, "ticker is required");
         this.cacheMonitor = Objects.requireNonNull(cacheMonitor, "cacheMonitor is required");
         this.maximumEntryWeight = requiredProperties.maximumEntryWeight();
-        this.weightEstimator = new RepositorySyntaxWeightEstimator();
+        this.weightEstimator = Objects.requireNonNull(weightEstimator, "weightEstimator is required");
         this.cache = Caffeine.newBuilder()
                 .maximumWeight(requiredProperties.maximumWeight())
                 .expireAfterAccess(requiredProperties.expireAfterAccess())
                 .ticker(requiredTicker)
-                .weigher((RepositorySyntaxCacheKey ignored, RepositorySyntax syntax) -> cacheWeight(syntax,
+                .weigher((RepositorySyntaxCacheKey ignored, CachedRepositorySyntax cachedSyntax) -> cacheWeight(
+                        cachedSyntax.structuralWeight(),
                         requiredProperties.maximumWeight()))
                 .removalListener(this::logEviction)
                 .build();
@@ -85,18 +95,18 @@ public final class CaffeineRevisionBoundRepositorySyntaxProvider
                 requiredSnapshot.repositoryId(), requiredSnapshot.revision());
         long lookupStartedAt = System.nanoTime();
         cache.cleanUp();
-        RepositorySyntax cachedSyntax = cache.getIfPresent(key);
+        CachedRepositorySyntax cachedSyntax = cache.getIfPresent(key);
         if (Objects.nonNull(cachedSyntax)) {
-            log(key, "HIT", true, weightEstimator.estimate(cachedSyntax), Duration.ZERO);
-            return cachedSyntax;
+            log(key, "HIT", true, cachedSyntax.structuralWeight(), Duration.ZERO);
+            return cachedSyntax.syntax();
         }
 
-        AtomicReference<RepositorySyntax> loadedSyntax = new AtomicReference<>();
+        AtomicReference<CachedRepositorySyntax> loadedSyntax = new AtomicReference<>();
         AtomicLong loadDurationNanos = new AtomicLong();
         try {
-            RepositorySyntax syntax = cache.get(key, ignored -> load(requiredSnapshot, loadedSyntax, loadDurationNanos));
-            RepositorySyntax requiredSyntax = Objects.requireNonNull(syntax, "cache result is required");
-            int structuralWeight = weightEstimator.estimate(requiredSyntax);
+            CachedRepositorySyntax syntax = cache.get(
+                    key, ignored -> load(requiredSnapshot, loadedSyntax, loadDurationNanos));
+            CachedRepositorySyntax requiredSyntax = Objects.requireNonNull(syntax, "cache result is required");
             cache.cleanUp();
             boolean stored = Objects.nonNull(cache.getIfPresent(key));
             boolean loadedByThisCall = Objects.nonNull(loadedSyntax.get());
@@ -104,34 +114,47 @@ public final class CaffeineRevisionBoundRepositorySyntaxProvider
                     ? Duration.ofNanos(loadDurationNanos.get())
                     : Duration.ofNanos(System.nanoTime() - lookupStartedAt);
             String outcome = loadedByThisCall ? "LOADED" : "HIT";
-            if (structuralWeight > maximumEntryWeight) {
+            if (requiredSyntax.structuralWeight() > maximumEntryWeight) {
                 outcome = "NOT_CACHED_OVERSIZED";
             }
-            log(key, outcome, stored, structuralWeight, duration);
-            return requiredSyntax;
+            log(key, outcome, stored, requiredSyntax.structuralWeight(), duration);
+            return requiredSyntax.syntax();
+        } catch (CacheBookkeepingException exception) {
+            log(key,
+                    "BYPASSED_CACHE_FAILURE",
+                    false,
+                    0,
+                    Duration.ofNanos(System.nanoTime() - lookupStartedAt));
+            return exception.syntax();
         } catch (RuntimeException exception) {
             log(key, "LOAD_FAILED", false, 0, Duration.ofNanos(System.nanoTime() - lookupStartedAt));
             throw exception;
         }
     }
 
-    private RepositorySyntax load(
+    private CachedRepositorySyntax load(
             RepositorySnapshot snapshot,
-            AtomicReference<RepositorySyntax> loadedSyntax,
+            AtomicReference<CachedRepositorySyntax> loadedSyntax,
             AtomicLong loadDurationNanos) {
         long loadStartedAt = System.nanoTime();
         try {
             RepositorySyntax syntax = Objects.requireNonNull(
                     syntaxExtractionService.extract(snapshot.root()), "syntax extraction result is required");
-            loadedSyntax.set(syntax);
-            return syntax;
+            CachedRepositorySyntax cachedSyntax;
+            try {
+                cachedSyntax = new CachedRepositorySyntax(syntax, weightEstimator.estimate(syntax));
+            } catch (RuntimeException exception) {
+                throw new CacheBookkeepingException(
+                        "repository syntax weight estimation failed", syntax, exception);
+            }
+            loadedSyntax.set(cachedSyntax);
+            return cachedSyntax;
         } finally {
             loadDurationNanos.set(System.nanoTime() - loadStartedAt);
         }
     }
 
-    private int cacheWeight(RepositorySyntax syntax, int maximumWeight) {
-        int structuralWeight = weightEstimator.estimate(syntax);
+    private int cacheWeight(int structuralWeight, int maximumWeight) {
         if (structuralWeight > maximumEntryWeight) {
             return maximumWeight + 1;
         }
@@ -140,10 +163,10 @@ public final class CaffeineRevisionBoundRepositorySyntaxProvider
 
     private void logEviction(
             RepositorySyntaxCacheKey key,
-            RepositorySyntax syntax,
+            CachedRepositorySyntax syntax,
             RemovalCause cause) {
         if (Objects.nonNull(key) && Objects.nonNull(syntax) && cause.wasEvicted()) {
-            log(key, "EVICTED", false, weightEstimator.estimate(syntax), Duration.ZERO);
+            log(key, "EVICTED", false, syntax.structuralWeight(), Duration.ZERO);
         }
     }
 
@@ -170,5 +193,36 @@ public final class CaffeineRevisionBoundRepositorySyntaxProvider
                 cacheStored,
                 structuralWeight,
                 loadDuration.toMillis());
+    }
+
+    /** 將 RepositorySyntax 與 admission 時的一次性結構權重綁定 */
+    private record CachedRepositorySyntax(RepositorySyntax syntax, int structuralWeight) {
+
+        private CachedRepositorySyntax {
+            syntax = Objects.requireNonNull(syntax, "syntax is required");
+            if (structuralWeight < 1) {
+                throw new IllegalArgumentException("structuralWeight must be positive");
+            }
+        }
+    }
+
+    /** 區分已成功 extraction 後發生的快取帳務錯誤，僅限方法內控制流程且不得記錄或向外傳播 */
+    private static final class CacheBookkeepingException extends RuntimeException {
+
+        private final RepositorySyntax syntax;
+
+        private CacheBookkeepingException(String message, RepositorySyntax syntax, Throwable cause) {
+            super(message, cause);
+            this.syntax = Objects.requireNonNull(syntax, "syntax is required");
+        }
+
+        private RepositorySyntax syntax() {
+            return syntax;
+        }
+
+        @Override
+        public synchronized Throwable fillInStackTrace() {
+            return this;
+        }
     }
 }

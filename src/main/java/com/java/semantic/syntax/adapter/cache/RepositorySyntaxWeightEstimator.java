@@ -82,7 +82,6 @@ final class RepositorySyntaxWeightEstimator {
         result = collectionWeight(result, method.paramTypes().size());
         result = saturatedAdd(result, method.annotationSqlLocation().isPresent() ? 1 : 0);
         result = typeReferenceCollectionWeight(result, method.parameterTypeReferences());
-        result = saturatedAdd(result, method.returnType().isPresent() ? 1 : 0);
         if (method.returnType().isPresent()) {
             result = typeReferenceWeight(result, method.returnType().orElseThrow());
         }
@@ -105,34 +104,30 @@ final class RepositorySyntaxWeightEstimator {
     private int typeReferenceWeight(int current, TypeReference typeReference) {
         TypeReference requiredTypeReference = Objects.requireNonNull(typeReference, "typeReference is required");
         int weight = saturatedAdd(current, 1);
-        if (requiredTypeReference instanceof ParameterizedTypeReference parameterizedType) {
-            weight = typeReferenceWeight(weight, parameterizedType.rawType());
-            return typeReferenceCollectionWeight(weight, parameterizedType.typeArguments());
-        }
-        if (requiredTypeReference instanceof ArrayTypeReference arrayType) {
-            return typeReferenceWeight(weight, arrayType.elementType());
-        }
-        if (requiredTypeReference instanceof WildcardTypeReference wildcardType) {
-            if (wildcardType.upperBound().isPresent()) {
-                weight = typeReferenceWeight(weight, wildcardType.upperBound().orElseThrow());
+        return switch (requiredTypeReference) {
+            case ParameterizedTypeReference parameterizedType -> {
+                int rawTypeWeight = typeReferenceWeight(weight, parameterizedType.rawType());
+                yield typeReferenceCollectionWeight(rawTypeWeight, parameterizedType.typeArguments());
             }
-            if (wildcardType.lowerBound().isPresent()) {
-                weight = typeReferenceWeight(weight, wildcardType.lowerBound().orElseThrow());
+            case ArrayTypeReference arrayType -> typeReferenceWeight(weight, arrayType.elementType());
+            case WildcardTypeReference wildcardType -> {
+                int boundedWeight = weight;
+                if (wildcardType.upperBound().isPresent()) {
+                    boundedWeight = typeReferenceWeight(boundedWeight, wildcardType.upperBound().orElseThrow());
+                }
+                if (wildcardType.lowerBound().isPresent()) {
+                    boundedWeight = typeReferenceWeight(boundedWeight, wildcardType.lowerBound().orElseThrow());
+                }
+                yield boundedWeight;
             }
-            return weight;
-        }
-        if (requiredTypeReference instanceof TypeVariableReference typeVariable) {
-            return typeReferenceCollectionWeight(weight, typeVariable.upperBounds());
-        }
-        if (requiredTypeReference instanceof CompositeTypeReference compositeType) {
-            return typeReferenceCollectionWeight(weight, compositeType.alternatives());
-        }
-        if (requiredTypeReference instanceof NamedTypeReference
-                || requiredTypeReference instanceof PrimitiveTypeReference
-                || requiredTypeReference instanceof InferredTypeReference) {
-            return weight;
-        }
-        throw new IllegalArgumentException("unsupported type reference");
+            case TypeVariableReference typeVariable ->
+                    typeReferenceCollectionWeight(weight, typeVariable.upperBounds());
+            case CompositeTypeReference compositeType ->
+                    typeReferenceCollectionWeight(weight, compositeType.alternatives());
+            case NamedTypeReference ignored -> weight;
+            case PrimitiveTypeReference ignored -> weight;
+            case InferredTypeReference ignored -> weight;
+        };
     }
 
     private int collectionWeight(int current, int elements) {

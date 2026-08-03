@@ -145,6 +145,32 @@ class CaffeineRevisionBoundRepositorySyntaxProviderTest {
     }
 
     @Test
+    void should_return_uncached_extraction_when_cache_weight_estimation_fails() {
+        SyntaxExtractionService extractionService = mock(SyntaxExtractionService.class);
+        RepositorySyntaxWeightEstimator weightEstimator = mock(RepositorySyntaxWeightEstimator.class);
+        RepositorySnapshot snapshot = snapshot("orders", "1", "/repository/orders");
+        RepositorySyntax syntax = RepositorySyntax.empty();
+        Queue<String> outcomes = new ConcurrentLinkedQueue<>();
+        when(extractionService.extract(snapshot.root())).thenReturn(syntax);
+        when(weightEstimator.estimate(syntax))
+                .thenThrow(new IllegalStateException("synthetic cache bookkeeping failure"));
+        CaffeineRevisionBoundRepositorySyntaxProvider.CacheMonitor monitor =
+                (key, outcome, cacheStored, structuralWeight, loadDuration) -> outcomes.add(outcome);
+        CaffeineRevisionBoundRepositorySyntaxProvider provider = new CaffeineRevisionBoundRepositorySyntaxProvider(
+                extractionService,
+                new RepositorySyntaxCacheProperties(100, 100, Duration.ofMinutes(1)),
+                Ticker.systemTicker(),
+                monitor,
+                weightEstimator);
+
+        assertThat(provider.get(snapshot)).isSameAs(syntax);
+        assertThat(provider.get(snapshot)).isSameAs(syntax);
+
+        verify(extractionService, times(2)).extract(snapshot.root());
+        assertThat(outcomes).containsExactly("BYPASSED_CACHE_FAILURE", "BYPASSED_CACHE_FAILURE");
+    }
+
+    @Test
     void should_serve_an_oversized_result_without_admitting_it() {
         SyntaxExtractionService extractionService = mock(SyntaxExtractionService.class);
         RepositorySnapshot snapshot = snapshot("orders", "1", "/repository/orders");
