@@ -1,15 +1,15 @@
 package com.java.semantic.api.dto;
 
-import com.java.semantic.api.monitoring.ApiMonitoringField;
-import com.java.semantic.api.monitoring.ApiMonitoringMode;
+import com.java.semantic.monitoring.MonitoringField;
+import com.java.semantic.monitoring.MonitoringMode;
 
 import java.util.List;
 import java.util.Objects;
 
 /** 方法實作探索完整性與保留問題的彙總 */
 public record MethodImplementationResolutionResponse(
-        @ApiMonitoringField(ApiMonitoringMode.VALUE) Status status,
-        @ApiMonitoringField(ApiMonitoringMode.SIZE) List<SemanticImplementationIssueSummaryResponse> issueSummaries) {
+        @MonitoringField(MonitoringMode.VALUE) Status status,
+        @MonitoringField(MonitoringMode.SIZE) List<SemanticImplementationIssueSummaryResponse> issueSummaries) {
 
     public MethodImplementationResolutionResponse {
         status = Objects.requireNonNull(status, "status is required");

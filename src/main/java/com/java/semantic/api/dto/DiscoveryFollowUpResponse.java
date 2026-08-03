@@ -6,8 +6,8 @@ import com.java.semantic.api.dto.identity.SourceTypeIdentityPayload;
 import com.java.semantic.api.dto.identity.SourceSymbolContextPayload;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
-import com.java.semantic.api.monitoring.ApiMonitoringField;
-import com.java.semantic.api.monitoring.ApiMonitoringMode;
+import com.java.semantic.monitoring.MonitoringField;
+import com.java.semantic.monitoring.MonitoringMode;
 import com.java.semantic.api.dto.location.PositionPayload;
 import com.java.semantic.api.dto.location.SourceRangePayload;
 
@@ -17,9 +17,9 @@ import java.util.Optional;
 
 /** operation 與 request 是 Agent 可直接提交的下一輪 HTTP 契約，不是建議文字 */
 public record DiscoveryFollowUpResponse(
-        @ApiMonitoringField(ApiMonitoringMode.VALUE) String operation,
-        @ApiMonitoringField(ApiMonitoringMode.NESTED) ApiResponse api,
-        @ApiMonitoringField(ApiMonitoringMode.NESTED) RequestResponse request) {
+        @MonitoringField(MonitoringMode.VALUE) String operation,
+        @MonitoringField(MonitoringMode.NESTED) ApiResponse api,
+        @MonitoringField(MonitoringMode.NESTED) RequestResponse request) {
 
     public DiscoveryFollowUpResponse {
         api = Objects.requireNonNull(api, "api is required");
@@ -27,7 +27,7 @@ public record DiscoveryFollowUpResponse(
     }
 
     /** 後續動作的固定 HTTP method、path 與 operationId */
-    public record ApiResponse(@ApiMonitoringField(ApiMonitoringMode.VALUE) String method, @ApiMonitoringField(ApiMonitoringMode.VALUE) String path, @ApiMonitoringField(ApiMonitoringMode.VALUE) String operationId) {
+    public record ApiResponse(@MonitoringField(MonitoringMode.VALUE) String method, @MonitoringField(MonitoringMode.VALUE) String path, @MonitoringField(MonitoringMode.VALUE) String operationId) {
     }
 
     /** 後續動作可攜帶的封閉完整請求投影 */
@@ -48,9 +48,9 @@ public record DiscoveryFollowUpResponse(
 
     /** exact method source 後續動作的完整請求 */
     public record GetMethodSourceRequestResponse(
-            @ApiMonitoringField(ApiMonitoringMode.VALUE) String repoId,
-            @ApiMonitoringField(ApiMonitoringMode.VALUE) String expectedRevision,
-            @ApiMonitoringField(ApiMonitoringMode.NESTED) MethodTargetPayload target) implements RequestResponse {
+            @MonitoringField(MonitoringMode.VALUE) String repoId,
+            @MonitoringField(MonitoringMode.VALUE) String expectedRevision,
+            @MonitoringField(MonitoringMode.NESTED) MethodTargetPayload target) implements RequestResponse {
 
         public GetMethodSourceRequestResponse {
             target = Objects.requireNonNull(target, "target is required");
@@ -59,10 +59,10 @@ public record DiscoveryFollowUpResponse(
 
     /** outgoing 或 incoming call graph 後續動作的完整請求 */
     public record AnalyzeCallGraphRequestResponse(
-            @ApiMonitoringField(ApiMonitoringMode.VALUE) String repoId,
-            @ApiMonitoringField(ApiMonitoringMode.VALUE) String expectedRevision,
-            @ApiMonitoringField(ApiMonitoringMode.VALUE) int depth,
-            @ApiMonitoringField(ApiMonitoringMode.NESTED) MethodTargetPayload target) implements RequestResponse {
+            @MonitoringField(MonitoringMode.VALUE) String repoId,
+            @MonitoringField(MonitoringMode.VALUE) String expectedRevision,
+            @MonitoringField(MonitoringMode.VALUE) int depth,
+            @MonitoringField(MonitoringMode.NESTED) MethodTargetPayload target) implements RequestResponse {
 
         public AnalyzeCallGraphRequestResponse {
             target = Objects.requireNonNull(target, "target is required");
@@ -71,9 +71,9 @@ public record DiscoveryFollowUpResponse(
 
     /** 方法實作探索後續動作的完整請求 */
     public record DiscoverMethodImplementationsRequestResponse(
-            @ApiMonitoringField(ApiMonitoringMode.VALUE) String repoId,
-            @ApiMonitoringField(ApiMonitoringMode.VALUE) String expectedRevision,
-            @ApiMonitoringField(ApiMonitoringMode.NESTED) MethodTargetPayload declarationTarget) implements RequestResponse {
+            @MonitoringField(MonitoringMode.VALUE) String repoId,
+            @MonitoringField(MonitoringMode.VALUE) String expectedRevision,
+            @MonitoringField(MonitoringMode.NESTED) MethodTargetPayload declarationTarget) implements RequestResponse {
 
         public DiscoverMethodImplementationsRequestResponse {
             declarationTarget = Objects.requireNonNull(
@@ -83,9 +83,9 @@ public record DiscoveryFollowUpResponse(
 
     /** 精確 typed concept resolve follow-up 的完整請求 */
     public record ResolveConceptRequestResponse(
-            @ApiMonitoringField(ApiMonitoringMode.VALUE) String repoId,
-            @ApiMonitoringField(ApiMonitoringMode.VALUE) String expectedRevision,
-            @ApiMonitoringField(ApiMonitoringMode.NESTED) ConceptIdentityResponse identity) implements RequestResponse {
+            @MonitoringField(MonitoringMode.VALUE) String repoId,
+            @MonitoringField(MonitoringMode.VALUE) String expectedRevision,
+            @MonitoringField(MonitoringMode.NESTED) ConceptIdentityResponse identity) implements RequestResponse {
 
         public ResolveConceptRequestResponse {
             identity = Objects.requireNonNull(identity, "identity is required");
@@ -94,19 +94,19 @@ public record DiscoveryFollowUpResponse(
 
     /** 概念搜尋下一頁 follow-up 的單一搜尋條件 */
     public record ConceptSearchTermResponse(
-            @ApiMonitoringField(ApiMonitoringMode.VALUE) String value,
-            @ApiMonitoringField(ApiMonitoringMode.VALUE) String matchMode) {
+            @MonitoringField(MonitoringMode.VALUE) String value,
+            @MonitoringField(MonitoringMode.VALUE) String matchMode) {
     }
 
     /** 宣告型概念導向型別成員探索的完整請求 */
     public record GetTypeMembersRequestResponse(
-            @ApiMonitoringField(ApiMonitoringMode.VALUE) String repoId,
-            @ApiMonitoringField(ApiMonitoringMode.VALUE) String expectedRevision,
-            @ApiMonitoringField(ApiMonitoringMode.NESTED) SourceTypeIdentityPayload sourceType,
-            @ApiMonitoringField(ApiMonitoringMode.SIZE) List<String> memberKinds,
-            @ApiMonitoringField(ApiMonitoringMode.OMIT) Optional<String> namePrefix,
-            @ApiMonitoringField(ApiMonitoringMode.VALUE) int offset,
-            @ApiMonitoringField(ApiMonitoringMode.VALUE) int limit) implements RequestResponse {
+            @MonitoringField(MonitoringMode.VALUE) String repoId,
+            @MonitoringField(MonitoringMode.VALUE) String expectedRevision,
+            @MonitoringField(MonitoringMode.NESTED) SourceTypeIdentityPayload sourceType,
+            @MonitoringField(MonitoringMode.SIZE) List<String> memberKinds,
+            @MonitoringField(MonitoringMode.OMIT) Optional<String> namePrefix,
+            @MonitoringField(MonitoringMode.VALUE) int offset,
+            @MonitoringField(MonitoringMode.VALUE) int limit) implements RequestResponse {
 
         public GetTypeMembersRequestResponse {
             sourceType = Objects.requireNonNull(sourceType, "sourceType is required");
@@ -118,13 +118,13 @@ public record DiscoveryFollowUpResponse(
 
     /** 型別成員下一頁後續動作的完整請求 */
     public record DiscoverTypeMembersRequestResponse(
-            @ApiMonitoringField(ApiMonitoringMode.VALUE) String repoId,
-            @ApiMonitoringField(ApiMonitoringMode.VALUE) String expectedRevision,
-            @ApiMonitoringField(ApiMonitoringMode.NESTED) SourceTypeIdentityPayload sourceType,
-            @ApiMonitoringField(ApiMonitoringMode.SIZE) List<String> memberKinds,
-            @ApiMonitoringField(ApiMonitoringMode.OMIT) Optional<String> namePrefix,
-            @ApiMonitoringField(ApiMonitoringMode.VALUE) int offset,
-            @ApiMonitoringField(ApiMonitoringMode.VALUE) int limit) implements RequestResponse {
+            @MonitoringField(MonitoringMode.VALUE) String repoId,
+            @MonitoringField(MonitoringMode.VALUE) String expectedRevision,
+            @MonitoringField(MonitoringMode.NESTED) SourceTypeIdentityPayload sourceType,
+            @MonitoringField(MonitoringMode.SIZE) List<String> memberKinds,
+            @MonitoringField(MonitoringMode.OMIT) Optional<String> namePrefix,
+            @MonitoringField(MonitoringMode.VALUE) int offset,
+            @MonitoringField(MonitoringMode.VALUE) int limit) implements RequestResponse {
 
         public DiscoverTypeMembersRequestResponse {
             sourceType = Objects.requireNonNull(sourceType, "sourceType is required");
@@ -136,14 +136,14 @@ public record DiscoveryFollowUpResponse(
 
     /** 直接重送固定搜尋條件的概念下一頁完整 HTTP request */
     public record DiscoverConceptsRequestResponse(
-            @ApiMonitoringField(ApiMonitoringMode.VALUE) String repoId,
-            @ApiMonitoringField(ApiMonitoringMode.VALUE) String expectedRevision,
-            @ApiMonitoringField(ApiMonitoringMode.NESTED) List<ConceptSearchTermResponse> terms,
-            @ApiMonitoringField(ApiMonitoringMode.SIZE) List<String> kinds,
-            @ApiMonitoringField(ApiMonitoringMode.VALUE) String operator,
-            @ApiMonitoringField(ApiMonitoringMode.VALUE) Optional<String> packagePrefix,
-            @ApiMonitoringField(ApiMonitoringMode.VALUE) int offset,
-            @ApiMonitoringField(ApiMonitoringMode.VALUE) int limit) implements RequestResponse {
+            @MonitoringField(MonitoringMode.VALUE) String repoId,
+            @MonitoringField(MonitoringMode.VALUE) String expectedRevision,
+            @MonitoringField(MonitoringMode.NESTED) List<ConceptSearchTermResponse> terms,
+            @MonitoringField(MonitoringMode.SIZE) List<String> kinds,
+            @MonitoringField(MonitoringMode.VALUE) String operator,
+            @MonitoringField(MonitoringMode.VALUE) Optional<String> packagePrefix,
+            @MonitoringField(MonitoringMode.VALUE) int offset,
+            @MonitoringField(MonitoringMode.VALUE) int limit) implements RequestResponse {
 
         public DiscoverConceptsRequestResponse {
             terms = List.copyOf(Objects.requireNonNull(terms, "terms are required"));
@@ -154,21 +154,21 @@ public record DiscoveryFollowUpResponse(
 
     /** 直接重送固定 event type 與頁碼的事件監聽器下一頁完整 HTTP request */
     public record DiscoverEventListenersRequestResponse(
-            @ApiMonitoringField(ApiMonitoringMode.VALUE) String repoId,
-            @ApiMonitoringField(ApiMonitoringMode.VALUE) String expectedRevision,
-            @ApiMonitoringField(ApiMonitoringMode.VALUE) String eventType,
-            @ApiMonitoringField(ApiMonitoringMode.VALUE) int offset,
-            @ApiMonitoringField(ApiMonitoringMode.VALUE) int limit) implements RequestResponse {
+            @MonitoringField(MonitoringMode.VALUE) String repoId,
+            @MonitoringField(MonitoringMode.VALUE) String expectedRevision,
+            @MonitoringField(MonitoringMode.VALUE) String eventType,
+            @MonitoringField(MonitoringMode.VALUE) int offset,
+            @MonitoringField(MonitoringMode.VALUE) int limit) implements RequestResponse {
     }
 
     /** RESOLVE_SOURCE_SYMBOL 後續動作的完整請求 */
     public record ResolveSourceSymbolRequestResponse(
-            @ApiMonitoringField(ApiMonitoringMode.VALUE) String repoId,
-            @ApiMonitoringField(ApiMonitoringMode.VALUE) String expectedRevision,
-            @ApiMonitoringField(ApiMonitoringMode.NESTED) SourceSymbolContextPayload context,
-            @ApiMonitoringField(ApiMonitoringMode.VALUE) String symbol,
+            @MonitoringField(MonitoringMode.VALUE) String repoId,
+            @MonitoringField(MonitoringMode.VALUE) String expectedRevision,
+            @MonitoringField(MonitoringMode.NESTED) SourceSymbolContextPayload context,
+            @MonitoringField(MonitoringMode.VALUE) String symbol,
             @JsonInclude(JsonInclude.Include.NON_ABSENT)
-            @ApiMonitoringField(ApiMonitoringMode.NESTED) Optional<PositionPayload> position)
+            @MonitoringField(MonitoringMode.NESTED) Optional<PositionPayload> position)
             implements RequestResponse {
 
         public ResolveSourceSymbolRequestResponse {
@@ -179,26 +179,26 @@ public record DiscoveryFollowUpResponse(
 
     /** 內部 reference 下一頁的完整 exact target 請求 */
     public record FindInternalReferencesRequestResponse(
-            @ApiMonitoringField(ApiMonitoringMode.VALUE) String repoId,
-            @ApiMonitoringField(ApiMonitoringMode.VALUE) String expectedRevision,
-            @ApiMonitoringField(ApiMonitoringMode.NESTED) InternalSourceReferenceTargetPayload target,
-            @ApiMonitoringField(ApiMonitoringMode.VALUE) int offset,
-            @ApiMonitoringField(ApiMonitoringMode.VALUE) int limit) implements RequestResponse {
+            @MonitoringField(MonitoringMode.VALUE) String repoId,
+            @MonitoringField(MonitoringMode.VALUE) String expectedRevision,
+            @MonitoringField(MonitoringMode.NESTED) InternalSourceReferenceTargetPayload target,
+            @MonitoringField(MonitoringMode.VALUE) int offset,
+            @MonitoringField(MonitoringMode.VALUE) int limit) implements RequestResponse {
     }
 
     /** bounded source segment 的完整 exact range 請求 */
     public record GetSourceSegmentRequestResponse(
-            @ApiMonitoringField(ApiMonitoringMode.VALUE) String repoId,
-            @ApiMonitoringField(ApiMonitoringMode.VALUE) String expectedRevision,
-            @ApiMonitoringField(ApiMonitoringMode.NESTED) SourceRangePayload location,
-            @ApiMonitoringField(ApiMonitoringMode.VALUE) int contextLines) implements RequestResponse {
+            @MonitoringField(MonitoringMode.VALUE) String repoId,
+            @MonitoringField(MonitoringMode.VALUE) String expectedRevision,
+            @MonitoringField(MonitoringMode.NESTED) SourceRangePayload location,
+            @MonitoringField(MonitoringMode.VALUE) int contextLines) implements RequestResponse {
     }
 
     /** evidence-source follow-up 的完整封閉 typed request */
     public record GetEvidenceSourceRequestResponse(
-            @ApiMonitoringField(ApiMonitoringMode.VALUE) String repoId,
-            @ApiMonitoringField(ApiMonitoringMode.VALUE) String expectedRevision,
-            @ApiMonitoringField(ApiMonitoringMode.NESTED) EvidenceSourceIdentityPayload identity)
+            @MonitoringField(MonitoringMode.VALUE) String repoId,
+            @MonitoringField(MonitoringMode.VALUE) String expectedRevision,
+            @MonitoringField(MonitoringMode.NESTED) EvidenceSourceIdentityPayload identity)
             implements RequestResponse {
 
         public GetEvidenceSourceRequestResponse {

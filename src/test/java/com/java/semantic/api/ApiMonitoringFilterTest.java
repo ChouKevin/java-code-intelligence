@@ -3,8 +3,8 @@ package com.java.semantic.api;
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
-import com.java.semantic.api.monitoring.ApiMonitoringField;
-import com.java.semantic.api.monitoring.ApiMonitoringMode;
+import com.java.semantic.monitoring.MonitoringField;
+import com.java.semantic.monitoring.MonitoringMode;
 import com.java.semantic.api.security.ApiSecurityProperties;
 import com.java.semantic.api.security.ApiTokenFilter;
 import com.java.semantic.api.dto.ConceptKindUnavailableResponse;
@@ -216,11 +216,11 @@ class ApiMonitoringFilterTest {
                         && message.substring(expectedPrefix.length()).matches(" durationMillis=\\d+"));
     }
 
-    private record SuccessPayload(@ApiMonitoringField(ApiMonitoringMode.VALUE) String repositoryId) {
+    private record SuccessPayload(@MonitoringField(MonitoringMode.VALUE) String repositoryId) {
     }
 
     private record NullableSuccessPayload(
-            @ApiMonitoringField(ApiMonitoringMode.NESTED) SuccessPayload nested) {
+            @MonitoringField(MonitoringMode.NESTED) SuccessPayload nested) {
     }
 
     private record FilterResult(MockHttpServletResponse response) {

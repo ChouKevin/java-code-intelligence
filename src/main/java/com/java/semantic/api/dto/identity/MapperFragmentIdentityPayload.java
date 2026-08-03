@@ -2,8 +2,8 @@ package com.java.semantic.api.dto.identity;
 
 import com.fasterxml.jackson.annotation.JsonAnySetter;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
-import com.java.semantic.api.monitoring.ApiMonitoringField;
-import com.java.semantic.api.monitoring.ApiMonitoringMode;
+import com.java.semantic.monitoring.MonitoringField;
+import com.java.semantic.monitoring.MonitoringMode;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.PositiveOrZero;
@@ -14,14 +14,14 @@ import java.util.Objects;
 /** mapper fragment 實體證據的共享 HTTP identity */
 @JsonIgnoreProperties(ignoreUnknown = false)
 public record MapperFragmentIdentityPayload(
-        @ApiMonitoringField(ApiMonitoringMode.VALUE)
+        @MonitoringField(MonitoringMode.VALUE)
         @NotBlank @Size(max = 1024) @Pattern(regexp = "[^\\p{javaISOControl}]+") String namespace,
-        @ApiMonitoringField(ApiMonitoringMode.VALUE)
+        @MonitoringField(MonitoringMode.VALUE)
         @NotBlank @Size(max = 255) @Pattern(regexp = "[^\\p{javaISOControl}]+") String fragmentId,
-        @ApiMonitoringField(ApiMonitoringMode.OMIT)
+        @MonitoringField(MonitoringMode.OMIT)
         @NotBlank @Size(max = 1024) @Pattern(regexp = "[^\\p{javaISOControl}]+") String resourcePath,
-        @ApiMonitoringField(ApiMonitoringMode.VALUE) @PositiveOrZero int documentOrdinal,
-        @ApiMonitoringField(ApiMonitoringMode.VALUE)
+        @MonitoringField(MonitoringMode.VALUE) @PositiveOrZero int documentOrdinal,
+        @MonitoringField(MonitoringMode.VALUE)
         @NotBlank @Pattern(regexp = "MAPPER_XML_ELEMENT") String representation) {
 
     public MapperFragmentIdentityPayload {

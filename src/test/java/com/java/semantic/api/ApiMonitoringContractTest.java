@@ -1,7 +1,7 @@
 package com.java.semantic.api;
 
-import com.java.semantic.api.monitoring.ApiMonitoringField;
-import com.java.semantic.api.monitoring.ApiMonitoringMode;
+import com.java.semantic.monitoring.MonitoringField;
+import com.java.semantic.monitoring.MonitoringMode;
 import com.java.semantic.api.dto.EvidenceSourceResponse;
 import com.java.semantic.api.dto.SourceSegmentPayload;
 import com.tngtech.archunit.core.domain.JavaClass;
@@ -33,10 +33,10 @@ class ApiMonitoringContractTest {
     void should_explicitly_classify_every_project_owned_dto_record_component() {
         List<String> violations = new ArrayList<>();
         for (RecordComponent component : dtoRecordComponents()) {
-            ApiMonitoringField annotation = component.getAnnotation(ApiMonitoringField.class);
+            MonitoringField annotation = component.getAnnotation(MonitoringField.class);
             String componentId = component.getDeclaringRecord().getSimpleName() + "." + component.getName();
             if (Objects.isNull(annotation)) {
-                violations.add(componentId + " is missing ApiMonitoringField");
+                violations.add(componentId + " is missing MonitoringField");
                 continue;
             }
             verifyClassification(component, annotation.value(), componentId, violations);
@@ -58,11 +58,11 @@ class ApiMonitoringContractTest {
 
     @Test
     void should_omit_evidence_source_content_while_nesting_its_location_and_segment() {
-        assertThat(monitoringMode(EvidenceSourceResponse.class, "location")).isEqualTo(ApiMonitoringMode.NESTED);
-        assertThat(monitoringMode(EvidenceSourceResponse.class, "segment")).isEqualTo(ApiMonitoringMode.NESTED);
-        assertThat(monitoringMode(SourceSegmentPayload.class, "location")).isEqualTo(ApiMonitoringMode.NESTED);
-        assertThat(monitoringMode(SourceSegmentPayload.class, "content")).isEqualTo(ApiMonitoringMode.OMIT);
-        assertThat(monitoringMode(SourceSegmentPayload.class, "nextLocation")).isEqualTo(ApiMonitoringMode.NESTED);
+        assertThat(monitoringMode(EvidenceSourceResponse.class, "location")).isEqualTo(MonitoringMode.NESTED);
+        assertThat(monitoringMode(EvidenceSourceResponse.class, "segment")).isEqualTo(MonitoringMode.NESTED);
+        assertThat(monitoringMode(SourceSegmentPayload.class, "location")).isEqualTo(MonitoringMode.NESTED);
+        assertThat(monitoringMode(SourceSegmentPayload.class, "content")).isEqualTo(MonitoringMode.OMIT);
+        assertThat(monitoringMode(SourceSegmentPayload.class, "nextLocation")).isEqualTo(MonitoringMode.NESTED);
     }
 
     private static RecordComponent component(Class<?> recordType) {
@@ -72,11 +72,11 @@ class ApiMonitoringContractTest {
                 .orElseThrow();
     }
 
-    private static ApiMonitoringMode monitoringMode(Class<?> recordType, String componentName) {
+    private static MonitoringMode monitoringMode(Class<?> recordType, String componentName) {
         return Arrays.stream(recordType.getRecordComponents())
                 .filter(component -> componentName.equals(component.getName()))
-                .map(component -> component.getAnnotation(ApiMonitoringField.class))
-                .map(ApiMonitoringField::value)
+                .map(component -> component.getAnnotation(MonitoringField.class))
+                .map(MonitoringField::value)
                 .findFirst()
                 .orElseThrow();
     }
@@ -105,27 +105,27 @@ class ApiMonitoringContractTest {
 
     private static void verifyClassification(
             RecordComponent component,
-            ApiMonitoringMode mode,
+            MonitoringMode mode,
             String componentId,
             List<String> violations) {
-        if ("sourceFile".equals(component.getName()) && mode != ApiMonitoringMode.VALUE) {
+        if ("sourceFile".equals(component.getName()) && mode != MonitoringMode.VALUE) {
             violations.add(componentId + " must use VALUE for a repository-relative source file");
         }
         if (Collection.class.isAssignableFrom(component.getType())
-                && mode != ApiMonitoringMode.SIZE
-                && !(mode == ApiMonitoringMode.NESTED && isSupportedNested(component))) {
+                && mode != MonitoringMode.SIZE
+                && !(mode == MonitoringMode.NESTED && isSupportedNested(component))) {
             violations.add(componentId + " must use SIZE for a collection");
         }
-        if (isSensitiveContent(component.getName()) && mode != ApiMonitoringMode.OMIT) {
+        if (isSensitiveContent(component.getName()) && mode != MonitoringMode.OMIT) {
             violations.add(componentId + " must use OMIT for sensitive content");
         }
-        if (mode == ApiMonitoringMode.VALUE && !isSupportedValue(component.getGenericType())) {
+        if (mode == MonitoringMode.VALUE && !isSupportedValue(component.getGenericType())) {
             violations.add(componentId + " VALUE is unsupported for " + component.getType().getSimpleName());
         }
-        if (mode == ApiMonitoringMode.SIZE && !isSupportedSize(component.getType())) {
+        if (mode == MonitoringMode.SIZE && !isSupportedSize(component.getType())) {
             violations.add(componentId + " SIZE is unsupported for " + component.getType().getSimpleName());
         }
-        if (mode == ApiMonitoringMode.NESTED && !isSupportedNested(component)) {
+        if (mode == MonitoringMode.NESTED && !isSupportedNested(component)) {
             violations.add(componentId + " NESTED requires a project-owned DTO record");
         }
     }
@@ -214,14 +214,14 @@ class ApiMonitoringContractTest {
     }
 
     private record DirectNestedRecord(
-            @ApiMonitoringField(ApiMonitoringMode.VALUE) String identifier) {
+            @MonitoringField(MonitoringMode.VALUE) String identifier) {
     }
 
     private sealed interface ClosedNested permits ClosedNestedRecord {
     }
 
     private record ClosedNestedRecord(
-            @ApiMonitoringField(ApiMonitoringMode.VALUE) String identifier) implements ClosedNested {
+            @MonitoringField(MonitoringMode.VALUE) String identifier) implements ClosedNested {
     }
 
     private interface OpenNested {
@@ -234,30 +234,30 @@ class ApiMonitoringContractTest {
     }
 
     private record DirectRecordPayload(
-            @ApiMonitoringField(ApiMonitoringMode.NESTED) DirectNestedRecord nested) {
+            @MonitoringField(MonitoringMode.NESTED) DirectNestedRecord nested) {
     }
 
     private record NestedRecordListPayload(
-            @ApiMonitoringField(ApiMonitoringMode.NESTED) List<DirectNestedRecord> nested) {
+            @MonitoringField(MonitoringMode.NESTED) List<DirectNestedRecord> nested) {
     }
 
     private record ClosedInterfacePayload(
-            @ApiMonitoringField(ApiMonitoringMode.NESTED) ClosedNested nested) {
+            @MonitoringField(MonitoringMode.NESTED) ClosedNested nested) {
     }
 
     private record OptionalClosedInterfacePayload(
-            @ApiMonitoringField(ApiMonitoringMode.NESTED) Optional<ClosedNested> nested) {
+            @MonitoringField(MonitoringMode.NESTED) Optional<ClosedNested> nested) {
     }
 
     private record NestedOptionalPayload(
-            @ApiMonitoringField(ApiMonitoringMode.NESTED) Optional<Optional<DirectNestedRecord>> nested) {
+            @MonitoringField(MonitoringMode.NESTED) Optional<Optional<DirectNestedRecord>> nested) {
     }
 
     private record OpenInterfacePayload(
-            @ApiMonitoringField(ApiMonitoringMode.NESTED) OpenNested nested) {
+            @MonitoringField(MonitoringMode.NESTED) OpenNested nested) {
     }
 
     private record NonRecordPermittedPayload(
-            @ApiMonitoringField(ApiMonitoringMode.NESTED) NonRecordPermittedNested nested) {
+            @MonitoringField(MonitoringMode.NESTED) NonRecordPermittedNested nested) {
     }
 }

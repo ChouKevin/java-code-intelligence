@@ -1,7 +1,7 @@
 package com.java.semantic.api.dto;
 
-import com.java.semantic.api.monitoring.ApiMonitoringField;
-import com.java.semantic.api.monitoring.ApiMonitoringMode;
+import com.java.semantic.monitoring.MonitoringField;
+import com.java.semantic.monitoring.MonitoringMode;
 import com.java.semantic.api.dto.identity.SourceMemberIdentityPayload;
 
 import java.util.List;
@@ -10,13 +10,13 @@ import java.util.Optional;
 
 /** 帶型別資訊、註解、限制與 follow-up 的 FIELD 成員回應 */
 public record FieldTypeMemberResponse(
-        @ApiMonitoringField(ApiMonitoringMode.VALUE) String kind,
-        @ApiMonitoringField(ApiMonitoringMode.NESTED) SourceMemberIdentityPayload identity,
-        @ApiMonitoringField(ApiMonitoringMode.VALUE) String writtenType,
-        @ApiMonitoringField(ApiMonitoringMode.OMIT) Optional<String> resolvedType,
-        @ApiMonitoringField(ApiMonitoringMode.SIZE) List<String> annotations,
-        @ApiMonitoringField(ApiMonitoringMode.SIZE) List<String> limitations,
-        @ApiMonitoringField(ApiMonitoringMode.NESTED) List<DiscoveryFollowUpResponse> availableFollowUps) implements TypeMemberResponse {
+        @MonitoringField(MonitoringMode.VALUE) String kind,
+        @MonitoringField(MonitoringMode.NESTED) SourceMemberIdentityPayload identity,
+        @MonitoringField(MonitoringMode.VALUE) String writtenType,
+        @MonitoringField(MonitoringMode.OMIT) Optional<String> resolvedType,
+        @MonitoringField(MonitoringMode.SIZE) List<String> annotations,
+        @MonitoringField(MonitoringMode.SIZE) List<String> limitations,
+        @MonitoringField(MonitoringMode.NESTED) List<DiscoveryFollowUpResponse> availableFollowUps) implements TypeMemberResponse {
 
     public FieldTypeMemberResponse {
         identity = Objects.requireNonNull(identity, "identity is required");

@@ -1,12 +1,12 @@
 package com.java.semantic.api.dto;
 
-import com.java.semantic.api.monitoring.ApiMonitoringField;
-import com.java.semantic.api.monitoring.ApiMonitoringMode;
+import com.java.semantic.monitoring.MonitoringField;
+import com.java.semantic.monitoring.MonitoringMode;
 
 /** duplicate source type 的 exact file retry */
 public record SourceTypeContextCandidateResponse(
-        @ApiMonitoringField(ApiMonitoringMode.VALUE) String kind,
-        @ApiMonitoringField(ApiMonitoringMode.VALUE) String sourceFile,
-        @ApiMonitoringField(ApiMonitoringMode.NESTED) DiscoveryFollowUpResponse retry)
+        @MonitoringField(MonitoringMode.VALUE) String kind,
+        @MonitoringField(MonitoringMode.VALUE) String sourceFile,
+        @MonitoringField(MonitoringMode.NESTED) DiscoveryFollowUpResponse retry)
         implements SourceContextCandidateResponse {
 }

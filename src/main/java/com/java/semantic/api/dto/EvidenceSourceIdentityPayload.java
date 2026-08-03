@@ -5,8 +5,8 @@ import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.java.semantic.api.dto.identity.MapperFragmentIdentityPayload;
 import com.java.semantic.api.dto.identity.MapperStatementIdentityPayload;
-import com.java.semantic.api.monitoring.ApiMonitoringField;
-import com.java.semantic.api.monitoring.ApiMonitoringMode;
+import com.java.semantic.monitoring.MonitoringField;
+import com.java.semantic.monitoring.MonitoringMode;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;
@@ -17,12 +17,12 @@ import java.util.Optional;
 /** evidence endpoint 唯一接受的三種封閉 typed identity */
 @JsonIgnoreProperties(ignoreUnknown = false)
 public record EvidenceSourceIdentityPayload(
-        @ApiMonitoringField(ApiMonitoringMode.VALUE)
+        @MonitoringField(MonitoringMode.VALUE)
         @NotBlank @Pattern(regexp = "ANNOTATION_SQL|MAPPER_STATEMENT|MAPPER_FRAGMENT") String kind,
         @JsonInclude(JsonInclude.Include.NON_ABSENT)
-        @ApiMonitoringField(ApiMonitoringMode.NESTED) Optional<@Valid MapperStatementIdentityPayload> statementIdentity,
+        @MonitoringField(MonitoringMode.NESTED) Optional<@Valid MapperStatementIdentityPayload> statementIdentity,
         @JsonInclude(JsonInclude.Include.NON_ABSENT)
-        @ApiMonitoringField(ApiMonitoringMode.NESTED) Optional<@Valid MapperFragmentIdentityPayload> fragmentIdentity) {
+        @MonitoringField(MonitoringMode.NESTED) Optional<@Valid MapperFragmentIdentityPayload> fragmentIdentity) {
 
     public EvidenceSourceIdentityPayload {
         kind = Objects.requireNonNull(kind, "kind is required");

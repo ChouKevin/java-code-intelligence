@@ -1,8 +1,8 @@
 package com.java.semantic.api.dto;
 
-import com.java.semantic.api.monitoring.ApiMonitoringField;
-import com.java.semantic.api.monitoring.ApiMonitoringMode;
+import com.java.semantic.monitoring.MonitoringField;
+import com.java.semantic.monitoring.MonitoringMode;
 
 /** 監聽器註解的種類與辨識證據 */
-public record ListenerAnnotationEvidenceResponse(@ApiMonitoringField(ApiMonitoringMode.VALUE) String kind, @ApiMonitoringField(ApiMonitoringMode.VALUE) String matchKind) {
+public record ListenerAnnotationEvidenceResponse(@MonitoringField(MonitoringMode.VALUE) String kind, @MonitoringField(MonitoringMode.VALUE) String matchKind) {
 }

@@ -2,13 +2,13 @@ package com.java.semantic.api.dto;
 
 import com.java.semantic.api.dto.identity.MethodTargetPayload;
 
-import com.java.semantic.api.monitoring.ApiMonitoringField;
-import com.java.semantic.api.monitoring.ApiMonitoringMode;
+import com.java.semantic.monitoring.MonitoringField;
+import com.java.semantic.monitoring.MonitoringMode;
 
 /** overloaded method 的 canonical MethodTarget retry */
 public record SourceMethodContextCandidateResponse(
-        @ApiMonitoringField(ApiMonitoringMode.VALUE) String kind,
-        @ApiMonitoringField(ApiMonitoringMode.NESTED) MethodTargetPayload target,
-        @ApiMonitoringField(ApiMonitoringMode.NESTED) DiscoveryFollowUpResponse retry)
+        @MonitoringField(MonitoringMode.VALUE) String kind,
+        @MonitoringField(MonitoringMode.NESTED) MethodTargetPayload target,
+        @MonitoringField(MonitoringMode.NESTED) DiscoveryFollowUpResponse retry)
         implements SourceContextCandidateResponse {
 }

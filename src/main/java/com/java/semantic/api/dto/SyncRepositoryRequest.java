@@ -1,8 +1,8 @@
 package com.java.semantic.api.dto;
 
-import com.java.semantic.api.monitoring.ApiMonitoringField;
-import com.java.semantic.api.monitoring.ApiMonitoringMode;
+import com.java.semantic.monitoring.MonitoringField;
+import com.java.semantic.monitoring.MonitoringMode;
 
 /** 同步儲存庫的可選分支 */
-public record SyncRepositoryRequest(@ApiMonitoringField(ApiMonitoringMode.VALUE) String branch) {
+public record SyncRepositoryRequest(@MonitoringField(MonitoringMode.VALUE) String branch) {
 }

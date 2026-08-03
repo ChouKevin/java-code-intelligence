@@ -1,15 +1,15 @@
 package com.java.semantic.api.dto;
 
-import com.java.semantic.api.monitoring.ApiMonitoringField;
-import com.java.semantic.api.monitoring.ApiMonitoringMode;
+import com.java.semantic.monitoring.MonitoringField;
+import com.java.semantic.monitoring.MonitoringMode;
 
 /** 固定版本結果的一頁計數 */
 public record PageResponse(
-        @ApiMonitoringField(ApiMonitoringMode.VALUE) int offset,
-        @ApiMonitoringField(ApiMonitoringMode.VALUE) int limit,
-        @ApiMonitoringField(ApiMonitoringMode.VALUE) int returnedCount,
-        @ApiMonitoringField(ApiMonitoringMode.VALUE) long totalCount,
-        @ApiMonitoringField(ApiMonitoringMode.VALUE) boolean hasMore) {
+        @MonitoringField(MonitoringMode.VALUE) int offset,
+        @MonitoringField(MonitoringMode.VALUE) int limit,
+        @MonitoringField(MonitoringMode.VALUE) int returnedCount,
+        @MonitoringField(MonitoringMode.VALUE) long totalCount,
+        @MonitoringField(MonitoringMode.VALUE) boolean hasMore) {
 
     public PageResponse {
         if (offset < 0) {

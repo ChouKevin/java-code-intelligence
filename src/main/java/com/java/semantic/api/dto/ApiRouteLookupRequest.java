@@ -1,12 +1,12 @@
 package com.java.semantic.api.dto;
 
-import com.java.semantic.api.monitoring.ApiMonitoringField;
-import com.java.semantic.api.monitoring.ApiMonitoringMode;
+import com.java.semantic.monitoring.MonitoringField;
+import com.java.semantic.monitoring.MonitoringMode;
 
 import jakarta.validation.constraints.NotBlank;
 
 public record ApiRouteLookupRequest(
-        @ApiMonitoringField(ApiMonitoringMode.VALUE) @NotBlank String apiPath,
-        @ApiMonitoringField(ApiMonitoringMode.VALUE) String httpMethod,
-        @ApiMonitoringField(ApiMonitoringMode.VALUE) String repoScope) {
+        @MonitoringField(MonitoringMode.VALUE) @NotBlank String apiPath,
+        @MonitoringField(MonitoringMode.VALUE) String httpMethod,
+        @MonitoringField(MonitoringMode.VALUE) String repoScope) {
 }

@@ -4,8 +4,8 @@ import com.fasterxml.jackson.annotation.JsonAnySetter;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonSetter;
 import com.fasterxml.jackson.annotation.Nulls;
-import com.java.semantic.api.monitoring.ApiMonitoringField;
-import com.java.semantic.api.monitoring.ApiMonitoringMode;
+import com.java.semantic.monitoring.MonitoringField;
+import com.java.semantic.monitoring.MonitoringMode;
 import com.java.semantic.syntax.application.concept.ConceptKind;
 import com.java.semantic.syntax.application.concept.ConceptMatchMode;
 import jakarta.validation.Valid;
@@ -132,8 +132,8 @@ public final class DiscoverConceptsRequest {
     /** 單一概念搜尋條件的封閉 HTTP 值 */
     @JsonIgnoreProperties(ignoreUnknown = false)
     public record Term(
-            @ApiMonitoringField(ApiMonitoringMode.VALUE) @NotBlank @Size(min = 2, max = 128) String value,
-            @ApiMonitoringField(ApiMonitoringMode.VALUE) @NotNull ConceptMatchMode matchMode) {
+            @MonitoringField(MonitoringMode.VALUE) @NotBlank @Size(min = 2, max = 128) String value,
+            @MonitoringField(MonitoringMode.VALUE) @NotNull ConceptMatchMode matchMode) {
 
         @JsonAnySetter
         public void rejectUnknownProperty(String property, Object value) {

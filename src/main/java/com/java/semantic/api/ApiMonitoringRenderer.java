@@ -1,13 +1,10 @@
 package com.java.semantic.api;
 
 import com.java.semantic.api.dto.DiscoverConceptsRequest;
-import com.java.semantic.api.monitoring.ApiMonitoringField;
-import com.java.semantic.api.monitoring.ApiMonitoringMode;
+import com.java.semantic.monitoring.MonitoringProjection;
 import org.springframework.util.Assert;
 import org.springframework.util.StringUtils;
 
-import java.lang.reflect.InvocationTargetException;
-import java.lang.reflect.RecordComponent;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -75,12 +72,7 @@ public final class ApiMonitoringRenderer {
         if (!isProjectOwnedRecord(value)) {
             return false;
         }
-        for (RecordComponent component : value.getClass().getRecordComponents()) {
-            if (Objects.nonNull(component.getAnnotation(ApiMonitoringField.class))) {
-                return true;
-            }
-        }
-        return false;
+        return MonitoringProjection.hasMonitoringFields(value);
     }
 
     /** 保存完成後可直接寫入日誌的安全片段 */
@@ -150,59 +142,55 @@ public final class ApiMonitoringRenderer {
                 throw contractDefect("nested monitoring record must not contain a cycle");
             }
             try {
-                for (RecordComponent component : value.getClass().getRecordComponents()) {
+                for (MonitoringProjection.MonitoringComponent component : MonitoringProjection.project(value)) {
                     if (renderedFieldCount >= MAX_RENDERED_FIELDS) {
                         monitoringFieldsTruncated = true;
                         return;
                     }
-                    renderComponent(root, value, component);
+                    renderComponent(root, component);
                 }
             } finally {
                 renderingRecords.remove(value);
             }
         }
 
-        void renderComponent(String root, Object record, RecordComponent component) {
-            ApiMonitoringField field = component.getAnnotation(ApiMonitoringField.class);
-            if (Objects.isNull(field)) {
-                throw contractDefect("every rendered record component requires ApiMonitoringField");
-            }
-            String fieldName = root + "." + component.getName();
-            Object componentValue = componentValue(record, component);
+        void renderComponent(String root, MonitoringProjection.MonitoringComponent component) {
+            String fieldName = root + "." + component.name();
+            Object componentValue = component.value();
             if (Objects.isNull(componentValue)) {
                 return;
             }
-            switch (field.value()) {
-                case VALUE -> renderValue(fieldName, component, componentValue);
-                case SIZE -> renderSize(fieldName, component, componentValue);
+            switch (component.mode()) {
+                case VALUE -> renderValue(fieldName, component.name(), componentValue);
+                case SIZE -> renderSize(fieldName, component.name(), componentValue);
                 case NESTED -> renderNested(fieldName, componentValue);
                 case OMIT -> { }
             }
         }
 
-        void renderValue(String fieldName, RecordComponent component, Object componentValue) {
+        void renderValue(String fieldName, String componentName, Object componentValue) {
             if (componentValue instanceof Optional<?> optionalValue) {
-                optionalValue.ifPresent(value -> renderScalarValue(fieldName, component, value));
+                optionalValue.ifPresent(value -> renderScalarValue(fieldName, componentName, value));
                 return;
             }
-            renderScalarValue(fieldName, component, componentValue);
+            renderScalarValue(fieldName, componentName, componentValue);
         }
 
-        private void renderScalarValue(String fieldName, RecordComponent component, Object componentValue) {
+        private void renderScalarValue(String fieldName, String componentName, Object componentValue) {
             if (!isApprovedScalar(componentValue)) {
-                throw contractDefect("VALUE requires an approved scalar for " + component.getName());
+                throw contractDefect("VALUE requires an approved scalar for " + componentName);
             }
             String value = scalarValue(componentValue);
-            if (isDisallowedPath(component.getName(), value)) {
+            if (isDisallowedPath(componentName, value)) {
                 return;
             }
-            if (requiresOmission(component.getName())) {
-                throw contractDefect(component.getName() + " must use OMIT");
+            if (requiresOmission(componentName)) {
+                throw contractDefect(componentName + " must use OMIT");
             }
             appendField(fieldName, value);
         }
 
-        void renderSize(String fieldName, RecordComponent component, Object componentValue) {
+        void renderSize(String fieldName, String componentName, Object componentValue) {
             if (componentValue instanceof CharSequence sequence) {
                 appendField(fieldName + ".size", Integer.toString(sequence.length()));
                 return;
@@ -211,7 +199,7 @@ public final class ApiMonitoringRenderer {
                 appendField(fieldName + ".size", Integer.toString(collection.size()));
                 return;
             }
-            throw contractDefect("SIZE requires a String or Collection for " + component.getName());
+            throw contractDefect("SIZE requires a String or Collection for " + componentName);
         }
 
         void renderNested(String fieldName, Object componentValue) {
@@ -291,14 +279,6 @@ public final class ApiMonitoringRenderer {
 
         RenderedApiMonitoring result() {
             return new RenderedApiMonitoring(segments, monitoringFieldsTruncated);
-        }
-
-        private Object componentValue(Object record, RecordComponent component) {
-            try {
-                return component.getAccessor().invoke(record);
-            } catch (IllegalAccessException | InvocationTargetException exception) {
-                throw contractDefect("unable to read monitored record component", exception);
-            }
         }
 
         private boolean isApprovedScalar(Object value) {
@@ -406,10 +386,6 @@ public final class ApiMonitoringRenderer {
 
         private IllegalStateException contractDefect(String message) {
             return new IllegalStateException("API monitoring contract defect: " + message);
-        }
-
-        private IllegalStateException contractDefect(String message, Exception cause) {
-            return new IllegalStateException("API monitoring contract defect: " + message, cause);
         }
 
         private int utf8Bytes(int codePoint) {

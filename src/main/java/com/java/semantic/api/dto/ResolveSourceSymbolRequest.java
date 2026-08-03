@@ -2,8 +2,8 @@ package com.java.semantic.api.dto;
 
 import com.fasterxml.jackson.annotation.JsonAnySetter;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
-import com.java.semantic.api.monitoring.ApiMonitoringField;
-import com.java.semantic.api.monitoring.ApiMonitoringMode;
+import com.java.semantic.monitoring.MonitoringField;
+import com.java.semantic.monitoring.MonitoringMode;
 import com.java.semantic.api.dto.location.PositionPayload;
 import com.java.semantic.api.dto.identity.SourceSymbolContextPayload;
 import jakarta.validation.Valid;
@@ -17,14 +17,14 @@ import java.util.Optional;
 /** source-symbol resolve endpoint 的封閉請求 */
 @JsonIgnoreProperties(ignoreUnknown = false)
 public record ResolveSourceSymbolRequest(
-        @ApiMonitoringField(ApiMonitoringMode.VALUE) @NotBlank String repoId,
-        @ApiMonitoringField(ApiMonitoringMode.VALUE) @NotBlank
+        @MonitoringField(MonitoringMode.VALUE) @NotBlank String repoId,
+        @MonitoringField(MonitoringMode.VALUE) @NotBlank
         @Pattern(regexp = "^[0-9a-f]{40}$|^FIXTURE$") String expectedRevision,
-        @ApiMonitoringField(ApiMonitoringMode.NESTED) @NotNull @Valid SourceSymbolContextPayload context,
-        @ApiMonitoringField(ApiMonitoringMode.VALUE) @NotBlank
+        @MonitoringField(MonitoringMode.NESTED) @NotNull @Valid SourceSymbolContextPayload context,
+        @MonitoringField(MonitoringMode.VALUE) @NotBlank
         @Pattern(regexp = "[\\p{L}\\p{Nl}\\p{Sc}\\p{Pc}]"
                 + "[\\p{L}\\p{Nl}\\p{Sc}\\p{Pc}\\p{Mn}\\p{Mc}\\p{Nd}]*") String symbol,
-        @ApiMonitoringField(ApiMonitoringMode.NESTED) @Valid Optional<PositionPayload> position) {
+        @MonitoringField(MonitoringMode.NESTED) @Valid Optional<PositionPayload> position) {
 
     public ResolveSourceSymbolRequest {
         position = Objects.requireNonNull(position, "position is required");

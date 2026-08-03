@@ -7,8 +7,8 @@ import com.fasterxml.jackson.annotation.JsonTypeInfo;
 import com.java.semantic.api.dto.identity.MethodTargetPayload;
 import com.java.semantic.api.dto.identity.SourceMemberIdentityPayload;
 import com.java.semantic.api.dto.identity.SourceTypeIdentityPayload;
-import com.java.semantic.api.monitoring.ApiMonitoringField;
-import com.java.semantic.api.monitoring.ApiMonitoringMode;
+import com.java.semantic.monitoring.MonitoringField;
+import com.java.semantic.monitoring.MonitoringMode;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotNull;
 
@@ -40,8 +40,8 @@ public sealed interface InternalSourceReferenceTargetPayload permits
 
     /** 精確來源型別 target */
     record Type(
-            @ApiMonitoringField(ApiMonitoringMode.VALUE) String kind,
-            @ApiMonitoringField(ApiMonitoringMode.NESTED) @NotNull @Valid SourceTypeIdentityPayload identity)
+            @MonitoringField(MonitoringMode.VALUE) String kind,
+            @MonitoringField(MonitoringMode.NESTED) @NotNull @Valid SourceTypeIdentityPayload identity)
             implements InternalSourceReferenceTargetPayload {
 
         public Type {
@@ -54,8 +54,8 @@ public sealed interface InternalSourceReferenceTargetPayload permits
 
     /** 精確 canonical 方法 target */
     record Method(
-            @ApiMonitoringField(ApiMonitoringMode.VALUE) String kind,
-            @ApiMonitoringField(ApiMonitoringMode.NESTED) @NotNull @Valid MethodTargetPayload identity)
+            @MonitoringField(MonitoringMode.VALUE) String kind,
+            @MonitoringField(MonitoringMode.NESTED) @NotNull @Valid MethodTargetPayload identity)
             implements InternalSourceReferenceTargetPayload {
 
         public Method {
@@ -68,8 +68,8 @@ public sealed interface InternalSourceReferenceTargetPayload permits
 
     /** 精確型別或方法範圍成員 target */
     record Member(
-            @ApiMonitoringField(ApiMonitoringMode.VALUE) String kind,
-            @ApiMonitoringField(ApiMonitoringMode.NESTED) @NotNull @Valid SourceMemberIdentityPayload identity)
+            @MonitoringField(MonitoringMode.VALUE) String kind,
+            @MonitoringField(MonitoringMode.NESTED) @NotNull @Valid SourceMemberIdentityPayload identity)
             implements InternalSourceReferenceTargetPayload {
 
         public Member {

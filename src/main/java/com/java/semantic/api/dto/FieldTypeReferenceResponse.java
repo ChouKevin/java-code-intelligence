@@ -3,8 +3,8 @@ package com.java.semantic.api.dto;
 import com.java.semantic.api.dto.identity.JavaTypeIdentityPayload;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
-import com.java.semantic.api.monitoring.ApiMonitoringField;
-import com.java.semantic.api.monitoring.ApiMonitoringMode;
+import com.java.semantic.monitoring.MonitoringField;
+import com.java.semantic.monitoring.MonitoringMode;
 
 import java.util.List;
 import java.util.Optional;
@@ -20,54 +20,54 @@ public sealed interface FieldTypeReferenceResponse permits
 
     /** 名義型別證據回應 */
     record NamedFieldTypeReferenceResponse(
-            @ApiMonitoringField(ApiMonitoringMode.VALUE) String kind,
-            @ApiMonitoringField(ApiMonitoringMode.VALUE) String writtenType,
-            @ApiMonitoringField(ApiMonitoringMode.VALUE) String simpleTypeName,
+            @MonitoringField(MonitoringMode.VALUE) String kind,
+            @MonitoringField(MonitoringMode.VALUE) String writtenType,
+            @MonitoringField(MonitoringMode.VALUE) String simpleTypeName,
             @JsonInclude(JsonInclude.Include.NON_ABSENT)
-            @ApiMonitoringField(ApiMonitoringMode.NESTED) Optional<JavaTypeIdentityPayload> resolvedJavaType,
-            @ApiMonitoringField(ApiMonitoringMode.VALUE) boolean sourceDefined) implements FieldTypeReferenceResponse {
+            @MonitoringField(MonitoringMode.NESTED) Optional<JavaTypeIdentityPayload> resolvedJavaType,
+            @MonitoringField(MonitoringMode.VALUE) boolean sourceDefined) implements FieldTypeReferenceResponse {
     }
 
     /** 參數化型別證據回應 */
     record ParameterizedFieldTypeReferenceResponse(
-            @ApiMonitoringField(ApiMonitoringMode.VALUE) String kind,
-            @ApiMonitoringField(ApiMonitoringMode.VALUE) String writtenType,
-            @ApiMonitoringField(ApiMonitoringMode.NESTED) NamedFieldTypeReferenceResponse rawType,
-            @ApiMonitoringField(ApiMonitoringMode.SIZE) List<FieldTypeReferenceResponse> typeArguments)
+            @MonitoringField(MonitoringMode.VALUE) String kind,
+            @MonitoringField(MonitoringMode.VALUE) String writtenType,
+            @MonitoringField(MonitoringMode.NESTED) NamedFieldTypeReferenceResponse rawType,
+            @MonitoringField(MonitoringMode.SIZE) List<FieldTypeReferenceResponse> typeArguments)
             implements FieldTypeReferenceResponse {
     }
 
     /** 基本型別證據回應 */
     record PrimitiveFieldTypeReferenceResponse(
-            @ApiMonitoringField(ApiMonitoringMode.VALUE) String kind,
-            @ApiMonitoringField(ApiMonitoringMode.VALUE) String writtenType) implements FieldTypeReferenceResponse {
+            @MonitoringField(MonitoringMode.VALUE) String kind,
+            @MonitoringField(MonitoringMode.VALUE) String writtenType) implements FieldTypeReferenceResponse {
     }
 
     /** 陣列型別證據回應 */
     record ArrayFieldTypeReferenceResponse(
-            @ApiMonitoringField(ApiMonitoringMode.VALUE) String kind,
-            @ApiMonitoringField(ApiMonitoringMode.VALUE) String writtenType,
-            @ApiMonitoringField(ApiMonitoringMode.NESTED) FieldTypeReferenceResponse elementType,
-            @ApiMonitoringField(ApiMonitoringMode.VALUE) int dimensions) implements FieldTypeReferenceResponse {
+            @MonitoringField(MonitoringMode.VALUE) String kind,
+            @MonitoringField(MonitoringMode.VALUE) String writtenType,
+            @MonitoringField(MonitoringMode.NESTED) FieldTypeReferenceResponse elementType,
+            @MonitoringField(MonitoringMode.VALUE) int dimensions) implements FieldTypeReferenceResponse {
     }
 
     /** wildcard 型別證據回應 */
     record WildcardFieldTypeReferenceResponse(
-            @ApiMonitoringField(ApiMonitoringMode.VALUE) String kind,
-            @ApiMonitoringField(ApiMonitoringMode.VALUE) String writtenType,
+            @MonitoringField(MonitoringMode.VALUE) String kind,
+            @MonitoringField(MonitoringMode.VALUE) String writtenType,
             @JsonInclude(JsonInclude.Include.NON_ABSENT)
-            @ApiMonitoringField(ApiMonitoringMode.NESTED) Optional<FieldTypeReferenceResponse> upperBound,
+            @MonitoringField(MonitoringMode.NESTED) Optional<FieldTypeReferenceResponse> upperBound,
             @JsonInclude(JsonInclude.Include.NON_ABSENT)
-            @ApiMonitoringField(ApiMonitoringMode.NESTED) Optional<FieldTypeReferenceResponse> lowerBound,
-            @ApiMonitoringField(ApiMonitoringMode.VALUE) boolean sourceDefined) implements FieldTypeReferenceResponse {
+            @MonitoringField(MonitoringMode.NESTED) Optional<FieldTypeReferenceResponse> lowerBound,
+            @MonitoringField(MonitoringMode.VALUE) boolean sourceDefined) implements FieldTypeReferenceResponse {
     }
 
     /** 型別變數證據回應 */
     record TypeVariableFieldTypeReferenceResponse(
-            @ApiMonitoringField(ApiMonitoringMode.VALUE) String kind,
-            @ApiMonitoringField(ApiMonitoringMode.VALUE) String writtenType,
-            @ApiMonitoringField(ApiMonitoringMode.VALUE) String variableName,
-            @ApiMonitoringField(ApiMonitoringMode.SIZE) List<FieldTypeReferenceResponse> upperBounds,
-            @ApiMonitoringField(ApiMonitoringMode.VALUE) boolean sourceDefined) implements FieldTypeReferenceResponse {
+            @MonitoringField(MonitoringMode.VALUE) String kind,
+            @MonitoringField(MonitoringMode.VALUE) String writtenType,
+            @MonitoringField(MonitoringMode.VALUE) String variableName,
+            @MonitoringField(MonitoringMode.SIZE) List<FieldTypeReferenceResponse> upperBounds,
+            @MonitoringField(MonitoringMode.VALUE) boolean sourceDefined) implements FieldTypeReferenceResponse {
     }
 }

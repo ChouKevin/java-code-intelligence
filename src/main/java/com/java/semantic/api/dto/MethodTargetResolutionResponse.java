@@ -2,19 +2,19 @@ package com.java.semantic.api.dto;
 
 import com.java.semantic.api.dto.identity.MethodTargetPayload;
 
-import com.java.semantic.api.monitoring.ApiMonitoringField;
-import com.java.semantic.api.monitoring.ApiMonitoringMode;
+import com.java.semantic.monitoring.MonitoringField;
+import com.java.semantic.monitoring.MonitoringMode;
 
 import java.util.List;
 import java.util.Objects;
 
 /** API representation of an exact method-target resolution outcome. */
 public record MethodTargetResolutionResponse(
-        @ApiMonitoringField(ApiMonitoringMode.VALUE) String status,
-        @ApiMonitoringField(ApiMonitoringMode.NESTED) MethodTargetPayload target,
-        @ApiMonitoringField(ApiMonitoringMode.SIZE) List<MethodTargetPayload> candidates,
-        @ApiMonitoringField(ApiMonitoringMode.VALUE) String reasonCode,
-        @ApiMonitoringField(ApiMonitoringMode.NESTED) List<DiscoveryFollowUpResponse> availableFollowUps) {
+        @MonitoringField(MonitoringMode.VALUE) String status,
+        @MonitoringField(MonitoringMode.NESTED) MethodTargetPayload target,
+        @MonitoringField(MonitoringMode.SIZE) List<MethodTargetPayload> candidates,
+        @MonitoringField(MonitoringMode.VALUE) String reasonCode,
+        @MonitoringField(MonitoringMode.NESTED) List<DiscoveryFollowUpResponse> availableFollowUps) {
 
     public MethodTargetResolutionResponse {
         status = Objects.requireNonNull(status, "status is required");
