@@ -138,12 +138,12 @@ class ApiRouteControllerTest {
     }
 
     @Test
-    void should_reject_the_removed_repository_scope_field() throws Exception {
+    void should_reject_unknown_request_fields() throws Exception {
         mockMvc.perform(post("/v1/api-routes/lookup")
                         .header(ApiTokenFilter.API_TOKEN_HEADER, TOKEN)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"repoId":"orders","expectedRevision":"1111111111111111111111111111111111111111","apiPath":"/orders","repoScope":"orders"}
+                                {"repoId":"orders","expectedRevision":"1111111111111111111111111111111111111111","apiPath":"/orders","obsoleteField":"orders"}
                                 """))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.errorCode").value("REQUEST_INVALID"));
