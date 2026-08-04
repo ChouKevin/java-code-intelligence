@@ -26,6 +26,10 @@ jobs:
           java-version: '21'
           cache: maven
 
+      - run: scripts/test-install-jdtls.sh
+
       - run: mvn --batch-mode --no-transfer-progress clean test
 
       - run: docker build -t java-code-intelligence:ci .
+
+      - run: scripts/smoke-jdtls-image.sh java-code-intelligence:ci

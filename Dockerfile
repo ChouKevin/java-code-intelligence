@@ -27,6 +27,7 @@ RUN groupadd --system --gid 10001 semantic \
 WORKDIR /app
 
 COPY --from=jdtls /opt/jdtls /opt/jdtls
+RUN chown --recursive semantic:semantic /opt/jdtls/config_linux
 COPY --from=builder /workspace/target/java-semantic-service-*.jar /app/java-semantic-service.jar
 
 ENV JDTLS_HOME=/opt/jdtls
