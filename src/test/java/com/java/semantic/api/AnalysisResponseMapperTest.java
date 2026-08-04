@@ -177,7 +177,9 @@ class AnalysisResponseMapperTest {
         assertThat(response.edges()).singleElement().satisfies(edge -> {
             assertThat(edge.availableFollowUps()).singleElement().satisfies(followUp -> {
                 assertThat(followUp.operation()).isEqualTo("GET_EVIDENCE_SOURCE");
+                assertThat(followUp.api().method()).isEqualTo("POST");
                 assertThat(followUp.api().path()).isEqualTo("/v1/discovery/evidence-source");
+                assertThat(followUp.api().operationId()).isEqualTo("getEvidenceSource");
                 assertThat(followUp.request())
                         .isInstanceOf(DiscoveryFollowUpResponse.GetEvidenceSourceRequestResponse.class);
                 DiscoveryFollowUpResponse.GetEvidenceSourceRequestResponse request =
