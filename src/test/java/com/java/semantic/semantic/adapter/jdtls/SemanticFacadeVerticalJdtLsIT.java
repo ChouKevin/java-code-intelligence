@@ -6,6 +6,8 @@ import tools.jackson.databind.node.ObjectNode;
 import com.java.semantic.api.security.ApiTokenFilter;
 import com.java.semantic.repository.domain.RepositoryId;
 import com.java.semantic.repository.domain.RepositoryRevision;
+import org.eclipse.jgit.api.errors.GitAPIException;
+import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -24,6 +26,7 @@ import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.util.StringUtils;
 
 import java.io.IOException;
+import java.net.URISyntaxException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -40,7 +43,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-/** Real-process, authenticated HTTP proof for the revision-pinned directional semantic facade. */
+/** 透過真實程序與驗證 HTTP 證明 revision 鎖定的方向性語意 facade */
 @SpringBootTest
 @AutoConfigureMockMvc
 @Tag("jdtls-it")
@@ -50,12 +53,12 @@ class SemanticFacadeVerticalJdtLsIT {
     private static final String TOKEN = "semantic-facade-vertical-token";
     private static final String FIXED_REPOSITORY = "fixed-system-agent";
     private static final String FIXTURE_REPOSITORY = "semantic-vertical";
-    private static final String FIXED_REVISION = "1a151e96ecff748a3c7b2b2cee4a4fe813bb2770";
     private static final Path FIXTURE = Path.of("src/test/resources/fixtures/semantic-facade-vertical")
             .toAbsolutePath().normalize();
     private static final Path WORKSPACE_DATA = Path.of("target/semantic-facade-vertical-jdtls")
             .toAbsolutePath().normalize();
     private static final MutableTicker LIFECYCLE_TICKER = new MutableTicker();
+    private static CurrentProjectRemoteFixture remote;
 
     @Autowired
     private MockMvc mockMvc;
@@ -81,8 +84,8 @@ class SemanticFacadeVerticalJdtLsIT {
         registry.add("semantic.jdtls.max-active-workspaces", () -> "2");
         registry.add("semantic.jdtls.maintenance-interval", () -> "24h");
         registry.add("semantic.repositories.fixed-system-agent.mode", () -> "REMOTE");
-        registry.add("semantic.repositories.fixed-system-agent.url", () -> enclosingRepository().toUri().toString());
-        registry.add("semantic.repositories.fixed-system-agent.default-branch", () -> "uat");
+        registry.add("semantic.repositories.fixed-system-agent.url", () -> remote().remoteUri());
+        registry.add("semantic.repositories.fixed-system-agent.default-branch", () -> remote().branch());
         registry.add("semantic.repositories.semantic-vertical.mode", () -> "LOCAL_FIXTURE");
         registry.add("semantic.repositories.semantic-vertical.path", () -> FIXTURE.toString());
         registry.add("semantic.analysis.incoming.depth-two-node-budget", () -> "0");
@@ -95,13 +98,13 @@ class SemanticFacadeVerticalJdtLsIT {
         LIFECYCLE_TICKER.reset();
         ensureAndCheckoutFixedRepository();
 
-        ObjectNode fixedApi = discoverTarget(FIXED_REPOSITORY, "API", "AnalysisController", "getApiCallGraph");
-        ObjectNode fixedSchedule = discoverTarget(FIXED_REPOSITORY, "SCHEDULE", "RateLimitingService", "cleanup");
-        assertThat(fixedSchedule.path("className").asText()).isEqualTo("RateLimitingService");
+        ObjectNode fixedApi = discoverTarget(FIXED_REPOSITORY, "API", "AnalysisController", "analyzeOutgoing");
+        ObjectNode fixedSchedule = discoverTarget(FIXED_REPOSITORY, "SCHEDULE", "JdtWorkspaceIdleReaper", "runOnce");
+        assertThat(fixedSchedule.path("className").asText()).isEqualTo("JdtWorkspaceIdleReaper");
 
-        JsonNode fixedFragment = analyze(FIXED_REPOSITORY, FIXED_REVISION, fixedApi, 2, "outgoing");
+        JsonNode fixedFragment = analyze(FIXED_REPOSITORY, remote().revision(), fixedApi, 2, "outgoing");
         assertThat(fixedFragment.path("status").asText()).isEqualTo("PARTIAL");
-        assertThat(fixedFragment.path("analyzedRevision").asText()).isEqualTo(FIXED_REVISION);
+        assertThat(fixedFragment.path("analyzedRevision").asText()).isEqualTo(remote().revision());
         assertThat(fixedFragment.path("traversal").path("rootDirectCallsComplete").asBoolean()).isTrue();
         JsonNode fixedRoot = nodeById(fixedFragment, fixedFragment.path("rootNodeId").asText());
         assertFullSource(fixedRoot);
@@ -278,6 +281,13 @@ class SemanticFacadeVerticalJdtLsIT {
         workspaceManager.shutdownAll();
     }
 
+    @AfterAll
+    static void closeRemote() throws IOException {
+        if (Objects.nonNull(remote)) {
+            remote.close();
+        }
+    }
+
     private void ensureAndCheckoutFixedRepository() throws Exception {
         ensureRepository(FIXED_REPOSITORY);
         mockMvc.perform(post("/v1/repositories/{repoId}/checkout", FIXED_REPOSITORY)
@@ -285,7 +295,7 @@ class SemanticFacadeVerticalJdtLsIT {
                         .contentType("application/json")
                         .content("""
                                 {"revision":"%s"}
-                                """.formatted(FIXED_REVISION)))
+                                """.formatted(remote().revision())))
                 .andExpect(status().isOk());
     }
 
@@ -506,16 +516,15 @@ class SemanticFacadeVerticalJdtLsIT {
         return home;
     }
 
-    private static Path enclosingRepository() {
-        Path current = Path.of("").toAbsolutePath().normalize();
-        while (!Files.isDirectory(current.resolve(".git"))) {
-            Path parent = current.getParent();
-            if (Objects.isNull(parent)) {
-                throw new IllegalStateException("could not locate enclosing Git repository from " + current);
+    private static synchronized CurrentProjectRemoteFixture remote() {
+        if (Objects.isNull(remote)) {
+            try {
+                remote = CurrentProjectRemoteFixture.create();
+            } catch (IOException | GitAPIException | URISyntaxException exception) {
+                throw new IllegalStateException("could not create current-project remote fixture", exception);
             }
-            current = parent;
         }
-        return current;
+        return remote;
     }
 
     private record TargetIdentity(String className, String methodName) {
