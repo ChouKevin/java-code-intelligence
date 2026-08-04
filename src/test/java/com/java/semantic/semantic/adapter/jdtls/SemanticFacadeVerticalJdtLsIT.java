@@ -166,7 +166,7 @@ class SemanticFacadeVerticalJdtLsIT {
         assertThat(ambiguityFragment.path("edges")).noneSatisfy(edge -> {
             String calleeNodeId = edge.path("calleeNodeId").asText();
             JsonNode callee = nodeById(ambiguityFragment, calleeNodeId);
-            assertThat(callee.path("target").path("className").asText())
+            assertThat(callee.path("target").path("sourceType").path("javaType").path("className").asText())
                     .isNotIn("CardPayment", "CashPayment", "PaymentPort");
         });
 
@@ -361,7 +361,8 @@ class SemanticFacadeVerticalJdtLsIT {
 
     private JsonNode nodeByClassAndMethod(JsonNode fragment, String className, String methodName) {
         return stream(fragment.path("nodes"))
-                .filter(node -> className.equals(node.path("target").path("className").asText()))
+                .filter(node -> className.equals(node.path("target").path("sourceType").path("javaType")
+                        .path("className").asText()))
                 .filter(node -> methodName.equals(node.path("target").path("methodName").asText()))
                 .findFirst()
                 .orElseThrow(() -> new AssertionError("missing graph target " + className + "#" + methodName));
@@ -402,13 +403,14 @@ class SemanticFacadeVerticalJdtLsIT {
         return stream(fragment.path("warnings"))
                 .flatMap(warning -> stream(warning.path("candidates")))
                 .map(candidate -> new TargetIdentity(
-                        candidate.path("className").asText(), candidate.path("methodName").asText()))
+                        candidate.path("sourceType").path("javaType").path("className").asText(),
+                        candidate.path("methodName").asText()))
                 .collect(Collectors.toSet());
     }
 
     private void assertFullSource(JsonNode node) {
         assertThat(node.path("contentState").asText()).isEqualTo("FULL_SOURCE");
-        assertThat(node.path("declarationRange").path("sourceFile").asText()).isNotBlank();
+        assertThat(node.path("target").path("sourceType").path("sourceFile").asText()).isNotBlank();
         assertThat(node.path("declarationRange").path("start").path("line").asInt()).isGreaterThanOrEqualTo(0);
         assertThat(node.path("declarationRange").path("end").path("line").asInt()).isGreaterThanOrEqualTo(0);
     }
@@ -442,7 +444,9 @@ class SemanticFacadeVerticalJdtLsIT {
         return stream(fragment.path("edges"))
                 .filter(edge -> rootNodeId.equals(edge.path("calleeNodeId").asText()))
                 .map(edge -> nodeById(fragment, edge.path("callerNodeId").asText()).path("target"))
-                .map(target -> new TargetIdentity(target.path("className").asText(), target.path("methodName").asText()))
+                .map(target -> new TargetIdentity(
+                        target.path("sourceType").path("javaType").path("className").asText(),
+                        target.path("methodName").asText()))
                 .collect(Collectors.toSet());
     }
 
