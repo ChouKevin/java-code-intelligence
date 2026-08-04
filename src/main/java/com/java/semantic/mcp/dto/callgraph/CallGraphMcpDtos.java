@@ -51,17 +51,30 @@ public final class CallGraphMcpDtos {
 
     /** MCP 自有完整 graph result */
     public record GraphResult(
-            GraphAnalysisStatus status, RepositoryRevision analyzedRevision, CallNodeId rootNodeId, GraphTraversal traversal,
-            List<GraphNode> nodes, List<GraphEdgeOutput> edges, List<GraphWarning> warnings, List<GraphError> errors) {
+            @MonitoringField(MonitoringMode.NESTED) GraphAnalysisStatus status,
+            @MonitoringField(MonitoringMode.NESTED) RepositoryRevision analyzedRevision,
+            @MonitoringField(MonitoringMode.NESTED) CallNodeId rootNodeId,
+            @MonitoringField(MonitoringMode.NESTED) GraphTraversal traversal,
+            @MonitoringField(MonitoringMode.NESTED) List<GraphNode> nodes,
+            @MonitoringField(MonitoringMode.NESTED) List<GraphEdgeOutput> edges,
+            @MonitoringField(MonitoringMode.NESTED) List<GraphWarning> warnings,
+            @MonitoringField(MonitoringMode.NESTED) List<GraphError> errors) {
     }
 
     /** 不直接公開 domain evidence identity 的 edge transport */
     public record GraphEdgeOutput(
-            CallNodeId callerNodeId, CallNodeId calleeNodeId, CallSiteRange callSite, String callExpression,
-            ResolutionStrategy resolutionStrategy, List<String> evidence, List<EvidenceSourceFollowUp> availableFollowUps) {
+            @MonitoringField(MonitoringMode.NESTED) CallNodeId callerNodeId,
+            @MonitoringField(MonitoringMode.NESTED) CallNodeId calleeNodeId,
+            @MonitoringField(MonitoringMode.NESTED) CallSiteRange callSite,
+            @MonitoringField(MonitoringMode.VALUE) String callExpression,
+            @MonitoringField(MonitoringMode.NESTED) ResolutionStrategy resolutionStrategy,
+            @MonitoringField(MonitoringMode.NESTED) List<String> evidence,
+            @MonitoringField(MonitoringMode.NESTED) List<EvidenceSourceFollowUp> availableFollowUps) {
     }
 
     /** 可直接執行的 evidence source follow-up */
-    public record EvidenceSourceFollowUp(String toolName, SourceDiscoveryMcpDtos.EvidenceSourceInput arguments) {
+    public record EvidenceSourceFollowUp(
+            @MonitoringField(MonitoringMode.VALUE) String toolName,
+            @MonitoringField(MonitoringMode.NESTED) SourceDiscoveryMcpDtos.EvidenceSourceInput arguments) {
     }
 }
