@@ -100,7 +100,8 @@ class SemanticFacadeVerticalJdtLsIT {
 
         ObjectNode fixedApi = discoverTarget(FIXED_REPOSITORY, "API", "AnalysisController", "analyzeOutgoing");
         ObjectNode fixedSchedule = discoverTarget(FIXED_REPOSITORY, "SCHEDULE", "JdtWorkspaceIdleReaper", "runOnce");
-        assertThat(fixedSchedule.path("className").asText()).isEqualTo("JdtWorkspaceIdleReaper");
+        assertThat(fixedSchedule.path("sourceType").path("javaType").path("className").asText())
+                .isEqualTo("JdtWorkspaceIdleReaper");
 
         JsonNode fixedFragment = analyze(FIXED_REPOSITORY, remote().revision(), fixedApi, 2, "outgoing");
         assertThat(fixedFragment.path("status").asText()).isEqualTo("PARTIAL");
@@ -124,7 +125,8 @@ class SemanticFacadeVerticalJdtLsIT {
         ObjectNode fixtureSchedule = discoverTarget(FIXTURE_REPOSITORY, "SCHEDULE", "OrderJob", "cleanup");
         assertThat(fixtureRest.path("parameterTypes")).containsExactly(objectMapper.getNodeFactory()
                 .textNode("com.example.vertical.PlaceOrderRequest"));
-        assertThat(fixtureSchedule.path("className").asText()).isEqualTo("OrderJob");
+        assertThat(fixtureSchedule.path("sourceType").path("javaType").path("className").asText())
+                .isEqualTo("OrderJob");
 
         JsonNode restFragment = analyze(FIXTURE_REPOSITORY, "FIXTURE", fixtureRest, 2, "outgoing");
         assertThat(restFragment.path("analyzedRevision").asText()).isEqualTo("FIXTURE");
