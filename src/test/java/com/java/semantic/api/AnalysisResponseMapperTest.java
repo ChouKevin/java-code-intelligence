@@ -2,6 +2,9 @@ package com.java.semantic.api;
 
 import com.java.semantic.api.dto.OutgoingCallGraphResponse;
 import com.java.semantic.api.dto.DiscoveryFollowUpResponse;
+import com.java.semantic.api.dto.EvidenceSourceIdentityPayload;
+import com.java.semantic.api.dto.identity.MapperStatementIdentityPayload;
+import com.java.semantic.api.dto.identity.MapperStatementKeyPayload;
 import com.java.semantic.syntax.application.DiscoveryFollowUpFactory;
 import com.java.semantic.repository.domain.RepositoryId;
 import com.java.semantic.callgraph.domain.CallNodeId;
@@ -21,6 +24,9 @@ import com.java.semantic.identity.JavaTypeIdentity;
 import com.java.semantic.identity.MethodTarget;
 import com.java.semantic.identity.SourceTypeIdentity;
 import com.java.semantic.repository.domain.RepositoryRevision;
+import com.java.semantic.syntax.domain.MapperEvidenceRepresentation;
+import com.java.semantic.syntax.domain.MapperStatementIdentity;
+import com.java.semantic.syntax.domain.MapperStatementKey;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -131,6 +137,64 @@ class AnalysisResponseMapperTest {
         assertThat(response.edges().get(1).resolutionStrategy()).isEqualTo("JDT_CALL_HIERARCHY");
         assertThat(response.edges().get(1).category()).isEqualTo("RESOLVED_ANALYZABLE");
         assertThat(response.nodes().get(0).dispatchKind()).isEqualTo("SYNCHRONOUS");
+    }
+
+    @Test
+    void should_map_xml_mapper_edge_to_one_typed_evidence_source_follow_up() {
+        CallNodeId root = new CallNodeId("node-root");
+        MapperStatementIdentity identity = new MapperStatementIdentity(
+                new MapperStatementKey("com.acme.OrderMapper", "findOrder"),
+                "src/main/resources/mapper/OrderMapper.xml",
+                Optional.of("postgres"),
+                3,
+                MapperEvidenceRepresentation.MAPPER_XML_ELEMENT);
+        OutgoingGraphFragment fragment = new OutgoingGraphFragment(
+                GraphAnalysisStatus.SUCCESS,
+                RepositoryRevision.fixture(),
+                root,
+                new GraphTraversal(1, 0, 40, true, GraphLimitReason.NONE),
+                List.of(new GraphNode(
+                        root,
+                        Optional.of(TARGET),
+                        "",
+                        NodeContentState.TARGET_ONLY,
+                        NodeTraversalState.BUDGET_CUTOFF,
+                        DispatchKind.SYNCHRONOUS,
+                        Optional.empty())),
+                List.of(new GraphEdge(
+                        root,
+                        new CallNodeId("node-mapper"),
+                        new CallSiteRange(TARGET.sourceFile(), 12, 3, 12, 15),
+                        "findOrder(orderId)",
+                        ResolutionStrategy.MYBATIS_MAPPER,
+                        List.of("mapper evidence"),
+                        List.of(identity))),
+                List.of(),
+                List.of());
+
+        OutgoingCallGraphResponse response = mapper.toResponse(RepositoryId.of("orders"), fragment);
+
+        assertThat(response.edges()).singleElement().satisfies(edge -> {
+            assertThat(edge.availableFollowUps()).singleElement().satisfies(followUp -> {
+                assertThat(followUp.operation()).isEqualTo("GET_EVIDENCE_SOURCE");
+                assertThat(followUp.api().path()).isEqualTo("/v1/discovery/evidence-source");
+                assertThat(followUp.request())
+                        .isInstanceOf(DiscoveryFollowUpResponse.GetEvidenceSourceRequestResponse.class);
+                DiscoveryFollowUpResponse.GetEvidenceSourceRequestResponse request =
+                        (DiscoveryFollowUpResponse.GetEvidenceSourceRequestResponse) followUp.request();
+                assertThat(request.repoId()).isEqualTo("orders");
+                assertThat(request.expectedRevision()).isEqualTo(fragment.analyzedRevision().value());
+                assertThat(request.identity()).isEqualTo(new EvidenceSourceIdentityPayload(
+                        "MAPPER_STATEMENT",
+                        Optional.of(new MapperStatementIdentityPayload(
+                                new MapperStatementKeyPayload("com.acme.OrderMapper", "findOrder"),
+                                "src/main/resources/mapper/OrderMapper.xml",
+                                Optional.of("postgres"),
+                                3,
+                                "MAPPER_XML_ELEMENT")),
+                        Optional.empty()));
+            });
+        });
     }
 
     @Test
