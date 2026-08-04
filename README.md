@@ -1,5 +1,24 @@
 # Java Semantic Service
 
+## Repository ownership and extraction status
+
+The canonical repository for this service is
+`git@github.com:ChouKevin/java-code-intelligence.git`. The current
+`java-system-agent/java-semantic-service/` location is temporary while its Git history, delivery
+baseline, and Agent consumer handoff are prepared. Do not establish long-lived development in both
+locations. The Agent repository retains the extraction procedure in
+[`docs/handoffs/java-code-intelligence-extraction.md`](https://github.com/ChouKevin/java-system-agent/blob/uat/docs/handoffs/java-code-intelligence-extraction.md),
+while this service retains its post-extraction direction in [`docs/roadmap.md`](docs/roadmap.md).
+
+Until extraction, run the commands below from this service directory:
+
+```bash
+cd java-semantic-service
+```
+
+After extraction, the service directory becomes the root of `java-code-intelligence`, so the same
+Maven commands continue to apply without path rewriting.
+
 ## MCP SDK validation and result contract
 
 Project contract tests cover MCP protocol versions `2025-06-18` and `2025-11-25`. The current SDK
@@ -52,18 +71,18 @@ The ordinary Maven test suite does not launch JDT LS. A running service needs
 JDT LS unless it is deliberately configured with `JDTLS_ENABLED=false` for an
 environment that does not perform semantic analysis.
 
-From the repository root:
+From the service project root:
 
 ```bash
-mvn -f java-semantic-service/pom.xml clean test
-mvn -f java-semantic-service/pom.xml spring-boot:run
+mvn clean test
+mvn spring-boot:run
 ```
 
 For a real JDT LS installation, set `JDTLS_HOME` and use the service's
 `jdtls-it` profile for integration verification:
 
 ```bash
-JDTLS_HOME=/opt/jdtls mvn -f java-semantic-service/pom.xml -Pjdtls-it test
+JDTLS_HOME=/opt/jdtls mvn -Pjdtls-it test
 ```
 
 ## Configuration and authentication

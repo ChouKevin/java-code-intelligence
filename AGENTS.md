@@ -2,18 +2,18 @@
 
 ## Project Structure & Module Organization
 
-`java-semantic-service` is a standalone Java 21/Spring Boot Maven project; it is not a module of the root application. Production code lives under `src/main/java/com/java/semantic`. Packages separate HTTP contracts (`api`), graph construction (`callgraph`), repository lifecycle (`repository`), JDT LS integration (`semantic`), JDT syntax extraction (`syntax`), route matching (`trie`), and shared identity/diagnostics/configuration. Runtime configuration is in `src/main/resources/application.yml`; the versioned contract is `src/main/resources/openapi/semantic-api-v1.yaml`. Tests mirror production packages under `src/test/java`, with fixture repositories in `src/test/resources/fixtures`.
+`java-semantic-service` is a standalone Java 21/Spring Boot Maven project; it is not a module of the root application. Its canonical repository is `git@github.com:ChouKevin/java-code-intelligence.git`; the current directory is the temporary source for a history-preserving extraction. Never maintain parallel service implementations in both repositories. Production code lives under `src/main/java/com/java/semantic`. Packages separate HTTP contracts (`api`), graph construction (`callgraph`), repository lifecycle (`repository`), JDT LS integration (`semantic`), JDT syntax extraction (`syntax`), route matching (`trie`), and shared identity/diagnostics/configuration. Runtime configuration is in `src/main/resources/application.yml`; the versioned contract is `src/main/resources/openapi/semantic-api-v1.yaml`. Tests mirror production packages under `src/test/java`, with fixture repositories in `src/test/resources/fixtures`.
 
 Domain vocabulary is summarized in [`docs/domain-model.md`](docs/domain-model.md).
 
 ## Build, Test, and Development Commands
 
-Run commands from the repository root:
+Run commands from the service project root. Before extraction, enter `java-semantic-service/`; after extraction, this directory is the new repository root:
 
 ```bash
-mvn -f java-semantic-service/pom.xml clean test
-mvn -f java-semantic-service/pom.xml spring-boot:run
-JDTLS_HOME=/opt/jdtls mvn -f java-semantic-service/pom.xml -Pjdtls-it test
+mvn clean test
+mvn spring-boot:run
+JDTLS_HOME=/opt/jdtls mvn -Pjdtls-it test
 ```
 
 The first command runs the ordinary suite without launching JDT LS. The profile command enables real-server integration tests and requires a valid `JDTLS_HOME`.
