@@ -1,0 +1,11 @@
+.git
+.github
+.env
+.env.*
+target/
+data/
+repos/
+jdtls/
+uat/
+*.log
+.idea/

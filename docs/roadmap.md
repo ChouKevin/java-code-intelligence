@@ -8,33 +8,33 @@ compatibility promises. The service remains the sole owner of repository lifecyc
 analysis, structured discovery, source navigation, API-route indexing, HTTP contracts, and MCP
 query projection.
 
-The roadmap uses three states:
+The roadmap uses four states:
 
+- `ACTIVE`: the delivery boundary currently being implemented
 - `NEXT`: the next accepted delivery boundary
 - `PLANNED`: an accepted direction whose detailed contract still requires a milestone spec
 - `DEFERRED`: intentionally excluded until concrete evidence justifies the complexity
+- `COMPLETE`: a delivery boundary whose completion gate has been met
 
 ## R0: History-preserving repository extraction
 
-Status: `NEXT`
+Status: `COMPLETE`
 
-- Extract committed `java-semantic-service/` history into the root of `java-code-intelligence`
-- Publish the extracted branch as `uat`, verify it, then establish `main`
-- Add independent CI, branch protection, packaging, and deployment ownership
-- Preserve HTTP, OpenAPI, MCP, monitoring, security, revision, and typed-identity contracts
-- Complete the Agent consumer handoff before deleting the embedded source
-- Avoid any long-lived dual-source or compatibility implementation
+- Extracted committed `java-semantic-service/` history into the root of `java-code-intelligence`
+- Established the extracted baseline on `uat` and `main`
+- Preserved HTTP, OpenAPI, MCP, monitoring, security, revision, and typed-identity contracts
+- Retained the Agent consumer handoff as the gate before deleting the embedded source
+- Prohibited long-lived dual-source and compatibility implementations
 
 ## R1: Independent delivery baseline
 
-Status: `NEXT`
+Status: `ACTIVE`
 
-- Produce one independently deployable Java 21 artifact or container
-- Verify Spring Boot 4.1 and Spring AI 2.0 startup in the target environment
+- Produce one independently buildable Java 21 container with a pinned JDT LS distribution
 - Keep ordinary tests independent of a live JDT LS process
 - Run explicit JDT LS integration verification for lifecycle and semantic-resolution changes
-- Protect the versioned OpenAPI document and the exact 17-tool MCP catalog in CI
-- Document runtime storage, repository clone, JDT LS workspace, token, and Git-credential ownership
+- Use existing tests as the authority for the versioned OpenAPI document and exact 17-tool MCP catalog
+- Keep image publication, registry authentication, and deployment ownership out of scope
 
 ## R2: Agent consumer cutover
 
