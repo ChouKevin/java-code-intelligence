@@ -11,7 +11,10 @@ Do not create a second service implementation, shared Java library, or compatibi
 and MCP adapters may project the same application services, but each transport keeps its own
 adapter contract.
 
-## Current state
+## Baseline state before Phase 1 implementation
+
+The facts below record the post-extraction baseline before Phase 1 implementation began. They are
+retained as historical handoff context rather than a description of the current branch contents.
 
 ### Java Code Intelligence
 
@@ -22,8 +25,8 @@ adapter contract.
 - Extracted baseline on both branches: `71952639132f66b89e862b3f900ea6719f5244c2`
 - The service is a standalone Java 21, Spring Boot 4.1, Spring AI 2.0 Maven project
 - `mvn clean test` passed after extraction
-- There is currently no GitHub Actions workflow, Dockerfile, image publication, or deployment
-  manifest
+- At this baseline there was no GitHub Actions workflow, Dockerfile, image publication, or
+  deployment manifest
 
 ### Java System Agent
 

@@ -8,7 +8,7 @@ compatibility promises. The service remains the sole owner of repository lifecyc
 analysis, structured discovery, source navigation, API-route indexing, HTTP contracts, and MCP
 query projection.
 
-The roadmap uses four states:
+The roadmap uses five states:
 
 - `ACTIVE`: the delivery boundary currently being implemented
 - `NEXT`: the next accepted delivery boundary
