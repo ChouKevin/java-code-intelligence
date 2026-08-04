@@ -77,4 +77,20 @@ public final class McpMapperIdentityPayloads {
                 value.documentOrdinal(),
                 value.representation());
     }
+
+    public static StatementKey toPayload(MapperStatementKey identity) {
+        MapperStatementKey value = Objects.requireNonNull(identity, "identity is required");
+        return new StatementKey(value.namespace(), value.statementId());
+    }
+
+    public static Statement toPayload(MapperStatementIdentity identity) {
+        MapperStatementIdentity value = Objects.requireNonNull(identity, "identity is required");
+        return new Statement(toPayload(value.statementKey()), value.resourcePath(), value.databaseId(),
+                value.documentOrdinal(), value.representation());
+    }
+
+    public static Fragment toPayload(MapperFragmentIdentity identity) {
+        MapperFragmentIdentity value = Objects.requireNonNull(identity, "identity is required");
+        return new Fragment(value.namespace(), value.fragmentId(), value.resourcePath(), value.documentOrdinal(), value.representation());
+    }
 }

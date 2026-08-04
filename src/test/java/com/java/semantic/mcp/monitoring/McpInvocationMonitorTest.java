@@ -4,6 +4,7 @@ import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
 import com.java.semantic.mcp.McpToolContractException;
+import com.java.semantic.mcp.dto.callgraph.CallGraphMcpDtos;
 import com.java.semantic.monitoring.MonitoringField;
 import com.java.semantic.monitoring.MonitoringMode;
 import com.java.semantic.repository.application.RepositoryNotReadyException;
@@ -77,6 +78,28 @@ class McpInvocationMonitorTest {
                     .anyMatch(message -> message.startsWith(
                             "mcp_tool_completed requestId= toolName=semantic_get_repository resultCategory=EXPECTED_TOOL_FAILURE"))
                     .noneMatch(message -> message.contains("orders"));
+        } finally {
+            capturedLogs.stop();
+        }
+    }
+
+    @Test
+    void should_omit_call_graph_call_expression_from_monitoring_segments() {
+        CapturedLogs capturedLogs = captureLogs();
+        try {
+            CallGraphMcpDtos.GraphEdgeOutput edge = new CallGraphMcpDtos.GraphEdgeOutput(
+                    null, null, null, "secret-token", null, List.of(), List.of());
+            CallGraphMcpDtos.OutgoingOutput response = new CallGraphMcpDtos.OutgoingOutput(
+                    new CallGraphMcpDtos.GraphResult(
+                            null, null, null, null, List.of(), List.of(edge), List.of(), List.of()));
+
+            new McpInvocationMonitor().monitor("semantic_analyze_outgoing_call_graph", () ->
+                    new McpInvocationMonitor.MonitoredInvocation<>(
+                            new SourceRequest("orders", "private-input"), response, "result"));
+
+            assertThat(capturedLogs.messages())
+                    .anyMatch(message -> message.contains("segment=request.repoId=orders"))
+                    .noneMatch(message -> message.contains("secret-token"));
         } finally {
             capturedLogs.stop();
         }

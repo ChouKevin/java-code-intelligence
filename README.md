@@ -2,22 +2,16 @@
 
 ## Repository ownership and extraction status
 
-The canonical repository for this service is
-`git@github.com:ChouKevin/java-code-intelligence.git`. The current
-`java-system-agent/java-semantic-service/` location is temporary while its Git history, delivery
-baseline, and Agent consumer handoff are prepared. Do not establish long-lived development in both
-locations. The Agent repository retains the extraction procedure in
-[`docs/handoffs/java-code-intelligence-extraction.md`](https://github.com/ChouKevin/java-system-agent/blob/uat/docs/handoffs/java-code-intelligence-extraction.md),
-while this service retains its post-extraction direction in [`docs/roadmap.md`](docs/roadmap.md).
+`git@github.com:ChouKevin/java-code-intelligence.git` is the canonical and sole repository for
+Java Semantic Service. R0 history-preserving extraction is complete; do not recreate or maintain a
+parallel service implementation in the Java System Agent repository. The Agent-owned extraction
+and cutover record remains at
+[`docs/handoffs/java-code-intelligence-extraction.md`](https://github.com/ChouKevin/java-system-agent/blob/uat/docs/handoffs/java-code-intelligence-extraction.md).
 
-Until extraction, run the commands below from this service directory:
-
-```bash
-cd java-semantic-service
-```
-
-After extraction, the service directory becomes the root of `java-code-intelligence`, so the same
-Maven commands continue to apply without path rewriting.
+R1, the independent delivery baseline, is active. It provides ordinary CI, a reproducible Docker
+build, and a pinned JDT LS installation contract. Image publication, registry authentication, and
+deployment ownership are intentionally out of scope until a separate deployment decision exists.
+See [`docs/roadmap.md`](docs/roadmap.md) for the delivery sequence.
 
 ## MCP SDK validation and result contract
 
@@ -83,6 +77,14 @@ For a real JDT LS installation, set `JDTLS_HOME` and use the service's
 
 ```bash
 JDTLS_HOME=/opt/jdtls mvn -Pjdtls-it test
+```
+
+`scripts/jdtls-release.env` is the repository-owned JDT LS release source of truth. Both the
+Docker build and the scheduled integration workflow use `scripts/install-jdtls.sh`; local
+installations may use the same command with an explicit destination:
+
+```bash
+scripts/install-jdtls.sh /opt/jdtls
 ```
 
 ## Configuration and authentication

@@ -777,9 +777,10 @@ class OpenApiContractTest {
         assertClosedObject(edge);
         assertExactPropertiesAndRequired(edge,
                 "callerNodeId", "calleeNodeId", "callSite", "callExpression", "resolutionStrategy", "category",
-                "evidence");
+                "evidence", "availableFollowUps");
         assertThat(edge.get("description")).asString().contains("caller", "callee");
         assertRequiredNonNullableArray(edge, "evidence");
+        assertRequiredNonNullableArray(edge, "availableFollowUps");
         assertThat(schema(properties(edge), "evidence").get("description"))
                 .asString().contains("MYBATIS_MAPPER", "SQL");
         assertThat(list(schema(properties(edge), "resolutionStrategy").get("enum"))).containsExactly(
@@ -1028,14 +1029,14 @@ class OpenApiContractTest {
                 new TextRangePayload(new PositionPayload(0, 0), new PositionPayload(0, 1)));
         List<String> evidence = new ArrayList<>();
         GraphEdgeResponse edge = new GraphEdgeResponse(
-                "caller", "callee", range, "call()", "JDT", "RESOLVED_ANALYZABLE", evidence);
+                "caller", "callee", range, "call()", "JDT", "RESOLVED_ANALYZABLE", evidence, List.of());
         evidence.add("mutated");
         assertThat(edge.evidence()).isEmpty();
         assertThatThrownBy(() -> new GraphEdgeResponse(
-                "caller", "callee", range, "call()", "JDT", "RESOLVED_ANALYZABLE", null))
+                "caller", "callee", range, "call()", "JDT", "RESOLVED_ANALYZABLE", null, List.of()))
                 .isInstanceOf(NullPointerException.class);
         assertThatThrownBy(() -> new GraphEdgeResponse(
-                "caller", "callee", range, "call()", "JDT", null, evidence))
+                "caller", "callee", range, "call()", "JDT", null, evidence, List.of()))
                 .isInstanceOf(NullPointerException.class);
 
         List<MethodTargetPayload> candidates = new ArrayList<>();

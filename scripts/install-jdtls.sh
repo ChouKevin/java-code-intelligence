@@ -1,44 +1,68 @@
-#!/usr/bin/env bash
-set -euo pipefail
+#!/bin/sh
+set -eu
 
-TARGET="${1:?usage: install-jdtls.sh <target-dir>}"
-
-VERSION="1.50.0"
-ARCHIVE="jdt-language-server-1.50.0-202509041425.tar.gz"
-BASE_URL="https://download.eclipse.org/jdtls/milestones/${VERSION}"
-SHA256="3292c5c33888f95ab0ff718e777ee94ff5496b8635a23a8844b876ee090ebdea"
-
-installation_is_valid() {
-  [ -d "${TARGET}/plugins" ] || return 1
-  [ -d "${TARGET}/config_linux" ] || return 1
-  local launchers
-  launchers="$(find "${TARGET}/plugins" -name 'org.eclipse.equinox.launcher_*.jar' | wc -l)"
-  [ "${launchers}" -eq 1 ]
+die() {
+    printf '%s\n' "$1" >&2
+    exit 1
 }
 
-if [ -f "${TARGET}/.installed-${VERSION}" ] && installation_is_valid; then
-  echo "jdtls ${VERSION} already installed at ${TARGET}"
-  exit 0
+SCRIPT_DIR=$(CDPATH= cd "$(dirname "$0")" && pwd)
+RELEASE_FILE="${SCRIPT_DIR}/jdtls-release.env"
+
+[ -r "${RELEASE_FILE}" ] || die "JDT LS release metadata is required"
+# shellcheck source=jdtls-release.env
+. "${RELEASE_FILE}"
+
+[ "$#" -eq 1 ] || die "usage: install-jdtls.sh <target-dir>"
+TARGET=$1
+
+[ -n "${JDTLS_VERSION:-}" ] || die "JDTLS_VERSION is required"
+[ -n "${JDTLS_ARCHIVE:-}" ] || die "JDTLS_ARCHIVE is required"
+[ -n "${JDTLS_URL:-}" ] || die "JDTLS_URL is required"
+[ -n "${JDTLS_SHA256:-}" ] || die "JDTLS_SHA256 is required"
+[ -n "${TARGET}" ] || die "target directory is required"
+
+case "${TARGET}" in
+    /|.|./|..|../|-*) die "target directory is invalid" ;;
+esac
+
+installation_is_valid() {
+    installation=$1
+    [ -d "${installation}/plugins" ] || return 1
+    [ -d "${installation}/config_linux" ] || return 1
+    set -- "${installation}"/plugins/org.eclipse.equinox.launcher_*.jar
+    [ "$#" -eq 1 ] && [ -f "$1" ]
+}
+
+if [ -f "${TARGET}/.installed-${JDTLS_VERSION}" ] && installation_is_valid "${TARGET}"; then
+    printf '%s\n' "jdtls ${JDTLS_VERSION} already installed at ${TARGET}"
+    exit 0
 fi
 
-TMP="$(mktemp -d)"
-trap 'rm -rf "${TMP}"' EXIT
+TMP=$(mktemp -d) || die "unable to create temporary directory"
+STAGING=
+trap 'rm -rf "${TMP}" ${STAGING:+"${STAGING}"}' EXIT HUP INT TERM
 
-echo "downloading ${ARCHIVE}"
-curl -fsSL "${BASE_URL}/${ARCHIVE}" -o "${TMP}/${ARCHIVE}"
+ARCHIVE_PATH="${TMP}/${JDTLS_ARCHIVE}"
 
-echo "${SHA256}  ${TMP}/${ARCHIVE}" | sha256sum -c -
+printf '%s\n' "downloading ${JDTLS_ARCHIVE}"
+curl -fsSL "${JDTLS_URL}" -o "${ARCHIVE_PATH}"
+printf '%s  %s\n' "${JDTLS_SHA256}" "${ARCHIVE_PATH}" | sha256sum -c -
+
+tar -xzf "${ARCHIVE_PATH}" -C "${TMP}"
+installation_is_valid "${TMP}" || die "JDT LS archive has an invalid layout"
+
+TARGET_PARENT=$(dirname "${TARGET}")
+TARGET_NAME=$(basename "${TARGET}")
+mkdir -p "${TARGET_PARENT}"
+STAGING=$(mktemp -d "${TARGET_PARENT}/.${TARGET_NAME}.install.XXXXXX") \
+    || die "unable to create destination staging directory"
+cp -R "${TMP}/." "${STAGING}"
+touch "${STAGING}/.installed-${JDTLS_VERSION}"
+installation_is_valid "${STAGING}" || die "installed JDT LS layout is invalid"
 
 rm -rf "${TARGET}"
-mkdir -p "${TARGET}"
-tar -xzf "${TMP}/${ARCHIVE}" -C "${TARGET}"
+mv "${STAGING}" "${TARGET}"
+STAGING=
 
-LAUNCHERS="$(find "${TARGET}/plugins" -name 'org.eclipse.equinox.launcher_*.jar' | wc -l)"
-if [ "${LAUNCHERS}" -ne 1 ]; then
-  echo "expected exactly 1 equinox launcher, found ${LAUNCHERS}" >&2
-  exit 1
-fi
-[ -d "${TARGET}/config_linux" ] || { echo "config_linux missing" >&2; exit 1; }
-
-touch "${TARGET}/.installed-${VERSION}"
-echo "jdtls ${VERSION} installed at ${TARGET}"
+printf '%s\n' "jdtls ${JDTLS_VERSION} installed at ${TARGET}"

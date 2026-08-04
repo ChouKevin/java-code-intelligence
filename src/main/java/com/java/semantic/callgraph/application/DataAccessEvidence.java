@@ -42,6 +42,20 @@ public final class DataAccessEvidence {
      */
     Optional<EvidenceMatch> evaluate(
             SourceTypeMetadata declaringType, SourceMethodMetadata declaredMethod, MethodTarget declarationTarget) {
+        return evaluate(
+                new RepositorySyntaxIndex(
+                        "evidence", new com.java.semantic.syntax.domain.RepositorySyntax(List.of(), List.of(declaringType))),
+                declaringType,
+                declaredMethod,
+                declarationTarget);
+    }
+
+    Optional<EvidenceMatch> evaluate(
+            RepositorySyntaxIndex index,
+            SourceTypeMetadata declaringType,
+            SourceMethodMetadata declaredMethod,
+            MethodTarget declarationTarget) {
+        Objects.requireNonNull(index, "index is required");
         Objects.requireNonNull(declaringType, "declaringType is required");
         Objects.requireNonNull(declaredMethod, "declaredMethod is required");
         Objects.requireNonNull(declarationTarget, "declarationTarget is required");
@@ -50,19 +64,24 @@ public final class DataAccessEvidence {
             return Optional.empty();
         }
 
-        return matchMybatisMapper(declaringType, declaredMethod, declarationTarget)
+        return matchMybatisMapper(index, declaringType, declaredMethod, declarationTarget)
                 .or(() -> matchSpringDataRepository(declaringType, declaredMethod, declarationTarget))
                 .or(() -> matchDataAccessWithoutEvidence(declaringType, declaredMethod, declarationTarget));
     }
 
     private Optional<EvidenceMatch> matchMybatisMapper(
-            SourceTypeMetadata declaringType, SourceMethodMetadata declaredMethod, MethodTarget declarationTarget) {
+            RepositorySyntaxIndex index,
+            SourceTypeMetadata declaringType,
+            SourceMethodMetadata declaredMethod,
+            MethodTarget declarationTarget) {
         if (Objects.isNull(declaredMethod.sqlSource())) {
             return Optional.empty();
         }
         return Optional.of(matched(
                 ResolutionStrategy.MYBATIS_MAPPER, declaringType, declaredMethod, declarationTarget,
-                List.of("mapper SQL evidence: " + declaredMethod.sqlSource().name())));
+                List.of("mapper SQL evidence: " + declaredMethod.sqlSource().name()),
+                index.mapperStatementIdentities(
+                        declaringType.declaration().identity().fullyQualifiedName(), declaredMethod.name())));
     }
 
     /**
@@ -79,7 +98,7 @@ public final class DataAccessEvidence {
                 .findFirst()
                 .map(supertype -> matched(
                         ResolutionStrategy.SPRING_DATA_REPOSITORY, declaringType, declaredMethod, declarationTarget,
-                        List.of("extends " + supertype)));
+                        List.of("extends " + supertype), List.of()));
     }
 
     private Optional<EvidenceMatch> matchDataAccessWithoutEvidence(
@@ -92,15 +111,17 @@ public final class DataAccessEvidence {
                 .map(annotation -> matched(
                         ResolutionStrategy.DATA_ACCESS_WITHOUT_EVIDENCE, declaringType, declaredMethod,
                         declarationTarget,
-                        List.of("@" + annotation + " without SQL or known supertype")));
+                        List.of("@" + annotation + " without SQL or known supertype"), List.of()));
     }
 
     private static EvidenceMatch matched(
             ResolutionStrategy strategy, SourceTypeMetadata declaringType, SourceMethodMetadata declaredMethod,
-            MethodTarget declarationTarget, List<String> evidence) {
+            MethodTarget declarationTarget,
+            List<String> evidence,
+            List<com.java.semantic.syntax.domain.MapperStatementIdentity> evidenceSourceIdentities) {
         return new EvidenceMatch(
                 strategy, opaqueSymbolOf(declaringType, declaredMethod), Optional.of(declarationTarget),
-                evidence);
+                evidence, evidenceSourceIdentities);
     }
 
     private static String opaqueSymbolOf(SourceTypeMetadata declaringType, SourceMethodMetadata declaredMethod) {

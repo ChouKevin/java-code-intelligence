@@ -1,0 +1,37 @@
+name: JDT LS integration
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '17 3 * * 1'
+  pull_request:
+    types: [labeled]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: jdtls-integration-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  integration:
+    if: >-
+      github.event_name != 'pull_request' ||
+      github.event.label.name == 'run-jdtls-integration'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+
+      - run: scripts/install-jdtls.sh "$RUNNER_TEMP/jdtls"
+
+      - env:
+          JDTLS_HOME: ${{ runner.temp }}/jdtls
+        run: mvn --batch-mode --no-transfer-progress -Pjdtls-it test

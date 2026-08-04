@@ -38,14 +38,7 @@ public final class SourceDiscoveryMcpMapper {
 
     /** 將封閉 MCP evidence identity 還原為既有 evidence domain identity */
     public EvidenceSourceQuery.EvidenceIdentity toDomain(McpEvidenceIdentityPayload payload) {
-        return switch (Objects.requireNonNull(payload, "payload is required")) {
-            case McpEvidenceIdentityPayload.AnnotationSql annotationSql -> new EvidenceSourceQuery.AnnotationSql(
-                    McpMapperIdentityPayloads.toDomain(annotationSql.identity()));
-            case McpEvidenceIdentityPayload.MapperStatement statement -> new EvidenceSourceQuery.MapperStatement(
-                    McpMapperIdentityPayloads.toDomain(statement.identity()));
-            case McpEvidenceIdentityPayload.MapperFragment fragment -> new EvidenceSourceQuery.MapperFragment(
-                    McpMapperIdentityPayloads.toDomain(fragment.identity()));
-        };
+        return new EvidenceIdentityMcpMapper().toDomain(payload);
     }
 
     public SourceDiscoveryMcpDtos.ResolveSymbolOutput symbol(RevisionBoundSourceSymbolResolution result) {

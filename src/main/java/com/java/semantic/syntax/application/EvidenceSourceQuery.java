@@ -37,4 +37,13 @@ public record EvidenceSourceQuery(RepositoryId repositoryId, RepositoryRevision 
             identity = Objects.requireNonNull(identity, "identity is required");
         }
     }
+
+    /** 依 statement 原始證據表現型別建立唯一可執行的 evidence identity */
+    public static EvidenceIdentity identityOf(MapperStatementIdentity identity) {
+        MapperStatementIdentity statementIdentity = Objects.requireNonNull(identity, "identity is required");
+        return switch (statementIdentity.representation()) {
+            case ANNOTATION_SQL_TEXT -> new AnnotationSql(statementIdentity);
+            case MAPPER_XML_ELEMENT -> new MapperStatement(statementIdentity);
+        };
+    }
 }

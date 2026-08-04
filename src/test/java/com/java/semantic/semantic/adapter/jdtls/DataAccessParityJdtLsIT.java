@@ -1,7 +1,10 @@
 package com.java.semantic.semantic.adapter.jdtls;
 
 import com.java.semantic.api.AnalysisResponseMapper;
+import com.java.semantic.api.MapperIdentityHttpMapper;
 import com.java.semantic.api.SourceLocationHttpMapper;
+import com.java.semantic.api.dto.DiscoveryFollowUpResponse;
+import com.java.semantic.api.dto.EvidenceSourceIdentityPayload;
 import com.java.semantic.api.dto.GraphEdgeResponse;
 import com.java.semantic.callgraph.application.CanonicalTargetProjection;
 import com.java.semantic.callgraph.application.DirectCallRelationshipResolver;
@@ -26,6 +29,9 @@ import com.java.semantic.semantic.domain.SemanticMethod;
 import com.java.semantic.semantic.domain.SemanticPosition;
 import com.java.semantic.syntax.adapter.jdt.JdtSyntaxExtractionService;
 import com.java.semantic.syntax.domain.CanonicalMethodDeclarationResolver;
+import com.java.semantic.syntax.domain.MapperEvidenceRepresentation;
+import com.java.semantic.syntax.domain.MapperStatementIdentity;
+import com.java.semantic.syntax.domain.MapperStatementKey;
 import com.java.semantic.syntax.domain.RepositorySyntax;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Tag;
@@ -38,6 +44,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
+import java.util.Optional;
 import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -46,7 +53,7 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
 /**
  * 在真實 JDT LS 下證明資料存取進入點在 outgoing/incoming 呼叫圖上的分類與方向對稱行為
  * <p>
- * outgoing：XML 支撐的 mapper 呼叫改標 {@code MYBATIS_MAPPER} 並帶 SQL 證據，API 層歸類
+ * outgoing：XML 支撐的 mapper 呼叫改標 {@code MYBATIS_MAPPER} 並帶型別化證據識別，API 層歸類
  * RESOLVED_OPAQUE；Spring Data repository 呼叫改標 {@code SPRING_DATA_REPOSITORY}，API 層
  * 同樣歸類 RESOLVED_OPAQUE；僅有 {@code @Mapper} 而無 SQL 或已知父介面的 DAO 呼叫改標
  * {@code DATA_ACCESS_WITHOUT_EVIDENCE} 並保留未解析警告
@@ -62,7 +69,6 @@ class DataAccessParityJdtLsIT {
     private static final RepositoryRevision REVISION = RepositoryRevision.ofSha("d".repeat(40));
     private static final String SERVICE_PACKAGE = "com.example.service";
     private static final String PERSISTENCE_PACKAGE = "com.example.persistence";
-    private static final String ORDER_XML_SQL = "SELECT * FROM orders WHERE customer_id = #{customerId}";
     private static final int OUTGOING_DEPTH = 1;
     private static final int DEPTH_TWO_NODE_BUDGET = 40;
 
@@ -87,7 +93,7 @@ class DataAccessParityJdtLsIT {
                     builder, service, snapshot, syntax,
                     SERVICE_PACKAGE, "OrderApplicationService", "reconcile", List.of("Long"));
 
-            assertMapperEdgeCarriesXmlSqlAndMapsToResolvedOpaque(fragment);
+            assertMapperEdgeCarriesXmlEvidenceAndMapsToResolvedOpaque(fragment);
             assertSpringDataRepositoryEdgeIsResolvedOpaque(fragment);
             assertAnnotatedDaoWithoutEvidenceKeepsWarning(fragment);
             assertIncomingRootAtMapperReturnsCallerEdge(service, snapshot, syntax);
@@ -97,17 +103,20 @@ class DataAccessParityJdtLsIT {
     }
 
     /**
-     * XML 支撐的 mapper 呼叫改標 {@code MYBATIS_MAPPER}，帶 OrderMapper.xml 的 SQL 逐字證據，
+     * XML 支撐的 mapper 呼叫改標 {@code MYBATIS_MAPPER}，帶 OrderMapper.xml 的型別化證據識別，
      * 終端節點為 TARGET_ONLY/OPAQUE 並保留介面 MethodTarget；同一條邊經 API 回應對應層後歸類
-     * {@code RESOLVED_OPAQUE}，於真實 JDT 下端到端證明 opaque 資料存取邊的分類
+     * {@code RESOLVED_OPAQUE} 並提供可直接提交的 evidence-source 後續動作，於真實 JDT 下端到端
+     * 證明 opaque 資料存取邊的分類
      */
-    private void assertMapperEdgeCarriesXmlSqlAndMapsToResolvedOpaque(OutgoingGraphFragment fragment) {
+    private void assertMapperEdgeCarriesXmlEvidenceAndMapsToResolvedOpaque(OutgoingGraphFragment fragment) {
         assertThat(fragment.edges())
                 .filteredOn(edge -> ResolutionStrategy.MYBATIS_MAPPER.equals(edge.resolutionStrategy()))
                 .singleElement()
                 .satisfies(edge -> {
-                    assertThat(edge.evidence())
-                            .anySatisfy(entry -> assertThat(entry).contains(ORDER_XML_SQL));
+                    assertThat(edge.evidence()).containsExactly("mapper SQL evidence: MAPPER_XML");
+                    assertThat(edge.evidenceSourceIdentities()).containsExactly(xmlOnlyMapperIdentity());
+                    assertThat(edge.evidenceSourceIdentities().getFirst().representation())
+                            .isEqualTo(MapperEvidenceRepresentation.MAPPER_XML_ELEMENT);
                     GraphNode callee = nodeById(fragment, edge.calleeNodeId());
                     assertThat(callee.contentState()).isEqualTo(NodeContentState.TARGET_ONLY);
                     assertThat(callee.traversalState()).isEqualTo(NodeTraversalState.OPAQUE);
@@ -125,8 +134,23 @@ class DataAccessParityJdtLsIT {
                 .singleElement()
                 .satisfies(edge -> {
                     assertThat(edge.category()).isEqualTo("RESOLVED_OPAQUE");
-                    assertThat(edge.evidence())
-                            .anySatisfy(entry -> assertThat(entry).contains(ORDER_XML_SQL));
+                    assertThat(edge.evidence()).containsExactly("mapper SQL evidence: MAPPER_XML");
+                    assertThat(edge.availableFollowUps()).singleElement().satisfies(followUp -> {
+                        assertThat(followUp.operation()).isEqualTo("GET_EVIDENCE_SOURCE");
+                        assertThat(followUp.api().method()).isEqualTo("POST");
+                        assertThat(followUp.api().path()).isEqualTo("/v1/discovery/evidence-source");
+                        assertThat(followUp.api().operationId()).isEqualTo("getEvidenceSource");
+                        assertThat(followUp.request())
+                                .isInstanceOf(DiscoveryFollowUpResponse.GetEvidenceSourceRequestResponse.class);
+                        DiscoveryFollowUpResponse.GetEvidenceSourceRequestResponse request =
+                                (DiscoveryFollowUpResponse.GetEvidenceSourceRequestResponse) followUp.request();
+                        assertThat(request.repoId()).isEqualTo(REPOSITORY_ID.value());
+                        assertThat(request.expectedRevision()).isEqualTo(REVISION.value());
+                        assertThat(request.identity()).isEqualTo(new EvidenceSourceIdentityPayload(
+                                "MAPPER_STATEMENT",
+                                Optional.of(new MapperIdentityHttpMapper().toPayload(xmlOnlyMapperIdentity())),
+                                Optional.empty()));
+                    });
                 });
     }
 
@@ -143,6 +167,7 @@ class DataAccessParityJdtLsIT {
                 .filteredOn(edge -> ResolutionStrategy.SPRING_DATA_REPOSITORY.equals(edge.resolutionStrategy()))
                 .singleElement()
                 .satisfies(edge -> {
+                    assertThat(edge.evidenceSourceIdentities()).isEmpty();
                     GraphNode callee = nodeById(fragment, edge.calleeNodeId());
                     assertThat(callee.contentState()).isEqualTo(NodeContentState.TARGET_ONLY);
                     assertThat(callee.traversalState()).isEqualTo(NodeTraversalState.OPAQUE);
@@ -155,7 +180,10 @@ class DataAccessParityJdtLsIT {
         assertThat(mappedEdges)
                 .filteredOn(edge -> "SPRING_DATA_REPOSITORY".equals(edge.resolutionStrategy()))
                 .singleElement()
-                .satisfies(edge -> assertThat(edge.category()).isEqualTo("RESOLVED_OPAQUE"));
+                .satisfies(edge -> {
+                    assertThat(edge.category()).isEqualTo("RESOLVED_OPAQUE");
+                    assertThat(edge.availableFollowUps()).isEmpty();
+                });
     }
 
     private void assertAnnotatedDaoWithoutEvidenceKeepsWarning(OutgoingGraphFragment fragment) {
@@ -164,6 +192,7 @@ class DataAccessParityJdtLsIT {
                 .filteredOn(edge -> ResolutionStrategy.DATA_ACCESS_WITHOUT_EVIDENCE.equals(edge.resolutionStrategy()))
                 .singleElement()
                 .satisfies(edge -> {
+                    assertThat(edge.evidenceSourceIdentities()).isEmpty();
                     GraphNode callee = nodeById(fragment, edge.calleeNodeId());
                     assertThat(callee.target().orElseThrow().className()).isEqualTo("AuditDao");
                 });
@@ -171,6 +200,14 @@ class DataAccessParityJdtLsIT {
                 .filteredOn(warning -> "DESCENDANT_CALL_UNRESOLVED".equals(warning.code()))
                 .extracting(warning -> warning.callExpression().orElseThrow())
                 .anySatisfy(expression -> assertThat(expression).contains("auditDao.latest()"));
+
+        List<GraphEdgeResponse> mappedEdges = new AnalysisResponseMapper(new SourceLocationHttpMapper())
+                .toResponse(REPOSITORY_ID, fragment)
+                .edges();
+        assertThat(mappedEdges)
+                .filteredOn(edge -> "DATA_ACCESS_WITHOUT_EVIDENCE".equals(edge.resolutionStrategy()))
+                .singleElement()
+                .satisfies(edge -> assertThat(edge.availableFollowUps()).isEmpty());
     }
 
     /**
@@ -195,10 +232,21 @@ class DataAccessParityJdtLsIT {
         assertThat(fragment.edges())
                 .filteredOn(edge -> ResolutionStrategy.MYBATIS_MAPPER.equals(edge.resolutionStrategy()))
                 .anySatisfy(edge -> {
+                    assertThat(edge.evidence()).containsExactly("mapper SQL evidence: MAPPER_XML");
+                    assertThat(edge.evidenceSourceIdentities()).containsExactly(xmlOnlyMapperIdentity());
                     GraphNode caller = nodeById(fragment, edge.callerNodeId());
                     assertThat(caller.target().orElseThrow().className()).isEqualTo("OrderApplicationService");
                     assertThat(caller.target().orElseThrow().methodName()).isEqualTo("reconcile");
                 });
+    }
+
+    private MapperStatementIdentity xmlOnlyMapperIdentity() {
+        return new MapperStatementIdentity(
+                new MapperStatementKey("com.example.persistence.OrderMapper", "xmlOnly"),
+                "module-persistence/src/main/resources/mapper/OrderMapper.xml",
+                Optional.empty(),
+                1,
+                MapperEvidenceRepresentation.MAPPER_XML_ELEMENT);
     }
 
     private GraphNode nodeById(IncomingGraphFragment fragment, CallNodeId nodeId) {

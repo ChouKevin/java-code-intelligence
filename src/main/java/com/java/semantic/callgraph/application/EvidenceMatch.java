@@ -6,6 +6,7 @@ import java.util.Optional;
 
 import com.java.semantic.callgraph.domain.ResolutionStrategy;
 import com.java.semantic.identity.MethodTarget;
+import com.java.semantic.syntax.domain.MapperStatementIdentity;
 
 import org.springframework.util.Assert;
 
@@ -23,12 +24,23 @@ record EvidenceMatch(
         ResolutionStrategy strategy,
         String opaqueSymbol,
         Optional<MethodTarget> declarationTarget,
-        List<String> evidence) {
+        List<String> evidence,
+        List<MapperStatementIdentity> evidenceSourceIdentities) {
 
     EvidenceMatch {
         strategy = Objects.requireNonNull(strategy, "strategy is required");
         Assert.hasText(opaqueSymbol, "opaqueSymbol is required");
         declarationTarget = Objects.requireNonNull(declarationTarget, "declarationTarget is required");
         evidence = List.copyOf(Objects.requireNonNull(evidence, "evidence is required"));
+        evidenceSourceIdentities = List.copyOf(Objects.requireNonNull(
+                evidenceSourceIdentities, "evidenceSourceIdentities is required"));
+    }
+
+    EvidenceMatch(
+            ResolutionStrategy strategy,
+            String opaqueSymbol,
+            Optional<MethodTarget> declarationTarget,
+            List<String> evidence) {
+        this(strategy, opaqueSymbol, declarationTarget, evidence, List.of());
     }
 }

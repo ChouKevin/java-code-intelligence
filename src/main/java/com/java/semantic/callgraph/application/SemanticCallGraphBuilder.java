@@ -323,7 +323,8 @@ public final class SemanticCallGraphBuilder {
             if (declaringType.isEmpty() || declaredMethod.isEmpty()) {
                 return Optional.empty();
             }
-            return dataAccessEvidence.evaluate(declaringType.orElseThrow(), declaredMethod.orElseThrow(), declarationTarget);
+            return dataAccessEvidence.evaluate(
+                    index, declaringType.orElseThrow(), declaredMethod.orElseThrow(), declarationTarget);
         }
 
         private Optional<EvidenceMatch> generatedMemberEvidenceFor(SyntaxInvocation invocation) {
@@ -356,7 +357,7 @@ public final class SemanticCallGraphBuilder {
             CallNodeId nodeId = match.declarationTarget()
                     .map(this::opaqueLocalNodeId)
                     .orElseGet(() -> opaqueExternalNodeId(match.opaqueSymbol()));
-            addEdge(caller, nodeId, relationship, match.strategy(), match.evidence());
+            addEdge(caller, nodeId, relationship, match.strategy(), match.evidence(), match.evidenceSourceIdentities());
         }
 
         private CallNodeId opaqueLocalNodeId(MethodTarget target) {
@@ -501,7 +502,7 @@ public final class SemanticCallGraphBuilder {
                 CallNodeId callee,
                 DirectCallRelationship relationship,
                 ResolutionStrategy strategy) {
-            addEdge(caller, callee, relationship, strategy, relationship.evidence());
+            addEdge(caller, callee, relationship, strategy, relationship.evidence(), relationship.evidenceSourceIdentities());
         }
 
         private void addEdge(
@@ -509,14 +510,16 @@ public final class SemanticCallGraphBuilder {
                 CallNodeId callee,
                 DirectCallRelationship relationship,
                 ResolutionStrategy strategy,
-                List<String> evidence) {
+                List<String> evidence,
+                List<com.java.semantic.syntax.domain.MapperStatementIdentity> evidenceSourceIdentities) {
             CallNodeId callerId = localNodes.get(caller).nodeId();
             CallSiteRange range = callSite(caller, relationship.callSite());
             EdgeKey key = new EdgeKey(callerId, callee, range);
             if (!edgeKeys.add(key)) {
                 return;
             }
-            edges.add(new GraphEdge(callerId, callee, range, relationship.expression(), strategy, evidence));
+            edges.add(new GraphEdge(
+                    callerId, callee, range, relationship.expression(), strategy, evidence, evidenceSourceIdentities));
         }
 
         private CallSiteRange callSite(MethodTarget caller, SemanticRange range) {

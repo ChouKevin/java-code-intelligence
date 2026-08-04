@@ -260,7 +260,7 @@ public final class IncomingSemanticCallGraphBuilder {
             if (isOpaqueDataAccessCall(relationship, calleeTarget)) {
                 relabeled.add(DirectCallRelationship.local(
                         calleeTarget, semanticMethod, relationship.callSite(), relationship.expression(),
-                        evidenceMatch.strategy(), evidenceMatch.evidence()));
+                        evidenceMatch.strategy(), evidenceMatch.evidence(), evidenceMatch.evidenceSourceIdentities()));
             } else {
                 relabeled.add(relationship);
             }
@@ -280,7 +280,7 @@ public final class IncomingSemanticCallGraphBuilder {
         if (declaringType.isEmpty() || declaredMethod.isEmpty()) {
             return Optional.empty();
         }
-        return dataAccessEvidence.evaluate(declaringType.orElseThrow(), declaredMethod.orElseThrow(), calleeTarget)
+        return dataAccessEvidence.evaluate(index, declaringType.orElseThrow(), declaredMethod.orElseThrow(), calleeTarget)
                 .filter(match -> OPAQUE_DATA_ACCESS_RELABELING_STRATEGIES.contains(match.strategy()));
     }
 
@@ -632,7 +632,8 @@ public final class IncomingSemanticCallGraphBuilder {
                     range,
                     relationship.expression(),
                     relationship.strategy(),
-                    relationship.evidence()));
+                    relationship.evidence(),
+                    relationship.evidenceSourceIdentities()));
         }
 
         private CallSiteRange callSite(MethodTarget caller, SemanticRange range) {

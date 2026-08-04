@@ -4,6 +4,8 @@ import com.java.semantic.callgraph.domain.MethodId;
 import com.java.semantic.identity.JavaIdentityNormalizer;
 import com.java.semantic.identity.MethodTarget;
 import com.java.semantic.syntax.domain.RepositorySyntax;
+import com.java.semantic.syntax.domain.MapperEvidenceIndex;
+import com.java.semantic.syntax.domain.MapperStatementIdentity;
 import com.java.semantic.syntax.domain.SourceMethodMetadata;
 import com.java.semantic.syntax.domain.SourceTypeMetadata;
 import com.java.semantic.syntax.domain.SyntaxRange;
@@ -50,6 +52,7 @@ public final class RepositorySyntaxIndex {
     private final Map<MethodTarget, SourceMethodMetadata> methodsByTarget;
     private final Map<MethodTarget, SourceTypeMetadata> sourceTypesByTarget;
     private final Map<SourceRange, SourceMethodMetadata> methodsBySourceRange;
+    private final MapperEvidenceIndex mapperEvidenceIndex;
 
     public RepositorySyntaxIndex(String repoId, RepositorySyntax syntax) {
         this.repoId = Objects.requireNonNull(repoId, "repoId is required");
@@ -59,6 +62,7 @@ public final class RepositorySyntaxIndex {
         this.methodsByTarget = indexMethodsByTarget(syntax.sourceTypes());
         this.sourceTypesByTarget = indexSourceTypesByTarget(syntax.sourceTypes());
         this.methodsBySourceRange = indexMethodsBySourceRange(syntax.sourceTypes());
+        this.mapperEvidenceIndex = syntax.mapperEvidenceIndex().orElseGet(MapperEvidenceIndex::empty);
     }
 
     public List<SourceTypeMetadata> sourceTypes(String fullyQualifiedName) {
@@ -98,6 +102,13 @@ public final class RepositorySyntaxIndex {
                 .filter(target -> target.methodName().equals(methodName))
                 .filter(target -> target.parameterTypes().equals(parameterTypes))
                 .findFirst();
+    }
+
+    /** 依 mapper statement logical key 取得既有且位置排序的 typed identities */
+    public List<MapperStatementIdentity> mapperStatementIdentities(String namespace, String statementId) {
+        return mapperEvidenceIndex.statements(namespace, statementId).stream()
+                .map(statement -> statement.identity())
+                .toList();
     }
 
     private Map<String, List<SourceTypeMetadata>> indexSourceTypes(List<SourceTypeMetadata> sourceTypes) {

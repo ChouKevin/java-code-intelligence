@@ -177,6 +177,14 @@ public final class DiscoveryFollowUpFactory {
         return followUp(Operation.GET_EVIDENCE_SOURCE, request);
     }
 
+    /** 由 mapper statement identity 建立 evidence-source follow-up */
+    public DiscoveryFollowUp forEvidenceSource(
+            RepositoryId repositoryId,
+            RepositoryRevision revision,
+            com.java.semantic.syntax.domain.MapperStatementIdentity identity) {
+        return forEvidenceSource(repositoryId, revision, EvidenceSourceQuery.identityOf(identity));
+    }
+
     /** 建立保留 exact target 與 limit 的內部 reference 下一頁 */
     public DiscoveryFollowUp nextInternalReferencePage(
             RepositoryId repositoryId,
