@@ -50,13 +50,13 @@ class ApiTrieServiceTest {
                 route("WildcardController", "wildcard", "GET", "/api/{id}"),
                 route("RestController", "rest", "GET", "/api/{*path}")));
 
-        assertThat(refs(service.lookupMatches("/api/special", "GET", "")))
+        assertThat(refs(lookup(service, "repo", SHA_ONE, "/api/special", "GET")))
                 .extracting(ApiEntryPointRef::methodName)
                 .containsExactly("exact");
-        assertThat(refs(service.lookupMatches("/api/other", "GET", "")))
+        assertThat(refs(lookup(service, "repo", SHA_ONE, "/api/other", "GET")))
                 .extracting(ApiEntryPointRef::methodName)
                 .containsExactly("wildcard");
-        assertThat(refs(service.lookupMatches("/api/other/more", "GET", "")))
+        assertThat(refs(lookup(service, "repo", SHA_ONE, "/api/other/more", "GET")))
                 .extracting(ApiEntryPointRef::methodName)
                 .containsExactly("rest");
     }
@@ -68,7 +68,7 @@ class ApiTrieServiceTest {
                 route("ExactController", "getExact", "GET", "/api/vip/special"),
                 route("WildcardController", "postWildcard", "POST", "/api/vip/{id}")));
 
-        assertThat(refs(service.lookupMatches("/api/vip/special", "POST", "")))
+        assertThat(refs(lookup(service, "repo", SHA_ONE, "/api/vip/special", "POST")))
                 .extracting(ApiEntryPointRef::methodName)
                 .containsExactly("postWildcard");
     }
@@ -79,8 +79,8 @@ class ApiTrieServiceTest {
         service.reload(snapshot("repo", SHA_ONE.value()),
                 syntax(route("FileController", "read", "GET", "/files/{*path}")));
 
-        assertThat(refs(service.lookupMatches("/files", "GET", ""))).hasSize(1);
-        assertThat(refs(service.lookupMatches("/files/a/b/c", "GET", ""))).hasSize(1);
+        assertThat(refs(lookup(service, "repo", SHA_ONE, "/files", "GET"))).hasSize(1);
+        assertThat(refs(lookup(service, "repo", SHA_ONE, "/files/a/b/c", "GET"))).hasSize(1);
     }
 
     @Test
@@ -89,19 +89,20 @@ class ApiTrieServiceTest {
         service.reload(snapshot("repo", SHA_ONE.value()), syntax(route(
                 "FileController", "metadata", "GET", "/files/{*path}/metadata")));
 
-        assertThat(refs(service.lookupMatches("/files/a/metadata", "GET", ""))).isEmpty();
+        assertThat(refs(lookup(service, "repo", SHA_ONE, "/files/a/metadata", "GET"))).isEmpty();
     }
 
     @Test
     void should_use_all_only_as_fallback_when_lookup_has_exact_method() {
         ApiTrieService service = new ApiTrieService();
-        service.reload(snapshot("repo-all", SHA_ONE.value()), syntax(route("AllController", "all", "ALL", "/orders")));
-        service.reload(snapshot("repo-get", SHA_TWO.value()), syntax(route("GetController", "get", "GET", "/orders")));
+        service.reload(snapshot("repo", SHA_ONE.value()), syntax(
+                route("AllController", "all", "ALL", "/orders"),
+                route("GetController", "get", "GET", "/orders")));
 
-        assertThat(refs(service.lookupMatches("/orders", "GET", "")))
+        assertThat(refs(lookup(service, "repo", SHA_ONE, "/orders", "GET")))
                 .extracting(ApiEntryPointRef::methodName)
                 .containsExactly("get");
-        assertThat(refs(service.lookupMatches("/orders", "POST", "")))
+        assertThat(refs(lookup(service, "repo", SHA_ONE, "/orders", "POST")))
                 .extracting(ApiEntryPointRef::methodName)
                 .containsExactly("all");
     }
@@ -109,12 +110,11 @@ class ApiTrieServiceTest {
     @Test
     void should_union_all_with_exact_method_when_suggesting_routes() {
         ApiTrieService service = new ApiTrieService();
-        service.reload(snapshot("repo-all", SHA_ONE.value()),
-                syntax(route("AllController", "all", "ALL", "/orders/{id}")));
-        service.reload(snapshot("repo-get", SHA_TWO.value()),
-                syntax(route("GetController", "get", "GET", "/orders/{id}")));
+        service.reload(snapshot("repo", SHA_ONE.value()), syntax(
+                route("AllController", "all", "ALL", "/orders/{id}"),
+                route("GetController", "get", "GET", "/orders/{id}")));
 
-        assertThat(refs(service.suggestMatches("/orders/42", "GET", "", 10)))
+        assertThat(refs(suggest(service, "repo", SHA_ONE, "/orders/42", "GET", 10)))
                 .extracting(ApiEntryPointRef::methodName)
                 .containsExactly("all", "get");
     }
@@ -125,7 +125,7 @@ class ApiTrieServiceTest {
         service.reload(snapshot("repo", SHA_ONE.value()),
                 syntax(route("ArchiveController", "find", "GET", "/archive/{id}")));
 
-        assertThat(service.suggestMatches("/orders/42", "GET", "", 10).matches()).isEmpty();
+        assertThat(suggest(service, "repo", SHA_ONE, "/orders/42", "GET", 10).matches()).isEmpty();
     }
 
     @Test
@@ -134,7 +134,7 @@ class ApiTrieServiceTest {
         service.reload(snapshot("repo", SHA_ONE.value()),
                 syntax(route("OrderController", "get", "GET", "/orders/{id}")));
 
-        assertThat(service.lookupMatches("/orders/42", "GET", "").matches())
+        assertThat(lookup(service, "repo", SHA_ONE, "/orders/42", "GET").matches())
                 .singleElement()
                 .extracting(ApiRouteMatch::matchReasons)
                 .isEqualTo(List.of(
@@ -145,18 +145,18 @@ class ApiTrieServiceTest {
     @Test
     void should_use_canonical_order_and_report_suggestion_truncation_across_reloads() {
         ApiTrieService service = new ApiTrieService();
-        service.reload(snapshot("repo-z", SHA_TWO.value()),
-                syntax(route("ZController", "z", "GET", "/orders/{id}")));
-        service.reload(snapshot("repo-a", SHA_ONE.value()),
-                syntax(route("AController", "a", "GET", "/orders/{*path}")));
+        service.reload(snapshot("repo", SHA_ONE.value()), syntax(
+                route("ZController", "z", "GET", "/orders/{id}"),
+                route("AController", "a", "GET", "/orders/{*path}")));
 
-        ApiRouteMatchBatch beforeReload = service.suggestMatches("/orders/42", "GET", "", 1);
-        service.reload(snapshot("repo-a", SHA_ONE.value()),
-                syntax(route("AController", "a", "GET", "/orders/{*path}")));
-        ApiRouteMatchBatch afterReload = service.suggestMatches("/orders/42", "GET", "", 1);
+        ApiRouteMatchBatch beforeReload = suggest(service, "repo", SHA_ONE, "/orders/42", "GET", 1);
+        service.reload(snapshot("repo", SHA_ONE.value()), syntax(
+                route("ZController", "z", "GET", "/orders/{id}"),
+                route("AController", "a", "GET", "/orders/{*path}")));
+        ApiRouteMatchBatch afterReload = suggest(service, "repo", SHA_ONE, "/orders/42", "GET", 1);
 
         assertThat(beforeReload.matches()).extracting(match -> match.ref().repoId())
-                .containsExactly("repo-a");
+                .containsExactly("repo");
         assertThat(afterReload.matches()).isEqualTo(beforeReload.matches());
         assertThat(beforeReload.matches().get(0).matchReasons()).containsExactly(
                 ApiRouteMatchReason.SHARED_STATIC_SEGMENT,
@@ -170,15 +170,14 @@ class ApiTrieServiceTest {
     @Test
     void should_not_report_truncation_when_suggestion_candidate_count_equals_limit() {
         ApiTrieService service = new ApiTrieService();
-        service.reload(snapshot("repo-a", SHA_ONE.value()),
-                syntax(route("AController", "a", "GET", "/orders/{id}")));
-        service.reload(snapshot("repo-b", SHA_TWO.value()),
-                syntax(route("BController", "b", "GET", "/orders/{*path}")));
+        service.reload(snapshot("repo", SHA_ONE.value()), syntax(
+                route("AController", "a", "GET", "/orders/{id}"),
+                route("BController", "b", "GET", "/orders/{*path}")));
 
-        ApiRouteMatchBatch batch = service.suggestMatches("/orders/42", "GET", "", 2);
+        ApiRouteMatchBatch batch = suggest(service, "repo", SHA_ONE, "/orders/42", "GET", 2);
 
         assertThat(batch.matches()).extracting(match -> match.ref().repoId())
-                .containsExactly("repo-a", "repo-b");
+                .containsExactly("repo", "repo");
         assertThat(batch.observations()).isEmpty();
     }
 
@@ -189,10 +188,10 @@ class ApiTrieServiceTest {
                 route("TraceController", "trace", "TRACE", "/diagnostics"),
                 route("HealthController", "health", "GET", "/health")));
 
-        assertThat(refs(service.lookupMatches("/diagnostics", "TRACE", "")))
+        assertThat(refs(lookup(service, "repo", SHA_ONE, "/diagnostics", "TRACE")))
                 .extracting(ApiEntryPointRef::methodName)
                 .containsExactly("trace");
-        assertThat(refs(service.lookupMatches("/health", "GET", "")))
+        assertThat(refs(lookup(service, "repo", SHA_ONE, "/health", "GET")))
                 .extracting(ApiEntryPointRef::methodName)
                 .containsExactly("health");
     }
@@ -205,10 +204,10 @@ class ApiTrieServiceTest {
         EntryPointClass earlier = route("AControllerSentinel", "aHandlerSentinel", "GET", "/collision-sentinel");
         service.reload(snapshot("repo", SHA_ONE.value()), syntax(later, earlier));
 
-        assertThat(refs(service.lookupMatches("/collision-sentinel", "GET", "")))
+        assertThat(refs(lookup(service, "repo", SHA_ONE, "/collision-sentinel", "GET")))
                 .extracting(ref -> ref.sourceType().javaType().className(), ApiEntryPointRef::methodName)
                 .containsExactly(Tuple.tuple("AControllerSentinel", "aHandlerSentinel"));
-        assertThat(refs(service.suggestMatches("/collision-sentinel", "GET", "", 10)))
+        assertThat(refs(suggest(service, "repo", SHA_ONE, "/collision-sentinel", "GET", 10)))
                 .extracting(ref -> ref.sourceType().javaType().className(), ApiEntryPointRef::methodName)
                 .containsExactly(Tuple.tuple("AControllerSentinel", "aHandlerSentinel"));
         assertThat(output)
@@ -232,10 +231,10 @@ class ApiTrieServiceTest {
 
         service.reload(snapshot("repo", SHA_ONE.value()), syntax(largerPackage, smallerPackage));
 
-        assertThat(refs(service.lookupMatches("/package-collision", "GET", "")))
+        assertThat(refs(lookup(service, "repo", SHA_ONE, "/package-collision", "GET")))
                 .extracting(ref -> ref.sourceType().javaType().packageName())
                 .containsExactly("a.package");
-        assertThat(refs(service.suggestMatches("/package-collision", "GET", "", 10)))
+        assertThat(refs(suggest(service, "repo", SHA_ONE, "/package-collision", "GET", 10)))
                 .extracting(ref -> ref.sourceType().javaType().packageName())
                 .containsExactly("a.package");
     }
@@ -272,10 +271,10 @@ class ApiTrieServiceTest {
 
         service.reload(snapshot("repo", SHA_ONE.value()), syntax(largerMethod, smallerMethod));
 
-        assertThat(refs(service.lookupMatches("/method-collision", "GET", "")))
+        assertThat(refs(lookup(service, "repo", SHA_ONE, "/method-collision", "GET")))
                 .extracting(ApiEntryPointRef::methodName)
                 .containsExactly("aHandler");
-        assertThat(refs(service.suggestMatches("/method-collision", "GET", "", 10)))
+        assertThat(refs(suggest(service, "repo", SHA_ONE, "/method-collision", "GET", 10)))
                 .extracting(ApiEntryPointRef::methodName)
                 .containsExactly("aHandler");
     }
@@ -312,12 +311,12 @@ class ApiTrieServiceTest {
         forward.reload(snapshot("repo", SHA_ONE.value()), syntax(larger, smaller));
         reversed.reload(snapshot("repo", SHA_ONE.value()), syntax(smaller, larger));
 
-        assertThat(refs(forward.lookupMatches("/complete-target-collision", "GET", "")))
+        assertThat(refs(lookup(forward, "repo", SHA_ONE, "/complete-target-collision", "GET")))
                 .singleElement()
                 .extracting(ApiEntryPointRef::analysisTarget)
                 .extracting(resolution -> resolution.target().orElseThrow())
                 .isEqualTo(smallerTarget);
-        assertThat(refs(reversed.lookupMatches("/complete-target-collision", "GET", "")))
+        assertThat(refs(lookup(reversed, "repo", SHA_ONE, "/complete-target-collision", "GET")))
                 .singleElement()
                 .extracting(ApiEntryPointRef::analysisTarget)
                 .extracting(resolution -> resolution.target().orElseThrow())
@@ -325,7 +324,7 @@ class ApiTrieServiceTest {
     }
 
     @Test
-    void should_order_cross_repo_candidates_when_same_route_exists_in_multiple_repositories(
+    void should_scope_a_shared_route_to_the_requested_repository(
             CapturedOutput output) {
         ApiTrieService service = new ApiTrieService();
         service.reload(snapshot("repo-b", SHA_TWO.value()), syntax(route(
@@ -333,10 +332,10 @@ class ApiTrieServiceTest {
         service.reload(snapshot("repo-a", SHA_ONE.value()), syntax(route(
                 "AControllerSentinel", "fromASentinel", "GET", "/shared-sentinel")));
 
-        assertThat(refs(service.lookupMatches("/shared-sentinel", "GET", "")))
+        assertThat(refs(lookup(service, "repo-a", SHA_ONE, "/shared-sentinel", "GET")))
                 .extracting(ApiEntryPointRef::repoId)
-                .containsExactly("repo-a", "repo-b");
-        assertThat(refs(service.lookupMatches("/shared-sentinel", "GET", "repo-b")))
+                .containsExactly("repo-a");
+        assertThat(refs(lookup(service, "repo-b", SHA_TWO, "/shared-sentinel", "GET")))
                 .extracting(ApiEntryPointRef::repoId)
                 .containsExactly("repo-b");
         assertThat(output)
@@ -357,7 +356,7 @@ class ApiTrieServiceTest {
         service.reload(snapshot("repo", SHA_ONE.value()),
                 syntax(route("OrderController", "get", "GET", "/orders/{id}")));
 
-        assertThat(refs(service.lookupMatches("/orders/42", "GET", "")))
+        assertThat(refs(lookup(service, "repo", SHA_ONE, "/orders/42", "GET")))
                 .extracting(ApiEntryPointRef::repoId, ApiEntryPointRef::analyzedRevision)
                 .containsExactly(tuple("repo", SHA_ONE.value()));
     }
@@ -372,7 +371,7 @@ class ApiTrieServiceTest {
 
         service.clear(RepositoryId.of("repo-a"));
 
-        assertThat(refs(service.lookupMatches("/shared", "GET", "")))
+        assertThat(refs(lookup(service, "repo-b", SHA_TWO, "/shared", "GET")))
                 .extracting(ApiEntryPointRef::repoId, ApiEntryPointRef::analyzedRevision)
                 .containsExactly(tuple("repo-b", SHA_TWO.value()));
     }
@@ -388,7 +387,8 @@ class ApiTrieServiceTest {
             throw new IllegalStateException("syntax failed");
         })).isInstanceOf(IllegalStateException.class);
 
-        assertThat(refs(service.lookupMatches("/old", "GET", ""))).isEmpty();
+        assertThatThrownBy(() -> lookup(service, "repo", SHA_TWO, "/old", "GET"))
+                .isInstanceOf(ApiRouteIndexNotReadyException.class);
     }
 
     @Test
@@ -400,7 +400,7 @@ class ApiTrieServiceTest {
         assertThatThrownBy(() -> service.reload(snapshot("repo", SHA_TWO.value()), () -> {
             throw expected;
         })).isSameAs(expected);
-        assertThat(refs(service.lookupMatches("/old", "GET", "")))
+        assertThat(refs(lookup(service, "repo", SHA_ONE, "/old", "GET")))
                 .singleElement()
                 .extracting(ApiEntryPointRef::analyzedRevision)
                 .isEqualTo(SHA_ONE.value());
@@ -413,11 +413,11 @@ class ApiTrieServiceTest {
                 route("InvalidControllerSentinel", "invalidSentinel", "GET", "/files/{*path}/metadata-sentinel"),
                 route("ValidController", "valid", "GET", "/files/valid")));
 
-        assertThat(refs(service.lookupMatches("/files/a/metadata-sentinel", "GET", ""))).isEmpty();
-        assertThat(refs(service.suggestMatches("/files/a/metadata-sentinel", "GET", "", 10)))
+        assertThat(refs(lookup(service, "repo", SHA_ONE, "/files/a/metadata-sentinel", "GET"))).isEmpty();
+        assertThat(refs(suggest(service, "repo", SHA_ONE, "/files/a/metadata-sentinel", "GET", 10)))
                 .extracting(ApiEntryPointRef::methodName)
                 .containsExactly("valid");
-        assertThat(refs(service.lookupMatches("/files/valid", "GET", "")))
+        assertThat(refs(lookup(service, "repo", SHA_ONE, "/files/valid", "GET")))
                 .extracting(ApiEntryPointRef::methodName)
                 .containsExactly("valid");
         assertThat(output)
@@ -455,14 +455,14 @@ class ApiTrieServiceTest {
 
         assertThat(started.await(5, TimeUnit.SECONDS)).isTrue();
         assertThat(repoALock.isWriteLocked()).isTrue();
-        assertThat(refs(service.lookupMatches("/shared", "GET", "")))
+        assertThat(refs(lookup(service, "repo-b", SHA_TWO, "/shared", "GET")))
                 .extracting(ApiEntryPointRef::repoId)
                 .containsExactly("repo-b");
         release.countDown();
         rebuild.get(5, TimeUnit.SECONDS);
-        assertThat(refs(service.lookupMatches("/shared", "GET", "")))
+        assertThat(refs(lookup(service, "repo-a", SHA_TWO, "/shared", "GET")))
                 .extracting(ApiEntryPointRef::methodName)
-                .containsExactly("newRoute", "other");
+                .containsExactly("newRoute");
     }
 
     @Test
@@ -490,7 +490,7 @@ class ApiTrieServiceTest {
             try {
                 assertThat(supplierReturned.await(5, TimeUnit.SECONDS)).isTrue();
                 assertThat(constructionBlocked.await(5, TimeUnit.SECONDS)).isTrue();
-                assertThat(refs(service.lookupMatches("/publication", "GET", "")))
+                assertThat(refs(lookup(service, "repo-b", SHA_TWO, "/publication", "GET")))
                         .extracting(ApiEntryPointRef::repoId, ApiEntryPointRef::methodName)
                         .containsExactly(Tuple.tuple("repo-b", "other"));
             } finally {
@@ -501,11 +501,9 @@ class ApiTrieServiceTest {
             logger.detachAppender(appender);
             appender.stop();
         }
-        assertThat(refs(service.lookupMatches("/publication", "GET", "")))
+        assertThat(refs(lookup(service, "repo-a", SHA_TWO, "/publication", "GET")))
                 .extracting(ApiEntryPointRef::repoId, ApiEntryPointRef::methodName)
-                .containsExactly(
-                        Tuple.tuple("repo-a", "newRoute"),
-                        Tuple.tuple("repo-b", "other"));
+                .containsExactly(Tuple.tuple("repo-a", "newRoute"));
     }
 
     @Test
@@ -521,8 +519,50 @@ class ApiTrieServiceTest {
 
         service.reload(snapshot("repo", SHA_ONE.value()), syntax(entryPointClass));
 
-        assertThat(service.lookupMatches("/route", "GET", "").matches().get(0).ref().analysisTarget())
+        assertThat(lookup(service, "repo", SHA_ONE, "/route", "GET").matches().get(0).ref().analysisTarget())
                 .isSameAs(resolution);
+    }
+
+    @Test
+    void should_return_empty_matches_when_the_requested_revision_published_an_empty_route_index() {
+        ApiTrieService service = new ApiTrieService();
+        service.reload(snapshot("repo", SHA_ONE.value()), syntax());
+
+        assertThat(lookup(service, "repo", SHA_ONE, "/orders", "GET").matches()).isEmpty();
+        assertThat(suggest(service, "repo", SHA_ONE, "/orders", "GET", 10).matches()).isEmpty();
+    }
+
+    @Test
+    void should_reject_lookup_and_suggestion_when_the_indexed_revision_is_stale() {
+        ApiTrieService service = new ApiTrieService();
+        service.reload(snapshot("repo", SHA_ONE.value()),
+                syntax(route("OrdersController", "find", "GET", "/orders")));
+
+        assertThatThrownBy(() -> lookup(service, "repo", SHA_TWO, "/orders", "GET"))
+                .isInstanceOf(ApiRouteIndexNotReadyException.class);
+        assertThatThrownBy(() -> suggest(service, "repo", SHA_TWO, "/orders", "GET", 10))
+                .isInstanceOf(ApiRouteIndexNotReadyException.class);
+    }
+
+    private static ApiRouteMatchBatch lookup(
+            ApiTrieService service,
+            String repositoryId,
+            RepositoryRevision expectedRevision,
+            String apiPath,
+            String httpMethod) {
+        return service.lookupMatches(
+                RepositoryId.of(repositoryId), expectedRevision, apiPath, httpMethod);
+    }
+
+    private static ApiRouteMatchBatch suggest(
+            ApiTrieService service,
+            String repositoryId,
+            RepositoryRevision expectedRevision,
+            String apiPath,
+            String httpMethod,
+            int limit) {
+        return service.suggestMatches(
+                RepositoryId.of(repositoryId), expectedRevision, apiPath, httpMethod, limit);
     }
 
     private static RepositorySnapshot snapshot(String repoId, String revision) {

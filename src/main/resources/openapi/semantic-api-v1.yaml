@@ -209,7 +209,7 @@ paths:
   /v1/api-routes/lookup:
     post:
       operationId: lookupApiRoutes
-      description: Unknown-but-valid repoScope values return an empty candidate list with 200 and do not manufacture a repository status error
+      description: Queries one repository's route index at an exact revision
       requestBody:
         required: true
         content:
@@ -225,12 +225,16 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/AuthDisabled'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
         '500':
           $ref: '#/components/responses/MutationFailed'
   /v1/api-routes/suggest:
     post:
       operationId: suggestApiRoutes
-      description: Unknown-but-valid repoScope values return an empty candidate list with 200 and do not manufacture a repository status error
+      description: Queries one repository's route index at an exact revision
       requestBody:
         required: true
         content:
@@ -246,6 +250,10 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/AuthDisabled'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
         '500':
           $ref: '#/components/responses/MutationFailed'
   /v1/discovery/event-listeners:
@@ -1299,33 +1307,45 @@ components:
             $ref: '#/components/schemas/DiscoveryFollowUpResponse'
     ApiRouteLookupRequest:
       type: object
+      additionalProperties: false
       required:
+        - repoId
+        - expectedRevision
         - apiPath
       properties:
+        repoId:
+          type: string
+          pattern: '^[a-z0-9][a-z0-9._-]{0,63}$'
+        expectedRevision:
+          type: string
+          pattern: '^[0-9a-f]{40}$|^FIXTURE$'
         apiPath:
           type: string
           minLength: 1
           pattern: '.*\S.*'
         httpMethod:
-          type: string
-          nullable: true
-        repoScope:
           type: string
           nullable: true
     ApiRouteSuggestRequest:
       type: object
+      additionalProperties: false
       required:
+        - repoId
+        - expectedRevision
         - apiPath
         - limit
       properties:
+        repoId:
+          type: string
+          pattern: '^[a-z0-9][a-z0-9._-]{0,63}$'
+        expectedRevision:
+          type: string
+          pattern: '^[0-9a-f]{40}$|^FIXTURE$'
         apiPath:
           type: string
           minLength: 1
           pattern: '.*\S.*'
         httpMethod:
-          type: string
-          nullable: true
-        repoScope:
           type: string
           nullable: true
         limit:
@@ -3760,6 +3780,7 @@ components:
             - REPOSITORY_NOT_FOUND
             - REPOSITORY_NOT_READY
             - REPOSITORY_REVISION_MISMATCH
+            - API_ROUTE_INDEX_NOT_READY
             - SEMANTIC_BINDING_AMBIGUOUS
             - SEMANTIC_TARGET_NOT_FOUND
             - SOURCE_DECLARATION_NOT_FOUND

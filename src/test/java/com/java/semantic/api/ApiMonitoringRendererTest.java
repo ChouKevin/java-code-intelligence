@@ -17,8 +17,8 @@ import com.java.semantic.api.dto.identity.SourceTypeIdentityPayload;
 import com.java.semantic.api.dto.location.PositionPayload;
 import com.java.semantic.api.dto.location.SourceRangePayload;
 import com.java.semantic.api.dto.location.TextRangePayload;
-import com.java.semantic.api.monitoring.ApiMonitoringField;
-import com.java.semantic.api.monitoring.ApiMonitoringMode;
+import com.java.semantic.monitoring.MonitoringField;
+import com.java.semantic.monitoring.MonitoringMode;
 import com.java.semantic.api.ApiMonitoringRenderer.RenderedApiMonitoring;
 import org.junit.jupiter.api.Test;
 
@@ -219,7 +219,7 @@ class ApiMonitoringRendererTest {
     void should_reject_unannotated_or_sensitive_value_components_as_monitoring_contract_defects() {
         assertThatThrownBy(() -> renderer.render("request", new UnannotatedPayload("repo-42")))
                 .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("ApiMonitoringField");
+                .hasMessageContaining("MonitoringField");
         assertThatThrownBy(() -> renderer.render("request", new UnsafePayload("select * from users")))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("OMIT");
@@ -324,84 +324,84 @@ class ApiMonitoringRendererTest {
     }
 
     private record RequestPayload(
-            @ApiMonitoringField(ApiMonitoringMode.VALUE) String repositoryId,
-            @ApiMonitoringField(ApiMonitoringMode.SIZE) List<String> labels,
-            @ApiMonitoringField(ApiMonitoringMode.SIZE) String description,
-            @ApiMonitoringField(ApiMonitoringMode.NESTED) NestedPayload nested,
-            @ApiMonitoringField(ApiMonitoringMode.OMIT) String source) {
+            @MonitoringField(MonitoringMode.VALUE) String repositoryId,
+            @MonitoringField(MonitoringMode.SIZE) List<String> labels,
+            @MonitoringField(MonitoringMode.SIZE) String description,
+            @MonitoringField(MonitoringMode.NESTED) NestedPayload nested,
+            @MonitoringField(MonitoringMode.OMIT) String source) {
     }
 
-    private record NestedPayload(@ApiMonitoringField(ApiMonitoringMode.VALUE) String revision) {
+    private record NestedPayload(@MonitoringField(MonitoringMode.VALUE) String revision) {
     }
 
     private record NullableNestedPayload(
-            @ApiMonitoringField(ApiMonitoringMode.NESTED) NestedPayload nested) {
+            @MonitoringField(MonitoringMode.NESTED) NestedPayload nested) {
     }
 
     private record NullableScalarPayload(
-            @ApiMonitoringField(ApiMonitoringMode.VALUE) String identifier,
-            @ApiMonitoringField(ApiMonitoringMode.SIZE) String description) {
+            @MonitoringField(MonitoringMode.VALUE) String identifier,
+            @MonitoringField(MonitoringMode.SIZE) String description) {
     }
 
     private record OptionalNestedPayload(
-            @ApiMonitoringField(ApiMonitoringMode.NESTED) Optional<NestedPayload> nested) {
+            @MonitoringField(MonitoringMode.NESTED) Optional<NestedPayload> nested) {
     }
 
     private record NestedRecordListPayload(
-            @ApiMonitoringField(ApiMonitoringMode.NESTED) List<NestedPayload> availableFollowUps) {
+            @MonitoringField(MonitoringMode.NESTED) List<NestedPayload> availableFollowUps) {
     }
 
     private record OptionalScalarPayload(
-            @ApiMonitoringField(ApiMonitoringMode.VALUE) Optional<Integer> documentOrdinal,
-            @ApiMonitoringField(ApiMonitoringMode.VALUE) Optional<String> representation) {
+            @MonitoringField(MonitoringMode.VALUE) Optional<Integer> documentOrdinal,
+            @MonitoringField(MonitoringMode.VALUE) Optional<String> representation) {
     }
 
     private record UnsupportedNestedPayload(
-            @ApiMonitoringField(ApiMonitoringMode.NESTED) Object nested) {
+            @MonitoringField(MonitoringMode.NESTED) Object nested) {
     }
 
-    private record UnicodePayload(@ApiMonitoringField(ApiMonitoringMode.VALUE) String value) {
+    private record UnicodePayload(@MonitoringField(MonitoringMode.VALUE) String value) {
     }
 
-    private record ControlValuePayload(@ApiMonitoringField(ApiMonitoringMode.VALUE) String value) {
+    private record ControlValuePayload(@MonitoringField(MonitoringMode.VALUE) String value) {
     }
 
-    private record SourceFilePayload(@ApiMonitoringField(ApiMonitoringMode.VALUE) String sourceFile) {
+    private record SourceFilePayload(@MonitoringField(MonitoringMode.VALUE) String sourceFile) {
     }
 
     private record BusinessIdentityPayload(
-            @ApiMonitoringField(ApiMonitoringMode.VALUE) String destination,
-            @ApiMonitoringField(ApiMonitoringMode.VALUE) String identity,
-            @ApiMonitoringField(ApiMonitoringMode.VALUE) String moduleIdentity) {
+            @MonitoringField(MonitoringMode.VALUE) String destination,
+            @MonitoringField(MonitoringMode.VALUE) String identity,
+            @MonitoringField(MonitoringMode.VALUE) String moduleIdentity) {
     }
 
     private record UnannotatedPayload(String repositoryId) {
     }
 
-    private record UnsafePayload(@ApiMonitoringField(ApiMonitoringMode.VALUE) String sql) {
+    private record UnsafePayload(@MonitoringField(MonitoringMode.VALUE) String sql) {
     }
 
     private record SixtyFiveValues(
-            @ApiMonitoringField(ApiMonitoringMode.NESTED) ThirteenValues first,
-            @ApiMonitoringField(ApiMonitoringMode.NESTED) ThirteenValues second,
-            @ApiMonitoringField(ApiMonitoringMode.NESTED) ThirteenValues third,
-            @ApiMonitoringField(ApiMonitoringMode.NESTED) ThirteenValues fourth,
-            @ApiMonitoringField(ApiMonitoringMode.NESTED) ThirteenValues fifth) {
+            @MonitoringField(MonitoringMode.NESTED) ThirteenValues first,
+            @MonitoringField(MonitoringMode.NESTED) ThirteenValues second,
+            @MonitoringField(MonitoringMode.NESTED) ThirteenValues third,
+            @MonitoringField(MonitoringMode.NESTED) ThirteenValues fourth,
+            @MonitoringField(MonitoringMode.NESTED) ThirteenValues fifth) {
     }
 
     private record ThirteenValues(
-            @ApiMonitoringField(ApiMonitoringMode.VALUE) String value1,
-            @ApiMonitoringField(ApiMonitoringMode.VALUE) String value2,
-            @ApiMonitoringField(ApiMonitoringMode.VALUE) String value3,
-            @ApiMonitoringField(ApiMonitoringMode.VALUE) String value4,
-            @ApiMonitoringField(ApiMonitoringMode.VALUE) String value5,
-            @ApiMonitoringField(ApiMonitoringMode.VALUE) String value6,
-            @ApiMonitoringField(ApiMonitoringMode.VALUE) String value7,
-            @ApiMonitoringField(ApiMonitoringMode.VALUE) String value8,
-            @ApiMonitoringField(ApiMonitoringMode.VALUE) String value9,
-            @ApiMonitoringField(ApiMonitoringMode.VALUE) String value10,
-            @ApiMonitoringField(ApiMonitoringMode.VALUE) String value11,
-            @ApiMonitoringField(ApiMonitoringMode.VALUE) String value12,
-            @ApiMonitoringField(ApiMonitoringMode.VALUE) String value13) {
+            @MonitoringField(MonitoringMode.VALUE) String value1,
+            @MonitoringField(MonitoringMode.VALUE) String value2,
+            @MonitoringField(MonitoringMode.VALUE) String value3,
+            @MonitoringField(MonitoringMode.VALUE) String value4,
+            @MonitoringField(MonitoringMode.VALUE) String value5,
+            @MonitoringField(MonitoringMode.VALUE) String value6,
+            @MonitoringField(MonitoringMode.VALUE) String value7,
+            @MonitoringField(MonitoringMode.VALUE) String value8,
+            @MonitoringField(MonitoringMode.VALUE) String value9,
+            @MonitoringField(MonitoringMode.VALUE) String value10,
+            @MonitoringField(MonitoringMode.VALUE) String value11,
+            @MonitoringField(MonitoringMode.VALUE) String value12,
+            @MonitoringField(MonitoringMode.VALUE) String value13) {
     }
 }

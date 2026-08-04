@@ -1,7 +1,7 @@
 package com.java.semantic.api.dto;
 
-import com.java.semantic.api.monitoring.ApiMonitoringField;
-import com.java.semantic.api.monitoring.ApiMonitoringMode;
+import com.java.semantic.monitoring.MonitoringField;
+import com.java.semantic.monitoring.MonitoringMode;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
 import java.util.List;
@@ -10,17 +10,17 @@ import java.util.Optional;
 
 /** 由 typed ConceptIdentity 唯讀衍生 evidence 與可執行 follow-up 的概念候選回應 */
 public record ConceptCandidateResponse(
-        @ApiMonitoringField(ApiMonitoringMode.NESTED) ConceptIdentityResponse identity,
-        @ApiMonitoringField(ApiMonitoringMode.VALUE) String displayValue,
-        @ApiMonitoringField(ApiMonitoringMode.SIZE) /** AND 比對成功的全部正規化搜尋詞並保留請求順序 */
+        @MonitoringField(MonitoringMode.NESTED) ConceptIdentityResponse identity,
+        @MonitoringField(MonitoringMode.VALUE) String displayValue,
+        @MonitoringField(MonitoringMode.SIZE) /** AND 比對成功的全部正規化搜尋詞並保留請求順序 */
         List<String> matchedTerms,
-        @ApiMonitoringField(ApiMonitoringMode.VALUE) String authority,
+        @MonitoringField(MonitoringMode.VALUE) String authority,
         @JsonInclude(JsonInclude.Include.NON_ABSENT)
-        @ApiMonitoringField(ApiMonitoringMode.NESTED)
+        @MonitoringField(MonitoringMode.NESTED)
         Optional<ConceptCandidateDetailsResponse> details,
-        @ApiMonitoringField(ApiMonitoringMode.SIZE) /** 依精確 typed identity 排序的最小 identity 投影 */
+        @MonitoringField(MonitoringMode.SIZE) /** 依精確 typed identity 排序的最小 identity 投影 */
         List<ConceptEvidenceResponse> evidence,
-        @ApiMonitoringField(ApiMonitoringMode.NESTED) /** 可直接執行且不需重建參數的候選後續動作 */
+        @MonitoringField(MonitoringMode.NESTED) /** 可直接執行且不需重建參數的候選後續動作 */
         List<DiscoveryFollowUpResponse> availableFollowUps) {
 
     public ConceptCandidateResponse {

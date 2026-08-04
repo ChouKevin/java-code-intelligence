@@ -2,8 +2,8 @@ package com.java.semantic.api.dto;
 
 import com.java.semantic.api.dto.identity.MethodTargetPayload;
 
-import com.java.semantic.api.monitoring.ApiMonitoringField;
-import com.java.semantic.api.monitoring.ApiMonitoringMode;
+import com.java.semantic.monitoring.MonitoringField;
+import com.java.semantic.monitoring.MonitoringMode;
 import com.java.semantic.api.dto.location.SourceRangePayload;
 
 import java.util.List;
@@ -11,13 +11,13 @@ import java.util.Objects;
 
 /** Expected incomplete semantic outcome, including every exact candidate where applicable. */
 public record GraphWarningResponse(
-        @ApiMonitoringField(ApiMonitoringMode.VALUE) String code,
-        @ApiMonitoringField(ApiMonitoringMode.SIZE) String message,
-        @ApiMonitoringField(ApiMonitoringMode.VALUE) String nodeId,
-        @ApiMonitoringField(ApiMonitoringMode.OMIT) String callExpression,
-        @ApiMonitoringField(ApiMonitoringMode.NESTED) SourceRangePayload callSite,
-        @ApiMonitoringField(ApiMonitoringMode.SIZE) List<MethodTargetPayload> candidates,
-        @ApiMonitoringField(ApiMonitoringMode.NESTED) List<DiscoveryFollowUpResponse> availableFollowUps) {
+        @MonitoringField(MonitoringMode.VALUE) String code,
+        @MonitoringField(MonitoringMode.SIZE) String message,
+        @MonitoringField(MonitoringMode.VALUE) String nodeId,
+        @MonitoringField(MonitoringMode.OMIT) String callExpression,
+        @MonitoringField(MonitoringMode.NESTED) SourceRangePayload callSite,
+        @MonitoringField(MonitoringMode.SIZE) List<MethodTargetPayload> candidates,
+        @MonitoringField(MonitoringMode.NESTED) List<DiscoveryFollowUpResponse> availableFollowUps) {
 
     public GraphWarningResponse {
         code = Objects.requireNonNull(code, "code is required");

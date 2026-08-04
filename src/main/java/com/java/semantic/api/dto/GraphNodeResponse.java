@@ -2,8 +2,8 @@ package com.java.semantic.api.dto;
 
 import com.java.semantic.api.dto.identity.MethodTargetPayload;
 
-import com.java.semantic.api.monitoring.ApiMonitoringField;
-import com.java.semantic.api.monitoring.ApiMonitoringMode;
+import com.java.semantic.monitoring.MonitoringField;
+import com.java.semantic.monitoring.MonitoringMode;
 import com.java.semantic.api.dto.location.TextRangePayload;
 
 import java.util.Objects;
@@ -11,14 +11,14 @@ import java.util.List;
 
 /** One normalized node whose source availability and traversal progress are explicit. */
 public record GraphNodeResponse(
-        @ApiMonitoringField(ApiMonitoringMode.VALUE) String nodeId,
-        @ApiMonitoringField(ApiMonitoringMode.NESTED) MethodTargetPayload target,
-        @ApiMonitoringField(ApiMonitoringMode.VALUE) String externalSymbol,
-        @ApiMonitoringField(ApiMonitoringMode.VALUE) String contentState,
-        @ApiMonitoringField(ApiMonitoringMode.VALUE) String traversalState,
-        @ApiMonitoringField(ApiMonitoringMode.VALUE) String dispatchKind,
-        @ApiMonitoringField(ApiMonitoringMode.NESTED) TextRangePayload declarationRange,
-        @ApiMonitoringField(ApiMonitoringMode.NESTED) List<DiscoveryFollowUpResponse> availableFollowUps) {
+        @MonitoringField(MonitoringMode.VALUE) String nodeId,
+        @MonitoringField(MonitoringMode.NESTED) MethodTargetPayload target,
+        @MonitoringField(MonitoringMode.VALUE) String externalSymbol,
+        @MonitoringField(MonitoringMode.VALUE) String contentState,
+        @MonitoringField(MonitoringMode.VALUE) String traversalState,
+        @MonitoringField(MonitoringMode.VALUE) String dispatchKind,
+        @MonitoringField(MonitoringMode.NESTED) TextRangePayload declarationRange,
+        @MonitoringField(MonitoringMode.NESTED) List<DiscoveryFollowUpResponse> availableFollowUps) {
 
     public GraphNodeResponse {
         nodeId = Objects.requireNonNull(nodeId, "nodeId is required");

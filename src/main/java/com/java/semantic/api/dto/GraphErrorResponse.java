@@ -1,12 +1,12 @@
 package com.java.semantic.api.dto;
 
-import com.java.semantic.api.monitoring.ApiMonitoringField;
-import com.java.semantic.api.monitoring.ApiMonitoringMode;
+import com.java.semantic.monitoring.MonitoringField;
+import com.java.semantic.monitoring.MonitoringMode;
 
 import java.util.Objects;
 
 /** Descendant failure captured after a usable outgoing graph fragment was established. */
-public record GraphErrorResponse(@ApiMonitoringField(ApiMonitoringMode.VALUE) String code, @ApiMonitoringField(ApiMonitoringMode.SIZE) String message, @ApiMonitoringField(ApiMonitoringMode.VALUE) String nodeId) {
+public record GraphErrorResponse(@MonitoringField(MonitoringMode.VALUE) String code, @MonitoringField(MonitoringMode.SIZE) String message, @MonitoringField(MonitoringMode.VALUE) String nodeId) {
 
     public GraphErrorResponse {
         code = Objects.requireNonNull(code, "code is required");

@@ -1,14 +1,14 @@
 package com.java.semantic.api.dto;
 
-import com.java.semantic.api.monitoring.ApiMonitoringField;
-import com.java.semantic.api.monitoring.ApiMonitoringMode;
+import com.java.semantic.monitoring.MonitoringField;
+import com.java.semantic.monitoring.MonitoringMode;
 
 /** 有界結果集合的完整計數 */
 public record BoundedResultResponse(
-        @ApiMonitoringField(ApiMonitoringMode.VALUE) int limit,
-        @ApiMonitoringField(ApiMonitoringMode.VALUE) int returnedCount,
-        @ApiMonitoringField(ApiMonitoringMode.VALUE) int totalCount,
-        @ApiMonitoringField(ApiMonitoringMode.VALUE) boolean truncated) {
+        @MonitoringField(MonitoringMode.VALUE) int limit,
+        @MonitoringField(MonitoringMode.VALUE) int returnedCount,
+        @MonitoringField(MonitoringMode.VALUE) int totalCount,
+        @MonitoringField(MonitoringMode.VALUE) boolean truncated) {
 
     public BoundedResultResponse {
         if (limit <= 0) {

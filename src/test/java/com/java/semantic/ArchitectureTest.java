@@ -16,7 +16,7 @@ import com.java.semantic.api.dto.location.TextRangePayload;
 import com.java.semantic.config.SemanticAnalysisConfiguration;
 import com.java.semantic.repository.application.RepositoryApplicationService;
 import com.java.semantic.repository.domain.RepositoryId;
-import com.java.semantic.api.monitoring.ApiMonitoringField;
+import com.java.semantic.monitoring.MonitoringField;
 import com.java.semantic.syntax.application.concept.ConceptDiscoveryApplicationService;
 import com.java.semantic.syntax.application.EvidenceSourceApplicationService;
 import com.java.semantic.syntax.application.SourceSymbolResolutionApplicationService;
@@ -137,8 +137,8 @@ class ArchitectureTest {
                         "jakarta.validation..",
                         "com.java.semantic.api.dto.identity..",
                         "com.java.semantic.api.dto.location..",
-                        "com.java.semantic.api.monitoring..")
-                .as("shared HTTP payloads may depend only on transport concerns and other shared payloads")
+                        "com.java.semantic.monitoring..")
+                .as("shared HTTP payloads may depend only on transport concerns, neutral monitoring metadata, and other shared payloads")
                 .allowEmptyShould(false)
                 .check(classes);
     }
@@ -215,16 +215,17 @@ class ArchitectureTest {
     }
 
     @Test
-    void should_require_explicit_monitoring_on_every_api_dto_record_component() {
+    void should_require_explicit_monitoring_on_every_transport_dto_record_component() {
         List<String> violations = new ArrayList<>();
         classes.stream()
                 .map(JavaClass::getName)
-                .filter(name -> name.startsWith("com.java.semantic.api.dto."))
+                .filter(name -> name.startsWith("com.java.semantic.api.dto.")
+                        || name.startsWith("com.java.semantic.mcp.dto."))
                 .map(ArchitectureTest::loadClass)
                 .filter(Class::isRecord)
                 .forEach(type -> {
                     for (RecordComponent component : type.getRecordComponents()) {
-                        if (Objects.isNull(component.getAnnotation(ApiMonitoringField.class))) {
+                        if (Objects.isNull(component.getAnnotation(MonitoringField.class))) {
                             violations.add(type.getSimpleName() + "." + component.getName());
                         }
                     }
@@ -604,6 +605,7 @@ class ArchitectureTest {
                 .or().haveSimpleName("InternalSourceReferenceApplicationService")
                 .or().haveSimpleName("SourceSegmentApplicationService")
                 .or().haveSimpleName("MethodSourceApplicationService")
+                .or().haveSimpleName("ApiRouteApplicationService")
                 .or().areAssignableTo(ConceptDiscoveryApplicationService.class)
                 .or().areAssignableTo(EvidenceSourceApplicationService.class)
                 .or().areAssignableTo(SourceSymbolResolutionApplicationService.class)

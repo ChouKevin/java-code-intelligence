@@ -1,10 +1,10 @@
 package com.java.semantic.api.dto;
 
-import com.java.semantic.api.monitoring.ApiMonitoringField;
-import com.java.semantic.api.monitoring.ApiMonitoringMode;
+import com.java.semantic.monitoring.MonitoringField;
+import com.java.semantic.monitoring.MonitoringMode;
 
 /** source binding issue code 的 grouped count */
 public record SourceSymbolIssueSummaryResponse(
-        @ApiMonitoringField(ApiMonitoringMode.VALUE) String code,
-        @ApiMonitoringField(ApiMonitoringMode.VALUE) int count) {
+        @MonitoringField(MonitoringMode.VALUE) String code,
+        @MonitoringField(MonitoringMode.VALUE) int count) {
 }

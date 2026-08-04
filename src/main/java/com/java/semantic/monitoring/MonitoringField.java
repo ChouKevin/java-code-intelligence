@@ -1,14 +1,14 @@
-package com.java.semantic.api.monitoring;
+package com.java.semantic.monitoring;
 
 import java.lang.annotation.ElementType;
 import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
 import java.lang.annotation.Target;
 
-/** 明確標示 record component 的 API 監控輸出規則 */
+/** 明確標示 record component 的監控輸出規則 */
 @Target(ElementType.RECORD_COMPONENT)
 @Retention(RetentionPolicy.RUNTIME)
-public @interface ApiMonitoringField {
+public @interface MonitoringField {
 
-    ApiMonitoringMode value();
+    MonitoringMode value();
 }

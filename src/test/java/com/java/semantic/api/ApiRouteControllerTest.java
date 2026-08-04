@@ -4,6 +4,7 @@ import com.java.semantic.api.security.ApiTokenFilter;
 import com.java.semantic.identity.JavaTypeIdentity;
 import com.java.semantic.identity.MethodTarget;
 import com.java.semantic.identity.SourceTypeIdentity;
+import com.java.semantic.repository.application.RepositoryRevisionMismatchException;
 import com.java.semantic.repository.domain.RepositoryId;
 import com.java.semantic.repository.domain.RepositoryRevision;
 import com.java.semantic.trie.ApiEntryPointRef;
@@ -11,6 +12,7 @@ import com.java.semantic.trie.ApiRouteApplicationService;
 import com.java.semantic.trie.ApiRouteCandidate;
 import com.java.semantic.trie.ApiRouteMatch;
 import com.java.semantic.trie.ApiRouteMatchBatch;
+import com.java.semantic.trie.ApiRouteIndexNotReadyException;
 import com.java.semantic.trie.ApiRouteObservation;
 import com.java.semantic.trie.ApiRouteObservationCode;
 import com.java.semantic.syntax.domain.AnalysisTargetStatus;
@@ -21,7 +23,7 @@ import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
+import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
@@ -29,6 +31,7 @@ import org.springframework.test.web.servlet.MockMvc;
 
 import java.util.Arrays;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.stream.Stream;
 
@@ -62,20 +65,16 @@ class ApiRouteControllerTest {
     @Test
     void should_return_multiple_candidates_with_per_candidate_revisions() throws Exception {
         given(apiRouteApplicationService.lookupMatches(
-                "/orders/42", Optional.of("GET"), Optional.empty()))
-                .willReturn(batch(
-                        candidate("repo-a", SHA_ONE.value()),
-                        candidate("repo-b", SHA_TWO.value())));
+                RepositoryId.of("orders"), SHA_ONE, "/orders/42", Optional.of("GET")))
+                .willReturn(batch(candidate("orders", SHA_ONE.value())));
 
         mockMvc.perform(post("/v1/api-routes/lookup")
                         .header(ApiTokenFilter.API_TOKEN_HEADER, TOKEN)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("""
-                                {"apiPath":"/orders/42","httpMethod":"GET","repoScope":null}
-                                """))
+                        .content(lookupRequest("/orders/42", "GET")))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.candidates.length()").value(2))
-                .andExpect(jsonPath("$.candidates[0].repoId").value("repo-a"))
+                .andExpect(jsonPath("$.candidates.length()").value(1))
+                .andExpect(jsonPath("$.candidates[0].repoId").value("orders"))
                 .andExpect(jsonPath("$.candidates[0].analyzedRevision").value(SHA_ONE.value()))
                 .andExpect(jsonPath("$.analyzedRevision").doesNotExist())
                 .andExpect(jsonPath("$.candidates[0].apiPath").doesNotExist())
@@ -86,13 +85,14 @@ class ApiRouteControllerTest {
 
     @Test
     void should_return_ok_with_empty_candidate_list() throws Exception {
-        given(apiRouteApplicationService.lookupMatches("/missing", Optional.empty(), Optional.empty()))
+        given(apiRouteApplicationService.lookupMatches(
+                RepositoryId.of("orders"), SHA_ONE, "/missing", Optional.empty()))
                 .willReturn(batch());
 
         mockMvc.perform(post("/v1/api-routes/lookup")
                         .header(ApiTokenFilter.API_TOKEN_HEADER, TOKEN)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"apiPath\":\"/missing\"}"))
+                        .content(lookupRequest("/missing")))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.candidates").isEmpty());
     }
@@ -103,7 +103,7 @@ class ApiRouteControllerTest {
         mockMvc.perform(post("/v1/api-routes/suggest")
                         .header(ApiTokenFilter.API_TOKEN_HEADER, TOKEN)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"apiPath\":\"/orders\",\"limit\":" + limit + "}"))
+                        .content(suggestRequest("/orders", null, limit)))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.errorCode").value("REQUEST_INVALID"));
         then(apiRouteApplicationService).shouldHaveNoInteractions();
@@ -113,23 +113,38 @@ class ApiRouteControllerTest {
     @ValueSource(ints = {1, 20})
     void should_accept_suggest_limit_boundary(int limit) throws Exception {
         given(apiRouteApplicationService.suggestMatches(
-                "/orders", Optional.empty(), Optional.empty(), limit)).willReturn(batch());
+                RepositoryId.of("orders"), SHA_ONE, "/orders", Optional.empty(), limit)).willReturn(batch());
 
         mockMvc.perform(post("/v1/api-routes/suggest")
                         .header(ApiTokenFilter.API_TOKEN_HEADER, TOKEN)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"apiPath\":\"/orders\",\"limit\":" + limit + "}"))
+                        .content(suggestRequest("/orders", null, limit)))
                 .andExpect(status().isOk());
         then(apiRouteApplicationService).should().suggestMatches(
-                "/orders", Optional.empty(), Optional.empty(), limit);
+                RepositoryId.of("orders"), SHA_ONE, "/orders", Optional.empty(), limit);
     }
 
     @Test
-    void should_reject_invalid_repository_scope() throws Exception {
+    void should_reject_invalid_repository_id() throws Exception {
         mockMvc.perform(post("/v1/api-routes/lookup")
                         .header(ApiTokenFilter.API_TOKEN_HEADER, TOKEN)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"apiPath\":\"/orders\",\"repoScope\":\"../secret\"}"))
+                        .content("""
+                                {"repoId":"../secret","expectedRevision":"1111111111111111111111111111111111111111","apiPath":"/orders"}
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.errorCode").value("REQUEST_INVALID"));
+        then(apiRouteApplicationService).shouldHaveNoInteractions();
+    }
+
+    @Test
+    void should_reject_unknown_request_fields() throws Exception {
+        mockMvc.perform(post("/v1/api-routes/lookup")
+                        .header(ApiTokenFilter.API_TOKEN_HEADER, TOKEN)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"repoId":"orders","expectedRevision":"1111111111111111111111111111111111111111","apiPath":"/orders","obsoleteField":"orders"}
+                                """))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.errorCode").value("REQUEST_INVALID"));
         then(apiRouteApplicationService).shouldHaveNoInteractions();
@@ -138,13 +153,13 @@ class ApiRouteControllerTest {
     @ParameterizedTest
     @MethodSource("malformedRouteInputs")
     void should_map_invalid_path_or_method_to_request_invalid(String json) throws Exception {
-        given(apiRouteApplicationService.lookupMatches(any(), any(), any()))
+        given(apiRouteApplicationService.lookupMatches(any(), any(), any(), any()))
                 .willThrow(new IllegalArgumentException("SECRET"));
 
         String body = mockMvc.perform(post("/v1/api-routes/lookup")
                         .header(ApiTokenFilter.API_TOKEN_HEADER, TOKEN)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(json))
+                        .content(json.formatted(SHA_ONE.value())))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.errorCode").value("REQUEST_INVALID"))
                 .andReturn().getResponse().getContentAsString();
@@ -153,46 +168,44 @@ class ApiRouteControllerTest {
 
     static Stream<String> malformedRouteInputs() {
         return Stream.of(
-                "{\"apiPath\":\"malformed\"}",
-                "{\"apiPath\":\"/orders\",\"httpMethod\":\"BAD METHOD\"}");
+                "{\"repoId\":\"orders\",\"expectedRevision\":\"%s\",\"apiPath\":\"malformed\"}",
+                "{\"repoId\":\"orders\",\"expectedRevision\":\"%s\",\"apiPath\":\"/orders\",\"httpMethod\":\"BAD METHOD\"}");
     }
 
     @Test
-    void should_forward_lookup_scope_and_method() throws Exception {
-        RepositoryId scope = RepositoryId.of("orders");
-        given(apiRouteApplicationService.lookupMatches("/orders/42", Optional.of("POST"), Optional.of(scope)))
+    void should_forward_lookup_repository_revision_and_method() throws Exception {
+        RepositoryId repositoryId = RepositoryId.of("orders");
+        given(apiRouteApplicationService.lookupMatches(repositoryId, SHA_ONE, "/orders/42", Optional.of("POST")))
                 .willReturn(batch());
 
         mockMvc.perform(post("/v1/api-routes/lookup")
                         .header(ApiTokenFilter.API_TOKEN_HEADER, TOKEN)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"apiPath\":\"/orders/42\",\"httpMethod\":\"POST\",\"repoScope\":\"orders\"}"))
+                        .content(lookupRequest("/orders/42", "POST")))
                 .andExpect(status().isOk());
         then(apiRouteApplicationService).should().lookupMatches(
-                "/orders/42", Optional.of("POST"), Optional.of(scope));
+                repositoryId, SHA_ONE, "/orders/42", Optional.of("POST"));
     }
 
     @Test
     void should_preserve_suggestion_candidate_order() throws Exception {
-        ApiRouteCandidate first = candidate("repo-a", SHA_ONE.value());
-        ApiRouteCandidate second = candidate("repo-b", SHA_TWO.value());
+        ApiRouteCandidate first = candidate("orders", SHA_ONE.value());
         given(apiRouteApplicationService.suggestMatches(
-                "/orders", Optional.empty(), Optional.empty(), 2))
-                .willReturn(batch(first, second));
+                RepositoryId.of("orders"), SHA_ONE, "/orders", Optional.empty(), 2))
+                .willReturn(batch(first));
 
         mockMvc.perform(post("/v1/api-routes/suggest")
                         .header(ApiTokenFilter.API_TOKEN_HEADER, TOKEN)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"apiPath\":\"/orders\",\"limit\":2}"))
+                        .content(suggestRequest("/orders", null, 2)))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.candidates[0].repoId").value("repo-a"))
-                .andExpect(jsonPath("$.candidates[1].repoId").value("repo-b"));
+                .andExpect(jsonPath("$.candidates[0].repoId").value("orders"));
     }
 
     @Test
     void should_serialize_truncation_observation() throws Exception {
         given(apiRouteApplicationService.suggestMatches(
-                "/orders", Optional.empty(), Optional.empty(), 1))
+                RepositoryId.of("orders"), SHA_ONE, "/orders", Optional.empty(), 1))
                 .willReturn(new ApiRouteMatchBatch(
                         List.of(),
                         List.of(new ApiRouteObservation(
@@ -202,7 +215,7 @@ class ApiRouteControllerTest {
         mockMvc.perform(post("/v1/api-routes/suggest")
                         .header(ApiTokenFilter.API_TOKEN_HEADER, TOKEN)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"apiPath\":\"/orders\",\"limit\":1}"))
+                        .content(suggestRequest("/orders", null, 1)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.candidates").isEmpty())
                 .andExpect(jsonPath("$.observations[0].code").value("TRUNCATED_CANDIDATES"))
@@ -212,13 +225,13 @@ class ApiRouteControllerTest {
 
     @Test
     void should_not_serialize_route_identity_or_exception_sentinels() throws Exception {
-        given(apiRouteApplicationService.lookupMatches(any(), any(), any()))
-                .willReturn(batch(candidate("repo-a", SHA_ONE.value())));
+        given(apiRouteApplicationService.lookupMatches(any(), any(), any(), any()))
+                .willReturn(batch(candidate("orders", SHA_ONE.value())));
 
         String body = mockMvc.perform(post("/v1/api-routes/lookup")
                         .header(ApiTokenFilter.API_TOKEN_HEADER, TOKEN)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"apiPath\":\"/orders\"}"))
+                        .content(lookupRequest("/orders")))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.candidates[0].repoId").exists())
                 .andExpect(jsonPath("$.candidates[0].analyzedRevision").exists())
@@ -236,13 +249,13 @@ class ApiRouteControllerTest {
 
     @Test
     void should_serialize_ambiguous_route_target_candidates_in_complete_value_order() throws Exception {
-        given(apiRouteApplicationService.lookupMatches(any(), any(), any()))
-                .willReturn(batch(candidate("repo-a", SHA_ONE.value())));
+        given(apiRouteApplicationService.lookupMatches(any(), any(), any(), any()))
+                .willReturn(batch(candidate("orders", SHA_ONE.value())));
 
         mockMvc.perform(post("/v1/api-routes/lookup")
                         .header(ApiTokenFilter.API_TOKEN_HEADER, TOKEN)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"apiPath\":\"/orders\"}"))
+                        .content(lookupRequest("/orders")))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.candidates[0].analysisTarget.status").value("AMBIGUOUS"))
                 .andExpect(jsonPath("$.candidates[0].analysisTarget.target").doesNotExist())
@@ -255,7 +268,7 @@ class ApiRouteControllerTest {
 
     @Test
     void should_serialize_an_unresolved_route_target_without_reconstructing_display_fields() throws Exception {
-        given(apiRouteApplicationService.lookupMatches(any(), any(), any()))
+        given(apiRouteApplicationService.lookupMatches(any(), any(), any(), any()))
                 .willReturn(batch(new ApiRouteCandidate(
                         "repo-a",
                         SHA_ONE.value(),
@@ -271,7 +284,7 @@ class ApiRouteControllerTest {
         mockMvc.perform(post("/v1/api-routes/lookup")
                         .header(ApiTokenFilter.API_TOKEN_HEADER, TOKEN)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"apiPath\":\"/orders\"}"))
+                        .content(lookupRequest("/orders")))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.candidates[0].analysisTarget.status").value("UNRESOLVED"))
                 .andExpect(jsonPath("$.candidates[0].analysisTarget.target").doesNotExist())
@@ -289,7 +302,7 @@ class ApiRouteControllerTest {
                 new JavaTypeIdentity("com.acme.order", "OrderController"),
                 "module-a/src/main/java/com/acme/order/OrderController.java");
         MethodTarget target = new MethodTarget(sourceType, "getOrder", List.of("java.lang.String"));
-        given(apiRouteApplicationService.lookupMatches(any(), any(), any()))
+        given(apiRouteApplicationService.lookupMatches(any(), any(), any(), any()))
                 .willReturn(batch(new ApiRouteCandidate(
                         "repo-a",
                         SHA_ONE.value(),
@@ -303,7 +316,7 @@ class ApiRouteControllerTest {
         mockMvc.perform(post("/v1/api-routes/lookup")
                         .header(ApiTokenFilter.API_TOKEN_HEADER, TOKEN)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"apiPath\":\"/orders/42\"}"))
+                        .content(lookupRequest("/orders/42")))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.candidates[0].sourceType.javaType.packageName")
                         .value("com.acme.order"))
@@ -325,7 +338,7 @@ class ApiRouteControllerTest {
     void should_reject_missing_route_token() throws Exception {
         mockMvc.perform(post("/v1/api-routes/lookup")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"apiPath\":\"/orders\"}"))
+                        .content(lookupRequest("/orders")))
                 .andExpect(status().isUnauthorized());
         then(apiRouteApplicationService).shouldHaveNoInteractions();
     }
@@ -335,9 +348,65 @@ class ApiRouteControllerTest {
         mockMvc.perform(post("/v1/api-routes/lookup")
                         .header(ApiTokenFilter.API_TOKEN_HEADER, "wrong")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"apiPath\":\"/orders\"}"))
+                        .content(lookupRequest("/orders")))
                 .andExpect(status().isUnauthorized());
         then(apiRouteApplicationService).shouldHaveNoInteractions();
+    }
+
+    @Test
+    void should_project_a_route_index_that_is_not_ready_as_a_conflict() throws Exception {
+        RepositoryId repositoryId = RepositoryId.of("orders");
+        given(apiRouteApplicationService.lookupMatches(
+                repositoryId, SHA_ONE, "/orders", Optional.empty()))
+                .willThrow(new ApiRouteIndexNotReadyException(repositoryId, SHA_ONE));
+
+        mockMvc.perform(post("/v1/api-routes/lookup")
+                        .header(ApiTokenFilter.API_TOKEN_HEADER, TOKEN)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(lookupRequest("/orders")))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.errorCode").value("API_ROUTE_INDEX_NOT_READY"));
+    }
+
+    @Test
+    void should_project_a_repository_revision_mismatch_as_a_conflict() throws Exception {
+        RepositoryId repositoryId = RepositoryId.of("orders");
+        given(apiRouteApplicationService.lookupMatches(
+                repositoryId, SHA_ONE, "/orders", Optional.empty()))
+                .willThrow(new RepositoryRevisionMismatchException(SHA_ONE, SHA_TWO));
+
+        mockMvc.perform(post("/v1/api-routes/lookup")
+                        .header(ApiTokenFilter.API_TOKEN_HEADER, TOKEN)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(lookupRequest("/orders")))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.errorCode").value("REPOSITORY_REVISION_MISMATCH"))
+                .andExpect(jsonPath("$.expectedRevision").value(SHA_ONE.value()))
+                .andExpect(jsonPath("$.currentRevision").value(SHA_TWO.value()));
+    }
+
+    private static String lookupRequest(String apiPath) {
+        return lookupRequest(apiPath, null);
+    }
+
+    private static String lookupRequest(String apiPath, String httpMethod) {
+        String method = Objects.isNull(httpMethod) ? "" : """
+                ,"httpMethod":"%s"
+                """.formatted(httpMethod);
+        return """
+                {"repoId":"orders","expectedRevision":"%s","apiPath":"%s"%s}
+                """
+                .formatted(SHA_ONE.value(), apiPath, method);
+    }
+
+    private static String suggestRequest(String apiPath, String httpMethod, int limit) {
+        String method = Objects.isNull(httpMethod) ? "" : """
+                ,"httpMethod":"%s"
+                """.formatted(httpMethod);
+        return """
+                {"repoId":"orders","expectedRevision":"%s","apiPath":"%s"%s,"limit":%s}
+                """
+                .formatted(SHA_ONE.value(), apiPath, method, limit);
     }
 
     private static ApiRouteCandidate candidate(String repoId, String revision) {

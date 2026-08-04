@@ -1,14 +1,14 @@
 package com.java.semantic.api.dto;
 
-import com.java.semantic.api.monitoring.ApiMonitoringField;
-import com.java.semantic.api.monitoring.ApiMonitoringMode;
+import com.java.semantic.monitoring.MonitoringField;
+import com.java.semantic.monitoring.MonitoringMode;
 
 import java.util.List;
 
 public record EntryPointsResponse(
-        @ApiMonitoringField(ApiMonitoringMode.VALUE) String repoId,
-        @ApiMonitoringField(ApiMonitoringMode.VALUE) String analyzedRevision,
-        @ApiMonitoringField(ApiMonitoringMode.SIZE) List<EntryPointClassResponse> entryPoints) {
+        @MonitoringField(MonitoringMode.VALUE) String repoId,
+        @MonitoringField(MonitoringMode.VALUE) String analyzedRevision,
+        @MonitoringField(MonitoringMode.SIZE) List<EntryPointClassResponse> entryPoints) {
 
     public EntryPointsResponse {
         entryPoints = List.copyOf(entryPoints);

@@ -84,7 +84,8 @@ class ApiRouteCandidateTest {
 
         service.reload(snapshot, new RepositorySyntax(List.of(entryPointClass), List.of()));
 
-        ApiRouteMatch match = service.lookupMatches("/orders/123", "GET", "").matches().getFirst();
+        ApiRouteMatch match = service.lookupMatches(
+                snapshot.repositoryId(), snapshot.revision(), "/orders/123", "GET").matches().getFirst();
         ApiRouteCandidate candidate = ApiRouteCandidate.from(match);
 
         assertThat(candidate.analysisTarget()).isSameAs(resolution);

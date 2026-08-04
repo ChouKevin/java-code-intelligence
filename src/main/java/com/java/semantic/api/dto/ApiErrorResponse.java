@@ -2,21 +2,21 @@ package com.java.semantic.api.dto;
 
 import com.java.semantic.api.dto.identity.MethodTargetPayload;
 
-import com.java.semantic.api.monitoring.ApiMonitoringField;
-import com.java.semantic.api.monitoring.ApiMonitoringMode;
+import com.java.semantic.monitoring.MonitoringField;
+import com.java.semantic.monitoring.MonitoringMode;
 
 import java.util.List;
 
 /** 穩定且不洩漏內部例外的 API 錯誤 */
 public record ApiErrorResponse(
-        @ApiMonitoringField(ApiMonitoringMode.VALUE) String errorCode,
-        @ApiMonitoringField(ApiMonitoringMode.SIZE) String message,
-        @ApiMonitoringField(ApiMonitoringMode.VALUE) String repoId,
-        @ApiMonitoringField(ApiMonitoringMode.VALUE) String expectedRevision,
-        @ApiMonitoringField(ApiMonitoringMode.VALUE) String currentRevision,
-        @ApiMonitoringField(ApiMonitoringMode.NESTED) MethodTargetPayload target,
-        @ApiMonitoringField(ApiMonitoringMode.SIZE) List<MethodTargetPayload> candidates,
-        @ApiMonitoringField(ApiMonitoringMode.VALUE) String requestId) {
+        @MonitoringField(MonitoringMode.VALUE) String errorCode,
+        @MonitoringField(MonitoringMode.SIZE) String message,
+        @MonitoringField(MonitoringMode.VALUE) String repoId,
+        @MonitoringField(MonitoringMode.VALUE) String expectedRevision,
+        @MonitoringField(MonitoringMode.VALUE) String currentRevision,
+        @MonitoringField(MonitoringMode.NESTED) MethodTargetPayload target,
+        @MonitoringField(MonitoringMode.SIZE) List<MethodTargetPayload> candidates,
+        @MonitoringField(MonitoringMode.VALUE) String requestId) {
 
     public ApiErrorResponse {
         candidates = List.copyOf(candidates);

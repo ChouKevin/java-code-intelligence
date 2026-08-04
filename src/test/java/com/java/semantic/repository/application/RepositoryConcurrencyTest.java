@@ -22,6 +22,7 @@ import com.java.semantic.semantic.domain.SemanticBindingUnresolvedException;
 import com.java.semantic.semantic.domain.SemanticRequestTimeoutException;
 import com.java.semantic.semantic.domain.SemanticTargetNotFoundException;
 import com.java.semantic.support.ConcurrencyTestSupport;
+import com.java.semantic.trie.ApiRouteIndexNotReadyException;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.api.io.TempDir;
@@ -347,7 +348,7 @@ class RepositoryConcurrencyTest {
     }
 
     @Test
-    void should_log_expected_semantic_callback_failures_at_warn() {
+    void should_log_expected_callback_failures_at_warn() {
         DefaultRepositoryApplicationService service = service(new FakeGitRepositoryPort(), Duration.ofMillis(100));
         service.ensure(REPOSITORY_ID);
         MethodTarget target = new MethodTarget(
@@ -367,7 +368,8 @@ class RepositoryConcurrencyTest {
                 List.of()))),
                 new SemanticBindingUnresolvedException(target),
                 new SemanticRequestTimeoutException(),
-                new SemanticTargetNotFoundException(target));
+                new SemanticTargetNotFoundException(target),
+                new ApiRouteIndexNotReadyException(REPOSITORY_ID, SHA_ONE));
         Logger logger = (Logger) LoggerFactory.getLogger(DefaultRepositoryApplicationService.class);
         ListAppender<ILoggingEvent> appender = attach(logger);
         try {
@@ -384,7 +386,7 @@ class RepositoryConcurrencyTest {
             List<ILoggingEvent> failures = appender.list.stream()
                     .filter(event -> event.getFormattedMessage().contains("phase=snapshot outcome=failed"))
                     .toList();
-            assertThat(failures).hasSize(4).allSatisfy(event -> {
+            assertThat(failures).hasSize(5).allSatisfy(event -> {
                 assertThat(event.getLevel()).isEqualTo(Level.WARN);
                 assertThat(event.getThrowableProxy()).isNull();
             });

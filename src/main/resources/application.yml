@@ -1,3 +1,23 @@
+spring:
+  ai:
+    mcp:
+      server:
+        enabled: true
+        protocol: STATELESS
+        type: SYNC
+        stdio: false
+        tool-callback-converter: false
+        annotation-scanner:
+          enabled: false
+        streamable-http:
+          # STATELESS mode still uses this Spring AI endpoint property
+          mcp-endpoint: /mcp
+        capabilities:
+          tool: true
+          resource: false
+          prompt: false
+          completion: false
+
 semantic:
   syntax:
     cache:
@@ -40,7 +60,6 @@ semantic:
   repository-lock-timeout: 5s
   git-username: ${GIT_USERNAME:}
   git-token: ${GIT_TOKEN:}
-  repositories: {}
 
 logging:
   level:

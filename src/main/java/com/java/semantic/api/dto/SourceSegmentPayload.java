@@ -2,8 +2,8 @@ package com.java.semantic.api.dto;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.java.semantic.api.dto.location.SourceRangePayload;
-import com.java.semantic.api.monitoring.ApiMonitoringField;
-import com.java.semantic.api.monitoring.ApiMonitoringMode;
+import com.java.semantic.monitoring.MonitoringField;
+import com.java.semantic.monitoring.MonitoringMode;
 
 import java.util.Objects;
 import java.util.Optional;
@@ -13,10 +13,10 @@ import java.util.Optional;
  * location 與 nextLocation 使用零基 UTF-16 半開區間，nextLocation 指向尚未回傳的 suffix
  */
 public record SourceSegmentPayload(
-        @ApiMonitoringField(ApiMonitoringMode.NESTED) SourceRangePayload location,
-        @ApiMonitoringField(ApiMonitoringMode.OMIT) String content,
+        @MonitoringField(MonitoringMode.NESTED) SourceRangePayload location,
+        @MonitoringField(MonitoringMode.OMIT) String content,
         @JsonInclude(JsonInclude.Include.NON_ABSENT)
-        @ApiMonitoringField(ApiMonitoringMode.NESTED) Optional<SourceRangePayload> nextLocation) {
+        @MonitoringField(MonitoringMode.NESTED) Optional<SourceRangePayload> nextLocation) {
 
     public SourceSegmentPayload {
         location = Objects.requireNonNull(location, "location is required");

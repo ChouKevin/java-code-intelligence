@@ -5,8 +5,8 @@ import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonSubTypes;
 import com.fasterxml.jackson.annotation.JsonTypeInfo;
 import com.java.semantic.api.dto.location.TextRangePayload;
-import com.java.semantic.api.monitoring.ApiMonitoringField;
-import com.java.semantic.api.monitoring.ApiMonitoringMode;
+import com.java.semantic.monitoring.MonitoringField;
+import com.java.semantic.monitoring.MonitoringMode;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
@@ -33,8 +33,8 @@ public sealed interface SourceMemberIdentityPayload permits
 
     /** 型別直接擁有的成員 identity */
     record TypeMember(
-            @ApiMonitoringField(ApiMonitoringMode.NESTED) @NotNull @Valid SourceTypeIdentityPayload ownerType,
-            @ApiMonitoringField(ApiMonitoringMode.VALUE) @NotBlank @Size(max = 255)
+            @MonitoringField(MonitoringMode.NESTED) @NotNull @Valid SourceTypeIdentityPayload ownerType,
+            @MonitoringField(MonitoringMode.VALUE) @NotBlank @Size(max = 255)
             @Pattern(regexp = "[\\p{L}\\p{Nl}\\p{Sc}\\p{Pc}]"
                     + "[\\p{L}\\p{Nl}\\p{Sc}\\p{Pc}\\p{Mn}\\p{Mc}\\p{Nd}]*") String name)
             implements SourceMemberIdentityPayload {
@@ -47,9 +47,9 @@ public sealed interface SourceMemberIdentityPayload permits
 
     /** 方法內以宣告範圍固定的成員 identity */
     record MethodScoped(
-            @ApiMonitoringField(ApiMonitoringMode.NESTED) @NotNull @Valid MethodTargetPayload declaringMethod,
-            @ApiMonitoringField(ApiMonitoringMode.NESTED) @NotNull @Valid TextRangePayload declarationRange,
-            @ApiMonitoringField(ApiMonitoringMode.VALUE) @NotBlank @Size(max = 255)
+            @MonitoringField(MonitoringMode.NESTED) @NotNull @Valid MethodTargetPayload declaringMethod,
+            @MonitoringField(MonitoringMode.NESTED) @NotNull @Valid TextRangePayload declarationRange,
+            @MonitoringField(MonitoringMode.VALUE) @NotBlank @Size(max = 255)
             @Pattern(regexp = "[\\p{L}\\p{Nl}\\p{Sc}\\p{Pc}]"
                     + "[\\p{L}\\p{Nl}\\p{Sc}\\p{Pc}\\p{Mn}\\p{Mc}\\p{Nd}]*") String name)
             implements SourceMemberIdentityPayload {

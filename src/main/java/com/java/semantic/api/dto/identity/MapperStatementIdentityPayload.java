@@ -3,8 +3,8 @@ package com.java.semantic.api.dto.identity;
 import com.fasterxml.jackson.annotation.JsonAnySetter;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonInclude;
-import com.java.semantic.api.monitoring.ApiMonitoringField;
-import com.java.semantic.api.monitoring.ApiMonitoringMode;
+import com.java.semantic.monitoring.MonitoringField;
+import com.java.semantic.monitoring.MonitoringMode;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
@@ -18,15 +18,15 @@ import java.util.Optional;
 /** mapper statement 實體證據的共享 HTTP identity */
 @JsonIgnoreProperties(ignoreUnknown = false)
 public record MapperStatementIdentityPayload(
-        @ApiMonitoringField(ApiMonitoringMode.NESTED)
+        @MonitoringField(MonitoringMode.NESTED)
         @NotNull @Valid MapperStatementKeyPayload statementKey,
-        @ApiMonitoringField(ApiMonitoringMode.OMIT)
+        @MonitoringField(MonitoringMode.OMIT)
         @NotBlank @Size(max = 1024) @Pattern(regexp = "[^\\p{javaISOControl}]+") String resourcePath,
         @JsonInclude(JsonInclude.Include.NON_ABSENT)
-        @ApiMonitoringField(ApiMonitoringMode.OMIT)
+        @MonitoringField(MonitoringMode.OMIT)
         Optional<@Size(max = 255) @Pattern(regexp = "[^\\p{javaISOControl}]+") String> databaseId,
-        @ApiMonitoringField(ApiMonitoringMode.VALUE) @PositiveOrZero int documentOrdinal,
-        @ApiMonitoringField(ApiMonitoringMode.VALUE)
+        @MonitoringField(MonitoringMode.VALUE) @PositiveOrZero int documentOrdinal,
+        @MonitoringField(MonitoringMode.VALUE)
         @NotBlank @Pattern(regexp = "MAPPER_XML_ELEMENT|ANNOTATION_SQL_TEXT") String representation) {
 
     public MapperStatementIdentityPayload {

@@ -1,10 +1,5 @@
 package com.java.semantic.api;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ObjectNode;
-import com.github.fge.jsonschema.main.JsonSchema;
-import com.github.fge.jsonschema.main.JsonSchemaFactory;
 import com.java.semantic.api.dto.GraphEdgeResponse;
 import com.java.semantic.api.dto.GraphErrorResponse;
 import com.java.semantic.api.dto.GraphNodeResponse;
@@ -22,16 +17,13 @@ import com.java.semantic.syntax.application.concept.ConceptKind;
 import jakarta.validation.ConstraintViolation;
 import jakarta.validation.Validation;
 import jakarta.validation.Validator;
-import io.swagger.v3.oas.models.OpenAPI;
-import io.swagger.v3.oas.models.media.ComposedSchema;
-import io.swagger.v3.oas.models.media.Schema;
-import io.swagger.v3.parser.OpenAPIV3Parser;
-import io.swagger.v3.parser.core.models.SwaggerParseResult;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.yaml.snakeyaml.LoaderOptions;
-import org.yaml.snakeyaml.Yaml;
-import org.yaml.snakeyaml.constructor.SafeConstructor;
+import tools.jackson.core.StreamReadFeature;
+import tools.jackson.core.type.TypeReference;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.dataformat.yaml.YAMLMapper;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -60,19 +52,23 @@ class OpenApiContractTest {
     private static final String CLASS_NAME_PATTERN = "^[\\p{L}\\p{Nl}\\p{Sc}\\p{Pc}][\\p{L}\\p{Nl}\\p{Sc}\\p{Pc}\\p{Mn}\\p{Mc}\\p{Nd}]*(?:\\.[\\p{L}\\p{Nl}\\p{Sc}\\p{Pc}][\\p{L}\\p{Nl}\\p{Sc}\\p{Pc}\\p{Mn}\\p{Mc}\\p{Nd}]*)*$";
     private static final String METHOD_NAME_PATTERN = "^[\\p{L}\\p{Nl}\\p{Sc}\\p{Pc}][\\p{L}\\p{Nl}\\p{Sc}\\p{Pc}\\p{Mn}\\p{Mc}\\p{Nd}]*$";
     private static final String EVENT_TYPE_PATTERN = "^(?:[\\p{L}_][\\p{L}\\p{N}_]*\\.)+[\\p{L}_][\\p{L}\\p{N}_]*(?:\\[\\])*$";
+    private static final TypeReference<Map<String, Object>> DOCUMENT_TYPE = new TypeReference<>() {
+    };
+    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+    private static final YAMLMapper YAML_MAPPER = YAMLMapper.builder()
+            .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
+            .build();
 
     private Map<String, Object> document;
-
-    private final ObjectMapper objectMapper = new ObjectMapper();
+    private JsonNode documentTree;
 
     @BeforeEach
     void setUp() throws Exception {
-        LoaderOptions loaderOptions = new LoaderOptions();
-        loaderOptions.setAllowDuplicateKeys(false);
         try (InputStream input = Objects.requireNonNull(
                 getClass().getResourceAsStream("/openapi/semantic-api-v1.yaml"),
                 "OpenAPI document is required")) {
-            document = map(new Yaml(new SafeConstructor(loaderOptions)).load(input));
+            documentTree = YAML_MAPPER.readTree(input);
+            document = YAML_MAPPER.convertValue(documentTree, DOCUMENT_TYPE);
         }
     }
 
@@ -871,6 +867,7 @@ class OpenApiContractTest {
                 "REPOSITORY_NOT_FOUND",
                 "REPOSITORY_NOT_READY",
                 "REPOSITORY_REVISION_MISMATCH",
+                "API_ROUTE_INDEX_NOT_READY",
                 "SEMANTIC_BINDING_AMBIGUOUS",
                 "SEMANTIC_TARGET_NOT_FOUND",
                 "SOURCE_DECLARATION_NOT_FOUND",
@@ -906,21 +903,12 @@ class OpenApiContractTest {
     }
 
     @Test
-    void should_parse_nullable_composed_references_without_messages() {
-        String resource = Objects.requireNonNull(
-                getClass().getResource("/openapi/semantic-api-v1.yaml"),
-                "OpenAPI document is required").toString();
-
-        SwaggerParseResult result = new OpenAPIV3Parser().readLocation(resource, null, null);
-
-        assertThat(result).isNotNull();
-        assertThat(result.getOpenAPI()).isNotNull();
-        assertThat(result.getMessages()).isEmpty();
-        OpenAPI openApi = result.getOpenAPI();
-        assertNullableComposedReference(openApi, "GraphNode", "target", "MethodTargetPayload");
-        assertNullableComposedReference(openApi, "GraphNode", "declarationRange", "TextRangePayload");
-        assertNullableComposedReference(openApi, "GraphWarning", "callSite", "SourceRangePayload");
-        assertNullableComposedReference(openApi, "ApiErrorResponse", "target", "MethodTargetPayload");
+    void should_parse_nullable_composed_references_from_yaml_tree() {
+        assertThat(documentTree.isObject()).isTrue();
+        assertNullableComposedReference("GraphNode", "target", "MethodTargetPayload");
+        assertNullableComposedReference("GraphNode", "declarationRange", "TextRangePayload");
+        assertNullableComposedReference("GraphWarning", "callSite", "SourceRangePayload");
+        assertNullableComposedReference("ApiErrorResponse", "target", "MethodTargetPayload");
     }
 
     @Test
@@ -974,8 +962,7 @@ class OpenApiContractTest {
                 List.of()))
                 .hasCauseInstanceOf(NullPointerException.class);
 
-        ObjectMapper objectMapper = new ObjectMapper();
-        assertThatThrownBy(() -> objectMapper.readValue("""
+        assertThatThrownBy(() -> OBJECT_MAPPER.readValue("""
                 {
                   "repoId":"order-service",
                   "expectedRevision":"FIXTURE",
@@ -1174,8 +1161,8 @@ class OpenApiContractTest {
                 "200", "400", "401", "403", "404", "409", "500");
         assertResponseCodes(operation(paths, "/v1/repositories/{repoId}/entry-points", "get"),
                 "200", "400", "401", "403", "404", "409", "500");
-        assertResponseCodes(operation(paths, "/v1/api-routes/lookup", "post"), "200", "400", "401", "403", "500");
-        assertResponseCodes(operation(paths, "/v1/api-routes/suggest", "post"), "200", "400", "401", "403", "500");
+        assertResponseCodes(operation(paths, "/v1/api-routes/lookup", "post"), "200", "400", "401", "403", "404", "409", "500");
+        assertResponseCodes(operation(paths, "/v1/api-routes/suggest", "post"), "200", "400", "401", "403", "404", "409", "500");
         assertResponseCodes(operation(paths, "/v1/discovery/event-listeners", "post"),
                 "200", "400", "401", "403", "404", "409", "500");
         assertResponseCodes(operation(paths, "/v1/discovery/method-implementations", "post"),
@@ -1245,18 +1232,26 @@ class OpenApiContractTest {
 
         Map<String, Object> schemas = schemas();
         Map<String, Object> lookupRequest = schema(schemas, "ApiRouteLookupRequest");
-        assertThat(required(lookupRequest)).containsExactly("apiPath");
-        assertExactProperties(lookupRequest, "apiPath", "httpMethod", "repoScope");
+        assertClosedObject(lookupRequest);
+        assertThat(required(lookupRequest)).containsExactly("repoId", "expectedRevision", "apiPath");
+        assertExactProperties(lookupRequest, "repoId", "expectedRevision", "apiPath", "httpMethod");
+        assertThat(schema(properties(lookupRequest), "repoId"))
+                .containsEntry("pattern", "^[a-z0-9][a-z0-9._-]{0,63}$");
+        assertThat(schema(properties(lookupRequest), "expectedRevision"))
+                .containsEntry("pattern", REVISION_PATTERN);
         assertNonBlankString(properties(lookupRequest), "apiPath");
         assertNullableString(properties(lookupRequest), "httpMethod");
-        assertNullableString(properties(lookupRequest), "repoScope");
 
         Map<String, Object> suggestRequest = schema(schemas, "ApiRouteSuggestRequest");
-        assertThat(required(suggestRequest)).containsExactly("apiPath", "limit");
-        assertExactProperties(suggestRequest, "apiPath", "httpMethod", "repoScope", "limit");
+        assertClosedObject(suggestRequest);
+        assertThat(required(suggestRequest)).containsExactly("repoId", "expectedRevision", "apiPath", "limit");
+        assertExactProperties(suggestRequest, "repoId", "expectedRevision", "apiPath", "httpMethod", "limit");
+        assertThat(schema(properties(suggestRequest), "repoId"))
+                .containsEntry("pattern", "^[a-z0-9][a-z0-9._-]{0,63}$");
+        assertThat(schema(properties(suggestRequest), "expectedRevision"))
+                .containsEntry("pattern", REVISION_PATTERN);
         assertNonBlankString(properties(suggestRequest), "apiPath");
         assertNullableString(properties(suggestRequest), "httpMethod");
-        assertNullableString(properties(suggestRequest), "repoScope");
         assertThat(schema(properties(suggestRequest), "limit"))
                 .containsEntry("minimum", 1)
                 .containsEntry("maximum", 20);
@@ -1638,27 +1633,6 @@ class OpenApiContractTest {
         assertThat(map(schema(union, "discriminator").get("mapping"))).containsExactlyInAnyOrderEntriesOf(mapping);
     }
 
-    private void assertOpenApiPayloadValid(String schemaName, Map<String, Object> payload) throws Exception {
-        assertThat(openApiJsonSchema(schemaName).validInstance(objectMapper.valueToTree(payload)))
-                .as("payload should match %s: %s", schemaName, payload)
-                .isTrue();
-    }
-
-    private void assertOpenApiPayloadInvalid(String schemaName, Map<String, Object> payload) throws Exception {
-        assertThat(openApiJsonSchema(schemaName).validInstance(objectMapper.valueToTree(payload)))
-                .as("payload should not match %s: %s", schemaName, payload)
-                .isFalse();
-    }
-
-    private JsonSchema openApiJsonSchema(String schemaName) throws Exception {
-        ObjectNode rootSchema = objectMapper.createObjectNode();
-        rootSchema.put("$schema", "http://json-schema.org/draft-04/schema#");
-        rootSchema.put("$ref", "#/components/schemas/" + schemaName);
-        JsonNode components = objectMapper.valueToTree(Map.of("schemas", schemas()));
-        rootSchema.set("components", components);
-        return JsonSchemaFactory.byDefault().getJsonSchema(rootSchema);
-    }
-
     private void assertClosedFollowUpRequest(Map<String, Object> schemas, String name, String... properties) {
         Map<String, Object> request = schema(schemas, name);
         assertClosedObject(request);
@@ -1761,17 +1735,20 @@ class OpenApiContractTest {
     }
 
     private void assertNullableComposedReference(
-            OpenAPI openApi,
             String ownerSchemaName,
             String propertyName,
             String referencedSchemaName) {
-        Schema<?> ownerSchema = openApi.getComponents().getSchemas().get(ownerSchemaName);
-        Schema<?> propertySchema = ownerSchema.getProperties().get(propertyName);
-        assertThat(propertySchema).isInstanceOf(ComposedSchema.class);
-        assertThat(propertySchema.getNullable()).isTrue();
-        assertThat(propertySchema.getAllOf())
-                .singleElement()
-                .extracting(Schema::get$ref)
+        JsonNode propertySchema = documentTree.path("components")
+                .path("schemas")
+                .path(ownerSchemaName)
+                .path("properties")
+                .path(propertyName);
+        assertThat(propertySchema.isObject()).isTrue();
+        assertThat(propertySchema.path("nullable").asBoolean()).isTrue();
+        JsonNode allOf = propertySchema.path("allOf");
+        assertThat(allOf.isArray()).isTrue();
+        assertThat(allOf.size()).isEqualTo(1);
+        assertThat(allOf.get(0).path("$ref").asString())
                 .isEqualTo("#/components/schemas/" + referencedSchemaName);
     }
 

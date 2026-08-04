@@ -2,19 +2,19 @@ package com.java.semantic.api.dto;
 
 import com.java.semantic.api.dto.identity.MethodTargetPayload;
 
-import com.java.semantic.api.monitoring.ApiMonitoringField;
-import com.java.semantic.api.monitoring.ApiMonitoringMode;
+import com.java.semantic.monitoring.MonitoringField;
+import com.java.semantic.monitoring.MonitoringMode;
 
 import java.util.List;
 import java.util.Objects;
 
 /** 可作為後續外呼圖輸入的方法實作候選 */
 public record MethodImplementationCandidateResponse(
-        @ApiMonitoringField(ApiMonitoringMode.NESTED) MethodTargetPayload target,
-        @ApiMonitoringField(ApiMonitoringMode.VALUE) boolean primary,
-        @ApiMonitoringField(ApiMonitoringMode.SIZE) List<String> qualifiers,
-        @ApiMonitoringField(ApiMonitoringMode.SIZE) List<String> profiles,
-        @ApiMonitoringField(ApiMonitoringMode.NESTED) List<DiscoveryFollowUpResponse> availableFollowUps) {
+        @MonitoringField(MonitoringMode.NESTED) MethodTargetPayload target,
+        @MonitoringField(MonitoringMode.VALUE) boolean primary,
+        @MonitoringField(MonitoringMode.SIZE) List<String> qualifiers,
+        @MonitoringField(MonitoringMode.SIZE) List<String> profiles,
+        @MonitoringField(MonitoringMode.NESTED) List<DiscoveryFollowUpResponse> availableFollowUps) {
 
     public MethodImplementationCandidateResponse {
         target = Objects.requireNonNull(target, "target is required");

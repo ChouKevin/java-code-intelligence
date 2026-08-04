@@ -1,7 +1,7 @@
 package com.java.semantic.api.dto;
 
-import com.java.semantic.api.monitoring.ApiMonitoringField;
-import com.java.semantic.api.monitoring.ApiMonitoringMode;
+import com.java.semantic.monitoring.MonitoringField;
+import com.java.semantic.monitoring.MonitoringMode;
 
 import com.java.semantic.syntax.domain.EntryPointType;
 import org.springframework.util.StringUtils;
@@ -10,7 +10,7 @@ import java.util.EnumSet;
 import java.util.Objects;
 import java.util.Set;
 
-public record EntryPointListRequest(@ApiMonitoringField(ApiMonitoringMode.SIZE) Set<EntryPointType> types) {
+public record EntryPointListRequest(@MonitoringField(MonitoringMode.SIZE) Set<EntryPointType> types) {
 
     public EntryPointListRequest {
         types = Set.copyOf(types);

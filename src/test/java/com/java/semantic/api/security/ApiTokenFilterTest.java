@@ -1,7 +1,7 @@
 package com.java.semantic.api.security;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -108,6 +108,16 @@ class ApiTokenFilterTest {
     }
 
     @Test
+    void should_record_the_mcp_authentication_error_code_for_transport_monitoring() throws Exception {
+        MockHttpServletRequest request = new MockHttpServletRequest("POST", "/mcp");
+
+        invoke(filterWith(CONFIGURED_TOKEN), request);
+
+        assertThat(request.getAttribute(ApiTokenFilter.AUTH_ERROR_CODE_ATTRIBUTE))
+                .isEqualTo("SEMANTIC_UNAUTHORIZED");
+    }
+
+    @Test
     void should_reject_new_analysis_endpoint_when_token_is_wrong() throws Exception {
         FilterResult result = invoke(
                 filterWith(CONFIGURED_TOKEN), "POST", "/v1/analyses/call-graph", "wrong");
@@ -128,7 +138,7 @@ class ApiTokenFilterTest {
     private ApiTokenFilter filterWith(String token) {
         ApiSecurityProperties properties = new ApiSecurityProperties();
         properties.setApiToken(token);
-        return new ApiTokenFilter(properties);
+        return new ApiTokenFilter(properties, OBJECT_MAPPER);
     }
 
     private FilterResult invoke(ApiTokenFilter filter, String method, String uri, String token)

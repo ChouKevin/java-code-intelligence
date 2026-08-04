@@ -4,8 +4,8 @@ import com.fasterxml.jackson.annotation.JsonAnySetter;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonSubTypes;
 import com.fasterxml.jackson.annotation.JsonTypeInfo;
-import com.java.semantic.api.monitoring.ApiMonitoringField;
-import com.java.semantic.api.monitoring.ApiMonitoringMode;
+import com.java.semantic.monitoring.MonitoringField;
+import com.java.semantic.monitoring.MonitoringMode;
 
 /** 巢狀型別使用路徑節點的封閉 HTTP 回應 */
 @JsonIgnoreProperties(ignoreUnknown = false)
@@ -33,23 +33,23 @@ public sealed interface TypeUsagePathResponse permits
 
     /** 型別參數路徑節點 */
     record TypeArgumentPathResponse(
-            @ApiMonitoringField(ApiMonitoringMode.VALUE) String kind,
-            @ApiMonitoringField(ApiMonitoringMode.VALUE) int index) implements TypeUsagePathResponse {
+            @MonitoringField(MonitoringMode.VALUE) String kind,
+            @MonitoringField(MonitoringMode.VALUE) int index) implements TypeUsagePathResponse {
     }
 
     /** wildcard extends 路徑節點 */
     record WildcardExtendsBoundPathResponse(
-            @ApiMonitoringField(ApiMonitoringMode.VALUE) String kind) implements TypeUsagePathResponse {
+            @MonitoringField(MonitoringMode.VALUE) String kind) implements TypeUsagePathResponse {
     }
 
     /** wildcard super 路徑節點 */
     record WildcardSuperBoundPathResponse(
-            @ApiMonitoringField(ApiMonitoringMode.VALUE) String kind) implements TypeUsagePathResponse {
+            @MonitoringField(MonitoringMode.VALUE) String kind) implements TypeUsagePathResponse {
     }
 
     /** 型別變數上界路徑節點 */
     record TypeVariableBoundPathResponse(
-            @ApiMonitoringField(ApiMonitoringMode.VALUE) String kind,
-            @ApiMonitoringField(ApiMonitoringMode.VALUE) int index) implements TypeUsagePathResponse {
+            @MonitoringField(MonitoringMode.VALUE) String kind,
+            @MonitoringField(MonitoringMode.VALUE) int index) implements TypeUsagePathResponse {
     }
 }

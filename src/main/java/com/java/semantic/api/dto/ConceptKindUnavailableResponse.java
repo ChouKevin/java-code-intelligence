@@ -1,18 +1,18 @@
 package com.java.semantic.api.dto;
 
-import com.java.semantic.api.monitoring.ApiMonitoringField;
-import com.java.semantic.api.monitoring.ApiMonitoringMode;
+import com.java.semantic.monitoring.MonitoringField;
+import com.java.semantic.monitoring.MonitoringMode;
 
 import java.util.List;
 import java.util.Objects;
 
 /** 已宣告但未啟用概念種類的固定 client-safe 錯誤 */
 public record ConceptKindUnavailableResponse(
-        @ApiMonitoringField(ApiMonitoringMode.VALUE) String errorCode,
-        @ApiMonitoringField(ApiMonitoringMode.SIZE) String message,
-        @ApiMonitoringField(ApiMonitoringMode.SIZE) List<String> unavailableKinds,
-        @ApiMonitoringField(ApiMonitoringMode.SIZE) List<String> supportedKinds,
-        @ApiMonitoringField(ApiMonitoringMode.VALUE) String requestId) {
+        @MonitoringField(MonitoringMode.VALUE) String errorCode,
+        @MonitoringField(MonitoringMode.SIZE) String message,
+        @MonitoringField(MonitoringMode.SIZE) List<String> unavailableKinds,
+        @MonitoringField(MonitoringMode.SIZE) List<String> supportedKinds,
+        @MonitoringField(MonitoringMode.VALUE) String requestId) {
 
     public ConceptKindUnavailableResponse {
         errorCode = Objects.requireNonNull(errorCode, "errorCode is required");

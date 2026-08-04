@@ -1,7 +1,7 @@
 package com.java.semantic.api.dto;
 
-import com.java.semantic.api.monitoring.ApiMonitoringField;
-import com.java.semantic.api.monitoring.ApiMonitoringMode;
+import com.java.semantic.monitoring.MonitoringField;
+import com.java.semantic.monitoring.MonitoringMode;
 import com.java.semantic.api.dto.location.TextRangePayload;
 import com.java.semantic.api.dto.identity.SourceMemberIdentityPayload;
 
@@ -10,13 +10,13 @@ import java.util.Objects;
 
 /** field、record component、parameter、local 或 enum constant response */
 public record VariableLikeSourceSymbolCandidateResponse(
-        @ApiMonitoringField(ApiMonitoringMode.VALUE) String kind,
-        @ApiMonitoringField(ApiMonitoringMode.NESTED) SourceMemberIdentityPayload identity,
-        @ApiMonitoringField(ApiMonitoringMode.NESTED) DeclaredTypeResponse declaredType,
-        @ApiMonitoringField(ApiMonitoringMode.NESTED) TextRangePayload declarationRange,
-        @ApiMonitoringField(ApiMonitoringMode.NESTED) TextRangePayload representativeOccurrence,
-        @ApiMonitoringField(ApiMonitoringMode.VALUE) int occurrenceCount,
-        @ApiMonitoringField(ApiMonitoringMode.NESTED) List<DiscoveryFollowUpResponse> availableFollowUps)
+        @MonitoringField(MonitoringMode.VALUE) String kind,
+        @MonitoringField(MonitoringMode.NESTED) SourceMemberIdentityPayload identity,
+        @MonitoringField(MonitoringMode.NESTED) DeclaredTypeResponse declaredType,
+        @MonitoringField(MonitoringMode.NESTED) TextRangePayload declarationRange,
+        @MonitoringField(MonitoringMode.NESTED) TextRangePayload representativeOccurrence,
+        @MonitoringField(MonitoringMode.VALUE) int occurrenceCount,
+        @MonitoringField(MonitoringMode.NESTED) List<DiscoveryFollowUpResponse> availableFollowUps)
         implements SourceSymbolCandidateResponse {
 
     public VariableLikeSourceSymbolCandidateResponse {

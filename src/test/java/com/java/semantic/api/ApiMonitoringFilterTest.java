@@ -3,8 +3,8 @@ package com.java.semantic.api;
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
-import com.java.semantic.api.monitoring.ApiMonitoringField;
-import com.java.semantic.api.monitoring.ApiMonitoringMode;
+import com.java.semantic.monitoring.MonitoringField;
+import com.java.semantic.monitoring.MonitoringMode;
 import com.java.semantic.api.security.ApiSecurityProperties;
 import com.java.semantic.api.security.ApiTokenFilter;
 import com.java.semantic.api.dto.ConceptKindUnavailableResponse;
@@ -26,6 +26,7 @@ import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
 
 import java.util.List;
+import tools.jackson.databind.ObjectMapper;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -141,7 +142,7 @@ class ApiMonitoringFilterTest {
         try {
             ApiSecurityProperties properties = new ApiSecurityProperties();
             properties.setApiToken("configured");
-            ApiTokenFilter tokenFilter = new ApiTokenFilter(properties);
+            ApiTokenFilter tokenFilter = new ApiTokenFilter(properties, new ObjectMapper());
 
             FilterResult result = invoke((request, response) -> tokenFilter.doFilter(
                     request, response, (downstreamRequest, downstreamResponse) -> {
@@ -215,11 +216,11 @@ class ApiMonitoringFilterTest {
                         && message.substring(expectedPrefix.length()).matches(" durationMillis=\\d+"));
     }
 
-    private record SuccessPayload(@ApiMonitoringField(ApiMonitoringMode.VALUE) String repositoryId) {
+    private record SuccessPayload(@MonitoringField(MonitoringMode.VALUE) String repositoryId) {
     }
 
     private record NullableSuccessPayload(
-            @ApiMonitoringField(ApiMonitoringMode.NESTED) SuccessPayload nested) {
+            @MonitoringField(MonitoringMode.NESTED) SuccessPayload nested) {
     }
 
     private record FilterResult(MockHttpServletResponse response) {

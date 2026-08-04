@@ -2,8 +2,9 @@ package com.java.semantic.api.security;
 
 import com.java.semantic.api.RequestCorrelationFilter;
 import com.java.semantic.api.ApiMonitoringFilter;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import com.java.semantic.mcp.monitoring.McpTransportMonitoringFilter;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 import jakarta.servlet.FilterChain;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -28,10 +29,10 @@ class ApiSecurityConfigTest {
         ApiSecurityConfig config = new ApiSecurityConfig();
         ApiSecurityProperties properties = new ApiSecurityProperties();
 
-        FilterRegistrationBean<ApiTokenFilter> registration = config.apiTokenFilter(properties);
+        FilterRegistrationBean<ApiTokenFilter> registration = config.apiTokenFilter(properties, OBJECT_MAPPER);
 
         assertThat(registration.getUrlPatterns()).containsExactly("/*");
-        assertThat(registration.getOrder()).isEqualTo(Ordered.HIGHEST_PRECEDENCE + 2);
+        assertThat(registration.getOrder()).isEqualTo(Ordered.HIGHEST_PRECEDENCE + 4);
         assertThat(registration.getFilter()).isInstanceOf(ApiTokenFilter.class);
     }
 
@@ -55,6 +56,60 @@ class ApiSecurityConfigTest {
         assertThat(registration.getUrlPatterns()).containsExactly("/*");
         assertThat(registration.getOrder()).isEqualTo(Ordered.HIGHEST_PRECEDENCE + 1);
         assertThat(registration.getFilter()).isInstanceOf(ApiMonitoringFilter.class);
+    }
+
+    @Test
+    void should_register_mcp_monitoring_between_http_monitoring_and_token_authentication() {
+        ApiSecurityConfig config = new ApiSecurityConfig();
+
+        FilterRegistrationBean<McpTransportMonitoringFilter> registration =
+                config.mcpTransportMonitoringFilter("/mcp");
+
+        assertThat(registration.getUrlPatterns()).containsExactly("/*");
+        assertThat(registration.getOrder()).isEqualTo(Ordered.HIGHEST_PRECEDENCE + 2);
+        assertThat(registration.getFilter()).isInstanceOf(McpTransportMonitoringFilter.class);
+    }
+
+    @Test
+    void should_register_origin_rejection_before_mcp_transport_and_token_authentication() {
+        ApiSecurityConfig config = new ApiSecurityConfig();
+
+        FilterRegistrationBean<McpOriginFilter> registration = config.mcpOriginFilter("/mcp");
+
+        assertThat(registration.getUrlPatterns()).containsExactly("/*");
+        assertThat(registration.getOrder()).isEqualTo(Ordered.HIGHEST_PRECEDENCE + 3);
+        assertThat(registration.getFilter()).isInstanceOf(McpOriginFilter.class);
+    }
+
+    @Test
+    void should_apply_origin_rejection_to_the_configured_mcp_endpoint_only() throws Exception {
+        ApiSecurityConfig config = new ApiSecurityConfig();
+        McpTransportMonitoringFilter monitoringFilter = config.mcpTransportMonitoringFilter("/semantic-mcp").getFilter();
+        McpOriginFilter originFilter = config.mcpOriginFilter("/semantic-mcp").getFilter();
+        MockHttpServletRequest guardedRequest = new MockHttpServletRequest("POST", "/semantic-mcp");
+        guardedRequest.addHeader("Origin", "https://browser.example");
+        MockHttpServletResponse guardedResponse = new MockHttpServletResponse();
+        AtomicBoolean guardedDownstreamInvoked = new AtomicBoolean();
+
+        monitoringFilter.doFilter(guardedRequest, guardedResponse, (request, response) -> originFilter.doFilter(
+                request,
+                response,
+                (downstreamRequest, downstreamResponse) -> guardedDownstreamInvoked.set(true)));
+
+        MockHttpServletRequest otherRequest = new MockHttpServletRequest("POST", "/mcp");
+        otherRequest.addHeader("Origin", "https://browser.example");
+        MockHttpServletResponse otherResponse = new MockHttpServletResponse();
+        AtomicBoolean otherDownstreamInvoked = new AtomicBoolean();
+
+        monitoringFilter.doFilter(otherRequest, otherResponse, (request, response) -> originFilter.doFilter(
+                request,
+                response,
+                (downstreamRequest, downstreamResponse) -> otherDownstreamInvoked.set(true)));
+
+        assertThat(guardedResponse.getStatus()).isEqualTo(403);
+        assertThat(guardedDownstreamInvoked).isFalse();
+        assertThat(otherResponse.getStatus()).isEqualTo(200);
+        assertThat(otherDownstreamInvoked).isTrue();
     }
 
     @ParameterizedTest
@@ -132,7 +187,7 @@ class ApiSecurityConfigTest {
             String apiToken)
             throws Exception {
         RequestCorrelationFilter correlation = config.requestCorrelationFilter().getFilter();
-        ApiTokenFilter token = config.apiTokenFilter(properties).getFilter();
+        ApiTokenFilter token = config.apiTokenFilter(properties, OBJECT_MAPPER).getFilter();
         MockHttpServletRequest request = new MockHttpServletRequest(method, path);
         request.addHeader(RequestCorrelationFilter.REQUEST_ID_HEADER, suppliedRequestId);
         Optional.ofNullable(apiToken).ifPresent(value -> request.addHeader(ApiTokenFilter.API_TOKEN_HEADER, value));

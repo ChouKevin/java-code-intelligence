@@ -1,13 +1,13 @@
 package com.java.semantic.api.dto;
 
-import com.java.semantic.api.monitoring.ApiMonitoringField;
-import com.java.semantic.api.monitoring.ApiMonitoringMode;
+import com.java.semantic.monitoring.MonitoringField;
+import com.java.semantic.monitoring.MonitoringMode;
 
 import java.util.List;
 
 public record ApiRouteCandidatesResponse(
-        @ApiMonitoringField(ApiMonitoringMode.SIZE) List<ApiRouteCandidateResponse> candidates,
-        @ApiMonitoringField(ApiMonitoringMode.SIZE) List<ApiRouteObservationResponse> observations) {
+        @MonitoringField(MonitoringMode.SIZE) List<ApiRouteCandidateResponse> candidates,
+        @MonitoringField(MonitoringMode.SIZE) List<ApiRouteObservationResponse> observations) {
 
     public ApiRouteCandidatesResponse {
         candidates = List.copyOf(candidates);

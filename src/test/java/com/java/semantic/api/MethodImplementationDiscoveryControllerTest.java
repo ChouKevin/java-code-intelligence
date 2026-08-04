@@ -1,8 +1,8 @@
 package com.java.semantic.api;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ObjectNode;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.node.ObjectNode;
 import com.java.semantic.api.security.ApiTokenFilter;
 import com.java.semantic.callgraph.application.ImplementationCandidate;
 import com.java.semantic.identity.JavaTypeIdentity;
@@ -29,7 +29,7 @@ import com.java.semantic.semantic.domain.SemanticTargetNotFoundException;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
+import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
@@ -127,7 +127,7 @@ class MethodImplementationDiscoveryControllerTest {
                 .isEqualTo(IMPLEMENTATION_TARGET.sourceFile());
         assertThat(followUps.get(1).path("operation").asText()).isEqualTo("ANALYZE_OUTGOING_CALL_GRAPH");
         assertThat(followUps.get(2).path("operation").asText()).isEqualTo("ANALYZE_INCOMING_CALL_GRAPH");
-        ObjectNode comparableResponse = response.deepCopy();
+        ObjectNode comparableResponse = (ObjectNode) response.deepCopy();
         ObjectNode comparableCandidate = (ObjectNode) comparableResponse.at("/candidates/0");
         comparableCandidate.remove("availableFollowUps");
         assertThat(comparableResponse).isEqualTo(OBJECT_MAPPER.readTree("""
