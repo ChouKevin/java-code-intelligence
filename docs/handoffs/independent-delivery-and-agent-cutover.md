@@ -308,3 +308,9 @@ runtime ownership rule requires a separate approved design before implementation
 - Agent test commands and outcomes
 - embedded-source removal commit
 - confirmation that `java-code-intelligence` is the sole service source
+
+### Pre-merge real JDT LS gate
+
+The `JDT LS integration` workflow remains the single owner of the real JDT LS Maven profile. Before merging a delivery change, add the `run-jdtls-integration` label to its pull request to request a GitHub-hosted run; unrelated labels create no integration workload because the job is skipped. Remove and re-add the label when another run is required. The manual and weekly triggers continue to run the same job without a label.
+
+This gate validates the independent service delivery baseline only. It does not authorize Agent consumer cutover, deployment ownership changes, or removal of the embedded service sources.
