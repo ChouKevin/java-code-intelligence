@@ -15,6 +15,11 @@ import com.java.semantic.syntax.domain.MethodTargetResolution;
 import com.java.semantic.syntax.domain.SourceRange;
 import com.java.semantic.syntax.domain.SyntaxPosition;
 import com.java.semantic.syntax.domain.SyntaxRange;
+import com.java.semantic.syntax.domain.MapperEvidenceIndex;
+import com.java.semantic.syntax.domain.MapperEvidenceRepresentation;
+import com.java.semantic.syntax.domain.MapperStatementEvidence;
+import com.java.semantic.syntax.domain.MapperStatementIdentity;
+import com.java.semantic.syntax.domain.MapperStatementKey;
 
 import org.junit.jupiter.api.Test;
 
@@ -40,6 +45,35 @@ class DataAccessEvidenceTest {
         assertThat(match.orElseThrow().evidence())
                 .containsExactly("mapper SQL evidence: ANNOTATION");
         assertThat(match.orElseThrow().declarationTarget()).contains(declarationTarget);
+    }
+
+    @Test
+    void should_preserve_every_location_ordered_mapper_statement_variant_as_retrievable_evidence() {
+        SourceTypeMetadata orderMapper = metadata(
+                "com.example.OrderMapper", SourceTypeKind.INTERFACE, List.of(), List.of());
+        SourceMethodMetadata selectOrder = method(
+                "selectOrder", List.of("String"), SqlSourceKind.MAPPER_XML);
+        MethodTarget declarationTarget = target("com.example.OrderMapper", "selectOrder");
+        MapperStatementIdentity laterIdentity = mapperIdentity(
+                "mapper/z-order.xml", Optional.of("postgres"), 7);
+        MapperStatementIdentity earlierIdentity = mapperIdentity(
+                "mapper/a-order.xml", Optional.of("oracle"), 3);
+        MapperEvidenceIndex mapperEvidenceIndex = new MapperEvidenceIndex(
+                List.of(
+                        statementEvidence(laterIdentity, declarationTarget),
+                        statementEvidence(earlierIdentity, declarationTarget)),
+                List.of());
+        RepositorySyntaxIndex syntaxIndex = new RepositorySyntaxIndex(
+                "orders",
+                new com.java.semantic.syntax.domain.RepositorySyntax(
+                        List.of(), List.of(orderMapper), List.of(), Optional.of(mapperEvidenceIndex)));
+
+        Optional<EvidenceMatch> match = evidence.evaluate(
+                syntaxIndex, orderMapper, selectOrder, declarationTarget);
+
+        assertThat(match).isPresent();
+        assertThat(match.orElseThrow().evidenceSourceIdentities())
+                .containsExactly(earlierIdentity, laterIdentity);
     }
 
     @Test
@@ -166,6 +200,26 @@ class DataAccessEvidenceTest {
                         className + ".java"),
                 methodName,
                 List.of());
+    }
+
+    private static MapperStatementIdentity mapperIdentity(
+            String resourcePath, Optional<String> databaseId, int documentOrdinal) {
+        return new MapperStatementIdentity(
+                new MapperStatementKey("com.example.OrderMapper", "selectOrder"),
+                resourcePath,
+                databaseId,
+                documentOrdinal,
+                MapperEvidenceRepresentation.MAPPER_XML_ELEMENT);
+    }
+
+    private static MapperStatementEvidence statementEvidence(
+            MapperStatementIdentity identity, MethodTarget declarationTarget) {
+        return new MapperStatementEvidence(
+                identity,
+                "select",
+                new SourceRange(identity.resourcePath(), range(0, 0, 1, 0)),
+                List.of(),
+                Optional.of(declarationTarget));
     }
 
     private static SyntaxRange range(int startLine, int startCharacter, int endLine, int endCharacter) {

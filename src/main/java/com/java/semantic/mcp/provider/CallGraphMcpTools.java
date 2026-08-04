@@ -43,13 +43,13 @@ public final class CallGraphMcpTools implements McpQueryProvider {
 
     private CallGraphMcpDtos.OutgoingOutput outgoing(CallGraphMcpDtos.Input input) {
         RepositoryId repositoryId = RepositoryId.of(input.repoId());
-        return mapper.outgoing(applicationService.analyzeOutgoing(
+        return mapper.outgoing(repositoryId, applicationService.analyzeOutgoing(
                 repositoryId, new RepositoryRevision(input.expectedRevision()), input.target(), input.depth()));
     }
 
     private CallGraphMcpDtos.IncomingOutput incoming(CallGraphMcpDtos.Input input) {
         RepositoryId repositoryId = RepositoryId.of(input.repoId());
-        return mapper.incoming(applicationService.analyzeIncoming(
+        return mapper.incoming(repositoryId, applicationService.analyzeIncoming(
                 repositoryId, new RepositoryRevision(input.expectedRevision()), input.target(), input.depth()));
     }
 }

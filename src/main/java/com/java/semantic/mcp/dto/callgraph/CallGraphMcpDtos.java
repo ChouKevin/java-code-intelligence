@@ -1,7 +1,15 @@
 package com.java.semantic.mcp.dto.callgraph;
 
-import com.java.semantic.callgraph.domain.IncomingGraphFragment;
-import com.java.semantic.callgraph.domain.OutgoingGraphFragment;
+import com.java.semantic.callgraph.domain.CallNodeId;
+import com.java.semantic.callgraph.domain.CallSiteRange;
+import com.java.semantic.callgraph.domain.GraphAnalysisStatus;
+import com.java.semantic.callgraph.domain.GraphError;
+import com.java.semantic.callgraph.domain.GraphNode;
+import com.java.semantic.callgraph.domain.GraphTraversal;
+import com.java.semantic.callgraph.domain.GraphWarning;
+import com.java.semantic.callgraph.domain.ResolutionStrategy;
+import com.java.semantic.repository.domain.RepositoryRevision;
+import com.java.semantic.mcp.dto.source.SourceDiscoveryMcpDtos;
 import com.java.semantic.identity.MethodTarget;
 import com.java.semantic.mcp.dto.McpRevisionPinnedInput;
 import com.java.semantic.monitoring.MonitoringField;
@@ -12,6 +20,8 @@ import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
+
+import java.util.List;
 
 /** 固定 revision call graph MCP 查詢的 transport DTO */
 public final class CallGraphMcpDtos {
@@ -32,10 +42,26 @@ public final class CallGraphMcpDtos {
     }
 
     /** outgoing call graph 查詢結果 */
-    public record OutgoingOutput(@MonitoringField(MonitoringMode.NESTED) @NotNull @Valid OutgoingGraphFragment result) {
+    public record OutgoingOutput(@MonitoringField(MonitoringMode.NESTED) @NotNull @Valid GraphResult result) {
     }
 
     /** incoming call graph 查詢結果 */
-    public record IncomingOutput(@MonitoringField(MonitoringMode.NESTED) @NotNull @Valid IncomingGraphFragment result) {
+    public record IncomingOutput(@MonitoringField(MonitoringMode.NESTED) @NotNull @Valid GraphResult result) {
+    }
+
+    /** MCP 自有完整 graph result */
+    public record GraphResult(
+            GraphAnalysisStatus status, RepositoryRevision analyzedRevision, CallNodeId rootNodeId, GraphTraversal traversal,
+            List<GraphNode> nodes, List<GraphEdgeOutput> edges, List<GraphWarning> warnings, List<GraphError> errors) {
+    }
+
+    /** 不直接公開 domain evidence identity 的 edge transport */
+    public record GraphEdgeOutput(
+            CallNodeId callerNodeId, CallNodeId calleeNodeId, CallSiteRange callSite, String callExpression,
+            ResolutionStrategy resolutionStrategy, List<String> evidence, List<EvidenceSourceFollowUp> availableFollowUps) {
+    }
+
+    /** 可直接執行的 evidence source follow-up */
+    public record EvidenceSourceFollowUp(String toolName, SourceDiscoveryMcpDtos.EvidenceSourceInput arguments) {
     }
 }

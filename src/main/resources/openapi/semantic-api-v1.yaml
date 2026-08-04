@@ -3313,6 +3313,7 @@ components:
         - resolutionStrategy
         - category
         - evidence
+        - availableFollowUps
       properties:
         callerNodeId:
           type: string
@@ -3369,6 +3370,10 @@ components:
           items:
             type: string
           description: Human-readable proof strings; for MYBATIS_MAPPER edges includes the mapper SQL text.
+        availableFollowUps:
+          type: array
+          items:
+            $ref: '#/components/schemas/DiscoveryFollowUpResponse'
     GraphWarning:
       type: object
       additionalProperties: false

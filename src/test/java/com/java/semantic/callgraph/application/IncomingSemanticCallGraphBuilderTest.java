@@ -40,6 +40,11 @@ import com.java.semantic.syntax.domain.SyntaxInvocation;
 import com.java.semantic.syntax.domain.SyntaxPosition;
 import com.java.semantic.syntax.domain.SyntaxRange;
 import com.java.semantic.syntax.domain.TypeReference;
+import com.java.semantic.syntax.domain.MapperEvidenceIndex;
+import com.java.semantic.syntax.domain.MapperEvidenceRepresentation;
+import com.java.semantic.syntax.domain.MapperStatementEvidence;
+import com.java.semantic.syntax.domain.MapperStatementIdentity;
+import com.java.semantic.syntax.domain.MapperStatementKey;
 import org.junit.jupiter.api.Test;
 
 import java.nio.file.Path;
@@ -498,6 +503,30 @@ class IncomingSemanticCallGraphBuilderTest {
     }
 
     @Test
+    void should_preserve_mapper_statement_identity_on_incoming_relabelled_edge() {
+        MethodTarget mapperTarget = target("OrderMapper", "xmlOnly");
+        MethodTarget callerTarget = target("OrderService", "reconcile");
+        SemanticMethod mapper = incomingMethod(mapperTarget, 10);
+        SemanticMethod caller = incomingMethod(callerTarget, 0);
+        SemanticRange callSite = semanticRange(2);
+        MapperStatementIdentity identity = mapperIdentity(mapperTarget, "mapper/OrderMapper.xml", Optional.empty(), 0);
+        FakeSemanticService semantic = new FakeSemanticService()
+                .incoming(mapper, incoming(caller, callSite))
+                .resolution(caller, callSite, localCall(mapper, callSite));
+
+        IncomingGraphFragment fragment = builder(semantic)
+                .build(SNAPSHOT,
+                        syntaxWithMapperEvidence(
+                                List.of(dataAccessInterfaceType(
+                                        mapperTarget, SqlSourceKind.MAPPER_XML, List.of()), type(callerTarget)),
+                                List.of(statementEvidence(identity, mapperTarget))),
+                        mapperTarget, mapper, 1, 0);
+
+        assertThat(fragment.edges()).singleElement()
+                .satisfies(edge -> assertThat(edge.evidenceSourceIdentities()).containsExactly(identity));
+    }
+
+    @Test
     void should_reject_a_data_access_root_caller_without_a_supported_opaque_data_access_strategy() {
         MethodTarget daoTarget = target("AuditDao", "latest");
         MethodTarget callerTarget = target("OrderService", "reconcile");
@@ -548,6 +577,32 @@ class IncomingSemanticCallGraphBuilderTest {
 
     private static RepositorySyntax syntax(SourceTypeMetadata... types) {
         return new RepositorySyntax(List.of(), List.of(types));
+    }
+
+    private static RepositorySyntax syntaxWithMapperEvidence(
+            List<SourceTypeMetadata> types, List<MapperStatementEvidence> statements) {
+        return new RepositorySyntax(
+                List.of(), types, List.of(), Optional.of(new MapperEvidenceIndex(statements, List.of())));
+    }
+
+    private static MapperStatementIdentity mapperIdentity(
+            MethodTarget mapperTarget, String resourcePath, Optional<String> databaseId, int documentOrdinal) {
+        return new MapperStatementIdentity(
+                new MapperStatementKey(mapperTarget.fullyQualifiedClassName(), mapperTarget.methodName()),
+                resourcePath,
+                databaseId,
+                documentOrdinal,
+                MapperEvidenceRepresentation.MAPPER_XML_ELEMENT);
+    }
+
+    private static MapperStatementEvidence statementEvidence(MapperStatementIdentity identity, MethodTarget target) {
+        return new MapperStatementEvidence(
+                identity,
+                "select",
+                new SourceRange(identity.resourcePath(), new SyntaxRange(
+                        new SyntaxPosition(0, 0), new SyntaxPosition(1, 0))),
+                List.of(),
+                Optional.of(target));
     }
 
     private static SourceTypeMetadata type(MethodTarget target) {

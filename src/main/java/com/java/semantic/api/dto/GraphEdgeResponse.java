@@ -15,7 +15,8 @@ public record GraphEdgeResponse(
         @MonitoringField(MonitoringMode.OMIT) String callExpression,
         @MonitoringField(MonitoringMode.VALUE) String resolutionStrategy,
         @MonitoringField(MonitoringMode.VALUE) String category,
-        @MonitoringField(MonitoringMode.SIZE) List<String> evidence) {
+        @MonitoringField(MonitoringMode.SIZE) List<String> evidence,
+        @MonitoringField(MonitoringMode.NESTED) List<DiscoveryFollowUpResponse> availableFollowUps) {
 
     public GraphEdgeResponse {
         callerNodeId = Objects.requireNonNull(callerNodeId, "callerNodeId is required");
@@ -25,5 +26,6 @@ public record GraphEdgeResponse(
         resolutionStrategy = Objects.requireNonNull(resolutionStrategy, "resolutionStrategy is required");
         category = Objects.requireNonNull(category, "category is required");
         evidence = List.copyOf(Objects.requireNonNull(evidence, "evidence is required"));
+        availableFollowUps = List.copyOf(Objects.requireNonNull(availableFollowUps, "availableFollowUps is required"));
     }
 }

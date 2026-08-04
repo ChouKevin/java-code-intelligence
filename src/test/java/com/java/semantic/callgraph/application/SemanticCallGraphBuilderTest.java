@@ -41,6 +41,11 @@ import com.java.semantic.syntax.domain.SyntaxPosition;
 import com.java.semantic.syntax.domain.SyntaxRange;
 import com.java.semantic.syntax.domain.NamedTypeReference;
 import com.java.semantic.syntax.domain.TypeReference;
+import com.java.semantic.syntax.domain.MapperEvidenceIndex;
+import com.java.semantic.syntax.domain.MapperEvidenceRepresentation;
+import com.java.semantic.syntax.domain.MapperStatementEvidence;
+import com.java.semantic.syntax.domain.MapperStatementIdentity;
+import com.java.semantic.syntax.domain.MapperStatementKey;
 import org.junit.jupiter.api.Test;
 
 import java.nio.file.Path;
@@ -655,6 +660,26 @@ class SemanticCallGraphBuilderTest {
     }
 
     @Test
+    void should_preserve_mapper_statement_identity_on_outgoing_opaque_edge() {
+        MethodTarget rootTarget = target("Caller", "run");
+        MethodTarget mapperTarget = target("OrderMapper", "insert");
+        SemanticMethod root = outgoingMethod(rootTarget, 0);
+        SemanticMethod mapperDeclaration = outgoingMethod(mapperTarget, 10);
+        MapperStatementIdentity identity = mapperIdentity(mapperTarget, "mapper/OrderMapper.xml", Optional.empty(), 0);
+        FakeSemanticService semantic = new FakeSemanticService().outgoing(root, resolvedCall(mapperDeclaration, 2));
+
+        com.java.semantic.callgraph.domain.OutgoingGraphFragment fragment = builder(semantic)
+                .build(SNAPSHOT,
+                        syntaxWithMapperEvidence(
+                                List.of(type(rootTarget), mapperInterfaceType(mapperTarget)),
+                                List.of(statementEvidence(identity, mapperTarget))),
+                        rootTarget, root, 1, 40);
+
+        assertThat(fragment.edges()).singleElement()
+                .satisfies(edge -> assertThat(edge.evidenceSourceIdentities()).containsExactly(identity));
+    }
+
+    @Test
     void should_relabel_an_annotated_dao_without_evidence_and_keep_the_warning() {
         MethodTarget rootTarget = target("Caller", "run");
         MethodTarget mapperTarget = target("PaymentMapper", "insertPayment");
@@ -742,6 +767,31 @@ class SemanticCallGraphBuilderTest {
 
     private static RepositorySyntax syntax(List<SourceTypeMetadata> types) {
         return new RepositorySyntax(List.of(), types);
+    }
+
+    private static RepositorySyntax syntaxWithMapperEvidence(
+            List<SourceTypeMetadata> types, List<MapperStatementEvidence> statements) {
+        return new RepositorySyntax(
+                List.of(), types, List.of(), Optional.of(new MapperEvidenceIndex(statements, List.of())));
+    }
+
+    private static MapperStatementIdentity mapperIdentity(
+            MethodTarget mapperTarget, String resourcePath, Optional<String> databaseId, int documentOrdinal) {
+        return new MapperStatementIdentity(
+                new MapperStatementKey(mapperTarget.fullyQualifiedClassName(), mapperTarget.methodName()),
+                resourcePath,
+                databaseId,
+                documentOrdinal,
+                MapperEvidenceRepresentation.MAPPER_XML_ELEMENT);
+    }
+
+    private static MapperStatementEvidence statementEvidence(MapperStatementIdentity identity, MethodTarget target) {
+        return new MapperStatementEvidence(
+                identity,
+                "insert",
+                new SourceRange(identity.resourcePath(), range(0, 0, 1, 0)),
+                List.of(),
+                Optional.of(target));
     }
 
     private static SourceTypeMetadata type(MethodTarget target) {

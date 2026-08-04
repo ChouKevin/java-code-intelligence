@@ -75,7 +75,7 @@ public final class AnalysisResponseMapper {
                 fragment.rootNodeId().value(),
                 traversal(fragment.traversal()),
                 fragment.nodes().stream().map(node -> node(requiredRepositoryId, fragment.analyzedRevision(), node)).toList(),
-                fragment.edges().stream().map(this::edge).toList(),
+                fragment.edges().stream().map(edge -> edge(requiredRepositoryId, fragment.analyzedRevision(), edge)).toList(),
                 fragment.warnings().stream().map(warning -> warning(requiredRepositoryId, fragment.analyzedRevision(), warning)).toList(),
                 fragment.errors().stream().map(this::error).toList());
     }
@@ -89,7 +89,7 @@ public final class AnalysisResponseMapper {
                 fragment.rootNodeId().value(),
                 traversal(fragment.traversal()),
                 fragment.nodes().stream().map(node -> node(requiredRepositoryId, fragment.analyzedRevision(), node)).toList(),
-                fragment.edges().stream().map(this::edge).toList(),
+                fragment.edges().stream().map(edge -> edge(requiredRepositoryId, fragment.analyzedRevision(), edge)).toList(),
                 fragment.warnings().stream().map(warning -> warning(requiredRepositoryId, fragment.analyzedRevision(), warning)).toList(),
                 fragment.errors().stream().map(this::error).toList());
     }
@@ -126,7 +126,7 @@ public final class AnalysisResponseMapper {
                 followUps.stream().map(followUpMapper::followUp).toList());
     }
 
-    private GraphEdgeResponse edge(GraphEdge edge) {
+    private GraphEdgeResponse edge(RepositoryId repositoryId, RepositoryRevision revision, GraphEdge edge) {
         return new GraphEdgeResponse(
                 edge.callerNodeId().value(),
                 edge.calleeNodeId().value(),
@@ -134,7 +134,11 @@ public final class AnalysisResponseMapper {
                 edge.callExpression(),
                 resolutionStrategy(edge.resolutionStrategy()),
                 ResolutionStrategyPartition.categoryOf(edge.resolutionStrategy()).name(),
-                edge.evidence());
+                edge.evidence(),
+                edge.evidenceSourceIdentities().stream()
+                        .map(identity -> followUpFactory.forEvidenceSource(repositoryId, revision, identity))
+                        .map(followUpMapper::followUp)
+                        .toList());
     }
 
     private GraphWarningResponse warning(RepositoryId repositoryId, RepositoryRevision revision, GraphWarning warning) {

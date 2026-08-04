@@ -5,6 +5,7 @@ import com.java.semantic.identity.MethodTarget;
 import com.java.semantic.semantic.domain.SemanticMethod;
 import com.java.semantic.semantic.domain.SemanticRange;
 import com.java.semantic.syntax.domain.SyntaxInvocation;
+import com.java.semantic.syntax.domain.MapperStatementIdentity;
 import org.springframework.util.Assert;
 import org.springframework.util.CollectionUtils;
 import org.springframework.util.StringUtils;
@@ -23,6 +24,7 @@ record DirectCallRelationship(
         String expression,
         ResolutionStrategy strategy,
         List<String> evidence,
+        List<MapperStatementIdentity> evidenceSourceIdentities,
         List<MethodTarget> candidates,
         Optional<SyntaxInvocation> invocation,
         Optional<MethodTarget> declarationTarget) {
@@ -36,6 +38,8 @@ record DirectCallRelationship(
         Assert.hasText(expression, "expression is required");
         strategy = Objects.requireNonNull(strategy, "strategy is required");
         evidence = List.copyOf(Objects.requireNonNull(evidence, "evidence is required"));
+        evidenceSourceIdentities = List.copyOf(Objects.requireNonNull(
+                evidenceSourceIdentities, "evidenceSourceIdentities is required"));
         candidates = List.copyOf(Objects.requireNonNull(candidates, "candidates are required"));
         invocation = Objects.requireNonNull(invocation, "invocation is required");
         declarationTarget = Objects.requireNonNull(declarationTarget, "declarationTarget is required");
@@ -49,6 +53,17 @@ record DirectCallRelationship(
             String expression,
             ResolutionStrategy strategy,
             List<String> evidence) {
+        return local(target, semanticMethod, callSite, expression, strategy, evidence, List.of());
+    }
+
+    static DirectCallRelationship local(
+            MethodTarget target,
+            SemanticMethod semanticMethod,
+            SemanticRange callSite,
+            String expression,
+            ResolutionStrategy strategy,
+            List<String> evidence,
+            List<MapperStatementIdentity> evidenceSourceIdentities) {
         return new DirectCallRelationship(
                 Status.LOCAL,
                 Optional.of(Objects.requireNonNull(target, "target is required")),
@@ -58,6 +73,7 @@ record DirectCallRelationship(
                 expression,
                 strategy,
                 evidence,
+                evidenceSourceIdentities,
                 List.of(),
                 Optional.empty(),
                 Optional.empty());
@@ -79,6 +95,7 @@ record DirectCallRelationship(
                 ResolutionStrategy.EXTERNAL_LIBRARY,
                 evidence,
                 List.of(),
+                List.of(),
                 Optional.empty(),
                 Optional.empty());
     }
@@ -96,6 +113,7 @@ record DirectCallRelationship(
                 callSite,
                 expression,
                 strategy,
+                List.of(),
                 List.of(),
                 candidates,
                 Optional.empty(),
@@ -123,6 +141,7 @@ record DirectCallRelationship(
                 callSite,
                 expression,
                 strategy,
+                List.of(),
                 List.of(),
                 List.of(),
                 invocation,
