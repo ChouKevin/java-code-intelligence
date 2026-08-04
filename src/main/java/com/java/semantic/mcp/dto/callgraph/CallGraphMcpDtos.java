@@ -66,7 +66,7 @@ public final class CallGraphMcpDtos {
             @MonitoringField(MonitoringMode.NESTED) CallNodeId callerNodeId,
             @MonitoringField(MonitoringMode.NESTED) CallNodeId calleeNodeId,
             @MonitoringField(MonitoringMode.NESTED) CallSiteRange callSite,
-            @MonitoringField(MonitoringMode.VALUE) String callExpression,
+            @MonitoringField(MonitoringMode.OMIT) String callExpression,
             @MonitoringField(MonitoringMode.NESTED) ResolutionStrategy resolutionStrategy,
             @MonitoringField(MonitoringMode.NESTED) List<String> evidence,
             @MonitoringField(MonitoringMode.NESTED) List<EvidenceSourceFollowUp> availableFollowUps) {
