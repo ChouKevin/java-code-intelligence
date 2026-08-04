@@ -4,6 +4,9 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.node.ObjectNode;
 import com.java.semantic.api.dto.RepositoryStatusResponse;
+import com.java.semantic.api.dto.identity.JavaTypeIdentityPayload;
+import com.java.semantic.api.dto.identity.MethodTargetPayload;
+import com.java.semantic.api.dto.identity.SourceTypeIdentityPayload;
 import com.java.semantic.api.security.ApiTokenFilter;
 import com.java.semantic.repository.domain.RepositoryId;
 import com.java.semantic.repository.domain.RepositoryRevision;
@@ -405,13 +408,13 @@ class SemanticFacadeVerticalJdtLsIT {
     }
 
     private ObjectNode target(String className, String methodName, List<String> parameterTypes) {
-        ObjectNode target = objectMapper.createObjectNode();
-        target.put("sourceFile", "src/main/java/com/example/vertical/" + className + ".java");
-        target.put("packageName", "com.example.vertical");
-        target.put("className", className);
-        target.put("methodName", methodName);
-        target.set("parameterTypes", objectMapper.valueToTree(parameterTypes));
-        return target;
+        MethodTargetPayload target = new MethodTargetPayload(
+                new SourceTypeIdentityPayload(
+                        new JavaTypeIdentityPayload("com.example.vertical", className),
+                        "src/main/java/com/example/vertical/" + className + ".java"),
+                methodName,
+                parameterTypes);
+        return objectNode(objectMapper.valueToTree(target));
     }
 
     private ObjectNode targetOfFirstDepthBoundary(JsonNode fragment) {
