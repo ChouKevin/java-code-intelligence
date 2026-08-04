@@ -6,6 +6,7 @@ spring:
         protocol: STATELESS
         type: SYNC
         stdio: false
+        tool-callback-converter: false
         annotation-scanner:
           enabled: false
         streamable-http:

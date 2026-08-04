@@ -192,3 +192,75 @@ Accept: application/json, text/event-stream
     }
   }
 }
+
+> {%
+  const result = response.body.result;
+  if (!result.isError || result.structuredContent) {
+    throw new Error("Revision mismatch must be an error without structuredContent");
+  }
+  if (!result.content || result.content.length !== 1) {
+    throw new Error("Revision mismatch must contain exactly one failure content item");
+  }
+  const failure = JSON.parse(result.content[0].text);
+  if (failure.errorCode !== "REPOSITORY_REVISION_MISMATCH" || failure.recovery.retryable) {
+    throw new Error("Unexpected revision mismatch recovery contract");
+  }
+  const followUp = failure.recovery.availableFollowUps.find(
+      candidate => candidate.toolName === "semantic_get_repository");
+  if (!followUp || followUp.arguments.repoId !== failure.requestIdentity.repoId) {
+    throw new Error("Revision mismatch must provide repository status for the same repoId");
+  }
+  client.global.set("revisionFollowUpToolName", followUp.toolName);
+  client.global.set("revisionFollowUpArguments", JSON.stringify(followUp.arguments));
+%}
+
+### 9. Invoke the supplied repository-status follow-up.
+POST {{baseUrl}}/mcp
+X-Api-Token: {{apiToken}}
+MCP-Protocol-Version: 2025-06-18
+Content-Type: application/json
+Accept: application/json, text/event-stream
+
+{
+  "jsonrpc": "2.0",
+  "id": 9,
+  "method": "tools/call",
+  "params": {
+    "name": "{{revisionFollowUpToolName}}",
+    "arguments": {{revisionFollowUpArguments}}
+  }
+}
+
+> {%
+  const result = response.body.result;
+  if (result.isError || !result.structuredContent) {
+    throw new Error("Repository status follow-up must succeed with structuredContent");
+  }
+  const repository = result.structuredContent.repository;
+  const refreshedRevision = repository.currentRevision.value;
+  if (!refreshedRevision) {
+    throw new Error("Repository status follow-up did not return a revision");
+  }
+  client.global.set("refreshedRevision", refreshedRevision);
+%}
+
+### 10. Explicitly resubmit the original query with the newly accepted revision.
+POST {{baseUrl}}/mcp
+X-Api-Token: {{apiToken}}
+MCP-Protocol-Version: 2025-06-18
+Content-Type: application/json
+Accept: application/json, text/event-stream
+
+{
+  "jsonrpc": "2.0",
+  "id": 10,
+  "method": "tools/call",
+  "params": {
+    "name": "semantic_lookup_api_routes",
+    "arguments": {
+      "repoId": "{{repoId}}",
+      "expectedRevision": "{{refreshedRevision}}",
+      "apiPath": "/replace-with-a-known-route"
+    }
+  }
+}

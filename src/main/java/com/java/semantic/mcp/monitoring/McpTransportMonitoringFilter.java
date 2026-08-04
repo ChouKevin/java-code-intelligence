@@ -8,6 +8,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.util.Assert;
 import org.springframework.util.StringUtils;
 import org.springframework.web.filter.OncePerRequestFilter;
 
@@ -20,9 +21,16 @@ public final class McpTransportMonitoringFilter extends OncePerRequestFilter {
 
     private static final Logger log = LoggerFactory.getLogger(McpTransportMonitoringFilter.class);
 
+    private final String mcpEndpoint;
+
+    public McpTransportMonitoringFilter(String mcpEndpoint) {
+        Assert.hasText(mcpEndpoint, "mcpEndpoint is required");
+        this.mcpEndpoint = mcpEndpoint;
+    }
+
     @Override
     protected boolean shouldNotFilter(HttpServletRequest request) {
-        return !"/mcp".equals(request.getRequestURI());
+        return !mcpEndpoint.equals(request.getRequestURI());
     }
 
     @Override

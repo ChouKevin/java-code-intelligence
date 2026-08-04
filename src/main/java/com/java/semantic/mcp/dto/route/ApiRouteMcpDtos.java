@@ -1,5 +1,6 @@
 package com.java.semantic.mcp.dto.route;
 
+import com.java.semantic.mcp.dto.McpRevisionPinnedInput;
 import com.java.semantic.monitoring.MonitoringField;
 import com.java.semantic.monitoring.MonitoringMode;
 import com.java.semantic.trie.ApiRouteMatchBatch;
@@ -24,7 +25,8 @@ public final class ApiRouteMcpDtos {
             @MonitoringField(MonitoringMode.VALUE) @NotBlank
             @Pattern(regexp = "^[0-9a-f]{40}$|^FIXTURE$") String expectedRevision,
             @MonitoringField(MonitoringMode.VALUE) @NotBlank String apiPath,
-            @MonitoringField(MonitoringMode.VALUE) String httpMethod) {
+            @MonitoringField(MonitoringMode.VALUE) String httpMethod)
+            implements McpRevisionPinnedInput {
     }
 
     /** API route suggestion 輸入 */
@@ -35,7 +37,8 @@ public final class ApiRouteMcpDtos {
             @Pattern(regexp = "^[0-9a-f]{40}$|^FIXTURE$") String expectedRevision,
             @MonitoringField(MonitoringMode.VALUE) @NotBlank String apiPath,
             @MonitoringField(MonitoringMode.VALUE) String httpMethod,
-            @MonitoringField(MonitoringMode.VALUE) @NotNull @Min(1) @Max(20) Integer limit) {
+            @MonitoringField(MonitoringMode.VALUE) @NotNull @Min(1) @Max(20) Integer limit)
+            implements McpRevisionPinnedInput {
     }
 
     /** API route 查詢結果 */

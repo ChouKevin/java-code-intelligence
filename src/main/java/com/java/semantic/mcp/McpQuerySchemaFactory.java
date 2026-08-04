@@ -31,16 +31,53 @@ import java.util.Optional;
 /** 以 Jakarta validation 契約補正 Spring AI MCP 工具 schema */
 public final class McpQuerySchemaFactory {
 
-    public String generateForType(Type type) {
+    public String generateInputSchema(Type type) {
+        return generate(type, SchemaPurpose.INPUT);
+    }
+
+    public String generateOutputSchema(Type type) {
+        return generate(type, SchemaPurpose.OUTPUT);
+    }
+
+    private String generate(Type type, SchemaPurpose schemaPurpose) {
         Assert.notNull(type, "type is required");
+        Assert.notNull(schemaPurpose, "schemaPurpose is required");
         try {
             JsonMapper objectMapper = new JsonMapper();
             ObjectNode schema = (ObjectNode) objectMapper.readTree(JsonSchemaGenerator.generateForType(type));
-            new SchemaProjection(schema).apply(type, null, schema);
+            new SchemaProjection(schema, schemaPurpose).apply(type, null, schema);
             return objectMapper.writeValueAsString(schema);
         } catch (JacksonException exception) {
             throw new IllegalStateException("generated MCP schema is invalid", exception);
         }
+    }
+
+    static boolean isPortableMcpPattern(String pattern) {
+        String candidate = Objects.requireNonNull(pattern, "pattern is required");
+        return !candidate.contains("\\p{")
+                && !candidate.contains("\\P{")
+                && !candidate.contains("\\A")
+                && !candidate.contains("\\z")
+                && !candidate.contains("\\Z")
+                && !candidate.contains("\\h")
+                && !candidate.contains("\\H")
+                && !candidate.contains("\\R")
+                && !candidate.contains("(?")
+                && !hasPossessiveQuantifier(candidate);
+    }
+
+    private static boolean hasPossessiveQuantifier(String pattern) {
+        for (int index = 1; index < pattern.length(); index++) {
+            if (pattern.charAt(index) == '+' && "*+?}".indexOf(pattern.charAt(index - 1)) >= 0) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private enum SchemaPurpose {
+        INPUT,
+        OUTPUT
     }
 
     /**
@@ -50,9 +87,11 @@ public final class McpQuerySchemaFactory {
     private static final class SchemaProjection {
 
         private final ObjectNode root;
+        private final SchemaPurpose schemaPurpose;
 
-        private SchemaProjection(ObjectNode root) {
+        private SchemaProjection(ObjectNode root, SchemaPurpose schemaPurpose) {
             this.root = root;
+            this.schemaPurpose = schemaPurpose;
         }
 
         private void apply(Type type, AnnotatedType annotatedType, JsonNode candidate) {
@@ -95,7 +134,7 @@ public final class McpQuerySchemaFactory {
                 if (Objects.isNull(property)) {
                     continue;
                 }
-                if (McpInputRequiredness.isRequired(component)) {
+                if (isRequired(component)) {
                     required.add(component.getName());
                 }
                 apply(component.getGenericType(), component.getAnnotatedType(), property);
@@ -153,7 +192,7 @@ public final class McpQuerySchemaFactory {
                 applySize(schema, size);
             }
             Pattern pattern = annotation(annotations, Pattern.class);
-            if (Objects.nonNull(pattern)) {
+            if (Objects.nonNull(pattern) && isPortableMcpPattern(pattern.regexp())) {
                 applyPattern(schema, pattern.regexp());
             }
             Min min = annotation(annotations, Min.class);
@@ -188,6 +227,10 @@ public final class McpQuerySchemaFactory {
                 schema.withArray("allOf").addObject().put("pattern", existingPattern.asText());
             }
             schema.put("pattern", pattern);
+        }
+
+        private boolean isRequired(RecordComponent component) {
+            return schemaPurpose == SchemaPurpose.OUTPUT || McpInputRequiredness.isRequired(component);
         }
 
         private void applySize(ObjectNode schema, Size size) {

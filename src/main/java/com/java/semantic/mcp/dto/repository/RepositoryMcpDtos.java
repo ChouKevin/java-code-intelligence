@@ -1,5 +1,7 @@
 package com.java.semantic.mcp.dto.repository;
 
+import com.java.semantic.mcp.dto.McpRepositoryScopedInput;
+import com.java.semantic.mcp.dto.McpRevisionPinnedInput;
 import com.java.semantic.monitoring.MonitoringField;
 import com.java.semantic.monitoring.MonitoringMode;
 import com.java.semantic.repository.domain.RepositoryStatus;
@@ -30,7 +32,8 @@ public final class RepositoryMcpDtos {
 
     /** 讀取單一 repository catalog 項目的輸入 */
     public record GetInput(@MonitoringField(MonitoringMode.VALUE) @NotBlank
-                           @Pattern(regexp = "^[a-z0-9][a-z0-9._-]{0,63}$") String repoId) {
+                           @Pattern(regexp = "^[a-z0-9][a-z0-9._-]{0,63}$") String repoId)
+            implements McpRepositoryScopedInput {
     }
 
     /** 單一 repository catalog 查詢結果 */
@@ -43,7 +46,8 @@ public final class RepositoryMcpDtos {
             @Pattern(regexp = "^[a-z0-9][a-z0-9._-]{0,63}$") String repoId,
             @MonitoringField(MonitoringMode.VALUE) @NotBlank
             @Pattern(regexp = "^[0-9a-f]{40}$|^FIXTURE$") String expectedRevision,
-            @MonitoringField(MonitoringMode.SIZE) @NotNull Set<@NotNull EntryPointType> types) {
+            @MonitoringField(MonitoringMode.SIZE) @NotNull Set<@NotNull EntryPointType> types)
+            implements McpRevisionPinnedInput {
     }
 
     /** entry point MCP 查詢結果 */

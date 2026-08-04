@@ -1,7 +1,6 @@
 package com.java.semantic.mcp.provider;
 
 import com.java.semantic.mcp.McpQueryRegistration;
-import com.java.semantic.mcp.McpToolContractException;
 import com.java.semantic.mcp.StrictMcpToolInputDecoder;
 import com.java.semantic.mcp.dto.framework.FrameworkDiscoveryMcpDtos;
 import com.java.semantic.mcp.dto.source.SourceDiscoveryMcpDtos;
@@ -29,7 +28,6 @@ import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.then;
@@ -167,15 +165,18 @@ class DiscoveryMcpToolsTest {
                 .findFirst()
                 .orElseThrow();
 
-        assertThatThrownBy(() -> specification.callHandler().apply(
+        McpSchema.CallToolResult result = specification.callHandler().apply(
                 null,
                 new McpSchema.CallToolRequest("semantic_resolve_concept", Map.of(
                         "repoId", "orders",
                         "expectedRevision", "FIXTURE",
-                        "identity", identity))))
-                .isInstanceOf(McpToolContractException.class)
-                .extracting(exception -> ((McpToolContractException) exception).code())
-                .isEqualTo("INVALID_TOOL_INPUT");
+                        "identity", identity)));
+
+        assertThat(result.isError()).isTrue();
+        assertThat(result.structuredContent()).isNull();
+        assertThat(result.content()).singleElement().isInstanceOf(McpSchema.TextContent.class);
+        McpSchema.TextContent failureContent = (McpSchema.TextContent) result.content().getFirst();
+        assertThat(failureContent.text()).contains("\"errorCode\":\"INVALID_TOOL_INPUT\"");
     }
 
     private static Map<String, Object> invalidMethodTarget() {

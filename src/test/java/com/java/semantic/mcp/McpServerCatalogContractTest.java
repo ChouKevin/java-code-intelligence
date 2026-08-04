@@ -7,12 +7,17 @@ import com.java.semantic.syntax.application.concept.ConceptDiscoveryApplicationS
 import com.java.semantic.repository.application.RepositoryNotFoundException;
 import com.java.semantic.repository.application.RepositoryNotReadyException;
 import com.java.semantic.repository.application.RepositoryRevisionMismatchException;
+import com.java.semantic.repository.application.RepositoryApplicationService;
 import com.java.semantic.repository.domain.RepositoryId;
+import com.java.semantic.repository.domain.RepositoryMode;
 import com.java.semantic.repository.domain.RepositoryRevision;
+import com.java.semantic.repository.domain.RepositoryStatus;
 import com.java.semantic.trie.ApiRouteApplicationService;
 import com.java.semantic.trie.ApiRouteIndexNotReadyException;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.system.CapturedOutput;
@@ -22,16 +27,19 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
+import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.BDDMockito.willThrow;
+import static org.mockito.BDDMockito.given;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -59,9 +67,12 @@ class McpServerCatalogContractTest {
     @MockitoBean
     private SemanticAnalysisApplicationService semanticAnalysisApplicationService;
 
+    @MockitoBean
+    private RepositoryApplicationService repositoryApplicationService;
+
     @Test
     void should_initialize_and_publish_exactly_the_canonical_read_only_catalog() throws Exception {
-        mockMvc.perform(mcpRequest(initializeRequest()))
+        mockMvc.perform(mcpRequest(initializeRequest("2025-06-18"), "2025-06-18"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.result.protocolVersion").value("2025-06-18"));
 
@@ -81,13 +92,26 @@ class McpServerCatalogContractTest {
         });
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {"2025-06-18", "2025-11-25"})
+    void should_initialize_supported_project_protocol_versions(String protocolVersion) throws Exception {
+        mockMvc.perform(mcpRequest(initializeRequest(protocolVersion), protocolVersion))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.result.protocolVersion").value(protocolVersion));
+    }
+
     @Test
     void should_keep_malformed_unknown_and_invalid_tool_calls_distinct() throws Exception {
-        MvcResult malformed = mockMvc.perform(mcpRequest("{invalid}"))
+        MvcResult malformed = mockMvc.perform(mcpRequest("{private-error-data}"))
                 .andExpect(status().isBadRequest())
                 .andReturn();
 
-        assertThat(malformed.getResponse().getContentAsString()).doesNotContain("stackTrace");
+        assertThat(malformed.getResponse().getContentAsString())
+                .doesNotContain(
+                        "stackTrace",
+                        "McpError",
+                        "JacksonException",
+                        "private-error-data");
 
         mockMvc.perform(mcpRequest(toolCallRequest("unissued_tool", "{}")))
                 .andExpect(status().isOk())
@@ -100,11 +124,41 @@ class McpServerCatalogContractTest {
     }
 
     @Test
+    void should_leave_schema_rejection_to_the_sdk_before_callback_monitoring(CapturedOutput output) throws Exception {
+        MvcResult result = mockMvc.perform(mcpRequest(toolCallRequest("semantic_get_repository", "{}")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.result.isError").value(true))
+                .andReturn();
+
+        assertThat(result.getResponse().getContentAsString()).doesNotContain("INVALID_TOOL_INPUT");
+        assertThat(output).doesNotContain("toolName=semantic_get_repository");
+    }
+
+    @Test
+    void should_map_java_identifier_validation_to_project_invalid_tool_input(CapturedOutput output) throws Exception {
+        MvcResult result = mockMvc.perform(mcpRequest(toolCallRequest(
+                        "semantic_resolve_concept",
+                        conceptResolveRequest("invalid-method-name"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.result.isError").value(true))
+                .andExpect(jsonPath("$.result.structuredContent").doesNotExist())
+                .andExpect(jsonPath("$.result.content.length()").value(1))
+                .andReturn();
+
+        JsonNode failure = failureContent(result);
+        assertThat(failure.path("errorCode").asText()).isEqualTo("INVALID_TOOL_INPUT");
+        assertThat(output).contains("toolName=semantic_resolve_concept resultCategory=INVALID_TOOL_INPUT");
+    }
+
+    @Test
     void should_record_successful_mcp_invocation_without_logging_raw_json_rpc_payload(CapturedOutput output)
             throws Exception {
         mockMvc.perform(mcpRequest(toolCallRequest("semantic_list_repositories", "{}")))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.result.isError").value(false));
+                .andExpect(jsonPath("$.result.isError").value(false))
+                .andExpect(jsonPath("$.result.structuredContent.repositories").isArray())
+                .andExpect(jsonPath("$.result.content.length()").value(1))
+                .andExpect(jsonPath("$.result.content[0].text").value("Query completed"));
 
         assertThat(output)
                 .contains("mcp_tool_completed")
@@ -121,26 +175,26 @@ class McpServerCatalogContractTest {
         assertRouteFailure(
                 new RepositoryRevisionMismatchException(requestedRevision, currentRevision),
                 "REPOSITORY_REVISION_MISMATCH",
-                true,
+                false,
                 requestedRevision.value(),
                 currentRevision.value());
         assertRouteFailure(
                 new ApiRouteIndexNotReadyException(repositoryId, requestedRevision),
                 "API_ROUTE_INDEX_NOT_READY",
                 true,
-                "",
+                requestedRevision.value(),
                 "");
         assertRouteFailure(
                 new RepositoryNotFoundException(repositoryId),
                 "REPOSITORY_NOT_FOUND",
                 false,
-                "",
+                requestedRevision.value(),
                 "");
         assertRouteFailure(
                 new RepositoryNotReadyException(repositoryId),
                 "REPOSITORY_NOT_READY",
                 true,
-                "",
+                requestedRevision.value(),
                 "");
 
         assertThat(output).contains("toolName=semantic_lookup_api_routes resultCategory=EXPECTED_TOOL_FAILURE");
@@ -170,11 +224,65 @@ class McpServerCatalogContractTest {
     }
 
     @Test
+    void should_publish_complete_required_output_schemas_with_nullable_values() throws Exception {
+        JsonNode outputSchema = tool(tools(), "semantic_get_repository").path("outputSchema");
+
+        assertRequiredProperty(outputSchema, "repository");
+        assertRequiredProperty(outputSchema, "repositoryId");
+        List<JsonNode> currentRevisionOwners = schemaOwners(outputSchema, "currentRevision");
+        assertThat(currentRevisionOwners).isNotEmpty();
+        assertThat(currentRevisionOwners).allSatisfy(owner -> {
+            assertThat(owner.path("required")).extracting(JsonNode::asText).contains("currentRevision");
+            assertThat(owner.path("properties").path("currentRevision").path("type"))
+                    .extracting(JsonNode::asText)
+                    .contains("object", "null");
+        });
+    }
+
+    @Test
+    void should_serialize_nullable_output_components_as_explicit_nulls() throws Exception {
+        given(repositoryApplicationService.status(RepositoryId.of("orders"))).willReturn(new RepositoryStatus(
+                RepositoryId.of("orders"),
+                RepositoryMode.REMOTE,
+                "orders",
+                Optional.empty(),
+                Optional.empty(),
+                true));
+
+        MvcResult result = mockMvc.perform(mcpRequest(toolCallRequest(
+                        "semantic_get_repository", "{\"repoId\":\"orders\"}")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.result.isError").value(false))
+                .andReturn();
+
+        JsonNode repository = objectMapper.readTree(result.getResponse().getContentAsString())
+                .at("/result/structuredContent/repository");
+        assertThat(repository.has("currentBranch")).isTrue();
+        assertThat(repository.path("currentBranch").isNull()).isTrue();
+        assertThat(repository.has("currentRevision")).isTrue();
+        assertThat(repository.path("currentRevision").isNull()).isTrue();
+    }
+
+    @Test
+    void should_publish_only_portable_patterns_across_all_input_schemas() throws Exception {
+        JsonNode tools = tools();
+        assertThat(tools).hasSize(17);
+        List<String> patterns = new ArrayList<>();
+        for (JsonNode tool : tools) {
+            collectPatterns(tool.path("inputSchema"), patterns);
+        }
+
+        assertThat(patterns).isNotEmpty();
+        assertThat(patterns).allSatisfy(pattern ->
+                assertThat(McpQuerySchemaFactory.isPortableMcpPattern(pattern)).isTrue());
+    }
+
+    @Test
     void should_return_typed_semantic_engine_failures_from_mcp_transport() throws Exception {
         willThrow(new SemanticProtocolException()).given(semanticAnalysisApplicationService)
                 .analyzeOutgoing(any(), any(), any(), anyInt());
 
-        mockMvc.perform(mcpRequest(toolCallRequest("semantic_analyze_outgoing_call_graph", """
+        MvcResult result = mockMvc.perform(mcpRequest(toolCallRequest("semantic_analyze_outgoing_call_graph", """
                 {
                   "repoId":"orders",
                   "expectedRevision":"1111111111111111111111111111111111111111",
@@ -188,8 +296,12 @@ class McpServerCatalogContractTest {
                 """)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.result.isError").value(true))
-                .andExpect(jsonPath("$.result.structuredContent.errorCode").value("SEMANTIC_PROTOCOL_ERROR"))
-                .andExpect(jsonPath("$.result.structuredContent.recovery.retryable").value(true));
+                .andExpect(jsonPath("$.result.structuredContent").doesNotExist())
+                .andExpect(jsonPath("$.result.content.length()").value(1))
+                .andReturn();
+        JsonNode failure = failureContent(result);
+        assertThat(failure.path("errorCode").asText()).isEqualTo("SEMANTIC_PROTOCOL_ERROR");
+        assertThat(failure.at("/recovery/retryable").asBoolean()).isTrue();
     }
 
     @Test
@@ -202,11 +314,14 @@ class McpServerCatalogContractTest {
                         "{\"repoId\":\"orders\",\"expectedRevision\":\"1111111111111111111111111111111111111111\",\"apiPath\":\"/orders\"}")))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.result.isError").value(true))
-                .andExpect(jsonPath("$.result.structuredContent.errorCode").value("INTERNAL_ERROR"))
-                .andExpect(jsonPath("$.result.structuredContent.message").value("request failed"))
-                .andExpect(jsonPath("$.result.structuredContent.recovery.retryable").value(false))
+                .andExpect(jsonPath("$.result.structuredContent").doesNotExist())
+                .andExpect(jsonPath("$.result.content.length()").value(1))
                 .andReturn();
 
+        JsonNode failure = failureContent(result);
+        assertThat(failure.path("errorCode").asText()).isEqualTo("INTERNAL_ERROR");
+        assertThat(failure.path("message").asText()).isEqualTo("request failed");
+        assertThat(failure.at("/recovery/retryable").asBoolean()).isFalse();
         assertThat(result.getResponse().getContentAsString())
                 .doesNotContain("private integration defect")
                 .doesNotContain("INVALID_TOOL_INPUT");
@@ -225,19 +340,53 @@ class McpServerCatalogContractTest {
                 .andExpect(jsonPath("$.requestId").isNotEmpty());
     }
 
-    private org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder mcpRequest(String payload) {
+    @Test
+    void should_reject_present_origin_before_transport_and_callback_with_fixed_sanitized_error(CapturedOutput output)
+            throws Exception {
+        MvcResult result = mockMvc.perform(post("/mcp")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .accept("application/json, text/event-stream")
+                        .header("Origin", "https://private-browser.example")
+                        .header("MCP-Protocol-Version", "2025-06-18")
+                        .header(ApiTokenFilter.API_TOKEN_HEADER, TOKEN)
+                        .content("{\"privateSourceBody\":\"never-return-me\"}"))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.errorCode").value("MCP_ORIGIN_FORBIDDEN"))
+                .andExpect(jsonPath("$.message").value("Origin header is not allowed"))
+                .andReturn();
+
+        assertThat(result.getResponse().getContentAsString())
+                .doesNotContain(
+                        "private-browser.example",
+                        "never-return-me",
+                        "stackTrace",
+                        "Exception");
+        assertThat(output)
+                .contains("mcp_transport_completed")
+                .contains("observedStatus=403")
+                .doesNotContain("private-browser.example", "never-return-me")
+                .doesNotContain("mcp_tool_completed");
+    }
+
+    private MockHttpServletRequestBuilder mcpRequest(String payload) {
+        return mcpRequest(payload, "2025-06-18");
+    }
+
+    private MockHttpServletRequestBuilder mcpRequest(
+            String payload,
+            String protocolVersion) {
         return post("/mcp")
                 .contentType(MediaType.APPLICATION_JSON)
                 .accept("application/json, text/event-stream")
-                .header("MCP-Protocol-Version", "2025-06-18")
+                .header("MCP-Protocol-Version", protocolVersion)
                 .header(ApiTokenFilter.API_TOKEN_HEADER, TOKEN)
                 .content(payload);
     }
 
-    private String initializeRequest() {
+    private String initializeRequest(String protocolVersion) {
         return """
-                {"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"contract-test","version":"1"}}}
-                """;
+                {"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"%s","capabilities":{},"clientInfo":{"name":"contract-test","version":"1"}}}
+                """.formatted(protocolVersion);
     }
 
     private String toolsListRequest() {
@@ -265,14 +414,28 @@ class McpServerCatalogContractTest {
                         "{\"repoId\":\"orders\",\"expectedRevision\":\"1111111111111111111111111111111111111111\",\"apiPath\":\"/orders\"}")))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.result.isError").value(true))
-                .andExpect(jsonPath("$.result.structuredContent.errorCode").value(errorCode))
-                .andExpect(jsonPath("$.result.structuredContent.recovery.retryable").value(retryable))
+                .andExpect(jsonPath("$.result.structuredContent").doesNotExist())
+                .andExpect(jsonPath("$.result.content.length()").value(1))
                 .andReturn();
 
-        JsonNode failureContent = objectMapper.readTree(result.getResponse().getContentAsString())
-                .at("/result/structuredContent");
-        assertThat(failureContent.path("expectedRevision").asText()).isEqualTo(expectedRevision);
-        assertThat(failureContent.path("currentRevision").asText()).isEqualTo(currentRevision);
+        JsonNode failureContent = failureContent(result);
+        assertThat(failureContent.path("errorCode").asText()).isEqualTo(errorCode);
+        assertThat(failureContent.at("/recovery/retryable").asBoolean()).isEqualTo(retryable);
+        assertThat(failureContent.at("/requestIdentity/repoId").asText()).isEqualTo("orders");
+        assertThat(failureContent.at("/requestIdentity/expectedRevision").asText()).isEqualTo(expectedRevision);
+        assertThat(failureContent.at("/requestIdentity/currentRevision").asText()).isEqualTo(currentRevision);
+        if ("REPOSITORY_REVISION_MISMATCH".equals(errorCode)) {
+            assertThat(failureContent.at("/recovery/availableFollowUps/0/toolName").asText())
+                    .isEqualTo("semantic_get_repository");
+            assertThat(failureContent.at("/recovery/availableFollowUps/0/arguments/repoId").asText())
+                    .isEqualTo("orders");
+        }
+    }
+
+    private JsonNode failureContent(MvcResult result) throws Exception {
+        JsonNode response = objectMapper.readTree(result.getResponse().getContentAsString());
+        String failureJson = response.at("/result/content/0/text").asText();
+        return objectMapper.readTree(failureJson);
     }
 
     private JsonNode tools() throws Exception {
@@ -321,6 +484,16 @@ class McpServerCatalogContractTest {
         }
     }
 
+    private void collectPatterns(JsonNode node, List<String> patterns) {
+        JsonNode pattern = node.get("pattern");
+        if (pattern != null) { // cs-allow Jackson JsonNode#get signals absence with null
+            patterns.add(pattern.asText());
+        }
+        for (JsonNode child : node) {
+            collectPatterns(child, patterns);
+        }
+    }
+
     private void assertConceptInputIsAccepted(String identity) throws Exception {
         mockMvc.perform(mcpRequest(toolCallRequest("semantic_resolve_concept", """
                 {
@@ -331,7 +504,29 @@ class McpServerCatalogContractTest {
                 """.formatted(identity))))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.result.isError").value(true))
-                .andExpect(jsonPath("$.result.structuredContent.errorCode").value("REPOSITORY_NOT_READY"));
+                .andExpect(jsonPath("$.result.structuredContent").doesNotExist());
+    }
+
+    private String conceptResolveRequest(String methodName) {
+        return """
+                {
+                  "repoId":"orders",
+                  "expectedRevision":"1111111111111111111111111111111111111111",
+                  "identity":{
+                    "kind":"API_ROUTE",
+                    "target":{
+                      "sourceType":{
+                        "javaType":{"packageName":"com.example","className":"OrderController"},
+                        "sourceFile":"src/main/java/com/example/OrderController.java"
+                      },
+                      "methodName":"%s",
+                      "parameterTypes":[]
+                    },
+                    "httpVerb":"GET",
+                    "route":"/orders"
+                  }
+                }
+                """.formatted(methodName);
     }
 
     private String scheduleIdentityWithoutTriggerValue() {

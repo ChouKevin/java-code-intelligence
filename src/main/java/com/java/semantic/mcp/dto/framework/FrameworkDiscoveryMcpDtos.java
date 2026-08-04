@@ -1,6 +1,7 @@
 package com.java.semantic.mcp.dto.framework;
 
 import com.java.semantic.identity.MethodTarget;
+import com.java.semantic.mcp.dto.McpRevisionPinnedInput;
 import com.java.semantic.monitoring.MonitoringField;
 import com.java.semantic.monitoring.MonitoringMode;
 import com.java.semantic.semantic.application.RevisionBoundMethodImplementations;
@@ -28,7 +29,8 @@ public final class FrameworkDiscoveryMcpDtos {
             @Pattern(regexp = "^[0-9a-f]{40}$|^FIXTURE$") String expectedRevision,
             @MonitoringField(MonitoringMode.VALUE) @NotBlank String eventType,
             @MonitoringField(MonitoringMode.VALUE) @Min(0) Integer offset,
-            @MonitoringField(MonitoringMode.VALUE) @NotNull @Min(1) @Max(100) Integer limit) {
+            @MonitoringField(MonitoringMode.VALUE) @NotNull @Min(1) @Max(100) Integer limit)
+            implements McpRevisionPinnedInput {
     }
 
     /** event listener discovery 結果 */
@@ -42,7 +44,8 @@ public final class FrameworkDiscoveryMcpDtos {
             @Pattern(regexp = "^[a-z0-9][a-z0-9._-]{0,63}$") String repoId,
             @MonitoringField(MonitoringMode.VALUE) @NotBlank
             @Pattern(regexp = "^[0-9a-f]{40}$|^FIXTURE$") String expectedRevision,
-            @MonitoringField(MonitoringMode.NESTED) @NotNull @Valid MethodTarget declarationTarget) {
+            @MonitoringField(MonitoringMode.NESTED) @NotNull @Valid MethodTarget declarationTarget)
+            implements McpRevisionPinnedInput {
     }
 
     /** method implementation discovery 結果 */

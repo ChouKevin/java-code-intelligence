@@ -32,7 +32,7 @@ class McpTransportMonitoringFilterTest {
             properties.setApiToken("configured");
             ApiTokenFilter tokenFilter = new ApiTokenFilter(properties, new ObjectMapper());
 
-            new McpTransportMonitoringFilter().doFilter(request, response, (chainedRequest, chainedResponse) ->
+            new McpTransportMonitoringFilter("/mcp").doFilter(request, response, (chainedRequest, chainedResponse) ->
                     tokenFilter.doFilter(chainedRequest, chainedResponse, new MockFilterChain()));
 
             assertThat(response.getStatus()).isEqualTo(401);

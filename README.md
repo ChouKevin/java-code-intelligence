@@ -1,5 +1,34 @@
 # Java Semantic Service
 
+## MCP SDK validation and result contract
+
+Project contract tests cover MCP protocol versions `2025-06-18` and `2025-11-25`. The current SDK
+also accepts `2025-03-26`, but that is not a project-tested guarantee.
+
+General server-side clients must omit the `Origin` header on `/mcp`. An absent header proceeds;
+any present header is rejected before MCP transport and tool callbacks with HTTP `403 Forbidden`
+and fixed JSON `MCP_ORIGIN_FORBIDDEN` / `Origin header is not allowed`. The response never echoes
+the Origin value, request body, exception class, stack trace, or private details.
+
+The SDK owns pre-callback JSON Schema checks for structure, types, required fields, enums, numeric
+ranges, and collection bounds; those rejections are not tool execution. Strict JSON decoding,
+Jakarta validation, and cross-field validation inside the callback map to project error
+`INVALID_TOOL_INPUT`. Java-specific `\p{...}` regex patterns are not projected into MCP JSON
+Schema because other regex engines may reject them; runtime Jakarta validation remains
+authoritative.
+
+A successful tool result uses `isError=false`, places its typed output in `structuredContent`, and
+adds one short `Query completed` compatibility text without duplicating source bodies or sensitive
+content. A failure uses `isError=true`, has no `structuredContent`, and has exactly one
+`content[0].text` containing compact JSON `McpToolFailure`. The failure carries fixed
+`errorCode` / `message`, repository and revision identity when available, and
+`recovery.retryable` plus typed follow-up arguments.
+
+A revision mismatch is not automatically retryable. Its failure supplies a
+`semantic_get_repository` follow-up for the same `repoId`; after invoking that follow-up and
+accepting the current revision, the caller must explicitly resubmit the original tool call with
+the new `expectedRevision`.
+
 Java Semantic Service is a standalone Java 21 service for repository lifecycle,
 JDT LS-backed semantic analysis, structured discovery, API-route indexing, and
 bounded call-graph queries. The service is intentionally suitable for future
@@ -182,15 +211,19 @@ are deliberately absent from this catalog.
 | Situation | HTTP behavior | MCP behavior |
 | --- | --- | --- |
 | Missing or invalid token | `401` with `SEMANTIC_UNAUTHORIZED` | transport rejection, normally `401` |
-| Malformed request or missing required input | `400` with `REQUEST_INVALID` | JSON-RPC transport/input error; invalid typed arguments are `INVALID_TOOL_INPUT` |
+| Malformed JSON-RPC request | `400` with `REQUEST_INVALID` | sanitized JSON-RPC transport error |
+| JSON Schema rejection before callback | not applicable | SDK-owned JSON-RPC/tool input rejection; not monitored as callback execution |
+| Callback decoding, Jakarta, or cross-field rejection | not applicable | typed tool failure with `INVALID_TOOL_INPUT` |
 | Unknown MCP tool | not applicable | JSON-RPC `-32602` |
 | Revision changed since the query was planned | `409` with `REPOSITORY_REVISION_MISMATCH` | typed tool failure with the same semantic error category |
 | Route index absent or published for another revision | `409` with `API_ROUTE_INDEX_NOT_READY` | typed tool failure with the same semantic error category |
 | Repository or semantic engine not ready | typed `409` or `503` service error | typed tool failure; retry only after readiness is restored |
 
-`REPOSITORY_REVISION_MISMATCH` is resolved by reading the repository status and
-reissuing the query with its new `currentRevision`. Do not silently substitute
-the current revision for the caller's expected revision. For
+`REPOSITORY_REVISION_MISMATCH` is resolved by invoking the supplied
+`semantic_get_repository` follow-up for the same `repoId`, accepting its current revision, and
+explicitly reissuing the query with the new `expectedRevision`. The failure is marked
+`retryable=false`; do not silently substitute the current revision for the caller's expected
+revision. For
 `API_ROUTE_INDEX_NOT_READY`, wait for the repository analysis/index publication
 to complete and retry with the same revision only when that revision remains
 current.
@@ -217,8 +250,9 @@ service logs.
   `X-Api-Token`.
 - `REPOSITORY_NOT_READY`: run the repository lifecycle operation, verify the
   repository status, and wait for JDT LS import/readiness.
-- `REPOSITORY_REVISION_MISMATCH`: fetch the current status and replace every
-  query's `expectedRevision`; do not mix revisions in one discovery sequence.
+- `REPOSITORY_REVISION_MISMATCH`: invoke the supplied `semantic_get_repository`
+  follow-up, accept the current revision, and explicitly resubmit each query with the new
+  `expectedRevision`; do not mix revisions in one discovery sequence.
 - `API_ROUTE_INDEX_NOT_READY`: the route index has not been published for the
   requested revision. Wait for analysis/indexing, then retry against the same
   revision if it is still current.

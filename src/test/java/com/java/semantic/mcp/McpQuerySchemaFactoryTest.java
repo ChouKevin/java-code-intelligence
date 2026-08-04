@@ -3,6 +3,7 @@ package com.java.semantic.mcp;
 import com.fasterxml.jackson.annotation.JsonSubTypes;
 import com.fasterxml.jackson.annotation.JsonTypeInfo;
 import com.java.semantic.mcp.dto.framework.FrameworkDiscoveryMcpDtos;
+import com.java.semantic.mcp.dto.identity.McpJavaIdentityPayloads;
 import com.java.semantic.mcp.dto.route.ApiRouteMcpDtos;
 import jakarta.validation.Validation;
 import jakarta.validation.Validator;
@@ -31,7 +32,7 @@ class McpQuerySchemaFactoryTest {
 
     @Test
     void should_generate_closed_nested_object_schemas_with_required_and_constraint_metadata() throws Exception {
-        JsonNode schema = objectMapper.readTree(schemaFactory.generateForType(RepresentativeInput.class));
+        JsonNode schema = objectMapper.readTree(schemaFactory.generateInputSchema(RepresentativeInput.class));
 
         assertThat(schema.at("/additionalProperties").asBoolean()).isFalse();
         assertThat(schema.at("/required").toString()).contains("name", "label", "mode", "limit", "children");
@@ -51,16 +52,32 @@ class McpQuerySchemaFactoryTest {
 
     @Test
     void should_generate_polymorphic_output_schema() throws Exception {
-        JsonNode schema = objectMapper.readTree(schemaFactory.generateForType(RepresentativeOutput.class));
+        JsonNode schema = objectMapper.readTree(schemaFactory.generateOutputSchema(RepresentativeOutput.class));
 
         assertThat(schema.at("/properties/result/anyOf").isArray()).isTrue();
+        assertThat(schema.at("/required").toString()).contains("result");
+        assertThat(schema.at("/properties/result/anyOf/0/required").toString()).contains("value");
+    }
+
+    @Test
+    void should_omit_java_specific_patterns_while_retaining_portable_constraints() throws Exception {
+        JsonNode identitySchema = objectMapper.readTree(
+                schemaFactory.generateInputSchema(McpJavaIdentityPayloads.Method.class));
+        JsonNode routeSchema = objectMapper.readTree(
+                schemaFactory.generateInputSchema(ApiRouteMcpDtos.LookupInput.class));
+
+        assertThat(identitySchema.toString()).doesNotContain("javaJavaIdentifier", "javaWhitespace", "\\\\p{");
+        assertThat(routeSchema.at("/properties/repoId/pattern").asText())
+                .isEqualTo("^[a-z0-9][a-z0-9._-]{0,63}$");
+        assertThat(routeSchema.at("/properties/expectedRevision/pattern").asText())
+                .isEqualTo("^[0-9a-f]{40}$|^FIXTURE$");
     }
 
     @Test
     void should_share_optional_and_required_input_contracts_with_the_decoder() throws Exception {
-        JsonNode lookupSchema = objectMapper.readTree(schemaFactory.generateForType(ApiRouteMcpDtos.LookupInput.class));
+        JsonNode lookupSchema = objectMapper.readTree(schemaFactory.generateInputSchema(ApiRouteMcpDtos.LookupInput.class));
         JsonNode listenersSchema = objectMapper.readTree(
-                schemaFactory.generateForType(FrameworkDiscoveryMcpDtos.EventListenersInput.class));
+                schemaFactory.generateInputSchema(FrameworkDiscoveryMcpDtos.EventListenersInput.class));
         Validator validator = Validation.buildDefaultValidatorFactory().getValidator();
         StrictMcpToolInputDecoder decoder = new StrictMcpToolInputDecoder(new JsonMapper(), validator);
 
@@ -93,7 +110,7 @@ class McpQuerySchemaFactoryTest {
     private record Child(@NotBlank String value) {
     }
 
-    private record RepresentativeOutput(@NotNull Result result) {
+    private record RepresentativeOutput(Result result) {
     }
 
     @JsonTypeInfo(use = JsonTypeInfo.Id.NAME, property = "kind")
@@ -104,7 +121,7 @@ class McpQuerySchemaFactoryTest {
     private sealed interface Result permits TextResult, NumericResult {
     }
 
-    private record TextResult(@NotBlank String value) implements Result {
+    private record TextResult(String value) implements Result {
     }
 
     private record NumericResult(@Min(0) int value) implements Result {

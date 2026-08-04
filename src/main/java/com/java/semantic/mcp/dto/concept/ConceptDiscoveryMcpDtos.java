@@ -1,6 +1,7 @@
 package com.java.semantic.mcp.dto.concept;
 
 import com.java.semantic.identity.SourceTypeIdentity;
+import com.java.semantic.mcp.dto.McpRevisionPinnedInput;
 import com.java.semantic.monitoring.MonitoringField;
 import com.java.semantic.monitoring.MonitoringMode;
 import com.java.semantic.syntax.application.TypeMemberKind;
@@ -39,7 +40,8 @@ public final class ConceptDiscoveryMcpDtos {
             @MonitoringField(MonitoringMode.SIZE) @NotEmpty Set<@NotNull ConceptKind> kinds,
             @MonitoringField(MonitoringMode.VALUE) Optional<String> packagePrefix,
             @MonitoringField(MonitoringMode.VALUE) @NotNull @Min(0) Integer offset,
-            @MonitoringField(MonitoringMode.VALUE) @NotNull @Min(1) @Max(100) Integer limit) {
+            @MonitoringField(MonitoringMode.VALUE) @NotNull @Min(1) @Max(100) Integer limit)
+            implements McpRevisionPinnedInput {
     }
 
     /** concept search 結果 */
@@ -52,7 +54,8 @@ public final class ConceptDiscoveryMcpDtos {
             @Pattern(regexp = "^[a-z0-9][a-z0-9._-]{0,63}$") String repoId,
             @MonitoringField(MonitoringMode.VALUE) @NotBlank
             @Pattern(regexp = "^[0-9a-f]{40}$|^FIXTURE$") String expectedRevision,
-            @MonitoringField(MonitoringMode.NESTED) @NotNull @Valid McpConceptIdentityPayload identity) {
+            @MonitoringField(MonitoringMode.NESTED) @NotNull @Valid McpConceptIdentityPayload identity)
+            implements McpRevisionPinnedInput {
     }
 
     /** exact concept resolution 結果 */
@@ -70,7 +73,8 @@ public final class ConceptDiscoveryMcpDtos {
             @MonitoringField(MonitoringMode.SIZE) @NotEmpty Set<@NotNull TypeMemberKind> memberKinds,
             @MonitoringField(MonitoringMode.VALUE) Optional<String> namePrefix,
             @MonitoringField(MonitoringMode.VALUE) @NotNull @Min(0) Integer offset,
-            @MonitoringField(MonitoringMode.VALUE) @NotNull @Min(1) @Max(100) Integer limit) {
+            @MonitoringField(MonitoringMode.VALUE) @NotNull @Min(1) @Max(100) Integer limit)
+            implements McpRevisionPinnedInput {
     }
 
     /** type member discovery 結果 */

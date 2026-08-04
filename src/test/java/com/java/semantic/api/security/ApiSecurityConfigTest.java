@@ -32,7 +32,7 @@ class ApiSecurityConfigTest {
         FilterRegistrationBean<ApiTokenFilter> registration = config.apiTokenFilter(properties, OBJECT_MAPPER);
 
         assertThat(registration.getUrlPatterns()).containsExactly("/*");
-        assertThat(registration.getOrder()).isEqualTo(Ordered.HIGHEST_PRECEDENCE + 3);
+        assertThat(registration.getOrder()).isEqualTo(Ordered.HIGHEST_PRECEDENCE + 4);
         assertThat(registration.getFilter()).isInstanceOf(ApiTokenFilter.class);
     }
 
@@ -62,11 +62,54 @@ class ApiSecurityConfigTest {
     void should_register_mcp_monitoring_between_http_monitoring_and_token_authentication() {
         ApiSecurityConfig config = new ApiSecurityConfig();
 
-        FilterRegistrationBean<McpTransportMonitoringFilter> registration = config.mcpTransportMonitoringFilter();
+        FilterRegistrationBean<McpTransportMonitoringFilter> registration =
+                config.mcpTransportMonitoringFilter("/mcp");
 
         assertThat(registration.getUrlPatterns()).containsExactly("/*");
         assertThat(registration.getOrder()).isEqualTo(Ordered.HIGHEST_PRECEDENCE + 2);
         assertThat(registration.getFilter()).isInstanceOf(McpTransportMonitoringFilter.class);
+    }
+
+    @Test
+    void should_register_origin_rejection_before_mcp_transport_and_token_authentication() {
+        ApiSecurityConfig config = new ApiSecurityConfig();
+
+        FilterRegistrationBean<McpOriginFilter> registration = config.mcpOriginFilter("/mcp");
+
+        assertThat(registration.getUrlPatterns()).containsExactly("/*");
+        assertThat(registration.getOrder()).isEqualTo(Ordered.HIGHEST_PRECEDENCE + 3);
+        assertThat(registration.getFilter()).isInstanceOf(McpOriginFilter.class);
+    }
+
+    @Test
+    void should_apply_origin_rejection_to_the_configured_mcp_endpoint_only() throws Exception {
+        ApiSecurityConfig config = new ApiSecurityConfig();
+        McpTransportMonitoringFilter monitoringFilter = config.mcpTransportMonitoringFilter("/semantic-mcp").getFilter();
+        McpOriginFilter originFilter = config.mcpOriginFilter("/semantic-mcp").getFilter();
+        MockHttpServletRequest guardedRequest = new MockHttpServletRequest("POST", "/semantic-mcp");
+        guardedRequest.addHeader("Origin", "https://browser.example");
+        MockHttpServletResponse guardedResponse = new MockHttpServletResponse();
+        AtomicBoolean guardedDownstreamInvoked = new AtomicBoolean();
+
+        monitoringFilter.doFilter(guardedRequest, guardedResponse, (request, response) -> originFilter.doFilter(
+                request,
+                response,
+                (downstreamRequest, downstreamResponse) -> guardedDownstreamInvoked.set(true)));
+
+        MockHttpServletRequest otherRequest = new MockHttpServletRequest("POST", "/mcp");
+        otherRequest.addHeader("Origin", "https://browser.example");
+        MockHttpServletResponse otherResponse = new MockHttpServletResponse();
+        AtomicBoolean otherDownstreamInvoked = new AtomicBoolean();
+
+        monitoringFilter.doFilter(otherRequest, otherResponse, (request, response) -> originFilter.doFilter(
+                request,
+                response,
+                (downstreamRequest, downstreamResponse) -> otherDownstreamInvoked.set(true)));
+
+        assertThat(guardedResponse.getStatus()).isEqualTo(403);
+        assertThat(guardedDownstreamInvoked).isFalse();
+        assertThat(otherResponse.getStatus()).isEqualTo(200);
+        assertThat(otherDownstreamInvoked).isTrue();
     }
 
     @ParameterizedTest

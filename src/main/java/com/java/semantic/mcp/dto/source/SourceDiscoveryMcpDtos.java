@@ -1,6 +1,7 @@
 package com.java.semantic.mcp.dto.source;
 
 import com.java.semantic.identity.MethodTarget;
+import com.java.semantic.mcp.dto.McpRevisionPinnedInput;
 import com.java.semantic.monitoring.MonitoringField;
 import com.java.semantic.monitoring.MonitoringMode;
 import com.java.semantic.semantic.application.InternalSourceReferenceResult;
@@ -34,7 +35,8 @@ public final class SourceDiscoveryMcpDtos {
             @Pattern(regexp = "^[0-9a-f]{40}$|^FIXTURE$") String expectedRevision,
             @MonitoringField(MonitoringMode.NESTED) @NotNull @Valid SourceSymbolContext context,
             @MonitoringField(MonitoringMode.VALUE) @NotBlank String symbol,
-            @MonitoringField(MonitoringMode.NESTED) @NotNull Optional<@Valid SyntaxPosition> position) {
+            @MonitoringField(MonitoringMode.NESTED) @NotNull Optional<@Valid SyntaxPosition> position)
+            implements McpRevisionPinnedInput {
     }
 
     /** source symbol resolution 結果 */
@@ -50,7 +52,8 @@ public final class SourceDiscoveryMcpDtos {
             @Pattern(regexp = "^[0-9a-f]{40}$|^FIXTURE$") String expectedRevision,
             @MonitoringField(MonitoringMode.NESTED) @NotNull @Valid McpExactSourceDeclarationTargetPayload target,
             @MonitoringField(MonitoringMode.VALUE) @NotNull @Min(0) Integer offset,
-            @MonitoringField(MonitoringMode.VALUE) @NotNull @Min(1) @Max(100) Integer limit) {
+            @MonitoringField(MonitoringMode.VALUE) @NotNull @Min(1) @Max(100) Integer limit)
+            implements McpRevisionPinnedInput {
     }
 
     /** internal source reference 查詢結果 */
@@ -65,7 +68,8 @@ public final class SourceDiscoveryMcpDtos {
             @MonitoringField(MonitoringMode.VALUE) @NotBlank
             @Pattern(regexp = "^[0-9a-f]{40}$|^FIXTURE$") String expectedRevision,
             @MonitoringField(MonitoringMode.NESTED) @NotNull @Valid SourceRange location,
-            @MonitoringField(MonitoringMode.VALUE) @NotNull @Min(0) @Max(20) Integer contextLines) {
+            @MonitoringField(MonitoringMode.VALUE) @NotNull @Min(0) @Max(20) Integer contextLines)
+            implements McpRevisionPinnedInput {
     }
 
     /** bounded source segment 結果 */
@@ -85,7 +89,8 @@ public final class SourceDiscoveryMcpDtos {
             @Pattern(regexp = "^[a-z0-9][a-z0-9._-]{0,63}$") String repoId,
             @MonitoringField(MonitoringMode.VALUE) @NotBlank
             @Pattern(regexp = "^[0-9a-f]{40}$|^FIXTURE$") String expectedRevision,
-            @MonitoringField(MonitoringMode.NESTED) @NotNull @Valid MethodTarget target) {
+            @MonitoringField(MonitoringMode.NESTED) @NotNull @Valid MethodTarget target)
+            implements McpRevisionPinnedInput {
     }
 
     /** method source 結果 */
@@ -112,7 +117,8 @@ public final class SourceDiscoveryMcpDtos {
             @Pattern(regexp = "^[a-z0-9][a-z0-9._-]{0,63}$") String repoId,
             @MonitoringField(MonitoringMode.VALUE) @NotBlank
             @Pattern(regexp = "^[0-9a-f]{40}$|^FIXTURE$") String expectedRevision,
-            @MonitoringField(MonitoringMode.NESTED) @NotNull @Valid McpEvidenceIdentityPayload identity) {
+            @MonitoringField(MonitoringMode.NESTED) @NotNull @Valid McpEvidenceIdentityPayload identity)
+            implements McpRevisionPinnedInput {
     }
 
     /** evidence source 結果 */

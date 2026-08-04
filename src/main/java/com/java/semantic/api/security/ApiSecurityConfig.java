@@ -8,6 +8,7 @@ import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.Ordered;
+import org.springframework.beans.factory.annotation.Value;
 import tools.jackson.databind.ObjectMapper;
 
 /** 以 /* 註冊而非逐條列舉,新端點預設即受保護 */
@@ -34,11 +35,22 @@ public class ApiSecurityConfig {
     }
 
     @Bean
-    public FilterRegistrationBean<McpTransportMonitoringFilter> mcpTransportMonitoringFilter() {
+    public FilterRegistrationBean<McpTransportMonitoringFilter> mcpTransportMonitoringFilter(
+            @Value("${spring.ai.mcp.server.streamable-http.mcp-endpoint}") String mcpEndpoint) {
         FilterRegistrationBean<McpTransportMonitoringFilter> registration =
-                new FilterRegistrationBean<>(new McpTransportMonitoringFilter());
+                new FilterRegistrationBean<>(new McpTransportMonitoringFilter(mcpEndpoint));
         registration.addUrlPatterns("/*");
         registration.setOrder(Ordered.HIGHEST_PRECEDENCE + 2);
+        return registration;
+    }
+
+    @Bean
+    public FilterRegistrationBean<McpOriginFilter> mcpOriginFilter(
+            @Value("${spring.ai.mcp.server.streamable-http.mcp-endpoint}") String mcpEndpoint) {
+        FilterRegistrationBean<McpOriginFilter> registration =
+                new FilterRegistrationBean<>(new McpOriginFilter(mcpEndpoint));
+        registration.addUrlPatterns("/*");
+        registration.setOrder(Ordered.HIGHEST_PRECEDENCE + 3);
         return registration;
     }
 
@@ -49,7 +61,7 @@ public class ApiSecurityConfig {
         FilterRegistrationBean<ApiTokenFilter> registration =
                 new FilterRegistrationBean<>(new ApiTokenFilter(properties, objectMapper));
         registration.addUrlPatterns("/*");
-        registration.setOrder(Ordered.HIGHEST_PRECEDENCE + 3);
+        registration.setOrder(Ordered.HIGHEST_PRECEDENCE + 4);
         return registration;
     }
 }
