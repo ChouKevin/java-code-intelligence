@@ -308,6 +308,7 @@ class SemanticFacadeVerticalJdtLsIT {
     private ObjectNode discoverTarget(String repositoryId, String type, String className, String methodName)
             throws Exception {
         JsonNode entryPoints = response(mockMvc.perform(get("/v1/repositories/{repoId}/entry-points", repositoryId)
+                        .queryParam("expectedRevision", remote().revision())
                         .queryParam("types", type)
                         .header(ApiTokenFilter.API_TOKEN_HEADER, TOKEN))
                 .andExpect(status().isOk())
