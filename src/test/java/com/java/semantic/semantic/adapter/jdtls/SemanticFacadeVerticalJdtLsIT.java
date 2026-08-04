@@ -317,7 +317,7 @@ class SemanticFacadeVerticalJdtLsIT {
                 .flatMap(entryPoint -> stream(entryPoint.path("methods")))
                 .filter(candidate -> type.equals(candidate.path("type").asText()))
                 .filter(candidate -> className.equals(candidate.path("analysisTarget").path("target")
-                        .path("className").asText()))
+                        .path("sourceType").path("javaType").path("className").asText()))
                 .filter(candidate -> methodName.equals(candidate.path("analysisTarget").path("target")
                         .path("methodName").asText()))
                 .findFirst()
