@@ -1,0 +1,269 @@
+@baseUrl = http://localhost:8080
+@apiToken = {{$processEnv SEMANTIC_API_TOKEN}}
+@repoId = replace-with-repository-id
+@revision = replace-with-fixed-currentRevision
+@sourceFile = replace-with-repository-relative-java-source
+@packageName = replace.with.package
+@className = ReplaceWithSourceTypeOrOuter.Inner
+@methodName = replaceWithCanonicalMethodName
+@methodParameterTypes = []
+@fieldSymbol = replaceWithFieldName
+@localSymbol = replaceWithLocalName
+@methodSymbol = replaceWithInvokedMethodName
+@typeSymbol = replaceWithDeclaredTypeSimpleName
+@repeatedSymbol = replaceWithRepeatedSymbolName
+
+### Capture one repository revision before the sequence.
+### Copy response.currentRevision into @revision and keep it fixed for every request below.
+GET {{baseUrl}}/v1/repositories/{{repoId}}
+X-Api-Token: {{apiToken}}
+
+### Resolve a field from a canonical method context.
+POST {{baseUrl}}/v1/discovery/source-symbols/resolve
+X-Api-Token: {{apiToken}}
+Content-Type: application/json
+
+{
+  "repoId": "{{repoId}}",
+  "expectedRevision": "{{revision}}",
+  "context": {
+    "javaType": {
+      "packageName": "{{packageName}}",
+      "className": "{{className}}"
+    },
+    "sourceFile": "{{sourceFile}}",
+    "method": {
+      "name": "{{methodName}}",
+      "parameterTypes": {{methodParameterTypes}}
+    }
+  },
+  "symbol": "{{fieldSymbol}}"
+}
+
+### Resolve a local variable from the same method context.
+POST {{baseUrl}}/v1/discovery/source-symbols/resolve
+X-Api-Token: {{apiToken}}
+Content-Type: application/json
+
+{
+  "repoId": "{{repoId}}",
+  "expectedRevision": "{{revision}}",
+  "context": {
+    "javaType": {
+      "packageName": "{{packageName}}",
+      "className": "{{className}}"
+    },
+    "sourceFile": "{{sourceFile}}",
+    "method": {
+      "name": "{{methodName}}",
+      "parameterTypes": {{methodParameterTypes}}
+    }
+  },
+  "symbol": "{{localSymbol}}"
+}
+
+### Resolve a method and capture its complete GET_METHOD_SOURCE follow-up.
+POST {{baseUrl}}/v1/discovery/source-symbols/resolve
+X-Api-Token: {{apiToken}}
+Content-Type: application/json
+
+{
+  "repoId": "{{repoId}}",
+  "expectedRevision": "{{revision}}",
+  "context": {
+    "javaType": {
+      "packageName": "{{packageName}}",
+      "className": "{{className}}"
+    },
+    "sourceFile": "{{sourceFile}}",
+    "method": {
+      "name": "{{methodName}}",
+      "parameterTypes": {{methodParameterTypes}}
+    }
+  },
+  "symbol": "{{methodSymbol}}"
+}
+
+> {%
+  const method = response.body.candidates.find(candidate => candidate.kind === "METHOD");
+  const source = method?.availableFollowUps.find(followUp => followUp.operation === "GET_METHOD_SOURCE");
+  if (source) {
+    client.global.set("resolvedMethodSourceRequest", JSON.stringify(source.request));
+  }
+%}
+
+### Execute the emitted method-source request unchanged; no source body is embedded by symbol resolution.
+POST {{baseUrl}}/v1/discovery/method-source
+X-Api-Token: {{apiToken}}
+Content-Type: application/json
+
+{{resolvedMethodSourceRequest}}
+
+### Resolve a source type from type context and inspect its type-member/concept follow-ups.
+POST {{baseUrl}}/v1/discovery/source-symbols/resolve
+X-Api-Token: {{apiToken}}
+Content-Type: application/json
+
+{
+  "repoId": "{{repoId}}",
+  "expectedRevision": "{{revision}}",
+  "context": {
+    "javaType": {
+      "packageName": "{{packageName}}",
+      "className": "{{className}}"
+    },
+    "sourceFile": "{{sourceFile}}"
+  },
+  "symbol": "{{typeSymbol}}"
+}
+
+### Ambiguous type context: omit sourceFile and capture one complete SOURCE_TYPE retry.
+POST {{baseUrl}}/v1/discovery/source-symbols/resolve
+X-Api-Token: {{apiToken}}
+Content-Type: application/json
+
+{
+  "repoId": "{{repoId}}",
+  "expectedRevision": "{{revision}}",
+  "context": {
+    "javaType": {
+      "packageName": "{{packageName}}",
+      "className": "{{className}}"
+    }
+  },
+  "symbol": "{{fieldSymbol}}"
+}
+
+> {%
+  const candidate = response.body.contextCandidates.find(item => item.kind === "SOURCE_TYPE");
+  if (candidate) {
+    client.global.set("sourceTypeContextRetry", JSON.stringify(candidate.retry.request));
+  }
+%}
+
+### Execute the emitted type-context RESOLVE_SOURCE_SYMBOL retry unchanged.
+POST {{baseUrl}}/v1/discovery/source-symbols/resolve
+X-Api-Token: {{apiToken}}
+Content-Type: application/json
+
+{{sourceTypeContextRetry}}
+
+### Ambiguous overload context: omit parameterTypes and capture one complete METHOD retry.
+POST {{baseUrl}}/v1/discovery/source-symbols/resolve
+X-Api-Token: {{apiToken}}
+Content-Type: application/json
+
+{
+  "repoId": "{{repoId}}",
+  "expectedRevision": "{{revision}}",
+  "context": {
+    "javaType": {
+      "packageName": "{{packageName}}",
+      "className": "{{className}}"
+    },
+    "sourceFile": "{{sourceFile}}",
+    "method": {
+      "name": "{{methodName}}"
+    }
+  },
+  "symbol": "{{fieldSymbol}}"
+}
+
+> {%
+  const candidate = response.body.contextCandidates.find(item => item.kind === "METHOD");
+  if (candidate) {
+    client.global.set("methodContextRetry", JSON.stringify(candidate.retry.request));
+  }
+%}
+
+### Execute the emitted overload-specific retry; it contains canonical parameterTypes and no position.
+POST {{baseUrl}}/v1/discovery/source-symbols/resolve
+X-Api-Token: {{apiToken}}
+Content-Type: application/json
+
+{{methodContextRetry}}
+
+### Ambiguous occurrence: choose same-text identifiers that bind to different declarations
+### (for example parameter `foo` and field access `this.foo`) and capture one positioned retry.
+POST {{baseUrl}}/v1/discovery/source-symbols/resolve
+X-Api-Token: {{apiToken}}
+Content-Type: application/json
+
+{
+  "repoId": "{{repoId}}",
+  "expectedRevision": "{{revision}}",
+  "context": {
+    "javaType": {
+      "packageName": "{{packageName}}",
+      "className": "{{className}}"
+    },
+    "sourceFile": "{{sourceFile}}",
+    "method": {
+      "name": "{{methodName}}",
+      "parameterTypes": {{methodParameterTypes}}
+    }
+  },
+  "symbol": "{{repeatedSymbol}}"
+}
+
+> {%
+  const candidate = response.body.candidates.find(item => item.occurrenceCount > 1);
+  const retry = candidate?.availableFollowUps.find(
+    followUp => followUp.operation === "RESOLVE_SOURCE_SYMBOL");
+  if (retry) {
+    client.global.set("positionedSymbolRetry", JSON.stringify(retry.request));
+  }
+%}
+
+### Execute the emitted zero-based UTF-16 positioned retry unchanged.
+POST {{baseUrl}}/v1/discovery/source-symbols/resolve
+X-Api-Token: {{apiToken}}
+Content-Type: application/json
+
+{{positionedSymbolRetry}}
+
+### Revision mismatch: expect the existing sanitized 409 response.
+POST {{baseUrl}}/v1/discovery/source-symbols/resolve
+X-Api-Token: {{apiToken}}
+Content-Type: application/json
+
+{
+  "repoId": "{{repoId}}",
+  "expectedRevision": "0000000000000000000000000000000000000000",
+  "context": {
+    "javaType": {
+      "packageName": "{{packageName}}",
+      "className": "{{className}}"
+    },
+    "sourceFile": "{{sourceFile}}"
+  },
+  "symbol": "{{fieldSymbol}}"
+}
+
+### Closed request: expect 400 because unexpected is not an approved field.
+POST {{baseUrl}}/v1/discovery/source-symbols/resolve
+X-Api-Token: {{apiToken}}
+Content-Type: application/json
+
+{
+  "repoId": "{{repoId}}",
+  "expectedRevision": "{{revision}}",
+  "context": {
+    "javaType": {
+      "packageName": "{{packageName}}",
+      "className": "{{className}}"
+    },
+    "sourceFile": "{{sourceFile}}"
+  },
+  "symbol": "{{fieldSymbol}}",
+  "unexpected": true
+}
+
+### Manual checks:
+### - Every 200 response reports analyzedRevision={{revision}}.
+### - Every 200 response exposes the closed top-level issues array.
+### - STATIC_CONSTANT alone contains nonblank initializerSource; ordinary FIELD does not declare it.
+### - declarationRange and representativeOccurrence are zero-based UTF-16, start-inclusive/end-exclusive.
+### - A nested @className such as Outer.Inner remains unchanged in retries and identities.
+### - Context retry count is bounded by contextCandidateLimits; symbol candidates and occurrences are not paginated.
+### - source-symbol-resolution logs contain fixed-shape metadata only, never source bodies or initializer content.
