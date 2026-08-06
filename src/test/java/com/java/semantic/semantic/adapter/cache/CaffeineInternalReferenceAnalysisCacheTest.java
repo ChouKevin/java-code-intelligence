@@ -37,7 +37,7 @@ class CaffeineInternalReferenceAnalysisCacheTest {
                 5, Duration.ofMillis(40), 3);
         AtomicLong tickerNanos = new AtomicLong();
         CaffeineInternalReferenceAnalysisCache cache = new CaffeineInternalReferenceAnalysisCache(
-                properties, tickerNanos::get);
+                properties, tickerNanos::get, Runnable::run);
         InternalReferenceAnalysisCache.Key key = key("a");
         InternalReferenceAnalysis complete = analysis(InternalReferenceStatus.COMPLETE, 1);
         AtomicInteger loads = new AtomicInteger();

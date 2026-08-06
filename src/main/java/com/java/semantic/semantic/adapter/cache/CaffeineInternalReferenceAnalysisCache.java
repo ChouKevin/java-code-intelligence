@@ -10,6 +10,8 @@ import com.java.semantic.semantic.application.InternalReferenceStatus;
 
 import java.time.Duration;
 import java.util.Objects;
+import java.util.concurrent.Executor;
+import java.util.concurrent.ForkJoinPool;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
@@ -26,14 +28,21 @@ public final class CaffeineInternalReferenceAnalysisCache implements InternalRef
 
     CaffeineInternalReferenceAnalysisCache(
             InternalReferenceCacheProperties properties, Ticker ticker) {
+        this(properties, ticker, ForkJoinPool.commonPool());
+    }
+
+    CaffeineInternalReferenceAnalysisCache(
+            InternalReferenceCacheProperties properties, Ticker ticker, Executor executor) {
         InternalReferenceCacheProperties requiredProperties = Objects.requireNonNull(
                 properties, "properties is required");
         Ticker requiredTicker = Objects.requireNonNull(ticker, "ticker is required");
+        Executor requiredExecutor = Objects.requireNonNull(executor, "executor is required");
         this.maximumEntryWeight = requiredProperties.maximumEntryWeight();
         this.cache = Caffeine.newBuilder()
                 .maximumWeight(requiredProperties.maximumWeight())
                 .expireAfterAccess(requiredProperties.expireAfterAccess())
                 .ticker(requiredTicker)
+                .executor(requiredExecutor)
                 .weigher((Key ignored, InternalReferenceAnalysis analysis) -> analysis.entryWeight())
                 .build();
     }
