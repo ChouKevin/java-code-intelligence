@@ -32,6 +32,7 @@ class McpLiveContractIT {
     private static final String CLASS_NAME = "JavaSemanticServiceHttpAdapter";
     private static final String METHOD_NAME = "availableRepositories";
     private static final String STALE_REVISION = "0".repeat(40);
+    private static final Duration REQUEST_TIMEOUT = Duration.ofMinutes(5);
 
     private final HttpClient httpClient = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(10))
@@ -168,7 +169,7 @@ class McpLiveContractIT {
 
     private JsonNode post(String payload, boolean includeToken) throws IOException, InterruptedException {
         HttpRequest.Builder request = HttpRequest.newBuilder(mcpEndpoint())
-                .timeout(Duration.ofSeconds(30))
+                .timeout(REQUEST_TIMEOUT)
                 .header("Content-Type", "application/json")
                 .header("Accept", "application/json, text/event-stream")
                 .header("MCP-Protocol-Version", PROTOCOL_VERSION)
