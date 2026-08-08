@@ -22,7 +22,7 @@ import java.util.Objects;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Verifies the deployed stateless MCP surface against the pinned Java System Agent revision. */
-@EnabledIfEnvironmentVariable(named = "M5_SEMANTIC_BASE_URL", matches = ".+")
+@EnabledIfEnvironmentVariable(named = "M6_SEMANTIC_BASE_URL", matches = ".+")
 class McpLiveContractIT {
 
     private static final String PROTOCOL_VERSION = "2025-06-18";
@@ -67,7 +67,7 @@ class McpLiveContractIT {
 
     @Test
     void should_execute_the_revision_pinned_mcp_query_subset() throws Exception {
-        String revision = requiredEnvironment("M5_EXPECTED_REVISION");
+        String revision = requiredEnvironment("M6_AGENT_EXPECTED_REVISION");
 
         JsonNode repositories = successfulToolCall("semantic_list_repositories", objectMapper.createObjectNode());
         assertThat(repositories.path("repositories").isArray()).isTrue();
@@ -112,7 +112,7 @@ class McpLiveContractIT {
         assertThat(staleFailure.path("errorCode").asText()).isEqualTo("REPOSITORY_REVISION_MISMATCH");
         assertThat(staleFailure.at("/requestIdentity/expectedRevision").asText()).isEqualTo(STALE_REVISION);
         assertThat(staleFailure.at("/requestIdentity/currentRevision").asText())
-                .isEqualTo(requiredEnvironment("M5_EXPECTED_REVISION"));
+                .isEqualTo(requiredEnvironment("M6_AGENT_EXPECTED_REVISION"));
         assertThat(staleFailure.at("/recovery/availableFollowUps/0/toolName").asText())
                 .isEqualTo("semantic_get_repository");
         assertThat(staleFailure.at("/recovery/availableFollowUps/0/arguments/repoId").asText())
@@ -121,7 +121,7 @@ class McpLiveContractIT {
 
     @Test
     void should_reject_a_blank_api_path_without_returning_structured_content() throws Exception {
-        String revision = requiredEnvironment("M5_EXPECTED_REVISION");
+        String revision = requiredEnvironment("M6_AGENT_EXPECTED_REVISION");
         ObjectNode arguments = routeArguments(revision, null);
         arguments.put("apiPath", "");
 
@@ -175,7 +175,7 @@ class McpLiveContractIT {
                 .header("MCP-Protocol-Version", PROTOCOL_VERSION)
                 .POST(HttpRequest.BodyPublishers.ofString(payload));
         if (includeToken) {
-            request.header("X-Api-Token", requiredEnvironment("M5_SEMANTIC_API_TOKEN"));
+            request.header("X-Api-Token", requiredEnvironment("M6_SEMANTIC_API_TOKEN"));
         }
         HttpResponse<String> response = httpClient.send(request.build(), HttpResponse.BodyHandlers.ofString());
         int expectedStatus = includeToken ? 200 : 401;
@@ -184,7 +184,7 @@ class McpLiveContractIT {
     }
 
     private URI mcpEndpoint() {
-        String baseUrl = requiredEnvironment("M5_SEMANTIC_BASE_URL");
+        String baseUrl = requiredEnvironment("M6_SEMANTIC_BASE_URL");
         String normalizedBaseUrl = baseUrl.endsWith("/")
                 ? baseUrl.substring(0, baseUrl.length() - 1)
                 : baseUrl;
@@ -196,7 +196,7 @@ class McpLiveContractIT {
         params.put("protocolVersion", PROTOCOL_VERSION);
         params.set("capabilities", objectMapper.createObjectNode());
         ObjectNode clientInfo = params.putObject("clientInfo");
-        clientInfo.put("name", "m5-live-contract");
+        clientInfo.put("name", "m6-live-contract");
         clientInfo.put("version", "1");
         return jsonRpcRequest(1, "initialize", params);
     }
@@ -362,6 +362,6 @@ class McpLiveContractIT {
     }
 
     private String repositoryId() {
-        return requiredEnvironment("M5_REPO_ID");
+        return requiredEnvironment("M6_AGENT_REPO_ID");
     }
 }
