@@ -30,7 +30,9 @@ class McpLiveContractIT {
             "src/main/java/com/java/system/agent/codeintelligence/semantic/JavaSemanticServiceHttpAdapter.java";
     private static final String PACKAGE_NAME = "com.java.system.agent.codeintelligence.semantic";
     private static final String CLASS_NAME = "JavaSemanticServiceHttpAdapter";
-    private static final String METHOD_NAME = "availableRepositories";
+    private static final String METHOD_NAME = "currentRevisionInternal";
+    private static final String METHOD_PARAMETER_TYPE =
+            "com.java.system.agent.answering.domain.scope.RepositoryId";
     private static final String STALE_REVISION = "0".repeat(40);
     private static final Duration REQUEST_TIMEOUT = Duration.ofMinutes(5);
 
@@ -257,7 +259,7 @@ class McpLiveContractIT {
         javaType.put("className", CLASS_NAME);
         sourceType.put("sourceFile", SOURCE_FILE);
         target.put("methodName", METHOD_NAME);
-        target.putArray("parameterTypes");
+        target.putArray("parameterTypes").add(METHOD_PARAMETER_TYPE);
         return arguments;
     }
 
