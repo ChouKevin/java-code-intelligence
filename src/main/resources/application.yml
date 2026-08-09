@@ -61,6 +61,14 @@ semantic:
   git-username: ${GIT_USERNAME:}
   git-token: ${GIT_TOKEN:}
 
+springdoc:
+  api-docs:
+    enabled: false
+  swagger-ui:
+    path: /swagger-ui.html
+    url: /openapi/semantic-api-v1.yaml
+    disable-swagger-default-url: true
+
 logging:
   level:
     org.springframework.web.servlet.mvc.method.annotation.ExceptionHandlerExceptionResolver: INFO

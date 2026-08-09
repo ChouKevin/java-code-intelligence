@@ -77,10 +77,39 @@ class ApiTokenFilterTest {
         assertThat(result.filterChain().getRequest()).isNotNull();
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {
+            "/openapi/semantic-api-v1.yaml",
+            "/swagger-ui.html",
+            "/swagger-ui/swagger-ui-bundle.js",
+            "/v3/api-docs/swagger-config"
+    })
+    void should_allow_exact_documentation_paths_without_a_token(String path) throws Exception {
+        FilterResult result = invokeWithoutToken(filterWith(CONFIGURED_TOKEN), "GET", path);
+
+        assertThat(result.response().getStatus()).isEqualTo(200);
+        assertThat(result.filterChain().getRequest()).isNotNull();
+    }
+
     @Test
     void should_reject_when_path_only_starts_with_the_health_path() throws Exception {
         FilterResult result = invokeWithoutToken(
                 filterWith(CONFIGURED_TOKEN), "GET", "/actuator/health-extra");
+
+        assertThat(result.response().getStatus()).isEqualTo(401);
+        assertThat(result.filterChain().getRequest()).isNull();
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+            "/openapi/semantic-api-v1.yaml-extra",
+            "/swagger-ui.html-extra",
+            "/swagger-ui-extra/index.html",
+            "/v3/api-docs",
+            "/v3/api-docs/swagger-config-extra"
+    })
+    void should_reject_documentation_lookalikes_without_a_token(String path) throws Exception {
+        FilterResult result = invokeWithoutToken(filterWith(CONFIGURED_TOKEN), "GET", path);
 
         assertThat(result.response().getStatus()).isEqualTo(401);
         assertThat(result.filterChain().getRequest()).isNull();
