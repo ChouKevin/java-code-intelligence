@@ -17,10 +17,11 @@ import java.util.List;
 import java.util.Objects;
 
 /**
- * 以共用權杖保護所有端點
+ * 以共用權杖保護端點,僅公開固定的文件和健康檢查路徑
  *
  * 與 agent 的 ApiWriteProtectionFilter 不同:此處不豁免 GET
- * 本服務的讀取端點會回傳私有原始碼的衍生資訊,不存在無害的讀取
+ * 本服務的讀取端點會回傳私有原始碼的衍生資訊,不存在無害的讀取;
+ * Swagger UI 僅讀取版本化的靜態 OpenAPI 契約
  */
 public class ApiTokenFilter extends OncePerRequestFilter {
 
@@ -28,6 +29,10 @@ public class ApiTokenFilter extends OncePerRequestFilter {
     public static final String AUTH_ERROR_CODE_ATTRIBUTE = "semantic.apiAuthenticationErrorCode";
 
     private static final String HEALTH_PATH = "/actuator/health";
+    private static final String OPENAPI_CONTRACT_PATH = "/openapi/semantic-api-v1.yaml";
+    private static final String SWAGGER_UI_ENTRY_PATH = "/swagger-ui.html";
+    private static final String SWAGGER_UI_PATH_PREFIX = "/swagger-ui/";
+    private static final String SWAGGER_CONFIG_PATH = "/v3/api-docs/swagger-config";
     private final ApiSecurityProperties properties;
     private final ObjectMapper objectMapper;
 
@@ -36,10 +41,15 @@ public class ApiTokenFilter extends OncePerRequestFilter {
         this.objectMapper = objectMapper;
     }
 
-    /** health 供 compose 探測,是唯一豁免項 */
+    /** Health and the fixed documentation surface are public; every other path remains fail-closed. */
     @Override
     protected boolean shouldNotFilter(HttpServletRequest request) {
-        return HEALTH_PATH.equals(request.getRequestURI());
+        String requestUri = request.getRequestURI();
+        return HEALTH_PATH.equals(requestUri)
+                || OPENAPI_CONTRACT_PATH.equals(requestUri)
+                || SWAGGER_UI_ENTRY_PATH.equals(requestUri)
+                || requestUri.startsWith(SWAGGER_UI_PATH_PREFIX)
+                || SWAGGER_CONFIG_PATH.equals(requestUri);
     }
 
     @Override
