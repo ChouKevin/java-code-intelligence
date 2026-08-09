@@ -34,6 +34,7 @@ import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 import java.util.Comparator;
 import java.util.List;
@@ -42,6 +43,11 @@ import java.util.Objects;
 /** Maps typed semantic failures to the fixed, client-safe error envelope. */
 @RestControllerAdvice
 public class ApiExceptionHandler {
+
+    @ExceptionHandler(NoResourceFoundException.class)
+    public ResponseEntity<Void> resourceNotFound() {
+        return ResponseEntity.notFound().build();
+    }
 
     @ExceptionHandler(InvalidRepositoryIdException.class)
     public ResponseEntity<ApiErrorResponse> invalidRepositoryId(HttpServletRequest request) {
