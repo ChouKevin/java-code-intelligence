@@ -111,7 +111,7 @@ public final class JdtLsReadinessProbe {
     /**
      * 挑一個專案自己的型別名稱作為 sanity query
      *
-     * spike 是以 fixture 自己的 OrderCrudService 判定匯入完成;沒有可用型別就無從驗證
+     * 優先選取專案 src/main/java 下排序第一個 Java 型別，找不到時回退掃描整個 workspace
      */
     static Optional<String> sanityQuery(Path workspaceRoot) {
         return firstTypeName(workspaceRoot.resolve(MAIN_SOURCE_ROOT))
