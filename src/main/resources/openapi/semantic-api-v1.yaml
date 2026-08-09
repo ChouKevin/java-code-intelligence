@@ -1578,6 +1578,7 @@ components:
           minLength: 2
           maxLength: 128
           pattern: '.*\S.*'
+          description: Structured names are split at Java identifier and separator boundaries before matching.
         matchMode:
           $ref: '#/components/schemas/ConceptMatchMode'
     ConceptKind:
@@ -1600,6 +1601,7 @@ components:
         - ENUM_CONSTANT
     ConceptMatchMode:
       type: string
+      description: TOKEN_EXACT requires every derived token to match exactly; TOKEN_PREFIX requires every derived token to match a token prefix.
       enum:
         - TOKEN_EXACT
         - TOKEN_PREFIX

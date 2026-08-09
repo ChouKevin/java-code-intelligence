@@ -6,6 +6,7 @@ import com.java.semantic.identity.SourceTypeIdentity;
 import com.java.semantic.syntax.domain.SourceMemberIdentity.TypeMember;
 import com.java.semantic.syntax.application.concept.DeclarationConceptIdentity.FieldConceptIdentity;
 import com.java.semantic.syntax.application.concept.DeclarationConceptIdentity.MethodConceptIdentity;
+import com.java.semantic.syntax.application.concept.DeclarationConceptIdentity.TypeConceptIdentity;
 import com.java.semantic.syntax.application.concept.EntryPointConceptIdentity.MqDestinationConceptIdentity;
 import com.java.semantic.syntax.application.concept.EntryPointConceptIdentity.ScheduleConceptIdentity;
 import com.java.semantic.syntax.application.concept.MapperConceptIdentity.MapperStatementConceptIdentity;
@@ -51,6 +52,21 @@ class ConceptSearchMatcherTest {
                 .isTrue();
         assertThat(matches(entry, new ConceptSearchTerm("cre", ConceptMatchMode.TOKEN_PREFIX)))
                 .isTrue();
+    }
+
+    @Test
+    void should_match_each_token_from_a_structured_exact_identifier() {
+        ConceptCatalogEntry entry = entry(new TypeConceptIdentity(new SourceTypeIdentity(
+                new JavaTypeIdentity("com.acme.order", "OrderWorkflow"),
+                "src/main/java/com/acme/order/OrderWorkflow.java")));
+        ConceptCatalogEntry partialMatch = entry(new TypeConceptIdentity(new SourceTypeIdentity(
+                new JavaTypeIdentity("com.acme.order", "OrderService"),
+                "src/main/java/com/acme/order/OrderService.java")));
+
+        assertThat(matches(entry, new ConceptSearchTerm("OrderWorkflow", ConceptMatchMode.TOKEN_EXACT)))
+                .isTrue();
+        assertThat(matches(partialMatch, new ConceptSearchTerm("OrderWorkflow", ConceptMatchMode.TOKEN_EXACT)))
+                .isFalse();
     }
 
     @Test

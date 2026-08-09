@@ -1,7 +1,7 @@
 package com.java.semantic.syntax.application.concept;
 
-import java.util.Locale;
 import java.util.Objects;
+import java.util.Set;
 
 import org.springframework.util.Assert;
 import org.springframework.util.StringUtils;
@@ -27,6 +27,8 @@ public record ConceptSearchTerm(String value, ConceptMatchMode matchMode) {
         }
         Assert.isTrue(value.length() >= MINIMUM_LENGTH && value.length() <= MAXIMUM_LENGTH,
                 "term length must be between 2 and 128 characters");
-        value = value.toLowerCase(Locale.ROOT);
+        Set<String> tokens = ConceptSearchTokenizer.tokenizeSearchTerm(value);
+        Assert.notEmpty(tokens, "term must contain at least one searchable token");
+        value = String.join(" ", tokens);
     }
 }

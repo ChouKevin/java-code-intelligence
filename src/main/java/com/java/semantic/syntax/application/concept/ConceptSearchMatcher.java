@@ -2,6 +2,7 @@ package com.java.semantic.syntax.application.concept;
 
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 
 /** 以 AND 語意比對已投影的結構化概念搜尋 token */
 public final class ConceptSearchMatcher {
@@ -14,9 +15,11 @@ public final class ConceptSearchMatcher {
     }
 
     private boolean matchesTerm(ConceptSearchDocument document, ConceptSearchTerm term) {
+        Set<String> termTokens = ConceptSearchTokenizer.tokenizeSearchTerm(term.value());
         return switch (term.matchMode()) {
-            case TOKEN_EXACT -> document.tokens().contains(term.value());
-            case TOKEN_PREFIX -> document.tokens().stream().anyMatch(token -> token.startsWith(term.value()));
+            case TOKEN_EXACT -> termTokens.stream().allMatch(document.tokens()::contains);
+            case TOKEN_PREFIX -> termTokens.stream()
+                    .allMatch(termToken -> document.tokens().stream().anyMatch(token -> token.startsWith(termToken)));
         };
     }
 }

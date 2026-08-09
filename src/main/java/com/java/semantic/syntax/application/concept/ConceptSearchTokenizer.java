@@ -1,5 +1,6 @@
 package com.java.semantic.syntax.application.concept;
 
+import java.util.Collections;
 import java.util.LinkedHashSet;
 import java.util.Locale;
 import java.util.Objects;
@@ -19,6 +20,12 @@ public final class ConceptSearchTokenizer {
         String value = Objects.requireNonNull(structuredValue, "structuredValue is required")
                 .replace("<unresolved>", " ")
                 .replaceAll("(?<![\\p{L}\\p{N}])ALL(?![\\p{L}\\p{N}])", " ");
+        return tokenizeSearchTerm(value);
+    }
+
+    /** 將一個查詢值依相同的識別名稱邊界拆成固定 token，保留合法的 ALL/unresolved 名稱 */
+    public static Set<String> tokenizeSearchTerm(String searchTerm) {
+        String value = Objects.requireNonNull(searchTerm, "searchTerm is required");
         String boundaries = value
                 .replaceAll("(?<=[\\p{Ll}\\p{Nd}])(?=\\p{Lu})", " ")
                 .replaceAll("(?<=[\\p{Lu}])(?=\\p{Lu}\\p{Ll})", " ");
@@ -29,6 +36,6 @@ public final class ConceptSearchTokenizer {
                 tokens.add(fragment.toLowerCase(Locale.ROOT));
             }
         }
-        return Set.copyOf(tokens);
+        return Collections.unmodifiableSet(tokens);
     }
 }
