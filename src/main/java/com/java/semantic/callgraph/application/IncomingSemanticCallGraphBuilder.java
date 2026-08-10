@@ -633,7 +633,8 @@ public final class IncomingSemanticCallGraphBuilder {
                     relationship.expression(),
                     relationship.strategy(),
                     relationship.evidence(),
-                    relationship.evidenceSourceIdentities()));
+                    relationship.evidenceSourceIdentities(),
+                    relationship.declarationTarget()));
         }
 
         private CallSiteRange callSite(MethodTarget caller, SemanticRange range) {

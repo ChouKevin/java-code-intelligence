@@ -604,6 +604,8 @@ class SemanticCallGraphBuilderTest {
 
         assertThat(fragment.edges()).singleElement().extracting(edge -> edge.resolutionStrategy())
                 .isEqualTo(com.java.semantic.callgraph.domain.ResolutionStrategy.SPRING_SINGLE_IMPLEMENTATION);
+        assertThat(fragment.edges()).singleElement().satisfies(edge ->
+                assertThat(edge.declarationTarget()).contains(declarationTarget));
         assertThat(fragment.nodes()).filteredOn(node -> node.target().filter(implementationTarget::equals).isPresent())
                 .hasSize(1);
     }

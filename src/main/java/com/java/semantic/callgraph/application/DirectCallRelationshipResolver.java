@@ -320,7 +320,9 @@ public final class DirectCallRelationshipResolver {
                 callSite,
                 expression,
                 selected.strategy(),
-                evidence);
+                evidence,
+                List.of(),
+                Optional.of(declarationTarget));
     }
 
     private SyntaxInvocation hierarchyInvocation(

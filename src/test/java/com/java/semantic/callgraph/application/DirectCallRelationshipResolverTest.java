@@ -340,6 +340,7 @@ class DirectCallRelationshipResolverTest {
                 .orElseThrow();
         assertThat(hierarchyRelationship.status()).isEqualTo(DirectCallRelationship.Status.LOCAL);
         assertThat(hierarchyRelationship.target()).contains(fastTarget);
+        assertThat(hierarchyRelationship.declarationTarget()).contains(interfaceTarget);
         assertThat(hierarchyRelationship.strategy()).isEqualTo(ResolutionStrategy.SPRING_BEAN_BY_QUALIFIER);
     }
 

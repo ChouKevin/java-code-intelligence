@@ -31,8 +31,9 @@ import com.java.semantic.syntax.domain.SyntaxRange;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
-import java.util.Objects;
 import java.util.List;
+import java.util.Objects;
+import java.util.stream.Stream;
 
 /** Maps the domain-only normalized fragment through the API-owned Task 3 response contract. */
 @Component
@@ -127,6 +128,12 @@ public final class AnalysisResponseMapper {
     }
 
     private GraphEdgeResponse edge(RepositoryId repositoryId, RepositoryRevision revision, GraphEdge edge) {
+        List<DiscoveryFollowUp> followUps = Stream.concat(
+                        edge.evidenceSourceIdentities().stream()
+                                .map(identity -> followUpFactory.forEvidenceSource(repositoryId, revision, identity)),
+                        edge.declarationTarget().stream()
+                                .map(target -> followUpFactory.forMethodImplementations(repositoryId, revision, target)))
+                .toList();
         return new GraphEdgeResponse(
                 edge.callerNodeId().value(),
                 edge.calleeNodeId().value(),
@@ -135,8 +142,7 @@ public final class AnalysisResponseMapper {
                 resolutionStrategy(edge.resolutionStrategy()),
                 ResolutionStrategyPartition.categoryOf(edge.resolutionStrategy()).name(),
                 edge.evidence(),
-                edge.evidenceSourceIdentities().stream()
-                        .map(identity -> followUpFactory.forEvidenceSource(repositoryId, revision, identity))
+                followUps.stream()
                         .map(followUpMapper::followUp)
                         .toList());
     }

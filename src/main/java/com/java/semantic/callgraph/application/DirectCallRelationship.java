@@ -64,6 +64,26 @@ record DirectCallRelationship(
             ResolutionStrategy strategy,
             List<String> evidence,
             List<MapperStatementIdentity> evidenceSourceIdentities) {
+        return local(
+                target,
+                semanticMethod,
+                callSite,
+                expression,
+                strategy,
+                evidence,
+                evidenceSourceIdentities,
+                Optional.empty());
+    }
+
+    static DirectCallRelationship local(
+            MethodTarget target,
+            SemanticMethod semanticMethod,
+            SemanticRange callSite,
+            String expression,
+            ResolutionStrategy strategy,
+            List<String> evidence,
+            List<MapperStatementIdentity> evidenceSourceIdentities,
+            Optional<MethodTarget> declarationTarget) {
         return new DirectCallRelationship(
                 Status.LOCAL,
                 Optional.of(Objects.requireNonNull(target, "target is required")),
@@ -76,7 +96,7 @@ record DirectCallRelationship(
                 evidenceSourceIdentities,
                 List.of(),
                 Optional.empty(),
-                Optional.empty());
+                declarationTarget);
     }
 
     static DirectCallRelationship external(
@@ -163,7 +183,6 @@ record DirectCallRelationship(
                 Assert.isTrue(!externalSymbol.isPresent(), "local externalSymbol is forbidden");
                 Assert.isTrue(CollectionUtils.isEmpty(candidates), "local candidates are forbidden");
                 Assert.isTrue(!invocation.isPresent(), "local invocation is forbidden");
-                Assert.isTrue(!declarationTarget.isPresent(), "local declarationTarget is forbidden");
             }
             case EXTERNAL -> {
                 Assert.isTrue(!target.isPresent(), "external target is forbidden");

@@ -519,7 +519,14 @@ public final class SemanticCallGraphBuilder {
                 return;
             }
             edges.add(new GraphEdge(
-                    callerId, callee, range, relationship.expression(), strategy, evidence, evidenceSourceIdentities));
+                    callerId,
+                    callee,
+                    range,
+                    relationship.expression(),
+                    strategy,
+                    evidence,
+                    evidenceSourceIdentities,
+                    relationship.declarationTarget()));
         }
 
         private CallSiteRange callSite(MethodTarget caller, SemanticRange range) {

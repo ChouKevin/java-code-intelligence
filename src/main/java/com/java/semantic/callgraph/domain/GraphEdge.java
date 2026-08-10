@@ -1,10 +1,12 @@
 package com.java.semantic.callgraph.domain;
 
+import com.java.semantic.identity.MethodTarget;
+import com.java.semantic.syntax.domain.MapperStatementIdentity;
 import org.springframework.util.Assert;
 
 import java.util.List;
 import java.util.Objects;
-import com.java.semantic.syntax.domain.MapperStatementIdentity;
+import java.util.Optional;
 
 /** One proven caller-to-callee edge for a concrete source call site. */
 public record GraphEdge(
@@ -14,7 +16,8 @@ public record GraphEdge(
         String callExpression,
         ResolutionStrategy resolutionStrategy,
         List<String> evidence,
-        List<MapperStatementIdentity> evidenceSourceIdentities) {
+        List<MapperStatementIdentity> evidenceSourceIdentities,
+        Optional<MethodTarget> declarationTarget) {
 
     public GraphEdge {
         callerNodeId = Objects.requireNonNull(callerNodeId, "callerNodeId is required");
@@ -25,5 +28,25 @@ public record GraphEdge(
         evidence = List.copyOf(Objects.requireNonNull(evidence, "evidence is required"));
         evidenceSourceIdentities = List.copyOf(Objects.requireNonNull(
                 evidenceSourceIdentities, "evidenceSourceIdentities is required"));
+        declarationTarget = Objects.requireNonNull(declarationTarget, "declarationTarget is required");
+    }
+
+    public GraphEdge(
+            CallNodeId callerNodeId,
+            CallNodeId calleeNodeId,
+            CallSiteRange callSite,
+            String callExpression,
+            ResolutionStrategy resolutionStrategy,
+            List<String> evidence,
+            List<MapperStatementIdentity> evidenceSourceIdentities) {
+        this(
+                callerNodeId,
+                calleeNodeId,
+                callSite,
+                callExpression,
+                resolutionStrategy,
+                evidence,
+                evidenceSourceIdentities,
+                Optional.empty());
     }
 }
