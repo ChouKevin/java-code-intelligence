@@ -64,6 +64,19 @@ Never use a written simple name as proof of a resolved or source-bound identity.
 3. The Agent must not infer a field name or construct either the owning-field request or the exact-field reference request from the question.
 4. A type-member query can also return field `orders`, `writtenType: Order[][]`, and `resolvedType: com.example.order.Order[][]`. Its resolved-type follow-up searches the exact use-site type; the agent must not remove `[][]` and pretend the field is scalar.
 
+## Interface-dispatch implementation authority
+
+For interface dispatch, the implementation-discovery authority is preserved as a chain:
+
+```text
+abstract declaration
+  -> selected concrete graph target
+  -> graph edge retains the abstract declaration
+  -> provider-issued DISCOVER_METHOD_IMPLEMENTATIONS follow-up
+```
+
+The graph may select a concrete target to explain the dispatch, but the follow-up retains the abstract declaration that authorizes implementation discovery. Ordinary concrete calls do not synthesize `DISCOVER_METHOD_IMPLEMENTATIONS` follow-ups.
+
 ## Deferred concept identity cleanup
 
 `TypeUsageConceptIdentity` still stores a resolved use-site type string. R3 will inventory concept-family equality and ordering, replace string-composed type identity with typed identity where protocol-safe, and define any required migration explicitly. R2 does not introduce a second compatibility representation.

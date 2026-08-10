@@ -17,8 +17,10 @@ import com.java.semantic.identity.JavaTypeIdentity;
 import com.java.semantic.identity.MethodTarget;
 import com.java.semantic.identity.SourceTypeIdentity;
 import com.java.semantic.mcp.dto.callgraph.CallGraphMcpDtos;
+import com.java.semantic.mcp.dto.framework.FrameworkDiscoveryMcpDtos;
 import com.java.semantic.mcp.dto.identity.McpMapperIdentityPayloads;
 import com.java.semantic.mcp.dto.source.McpEvidenceIdentityPayload;
+import com.java.semantic.mcp.dto.source.SourceDiscoveryMcpDtos;
 import com.java.semantic.repository.domain.RepositoryId;
 import com.java.semantic.repository.domain.RepositoryRevision;
 import com.java.semantic.syntax.domain.MapperEvidenceRepresentation;
@@ -31,6 +33,7 @@ import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.groups.Tuple.tuple;
 
 /** {@link CallGraphMcpMapper} 的 MCP adapter edge 合約測試 */
 class CallGraphMcpMapperTest {
@@ -42,6 +45,12 @@ class CallGraphMcpMapperTest {
     private static final MethodTarget TARGET = new MethodTarget(
             new SourceTypeIdentity(new JavaTypeIdentity("com.example", "OrderMapper"),
                     "src/main/java/com/example/OrderMapper.java"),
+            "findOrder",
+            List.of("String"));
+
+    private static final MethodTarget DECLARATION_TARGET = new MethodTarget(
+            new SourceTypeIdentity(new JavaTypeIdentity("com.example", "OrderPort"),
+                    "src/main/java/com/example/OrderPort.java"),
             "findOrder",
             List.of("String"));
 
@@ -58,7 +67,8 @@ class CallGraphMcpMapperTest {
         List<GraphEdge> edges = List.of(
                 new GraphEdge(
                         new CallNodeId("caller"), new CallNodeId("mapper"), new CallSiteRange(TARGET.sourceFile(), 4, 2, 4, 12),
-                        "findOrder(id)", ResolutionStrategy.MYBATIS_MAPPER, List.of("mapper evidence"), List.of(identity)),
+                        "findOrder(id)", ResolutionStrategy.MYBATIS_MAPPER, List.of("mapper evidence"), List.of(identity),
+                        Optional.of(DECLARATION_TARGET)),
                 new GraphEdge(
                         new CallNodeId("caller"), new CallNodeId("local"), new CallSiteRange(TARGET.sourceFile(), 5, 2, 5, 12),
                         "localCall()", ResolutionStrategy.JDT_CALL_HIERARCHY, List.of("jdt evidence"), List.of()));
@@ -87,13 +97,20 @@ class CallGraphMcpMapperTest {
         assertThat(mapperEdge.callExpression()).isEqualTo("findOrder(id)");
         assertThat(mapperEdge.resolutionStrategy()).isEqualTo(ResolutionStrategy.MYBATIS_MAPPER);
         assertThat(mapperEdge.evidence()).containsExactly("mapper evidence");
-        assertThat(mapperEdge.availableFollowUps()).singleElement().satisfies(followUp -> {
-            assertThat(followUp.toolName()).isEqualTo("semantic_get_evidence_source");
-            assertThat(followUp.arguments().repoId()).isEqualTo(REPOSITORY_ID.value());
-            assertThat(followUp.arguments().expectedRevision()).isEqualTo(REVISION.value());
-            assertThat(followUp.arguments().identity()).isEqualTo(new McpEvidenceIdentityPayload.MapperStatement(
-                    McpMapperIdentityPayloads.toPayload(identity)));
-        });
+        assertThat(mapperEdge.availableFollowUps())
+                .extracting(followUp -> followUp.toolName(), followUp -> followUp.arguments())
+                .containsExactly(
+                        tuple(
+                                "semantic_get_evidence_source",
+                                new SourceDiscoveryMcpDtos.EvidenceSourceInput(
+                                        REPOSITORY_ID.value(),
+                                        REVISION.value(),
+                                        new McpEvidenceIdentityPayload.MapperStatement(
+                                                McpMapperIdentityPayloads.toPayload(identity)))),
+                        tuple(
+                                "semantic_discover_method_implementations",
+                                new FrameworkDiscoveryMcpDtos.MethodImplementationsInput(
+                                        REPOSITORY_ID.value(), REVISION.value(), DECLARATION_TARGET)));
         CallGraphMcpDtos.GraphEdgeOutput nonMapperEdge = result.edges().get(1);
         assertThat(nonMapperEdge.callerNodeId()).isEqualTo(new CallNodeId("caller"));
         assertThat(nonMapperEdge.calleeNodeId()).isEqualTo(new CallNodeId("local"));

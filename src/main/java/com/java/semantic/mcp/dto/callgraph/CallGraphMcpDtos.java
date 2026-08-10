@@ -1,5 +1,9 @@
 package com.java.semantic.mcp.dto.callgraph;
 
+import com.fasterxml.jackson.annotation.JsonSubTypes;
+import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.annotation.JsonTypeId;
+import com.fasterxml.jackson.annotation.JsonTypeInfo;
 import com.java.semantic.callgraph.domain.CallNodeId;
 import com.java.semantic.callgraph.domain.CallSiteRange;
 import com.java.semantic.callgraph.domain.GraphAnalysisStatus;
@@ -8,12 +12,13 @@ import com.java.semantic.callgraph.domain.GraphNode;
 import com.java.semantic.callgraph.domain.GraphTraversal;
 import com.java.semantic.callgraph.domain.GraphWarning;
 import com.java.semantic.callgraph.domain.ResolutionStrategy;
-import com.java.semantic.repository.domain.RepositoryRevision;
-import com.java.semantic.mcp.dto.source.SourceDiscoveryMcpDtos;
 import com.java.semantic.identity.MethodTarget;
 import com.java.semantic.mcp.dto.McpRevisionPinnedInput;
+import com.java.semantic.mcp.dto.framework.FrameworkDiscoveryMcpDtos;
+import com.java.semantic.mcp.dto.source.SourceDiscoveryMcpDtos;
 import com.java.semantic.monitoring.MonitoringField;
 import com.java.semantic.monitoring.MonitoringMode;
+import com.java.semantic.repository.domain.RepositoryRevision;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
@@ -69,12 +74,54 @@ public final class CallGraphMcpDtos {
             @MonitoringField(MonitoringMode.OMIT) String callExpression,
             @MonitoringField(MonitoringMode.NESTED) ResolutionStrategy resolutionStrategy,
             @MonitoringField(MonitoringMode.NESTED) List<String> evidence,
-            @MonitoringField(MonitoringMode.NESTED) List<EvidenceSourceFollowUp> availableFollowUps) {
+            @MonitoringField(MonitoringMode.NESTED) List<GraphFollowUp> availableFollowUps) {
+    }
+
+    /** 可直接執行的 graph navigation follow-up。 */
+    @JsonTypeInfo(
+            use = JsonTypeInfo.Id.NAME,
+            include = JsonTypeInfo.As.PROPERTY,
+            property = "toolName")
+    @JsonSubTypes({
+            @JsonSubTypes.Type(value = EvidenceSourceFollowUp.class, name = "semantic_get_evidence_source"),
+            @JsonSubTypes.Type(
+                    value = MethodImplementationsFollowUp.class,
+                    name = "semantic_discover_method_implementations")
+    })
+    public sealed interface GraphFollowUp permits EvidenceSourceFollowUp, MethodImplementationsFollowUp {
+
+        String toolName();
+
+        McpRevisionPinnedInput arguments();
     }
 
     /** 可直接執行的 evidence source follow-up */
     public record EvidenceSourceFollowUp(
-            @MonitoringField(MonitoringMode.VALUE) String toolName,
-            @MonitoringField(MonitoringMode.NESTED) SourceDiscoveryMcpDtos.EvidenceSourceInput arguments) {
+            @JsonIgnore @JsonTypeId @MonitoringField(MonitoringMode.VALUE) String toolName,
+            @MonitoringField(MonitoringMode.NESTED) SourceDiscoveryMcpDtos.EvidenceSourceInput arguments)
+            implements GraphFollowUp {
+
+        private static final String TOOL_NAME = "semantic_get_evidence_source";
+
+        public EvidenceSourceFollowUp {
+            if (!TOOL_NAME.equals(toolName)) {
+                throw new IllegalArgumentException("toolName must be " + TOOL_NAME);
+            }
+        }
+    }
+
+    /** 可直接執行的方法實作探索 follow-up */
+    public record MethodImplementationsFollowUp(
+            @JsonIgnore @JsonTypeId @MonitoringField(MonitoringMode.VALUE) String toolName,
+            @MonitoringField(MonitoringMode.NESTED) FrameworkDiscoveryMcpDtos.MethodImplementationsInput arguments)
+            implements GraphFollowUp {
+
+        private static final String TOOL_NAME = "semantic_discover_method_implementations";
+
+        public MethodImplementationsFollowUp {
+            if (!TOOL_NAME.equals(toolName)) {
+                throw new IllegalArgumentException("toolName must be " + TOOL_NAME);
+            }
+        }
     }
 }

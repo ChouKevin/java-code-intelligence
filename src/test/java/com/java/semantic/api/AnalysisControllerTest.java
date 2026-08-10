@@ -73,6 +73,12 @@ class AnalysisControllerTest {
                         "src/main/java/com/acme/CheckoutService.java"),
                 "checkout",
                 List.of());
+    private static final MethodTarget DECLARATION_TARGET = new MethodTarget(
+                new SourceTypeIdentity(
+                        new JavaTypeIdentity("com.acme", "OrderPort"),
+                        "src/main/java/com/acme/OrderPort.java"),
+                "place",
+                List.of("com.acme.OrderRequest"));
     private static final MethodTarget AMBIGUOUS_ALPHA = new MethodTarget(
                 new SourceTypeIdentity(
                         new JavaTypeIdentity("com.acme", "AlphaOrderService"),
@@ -175,6 +181,26 @@ class AnalysisControllerTest {
                 .andExpect(jsonPath("$.edges[0].callSite.range.start.character").value(3))
                 .andExpect(jsonPath("$.edges[0].callSite.range.end.line").value(12))
                 .andExpect(jsonPath("$.edges[0].callSite.range.end.character").value(15))
+                .andExpect(jsonPath("$.edges[0].availableFollowUps[0].operation")
+                        .value("DISCOVER_METHOD_IMPLEMENTATIONS"))
+                .andExpect(jsonPath("$.edges[0].availableFollowUps[0].api.method").value("POST"))
+                .andExpect(jsonPath("$.edges[0].availableFollowUps[0].api.path")
+                        .value("/v1/discovery/method-implementations"))
+                .andExpect(jsonPath("$.edges[0].availableFollowUps[0].api.operationId")
+                        .value("discoverMethodImplementations"))
+                .andExpect(jsonPath("$.edges[0].availableFollowUps[0].request.repoId").value("orders"))
+                .andExpect(jsonPath("$.edges[0].availableFollowUps[0].request.expectedRevision")
+                        .value(REVISION.value()))
+                .andExpect(jsonPath("$.edges[0].availableFollowUps[0].request.declarationTarget.sourceType.sourceFile")
+                        .value(DECLARATION_TARGET.sourceFile()))
+                .andExpect(jsonPath("$.edges[0].availableFollowUps[0].request.declarationTarget.sourceType.javaType.packageName")
+                        .value(DECLARATION_TARGET.packageName()))
+                .andExpect(jsonPath("$.edges[0].availableFollowUps[0].request.declarationTarget.sourceType.javaType.className")
+                        .value(DECLARATION_TARGET.className()))
+                .andExpect(jsonPath("$.edges[0].availableFollowUps[0].request.declarationTarget.methodName")
+                        .value(DECLARATION_TARGET.methodName()))
+                .andExpect(jsonPath("$.edges[0].availableFollowUps[0].request.declarationTarget.parameterTypes[0]")
+                        .value("com.acme.OrderRequest"))
                 .andExpect(jsonPath("$.warnings[0].code").value("DESCENDANT_CALL_AMBIGUOUS"))
                 .andExpect(jsonPath("$.warnings[0].candidates[0].sourceType.sourceFile")
                         .value(AMBIGUOUS_ALPHA.sourceFile()))
@@ -415,7 +441,8 @@ class AnalysisControllerTest {
                         "place(orderId)",
                         ResolutionStrategy.JDT_CALL_HIERARCHY,
                         List.of("incoming-call-hierarchy"),
-                        List.of())),
+                        List.of(),
+                        Optional.of(DECLARATION_TARGET))),
                 List.of(new GraphWarning(
                         "DESCENDANT_CALL_AMBIGUOUS",
                         "multiple exact caller targets",

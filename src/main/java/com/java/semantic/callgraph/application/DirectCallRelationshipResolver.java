@@ -12,6 +12,7 @@ import com.java.semantic.semantic.domain.SemanticCallSite;
 import com.java.semantic.semantic.domain.SemanticMethod;
 import com.java.semantic.semantic.domain.SemanticPosition;
 import com.java.semantic.semantic.domain.SemanticRange;
+import com.java.semantic.syntax.domain.MethodImplementationEligibilityPolicy;
 import com.java.semantic.syntax.domain.SourceMethodMetadata;
 import com.java.semantic.syntax.domain.SourceTypeKind;
 import com.java.semantic.syntax.domain.SourceTypeMetadata;
@@ -279,6 +280,7 @@ public final class DirectCallRelationshipResolver {
             MethodTarget declarationTarget,
             SyntaxInvocation invocation,
             List<String> evidence) {
+        Optional<MethodTarget> eligibleDeclarationTarget = eligibleDeclarationTarget(index, declarationTarget);
         List<ImplementationCandidate> candidates = new ArrayList<>();
         if (index.method(declarationTarget).map(SourceMethodMetadata::executableDeclaration).orElse(false)) {
             candidates.add(candidate(index, declarationMethod, declarationTarget));
@@ -306,7 +308,7 @@ public final class DirectCallRelationshipResolver {
         if (CollectionUtils.isEmpty(distinct)) {
             return DirectCallRelationship.unresolved(
                     callSite, expression, strategy,
-                    Optional.of(invocation), Optional.of(declarationTarget));
+                    Optional.of(invocation), eligibleDeclarationTarget);
         }
         ImplementationSelection selection = implementationSelector.select(invocation, distinct);
         if (selection instanceof ImplementationSelection.Ambiguous ambiguous) {
@@ -320,7 +322,17 @@ public final class DirectCallRelationshipResolver {
                 callSite,
                 expression,
                 selected.strategy(),
-                evidence);
+                evidence,
+                List.of(),
+                eligibleDeclarationTarget);
+    }
+
+    private Optional<MethodTarget> eligibleDeclarationTarget(
+            RepositorySyntaxIndex index, MethodTarget declarationTarget) {
+        return index.sourceType(declarationTarget)
+                .flatMap(ownerType -> index.method(declarationTarget)
+                        .filter(declaration -> MethodImplementationEligibilityPolicy.isEligible(ownerType, declaration))
+                        .map(ignored -> declarationTarget));
     }
 
     private SyntaxInvocation hierarchyInvocation(

@@ -113,6 +113,27 @@ class DirectCallRelationshipResolverTest {
     }
 
     @Test
+    void should_not_expose_implementation_authority_for_an_executable_interface_default() {
+        MethodTarget callerTarget = target("Root", "run");
+        MethodTarget defaultTarget = target("Port", "handle");
+        SemanticMethod caller = outgoingMethod(callerTarget, 0);
+        SemanticMethod defaultMethod = outgoingMethod(defaultTarget, 10);
+        FakeSemanticService semantic = new FakeSemanticService().outgoing(caller, resolvedCall(defaultMethod, 2));
+
+        List<DirectCallRelationship> relationships = resolver(semantic).resolveAll(
+                SNAPSHOT,
+                index(type(callerTarget), executableInterfaceType(defaultTarget)),
+                callerTarget,
+                caller);
+
+        assertThat(relationships).singleElement().satisfies(relationship -> {
+            assertThat(relationship.status()).isEqualTo(DirectCallRelationship.Status.LOCAL);
+            assertThat(relationship.target()).contains(defaultTarget);
+            assertThat(relationship.declarationTarget()).isNotPresent();
+        });
+    }
+
+    @Test
     void should_carry_invocation_without_declaration_target_when_definition_fallback_stays_unresolved() {
         MethodTarget callerTarget = target("Root", "run");
         SemanticMethod caller = outgoingMethod(callerTarget, 0);
@@ -340,6 +361,7 @@ class DirectCallRelationshipResolverTest {
                 .orElseThrow();
         assertThat(hierarchyRelationship.status()).isEqualTo(DirectCallRelationship.Status.LOCAL);
         assertThat(hierarchyRelationship.target()).contains(fastTarget);
+        assertThat(hierarchyRelationship.declarationTarget()).contains(interfaceTarget);
         assertThat(hierarchyRelationship.strategy()).isEqualTo(ResolutionStrategy.SPRING_BEAN_BY_QUALIFIER);
     }
 
@@ -469,6 +491,10 @@ class DirectCallRelationshipResolverTest {
 
     private static SourceTypeMetadata interfaceType(MethodTarget target) {
         return type(target, SourceTypeKind.INTERFACE, false, List.of(), List.of());
+    }
+
+    private static SourceTypeMetadata executableInterfaceType(MethodTarget target) {
+        return type(target, SourceTypeKind.INTERFACE, true, List.of(), List.of());
     }
 
     private static SourceTypeMetadata qualifiedType(MethodTarget target, String qualifier) {

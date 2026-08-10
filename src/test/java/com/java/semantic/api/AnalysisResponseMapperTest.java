@@ -43,6 +43,12 @@ class AnalysisResponseMapperTest {
                         "src/main/java/com/acme/OrderService.java"),
                 "place",
                 List.of());
+    private static final MethodTarget DECLARATION_TARGET = new MethodTarget(
+            new SourceTypeIdentity(
+                    new JavaTypeIdentity("com.acme", "OrderPort"),
+                    "src/main/java/com/acme/OrderPort.java"),
+            "place",
+            List.of("com.acme.OrderRequest"));
 
     private final AnalysisResponseMapper mapper = new AnalysisResponseMapper(
             sourceLocationMapper(),
@@ -140,7 +146,7 @@ class AnalysisResponseMapperTest {
     }
 
     @Test
-    void should_map_xml_mapper_edge_to_one_typed_evidence_source_follow_up() {
+    void should_map_xml_mapper_edge_to_evidence_and_implementation_follow_ups_in_order() {
         CallNodeId root = new CallNodeId("node-root");
         MapperStatementIdentity identity = new MapperStatementIdentity(
                 new MapperStatementKey("com.acme.OrderMapper", "findOrder"),
@@ -161,21 +167,32 @@ class AnalysisResponseMapperTest {
                         NodeTraversalState.BUDGET_CUTOFF,
                         DispatchKind.SYNCHRONOUS,
                         Optional.empty())),
-                List.of(new GraphEdge(
-                        root,
-                        new CallNodeId("node-mapper"),
-                        new CallSiteRange(TARGET.sourceFile(), 12, 3, 12, 15),
-                        "findOrder(orderId)",
-                        ResolutionStrategy.MYBATIS_MAPPER,
-                        List.of("mapper evidence"),
-                        List.of(identity))),
+                List.of(
+                        new GraphEdge(
+                                root,
+                                new CallNodeId("node-mapper"),
+                                new CallSiteRange(TARGET.sourceFile(), 12, 3, 12, 15),
+                                "findOrder(orderId)",
+                                ResolutionStrategy.MYBATIS_MAPPER,
+                                List.of("mapper evidence"),
+                                List.of(identity),
+                                Optional.of(DECLARATION_TARGET)),
+                        new GraphEdge(
+                                root,
+                                new CallNodeId("node-concrete"),
+                                new CallSiteRange(TARGET.sourceFile(), 13, 3, 13, 15),
+                                "place(orderId)",
+                                ResolutionStrategy.JDT_CALL_HIERARCHY,
+                                List.of(),
+                                List.of())),
                 List.of(),
                 List.of());
 
         OutgoingCallGraphResponse response = mapper.toResponse(RepositoryId.of("orders"), fragment);
 
-        assertThat(response.edges()).singleElement().satisfies(edge -> {
-            assertThat(edge.availableFollowUps()).singleElement().satisfies(followUp -> {
+        assertThat(response.edges()).hasSize(2);
+        assertThat(response.edges().getFirst().availableFollowUps()).hasSize(2);
+        assertThat(response.edges().getFirst().availableFollowUps().getFirst()).satisfies(followUp -> {
                 assertThat(followUp.operation()).isEqualTo("GET_EVIDENCE_SOURCE");
                 assertThat(followUp.api().method()).isEqualTo("POST");
                 assertThat(followUp.api().path()).isEqualTo("/v1/discovery/evidence-source");
@@ -195,8 +212,21 @@ class AnalysisResponseMapperTest {
                                 3,
                                 "MAPPER_XML_ELEMENT")),
                         Optional.empty()));
-            });
         });
+        assertThat(response.edges().getFirst().availableFollowUps().get(1)).satisfies(followUp -> {
+            assertThat(followUp.operation()).isEqualTo("DISCOVER_METHOD_IMPLEMENTATIONS");
+            assertThat(followUp.api().method()).isEqualTo("POST");
+            assertThat(followUp.api().path()).isEqualTo("/v1/discovery/method-implementations");
+            assertThat(followUp.api().operationId()).isEqualTo("discoverMethodImplementations");
+            assertThat(followUp.request())
+                    .isInstanceOf(DiscoveryFollowUpResponse.DiscoverMethodImplementationsRequestResponse.class);
+            DiscoveryFollowUpResponse.DiscoverMethodImplementationsRequestResponse request =
+                    (DiscoveryFollowUpResponse.DiscoverMethodImplementationsRequestResponse) followUp.request();
+            assertThat(request.repoId()).isEqualTo("orders");
+            assertThat(request.expectedRevision()).isEqualTo(fragment.analyzedRevision().value());
+            assertThat(request.declarationTarget()).isEqualTo(JavaSourceIdentityHttpMapper.toPayload(DECLARATION_TARGET));
+        });
+        assertThat(response.edges().get(1).availableFollowUps()).isEmpty();
     }
 
     @Test
