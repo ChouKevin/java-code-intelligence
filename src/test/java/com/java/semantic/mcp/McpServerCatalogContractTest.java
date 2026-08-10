@@ -1,6 +1,11 @@
 package com.java.semantic.mcp;
 
 import com.java.semantic.api.security.ApiTokenFilter;
+import com.java.semantic.identity.JavaTypeIdentity;
+import com.java.semantic.identity.MethodTarget;
+import com.java.semantic.identity.SourceTypeIdentity;
+import com.java.semantic.mcp.dto.callgraph.CallGraphMcpDtos;
+import com.java.semantic.mcp.dto.framework.FrameworkDiscoveryMcpDtos;
 import com.java.semantic.semantic.application.SemanticAnalysisApplicationService;
 import com.java.semantic.semantic.domain.SemanticProtocolException;
 import com.java.semantic.syntax.application.concept.ConceptDiscoveryApplicationService;
@@ -240,6 +245,36 @@ class McpServerCatalogContractTest {
     }
 
     @Test
+    void should_publish_closed_graph_follow_up_schema_variants() throws Exception {
+        JsonNode outputSchema = tool(tools(), "semantic_analyze_outgoing_call_graph").path("outputSchema");
+        List<JsonNode> edgeSchemas = schemaOwners(outputSchema, "availableFollowUps");
+
+        assertThat(edgeSchemas).hasSize(1);
+        JsonNode branches = edgeSchemas.getFirst().at("/properties/availableFollowUps/items/anyOf");
+        assertThat(branches).hasSize(2);
+        assertGraphFollowUpBranch(branches, "semantic_get_evidence_source", "identity");
+        assertGraphFollowUpBranch(branches, "semantic_discover_method_implementations", "declarationTarget");
+
+        MethodTarget declarationTarget = new MethodTarget(
+                new SourceTypeIdentity(
+                        new JavaTypeIdentity("com.example", "OrderPort"),
+                        "src/main/java/com/example/OrderPort.java"),
+                "findOrder",
+                List.of("String"));
+        CallGraphMcpDtos.GraphFollowUp followUp = new CallGraphMcpDtos.MethodImplementationsFollowUp(
+                "semantic_discover_method_implementations",
+                new FrameworkDiscoveryMcpDtos.MethodImplementationsInput("orders", "FIXTURE", declarationTarget));
+        String serialized = objectMapper.writeValueAsString(followUp);
+        JsonNode serializedFollowUp = objectMapper.readTree(serialized);
+
+        assertThat(serialized.split("\"toolName\"", -1)).hasSize(2);
+        assertThat(serializedFollowUp.size()).isEqualTo(2);
+        assertThat(serializedFollowUp.path("toolName").asText())
+                .isEqualTo("semantic_discover_method_implementations");
+        assertThat(serializedFollowUp.at("/arguments/declarationTarget/methodName").asText()).isEqualTo("findOrder");
+    }
+
+    @Test
     void should_serialize_nullable_output_components_as_explicit_nulls() throws Exception {
         given(repositoryApplicationService.status(RepositoryId.of("orders"))).willReturn(new RepositoryStatus(
                 RepositoryId.of("orders"),
@@ -466,6 +501,21 @@ class McpServerCatalogContractTest {
         assertThat(owners).allSatisfy(owner -> assertThat(owner.path("required"))
                 .extracting(JsonNode::asText)
                 .contains(propertyName));
+    }
+
+    private void assertGraphFollowUpBranch(JsonNode branches, String toolName, String targetProperty) {
+        JsonNode branch = branches.valueStream()
+                .filter(candidate -> toolName.equals(candidate.at("/properties/toolName/const").asText()))
+                .findFirst()
+                .orElseThrow();
+
+        assertThat(branch.path("additionalProperties").asBoolean()).isFalse();
+        assertThat(branch.path("required")).extracting(JsonNode::asText).containsExactlyInAnyOrder("toolName", "arguments");
+        assertThat(branch.at("/properties/toolName/const").asText()).isEqualTo(toolName);
+        assertThat(branch.at("/properties/arguments/required"))
+                .extracting(JsonNode::asText)
+                .contains("repoId", "expectedRevision", targetProperty);
+        assertThat(branch.at("/properties/arguments/properties/" + targetProperty).isMissingNode()).isFalse();
     }
 
     private List<JsonNode> schemaOwners(JsonNode schema, String propertyName) {
