@@ -136,12 +136,23 @@ class SourceSymbolResolutionApplicationServiceTest {
                 ambiguous.candidates().getFirst().availableFollowUps().getFirst().request();
         assertThat(symbolRetry.context().sourceFile()).hasValue(SOURCE_FILE);
         assertThat(symbolRetry.position()).hasValue(occurrence.range().start());
-        assertThat(resolved.candidates().getFirst().availableFollowUps())
+        List<DiscoveryFollowUp> resolvedFollowUps = resolved.candidates().getFirst().availableFollowUps();
+        assertThat(resolvedFollowUps)
                 .extracting(DiscoveryFollowUp::operation)
                 .containsExactly(
                         DiscoveryFollowUp.Operation.GET_METHOD_SOURCE,
                         DiscoveryFollowUp.Operation.ANALYZE_OUTGOING_CALL_GRAPH,
-                        DiscoveryFollowUp.Operation.ANALYZE_INCOMING_CALL_GRAPH);
+                        DiscoveryFollowUp.Operation.ANALYZE_INCOMING_CALL_GRAPH,
+                        DiscoveryFollowUp.Operation.GET_TYPE_MEMBERS);
+        DiscoveryFollowUp.GetTypeMembersRequest owningFields =
+                (DiscoveryFollowUp.GetTypeMembersRequest) resolvedFollowUps.get(3).request();
+        assertThat(owningFields.repoId()).isEqualTo(REPOSITORY_ID.value());
+        assertThat(owningFields.expectedRevision()).isEqualTo(ANALYZED.value());
+        assertThat(owningFields.sourceType()).isEqualTo(method.sourceType());
+        assertThat(owningFields.memberKinds()).containsExactly(TypeMemberKind.FIELD);
+        assertThat(owningFields.namePrefix()).isEmpty();
+        assertThat(owningFields.offset()).isZero();
+        assertThat(owningFields.limit()).isEqualTo(50);
     }
 
     private SourceSymbolResolutionQuery query(

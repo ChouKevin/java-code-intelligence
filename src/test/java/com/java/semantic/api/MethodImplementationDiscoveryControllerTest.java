@@ -119,7 +119,7 @@ class MethodImplementationDiscoveryControllerTest {
 
         JsonNode response = OBJECT_MAPPER.readTree(body);
         JsonNode followUps = response.at("/candidates/0/availableFollowUps");
-        assertThat(followUps).hasSize(3);
+        assertThat(followUps).hasSize(4);
         assertThat(followUps.get(0).path("operation").asText()).isEqualTo("GET_METHOD_SOURCE");
         assertThat(followUps.get(0).at("/api/method").asText()).isEqualTo("POST");
         assertThat(followUps.get(0).at("/api/path").asText()).isEqualTo("/v1/discovery/method-source");
@@ -127,6 +127,20 @@ class MethodImplementationDiscoveryControllerTest {
                 .isEqualTo(IMPLEMENTATION_TARGET.sourceFile());
         assertThat(followUps.get(1).path("operation").asText()).isEqualTo("ANALYZE_OUTGOING_CALL_GRAPH");
         assertThat(followUps.get(2).path("operation").asText()).isEqualTo("ANALYZE_INCOMING_CALL_GRAPH");
+        assertThat(followUps.get(3).path("operation").asText()).isEqualTo("GET_TYPE_MEMBERS");
+        assertThat(followUps.get(3).at("/api/method").asText()).isEqualTo("POST");
+        assertThat(followUps.get(3).at("/api/path").asText()).isEqualTo("/v1/discovery/type-members");
+        assertThat(followUps.get(3).at("/request/repoId").asText()).isEqualTo(REPOSITORY_ID.value());
+        assertThat(followUps.get(3).at("/request/expectedRevision").asText()).isEqualTo(ANALYZED_REVISION.value());
+        assertThat(followUps.get(3).at("/request/sourceType/sourceFile").asText())
+                .isEqualTo(IMPLEMENTATION_TARGET.sourceFile());
+        assertThat(followUps.get(3).at("/request/sourceType/javaType/packageName").asText())
+                .isEqualTo(IMPLEMENTATION_TARGET.sourceType().javaType().packageName());
+        assertThat(followUps.get(3).at("/request/sourceType/javaType/className").asText())
+                .isEqualTo(IMPLEMENTATION_TARGET.sourceType().javaType().className());
+        assertThat(followUps.get(3).at("/request/memberKinds/0").asText()).isEqualTo("FIELD");
+        assertThat(followUps.get(3).at("/request/offset").asInt()).isZero();
+        assertThat(followUps.get(3).at("/request/limit").asInt()).isEqualTo(50);
         ObjectNode comparableResponse = (ObjectNode) response.deepCopy();
         ObjectNode comparableCandidate = (ObjectNode) comparableResponse.at("/candidates/0");
         comparableCandidate.remove("availableFollowUps");
