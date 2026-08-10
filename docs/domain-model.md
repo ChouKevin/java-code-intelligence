@@ -59,10 +59,10 @@ Never use a written simple name as proof of a resolved or source-bound identity.
 
 ## Agent follow-up example
 
-1. A type-member query returns field `orders`, `writtenType: Order[][]`, and `resolvedType: com.example.order.Order[][]`.
-2. The response follow-up searches the exact resolved use-site type. The agent must not remove `[][]` and pretend the field is scalar.
-3. A source-symbol or concept result can identify the nominal element declaration `com.example.order.Order` and its repository-relative source file.
-4. The agent then uses that source-bound identity to request type members, method source, implementation discovery, or a call graph.
+1. Authority chain: method target → provider-issued `GET_TYPE_MEMBERS` for the target's source-bound owning type with `FIELD` as the only member kind → returned typed field identity → provider-issued `FIND_INTERNAL_REFERENCES` for that exact field.
+2. The method target also returns provider-issued follow-ups for method source and call graphs.
+3. The Agent must not infer a field name or construct either the owning-field request or the exact-field reference request from the question.
+4. A type-member query can also return field `orders`, `writtenType: Order[][]`, and `resolvedType: com.example.order.Order[][]`. Its resolved-type follow-up searches the exact use-site type; the agent must not remove `[][]` and pretend the field is scalar.
 
 ## Deferred concept identity cleanup
 

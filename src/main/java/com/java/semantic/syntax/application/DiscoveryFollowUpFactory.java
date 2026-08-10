@@ -94,7 +94,7 @@ public final class DiscoveryFollowUpFactory {
         };
     }
 
-    /** 建立目前已可執行的 exact source、雙向 graph 與 implementation discovery 方法請求 */
+    /** 建立目前已可執行的 exact source、雙向 call graph 與所屬欄位導航方法請求 */
     public List<DiscoveryFollowUp> forMethod(
             RepositoryId repositoryId,
             RepositoryRevision revision,
@@ -313,7 +313,17 @@ public final class DiscoveryFollowUpFactory {
                         new AnalyzeCallGraphRequest(repoId, expectedRevision, GRAPH_DEPTH, methodTarget)),
                 followUp(
                         Operation.ANALYZE_INCOMING_CALL_GRAPH,
-                        new AnalyzeCallGraphRequest(repoId, expectedRevision, GRAPH_DEPTH, methodTarget)));
+                        new AnalyzeCallGraphRequest(repoId, expectedRevision, GRAPH_DEPTH, methodTarget)),
+                followUp(
+                        Operation.GET_TYPE_MEMBERS,
+                        new GetTypeMembersRequest(
+                                repoId,
+                                expectedRevision,
+                                methodTarget.sourceType(),
+                                List.of(TypeMemberKind.FIELD),
+                                Optional.empty(),
+                                0,
+                                DEFAULT_LIMIT)));
     }
 
     /**

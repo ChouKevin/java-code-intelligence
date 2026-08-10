@@ -15,6 +15,7 @@ import com.java.semantic.syntax.application.DiscoveryFollowUp.AnalyzeCallGraphRe
 import com.java.semantic.syntax.application.DiscoveryFollowUp.DiscoverMethodImplementationsRequest;
 import com.java.semantic.syntax.application.DiscoveryFollowUp.FindInternalReferencesRequest;
 import com.java.semantic.syntax.application.DiscoveryFollowUp.GetMethodSourceRequest;
+import com.java.semantic.syntax.application.DiscoveryFollowUp.GetTypeMembersRequest;
 import com.java.semantic.syntax.application.DiscoveryFollowUp.Operation;
 import com.java.semantic.syntax.application.DiscoveryFollowUp.TypeMembersRequest;
 import com.java.semantic.syntax.domain.AnnotationEvidence;
@@ -134,7 +135,8 @@ class TypeMemberDiscoveryApplicationServiceTest {
                 .containsExactly(
                         Operation.GET_METHOD_SOURCE,
                         Operation.ANALYZE_OUTGOING_CALL_GRAPH,
-                        Operation.ANALYZE_INCOMING_CALL_GRAPH);
+                        Operation.ANALYZE_INCOMING_CALL_GRAPH,
+                        Operation.GET_TYPE_MEMBERS);
         assertThat(method.availableFollowUps()).extracting(DiscoveryFollowUp::api)
                 .containsExactly(
                         new DiscoveryFollowUp.ApiProjection(
@@ -142,7 +144,9 @@ class TypeMemberDiscoveryApplicationServiceTest {
                         new DiscoveryFollowUp.ApiProjection(
                                 "POST", "/v1/analyses/call-graphs/outgoing", "analyzeOutgoingCallGraph"),
                         new DiscoveryFollowUp.ApiProjection(
-                                "POST", "/v1/analyses/call-graphs/incoming", "analyzeIncomingCallGraph"));
+                                "POST", "/v1/analyses/call-graphs/incoming", "analyzeIncomingCallGraph"),
+                        new DiscoveryFollowUp.ApiProjection(
+                                "POST", "/v1/discovery/type-members", "discoverTypeMembers"));
         assertThat(method.availableFollowUps().getFirst().request())
                 .isEqualTo(new GetMethodSourceRequest(
                         REPOSITORY_ID.value(), REVISION.value(), method.target()));
@@ -152,6 +156,15 @@ class TypeMemberDiscoveryApplicationServiceTest {
         assertThat(method.availableFollowUps().get(2).request())
                 .isEqualTo(new AnalyzeCallGraphRequest(
                         REPOSITORY_ID.value(), REVISION.value(), 2, method.target()));
+        assertThat(method.availableFollowUps().get(3).request())
+                .isEqualTo(new GetTypeMembersRequest(
+                        REPOSITORY_ID.value(),
+                        REVISION.value(),
+                        method.target().sourceType(),
+                        List.of(TypeMemberKind.FIELD),
+                        Optional.empty(),
+                        0,
+                        50));
 
         List<FieldTypeMember> fields = first.members().stream()
                 .filter(FieldTypeMember.class::isInstance)
@@ -264,8 +277,9 @@ class TypeMemberDiscoveryApplicationServiceTest {
                         Operation.GET_METHOD_SOURCE,
                         Operation.ANALYZE_OUTGOING_CALL_GRAPH,
                         Operation.ANALYZE_INCOMING_CALL_GRAPH,
+                        Operation.GET_TYPE_MEMBERS,
                         Operation.DISCOVER_METHOD_IMPLEMENTATIONS);
-        assertThat(member.availableFollowUps().get(3).request())
+        assertThat(member.availableFollowUps().get(4).request())
                 .isEqualTo(new DiscoverMethodImplementationsRequest(
                         REPOSITORY_ID.value(), REVISION.value(), member.target()));
     }
