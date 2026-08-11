@@ -11,8 +11,12 @@ import com.java.semantic.syntax.application.concept.EntryPointConceptIdentity.Ap
 import com.java.semantic.syntax.application.concept.EntryPointConceptIdentity.ScheduleConceptIdentity;
 import com.java.semantic.syntax.application.concept.MapperConceptIdentity.MapperStatementVariantEvidenceIdentity;
 import com.java.semantic.syntax.domain.ExactSourceDeclarationTarget;
+import com.java.semantic.syntax.domain.SourceRange;
+import com.java.semantic.syntax.domain.SyntaxPosition;
+import com.java.semantic.syntax.domain.SyntaxRange;
 import jakarta.validation.Validation;
 import jakarta.validation.Validator;
+import org.assertj.core.api.ThrowableAssert.ThrowingCallable;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -20,6 +24,7 @@ import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 import tools.jackson.databind.json.JsonMapper;
 
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Stream;
@@ -90,14 +95,45 @@ class McpDiscoveryInputDecodingTest {
             assertThat(identity.declarationRange().start().line()).isZero();
             assertThat(identity.declarationRange().start().character()).isZero();
         } else {
-            assertThatThrownBy(() -> decoder.decode(
-                    internalReferenceArguments(position), SourceDiscoveryMcpDtos.InternalReferencesInput.class))
-                    .isInstanceOf(McpToolContractException.class)
-                    .satisfies(exception -> {
-                        McpToolContractException contractException = (McpToolContractException) exception;
-                        assertThat(contractException.code()).isEqualTo("INVALID_TOOL_INPUT");
-                        assertThat(contractException.getMessage()).doesNotContain("0");
-                    });
+            assertInvalidToolInput(() -> decoder.decode(
+                    internalReferenceArguments(position), SourceDiscoveryMcpDtos.InternalReferencesInput.class));
+        }
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("sourceSymbolPositionCases")
+    void should_preserve_source_symbol_position_contract(
+            String caseName,
+            Map<String, Object> position,
+            boolean accepted) {
+        if (accepted) {
+            SourceDiscoveryMcpDtos.ResolveSymbolInput input = decoder.decode(
+                    sourceSymbolArguments(position), SourceDiscoveryMcpDtos.ResolveSymbolInput.class);
+
+            assertThat(input.position()).hasValue(new SyntaxPosition(0, 0));
+        } else {
+            assertInvalidToolInput(() -> decoder.decode(
+                    sourceSymbolArguments(position), SourceDiscoveryMcpDtos.ResolveSymbolInput.class));
+        }
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("sourceSegmentLocationCases")
+    void should_preserve_source_segment_location_contract(
+            String caseName,
+            Map<String, Object> start,
+            Map<String, Object> end,
+            boolean accepted) {
+        if (accepted) {
+            SourceDiscoveryMcpDtos.SourceSegmentInput input = decoder.decode(
+                    sourceSegmentArguments(start, end), SourceDiscoveryMcpDtos.SourceSegmentInput.class);
+
+            assertThat(input.location()).isEqualTo(new SourceRange(
+                    "src/main/java/com/example/OrderService.java",
+                    new SyntaxRange(new SyntaxPosition(0, 0), new SyntaxPosition(0, 0))));
+        } else {
+            assertInvalidToolInput(() -> decoder.decode(
+                    sourceSegmentArguments(start, end), SourceDiscoveryMcpDtos.SourceSegmentInput.class));
         }
     }
 
@@ -145,6 +181,29 @@ class McpDiscoveryInputDecodingTest {
                                 "representation", "MAPPER_XML_ELEMENT")));
     }
 
+    private static Map<String, Object> sourceSymbolArguments(Map<String, Object> position) {
+        return Map.of(
+                "repoId", "orders",
+                "expectedRevision", "FIXTURE",
+                "context", Map.of(
+                        "javaType", Map.of("packageName", "com.example", "className", "OrderService"),
+                        "method", Map.of("name", "getOrder", "parameterTypes", List.of("java.lang.String"))),
+                "symbol", "order",
+                "position", position);
+    }
+
+    private static Map<String, Object> sourceSegmentArguments(
+            Map<String, Object> start,
+            Map<String, Object> end) {
+        return Map.of(
+                "repoId", "orders",
+                "expectedRevision", "FIXTURE",
+                "location", Map.of(
+                        "sourceFile", "src/main/java/com/example/OrderService.java",
+                        "range", Map.of("start", start, "end", end)),
+                "contextLines", 0);
+    }
+
     private static Map<String, Object> scheduleConceptResolveArguments() {
         return Map.of(
                 "repoId", "orders",
@@ -181,12 +240,48 @@ class McpDiscoveryInputDecodingTest {
         return Stream.of(
                 Arguments.of("missing line", Map.of("character", 0), false),
                 Arguments.of("missing character", Map.of("line", 0), false),
+                Arguments.of("null line", positionWithNull("line"), false),
+                Arguments.of("null character", positionWithNull("character"), false),
                 Arguments.of("zero position", Map.of("line", 0, "character", 0), true));
+    }
+
+    private static Stream<Arguments> sourceSymbolPositionCases() {
+        return Stream.of(
+                Arguments.of("missing line", Map.of("character", 0), false),
+                Arguments.of("missing character", Map.of("line", 0), false),
+                Arguments.of("null line", positionWithNull("line"), false),
+                Arguments.of("null character", positionWithNull("character"), false),
+                Arguments.of("zero position", Map.of("line", 0, "character", 0), true));
+    }
+
+    private static Stream<Arguments> sourceSegmentLocationCases() {
+        return Stream.of(
+                Arguments.of("missing start character", Map.of("line", 0), Map.of("line", 0, "character", 0), false),
+                Arguments.of("null end line", Map.of("line", 0, "character", 0), positionWithNull("line"), false),
+                Arguments.of("zero location", Map.of("line", 0, "character", 0), Map.of("line", 0, "character", 0), true));
+    }
+
+    private static Map<String, Object> positionWithNull(String nullComponent) {
+        Map<String, Object> position = new HashMap<>();
+        position.put("line", 0);
+        position.put("character", 0);
+        position.put(nullComponent, null);
+        return position;
     }
 
     private static Map<String, Object> syntaxRange(Map<String, Object> startPosition) {
         return Map.of(
                 "start", startPosition,
                 "end", Map.of("line", 10, "character", 11));
+    }
+
+    private static void assertInvalidToolInput(ThrowingCallable invocation) {
+        assertThatThrownBy(invocation)
+                .isInstanceOf(McpToolContractException.class)
+                .satisfies(exception -> {
+                    McpToolContractException contractException = (McpToolContractException) exception;
+                    assertThat(contractException.code()).isEqualTo("INVALID_TOOL_INPUT");
+                    assertThat(contractException.getMessage()).isEqualTo("INVALID_TOOL_INPUT");
+                });
     }
 }
