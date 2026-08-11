@@ -237,19 +237,29 @@ public final class JdtWorkspaceSession {
      * 已被淘汰選中(CLOSING)的 session 直接拒絕新請求,避免對即將終結的程序送出會逾時掛住的呼叫
      */
     public <T> T call(String operation, Function<LanguageServer, CompletableFuture<T>> request) {
+        return call(operation, requestTimeout, request);
+    }
+
+    /** 以呼叫端提供的生命週期預算送出一次 LSP 請求 */
+    <T> T call(
+            String operation,
+            Duration timeout,
+            Function<LanguageServer, CompletableFuture<T>> request) {
         Assert.hasText(operation, "operation is required");
+        Assert.notNull(timeout, "timeout is required");
+        Assert.isTrue(!timeout.isZero() && !timeout.isNegative(), "timeout must be positive");
         Assert.notNull(request, "request is required");
         try (WorkspaceActivityLease ignored = acquireActivity(WorkspaceActivityKind.REQUEST, operation)) {
             CompletableFuture<T> pending = null;
             try {
                 pending = request.apply(handle.languageServer());
-                return pending.get(requestTimeout.toMillis(), TimeUnit.MILLISECONDS);
+                return pending.get(timeout.toMillis(), TimeUnit.MILLISECONDS);
             } catch (TimeoutException exception) {
                 cancel(pending);
                 log.warn("phase=jdtls-request outcome=timeout repoId={} operation={} exceptionType={}",
                         repositoryId.value(), operation, exception.getClass().getSimpleName());
                 throw new JdtRequestTimeoutException(
-                        "JDT LS request timed out after " + requestTimeout + ": " + operation, exception);
+                        "JDT LS request timed out after " + timeout + ": " + operation, exception);
             } catch (InterruptedException exception) {
                 Thread.currentThread().interrupt();
                 cancel(pending);

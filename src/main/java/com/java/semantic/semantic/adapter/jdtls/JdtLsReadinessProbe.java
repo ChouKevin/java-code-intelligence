@@ -87,7 +87,7 @@ public final class JdtLsReadinessProbe {
         while (true) {
             requireUsable(session);
             if (client.isImportSettled() && !buildCompleted) {
-                awaitIncrementalBuild(session);
+                awaitIncrementalBuild(session, remainingImportTimeout(session, deadlineNanos));
                 buildCompleted = true;
             }
             if (buildCompleted
@@ -150,10 +150,19 @@ public final class JdtLsReadinessProbe {
         }
     }
 
-    private void awaitIncrementalBuild(JdtWorkspaceSession session) {
+    private Duration remainingImportTimeout(JdtWorkspaceSession session, long deadlineNanos) {
+        long remainingNanos = deadlineNanos - System.nanoTime();
+        if (remainingNanos <= 0) {
+            throw startupFailure(session, "import did not complete within " + importTimeout, null);
+        }
+        return Duration.ofNanos(remainingNanos);
+    }
+
+    private void awaitIncrementalBuild(JdtWorkspaceSession session, Duration timeout) {
         try {
             JdtLsBuildWorkspaceStatus status = session.call(
                     BUILD_WORKSPACE_OPERATION,
+                    timeout,
                     server -> ((JdtLsLanguageServer) server).buildWorkspace(false));
             if (Objects.isNull(status)) {
                 throw startupFailure(session, "incremental workspace build returned no status", null);

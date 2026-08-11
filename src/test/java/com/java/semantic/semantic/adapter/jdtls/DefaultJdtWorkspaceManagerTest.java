@@ -113,6 +113,19 @@ class DefaultJdtWorkspaceManagerTest {
     }
 
     @Test
+    void should_allow_the_initial_workspace_build_to_use_the_import_timeout() {
+        Fixture fixture = new Fixture(Duration.ofMillis(5));
+        fixture.languageServer().buildWorkspaceResponse(() -> CompletableFuture.supplyAsync(
+                () -> JdtLsBuildWorkspaceStatus.SUCCEED,
+                CompletableFuture.delayedExecutor(50, TimeUnit.MILLISECONDS)));
+
+        JdtWorkspaceSession session = fixture.manager().getOrStart(fixture.snapshot());
+
+        assertThat(session.status()).isEqualTo(SemanticEngineStatus.READY);
+        assertThat(fixture.languageServer().buildWorkspaceRequests()).containsExactly(false);
+    }
+
+    @Test
     void should_reject_a_failed_incremental_build() {
         assertRejectedBuildStatus(JdtLsBuildWorkspaceStatus.FAILED);
     }
