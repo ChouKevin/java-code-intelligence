@@ -60,8 +60,8 @@ public final class McpJavaIdentityPayloads {
 
     /** MCP 零基原始碼位置 */
     public record Position(
-            @MonitoringField(MonitoringMode.VALUE) @Min(0) int line,
-            @MonitoringField(MonitoringMode.VALUE) @Min(0) int character) {
+            @MonitoringField(MonitoringMode.VALUE) @NotNull @Min(0) Integer line,
+            @MonitoringField(MonitoringMode.VALUE) @NotNull @Min(0) Integer character) {
     }
 
     /** MCP 半開原始碼範圍 */

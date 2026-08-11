@@ -1,7 +1,9 @@
 package com.java.semantic.mcp;
 
 import com.java.semantic.mcp.dto.concept.ConceptDiscoveryMcpDtos;
+import com.java.semantic.mcp.dto.identity.McpJavaIdentityPayloads.SourceMember.MethodScoped;
 import com.java.semantic.mcp.dto.source.SourceDiscoveryMcpDtos;
+import com.java.semantic.mcp.dto.source.McpExactSourceDeclarationTargetPayload.Member;
 import com.java.semantic.mcp.mapper.ConceptDiscoveryMcpMapper;
 import com.java.semantic.mcp.mapper.SourceDiscoveryMcpMapper;
 import com.java.semantic.syntax.application.EvidenceSourceQuery;
@@ -13,12 +15,17 @@ import jakarta.validation.Validation;
 import jakarta.validation.Validator;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import tools.jackson.databind.json.JsonMapper;
 
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** 驗證 discovery MCP 輸入可用封閉 transport identity 解碼 */
 class McpDiscoveryInputDecodingTest {
@@ -66,6 +73,34 @@ class McpDiscoveryInputDecodingTest {
                 .isInstanceOf(MapperStatementVariantEvidenceIdentity.class);
     }
 
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("nestedPositionCases")
+    void should_preserve_missing_and_zero_nested_position_contract(
+            String caseName,
+            Map<String, Object> position,
+            boolean accepted) {
+        if (accepted) {
+            SourceDiscoveryMcpDtos.InternalReferencesInput input = decoder.decode(
+                    internalReferenceArguments(position), SourceDiscoveryMcpDtos.InternalReferencesInput.class);
+
+            assertThat(input.target()).isInstanceOf(Member.class);
+            Member target = (Member) input.target();
+            assertThat(target.identity()).isInstanceOf(MethodScoped.class);
+            MethodScoped identity = (MethodScoped) target.identity();
+            assertThat(identity.declarationRange().start().line()).isZero();
+            assertThat(identity.declarationRange().start().character()).isZero();
+        } else {
+            assertThatThrownBy(() -> decoder.decode(
+                    internalReferenceArguments(position), SourceDiscoveryMcpDtos.InternalReferencesInput.class))
+                    .isInstanceOf(McpToolContractException.class)
+                    .satisfies(exception -> {
+                        McpToolContractException contractException = (McpToolContractException) exception;
+                        assertThat(contractException.code()).isEqualTo("INVALID_TOOL_INPUT");
+                        assertThat(contractException.getMessage()).doesNotContain("0");
+                    });
+        }
+    }
+
     private static Map<String, Object> conceptResolveArguments() {
         return Map.of(
                 "repoId", "orders",
@@ -78,6 +113,10 @@ class McpDiscoveryInputDecodingTest {
     }
 
     private static Map<String, Object> internalReferenceArguments() {
+        return internalReferenceArguments(Map.of("line", 10, "character", 4));
+    }
+
+    private static Map<String, Object> internalReferenceArguments(Map<String, Object> startPosition) {
         return Map.of(
                 "repoId", "orders",
                 "expectedRevision", "FIXTURE",
@@ -86,7 +125,7 @@ class McpDiscoveryInputDecodingTest {
                         "identity", Map.of(
                                 "scope", "METHOD",
                                 "declaringMethod", methodTarget(),
-                                "declarationRange", syntaxRange(),
+                                "declarationRange", syntaxRange(startPosition),
                                 "name", "request")),
                 "offset", 0,
                 "limit", 20);
@@ -138,9 +177,16 @@ class McpDiscoveryInputDecodingTest {
                 "parameterTypes", List.of("java.lang.String"));
     }
 
-    private static Map<String, Object> syntaxRange() {
+    private static Stream<Arguments> nestedPositionCases() {
+        return Stream.of(
+                Arguments.of("missing line", Map.of("character", 0), false),
+                Arguments.of("missing character", Map.of("line", 0), false),
+                Arguments.of("zero position", Map.of("line", 0, "character", 0), true));
+    }
+
+    private static Map<String, Object> syntaxRange(Map<String, Object> startPosition) {
         return Map.of(
-                "start", Map.of("line", 10, "character", 4),
+                "start", startPosition,
                 "end", Map.of("line", 10, "character", 11));
     }
 }
