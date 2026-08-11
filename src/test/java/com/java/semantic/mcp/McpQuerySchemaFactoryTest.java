@@ -19,6 +19,7 @@ import org.junit.jupiter.api.Test;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -32,12 +33,13 @@ class McpQuerySchemaFactoryTest {
 
     @Test
     void should_generate_closed_nested_object_schemas_with_required_and_constraint_metadata() throws Exception {
-        JsonNode schema = objectMapper.readTree(schemaFactory.generateInputSchema(RepresentativeInput.class));
+        JsonNode schema = schema(schemaFactory.generateInputSchema(RepresentativeInput.class));
 
         assertThat(schema.at("/additionalProperties").asBoolean()).isFalse();
-        assertThat(schema.at("/required").toString()).contains("name", "label", "mode", "limit", "children");
+        assertThat(schema.at("/required")).extracting(JsonNode::asText)
+                .contains("name", "label", "mode", "limit", "children");
         assertThat(schema.at("/properties/name/minLength").asInt()).isEqualTo(1);
-        assertThat(schema.at("/properties/name/pattern").asText()).isEqualTo(".*\\S.*");
+        assertThat(schema.toString()).doesNotContain(".*\\S.*");
         assertThat(schema.at("/properties/mode/enum").toString()).contains("FAST", "SAFE");
         assertThat(schema.at("/properties/limit/minimum").asInt()).isEqualTo(1);
         assertThat(schema.at("/properties/limit/maximum").asInt()).isEqualTo(20);
@@ -45,26 +47,24 @@ class McpQuerySchemaFactoryTest {
         assertThat(schema.at("/properties/children/maxItems").asInt()).isEqualTo(3);
         assertThat(schema.at("/properties/code/pattern").asText()).isEqualTo("[A-Z]+");
         assertThat(schema.at("/properties/label/pattern").asText()).isEqualTo("[A-Z]+");
-        assertThat(schema.at("/properties/label/allOf/0/pattern").asText()).isEqualTo(".*\\S.*");
         assertThat(schema.at("/properties/offset/minimum").asInt()).isZero();
         assertThat(schema.at("/properties/children/items/additionalProperties").asBoolean()).isFalse();
     }
 
     @Test
     void should_generate_polymorphic_output_schema() throws Exception {
-        JsonNode schema = objectMapper.readTree(schemaFactory.generateOutputSchema(RepresentativeOutput.class));
+        JsonNode schema = schema(schemaFactory.generateOutputSchema(RepresentativeOutput.class));
 
         assertThat(schema.at("/properties/result/anyOf").isArray()).isTrue();
-        assertThat(schema.at("/required").toString()).contains("result");
-        assertThat(schema.at("/properties/result/anyOf/0/required").toString()).contains("value");
+        assertThat(schema.at("/required")).extracting(JsonNode::asText).contains("result");
+        assertThat(schema.at("/properties/result/anyOf/0/required")).extracting(JsonNode::asText).contains("value");
+        assertThat(allObjectPropertyOwnersHaveRequiredProperties(schema)).isTrue();
     }
 
     @Test
     void should_omit_java_specific_patterns_while_retaining_portable_constraints() throws Exception {
-        JsonNode identitySchema = objectMapper.readTree(
-                schemaFactory.generateInputSchema(McpJavaIdentityPayloads.Method.class));
-        JsonNode routeSchema = objectMapper.readTree(
-                schemaFactory.generateInputSchema(ApiRouteMcpDtos.LookupInput.class));
+        JsonNode identitySchema = schema(schemaFactory.generateInputSchema(McpJavaIdentityPayloads.Method.class));
+        JsonNode routeSchema = schema(schemaFactory.generateInputSchema(ApiRouteMcpDtos.LookupInput.class));
 
         assertThat(identitySchema.toString()).doesNotContain("javaJavaIdentifier", "javaWhitespace", "\\\\p{");
         assertThat(routeSchema.at("/properties/repoId/pattern").asText())
@@ -75,16 +75,18 @@ class McpQuerySchemaFactoryTest {
 
     @Test
     void should_share_optional_and_required_input_contracts_with_the_decoder() throws Exception {
-        JsonNode lookupSchema = objectMapper.readTree(schemaFactory.generateInputSchema(ApiRouteMcpDtos.LookupInput.class));
-        JsonNode listenersSchema = objectMapper.readTree(
-                schemaFactory.generateInputSchema(FrameworkDiscoveryMcpDtos.EventListenersInput.class));
+        JsonNode lookupSchema = schema(schemaFactory.generateInputSchema(ApiRouteMcpDtos.LookupInput.class));
+        JsonNode listenersSchema = schema(schemaFactory.generateInputSchema(
+                FrameworkDiscoveryMcpDtos.EventListenersInput.class));
         Validator validator = Validation.buildDefaultValidatorFactory().getValidator();
         StrictMcpToolInputDecoder decoder = new StrictMcpToolInputDecoder(new JsonMapper(), validator);
 
-        assertThat(lookupSchema.at("/required").toString()).contains("repoId", "expectedRevision", "apiPath")
+        assertThat(lookupSchema.at("/required")).extracting(JsonNode::asText)
+                .contains("repoId", "expectedRevision", "apiPath")
                 .doesNotContain("httpMethod");
-        assertThat(listenersSchema.at("/required").toString()).contains(
-                "repoId", "expectedRevision", "eventType", "limit").doesNotContain("offset");
+        assertThat(listenersSchema.at("/required")).extracting(JsonNode::asText)
+                .contains("repoId", "expectedRevision", "eventType", "limit")
+                .doesNotContain("offset");
         assertThat(decoder.decode(
                 Map.of("repoId", "orders", "expectedRevision", "FIXTURE", "apiPath", "/orders"),
                 ApiRouteMcpDtos.LookupInput.class).httpMethod()).isNull();
@@ -95,6 +97,27 @@ class McpQuerySchemaFactoryTest {
                 Map.of("repoId", "orders", "expectedRevision", "FIXTURE", "apiPath", "/orders"),
                 ApiRouteMcpDtos.SuggestInput.class))
                 .isInstanceOf(McpToolContractException.class);
+    }
+
+    private JsonNode schema(Map<String, Object> generatedSchema) {
+        return objectMapper.valueToTree(generatedSchema);
+    }
+
+    private boolean allObjectPropertyOwnersHaveRequiredProperties(JsonNode schema) {
+        List<JsonNode> propertyOwners = new ArrayList<>();
+        collectObjectPropertyOwners(schema, propertyOwners);
+        return propertyOwners.stream().allMatch(owner -> owner.path("properties").propertyStream()
+                .allMatch(property -> owner.path("required").valueStream()
+                        .anyMatch(required -> required.asText().equals(property.getKey()))));
+    }
+
+    private void collectObjectPropertyOwners(JsonNode schema, List<JsonNode> propertyOwners) {
+        if (schema.path("properties").isObject()) {
+            propertyOwners.add(schema);
+        }
+        for (JsonNode child : schema) {
+            collectObjectPropertyOwners(child, propertyOwners);
+        }
     }
 
     private record RepresentativeInput(

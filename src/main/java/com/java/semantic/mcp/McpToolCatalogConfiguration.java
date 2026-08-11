@@ -11,10 +11,8 @@ import org.springframework.boot.jackson.autoconfigure.JsonMapperBuilderCustomize
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.util.Assert;
 import tools.jackson.core.JacksonException;
 import tools.jackson.core.JsonGenerator;
-import tools.jackson.core.type.TypeReference;
 import tools.jackson.databind.SerializationContext;
 import tools.jackson.databind.ValueSerializer;
 import tools.jackson.databind.ObjectMapper;
@@ -82,12 +80,12 @@ public class McpToolCatalogConfiguration {
             McpQuerySchemaFactory schemaFactory,
             McpInvocationMonitor invocationMonitor,
             ObjectMapper objectMapper) {
-        String inputSchema = schemaFactory.generateInputSchema(registration.inputType());
-        String outputSchema = schemaFactory.generateOutputSchema(registration.outputType());
+        Map<String, Object> inputSchema = schemaFactory.generateInputSchema(registration.inputType());
+        Map<String, Object> outputSchema = schemaFactory.generateOutputSchema(registration.outputType());
         McpSchema.Tool tool = McpSchema.Tool.builder(registration.name())
                 .description(registration.description())
-                .inputSchema(schemaMap(objectMapper, inputSchema))
-                .outputSchema(schemaMap(objectMapper, outputSchema))
+                .inputSchema(inputSchema)
+                .outputSchema(outputSchema)
                 .annotations(McpSchema.ToolAnnotations.builder()
                         .readOnlyHint(true)
                         .destructiveHint(false)
@@ -99,17 +97,6 @@ public class McpToolCatalogConfiguration {
                 .callHandler((context, request) -> invoke(
                         registration, inputDecoder, invocationMonitor, objectMapper, request.arguments()))
                 .build();
-    }
-
-    private static Map<String, Object> schemaMap(ObjectMapper objectMapper, String schema) {
-        Assert.notNull(objectMapper, "objectMapper is required");
-        Assert.hasText(schema, "schema is required");
-        try {
-            return objectMapper.readValue(schema, new TypeReference<>() {
-            });
-        } catch (JacksonException exception) {
-            throw new IllegalStateException("generated MCP schema is invalid", exception);
-        }
     }
 
     @SuppressWarnings("unchecked")
