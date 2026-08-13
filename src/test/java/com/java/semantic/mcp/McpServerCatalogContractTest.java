@@ -245,6 +245,29 @@ class McpServerCatalogContractTest {
     }
 
     @Test
+    void should_publish_all_type_member_request_and_result_kinds() throws Exception {
+        JsonNode typeMembers = tool(tools(), "semantic_discover_type_members");
+        JsonNode requestKinds = typeMembers.at("/inputSchema/properties/memberKinds/items/enum");
+        JsonNode resultKinds = typeMembers.at("/outputSchema/$defs/TypeMemberKind/enum");
+        JsonNode resultVariants = typeMembers.at(
+                "/outputSchema/properties/result/properties/members/items/anyOf");
+
+        assertThat(requestKinds).extracting(JsonNode::asText).containsExactlyInAnyOrder(
+                "METHOD", "FIELD", "ENUM_CONSTANT", "RECORD_COMPONENT");
+        assertThat(resultKinds).extracting(JsonNode::asText).containsExactlyInAnyOrder(
+                "METHOD", "FIELD", "ENUM_CONSTANT", "RECORD_COMPONENT");
+        assertThat(resultVariants).hasSize(4);
+        assertThat(resultVariants).anySatisfy(
+                variant -> assertThat(variant.at("/properties/target").isMissingNode()).isFalse());
+        assertThat(resultVariants).anySatisfy(
+                variant -> assertThat(variant.at("/properties/fieldName").isMissingNode()).isFalse());
+        assertThat(resultVariants).anySatisfy(
+                variant -> assertThat(variant.at("/properties/constantName").isMissingNode()).isFalse());
+        assertThat(resultVariants).anySatisfy(
+                variant -> assertThat(variant.at("/properties/componentName").isMissingNode()).isFalse());
+    }
+
+    @Test
     void should_publish_closed_graph_follow_up_schema_variants() throws Exception {
         JsonNode outputSchema = tool(tools(), "semantic_analyze_outgoing_call_graph").path("outputSchema");
         List<JsonNode> edgeSchemas = schemaOwners(outputSchema, "availableFollowUps");

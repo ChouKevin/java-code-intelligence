@@ -1,5 +1,7 @@
 package com.java.semantic.mcp;
 
+import com.fasterxml.classmate.ResolvedType;
+import com.fasterxml.jackson.annotation.JsonSubTypes;
 import com.github.victools.jsonschema.generator.Module;
 import com.github.victools.jsonschema.generator.MemberScope;
 import com.github.victools.jsonschema.generator.Option;
@@ -17,6 +19,8 @@ import tools.jackson.core.type.TypeReference;
 import tools.jackson.databind.json.JsonMapper;
 import tools.jackson.databind.node.ObjectNode;
 
+import java.util.Arrays;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
@@ -50,6 +54,7 @@ public final class McpQuerySchemaFactory {
                         JacksonOption.RESPECT_JSONPROPERTY_REQUIRED,
                         JacksonOption.RESPECT_JSONPROPERTY_ORDER))
                 .with(new PortablePatternJakartaValidationModule())
+                .with(new SealedSubtypeModule())
                 .with(
                         Option.FORBIDDEN_ADDITIONAL_PROPERTIES_BY_DEFAULT,
                         Option.PLAIN_DEFINITION_KEYS);
@@ -125,6 +130,23 @@ public final class McpQuerySchemaFactory {
         public void applyToConfigBuilder(SchemaGeneratorConfigBuilder builder) {
             builder.forFields().withRequiredCheck(member -> !member.isFakeContainerItemScope());
             builder.forMethods().withRequiredCheck(member -> !member.isFakeContainerItemScope());
+        }
+    }
+
+    private static final class SealedSubtypeModule implements Module {
+
+        @Override
+        public void applyToConfigBuilder(SchemaGeneratorConfigBuilder builder) {
+            builder.forTypesInGeneral().withSubtypeResolver((declaredType, context) -> {
+                Class<?> erasedType = declaredType.getErasedType();
+                if (!erasedType.isSealed() || erasedType.isAnnotationPresent(JsonSubTypes.class)) {
+                    return null;
+                }
+                List<ResolvedType> subtypes = Arrays.stream(erasedType.getPermittedSubclasses())
+                        .map(subtype -> context.getTypeContext().resolveSubtype(declaredType, subtype))
+                        .toList();
+                return subtypes;
+            });
         }
     }
 }

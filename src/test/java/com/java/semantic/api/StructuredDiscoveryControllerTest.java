@@ -44,8 +44,10 @@ import com.java.semantic.syntax.application.concept.UsageConceptIdentity.TypeUsa
 import com.java.semantic.syntax.application.concept.TypeUsagePath;
 import com.java.semantic.syntax.application.DiscoveryFollowUp;
 import com.java.semantic.syntax.application.DiscoveryFollowUpFactory;
+import com.java.semantic.syntax.application.EnumConstantTypeMember;
 import com.java.semantic.syntax.application.FieldTypeMember;
 import com.java.semantic.syntax.application.MethodTypeMember;
+import com.java.semantic.syntax.application.RecordComponentTypeMember;
 import com.java.semantic.syntax.application.concept.MapperStatementMethodMapping;
 import com.java.semantic.syntax.application.TypeMemberDiscoveryApplicationService;
 import com.java.semantic.syntax.application.TypeMemberKind;
@@ -65,6 +67,9 @@ import com.java.semantic.syntax.domain.ParameterizedTypeReference;
 import com.java.semantic.syntax.domain.ScheduleTriggerKind;
 import com.java.semantic.syntax.domain.SourceExtractionOutcome;
 import com.java.semantic.syntax.domain.SourceMemberIdentity.TypeMember;
+import com.java.semantic.syntax.domain.SourceRange;
+import com.java.semantic.syntax.domain.SyntaxPosition;
+import com.java.semantic.syntax.domain.SyntaxRange;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
@@ -681,6 +686,50 @@ class StructuredDiscoveryControllerTest {
                 Optional.empty(),
                 0,
                 50));
+    }
+
+    @Test
+    void should_return_exact_enum_constant_and_record_component_wire_variants() throws Exception {
+        given(typeMemberDiscoveryApplicationService.discover(any())).willReturn(valueTypeMemberResult());
+
+        mockMvc.perform(typeMemberRequest("""
+                {
+                  "repoId":"orders",
+                  "expectedRevision":"1111111111111111111111111111111111111111",
+                  "sourceType":{"javaType":{"packageName":"com.example","className":"OrderService"},"sourceFile":"src/main/java/com/example/OrderService.java"},
+                  "memberKinds":["ENUM_CONSTANT","RECORD_COMPONENT"]
+                }
+                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.members[0].kind").value("ENUM_CONSTANT"))
+                .andExpect(jsonPath("$.members[0].identity.scope").value("TYPE"))
+                .andExpect(jsonPath("$.members[0].identity.ownerType.sourceFile").value(SOURCE_FILE))
+                .andExpect(jsonPath("$.members[0].identity.name").value("CARD"))
+                .andExpect(jsonPath("$.members[0].declarationRange.start.line").value(4))
+                .andExpect(jsonPath("$.members[0].declarationRange.start.character").value(8))
+                .andExpect(jsonPath("$.members[0].declarationRange.end.line").value(4))
+                .andExpect(jsonPath("$.members[0].declarationRange.end.character").value(12))
+                .andExpect(jsonPath("$.members[0].annotations[0]").value("Deprecated"))
+                .andExpect(jsonPath("$.members[0].availableFollowUps[0].operation")
+                        .value("FIND_INTERNAL_REFERENCES"))
+                .andExpect(jsonPath("$.members[0].availableFollowUps[0].request.target.kind").value("MEMBER"))
+                .andExpect(jsonPath("$.members[0].availableFollowUps[0].request.target.identity.scope").value("TYPE"))
+                .andExpect(jsonPath("$.members[0].availableFollowUps[0].request.target.identity.name").value("CARD"))
+                .andExpect(jsonPath("$.members[1].kind").value("RECORD_COMPONENT"))
+                .andExpect(jsonPath("$.members[1].identity.scope").value("TYPE"))
+                .andExpect(jsonPath("$.members[1].identity.name").value("reference"))
+                .andExpect(jsonPath("$.members[1].writtenType").value("String"))
+                .andExpect(jsonPath("$.members[1].resolvedType").value("java.lang.String"))
+                .andExpect(jsonPath("$.members[1].declarationRange.start.line").value(8))
+                .andExpect(jsonPath("$.members[1].declarationRange.end.character").value(31))
+                .andExpect(jsonPath("$.members[1].annotations[0]").value("NotBlank"))
+                .andExpect(jsonPath("$.members[1].availableFollowUps[0].request.target.identity.name")
+                        .value("reference"));
+
+        ArgumentCaptor<TypeMemberQuery> query = ArgumentCaptor.forClass(TypeMemberQuery.class);
+        then(typeMemberDiscoveryApplicationService).should().discover(query.capture());
+        assertThat(query.getValue().memberKinds()).containsExactlyInAnyOrder(
+                TypeMemberKind.ENUM_CONSTANT, TypeMemberKind.RECORD_COMPONENT);
     }
 
     @Test
@@ -1446,6 +1495,35 @@ class StructuredDiscoveryControllerTest {
                 new ConceptPage(0, 2, 2, 3, true),
                 coverage(),
                 List.of(nextPage));
+    }
+
+    private static TypeMemberResult valueTypeMemberResult() {
+        DiscoveryFollowUpFactory followUpFactory = new DiscoveryFollowUpFactory();
+        SourceRange enumRange = new SourceRange(SOURCE_FILE,
+                new SyntaxRange(new SyntaxPosition(4, 8), new SyntaxPosition(4, 12)));
+        SourceRange componentRange = new SourceRange(SOURCE_FILE,
+                new SyntaxRange(new SyntaxPosition(8, 14), new SyntaxPosition(8, 31)));
+        TypeMember enumIdentity = new TypeMember(sourceType(), "CARD");
+        TypeMember componentIdentity = new TypeMember(sourceType(), "reference");
+        EnumConstantTypeMember enumConstant = new EnumConstantTypeMember(
+                "CARD", enumRange, List.of("Deprecated"), List.of(followUpFactory.internalSourceReferences(
+                REPOSITORY_ID, ANALYZED_REVISION, enumIdentity)));
+        RecordComponentTypeMember recordComponent = new RecordComponentTypeMember(
+                "reference", "String", Optional.of("java.lang.String"), componentRange, List.of("NotBlank"),
+                List.of(followUpFactory.internalSourceReferences(
+                        REPOSITORY_ID, ANALYZED_REVISION, componentIdentity)));
+        return new TypeMemberResult(
+                REPOSITORY_ID,
+                ANALYZED_REVISION,
+                sourceType(),
+                SourceTypeKind.RECORD,
+                List.of(),
+                List.of(),
+                List.of(),
+                List.of(enumConstant, recordComponent),
+                new ConceptPage(0, 50, 2, 2, false),
+                completeCoverage(),
+                List.of());
     }
 
     private static List<SourceExtractionOutcome> coverage() {

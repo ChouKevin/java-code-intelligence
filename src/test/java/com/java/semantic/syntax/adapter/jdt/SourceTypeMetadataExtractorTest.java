@@ -100,6 +100,9 @@ class SourceTypeMetadataExtractorTest {
         assertThat(valueMode.members().enumConstants().getFirst().annotationEvidence())
                 .extracting(AnnotationEvidence::writtenName)
                 .containsExactly("Deprecated");
+        assertThat(valueMode.members().enumConstants().getFirst().declarationLocation()).isEqualTo(new SourceRange(
+                "src/main/java/com/example/ValueMembers.java",
+                new SyntaxRange(new SyntaxPosition(5, 4), new SyntaxPosition(5, 20))));
         assertThat(valueRecord.members().recordComponents()).extracting(component -> component.name())
                 .containsExactly("methods", "reference");
         assertThat(valueRecord.members().fields()).isEmpty();
@@ -109,6 +112,9 @@ class SourceTypeMetadataExtractorTest {
         assertThat(valueRecord.members().recordComponents().getFirst().annotationEvidence())
                 .extracting(AnnotationEvidence::writtenName)
                 .containsExactly("Deprecated");
+        assertThat(valueRecord.members().recordComponents().getFirst().declarationLocation()).isEqualTo(new SourceRange(
+                "src/main/java/com/example/ValueMembers.java",
+                new SyntaxRange(new SyntaxPosition(9, 19), new SyntaxPosition(9, 51))));
     }
 
     @ParameterizedTest(name = "{0}")

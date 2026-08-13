@@ -62,6 +62,15 @@ class McpQuerySchemaFactoryTest {
     }
 
     @Test
+    void should_generate_polymorphic_output_schema_for_unannotated_sealed_domain_types() throws Exception {
+        JsonNode schema = schema(schemaFactory.generateOutputSchema(DomainOutput.class));
+        JsonNode branches = schema.at("/properties/result/anyOf");
+
+        assertThat(branches).hasSize(2);
+        assertThat(branches.toString()).contains("text", "number");
+    }
+
+    @Test
     void should_omit_java_specific_patterns_while_retaining_portable_constraints() throws Exception {
         JsonNode identitySchema = schema(schemaFactory.generateInputSchema(McpJavaIdentityPayloads.Method.class));
         JsonNode routeSchema = schema(schemaFactory.generateInputSchema(ApiRouteMcpDtos.LookupInput.class));
@@ -148,6 +157,18 @@ class McpQuerySchemaFactoryTest {
     }
 
     private record NumericResult(@Min(0) int value) implements Result {
+    }
+
+    private record DomainOutput(DomainResult result) {
+    }
+
+    private sealed interface DomainResult permits DomainTextResult, DomainNumericResult {
+    }
+
+    private record DomainTextResult(String text) implements DomainResult {
+    }
+
+    private record DomainNumericResult(@Min(0) int number) implements DomainResult {
     }
 
     private enum Mode {
