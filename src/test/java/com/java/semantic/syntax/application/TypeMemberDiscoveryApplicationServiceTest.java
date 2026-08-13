@@ -25,6 +25,9 @@ import com.java.semantic.syntax.domain.SourceTypeMetadata;
 import com.java.semantic.syntax.domain.SourceFieldMetadata;
 import com.java.semantic.syntax.domain.SourceMemberIdentity;
 import com.java.semantic.syntax.domain.SourceMethodMetadata;
+import com.java.semantic.syntax.domain.SourceEnumConstantMetadata;
+import com.java.semantic.syntax.domain.SourceRecordComponentMetadata;
+import com.java.semantic.syntax.domain.SourceTypeMembers;
 import com.java.semantic.syntax.domain.SourceTypeKind;
 import com.java.semantic.syntax.domain.MethodTargetResolution;
 import com.java.semantic.syntax.domain.RepositorySyntax;
@@ -238,6 +241,57 @@ class TypeMemberDiscoveryApplicationServiceTest {
                             Optional.of("shared"),
                             1,
                             1));
+                });
+    }
+
+    @Test
+    void should_merge_enum_constants_and_record_components_in_fixed_order_with_exact_follow_ups() {
+        RepositorySnapshot snapshot = new RepositorySnapshot(REPOSITORY_ID, REPOSITORY_ROOT, REVISION);
+        TypeMemberQuery query = new TypeMemberQuery(
+                REPOSITORY_ID,
+                REVISION,
+                SOURCE_TYPE,
+                Set.of(
+                        TypeMemberKind.METHOD,
+                        TypeMemberKind.FIELD,
+                        TypeMemberKind.ENUM_CONSTANT,
+                        TypeMemberKind.RECORD_COMPONENT),
+                Optional.of("value"),
+                0,
+                3);
+        delegateSnapshot(snapshot);
+        when(repositorySyntaxProvider.get(snapshot)).thenReturn(new RepositorySyntax(
+                List.of(), List.of(valueMetadata()), List.of()));
+
+        TypeMemberResult first = service.discover(query);
+
+        assertThat(first.members()).extracting(TypeMember::kind).containsExactly(
+                TypeMemberKind.METHOD,
+                TypeMemberKind.FIELD,
+                TypeMemberKind.ENUM_CONSTANT);
+        assertThat(first.members().get(2)).isInstanceOfSatisfying(EnumConstantTypeMember.class, constant -> {
+            assertThat(constant.constantName()).isEqualTo("valueConstant");
+            assertThat(constant.availableFollowUps()).singleElement()
+                    .satisfies(followUp -> assertSelfReference(followUp, "valueConstant"));
+        });
+        assertThat(first.availableFollowUps()).singleElement().satisfies(followUp ->
+                assertThat(followUp.request()).isEqualTo(new TypeMembersRequest(
+                        REPOSITORY_ID.value(), REVISION.value(), SOURCE_TYPE,
+                        List.of(
+                                TypeMemberKind.METHOD,
+                                TypeMemberKind.FIELD,
+                                TypeMemberKind.ENUM_CONSTANT,
+                                TypeMemberKind.RECORD_COMPONENT),
+                        Optional.of("value"), 3, 3)));
+
+        TypeMemberResult second = service.discover(query.nextPage(3));
+
+        assertThat(second.members()).singleElement().isInstanceOfSatisfying(RecordComponentTypeMember.class,
+                component -> {
+                    assertThat(component.componentName()).isEqualTo("valueComponent");
+                    assertThat(component.writtenType()).isEqualTo("Order");
+                    assertThat(component.availableFollowUps()).singleElement()
+                            .satisfies(followUp -> assertSelfReference(followUp, "valueComponent"));
                 });
     }
 
@@ -460,6 +514,26 @@ class TypeMemberDiscoveryApplicationServiceTest {
                 source(sourceFile),
                 false,
                 List.of());
+    }
+
+    private static SourceTypeMetadata valueMetadata() {
+        SourceMethodMetadata method = method(SOURCE_FILE, "valueMethod", List.of());
+        SourceFieldMetadata field = field("valueField", "Order", "com.acme.order.Order");
+        SourceRange declaration = source(SOURCE_FILE);
+        return new SourceTypeMetadata(
+                new com.java.semantic.syntax.domain.SourceTypeDeclaration(SOURCE_TYPE, SourceTypeKind.CLASS, false, declaration),
+                new com.java.semantic.syntax.domain.SourceTypeRelationships(List.of(), List.of()),
+                new SourceTypeMembers(
+                        List.of(field),
+                        List.of(method),
+                        List.of(new SourceEnumConstantMetadata("valueConstant", declaration, List.of())),
+                        List.of(new SourceRecordComponentMetadata(
+                                "valueComponent", "Order", "", namedTypeReference("Order", "com.acme.order.Order"),
+                                declaration, List.of())),
+                        false,
+                        false),
+                new com.java.semantic.syntax.domain.FrameworkTypeFacts(List.of(), List.of(), false, List.of()),
+                new com.java.semantic.syntax.domain.CompilationUnitContext(List.of()));
     }
 
     private static SourceTypeMetadata duplicateMetadata() {

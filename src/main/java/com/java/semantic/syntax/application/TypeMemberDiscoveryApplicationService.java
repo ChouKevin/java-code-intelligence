@@ -8,7 +8,9 @@ import com.java.semantic.repository.application.RepositoryApplicationService;
 import com.java.semantic.repository.domain.RepositorySnapshot;
 import com.java.semantic.syntax.domain.AnnotationEvidence;
 import com.java.semantic.syntax.domain.SourceFieldMetadata;
+import com.java.semantic.syntax.domain.SourceEnumConstantMetadata;
 import com.java.semantic.syntax.domain.SourceMethodMetadata;
+import com.java.semantic.syntax.domain.SourceRecordComponentMetadata;
 import com.java.semantic.syntax.domain.SourceMemberIdentity;
 import com.java.semantic.syntax.domain.MethodImplementationEligibilityPolicy;
 import com.java.semantic.syntax.domain.SourceTypeMetadata;
@@ -33,6 +35,13 @@ public final class TypeMemberDiscoveryApplicationService {
     private static final Comparator<FieldTypeMember> FIELD_ORDER = Comparator
             .comparing(FieldTypeMember::fieldName)
             .thenComparing(FieldTypeMember::writtenType);
+
+    private static final Comparator<EnumConstantTypeMember> ENUM_CONSTANT_ORDER = Comparator
+            .comparing(EnumConstantTypeMember::constantName);
+
+    private static final Comparator<RecordComponentTypeMember> RECORD_COMPONENT_ORDER = Comparator
+            .comparing(RecordComponentTypeMember::componentName)
+            .thenComparing(RecordComponentTypeMember::writtenType);
 
     private final RepositoryApplicationService repositoryApplicationService;
     private final RevisionBoundRepositorySyntaxProvider repositorySyntaxProvider;
@@ -108,7 +117,57 @@ public final class TypeMemberDiscoveryApplicationService {
                     .toList();
             combined.addAll(fields);
         }
+        if (query.memberKinds().contains(TypeMemberKind.ENUM_CONSTANT)) {
+            List<EnumConstantTypeMember> constants = metadata.members().enumConstants().stream()
+                    .map(constant -> enumConstantMember(snapshot, metadata.declaration().identity(), constant))
+                    .filter(member -> matchesPrefix(member.constantName(), query.namePrefix()))
+                    .sorted(ENUM_CONSTANT_ORDER)
+                    .toList();
+            combined.addAll(constants);
+        }
+        if (query.memberKinds().contains(TypeMemberKind.RECORD_COMPONENT)) {
+            List<RecordComponentTypeMember> components = metadata.members().recordComponents().stream()
+                    .map(component -> recordComponentMember(snapshot, syntax, metadata.declaration().identity(), component))
+                    .filter(member -> matchesPrefix(member.componentName(), query.namePrefix()))
+                    .sorted(RECORD_COMPONENT_ORDER)
+                    .toList();
+            combined.addAll(components);
+        }
         return List.copyOf(combined);
+    }
+
+    private EnumConstantTypeMember enumConstantMember(
+            RepositorySnapshot snapshot,
+            SourceTypeIdentity ownerType,
+            SourceEnumConstantMetadata constant) {
+        return new EnumConstantTypeMember(
+                constant.name(),
+                constant.declarationLocation(),
+                constant.annotationEvidence().stream().map(AnnotationEvidence::writtenName).toList(),
+                List.of(followUpFactory.internalSourceReferences(
+                        snapshot.repositoryId(),
+                        snapshot.revision(),
+                        new SourceMemberIdentity.TypeMember(ownerType, constant.name()))));
+    }
+
+    private RecordComponentTypeMember recordComponentMember(
+            RepositorySnapshot snapshot,
+            RepositorySyntax syntax,
+            SourceTypeIdentity ownerType,
+            SourceRecordComponentMetadata component) {
+        Optional<String> resolvedType = component.typeReference().resolvedTypeName();
+        List<DiscoveryFollowUp> resolvedTypeFollowUps = followUpFactory.forResolvedFieldType(
+                snapshot.repositoryId(), snapshot.revision(), sourceTypeIdentity(syntax, resolvedType));
+        DiscoveryFollowUp selfReferences = followUpFactory.internalSourceReferences(
+                snapshot.repositoryId(), snapshot.revision(),
+                new SourceMemberIdentity.TypeMember(ownerType, component.name()));
+        return new RecordComponentTypeMember(
+                component.name(),
+                component.typeReference().writtenType(),
+                resolvedType,
+                component.declarationLocation(),
+                component.annotationEvidence().stream().map(AnnotationEvidence::writtenName).toList(),
+                Stream.concat(resolvedTypeFollowUps.stream(), Stream.of(selfReferences)).toList());
     }
 
     private MethodTypeMember methodMember(

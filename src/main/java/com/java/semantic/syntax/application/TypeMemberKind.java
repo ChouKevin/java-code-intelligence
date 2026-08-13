@@ -4,5 +4,7 @@ package com.java.semantic.syntax.application;
 public enum TypeMemberKind {
 
     METHOD,
-    FIELD
+    FIELD,
+    ENUM_CONSTANT,
+    RECORD_COMPONENT
 }
