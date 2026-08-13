@@ -125,7 +125,7 @@ class TypeUsageConceptProviderTest {
                                 List.of(named("Order"), named("Order")))),
                         field("bounded", "T", bounds),
                         field("recursive", "S", recursive)),
-                        List.of(method), false, false),
+                        List.of(method), List.of(), List.of(), false, false),
                 new FrameworkTypeFacts(List.of(), List.of(), false, List.of()),
                 new CompilationUnitContext(List.of()));
         return new RepositorySyntax(List.of(), List.of(type));

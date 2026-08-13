@@ -19,6 +19,7 @@ import com.java.semantic.syntax.domain.AnnotationEvidence;
 import com.java.semantic.syntax.domain.RepositorySyntax;
 import com.java.semantic.syntax.domain.SourceFieldMetadata;
 import com.java.semantic.syntax.domain.SourceMethodMetadata;
+import com.java.semantic.syntax.domain.SourceRecordComponentMetadata;
 import com.java.semantic.syntax.domain.SourceMemberIdentity.TypeMember;
 import com.java.semantic.syntax.domain.SourceTypeMetadata;
 
@@ -72,6 +73,22 @@ public final class DeclarationConceptProvider implements ConceptProvider {
                         Optional.of(new FieldConceptDetails(field.typeReference()))));
                 addAnnotationEntries(entries, fieldSubject, field.annotationEvidence(),
                         fieldSubject.displayValue() + ":" + field.type(),
+                        packageName, Optional.of(fullyQualifiedName));
+            }
+            for (SourceRecordComponentMetadata component : metadata.members().recordComponents()) {
+                TypeMember componentMember = new TypeMember(sourceType, component.name());
+                FieldConceptIdentity componentIdentity = new FieldConceptIdentity(componentMember);
+                FieldDeclarationSubjectIdentity componentSubject = new FieldDeclarationSubjectIdentity(componentMember);
+                entries.add(entry(componentIdentity,
+                        component.name(),
+                        packageName,
+                        Optional.of(fullyQualifiedName),
+                        ConceptAuthority.SYNTAX_DECLARED,
+                        Optional.empty(),
+                        Optional.empty(),
+                        Optional.of(new FieldConceptDetails(component.typeReference()))));
+                addAnnotationEntries(entries, componentSubject, component.annotationEvidence(),
+                        componentSubject.displayValue() + ":" + component.type(),
                         packageName, Optional.of(fullyQualifiedName));
             }
             for (SourceMethodMetadata method : metadata.members().methods()) {

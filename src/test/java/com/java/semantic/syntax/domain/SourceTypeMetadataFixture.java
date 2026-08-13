@@ -40,7 +40,7 @@ public final class SourceTypeMetadataFixture {
         return new SourceTypeMetadata(
                 new SourceTypeDeclaration(new SourceTypeIdentity(javaType, sourceFile), kind, abstractType, declarationLocation),
                 new SourceTypeRelationships(nominalTypes(extendedTypes), nominalTypes(implementedTypes)),
-                new SourceTypeMembers(fields, methods, fluentSetters, chainedAccessors),
+                new SourceTypeMembers(fields, methods, List.of(), List.of(), fluentSetters, chainedAccessors),
                 new FrameworkTypeFacts(annotationNames.stream()
                         .map(name -> new AnnotationEvidence(name, Optional.empty()))
                         .toList(), profiles, primary, beanQualifiers),

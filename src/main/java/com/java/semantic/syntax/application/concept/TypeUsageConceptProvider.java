@@ -21,6 +21,7 @@ import com.java.semantic.syntax.domain.ParameterizedTypeReference;
 import com.java.semantic.syntax.domain.RepositorySyntax;
 import com.java.semantic.syntax.domain.SourceFieldMetadata;
 import com.java.semantic.syntax.domain.SourceMethodMetadata;
+import com.java.semantic.syntax.domain.SourceRecordComponentMetadata;
 import com.java.semantic.syntax.domain.SourceMemberIdentity.TypeMember;
 import com.java.semantic.syntax.domain.SourceTypeMetadata;
 import com.java.semantic.syntax.domain.TypeReference;
@@ -69,6 +70,12 @@ public final class TypeUsageConceptProvider implements ConceptProvider {
                     new TypeMember(sourceType, field.name()));
             entries.addAll(typeReferenceEntries(metadata, subject,
                     new TypeUsageLocation(TypeUsageSlot.FIELD_DECLARATION, 0), field.typeReference()));
+        }
+        for (SourceRecordComponentMetadata component : metadata.members().recordComponents()) {
+            FieldDeclarationSubjectIdentity subject = new FieldDeclarationSubjectIdentity(
+                    new TypeMember(sourceType, component.name()));
+            entries.addAll(typeReferenceEntries(metadata, subject,
+                    new TypeUsageLocation(TypeUsageSlot.FIELD_DECLARATION, 0), component.typeReference()));
         }
         for (SourceMethodMetadata method : metadata.members().methods()) {
             DeclarationSubjectIdentity subject = DeclarationConceptProvider.methodSubject(metadata, method);

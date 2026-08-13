@@ -300,6 +300,8 @@ class StructuredConceptCatalogProjectorTest {
                 new SourceTypeMembers(
                         List.of(field),
                         metadata.members().methods(),
+                        metadata.members().enumConstants(),
+                        metadata.members().recordComponents(),
                         metadata.members().fluentSetters(),
                         metadata.members().chainedAccessors()),
                 metadata.frameworkFacts(),

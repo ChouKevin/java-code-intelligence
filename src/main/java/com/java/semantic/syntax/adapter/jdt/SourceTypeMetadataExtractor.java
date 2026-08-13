@@ -22,7 +22,9 @@ import com.java.semantic.syntax.domain.ParameterizedTypeReference;
 import com.java.semantic.syntax.domain.PrimitiveTypeReference;
 import com.java.semantic.syntax.domain.FrameworkTypeFacts;
 import com.java.semantic.syntax.domain.SourceFieldMetadata;
+import com.java.semantic.syntax.domain.SourceEnumConstantMetadata;
 import com.java.semantic.syntax.domain.SourceMethodMetadata;
+import com.java.semantic.syntax.domain.SourceRecordComponentMetadata;
 import com.java.semantic.syntax.domain.SourceTypeDeclaration;
 import com.java.semantic.syntax.domain.SourceTypeKind;
 import com.java.semantic.syntax.domain.SourceTypeMembers;
@@ -42,6 +44,7 @@ import org.eclipse.jdt.core.dom.ArrayType;
 import org.eclipse.jdt.core.dom.BodyDeclaration;
 import org.eclipse.jdt.core.dom.CompilationUnit;
 import org.eclipse.jdt.core.dom.EnumDeclaration;
+import org.eclipse.jdt.core.dom.EnumConstantDeclaration;
 import org.eclipse.jdt.core.dom.FieldDeclaration;
 import org.eclipse.jdt.core.dom.ImportDeclaration;
 import org.eclipse.jdt.core.dom.MethodDeclaration;
@@ -103,6 +106,8 @@ final class SourceTypeMetadataExtractor {
                 new SourceTypeMembers(
                         fieldsOf(type),
                         methodsOf(parsed, type, fullyQualifiedName, sqlIndex, analysisTargetOf),
+                        enumConstantsOf(parsed, type),
+                        recordComponentsOf(parsed, type),
                         hasFluentAccessors(type),
                         hasChainedAccessors(type)),
                 new FrameworkTypeFacts(
@@ -173,17 +178,6 @@ final class SourceTypeMetadataExtractor {
 
     private static List<SourceFieldMetadata> fieldsOf(AbstractTypeDeclaration type) {
         List<SourceFieldMetadata> fields = new ArrayList<>();
-        if (type instanceof RecordDeclaration record) {
-            for (Object component : record.recordComponents()) {
-                SingleVariableDeclaration parameter = (SingleVariableDeclaration) component;
-                fields.add(new SourceFieldMetadata(
-                        parameter.getName().getIdentifier(),
-                        TypeNames.simpleNameOf(parameter.getType()),
-                        qualifierValueOf(parameter),
-                        typeReferenceOf(parameter.getType()),
-                        annotationEvidenceOf(parameter)));
-            }
-        }
         for (Object member : SourceTypes.declaredMembersOf(type)) {
             if (!(member instanceof FieldDeclaration field)) {
                 continue;
@@ -199,6 +193,43 @@ final class SourceTypeMetadataExtractor {
             }
         }
         return List.copyOf(fields);
+    }
+
+    private static List<SourceEnumConstantMetadata> enumConstantsOf(ParsedSource parsed, AbstractTypeDeclaration type) {
+        if (!(type instanceof EnumDeclaration enumDeclaration)) {
+            return List.of();
+        }
+        CompilationUnit unit = parsed.unit();
+        String sourceFile = parsed.source().repositoryRelativePath();
+        List<SourceEnumConstantMetadata> constants = new ArrayList<>();
+        for (Object candidate : enumDeclaration.enumConstants()) {
+            EnumConstantDeclaration constant = (EnumConstantDeclaration) candidate;
+            constants.add(new SourceEnumConstantMetadata(
+                    constant.getName().getIdentifier(),
+                    new SourceRange(sourceFile, AstSourceRanges.declarationRange(unit, constant)),
+                    annotationEvidenceOf(constant)));
+        }
+        return List.copyOf(constants);
+    }
+
+    private static List<SourceRecordComponentMetadata> recordComponentsOf(ParsedSource parsed, AbstractTypeDeclaration type) {
+        if (!(type instanceof RecordDeclaration record)) {
+            return List.of();
+        }
+        CompilationUnit unit = parsed.unit();
+        String sourceFile = parsed.source().repositoryRelativePath();
+        List<SourceRecordComponentMetadata> components = new ArrayList<>();
+        for (Object candidate : record.recordComponents()) {
+            SingleVariableDeclaration component = (SingleVariableDeclaration) candidate;
+            components.add(new SourceRecordComponentMetadata(
+                    component.getName().getIdentifier(),
+                    TypeNames.simpleNameOf(component.getType()),
+                    qualifierValueOf(component),
+                    typeReferenceOf(component.getType()),
+                    new SourceRange(sourceFile, AstSourceRanges.range(unit, component)),
+                    annotationEvidenceOf(component)));
+        }
+        return List.copyOf(components);
     }
 
     private static List<SourceMethodMetadata> methodsOf(ParsedSource parsed, AbstractTypeDeclaration type,

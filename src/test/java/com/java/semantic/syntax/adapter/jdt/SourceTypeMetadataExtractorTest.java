@@ -64,6 +64,50 @@ class SourceTypeMetadataExtractorTest {
     private final List<SourceTypeMetadata> evidenceClasses = SyntaxFixtures.extract(
             Path.of("src/test/resources/fixtures/syntax-evidence")).sourceTypes();
 
+    @Test
+    void should_extract_enum_constants_and_record_components_as_distinct_source_members(@TempDir Path tempDir)
+            throws IOException {
+        Path repositoryRoot = tempDir.resolve("value-members");
+        Path sourceRoot = repositoryRoot.resolve("src/main/java/com/example");
+        Files.createDirectories(sourceRoot);
+        Files.writeString(sourceRoot.resolve("ValueMembers.java"), """
+                package com.example;
+
+                enum PaymentMethod {
+                    @Deprecated CARD,
+                    CASH
+                }
+
+                record Payment(@Deprecated java.util.List<String> methods, String reference) {
+                }
+                """);
+
+        List<SourceTypeMetadata> metadata = new JdtSyntaxExtractionService().extract(repositoryRoot).sourceTypes();
+        SourceTypeMetadata paymentMethod = metadata.stream()
+                .filter(candidate -> candidate.declaration().identity().fullyQualifiedName().equals("com.example.PaymentMethod"))
+                .findFirst()
+                .orElseThrow();
+        SourceTypeMetadata payment = metadata.stream()
+                .filter(candidate -> candidate.declaration().identity().fullyQualifiedName().equals("com.example.Payment"))
+                .findFirst()
+                .orElseThrow();
+
+        assertThat(paymentMethod.members().enumConstants()).extracting(constant -> constant.name())
+                .containsExactly("CARD", "CASH");
+        assertThat(paymentMethod.members().enumConstants().getFirst().annotationEvidence())
+                .extracting(AnnotationEvidence::writtenName)
+                .containsExactly("Deprecated");
+        assertThat(payment.members().recordComponents()).extracting(component -> component.name())
+                .containsExactly("methods", "reference");
+        assertThat(payment.members().fields()).isEmpty();
+        assertThat(payment.members().recordComponents().getFirst().type()).isEqualTo("List<String>");
+        assertThat(payment.members().recordComponents().getFirst().typeReference().resolvedTypeName())
+                .contains("java.util.List");
+        assertThat(payment.members().recordComponents().getFirst().annotationEvidence())
+                .extracting(AnnotationEvidence::writtenName)
+                .containsExactly("Deprecated");
+    }
+
     @ParameterizedTest(name = "{0}")
     @MethodSource("typeReferenceForms")
     void should_extract_each_supported_jdt_type_form_as_explicit_evidence(
