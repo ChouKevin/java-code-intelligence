@@ -424,7 +424,8 @@ class OpenApiContractTest {
         assertThat(schema(properties(request), "memberKinds")).contains(
                 entry("type", "array"), entry("minItems", 1),
                 entry("items", Map.of("$ref", "#/components/schemas/TypeMemberKind")));
-        assertThat(list(schema(schemas, "TypeMemberKind").get("enum"))).containsExactly("METHOD", "FIELD");
+        assertThat(list(schema(schemas, "TypeMemberKind").get("enum"))).containsExactly(
+                "METHOD", "FIELD", "ENUM_CONSTANT", "RECORD_COMPONENT");
 
         Map<String, Object> response = schema(schemas, "DiscoverTypeMembersResponse");
         assertClosedObject(response);
@@ -440,16 +441,30 @@ class OpenApiContractTest {
                 "propertyName", "kind",
                 "mapping", Map.of(
                         "METHOD", "#/components/schemas/MethodTypeMemberResponse",
-                        "FIELD", "#/components/schemas/FieldTypeMemberResponse")));
+                        "FIELD", "#/components/schemas/FieldTypeMemberResponse",
+                        "ENUM_CONSTANT", "#/components/schemas/EnumConstantTypeMemberResponse",
+                        "RECORD_COMPONENT", "#/components/schemas/RecordComponentTypeMemberResponse")));
         assertThat(list(member.get("oneOf"))).containsExactly(
                 Map.of("$ref", "#/components/schemas/MethodTypeMemberResponse"),
-                Map.of("$ref", "#/components/schemas/FieldTypeMemberResponse"));
+                Map.of("$ref", "#/components/schemas/FieldTypeMemberResponse"),
+                Map.of("$ref", "#/components/schemas/EnumConstantTypeMemberResponse"),
+                Map.of("$ref", "#/components/schemas/RecordComponentTypeMemberResponse"));
         Map<String, Object> fieldMember = schema(schemas, "FieldTypeMemberResponse");
         assertExactProperties(fieldMember,
                 "kind", "identity", "writtenType", "resolvedType", "annotations", "limitations",
                 "availableFollowUps");
         assertThat(required(fieldMember)).containsExactlyInAnyOrder(
                 "kind", "identity", "writtenType", "annotations", "limitations", "availableFollowUps");
+        Map<String, Object> enumConstant = schema(schemas, "EnumConstantTypeMemberResponse");
+        assertClosedObject(enumConstant);
+        assertExactPropertiesAndRequired(enumConstant,
+                "kind", "identity", "declarationRange", "annotations", "availableFollowUps");
+        Map<String, Object> recordComponent = schema(schemas, "RecordComponentTypeMemberResponse");
+        assertClosedObject(recordComponent);
+        assertExactProperties(recordComponent,
+                "kind", "identity", "writtenType", "resolvedType", "declarationRange", "annotations", "availableFollowUps");
+        assertThat(required(recordComponent)).containsExactlyInAnyOrder(
+                "kind", "identity", "writtenType", "declarationRange", "annotations", "availableFollowUps");
     }
 
     @Test

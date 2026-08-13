@@ -28,8 +28,10 @@ import com.java.semantic.api.dto.DiscoveryFollowUpResponse.ResolveConceptRequest
 import com.java.semantic.api.dto.identity.SourceSymbolContextPayload;
 import com.java.semantic.api.dto.identity.SourceSymbolMethodContextPayload;
 import com.java.semantic.api.dto.FieldTypeMemberResponse;
+import com.java.semantic.api.dto.EnumConstantTypeMemberResponse;
 import com.java.semantic.api.dto.ResolveConceptResponse;
 import com.java.semantic.api.dto.MethodTypeMemberResponse;
+import com.java.semantic.api.dto.RecordComponentTypeMemberResponse;
 import com.java.semantic.api.dto.MapperMethodCandidateResponse;
 import com.java.semantic.api.dto.MapperStatementMappingResponse;
 import com.java.semantic.api.dto.TypeMemberResponse;
@@ -61,7 +63,9 @@ import com.java.semantic.syntax.application.DiscoveryFollowUp.ResolveSourceSymbo
 import com.java.semantic.syntax.application.DiscoveryFollowUp.ResolveConceptRequest;
 import com.java.semantic.syntax.application.DiscoveryFollowUpFactory;
 import com.java.semantic.syntax.application.FieldTypeMember;
+import com.java.semantic.syntax.application.EnumConstantTypeMember;
 import com.java.semantic.syntax.application.MethodTypeMember;
+import com.java.semantic.syntax.application.RecordComponentTypeMember;
 import com.java.semantic.syntax.application.concept.MapperStatementMethodMapping;
 import com.java.semantic.syntax.application.TypeMember;
 import com.java.semantic.syntax.application.TypeMemberResult;
@@ -290,6 +294,22 @@ public final class StructuredDiscoveryResponseMapper {
                     field.annotations(),
                     field.limitations().stream().map(Enum::name).toList(),
                     field.availableFollowUps().stream().map(this::followUp).toList());
+            case EnumConstantTypeMember constant -> new EnumConstantTypeMemberResponse(
+                    constant.kind().name(),
+                    JavaSourceIdentityHttpMapper.toPayload(
+                            new SourceMemberIdentity.TypeMember(sourceType, constant.constantName()), sourceLocationMapper),
+                    sourceLocationMapper.toTextRange(constant.declarationLocation()),
+                    constant.annotations(),
+                    constant.availableFollowUps().stream().map(this::followUp).toList());
+            case RecordComponentTypeMember component -> new RecordComponentTypeMemberResponse(
+                    component.kind().name(),
+                    JavaSourceIdentityHttpMapper.toPayload(
+                            new SourceMemberIdentity.TypeMember(sourceType, component.componentName()), sourceLocationMapper),
+                    component.writtenType(),
+                    component.resolvedType(),
+                    sourceLocationMapper.toTextRange(component.declarationLocation()),
+                    component.annotations(),
+                    component.availableFollowUps().stream().map(this::followUp).toList());
         };
     }
 
