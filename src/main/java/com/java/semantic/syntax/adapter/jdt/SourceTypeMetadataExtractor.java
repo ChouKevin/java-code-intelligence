@@ -223,7 +223,7 @@ final class SourceTypeMetadataExtractor {
             SingleVariableDeclaration component = (SingleVariableDeclaration) candidate;
             components.add(new SourceRecordComponentMetadata(
                     component.getName().getIdentifier(),
-                    TypeNames.simpleNameOf(component.getType()),
+                    component.getType().toString(),
                     qualifierValueOf(component),
                     typeReferenceOf(component.getType()),
                     new SourceRange(sourceFile, AstSourceRanges.range(unit, component)),

@@ -18,6 +18,7 @@ import com.java.semantic.syntax.domain.ArrayTypeReference;
 import com.java.semantic.syntax.domain.AnnotationEvidence;
 import com.java.semantic.syntax.domain.SourceTypeMetadata;
 import com.java.semantic.syntax.domain.SourceFieldMetadata;
+import com.java.semantic.syntax.domain.SourceRecordComponentMetadata;
 import com.java.semantic.syntax.domain.CompositeTypeReference;
 import com.java.semantic.syntax.domain.CompositeTypeReference.CompositeKind;
 import com.java.semantic.syntax.domain.EntryPointMethod;
@@ -73,37 +74,39 @@ class SourceTypeMetadataExtractorTest {
         Files.writeString(sourceRoot.resolve("ValueMembers.java"), """
                 package com.example;
 
-                enum PaymentMethod {
+                import java.util.List;
+
+                enum ValueMode {
                     @Deprecated CARD,
                     CASH
                 }
 
-                record Payment(@Deprecated java.util.List<String> methods, String reference) {
+                record ValueRecord(@Deprecated List<String> methods, String reference) {
                 }
                 """);
 
         List<SourceTypeMetadata> metadata = new JdtSyntaxExtractionService().extract(repositoryRoot).sourceTypes();
-        SourceTypeMetadata paymentMethod = metadata.stream()
-                .filter(candidate -> candidate.declaration().identity().fullyQualifiedName().equals("com.example.PaymentMethod"))
+        SourceTypeMetadata valueMode = metadata.stream()
+                .filter(candidate -> candidate.declaration().identity().fullyQualifiedName().equals("com.example.ValueMode"))
                 .findFirst()
                 .orElseThrow();
-        SourceTypeMetadata payment = metadata.stream()
-                .filter(candidate -> candidate.declaration().identity().fullyQualifiedName().equals("com.example.Payment"))
+        SourceTypeMetadata valueRecord = metadata.stream()
+                .filter(candidate -> candidate.declaration().identity().fullyQualifiedName().equals("com.example.ValueRecord"))
                 .findFirst()
                 .orElseThrow();
 
-        assertThat(paymentMethod.members().enumConstants()).extracting(constant -> constant.name())
+        assertThat(valueMode.members().enumConstants()).extracting(constant -> constant.name())
                 .containsExactly("CARD", "CASH");
-        assertThat(paymentMethod.members().enumConstants().getFirst().annotationEvidence())
+        assertThat(valueMode.members().enumConstants().getFirst().annotationEvidence())
                 .extracting(AnnotationEvidence::writtenName)
                 .containsExactly("Deprecated");
-        assertThat(payment.members().recordComponents()).extracting(component -> component.name())
+        assertThat(valueRecord.members().recordComponents()).extracting(component -> component.name())
                 .containsExactly("methods", "reference");
-        assertThat(payment.members().fields()).isEmpty();
-        assertThat(payment.members().recordComponents().getFirst().type()).isEqualTo("List<String>");
-        assertThat(payment.members().recordComponents().getFirst().typeReference().resolvedTypeName())
+        assertThat(valueRecord.members().fields()).isEmpty();
+        assertThat(valueRecord.members().recordComponents().getFirst().type()).isEqualTo("List<String>");
+        assertThat(valueRecord.members().recordComponents().getFirst().typeReference().resolvedTypeName())
                 .contains("java.util.List");
-        assertThat(payment.members().recordComponents().getFirst().annotationEvidence())
+        assertThat(valueRecord.members().recordComponents().getFirst().annotationEvidence())
                 .extracting(AnnotationEvidence::writtenName)
                 .containsExactly("Deprecated");
     }
@@ -698,9 +701,10 @@ class SourceTypeMetadataExtractorTest {
     }
 
     @Test
-    void should_expose_record_components_as_fields_when_a_record_is_scanned() {
-        assertThat(classOf(classes, "com.example.syntax.AccountSummary").members().fields())
-                .extracting(SourceFieldMetadata::name, SourceFieldMetadata::type)
+    void should_expose_record_components_separately_when_a_record_is_scanned() {
+        assertThat(classOf(classes, "com.example.syntax.AccountSummary").members().fields()).isEmpty();
+        assertThat(classOf(classes, "com.example.syntax.AccountSummary").members().recordComponents())
+                .extracting(SourceRecordComponentMetadata::name, SourceRecordComponentMetadata::type)
                 .containsExactly(
                         tuple("accountNo", "String"),
                         tuple("total", "long"));
