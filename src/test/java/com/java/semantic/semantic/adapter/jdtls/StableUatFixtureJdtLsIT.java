@@ -54,15 +54,29 @@ class StableUatFixtureJdtLsIT {
     private static final Path WORKSPACE_DATA = Path.of("target/stable-uat-fixture-jdtls").toAbsolutePath().normalize();
     private static final SourceTypeIdentityPayload PAYMENT_METHOD = sourceType(
             "com.example.payment", "PaymentMethod", "src/main/java/com/example/payment/PaymentMethod.java");
+    private static final SourceTypeIdentityPayload PAYMENT_FEE_CALCULATOR = sourceType(
+            "com.example.payment", "PaymentFeeCalculator", "src/main/java/com/example/payment/PaymentFeeCalculator.java");
+    private static final SourceTypeIdentityPayload PAYMENT_QUERY_CONTROLLER = sourceType(
+            "com.example.payment", "PaymentQueryController", "src/main/java/com/example/payment/PaymentQueryController.java");
+    private static final SourceTypeIdentityPayload ORDER_SERVICE = sourceType(
+            "com.example.order", "OrderService", "src/main/java/com/example/order/OrderService.java");
+    private static final SourceTypeIdentityPayload ORDER_QUERY_CONTROLLER = sourceType(
+            "com.example.order", "OrderQueryController", "src/main/java/com/example/order/OrderQueryController.java");
     private static final MethodTargetPayload FEE_FORMULA_METHOD = methodTarget(
             "com.example.payment", "PaymentFeeSettings", "src/main/java/com/example/payment/PaymentFeeSettings.java",
             "loadFeeFormulaJson", List.of("com.example.payment.PaymentMethod"));
+    private static final MethodTargetPayload PAYMENT_METHODS_ENTRY_POINT = methodTarget(
+            "com.example.payment", "PaymentQueryController", "src/main/java/com/example/payment/PaymentQueryController.java",
+            "paymentMethods", List.of());
     private static final MethodTargetPayload ORDER_CANCEL_METHOD = methodTarget(
             "com.example.order", "OrderService", "src/main/java/com/example/order/OrderService.java",
             "cancel", List.of("java.lang.String"));
     private static final MethodTargetPayload ORDER_FIND_METHOD = methodTarget(
             "com.example.order", "OrderService", "src/main/java/com/example/order/OrderService.java",
             "findOrder", List.of("java.lang.String"));
+    private static final MethodTargetPayload ORDER_CANCEL_ENTRY_POINT = methodTarget(
+            "com.example.order", "OrderQueryController", "src/main/java/com/example/order/OrderQueryController.java",
+            "cancelOrder", List.of("java.lang.String"));
 
     @Autowired
     private MockMvc mockMvc;
@@ -115,20 +129,21 @@ class StableUatFixtureJdtLsIT {
 
         ensureRepository(PAYMENT_REPOSITORY, PAYMENT_DISPLAY_NAME);
         assertRepositoryStatus(PAYMENT_REPOSITORY, PAYMENT_DISPLAY_NAME);
-        assertEntryPoints(PAYMENT_REPOSITORY);
+        JsonNode paymentEntryPoints = entryPoints(PAYMENT_REPOSITORY);
+        assertApiEntryPoint(
+                paymentEntryPoints, PAYMENT_QUERY_CONTROLLER, PAYMENT_METHODS_ENTRY_POINT, "/payment-methods", "GET");
 
         JsonNode concepts = postJson("/v1/discovery/concepts", conceptRequest(PAYMENT_REPOSITORY, "Payment", "TYPE"));
         assertBoundRevision(concepts, PAYMENT_REPOSITORY);
-        assertThat(concepts.path("candidates"))
-                .extracting(candidate -> candidate.path("displayValue").asText())
-                .contains("PaymentMethod", "PaymentFeeCalculator");
+        assertTypeConceptCandidate(concepts, PAYMENT_METHOD);
+        assertTypeConceptCandidate(concepts, PAYMENT_FEE_CALCULATOR);
 
         JsonNode members = postJson("/v1/discovery/type-members", typeMembersRequest(PAYMENT_REPOSITORY, PAYMENT_METHOD));
         assertBoundRevision(members, PAYMENT_REPOSITORY);
         assertThat(members.path("members"))
                 .filteredOn(member -> "ENUM_CONSTANT".equals(member.path("kind").asText()))
                 .extracting(member -> member.path("identity").path("name").asText())
-                .contains("CREDIT_CARD", "BANK_TRANSFER", "WALLET");
+                .containsExactlyInAnyOrder("CREDIT_CARD", "BANK_TRANSFER", "WALLET");
         members.path("members").forEach(member -> {
             if ("ENUM_CONSTANT".equals(member.path("kind").asText())) {
                 assertSourceRange(
@@ -164,13 +179,13 @@ class StableUatFixtureJdtLsIT {
 
         ensureRepository(ORDER_REPOSITORY, ORDER_DISPLAY_NAME);
         assertRepositoryStatus(ORDER_REPOSITORY, ORDER_DISPLAY_NAME);
-        assertEntryPoints(ORDER_REPOSITORY);
+        JsonNode orderEntryPoints = entryPoints(ORDER_REPOSITORY);
+        assertApiEntryPoint(
+                orderEntryPoints, ORDER_QUERY_CONTROLLER, ORDER_CANCEL_ENTRY_POINT, "/orders/{orderId}/cancel", "POST");
 
         JsonNode concepts = postJson("/v1/discovery/concepts", conceptRequest(ORDER_REPOSITORY, "Order", "TYPE"));
         assertBoundRevision(concepts, ORDER_REPOSITORY);
-        assertThat(concepts.path("candidates"))
-                .extracting(candidate -> candidate.path("displayValue").asText())
-                .contains("OrderService");
+        assertTypeConceptCandidate(concepts, ORDER_SERVICE);
 
         JsonNode methodSource = postJson("/v1/discovery/method-source", methodTargetRequest(ORDER_REPOSITORY, ORDER_CANCEL_METHOD));
         assertBoundRevision(methodSource, ORDER_REPOSITORY);
@@ -244,22 +259,27 @@ class StableUatFixtureJdtLsIT {
         assertThat(response.currentRevision()).contains(FIXTURE_REVISION);
     }
 
-    private void assertEntryPoints(String repositoryId) throws Exception {
+    private JsonNode entryPoints(String repositoryId) throws Exception {
         JsonNode response = response(mockMvc.perform(get("/v1/repositories/{repoId}/entry-points", repositoryId)
                         .queryParam("expectedRevision", FIXTURE_REVISION)
                         .header(ApiTokenFilter.API_TOKEN_HEADER, TOKEN))
                 .andExpect(status().isOk())
                 .andReturn());
         assertBoundRevision(response, repositoryId);
+        assertPublicSourceLocations(response);
+        assertThat(response.path("entryPoints")).isNotEmpty();
+        return response;
     }
 
     private JsonNode postJson(String endpoint, ObjectNode request) throws Exception {
-        return response(mockMvc.perform(post(endpoint)
+        JsonNode response = response(mockMvc.perform(post(endpoint)
                         .header(ApiTokenFilter.API_TOKEN_HEADER, TOKEN)
                         .contentType(APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(request)))
                 .andExpect(status().isOk())
                 .andReturn());
+        assertPublicSourceLocations(response);
+        return response;
     }
 
     private ObjectNode conceptRequest(String repositoryId, String term, String kind) {
@@ -324,11 +344,60 @@ class StableUatFixtureJdtLsIT {
         assertThat(response.path("analyzedRevision").asText()).isEqualTo(FIXTURE_REVISION);
     }
 
+    private static void assertApiEntryPoint(
+            JsonNode response,
+            SourceTypeIdentityPayload expectedSourceType,
+            MethodTargetPayload expectedMethod,
+            String expectedApiUrl,
+            String expectedHttpMethod) {
+        JsonNode entryPoint = response.path("entryPoints").valueStream()
+                .filter(candidate -> matchesSourceType(candidate.path("sourceType"), expectedSourceType))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("missing entry-point class " + expectedSourceType.javaType().className()));
+        assertSourceType(entryPoint.path("sourceType"), expectedSourceType);
+
+        JsonNode method = entryPoint.path("methods").valueStream()
+                .filter(candidate -> expectedApiUrl.equals(candidate.path("apiUrl").asText()))
+                .filter(candidate -> candidate.path("httpMethods").valueStream()
+                        .map(JsonNode::asText)
+                        .anyMatch(expectedHttpMethod::equals))
+                .filter(candidate -> matchesMethodTarget(candidate.path("analysisTarget").path("target"), expectedMethod))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError(
+                        "missing " + expectedHttpMethod + " " + expectedApiUrl + " entry-point method "
+                                + expectedMethod.methodName()));
+        assertThat(method.path("analysisTarget").path("status").asText()).isEqualTo("RESOLVED");
+        assertMethodTarget(method.path("analysisTarget").path("target"), expectedMethod);
+    }
+
+    private static void assertTypeConceptCandidate(JsonNode response, SourceTypeIdentityPayload expected) {
+        JsonNode candidate = response.path("candidates").valueStream()
+                .filter(value -> "TYPE".equals(value.path("identity").path("kind").asText()))
+                .filter(value -> matchesSourceType(value.path("identity").path("sourceType"), expected))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("missing type concept " + expected.javaType().className()));
+        assertSourceType(candidate.path("identity").path("sourceType"), expected);
+    }
+
     private static JsonNode graphNodeById(JsonNode graph, String nodeId) {
         return graph.path("nodes").valueStream()
                 .filter(node -> nodeId.equals(node.path("nodeId").asText()))
                 .findFirst()
                 .orElseThrow(() -> new AssertionError("missing graph node " + nodeId));
+    }
+
+    private static boolean matchesSourceType(JsonNode actual, SourceTypeIdentityPayload expected) {
+        return expected.javaType().packageName().equals(actual.path("javaType").path("packageName").asText())
+                && expected.javaType().className().equals(actual.path("javaType").path("className").asText())
+                && expected.sourceFile().equals(actual.path("sourceFile").asText());
+    }
+
+    private static void assertSourceType(JsonNode actual, SourceTypeIdentityPayload expected) {
+        assertThat(actual.path("javaType").path("packageName").asText())
+                .isEqualTo(expected.javaType().packageName());
+        assertThat(actual.path("javaType").path("className").asText())
+                .isEqualTo(expected.javaType().className());
+        assertThat(actual.path("sourceFile").asText()).isEqualTo(expected.sourceFile());
     }
 
     private static boolean matchesMethodTarget(JsonNode target, MethodTargetPayload expected) {
@@ -361,12 +430,49 @@ class StableUatFixtureJdtLsIT {
                 node.path("declarationRange"));
     }
 
+    private static void assertPublicSourceLocations(JsonNode response) {
+        assertPublicSourceLocations(response, "");
+    }
+
+    private static void assertPublicSourceLocations(JsonNode node, String inheritedSourceFile) {
+        if (node.isArray()) {
+            node.forEach(child -> assertPublicSourceLocations(child, inheritedSourceFile));
+            return;
+        }
+        if (!node.isObject()) {
+            return;
+        }
+
+        String sourceFile = sourceFileFor(node, inheritedSourceFile);
+        if (node.has("sourceFile")) {
+            assertSourceFile(node.path("sourceFile").asText());
+        }
+        if (node.has("range")) {
+            assertSourceRange(sourceFile, node.path("range"));
+        }
+        if (node.has("declarationRange")) {
+            assertSourceRange(sourceFile, node.path("declarationRange"));
+        }
+        node.forEach(child -> assertPublicSourceLocations(child, sourceFile));
+    }
+
+    private static String sourceFileFor(JsonNode node, String inheritedSourceFile) {
+        List<String> sourceFiles = List.of(
+                node.path("sourceFile").asText(),
+                node.path("sourceType").path("sourceFile").asText(),
+                node.path("target").path("sourceType").path("sourceFile").asText(),
+                node.path("target").path("identity").path("sourceType").path("sourceFile").asText(),
+                node.path("identity").path("sourceType").path("sourceFile").asText(),
+                node.path("identity").path("ownerType").path("sourceFile").asText(),
+                node.path("method").path("sourceType").path("sourceFile").asText(),
+                node.path("context").path("sourceType").path("sourceFile").asText(),
+                node.path("context").path("method").path("sourceType").path("sourceFile").asText(),
+                inheritedSourceFile);
+        return sourceFiles.stream().filter(StringUtils::hasText).findFirst().orElse("");
+    }
+
     private static void assertSourceRange(String sourceFile, JsonNode range) {
-        Path normalized = Path.of(sourceFile).normalize();
-        String normalizedSourceFile = normalized.toString().replace('\\', '/');
-        assertThat(normalized.isAbsolute()).isFalse();
-        assertThat(normalizedSourceFile).isEqualTo(sourceFile);
-        assertThat(sourceFile).doesNotStartWith("../").doesNotStartWith("./");
+        assertSourceFile(sourceFile);
 
         int startLine = range.path("start").path("line").asInt(-1);
         int startCharacter = range.path("start").path("character").asInt(-1);
@@ -378,6 +484,19 @@ class StableUatFixtureJdtLsIT {
         assertThat(endCharacter).isGreaterThanOrEqualTo(0);
         if (endLine == startLine) {
             assertThat(endCharacter).isGreaterThanOrEqualTo(startCharacter);
+        }
+    }
+
+    private static void assertSourceFile(String sourceFile) {
+        assertThat(sourceFile).isNotBlank().doesNotContain("\\\\").doesNotMatch("^[A-Za-z]:.*");
+        Path normalized = Path.of(sourceFile).normalize();
+        String normalizedSourceFile = normalized.toString().replace('\\', '/');
+        assertThat(normalized.isAbsolute()).isFalse();
+        assertThat(normalizedSourceFile).isEqualTo(sourceFile);
+        assertThat(normalizedSourceFile).isNotEqualTo(".");
+        assertThat(normalized.getNameCount()).isGreaterThan(0);
+        for (Path segment : normalized) {
+            assertThat(segment.toString()).isNotBlank().isNotIn(".", "..");
         }
     }
 

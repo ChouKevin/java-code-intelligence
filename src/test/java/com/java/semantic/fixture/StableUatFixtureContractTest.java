@@ -12,6 +12,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.IntStream;
 import java.util.stream.Stream;
 
@@ -20,6 +22,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 class StableUatFixtureContractTest {
 
     private static final Path FIXTURES_ROOT = Path.of("fixtures", "uat");
+    private static final Pattern ENUM_DECLARATION = Pattern.compile(
+            "\\benum\\s+(?<name>[A-Za-z_$][A-Za-z0-9_$]*)\\s*\\{(?<constants>[^}]*)}", Pattern.DOTALL);
+    private static final Pattern ENUM_CONSTANT = Pattern.compile("\\b[A-Z][A-Z0-9_]*\\b");
 
     @Test
     void shouldKeepPaymentFixtureAsAStandaloneRuntimeDataBoundary() throws Exception {
@@ -41,6 +46,10 @@ class StableUatFixtureContractTest {
 
         String settings = readProductionSource(paymentFixture, "com/example/payment/PaymentFeeSettings.java");
         assertThat(settings).contains("Optional<String>", "loadFeeFormulaJson(PaymentMethod");
+
+        String paymentMethod = readProductionSource(paymentFixture, "com/example/payment/PaymentMethod.java");
+        assertThat(enumConstants(paymentMethod, "PaymentMethod"))
+                .containsExactlyInAnyOrder("CREDIT_CARD", "BANK_TRANSFER", "WALLET");
 
         String calculator = readProductionSource(paymentFixture, "com/example/payment/PaymentFeeCalculator.java");
         assertThat(calculator)
@@ -161,6 +170,21 @@ class StableUatFixtureContractTest {
         } catch (IOException exception) {
             throw new IllegalStateException("Fixture source cannot be read", exception);
         }
+    }
+
+    private static List<String> enumConstants(String source, String enumName) {
+        Matcher declaration = ENUM_DECLARATION.matcher(source);
+        List<String> constants = new ArrayList<>();
+        while (declaration.find()) {
+            if (enumName.equals(declaration.group("name"))) {
+                Matcher constant = ENUM_CONSTANT.matcher(declaration.group("constants"));
+                while (constant.find()) {
+                    constants.add(constant.group());
+                }
+                return constants;
+            }
+        }
+        throw new AssertionError("missing enum declaration " + enumName);
     }
 
     private static List<String> productionDependencyArtifactIds(Path pom) throws Exception {
