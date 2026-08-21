@@ -60,6 +60,9 @@ class StableUatFixtureJdtLsIT {
     private static final MethodTargetPayload ORDER_CANCEL_METHOD = methodTarget(
             "com.example.order", "OrderService", "src/main/java/com/example/order/OrderService.java",
             "cancel", List.of("java.lang.String"));
+    private static final MethodTargetPayload ORDER_FIND_METHOD = methodTarget(
+            "com.example.order", "OrderService", "src/main/java/com/example/order/OrderService.java",
+            "findOrder", List.of("java.lang.String"));
 
     @Autowired
     private MockMvc mockMvc;
@@ -184,14 +187,29 @@ class StableUatFixtureJdtLsIT {
 
         JsonNode graph = postJson("/v1/analyses/call-graphs/outgoing", outgoingGraphRequest(ORDER_REPOSITORY));
         assertThat(graph.path("analyzedRevision").asText()).isEqualTo(FIXTURE_REVISION);
-        assertThat(graph.path("nodes"))
-                .anySatisfy(node -> assertThat(node.path("target").path("sourceType").path("javaType")
-                        .path("className").asText()).isEqualTo("OrderService"))
-                .anySatisfy(node -> assertThat(node.path("target").path("methodName").asText()).isEqualTo("findOrder"));
+        JsonNode rootNode = graphNodeById(graph, graph.path("rootNodeId").asText());
+        assertMethodTarget(rootNode.path("target"), ORDER_CANCEL_METHOD);
+        assertGraphNodeSourceRange(rootNode);
+
+        JsonNode findOrderNode = graph.path("nodes").valueStream()
+                .filter(node -> matchesMethodTarget(node.path("target"), ORDER_FIND_METHOD))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("missing graph node for OrderService.findOrder(String)"));
+        assertGraphNodeSourceRange(findOrderNode);
+
+        JsonNode rootToFindOrderEdge = graph.path("edges").valueStream()
+                .filter(edge -> rootNode.path("nodeId").asText().equals(edge.path("callerNodeId").asText()))
+                .filter(edge -> findOrderNode.path("nodeId").asText().equals(edge.path("calleeNodeId").asText()))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("missing OrderService.cancel(String) to findOrder(String) graph edge"));
+        assertSourceRange(
+                rootToFindOrderEdge.path("callSite").path("sourceFile").asText(),
+                rootToFindOrderEdge.path("callSite").path("range"));
+
         graph.path("nodes").forEach(node -> {
             JsonNode target = node.path("target");
             if (target.isObject() && node.path("declarationRange").isObject()) {
-                assertSourceRange(target.path("sourceType").path("sourceFile").asText(), node.path("declarationRange"));
+                assertGraphNodeSourceRange(node);
             }
         });
     }
@@ -304,6 +322,43 @@ class StableUatFixtureJdtLsIT {
     private void assertBoundRevision(JsonNode response, String repositoryId) {
         assertThat(response.path("repoId").asText()).isEqualTo(repositoryId);
         assertThat(response.path("analyzedRevision").asText()).isEqualTo(FIXTURE_REVISION);
+    }
+
+    private static JsonNode graphNodeById(JsonNode graph, String nodeId) {
+        return graph.path("nodes").valueStream()
+                .filter(node -> nodeId.equals(node.path("nodeId").asText()))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("missing graph node " + nodeId));
+    }
+
+    private static boolean matchesMethodTarget(JsonNode target, MethodTargetPayload expected) {
+        return expected.sourceType().javaType().packageName()
+                        .equals(target.path("sourceType").path("javaType").path("packageName").asText())
+                && expected.sourceType().javaType().className()
+                        .equals(target.path("sourceType").path("javaType").path("className").asText())
+                && expected.sourceType().sourceFile()
+                        .equals(target.path("sourceType").path("sourceFile").asText())
+                && expected.methodName().equals(target.path("methodName").asText())
+                && target.path("parameterTypes").valueStream().map(JsonNode::asText).toList()
+                        .equals(expected.parameterTypes());
+    }
+
+    private static void assertMethodTarget(JsonNode target, MethodTargetPayload expected) {
+        assertThat(target.path("sourceType").path("javaType").path("packageName").asText())
+                .isEqualTo(expected.sourceType().javaType().packageName());
+        assertThat(target.path("sourceType").path("javaType").path("className").asText())
+                .isEqualTo(expected.sourceType().javaType().className());
+        assertThat(target.path("sourceType").path("sourceFile").asText())
+                .isEqualTo(expected.sourceType().sourceFile());
+        assertThat(target.path("methodName").asText()).isEqualTo(expected.methodName());
+        assertThat(target.path("parameterTypes")).extracting(JsonNode::asText)
+                .containsExactlyElementsOf(expected.parameterTypes());
+    }
+
+    private static void assertGraphNodeSourceRange(JsonNode node) {
+        assertSourceRange(
+                node.path("target").path("sourceType").path("sourceFile").asText(),
+                node.path("declarationRange"));
     }
 
     private static void assertSourceRange(String sourceFile, JsonNode range) {
