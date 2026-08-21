@@ -32,6 +32,12 @@ jobs:
 
       - run: mvn --batch-mode --no-transfer-progress clean test
 
+      - name: Test payment-service UAT fixture
+        run: mvn --batch-mode --no-transfer-progress -f fixtures/uat/payment-service/pom.xml test
+
+      - name: Test order-service UAT fixture
+        run: mvn --batch-mode --no-transfer-progress -f fixtures/uat/order-service/pom.xml test
+
       - run: docker build -t java-code-intelligence:ci .
 
       - run: scripts/smoke-jdtls-image.sh java-code-intelligence:ci
