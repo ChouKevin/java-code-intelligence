@@ -32,6 +32,11 @@ jobs:
 
       - run: scripts/install-jdtls.sh "$RUNNER_TEMP/jdtls"
 
+      - name: Stable UAT fixture semantic contract
+        env:
+          JDTLS_HOME: ${{ runner.temp }}/jdtls
+        run: mvn --batch-mode --no-transfer-progress -Pjdtls-it -Dtest=StableUatFixtureJdtLsIT test
+
       - env:
           JDTLS_HOME: ${{ runner.temp }}/jdtls
         run: mvn --batch-mode --no-transfer-progress -Pjdtls-it test
