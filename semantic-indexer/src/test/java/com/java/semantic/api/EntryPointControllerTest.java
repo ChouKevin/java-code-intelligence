@@ -1,11 +1,11 @@
 package com.java.semantic.api;
 
 import com.java.semantic.api.security.ApiTokenFilter;
-import com.java.semantic.identity.JavaTypeIdentity;
-import com.java.semantic.identity.MethodTarget;
-import com.java.semantic.identity.SourceTypeIdentity;
-import com.java.semantic.repository.domain.RepositoryId;
-import com.java.semantic.repository.domain.RepositoryRevision;
+import com.java.semantic.model.codefact.JavaTypeIdentity;
+import com.java.semantic.model.codefact.MethodTarget;
+import com.java.semantic.model.codefact.SourceTypeIdentity;
+import com.java.semantic.model.repository.RepositoryId;
+import com.java.semantic.model.repository.RepositoryRevision;
 import com.java.semantic.repository.application.RepositoryRevisionMismatchException;
 import com.java.semantic.syntax.application.EntryPointDiscoveryApplicationService;
 import com.java.semantic.syntax.application.RevisionBoundEntryPoints;
@@ -46,7 +46,7 @@ class EntryPointControllerTest {
 
     private static final String TOKEN = "test-token";
     private static final RepositoryId REPOSITORY_ID = RepositoryId.of("orders");
-    private static final RepositoryRevision EXPECTED_REVISION = RepositoryRevision.fixture();
+    private static final RepositoryRevision EXPECTED_REVISION = RepositoryRevision.ofSha("0".repeat(40));
 
     @Autowired
     private MockMvc mockMvc;
@@ -61,7 +61,7 @@ class EntryPointControllerTest {
                 .willReturn(resultWithAllMethods());
 
         mockMvc.perform(get("/v1/repositories/orders/entry-points")
-                        .queryParam("expectedRevision", "FIXTURE")
+                        .queryParam("expectedRevision", "0000000000000000000000000000000000000000")
                         .header(ApiTokenFilter.API_TOKEN_HEADER, TOKEN))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.entryPoints[0].methods.length()").value(3));
@@ -77,7 +77,7 @@ class EntryPointControllerTest {
                 .willReturn(resultWithAllMethods());
 
         mockMvc.perform(get("/v1/repositories/orders/entry-points")
-                        .queryParam("expectedRevision", "FIXTURE")
+                        .queryParam("expectedRevision", "0000000000000000000000000000000000000000")
                         .queryParam("types", "API,MQ,SCHEDULE")
                         .header(ApiTokenFilter.API_TOKEN_HEADER, TOKEN))
                 .andExpect(status().isOk());
@@ -93,7 +93,7 @@ class EntryPointControllerTest {
                 .willReturn(resultWithAllMethods());
 
         mockMvc.perform(get("/v1/repositories/orders/entry-points")
-                        .queryParam("expectedRevision", "FIXTURE")
+                        .queryParam("expectedRevision", "0000000000000000000000000000000000000000")
                         .queryParam("types", "API,MQ,API")
                         .header(ApiTokenFilter.API_TOKEN_HEADER, TOKEN))
                 .andExpect(status().isOk());
@@ -105,7 +105,7 @@ class EntryPointControllerTest {
     @ValueSource(strings = {"", " ", "API,", "API, MQ", "UNKNOWN"})
     void should_reject_blank_types_or_unknown_or_whitespace_padded_type(String types) throws Exception {
         mockMvc.perform(get("/v1/repositories/orders/entry-points")
-                        .queryParam("expectedRevision", "FIXTURE")
+                        .queryParam("expectedRevision", "0000000000000000000000000000000000000000")
                         .queryParam("types", types)
                         .header(ApiTokenFilter.API_TOKEN_HEADER, TOKEN))
                 .andExpect(status().isBadRequest())
@@ -151,12 +151,12 @@ class EntryPointControllerTest {
                 .willReturn(resultWithAllMethods());
 
         mockMvc.perform(get("/v1/repositories/orders/entry-points")
-                        .queryParam("expectedRevision", "FIXTURE")
+                        .queryParam("expectedRevision", "0000000000000000000000000000000000000000")
                         .queryParam("types", "API,MQ,SCHEDULE")
                         .header(ApiTokenFilter.API_TOKEN_HEADER, TOKEN))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.repoId").value("orders"))
-                .andExpect(jsonPath("$.analyzedRevision").value("FIXTURE"))
+                .andExpect(jsonPath("$.analyzedRevision").value("0000000000000000000000000000000000000000"))
                 .andExpect(jsonPath("$.entryPoints[0].sourceType.javaType.packageName").value("com.acme"))
                 .andExpect(jsonPath("$.entryPoints[0].sourceType.javaType.className").value("OrderController"))
                 .andExpect(jsonPath("$.entryPoints[0].sourceType.sourceFile")
@@ -177,14 +177,14 @@ class EntryPointControllerTest {
         given(entryPointDiscoveryApplicationService.list(
                 eq(REPOSITORY_ID), eq(EXPECTED_REVISION), eq(EnumSet.allOf(EntryPointType.class))))
                 .willReturn(new RevisionBoundEntryPoints(
-                        REPOSITORY_ID, RepositoryRevision.fixture(), List.of()));
+                        REPOSITORY_ID, RepositoryRevision.ofSha("0".repeat(40)), List.of()));
 
         mockMvc.perform(get("/v1/repositories/orders/entry-points")
-                        .queryParam("expectedRevision", "FIXTURE")
+                        .queryParam("expectedRevision", "0000000000000000000000000000000000000000")
                         .header(ApiTokenFilter.API_TOKEN_HEADER, TOKEN))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.repoId").value("orders"))
-                .andExpect(jsonPath("$.analyzedRevision").value("FIXTURE"))
+                .andExpect(jsonPath("$.analyzedRevision").value("0000000000000000000000000000000000000000"))
                 .andExpect(jsonPath("$.entryPoints").isEmpty());
     }
 
@@ -195,7 +195,7 @@ class EntryPointControllerTest {
                 .willReturn(resultWithAllMethods());
 
         String body = mockMvc.perform(get("/v1/repositories/orders/entry-points")
-                        .queryParam("expectedRevision", "FIXTURE")
+                        .queryParam("expectedRevision", "0000000000000000000000000000000000000000")
                         .header(ApiTokenFilter.API_TOKEN_HEADER, TOKEN))
                 .andExpect(status().isOk())
                 .andReturn().getResponse().getContentAsString();
@@ -233,7 +233,7 @@ class EntryPointControllerTest {
                 .willReturn(resultWithAllMethods());
 
         mockMvc.perform(get("/v1/repositories/orders/entry-points")
-                        .queryParam("expectedRevision", "FIXTURE")
+                        .queryParam("expectedRevision", "0000000000000000000000000000000000000000")
                         .header(ApiTokenFilter.API_TOKEN_HEADER, TOKEN))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.entryPoints[0].methods[0].analysisTarget.status").value("RESOLVED"))
@@ -268,6 +268,6 @@ class EntryPointControllerTest {
                         new ScheduleEntryPoint("refresh", "refresh orders", ScheduleTriggerKind.CRON, "0 * * * *",
                                 MethodTargetResolution.unresolved("METHOD_PARAMETER_BINDING_UNRESOLVED"))));
         return new RevisionBoundEntryPoints(
-                REPOSITORY_ID, RepositoryRevision.fixture(), List.of(entryPointClass));
+                REPOSITORY_ID, RepositoryRevision.ofSha("0".repeat(40)), List.of(entryPointClass));
     }
 }

@@ -1,7 +1,8 @@
 package com.java.semantic.syntax.adapter.jdt;
+import com.java.semantic.model.codefact.SourceRange;
 
-import com.java.semantic.syntax.domain.SyntaxPosition;
-import com.java.semantic.syntax.domain.SyntaxRange;
+import com.java.semantic.model.codefact.SyntaxPosition;
+import com.java.semantic.model.codefact.SyntaxRange;
 import org.eclipse.jdt.core.dom.ASTNode;
 import org.eclipse.jdt.core.dom.BodyDeclaration;
 import org.eclipse.jdt.core.dom.CompilationUnit;

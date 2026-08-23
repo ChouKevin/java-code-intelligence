@@ -8,8 +8,8 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.function.Function;
 
-import com.java.semantic.identity.JavaIdentityNormalizer;
-import com.java.semantic.identity.JavaTypeIdentity;
+import com.java.semantic.model.codefact.JavaIdentityNormalizer;
+import com.java.semantic.model.codefact.JavaTypeIdentity;
 import com.java.semantic.syntax.domain.ArrayTypeReference;
 import com.java.semantic.syntax.domain.AnnotationEvidence;
 import com.java.semantic.syntax.domain.CompilationUnitContext;
@@ -28,13 +28,13 @@ import com.java.semantic.syntax.domain.SourceTypeKind;
 import com.java.semantic.syntax.domain.SourceTypeMembers;
 import com.java.semantic.syntax.domain.SourceTypeMetadata;
 import com.java.semantic.syntax.domain.SourceTypeRelationships;
-import com.java.semantic.syntax.domain.SourceRange;
+import com.java.semantic.model.codefact.SourceRange;
 import com.java.semantic.syntax.domain.SqlSourceKind;
 import com.java.semantic.syntax.domain.TypeReference;
 import com.java.semantic.syntax.domain.TypeVariableReference;
 import com.java.semantic.syntax.domain.WildcardTypeReference;
 import com.java.semantic.syntax.domain.MethodTargetResolution;
-import com.java.semantic.identity.SourceTypeIdentity;
+import com.java.semantic.model.codefact.SourceTypeIdentity;
 
 import org.eclipse.jdt.core.dom.AbstractTypeDeclaration;
 import org.eclipse.jdt.core.dom.Annotation;

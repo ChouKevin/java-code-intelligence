@@ -1,4 +1,6 @@
 package com.java.semantic.syntax.domain;
+import com.java.semantic.model.codefact.SourceRange;
+import com.java.semantic.model.codefact.SourceRangeSegment;
 
 import com.java.semantic.repository.domain.RepositorySnapshot;
 

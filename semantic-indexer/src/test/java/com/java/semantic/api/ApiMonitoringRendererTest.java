@@ -1,4 +1,5 @@
 package com.java.semantic.api;
+import com.java.semantic.model.codefact.SourceRange;
 
 import com.java.semantic.api.dto.BoundedResultResponse;
 import com.java.semantic.api.dto.InternalSourceReferenceContextPayload;

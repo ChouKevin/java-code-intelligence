@@ -27,7 +27,7 @@ public final class DiscoverEventListenersRequest {
     private String eventType;
 
     @NotBlank
-    @Pattern(regexp = "^[0-9a-f]{40}$|^FIXTURE$")
+    @Pattern(regexp = "^[0-9a-f]{40}$")
     private String expectedRevision;
 
     @Min(0)

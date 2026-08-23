@@ -1,7 +1,7 @@
 package com.java.semantic.callgraph.application;
 
 import com.java.semantic.callgraph.domain.CallNodeId;
-import com.java.semantic.identity.MethodTarget;
+import com.java.semantic.model.codefact.MethodTarget;
 
 import java.util.LinkedHashMap;
 import java.util.Map;

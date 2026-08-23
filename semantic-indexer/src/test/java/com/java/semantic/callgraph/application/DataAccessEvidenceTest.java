@@ -4,17 +4,17 @@ import java.util.List;
 import java.util.Optional;
 
 import com.java.semantic.callgraph.domain.ResolutionStrategy;
-import com.java.semantic.identity.JavaTypeIdentity;
-import com.java.semantic.identity.MethodTarget;
-import com.java.semantic.identity.SourceTypeIdentity;
+import com.java.semantic.model.codefact.JavaTypeIdentity;
+import com.java.semantic.model.codefact.MethodTarget;
+import com.java.semantic.model.codefact.SourceTypeIdentity;
 import com.java.semantic.syntax.domain.SourceTypeMetadata;
 import com.java.semantic.syntax.domain.SourceMethodMetadata;
 import com.java.semantic.syntax.domain.SourceTypeKind;
 import com.java.semantic.syntax.domain.SqlSourceKind;
 import com.java.semantic.syntax.domain.MethodTargetResolution;
-import com.java.semantic.syntax.domain.SourceRange;
-import com.java.semantic.syntax.domain.SyntaxPosition;
-import com.java.semantic.syntax.domain.SyntaxRange;
+import com.java.semantic.model.codefact.SourceRange;
+import com.java.semantic.model.codefact.SyntaxPosition;
+import com.java.semantic.model.codefact.SyntaxRange;
 
 import org.junit.jupiter.api.Test;
 

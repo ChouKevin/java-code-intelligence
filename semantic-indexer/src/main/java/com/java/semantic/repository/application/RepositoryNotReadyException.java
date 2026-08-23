@@ -1,6 +1,6 @@
 package com.java.semantic.repository.application;
 
-import com.java.semantic.repository.domain.RepositoryId;
+import com.java.semantic.model.repository.RepositoryId;
 
 /** 儲存庫尚未準備可讀快照 */
 public class RepositoryNotReadyException extends RuntimeException {

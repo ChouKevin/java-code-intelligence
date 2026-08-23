@@ -8,9 +8,9 @@ import com.java.semantic.repository.application.RepositoryNotFoundException;
 import com.java.semantic.repository.application.RepositoryNotReadyException;
 import com.java.semantic.repository.application.RepositoryRevisionMismatchException;
 import com.java.semantic.repository.application.RepositoryApplicationService;
-import com.java.semantic.repository.domain.RepositoryId;
+import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.repository.domain.RepositoryMode;
-import com.java.semantic.repository.domain.RepositoryRevision;
+import com.java.semantic.model.repository.RepositoryRevision;
 import com.java.semantic.repository.domain.RepositoryStatus;
 import com.java.semantic.trie.ApiRouteApplicationService;
 import com.java.semantic.trie.ApiRouteIndexNotReadyException;
@@ -207,7 +207,7 @@ class McpServerCatalogContractTest {
         assertThat(routeInput.at("/properties/repoId/pattern").asText())
                 .isEqualTo("^[a-z0-9][a-z0-9._-]{0,63}$");
         assertThat(routeInput.at("/properties/expectedRevision/pattern").asText())
-                .isEqualTo("^[0-9a-f]{40}$|^FIXTURE$");
+                .isEqualTo("^[0-9a-f]{40}$");
         assertThat(routeInput.at("/properties/limit/minimum").asInt()).isEqualTo(1);
         assertThat(routeInput.at("/properties/limit/maximum").asInt()).isEqualTo(20);
 

@@ -3,9 +3,9 @@ package com.java.semantic.syntax.application.concept;
 import java.util.List;
 import java.util.Objects;
 
-import com.java.semantic.identity.JavaTypeIdentity;
-import com.java.semantic.identity.MethodTarget;
-import com.java.semantic.identity.SourceTypeIdentity;
+import com.java.semantic.model.codefact.JavaTypeIdentity;
+import com.java.semantic.model.codefact.MethodTarget;
+import com.java.semantic.model.codefact.SourceTypeIdentity;
 import com.java.semantic.syntax.domain.SourceMemberIdentity.TypeMember;
 
 import org.springframework.util.Assert;

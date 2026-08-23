@@ -13,12 +13,12 @@ import com.java.semantic.callgraph.domain.GraphAnalysisStatus;
 import com.java.semantic.callgraph.domain.OutgoingGraphFragment;
 import com.java.semantic.config.IncomingGraphProperties;
 import com.java.semantic.config.OutgoingGraphProperties;
-import com.java.semantic.identity.JavaTypeIdentity;
-import com.java.semantic.identity.MethodTarget;
-import com.java.semantic.identity.SourceTypeIdentity;
+import com.java.semantic.model.codefact.JavaTypeIdentity;
+import com.java.semantic.model.codefact.MethodTarget;
+import com.java.semantic.model.codefact.SourceTypeIdentity;
 import com.java.semantic.repository.application.RepositoryApplicationService;
-import com.java.semantic.repository.domain.RepositoryId;
-import com.java.semantic.repository.domain.RepositoryRevision;
+import com.java.semantic.model.repository.RepositoryId;
+import com.java.semantic.model.repository.RepositoryRevision;
 import com.java.semantic.repository.domain.RepositorySnapshot;
 import com.java.semantic.semantic.domain.JavaSemanticService;
 import com.java.semantic.semantic.domain.SemanticBindingAmbiguousException;
@@ -30,7 +30,7 @@ import com.java.semantic.syntax.domain.SourceTypeMetadataFixture;
 import com.java.semantic.syntax.domain.MethodTargetResolution;
 import com.java.semantic.syntax.domain.RepositorySyntax;
 import com.java.semantic.syntax.domain.RevisionBoundRepositorySyntaxProvider;
-import com.java.semantic.syntax.domain.SyntaxPosition;
+import com.java.semantic.model.codefact.SyntaxPosition;
 import org.junit.jupiter.api.Test;
 import org.slf4j.LoggerFactory;
 
@@ -51,7 +51,7 @@ class SemanticAnalysisLoggingTest {
     @Test
     void should_log_safe_start_and_terminal_analysis_events() {
         RepositoryId repositoryId = RepositoryId.of("orders");
-        RepositoryRevision revision = RepositoryRevision.fixture();
+        RepositoryRevision revision = RepositoryRevision.ofSha("0".repeat(40));
         MethodTarget target = new MethodTarget(
                 new SourceTypeIdentity(
                         new JavaTypeIdentity("CREDENTIAL_SENTINEL", "CredentialSentinel"),
@@ -116,7 +116,7 @@ class SemanticAnalysisLoggingTest {
     @Test
     void should_log_expected_semantic_failures_at_warn_without_exception_details() {
         RepositoryId repositoryId = RepositoryId.of("orders");
-        RepositoryRevision revision = RepositoryRevision.fixture();
+        RepositoryRevision revision = RepositoryRevision.ofSha("0".repeat(40));
         MethodTarget target = new MethodTarget(
                 new SourceTypeIdentity(
                         new JavaTypeIdentity("com.acme", "OrderService"),
@@ -171,7 +171,7 @@ class SemanticAnalysisLoggingTest {
     @Test
     void should_log_returned_partial_analysis_summary_at_warn_without_a_throwable() {
         RepositoryId repositoryId = RepositoryId.of("orders");
-        RepositoryRevision revision = RepositoryRevision.fixture();
+        RepositoryRevision revision = RepositoryRevision.ofSha("0".repeat(40));
         MethodTarget target = new MethodTarget(
                 new SourceTypeIdentity(
                         new JavaTypeIdentity("com.acme", "OrderService"),
@@ -225,7 +225,7 @@ class SemanticAnalysisLoggingTest {
     @Test
     void should_log_incoming_success_and_partial_events_with_direction() {
         RepositoryId repositoryId = RepositoryId.of("orders");
-        RepositoryRevision revision = RepositoryRevision.fixture();
+        RepositoryRevision revision = RepositoryRevision.ofSha("0".repeat(40));
         MethodTarget target = new MethodTarget(
                 new SourceTypeIdentity(
                         new JavaTypeIdentity("com.acme", "OrderService"),
@@ -288,7 +288,7 @@ class SemanticAnalysisLoggingTest {
     @Test
     void should_log_incoming_expected_failures_and_unexpected_failures_without_sensitive_details() {
         RepositoryId repositoryId = RepositoryId.of("orders");
-        RepositoryRevision revision = RepositoryRevision.fixture();
+        RepositoryRevision revision = RepositoryRevision.ofSha("0".repeat(40));
         MethodTarget target = new MethodTarget(
                 new SourceTypeIdentity(
                         new JavaTypeIdentity("com.acme", "OrderService"),

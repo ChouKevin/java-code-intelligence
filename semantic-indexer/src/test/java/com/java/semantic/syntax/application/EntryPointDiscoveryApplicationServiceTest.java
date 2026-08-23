@@ -1,10 +1,10 @@
 package com.java.semantic.syntax.application;
 
-import com.java.semantic.identity.JavaTypeIdentity;
-import com.java.semantic.identity.SourceTypeIdentity;
+import com.java.semantic.model.codefact.JavaTypeIdentity;
+import com.java.semantic.model.codefact.SourceTypeIdentity;
 import com.java.semantic.repository.application.RepositoryApplicationService;
-import com.java.semantic.repository.domain.RepositoryId;
-import com.java.semantic.repository.domain.RepositoryRevision;
+import com.java.semantic.model.repository.RepositoryId;
+import com.java.semantic.model.repository.RepositoryRevision;
 import com.java.semantic.repository.domain.RepositorySnapshot;
 import com.java.semantic.syntax.domain.ApiEntryPoint;
 import com.java.semantic.syntax.domain.EntryPointClass;
@@ -86,7 +86,7 @@ class EntryPointDiscoveryApplicationServiceTest {
     @Test
     void should_return_exact_fixture_revision_and_empty_list_for_repository_policy_denial() {
         RepositorySnapshot snapshot = new RepositorySnapshot(
-                REPOSITORY_ID, REPOSITORY_ROOT, RepositoryRevision.fixture());
+                REPOSITORY_ID, REPOSITORY_ROOT, RepositoryRevision.ofSha("0".repeat(40)));
         delegateSnapshot(snapshot);
         when(repositorySyntaxProvider.get(snapshot)).thenReturn(extracted);
         when(discoveryFilter.filter(
@@ -94,9 +94,9 @@ class EntryPointDiscoveryApplicationServiceTest {
                 .thenReturn(RepositorySyntax.empty());
 
         RevisionBoundEntryPoints result = service.list(
-                REPOSITORY_ID, RepositoryRevision.fixture(), EnumSet.allOf(EntryPointType.class));
+                REPOSITORY_ID, RepositoryRevision.ofSha("0".repeat(40)), EnumSet.allOf(EntryPointType.class));
 
-        assertThat(result.analyzedRevision()).isEqualTo(RepositoryRevision.fixture());
+        assertThat(result.analyzedRevision()).isEqualTo(RepositoryRevision.ofSha("0".repeat(40)));
         assertThat(result.entryPoints()).isEmpty();
     }
 

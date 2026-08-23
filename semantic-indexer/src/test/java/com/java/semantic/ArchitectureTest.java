@@ -1,4 +1,5 @@
 package com.java.semantic;
+import com.java.semantic.model.codefact.SourceRange;
 
 import com.java.semantic.api.JavaSourceIdentityHttpMapper;
 import com.java.semantic.api.MapperIdentityHttpMapper;
@@ -15,7 +16,7 @@ import com.java.semantic.api.dto.location.SourceRangePayload;
 import com.java.semantic.api.dto.location.TextRangePayload;
 import com.java.semantic.config.SemanticAnalysisConfiguration;
 import com.java.semantic.repository.application.RepositoryApplicationService;
-import com.java.semantic.repository.domain.RepositoryId;
+import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.monitoring.MonitoringField;
 import com.java.semantic.syntax.application.concept.ConceptDiscoveryApplicationService;
 import com.java.semantic.syntax.application.EvidenceSourceApplicationService;
@@ -118,8 +119,8 @@ class ArchitectureTest {
     @Test
     void should_keep_the_source_identity_model_jdk_only() {
         noClasses()
-                .that().resideInAPackage("com.java.semantic.identity..")
-                .should().dependOnClassesThat().resideOutsideOfPackages("java..", "com.java.semantic.identity..")
+                .that().resideInAPackage("com.java.semantic.model..")
+                .should().dependOnClassesThat().resideOutsideOfPackages("java..", "com.java.semantic.model..")
                 .as("the source identity model must remain JDK-only")
                 .allowEmptyShould(false)
                 .check(classes);
@@ -159,8 +160,8 @@ class ArchitectureTest {
         assertThat(classNames).doesNotContain(
                 "com.java.semantic.syntax.domain.ClassMetadata",
                 "com.java.semantic.syntax.domain.ResolvedTypeIdentity",
-                "com.java.semantic.identity.PolicyIdentity",
-                "com.java.semantic.identity.SourceMemberIdentity",
+                "com.java.semantic.model.codefact.PolicyIdentity",
+                "com.java.semantic.model.codefact.SourceMemberIdentity",
                 "com.java.semantic.api.dto.MethodTargetRequest",
                 "com.java.semantic.api.dto.MethodTargetResponse",
                 "com.java.semantic.api.dto.JavaTypeIdentityResponse",
@@ -177,10 +178,10 @@ class ArchitectureTest {
                 "com.java.semantic.api.dto.DiscoveryFollowUpResponse$SourceSymbolContextResponse",
                 "com.java.semantic.api.dto.DiscoveryFollowUpResponse$SourceSymbolMethodContextResponse");
 
-        assertThat(loadClass("com.java.semantic.identity.MethodTarget").getConstructors())
+        assertThat(loadClass("com.java.semantic.model.codefact.MethodTarget").getConstructors())
                 .noneMatch(constructor -> Arrays.equals(constructor.getParameterTypes(), new Class<?>[]{
                         String.class, String.class, String.class, String.class, List.class}));
-        assertThat(loadClass("com.java.semantic.identity.SourceTypeIdentity").getConstructors())
+        assertThat(loadClass("com.java.semantic.model.codefact.SourceTypeIdentity").getConstructors())
                 .noneMatch(constructor -> Arrays.equals(constructor.getParameterTypes(), new Class<?>[]{
                         String.class, Optional.class}));
     }
@@ -539,7 +540,8 @@ class ArchitectureTest {
                         "com.java.semantic.callgraph..",
                         "com.java.semantic.syntax.domain..",
                         "com.java.semantic.diagnostic..",
-                        "com.java.semantic.identity..",
+                        "com.java.semantic.model.codefact..",
+                        "com.java.semantic.model.repository..",
                         "com.java.semantic.config..",
                         "com.java.semantic.repository.application..",
                         "com.java.semantic.repository.domain..",
@@ -672,7 +674,7 @@ class ArchitectureTest {
                 .or().haveSimpleName("GraphErrorResponse")
                 .or().haveSimpleName("OutgoingCallGraphResponse")
                 .should().dependOnClassesThat().resideInAnyPackage(
-                        "com.java.semantic.identity..",
+                        "com.java.semantic.model.codefact..",
                         "com.java.semantic.repository..",
                         "com.java.semantic.semantic..",
                         "com.java.semantic.callgraph..",

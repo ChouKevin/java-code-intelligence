@@ -16,7 +16,7 @@ import com.java.semantic.syntax.application.ListenerObservationSummary;
 import com.java.semantic.syntax.application.RevisionBoundEventListenerDiscovery;
 import com.java.semantic.syntax.application.DiscoveryFollowUp;
 import com.java.semantic.syntax.application.DiscoveryFollowUpFactory;
-import com.java.semantic.syntax.domain.SourceRange;
+import com.java.semantic.model.codefact.SourceRange;
 import org.springframework.stereotype.Component;
 import org.springframework.util.Assert;
 

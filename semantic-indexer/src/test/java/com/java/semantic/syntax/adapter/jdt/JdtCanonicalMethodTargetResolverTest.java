@@ -7,9 +7,9 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 
-import com.java.semantic.identity.JavaTypeIdentity;
-import com.java.semantic.identity.MethodTarget;
-import com.java.semantic.identity.SourceTypeIdentity;
+import com.java.semantic.model.codefact.JavaTypeIdentity;
+import com.java.semantic.model.codefact.MethodTarget;
+import com.java.semantic.model.codefact.SourceTypeIdentity;
 import com.java.semantic.syntax.domain.AnalysisTargetStatus;
 import com.java.semantic.syntax.domain.MethodTargetResolution;
 

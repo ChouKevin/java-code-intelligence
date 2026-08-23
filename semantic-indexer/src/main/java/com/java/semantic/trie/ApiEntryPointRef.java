@@ -1,6 +1,6 @@
 package com.java.semantic.trie;
 
-import com.java.semantic.identity.SourceTypeIdentity;
+import com.java.semantic.model.codefact.SourceTypeIdentity;
 import com.java.semantic.syntax.domain.MethodTargetResolution;
 
 import java.util.Objects;

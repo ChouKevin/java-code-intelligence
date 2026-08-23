@@ -1,6 +1,6 @@
 package com.java.semantic.callgraph.domain;
 
-import com.java.semantic.identity.JavaIdentityNormalizer;
+import com.java.semantic.model.codefact.JavaIdentityNormalizer;
 import org.springframework.util.Assert;
 import org.springframework.util.StringUtils;
 

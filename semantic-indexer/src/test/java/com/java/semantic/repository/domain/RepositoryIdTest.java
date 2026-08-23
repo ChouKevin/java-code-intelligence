@@ -1,4 +1,6 @@
 package com.java.semantic.repository.domain;
+import com.java.semantic.model.repository.RepositoryId;
+import com.java.semantic.model.repository.InvalidRepositoryIdException;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;

@@ -19,7 +19,7 @@ import java.util.Optional;
 public record ResolveSourceSymbolRequest(
         @MonitoringField(MonitoringMode.VALUE) @NotBlank String repoId,
         @MonitoringField(MonitoringMode.VALUE) @NotBlank
-        @Pattern(regexp = "^[0-9a-f]{40}$|^FIXTURE$") String expectedRevision,
+        @Pattern(regexp = "^[0-9a-f]{40}$") String expectedRevision,
         @MonitoringField(MonitoringMode.NESTED) @NotNull @Valid SourceSymbolContextPayload context,
         @MonitoringField(MonitoringMode.VALUE) @NotBlank
         @Pattern(regexp = "[\\p{L}\\p{Nl}\\p{Sc}\\p{Pc}]"

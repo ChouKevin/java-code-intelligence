@@ -1,6 +1,6 @@
 package com.java.semantic.syntax.application;
 
-import com.java.semantic.identity.MethodTarget;
+import com.java.semantic.model.codefact.MethodTarget;
 import com.java.semantic.repository.application.RepositoryApplicationService;
 import com.java.semantic.repository.domain.RepositorySnapshot;
 import com.java.semantic.semantic.domain.SemanticBindingAmbiguousException;
@@ -13,8 +13,8 @@ import com.java.semantic.syntax.domain.RevisionBoundRepositorySyntaxProvider;
 import com.java.semantic.syntax.domain.RevisionPinnedSourceRangeReader;
 import com.java.semantic.syntax.domain.SourceMethodMetadata;
 import com.java.semantic.syntax.domain.SourceTypeMetadata;
-import com.java.semantic.syntax.domain.SourceRange;
-import com.java.semantic.syntax.domain.SourceRangeSegment;
+import com.java.semantic.model.codefact.SourceRange;
+import com.java.semantic.model.codefact.SourceRangeSegment;
 
 import java.util.Objects;
 import java.util.Optional;

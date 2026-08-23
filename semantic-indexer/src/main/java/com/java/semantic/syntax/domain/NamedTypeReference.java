@@ -3,7 +3,7 @@ package com.java.semantic.syntax.domain;
 import java.util.Objects;
 import java.util.Optional;
 
-import com.java.semantic.identity.JavaTypeIdentity;
+import com.java.semantic.model.codefact.JavaTypeIdentity;
 
 /** 單一簡單、限定或名稱限定型別的證據 */
 public record NamedTypeReference(

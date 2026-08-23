@@ -1,12 +1,12 @@
 package com.java.semantic.syntax.application;
 
-import com.java.semantic.syntax.domain.SourceRange;
+import com.java.semantic.model.codefact.SourceRange;
 
 import com.java.semantic.syntax.application.concept.ConceptIdentity;
 import com.java.semantic.syntax.application.concept.ConceptSearchTerm;
-import com.java.semantic.identity.MethodTarget;
-import com.java.semantic.identity.SourceTypeIdentity;
-import com.java.semantic.syntax.domain.SyntaxPosition;
+import com.java.semantic.model.codefact.MethodTarget;
+import com.java.semantic.model.codefact.SourceTypeIdentity;
+import com.java.semantic.model.codefact.SyntaxPosition;
 import com.java.semantic.syntax.domain.ExactSourceDeclarationTarget;
 
 import java.util.List;

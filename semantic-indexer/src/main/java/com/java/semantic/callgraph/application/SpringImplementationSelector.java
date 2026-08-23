@@ -1,7 +1,7 @@
 package com.java.semantic.callgraph.application;
 
 import com.java.semantic.callgraph.domain.ResolutionStrategy;
-import com.java.semantic.identity.MethodTarget;
+import com.java.semantic.model.codefact.MethodTarget;
 import com.java.semantic.syntax.domain.SyntaxInvocation;
 import org.springframework.util.Assert;
 import org.springframework.util.StringUtils;

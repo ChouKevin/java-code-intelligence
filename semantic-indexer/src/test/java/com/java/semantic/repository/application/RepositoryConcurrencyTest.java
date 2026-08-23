@@ -4,13 +4,13 @@ import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
-import com.java.semantic.identity.JavaTypeIdentity;
-import com.java.semantic.identity.MethodTarget;
-import com.java.semantic.identity.SourceTypeIdentity;
+import com.java.semantic.model.codefact.JavaTypeIdentity;
+import com.java.semantic.model.codefact.MethodTarget;
+import com.java.semantic.model.codefact.SourceTypeIdentity;
 import com.java.semantic.repository.config.RepositoryProperties;
-import com.java.semantic.repository.domain.RepositoryId;
+import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.repository.domain.RepositoryMode;
-import com.java.semantic.repository.domain.RepositoryRevision;
+import com.java.semantic.model.repository.RepositoryRevision;
 import com.java.semantic.repository.domain.RepositoryRuntime;
 import com.java.semantic.repository.domain.RepositorySnapshot;
 import com.java.semantic.repository.domain.RepositoryStatus;
@@ -72,8 +72,8 @@ class RepositoryConcurrencyTest {
 
         assertThat(publication.events()).containsExactly(
                 "before:test-repo",
-                "after:test-repo:FIXTURE");
-        assertThat(status.currentRevision()).contains(RepositoryRevision.fixture());
+                "after:test-repo:0000000000000000000000000000000000000000");
+        assertThat(status.currentRevision()).contains(RepositoryRevision.ofSha("0".repeat(40)));
     }
 
     @Test
@@ -532,7 +532,7 @@ class RepositoryConcurrencyTest {
 
         RepositoryStatus status = service.ensure(REPOSITORY_ID);
 
-        assertThat(status.currentRevision()).contains(RepositoryRevision.fixture());
+        assertThat(status.currentRevision()).contains(RepositoryRevision.ofSha("0".repeat(40)));
         assertThat(status.currentBranch()).isEmpty();
         assertThatThrownBy(() -> service.sync(REPOSITORY_ID, Optional.empty()))
                 .isInstanceOf(ImmutableFixtureException.class);
@@ -553,10 +553,10 @@ class RepositoryConcurrencyTest {
 
         RepositoryRevision revision = service.withSnapshot(
                 REPOSITORY_ID,
-                Optional.of(RepositoryRevision.fixture()),
+                Optional.of(RepositoryRevision.ofSha("0".repeat(40))),
                 RepositorySnapshot::revision);
 
-        assertThat(revision).isEqualTo(RepositoryRevision.fixture());
+        assertThat(revision).isEqualTo(RepositoryRevision.ofSha("0".repeat(40)));
     }
 
     @Test

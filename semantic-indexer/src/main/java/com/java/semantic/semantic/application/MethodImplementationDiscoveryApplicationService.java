@@ -4,7 +4,7 @@ import com.java.semantic.callgraph.application.CanonicalTargetProjection;
 import com.java.semantic.callgraph.application.ImplementationCandidate;
 import com.java.semantic.callgraph.application.ImplementationCandidateFactory;
 import com.java.semantic.callgraph.application.RepositorySyntaxIndex;
-import com.java.semantic.identity.MethodTarget;
+import com.java.semantic.model.codefact.MethodTarget;
 import com.java.semantic.repository.application.RepositoryApplicationService;
 import com.java.semantic.repository.domain.RepositorySnapshot;
 import com.java.semantic.semantic.domain.JavaSemanticService;

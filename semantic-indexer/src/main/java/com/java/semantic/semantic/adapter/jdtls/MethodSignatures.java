@@ -1,6 +1,6 @@
 package com.java.semantic.semantic.adapter.jdtls;
 
-import com.java.semantic.identity.JavaIdentityNormalizer;
+import com.java.semantic.model.codefact.JavaIdentityNormalizer;
 import org.springframework.util.StringUtils;
 
 import java.util.ArrayList;

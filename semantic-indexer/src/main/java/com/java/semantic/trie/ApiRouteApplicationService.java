@@ -1,8 +1,8 @@
 package com.java.semantic.trie;
 
 import com.java.semantic.repository.application.RepositoryApplicationService;
-import com.java.semantic.repository.domain.RepositoryId;
-import com.java.semantic.repository.domain.RepositoryRevision;
+import com.java.semantic.model.repository.RepositoryId;
+import com.java.semantic.model.repository.RepositoryRevision;
 import org.springframework.stereotype.Service;
 
 import java.util.Objects;

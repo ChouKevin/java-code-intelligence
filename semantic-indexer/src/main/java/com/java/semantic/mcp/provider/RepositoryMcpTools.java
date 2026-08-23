@@ -5,8 +5,8 @@ import com.java.semantic.mcp.McpQueryRegistration;
 import com.java.semantic.mcp.dto.repository.RepositoryMcpDtos;
 import com.java.semantic.mcp.mapper.RepositoryMcpMapper;
 import com.java.semantic.repository.application.RepositoryApplicationService;
-import com.java.semantic.repository.domain.RepositoryId;
-import com.java.semantic.repository.domain.RepositoryRevision;
+import com.java.semantic.model.repository.RepositoryId;
+import com.java.semantic.model.repository.RepositoryRevision;
 import com.java.semantic.syntax.application.EntryPointDiscoveryApplicationService;
 import org.springframework.stereotype.Component;
 

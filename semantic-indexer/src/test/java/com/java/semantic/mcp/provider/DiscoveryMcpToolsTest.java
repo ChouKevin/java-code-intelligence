@@ -6,8 +6,8 @@ import com.java.semantic.mcp.dto.framework.FrameworkDiscoveryMcpDtos;
 import com.java.semantic.mcp.dto.source.SourceDiscoveryMcpDtos;
 import com.java.semantic.monitoring.MonitoringField;
 import com.java.semantic.monitoring.MonitoringMode;
-import com.java.semantic.repository.domain.RepositoryId;
-import com.java.semantic.repository.domain.RepositoryRevision;
+import com.java.semantic.model.repository.RepositoryId;
+import com.java.semantic.model.repository.RepositoryRevision;
 import com.java.semantic.syntax.application.EventListenerDiscoveryApplicationService;
 import com.java.semantic.syntax.application.EventListenerDiscoveryQuery;
 import com.java.semantic.syntax.application.RevisionBoundEventListenerDiscovery;
@@ -99,7 +99,7 @@ class DiscoveryMcpToolsTest {
         FrameworkDiscoveryMcpDtos.EventListenersInput input = decoder.decode(
                 Map.of(
                         "repoId", "orders",
-                        "expectedRevision", "FIXTURE",
+                        "expectedRevision", "0000000000000000000000000000000000000000",
                         "eventType", "com.example.OrderCreated",
                         "limit", 20),
                 FrameworkDiscoveryMcpDtos.EventListenersInput.class);
@@ -108,7 +108,7 @@ class DiscoveryMcpToolsTest {
 
         then(eventListenerDiscoveryApplicationService).should().discover(new EventListenerDiscoveryQuery(
                 RepositoryId.of("orders"),
-                new RepositoryRevision("FIXTURE"),
+                new RepositoryRevision("0000000000000000000000000000000000000000"),
                 "com.example.OrderCreated",
                 0,
                 20));
@@ -169,7 +169,7 @@ class DiscoveryMcpToolsTest {
                 null,
                 new McpSchema.CallToolRequest("semantic_resolve_concept", Map.of(
                         "repoId", "orders",
-                        "expectedRevision", "FIXTURE",
+                        "expectedRevision", "0000000000000000000000000000000000000000",
                         "identity", identity)));
 
         assertThat(result.isError()).isTrue();

@@ -1,6 +1,6 @@
 package com.java.semantic.syntax.application.concept;
 
-import com.java.semantic.identity.MethodTarget;
+import com.java.semantic.model.codefact.MethodTarget;
 import com.java.semantic.syntax.application.concept.DeclarationConceptIdentity.FieldConceptIdentity;
 import com.java.semantic.syntax.application.concept.DeclarationConceptIdentity.MethodConceptIdentity;
 import com.java.semantic.syntax.application.concept.DeclarationConceptIdentity.TypeConceptIdentity;

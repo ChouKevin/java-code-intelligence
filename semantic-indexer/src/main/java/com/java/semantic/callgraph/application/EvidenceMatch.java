@@ -5,7 +5,7 @@ import java.util.Objects;
 import java.util.Optional;
 
 import com.java.semantic.callgraph.domain.ResolutionStrategy;
-import com.java.semantic.identity.MethodTarget;
+import com.java.semantic.model.codefact.MethodTarget;
 
 import org.springframework.util.Assert;
 

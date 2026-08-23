@@ -5,11 +5,11 @@ import com.java.semantic.callgraph.domain.GraphAnalysisStatus;
 import com.java.semantic.callgraph.domain.GraphLimitReason;
 import com.java.semantic.callgraph.domain.NodeContentState;
 import com.java.semantic.callgraph.domain.NodeTraversalState;
-import com.java.semantic.identity.JavaTypeIdentity;
-import com.java.semantic.identity.MethodTarget;
-import com.java.semantic.identity.SourceTypeIdentity;
-import com.java.semantic.repository.domain.RepositoryId;
-import com.java.semantic.repository.domain.RepositoryRevision;
+import com.java.semantic.model.codefact.JavaTypeIdentity;
+import com.java.semantic.model.codefact.MethodTarget;
+import com.java.semantic.model.codefact.SourceTypeIdentity;
+import com.java.semantic.model.repository.RepositoryId;
+import com.java.semantic.model.repository.RepositoryRevision;
 import com.java.semantic.repository.domain.RepositorySnapshot;
 import com.java.semantic.semantic.domain.JavaSemanticService;
 import com.java.semantic.semantic.domain.SemanticCall;
@@ -35,10 +35,10 @@ import com.java.semantic.syntax.domain.SqlSourceKind;
 import com.java.semantic.syntax.domain.SourceTypeKind;
 import com.java.semantic.syntax.domain.MethodTargetResolution;
 import com.java.semantic.syntax.domain.RepositorySyntax;
-import com.java.semantic.syntax.domain.SourceRange;
+import com.java.semantic.model.codefact.SourceRange;
 import com.java.semantic.syntax.domain.SyntaxInvocation;
-import com.java.semantic.syntax.domain.SyntaxPosition;
-import com.java.semantic.syntax.domain.SyntaxRange;
+import com.java.semantic.model.codefact.SyntaxPosition;
+import com.java.semantic.model.codefact.SyntaxRange;
 import com.java.semantic.syntax.domain.NamedTypeReference;
 import com.java.semantic.syntax.domain.TypeReference;
 import org.junit.jupiter.api.Test;
@@ -61,7 +61,7 @@ import static org.assertj.core.groups.Tuple.tuple;
 class SemanticCallGraphBuilderTest {
 
     private static final RepositorySnapshot SNAPSHOT = new RepositorySnapshot(
-            RepositoryId.of("orders"), Path.of("/fixture"), RepositoryRevision.fixture());
+            RepositoryId.of("orders"), Path.of("/fixture"), RepositoryRevision.ofSha("0".repeat(40)));
 
     @Test
     void should_return_success_for_a_root_without_calls() {

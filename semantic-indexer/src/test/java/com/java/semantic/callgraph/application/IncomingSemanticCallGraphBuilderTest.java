@@ -8,9 +8,9 @@ import com.java.semantic.callgraph.domain.GraphLimitReason;
 import com.java.semantic.callgraph.domain.IncomingGraphFragment;
 import com.java.semantic.callgraph.domain.NodeContentState;
 import com.java.semantic.callgraph.domain.ResolutionStrategy;
-import com.java.semantic.identity.MethodTarget;
-import com.java.semantic.repository.domain.RepositoryId;
-import com.java.semantic.repository.domain.RepositoryRevision;
+import com.java.semantic.model.codefact.MethodTarget;
+import com.java.semantic.model.repository.RepositoryId;
+import com.java.semantic.model.repository.RepositoryRevision;
 import com.java.semantic.repository.domain.RepositorySnapshot;
 import com.java.semantic.semantic.domain.JavaSemanticService;
 import com.java.semantic.semantic.domain.SemanticCall;
@@ -35,10 +35,10 @@ import com.java.semantic.syntax.domain.AnnotationEvidence;
 import com.java.semantic.syntax.domain.SqlSourceKind;
 import com.java.semantic.syntax.domain.MethodTargetResolution;
 import com.java.semantic.syntax.domain.RepositorySyntax;
-import com.java.semantic.syntax.domain.SourceRange;
+import com.java.semantic.model.codefact.SourceRange;
 import com.java.semantic.syntax.domain.SyntaxInvocation;
-import com.java.semantic.syntax.domain.SyntaxPosition;
-import com.java.semantic.syntax.domain.SyntaxRange;
+import com.java.semantic.model.codefact.SyntaxPosition;
+import com.java.semantic.model.codefact.SyntaxRange;
 import com.java.semantic.syntax.domain.TypeReference;
 import org.junit.jupiter.api.Test;
 
@@ -59,7 +59,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class IncomingSemanticCallGraphBuilderTest {
 
     private static final RepositorySnapshot SNAPSHOT = new RepositorySnapshot(
-            RepositoryId.of("orders"), Path.of("/fixture"), RepositoryRevision.fixture());
+            RepositoryId.of("orders"), Path.of("/fixture"), RepositoryRevision.ofSha("0".repeat(40)));
 
     @Test
     void should_build_caller_to_callee_edges_for_each_distinct_call_site_with_full_source_state() {

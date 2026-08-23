@@ -1,9 +1,9 @@
 package com.java.semantic.syntax.application;
 
 import com.java.semantic.syntax.application.concept.ConceptPage;
-import com.java.semantic.repository.domain.RepositoryId;
-import com.java.semantic.repository.domain.RepositoryRevision;
-import com.java.semantic.identity.SourceTypeIdentity;
+import com.java.semantic.model.repository.RepositoryId;
+import com.java.semantic.model.repository.RepositoryRevision;
+import com.java.semantic.model.codefact.SourceTypeIdentity;
 import com.java.semantic.syntax.domain.SourceTypeKind;
 import com.java.semantic.syntax.domain.SourceExtractionOutcome;
 

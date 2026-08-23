@@ -1,16 +1,16 @@
 package com.java.semantic.api;
 
 import com.java.semantic.api.security.ApiTokenFilter;
-import com.java.semantic.repository.domain.RepositoryId;
-import com.java.semantic.repository.domain.RepositoryRevision;
+import com.java.semantic.model.repository.RepositoryId;
+import com.java.semantic.model.repository.RepositoryRevision;
 import com.java.semantic.repository.application.RepositoryRevisionMismatchException;
 import com.java.semantic.syntax.application.SourceSegmentApplicationService;
 import com.java.semantic.syntax.application.SourceSegmentQuery;
 import com.java.semantic.syntax.application.SourceSegmentResult;
 import com.java.semantic.syntax.application.SourceSegmentNotFoundException;
-import com.java.semantic.syntax.domain.SourceRange;
-import com.java.semantic.syntax.domain.SyntaxPosition;
-import com.java.semantic.syntax.domain.SyntaxRange;
+import com.java.semantic.model.codefact.SourceRange;
+import com.java.semantic.model.codefact.SyntaxPosition;
+import com.java.semantic.model.codefact.SyntaxRange;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;

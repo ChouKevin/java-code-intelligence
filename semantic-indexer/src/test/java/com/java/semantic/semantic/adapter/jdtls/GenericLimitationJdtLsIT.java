@@ -1,9 +1,9 @@
 package com.java.semantic.semantic.adapter.jdtls;
 
 import com.java.semantic.config.JdtLsProperties;
-import com.java.semantic.identity.MethodTarget;
-import com.java.semantic.repository.domain.RepositoryId;
-import com.java.semantic.repository.domain.RepositoryRevision;
+import com.java.semantic.model.codefact.MethodTarget;
+import com.java.semantic.model.repository.RepositoryId;
+import com.java.semantic.model.repository.RepositoryRevision;
 import com.java.semantic.repository.domain.RepositorySnapshot;
 import com.java.semantic.semantic.domain.SemanticCall;
 import com.java.semantic.semantic.domain.SemanticDeclarationAnchor;

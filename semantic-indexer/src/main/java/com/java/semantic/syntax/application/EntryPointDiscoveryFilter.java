@@ -3,7 +3,7 @@ package com.java.semantic.syntax.application;
 import com.java.semantic.callgraph.domain.EvidenceVisibility;
 import com.java.semantic.callgraph.domain.ReadPolicy;
 import com.java.semantic.callgraph.domain.TypeId;
-import com.java.semantic.repository.domain.RepositoryId;
+import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.syntax.domain.EntryPointClass;
 import com.java.semantic.syntax.domain.EntryPointMethod;
 import com.java.semantic.syntax.domain.EntryPointType;

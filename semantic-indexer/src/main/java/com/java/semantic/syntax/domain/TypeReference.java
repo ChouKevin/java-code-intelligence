@@ -2,7 +2,7 @@ package com.java.semantic.syntax.domain;
 
 import java.util.Optional;
 
-import com.java.semantic.identity.JavaTypeIdentity;
+import com.java.semantic.model.codefact.JavaTypeIdentity;
 
 /** 原始碼型別寫法與已證實 binding 的密封證據介面 */
 public sealed interface TypeReference permits NominalTypeReference, PrimitiveTypeReference, ArrayTypeReference,

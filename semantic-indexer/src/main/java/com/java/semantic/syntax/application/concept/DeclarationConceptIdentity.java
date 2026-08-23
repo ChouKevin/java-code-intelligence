@@ -2,8 +2,8 @@ package com.java.semantic.syntax.application.concept;
 
 import java.util.Objects;
 
-import com.java.semantic.identity.MethodTarget;
-import com.java.semantic.identity.SourceTypeIdentity;
+import com.java.semantic.model.codefact.MethodTarget;
+import com.java.semantic.model.codefact.SourceTypeIdentity;
 import com.java.semantic.syntax.domain.SourceMemberIdentity.TypeMember;
 
 /** 宣告類概念的唯一識別，供 TYPE、METHOD 與 FIELD 以穩定值合併目錄 */

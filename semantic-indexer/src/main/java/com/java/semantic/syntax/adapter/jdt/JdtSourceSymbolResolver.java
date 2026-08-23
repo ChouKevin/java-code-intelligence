@@ -1,13 +1,13 @@
 package com.java.semantic.syntax.adapter.jdt;
 
-import com.java.semantic.identity.MethodTarget;
-import com.java.semantic.identity.JavaTypeIdentity;
+import com.java.semantic.model.codefact.MethodTarget;
+import com.java.semantic.model.codefact.JavaTypeIdentity;
 import com.java.semantic.syntax.domain.SourceMemberIdentity;
-import com.java.semantic.identity.SourceTypeIdentity;
+import com.java.semantic.model.codefact.SourceTypeIdentity;
 import com.java.semantic.repository.domain.RepositorySnapshot;
 import com.java.semantic.syntax.application.SourceContextCandidate;
 import com.java.semantic.syntax.application.SourceMethodContextCandidate;
-import com.java.semantic.syntax.domain.SourceRange;
+import com.java.semantic.model.codefact.SourceRange;
 import com.java.semantic.syntax.application.SourceSymbolCandidate;
 import com.java.semantic.syntax.application.SourceSymbolContext;
 import com.java.semantic.syntax.application.SourceSymbolIssueCode;
@@ -19,8 +19,8 @@ import com.java.semantic.syntax.application.SourceSymbolResolutionStatus;
 import com.java.semantic.syntax.application.SourceSymbolResolver;
 import com.java.semantic.syntax.application.SourceTypeContextCandidate;
 import com.java.semantic.syntax.domain.MethodTargetResolution;
-import com.java.semantic.syntax.domain.SyntaxPosition;
-import com.java.semantic.syntax.domain.SyntaxRange;
+import com.java.semantic.model.codefact.SyntaxPosition;
+import com.java.semantic.model.codefact.SyntaxRange;
 import org.eclipse.jdt.core.dom.ASTNode;
 import org.eclipse.jdt.core.dom.ASTVisitor;
 import org.eclipse.jdt.core.dom.AbstractTypeDeclaration;

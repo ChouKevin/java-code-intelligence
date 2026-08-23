@@ -1,4 +1,5 @@
 package com.java.semantic.api.dto;
+import com.java.semantic.model.codefact.SourceRange;
 
 import com.fasterxml.jackson.annotation.JsonAnySetter;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
@@ -20,7 +21,7 @@ import java.util.Optional;
 public record SourceSegmentRequest(
         @MonitoringField(MonitoringMode.VALUE) @NotBlank String repoId,
         @MonitoringField(MonitoringMode.VALUE) @NotBlank
-        @Pattern(regexp = "^[0-9a-f]{40}$|^FIXTURE$") String expectedRevision,
+        @Pattern(regexp = "^[0-9a-f]{40}$") String expectedRevision,
         @MonitoringField(MonitoringMode.NESTED) @NotNull @Valid SourceRangePayload location,
         @MonitoringField(MonitoringMode.VALUE) @Min(0) @Max(20) Integer contextLines) {
 

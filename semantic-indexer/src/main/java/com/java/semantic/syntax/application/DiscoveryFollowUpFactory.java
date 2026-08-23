@@ -1,14 +1,14 @@
 package com.java.semantic.syntax.application;
 
-import com.java.semantic.syntax.domain.SourceRange;
+import com.java.semantic.model.codefact.SourceRange;
 
 import com.java.semantic.syntax.application.concept.ConceptIdentity;
 import com.java.semantic.syntax.application.concept.ConceptSearchQuery;
 import com.java.semantic.syntax.application.concept.ConceptSearchTerm;
-import com.java.semantic.identity.MethodTarget;
-import com.java.semantic.identity.SourceTypeIdentity;
-import com.java.semantic.repository.domain.RepositoryId;
-import com.java.semantic.repository.domain.RepositoryRevision;
+import com.java.semantic.model.codefact.MethodTarget;
+import com.java.semantic.model.codefact.SourceTypeIdentity;
+import com.java.semantic.model.repository.RepositoryId;
+import com.java.semantic.model.repository.RepositoryRevision;
 import com.java.semantic.syntax.application.concept.EntryPointConceptIdentity.ApiRouteConceptIdentity;
 import com.java.semantic.syntax.application.concept.DeclarationConceptIdentity.FieldConceptIdentity;
 import com.java.semantic.syntax.application.concept.DeclarationConceptIdentity.MethodConceptIdentity;
@@ -37,7 +37,7 @@ import com.java.semantic.syntax.application.DiscoveryFollowUp.Operation;
 import com.java.semantic.syntax.application.DiscoveryFollowUp.ResolveSourceSymbolRequest;
 import com.java.semantic.syntax.application.DiscoveryFollowUp.ResolveConceptRequest;
 import com.java.semantic.syntax.application.DiscoveryFollowUp.TypeMembersRequest;
-import com.java.semantic.syntax.domain.SyntaxPosition;
+import com.java.semantic.model.codefact.SyntaxPosition;
 import com.java.semantic.syntax.domain.ExactSourceDeclarationTarget;
 import com.java.semantic.syntax.domain.SourceMemberIdentity;
 

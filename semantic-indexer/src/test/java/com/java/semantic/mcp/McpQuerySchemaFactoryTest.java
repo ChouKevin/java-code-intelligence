@@ -70,7 +70,7 @@ class McpQuerySchemaFactoryTest {
         assertThat(routeSchema.at("/properties/repoId/pattern").asText())
                 .isEqualTo("^[a-z0-9][a-z0-9._-]{0,63}$");
         assertThat(routeSchema.at("/properties/expectedRevision/pattern").asText())
-                .isEqualTo("^[0-9a-f]{40}$|^FIXTURE$");
+                .isEqualTo("^[0-9a-f]{40}$");
     }
 
     @Test
@@ -86,13 +86,13 @@ class McpQuerySchemaFactoryTest {
         assertThat(listenersSchema.at("/required").toString()).contains(
                 "repoId", "expectedRevision", "eventType", "limit").doesNotContain("offset");
         assertThat(decoder.decode(
-                Map.of("repoId", "orders", "expectedRevision", "FIXTURE", "apiPath", "/orders"),
+                Map.of("repoId", "orders", "expectedRevision", "0000000000000000000000000000000000000000", "apiPath", "/orders"),
                 ApiRouteMcpDtos.LookupInput.class).httpMethod()).isNull();
         assertThat(decoder.decode(
-                Map.of("repoId", "orders", "expectedRevision", "FIXTURE", "eventType", "created", "limit", 5),
+                Map.of("repoId", "orders", "expectedRevision", "0000000000000000000000000000000000000000", "eventType", "created", "limit", 5),
                 FrameworkDiscoveryMcpDtos.EventListenersInput.class).offset()).isNull();
         assertThatThrownBy(() -> decoder.decode(
-                Map.of("repoId", "orders", "expectedRevision", "FIXTURE", "apiPath", "/orders"),
+                Map.of("repoId", "orders", "expectedRevision", "0000000000000000000000000000000000000000", "apiPath", "/orders"),
                 ApiRouteMcpDtos.SuggestInput.class))
                 .isInstanceOf(McpToolContractException.class);
     }

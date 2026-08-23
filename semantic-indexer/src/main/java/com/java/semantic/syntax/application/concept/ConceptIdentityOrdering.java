@@ -4,9 +4,9 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
 
-import com.java.semantic.identity.JavaTypeIdentity;
-import com.java.semantic.identity.MethodTarget;
-import com.java.semantic.identity.SourceTypeIdentity;
+import com.java.semantic.model.codefact.JavaTypeIdentity;
+import com.java.semantic.model.codefact.MethodTarget;
+import com.java.semantic.model.codefact.SourceTypeIdentity;
 import com.java.semantic.syntax.application.concept.DeclarationConceptIdentity.FieldConceptIdentity;
 import com.java.semantic.syntax.application.concept.DeclarationConceptIdentity.MethodConceptIdentity;
 import com.java.semantic.syntax.application.concept.DeclarationConceptIdentity.TypeConceptIdentity;

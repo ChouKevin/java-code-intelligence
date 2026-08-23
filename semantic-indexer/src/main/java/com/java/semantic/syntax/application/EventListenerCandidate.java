@@ -1,8 +1,8 @@
 package com.java.semantic.syntax.application;
 
-import com.java.semantic.syntax.domain.SourceRange;
+import com.java.semantic.model.codefact.SourceRange;
 
-import com.java.semantic.identity.MethodTarget;
+import com.java.semantic.model.codefact.MethodTarget;
 import org.springframework.util.Assert;
 
 import java.util.List;

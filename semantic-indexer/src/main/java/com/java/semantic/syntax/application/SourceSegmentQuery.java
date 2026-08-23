@@ -1,8 +1,8 @@
 package com.java.semantic.syntax.application;
 
-import com.java.semantic.repository.domain.RepositoryId;
-import com.java.semantic.repository.domain.RepositoryRevision;
-import com.java.semantic.syntax.domain.SourceRange;
+import com.java.semantic.model.repository.RepositoryId;
+import com.java.semantic.model.repository.RepositoryRevision;
+import com.java.semantic.model.codefact.SourceRange;
 
 import java.util.Objects;
 

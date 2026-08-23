@@ -1,6 +1,6 @@
 package com.java.semantic.callgraph.domain;
 
-import com.java.semantic.identity.MethodTarget;
+import com.java.semantic.model.codefact.MethodTarget;
 import org.springframework.util.Assert;
 import org.springframework.util.StringUtils;
 

@@ -1,4 +1,7 @@
 package com.java.semantic.mcp;
+import com.java.semantic.model.repository.RepositoryId;
+import com.java.semantic.model.repository.RepositoryRevision;
+import com.java.semantic.model.repository.InvalidRepositoryIdException;
 
 import com.java.semantic.mcp.dto.repository.RepositoryMcpDtos;
 import com.java.semantic.repository.application.ImmutableFixtureException;
@@ -7,7 +10,7 @@ import com.java.semantic.repository.application.RepositoryMutationException;
 import com.java.semantic.repository.application.RepositoryNotFoundException;
 import com.java.semantic.repository.application.RepositoryNotReadyException;
 import com.java.semantic.repository.application.RepositoryRevisionMismatchException;
-import com.java.semantic.repository.domain.InvalidRepositoryIdException;
+import com.java.semantic.model.repository.InvalidRepositoryIdException;
 import com.java.semantic.semantic.application.ImplementationTargetUnsupportedException;
 import com.java.semantic.semantic.application.SourceDeclarationNotFoundException;
 import com.java.semantic.semantic.domain.SemanticBindingAmbiguousException;

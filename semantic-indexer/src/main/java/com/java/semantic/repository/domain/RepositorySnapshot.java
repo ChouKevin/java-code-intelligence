@@ -1,4 +1,6 @@
 package com.java.semantic.repository.domain;
+import com.java.semantic.model.repository.RepositoryId;
+import com.java.semantic.model.repository.RepositoryRevision;
 
 import java.nio.file.Path;
 import java.util.Objects;

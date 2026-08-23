@@ -2,8 +2,8 @@ package com.java.semantic.api;
 
 import com.java.semantic.api.dto.DiscoverMethodImplementationsRequest;
 import com.java.semantic.api.dto.DiscoverMethodImplementationsResponse;
-import com.java.semantic.repository.domain.RepositoryId;
-import com.java.semantic.repository.domain.RepositoryRevision;
+import com.java.semantic.model.repository.RepositoryId;
+import com.java.semantic.model.repository.RepositoryRevision;
 import com.java.semantic.semantic.application.MethodImplementationDiscoveryApplicationService;
 import com.java.semantic.semantic.application.MethodImplementationDiscoveryQuery;
 import jakarta.validation.Valid;

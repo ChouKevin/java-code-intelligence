@@ -3,7 +3,7 @@ package com.java.semantic.api;
 import com.java.semantic.api.dto.OutgoingCallGraphResponse;
 import com.java.semantic.api.dto.DiscoveryFollowUpResponse;
 import com.java.semantic.syntax.application.DiscoveryFollowUpFactory;
-import com.java.semantic.repository.domain.RepositoryId;
+import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.callgraph.domain.CallNodeId;
 import com.java.semantic.callgraph.domain.CallSiteRange;
 import com.java.semantic.callgraph.domain.DispatchKind;
@@ -17,10 +17,10 @@ import com.java.semantic.callgraph.domain.NodeContentState;
 import com.java.semantic.callgraph.domain.NodeTraversalState;
 import com.java.semantic.callgraph.domain.OutgoingGraphFragment;
 import com.java.semantic.callgraph.domain.ResolutionStrategy;
-import com.java.semantic.identity.JavaTypeIdentity;
-import com.java.semantic.identity.MethodTarget;
-import com.java.semantic.identity.SourceTypeIdentity;
-import com.java.semantic.repository.domain.RepositoryRevision;
+import com.java.semantic.model.codefact.JavaTypeIdentity;
+import com.java.semantic.model.codefact.MethodTarget;
+import com.java.semantic.model.codefact.SourceTypeIdentity;
+import com.java.semantic.model.repository.RepositoryRevision;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -49,7 +49,7 @@ class AnalysisResponseMapperTest {
         CallNodeId externalNode = new CallNodeId("node-external");
         OutgoingGraphFragment fragment = new OutgoingGraphFragment(
                 GraphAnalysisStatus.SUCCESS,
-                RepositoryRevision.fixture(),
+                RepositoryRevision.ofSha("0".repeat(40)),
                 localNode,
                 new GraphTraversal(2, 0, 40, true, GraphLimitReason.NONE),
                 List.of(
@@ -92,7 +92,7 @@ class AnalysisResponseMapperTest {
 
         OutgoingGraphFragment fragment = new OutgoingGraphFragment(
                 GraphAnalysisStatus.SUCCESS,
-                RepositoryRevision.fixture(),
+                RepositoryRevision.ofSha("0".repeat(40)),
                 root,
                 new GraphTraversal(2, 0, 40, true, GraphLimitReason.NONE),
                 List.of(new GraphNode(
@@ -137,7 +137,7 @@ class AnalysisResponseMapperTest {
         CallSiteRange callSite = new CallSiteRange(TARGET.sourceFile(), 12, 3, 12, 15);
         OutgoingGraphFragment fragment = new OutgoingGraphFragment(
                 GraphAnalysisStatus.PARTIAL,
-                RepositoryRevision.fixture(),
+                RepositoryRevision.ofSha("0".repeat(40)),
                 root,
                 new GraphTraversal(2, 0, 40, true, GraphLimitReason.NONE),
                 List.of(new GraphNode(

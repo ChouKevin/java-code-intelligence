@@ -1,6 +1,6 @@
 package com.java.semantic.semantic.domain;
 
-import com.java.semantic.identity.RepositoryRelativeSource;
+import com.java.semantic.model.codefact.RepositoryRelativeSource;
 
 import java.util.Objects;
 

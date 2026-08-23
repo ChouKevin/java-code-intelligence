@@ -1,6 +1,6 @@
 package com.java.semantic.mcp.dto.concept;
 
-import com.java.semantic.identity.SourceTypeIdentity;
+import com.java.semantic.model.codefact.SourceTypeIdentity;
 import com.java.semantic.mcp.dto.McpRevisionPinnedInput;
 import com.java.semantic.monitoring.MonitoringField;
 import com.java.semantic.monitoring.MonitoringMode;
@@ -35,7 +35,7 @@ public final class ConceptDiscoveryMcpDtos {
             @MonitoringField(MonitoringMode.VALUE) @NotBlank
             @Pattern(regexp = "^[a-z0-9][a-z0-9._-]{0,63}$") String repoId,
             @MonitoringField(MonitoringMode.VALUE) @NotBlank
-            @Pattern(regexp = "^[0-9a-f]{40}$|^FIXTURE$") String expectedRevision,
+            @Pattern(regexp = "^[0-9a-f]{40}$") String expectedRevision,
             @MonitoringField(MonitoringMode.NESTED) @NotEmpty @Size(max = 4) List<@NotNull @Valid ConceptSearchTerm> terms,
             @MonitoringField(MonitoringMode.SIZE) @NotEmpty Set<@NotNull ConceptKind> kinds,
             @MonitoringField(MonitoringMode.VALUE) Optional<String> packagePrefix,
@@ -53,7 +53,7 @@ public final class ConceptDiscoveryMcpDtos {
             @MonitoringField(MonitoringMode.VALUE) @NotBlank
             @Pattern(regexp = "^[a-z0-9][a-z0-9._-]{0,63}$") String repoId,
             @MonitoringField(MonitoringMode.VALUE) @NotBlank
-            @Pattern(regexp = "^[0-9a-f]{40}$|^FIXTURE$") String expectedRevision,
+            @Pattern(regexp = "^[0-9a-f]{40}$") String expectedRevision,
             @MonitoringField(MonitoringMode.NESTED) @NotNull @Valid McpConceptIdentityPayload identity)
             implements McpRevisionPinnedInput {
     }
@@ -68,7 +68,7 @@ public final class ConceptDiscoveryMcpDtos {
             @MonitoringField(MonitoringMode.VALUE) @NotBlank
             @Pattern(regexp = "^[a-z0-9][a-z0-9._-]{0,63}$") String repoId,
             @MonitoringField(MonitoringMode.VALUE) @NotBlank
-            @Pattern(regexp = "^[0-9a-f]{40}$|^FIXTURE$") String expectedRevision,
+            @Pattern(regexp = "^[0-9a-f]{40}$") String expectedRevision,
             @MonitoringField(MonitoringMode.NESTED) @NotNull @Valid SourceTypeIdentity sourceType,
             @MonitoringField(MonitoringMode.SIZE) @NotEmpty Set<@NotNull TypeMemberKind> memberKinds,
             @MonitoringField(MonitoringMode.VALUE) Optional<String> namePrefix,

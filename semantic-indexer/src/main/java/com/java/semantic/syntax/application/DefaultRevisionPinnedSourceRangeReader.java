@@ -4,10 +4,10 @@ import com.java.semantic.repository.domain.RepositorySnapshot;
 import com.java.semantic.repository.domain.RepositorySourceContainment;
 import com.java.semantic.repository.domain.RepositorySourceContainmentResult;
 import com.java.semantic.syntax.domain.RevisionPinnedSourceRangeReader;
-import com.java.semantic.syntax.domain.SourceRange;
-import com.java.semantic.syntax.domain.SourceRangeSegment;
-import com.java.semantic.syntax.domain.SyntaxPosition;
-import com.java.semantic.syntax.domain.SyntaxRange;
+import com.java.semantic.model.codefact.SourceRange;
+import com.java.semantic.model.codefact.SourceRangeSegment;
+import com.java.semantic.model.codefact.SyntaxPosition;
+import com.java.semantic.model.codefact.SyntaxRange;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;

@@ -1,7 +1,7 @@
 package com.java.semantic.semantic.domain;
 
 import com.java.semantic.diagnostic.ExpectedFailure;
-import com.java.semantic.identity.MethodTarget;
+import com.java.semantic.model.codefact.MethodTarget;
 import org.springframework.util.Assert;
 
 import java.util.List;

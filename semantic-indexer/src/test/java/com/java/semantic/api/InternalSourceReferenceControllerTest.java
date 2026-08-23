@@ -1,11 +1,11 @@
 package com.java.semantic.api;
 
 import com.java.semantic.api.security.ApiTokenFilter;
-import com.java.semantic.identity.JavaTypeIdentity;
-import com.java.semantic.identity.MethodTarget;
-import com.java.semantic.identity.SourceTypeIdentity;
-import com.java.semantic.repository.domain.RepositoryId;
-import com.java.semantic.repository.domain.RepositoryRevision;
+import com.java.semantic.model.codefact.JavaTypeIdentity;
+import com.java.semantic.model.codefact.MethodTarget;
+import com.java.semantic.model.codefact.SourceTypeIdentity;
+import com.java.semantic.model.repository.RepositoryId;
+import com.java.semantic.model.repository.RepositoryRevision;
 import com.java.semantic.semantic.application.InternalReferenceCacheMetadata;
 import com.java.semantic.semantic.application.InternalReferenceContext;
 import com.java.semantic.semantic.application.InternalReferenceGroup;
@@ -19,8 +19,8 @@ import com.java.semantic.semantic.application.InternalSourceReferenceResult;
 import com.java.semantic.semantic.application.SourceDeclarationNotFoundException;
 import com.java.semantic.syntax.domain.ExactSourceDeclaration;
 import com.java.semantic.syntax.domain.ExactSourceDeclarationTarget;
-import com.java.semantic.syntax.domain.SyntaxPosition;
-import com.java.semantic.syntax.domain.SyntaxRange;
+import com.java.semantic.model.codefact.SyntaxPosition;
+import com.java.semantic.model.codefact.SyntaxRange;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;

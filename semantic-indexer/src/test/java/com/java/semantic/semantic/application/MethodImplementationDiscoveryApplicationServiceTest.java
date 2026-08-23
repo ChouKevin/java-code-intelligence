@@ -2,13 +2,13 @@ package com.java.semantic.semantic.application;
 
 import com.java.semantic.callgraph.application.CanonicalTargetProjection;
 import com.java.semantic.callgraph.application.ImplementationCandidateFactory;
-import com.java.semantic.identity.JavaTypeIdentity;
-import com.java.semantic.identity.MethodTarget;
-import com.java.semantic.identity.SourceTypeIdentity;
+import com.java.semantic.model.codefact.JavaTypeIdentity;
+import com.java.semantic.model.codefact.MethodTarget;
+import com.java.semantic.model.codefact.SourceTypeIdentity;
 import com.java.semantic.repository.application.RepositoryApplicationService;
 import com.java.semantic.repository.application.RepositoryRevisionMismatchException;
-import com.java.semantic.repository.domain.RepositoryId;
-import com.java.semantic.repository.domain.RepositoryRevision;
+import com.java.semantic.model.repository.RepositoryId;
+import com.java.semantic.model.repository.RepositoryRevision;
 import com.java.semantic.repository.domain.RepositorySnapshot;
 import com.java.semantic.semantic.domain.JavaSemanticService;
 import com.java.semantic.semantic.domain.SemanticDeclarationAnchor;
@@ -26,10 +26,10 @@ import com.java.semantic.syntax.domain.SourceMethodMetadata;
 import com.java.semantic.syntax.domain.SourceTypeKind;
 import com.java.semantic.syntax.domain.MethodTargetResolution;
 import com.java.semantic.syntax.domain.RepositorySyntax;
-import com.java.semantic.syntax.domain.SourceRange;
+import com.java.semantic.model.codefact.SourceRange;
 import com.java.semantic.syntax.domain.RevisionBoundRepositorySyntaxProvider;
-import com.java.semantic.syntax.domain.SyntaxPosition;
-import com.java.semantic.syntax.domain.SyntaxRange;
+import com.java.semantic.model.codefact.SyntaxPosition;
+import com.java.semantic.model.codefact.SyntaxRange;
 import com.java.semantic.syntax.domain.TypeReference;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -64,7 +64,7 @@ import static org.mockito.Mockito.when;
 class MethodImplementationDiscoveryApplicationServiceTest {
 
     private static final RepositoryId REPOSITORY_ID = RepositoryId.of("orders");
-    private static final RepositoryRevision REVISION = RepositoryRevision.fixture();
+    private static final RepositoryRevision REVISION = RepositoryRevision.ofSha("0".repeat(40));
 
     @TempDir
     private Path root;

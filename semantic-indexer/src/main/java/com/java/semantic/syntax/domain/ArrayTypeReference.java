@@ -3,7 +3,7 @@ package com.java.semantic.syntax.domain;
 import java.util.Objects;
 import java.util.Optional;
 
-import com.java.semantic.identity.JavaTypeIdentity;
+import com.java.semantic.model.codefact.JavaTypeIdentity;
 
 /** 含有元素型別與維度的陣列型別證據 */
 public record ArrayTypeReference(

@@ -4,7 +4,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 
-import com.java.semantic.identity.JavaTypeIdentity;
+import com.java.semantic.model.codefact.JavaTypeIdentity;
 
 /** 已由 binding 證實的型別變數與其上界證據 */
 public record TypeVariableReference(

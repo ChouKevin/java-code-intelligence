@@ -1,9 +1,8 @@
-package com.java.semantic.syntax.domain;
+package com.java.semantic.model.codefact;
 
 import java.util.Objects;
 import java.util.Optional;
 
-/** 固定 revision 中已 materialize 的 bounded 原始碼區段與可續讀位置 */
 public record SourceRangeSegment(
         SourceRange location,
         String content,
@@ -13,6 +12,6 @@ public record SourceRangeSegment(
     public SourceRangeSegment {
         location = Objects.requireNonNull(location, "location is required");
         content = Objects.requireNonNull(content, "content is required");
-        nextLocation = Objects.requireNonNull(nextLocation, "nextLocation is required");
+        nextLocation = Objects.requireNonNull(nextLocation, "next location is required");
     }
 }

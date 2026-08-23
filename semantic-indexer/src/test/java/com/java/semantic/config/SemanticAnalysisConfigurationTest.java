@@ -1,4 +1,5 @@
 package com.java.semantic.config;
+import com.java.semantic.model.codefact.SourceRange;
 
 import com.java.semantic.callgraph.application.DirectCallRelationshipResolver;
 import com.java.semantic.callgraph.application.IncomingSemanticCallGraphBuilder;

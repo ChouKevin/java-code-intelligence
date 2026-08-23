@@ -1,8 +1,8 @@
 package com.java.semantic.trie;
 
 import com.java.semantic.diagnostic.ExpectedFailure;
-import com.java.semantic.repository.domain.RepositoryId;
-import com.java.semantic.repository.domain.RepositoryRevision;
+import com.java.semantic.model.repository.RepositoryId;
+import com.java.semantic.model.repository.RepositoryRevision;
 
 import java.util.Objects;
 

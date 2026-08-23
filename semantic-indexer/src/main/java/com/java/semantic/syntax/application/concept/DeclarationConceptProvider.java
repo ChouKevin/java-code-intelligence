@@ -1,7 +1,7 @@
 package com.java.semantic.syntax.application.concept;
 
-import com.java.semantic.identity.MethodTarget;
-import com.java.semantic.identity.SourceTypeIdentity;
+import com.java.semantic.model.codefact.MethodTarget;
+import com.java.semantic.model.codefact.SourceTypeIdentity;
 import com.java.semantic.syntax.application.concept.UsageConceptIdentity.AnnotationIdentity;
 import com.java.semantic.syntax.application.concept.UsageConceptIdentity.AnnotationUsageConceptIdentity;
 import com.java.semantic.syntax.application.concept.UsageConceptIdentity.DeclarationSubjectIdentity;

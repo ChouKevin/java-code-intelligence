@@ -1,8 +1,8 @@
 package com.java.semantic.callgraph.application;
 
 import com.java.semantic.callgraph.domain.ResolutionStrategy;
-import com.java.semantic.identity.MethodTarget;
-import com.java.semantic.identity.MethodTargetDiagnosticId;
+import com.java.semantic.model.codefact.MethodTarget;
+import com.java.semantic.model.codefact.MethodTargetDiagnosticId;
 import com.java.semantic.repository.domain.RepositorySnapshot;
 import com.java.semantic.semantic.domain.JavaSemanticService;
 import com.java.semantic.semantic.domain.SemanticCall;
@@ -16,8 +16,8 @@ import com.java.semantic.syntax.domain.SourceMethodMetadata;
 import com.java.semantic.syntax.domain.SourceTypeKind;
 import com.java.semantic.syntax.domain.SourceTypeMetadata;
 import com.java.semantic.syntax.domain.SyntaxInvocation;
-import com.java.semantic.syntax.domain.SyntaxPosition;
-import com.java.semantic.syntax.domain.SyntaxRange;
+import com.java.semantic.model.codefact.SyntaxPosition;
+import com.java.semantic.model.codefact.SyntaxRange;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.util.CollectionUtils;
 import org.springframework.util.StringUtils;

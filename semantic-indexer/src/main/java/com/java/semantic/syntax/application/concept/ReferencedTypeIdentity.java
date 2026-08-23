@@ -2,7 +2,7 @@ package com.java.semantic.syntax.application.concept;
 
 import java.util.Objects;
 
-import com.java.semantic.identity.JavaTypeIdentity;
+import com.java.semantic.model.codefact.JavaTypeIdentity;
 
 /** TYPE_USAGE 所引用的已解析 Java 型別與陣列維度 */
 public record ReferencedTypeIdentity(JavaTypeIdentity javaType, int arrayDimensions) {

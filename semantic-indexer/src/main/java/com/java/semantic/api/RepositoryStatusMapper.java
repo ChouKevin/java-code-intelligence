@@ -1,7 +1,7 @@
 package com.java.semantic.api;
 
 import com.java.semantic.api.dto.RepositoryStatusResponse;
-import com.java.semantic.repository.domain.RepositoryRevision;
+import com.java.semantic.model.repository.RepositoryRevision;
 import com.java.semantic.repository.domain.RepositoryStatus;
 import org.springframework.stereotype.Component;
 

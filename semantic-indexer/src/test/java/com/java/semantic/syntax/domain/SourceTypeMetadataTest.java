@@ -1,10 +1,13 @@
 package com.java.semantic.syntax.domain;
+import com.java.semantic.model.codefact.SyntaxPosition;
+import com.java.semantic.model.codefact.SyntaxRange;
+import com.java.semantic.model.codefact.SourceRange;
 
 import com.java.semantic.syntax.domain.SourceTypeKind;
 
-import com.java.semantic.identity.JavaTypeIdentity;
-import com.java.semantic.identity.MethodTarget;
-import com.java.semantic.identity.SourceTypeIdentity;
+import com.java.semantic.model.codefact.JavaTypeIdentity;
+import com.java.semantic.model.codefact.MethodTarget;
+import com.java.semantic.model.codefact.SourceTypeIdentity;
 
 import java.lang.reflect.RecordComponent;
 import java.util.List;

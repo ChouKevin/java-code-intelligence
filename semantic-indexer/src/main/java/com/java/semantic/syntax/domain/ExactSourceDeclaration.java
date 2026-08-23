@@ -1,4 +1,5 @@
 package com.java.semantic.syntax.domain;
+import com.java.semantic.model.codefact.SyntaxRange;
 
 import java.util.Objects;
 

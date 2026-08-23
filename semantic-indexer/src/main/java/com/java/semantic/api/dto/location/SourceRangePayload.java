@@ -1,4 +1,5 @@
 package com.java.semantic.api.dto.location;
+import com.java.semantic.model.codefact.SourceRange;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.java.semantic.monitoring.MonitoringField;

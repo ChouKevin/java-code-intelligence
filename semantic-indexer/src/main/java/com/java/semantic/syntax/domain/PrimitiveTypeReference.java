@@ -3,7 +3,7 @@ package com.java.semantic.syntax.domain;
 import java.util.Objects;
 import java.util.Optional;
 
-import com.java.semantic.identity.JavaTypeIdentity;
+import com.java.semantic.model.codefact.JavaTypeIdentity;
 
 /** Java 基本型別的原始碼證據 */
 public record PrimitiveTypeReference(String writtenType) implements TypeReference {

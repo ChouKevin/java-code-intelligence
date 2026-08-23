@@ -1,10 +1,11 @@
 package com.java.semantic.syntax.domain;
+import com.java.semantic.model.codefact.SourceRange;
 
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 
-import com.java.semantic.identity.MethodTarget;
+import com.java.semantic.model.codefact.MethodTarget;
 
 /** 一個 mapper statement 變體的未求值原始證據 */
 public record MapperStatementEvidence(

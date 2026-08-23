@@ -6,8 +6,8 @@ import com.java.semantic.syntax.application.concept.UsageConceptIdentity.TypeDec
 import com.java.semantic.syntax.application.concept.UsageConceptIdentity.TypeUsageConceptIdentity;
 import com.java.semantic.syntax.application.concept.UsageConceptIdentity.TypeUsageLocation;
 import com.java.semantic.syntax.application.concept.UsageConceptIdentity.TypeUsageSlot;
-import com.java.semantic.identity.JavaTypeIdentity;
-import com.java.semantic.identity.SourceTypeIdentity;
+import com.java.semantic.model.codefact.JavaTypeIdentity;
+import com.java.semantic.model.codefact.SourceTypeIdentity;
 import java.util.ArrayList;
 import java.util.EnumSet;
 import java.util.List;

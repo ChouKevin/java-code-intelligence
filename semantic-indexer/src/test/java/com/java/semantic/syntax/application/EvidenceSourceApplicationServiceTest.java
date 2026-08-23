@@ -1,8 +1,8 @@
 package com.java.semantic.syntax.application;
 
 import com.java.semantic.repository.application.RepositoryApplicationService;
-import com.java.semantic.repository.domain.RepositoryId;
-import com.java.semantic.repository.domain.RepositoryRevision;
+import com.java.semantic.model.repository.RepositoryId;
+import com.java.semantic.model.repository.RepositoryRevision;
 import com.java.semantic.repository.domain.RepositorySnapshot;
 import com.java.semantic.repository.domain.RepositorySourceContainment;
 import com.java.semantic.syntax.domain.MapperEvidenceIndex;
@@ -14,9 +14,9 @@ import com.java.semantic.syntax.domain.MapperStatementIdentity;
 import com.java.semantic.syntax.domain.MapperStatementKey;
 import com.java.semantic.syntax.domain.RepositorySyntax;
 import com.java.semantic.syntax.domain.RevisionBoundRepositorySyntaxProvider;
-import com.java.semantic.syntax.domain.SourceRange;
-import com.java.semantic.syntax.domain.SyntaxPosition;
-import com.java.semantic.syntax.domain.SyntaxRange;
+import com.java.semantic.model.codefact.SourceRange;
+import com.java.semantic.model.codefact.SyntaxPosition;
+import com.java.semantic.model.codefact.SyntaxRange;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -37,7 +37,7 @@ import static org.mockito.Mockito.when;
 class EvidenceSourceApplicationServiceTest {
 
     private static final RepositoryId REPOSITORY_ID = RepositoryId.of("orders");
-    private static final RepositoryRevision REVISION = RepositoryRevision.fixture();
+    private static final RepositoryRevision REVISION = RepositoryRevision.ofSha("0".repeat(40));
     private static final String SOURCE_FILE = "src/main/resources/com/example/OrderMapper.xml";
 
     @Test

@@ -1,6 +1,6 @@
 package com.java.semantic.callgraph.domain;
 
-import com.java.semantic.identity.JavaIdentityNormalizer;
+import com.java.semantic.model.codefact.JavaIdentityNormalizer;
 
 import java.util.List;
 

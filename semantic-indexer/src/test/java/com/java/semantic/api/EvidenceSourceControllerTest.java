@@ -1,8 +1,8 @@
 package com.java.semantic.api;
 
 import com.java.semantic.api.security.ApiTokenFilter;
-import com.java.semantic.repository.domain.RepositoryId;
-import com.java.semantic.repository.domain.RepositoryRevision;
+import com.java.semantic.model.repository.RepositoryId;
+import com.java.semantic.model.repository.RepositoryRevision;
 import com.java.semantic.syntax.application.EvidenceSourceApplicationService;
 import com.java.semantic.syntax.application.EvidenceSourceQuery;
 import com.java.semantic.syntax.application.EvidenceSourceResult;
@@ -10,10 +10,10 @@ import com.java.semantic.syntax.domain.MapperEvidenceRepresentation;
 import com.java.semantic.syntax.domain.MapperFragmentIdentity;
 import com.java.semantic.syntax.domain.MapperStatementIdentity;
 import com.java.semantic.syntax.domain.MapperStatementKey;
-import com.java.semantic.syntax.domain.SourceRange;
-import com.java.semantic.syntax.domain.SourceRangeSegment;
-import com.java.semantic.syntax.domain.SyntaxPosition;
-import com.java.semantic.syntax.domain.SyntaxRange;
+import com.java.semantic.model.codefact.SourceRange;
+import com.java.semantic.model.codefact.SourceRangeSegment;
+import com.java.semantic.model.codefact.SyntaxPosition;
+import com.java.semantic.model.codefact.SyntaxRange;
 import tools.jackson.databind.ObjectMapper;
 import com.java.semantic.api.dto.EvidenceSourceRequest;
 import jakarta.validation.Validator;

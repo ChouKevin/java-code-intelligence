@@ -1,12 +1,13 @@
 package com.java.semantic.callgraph.application;
+import com.java.semantic.model.codefact.SourceRange;
 
 import com.java.semantic.callgraph.domain.MethodId;
-import com.java.semantic.identity.JavaIdentityNormalizer;
-import com.java.semantic.identity.MethodTarget;
+import com.java.semantic.model.codefact.JavaIdentityNormalizer;
+import com.java.semantic.model.codefact.MethodTarget;
 import com.java.semantic.syntax.domain.RepositorySyntax;
 import com.java.semantic.syntax.domain.SourceMethodMetadata;
 import com.java.semantic.syntax.domain.SourceTypeMetadata;
-import com.java.semantic.syntax.domain.SyntaxRange;
+import com.java.semantic.model.codefact.SyntaxRange;
 
 import java.util.ArrayList;
 import java.util.Collections;

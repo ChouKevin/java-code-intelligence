@@ -1,6 +1,6 @@
 package com.java.semantic.repository.application;
 
-import com.java.semantic.repository.domain.RepositoryRevision;
+import com.java.semantic.model.repository.RepositoryRevision;
 
 /** 呼叫者指定的版本與目前快照不同 */
 public class RepositoryRevisionMismatchException extends RuntimeException {

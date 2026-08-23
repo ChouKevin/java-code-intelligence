@@ -1,4 +1,7 @@
 package com.java.semantic.syntax.application.concept;
+import com.java.semantic.model.codefact.SyntaxPosition;
+import com.java.semantic.model.codefact.SyntaxRange;
+import com.java.semantic.model.codefact.SourceRange;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -6,9 +9,9 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.Optional;
 
-import com.java.semantic.identity.JavaTypeIdentity;
-import com.java.semantic.identity.MethodTarget;
-import com.java.semantic.identity.SourceTypeIdentity;
+import com.java.semantic.model.codefact.JavaTypeIdentity;
+import com.java.semantic.model.codefact.MethodTarget;
+import com.java.semantic.model.codefact.SourceTypeIdentity;
 import com.java.semantic.syntax.application.concept.MapperConceptIdentity.MapperStatementConceptIdentity;
 import com.java.semantic.syntax.application.concept.MapperConceptIdentity.MapperStatementVariantEvidenceIdentity;
 import com.java.semantic.syntax.adapter.jdt.JdtSyntaxExtractionService;
@@ -322,11 +325,11 @@ class MapperConceptProjectionTest {
                                     assertThat(target.parameterTypes()).containsExactly("java.lang.String"));
                         }));
     }
-    private static com.java.semantic.syntax.domain.SourceRange location(String sourceFile) {
-        return new com.java.semantic.syntax.domain.SourceRange(
+    private static com.java.semantic.model.codefact.SourceRange location(String sourceFile) {
+        return new com.java.semantic.model.codefact.SourceRange(
                 sourceFile,
-                new com.java.semantic.syntax.domain.SyntaxRange(
-                        new com.java.semantic.syntax.domain.SyntaxPosition(0, 0),
-                        new com.java.semantic.syntax.domain.SyntaxPosition(0, 1)));
+                new com.java.semantic.model.codefact.SyntaxRange(
+                        new com.java.semantic.model.codefact.SyntaxPosition(0, 0),
+                        new com.java.semantic.model.codefact.SyntaxPosition(0, 1)));
     }
 }

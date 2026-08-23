@@ -11,7 +11,7 @@ import jakarta.validation.constraints.Pattern;
 @JsonIgnoreProperties(ignoreUnknown = false)
 public record ApiRouteLookupRequest(
         @MonitoringField(MonitoringMode.VALUE) @NotBlank String repoId,
-        @MonitoringField(MonitoringMode.VALUE) @NotBlank @Pattern(regexp = "^[0-9a-f]{40}$|^FIXTURE$") String expectedRevision,
+        @MonitoringField(MonitoringMode.VALUE) @NotBlank @Pattern(regexp = "^[0-9a-f]{40}$") String expectedRevision,
         @MonitoringField(MonitoringMode.VALUE) @NotBlank String apiPath,
         @MonitoringField(MonitoringMode.VALUE) String httpMethod) {
 

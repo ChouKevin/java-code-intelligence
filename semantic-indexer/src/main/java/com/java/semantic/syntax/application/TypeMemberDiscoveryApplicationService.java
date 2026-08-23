@@ -2,8 +2,8 @@ package com.java.semantic.syntax.application;
 
 import com.java.semantic.syntax.application.concept.ConceptPage;
 import com.java.semantic.syntax.application.concept.DeclarationConceptIdentity.TypeConceptIdentity;
-import com.java.semantic.identity.MethodTarget;
-import com.java.semantic.identity.SourceTypeIdentity;
+import com.java.semantic.model.codefact.MethodTarget;
+import com.java.semantic.model.codefact.SourceTypeIdentity;
 import com.java.semantic.repository.application.RepositoryApplicationService;
 import com.java.semantic.repository.domain.RepositorySnapshot;
 import com.java.semantic.syntax.domain.AnnotationEvidence;

@@ -1,4 +1,5 @@
 package com.java.semantic.api;
+import com.java.semantic.model.codefact.SourceRange;
 
 import com.java.semantic.api.dto.ConceptCandidateResponse;
 import com.java.semantic.api.dto.ConceptCandidateDetailsResponse;
@@ -34,10 +35,10 @@ import com.java.semantic.api.dto.MapperMethodCandidateResponse;
 import com.java.semantic.api.dto.MapperStatementMappingResponse;
 import com.java.semantic.api.dto.TypeMemberResponse;
 import com.java.semantic.api.dto.UnavailableDiscoveryFollowUpResponse;
-import com.java.semantic.identity.MethodTarget;
-import com.java.semantic.identity.SourceTypeIdentity;
-import com.java.semantic.repository.domain.RepositoryId;
-import com.java.semantic.repository.domain.RepositoryRevision;
+import com.java.semantic.model.codefact.MethodTarget;
+import com.java.semantic.model.codefact.SourceTypeIdentity;
+import com.java.semantic.model.repository.RepositoryId;
+import com.java.semantic.model.repository.RepositoryRevision;
 import com.java.semantic.syntax.application.concept.ConceptCatalogEntry;
 import com.java.semantic.syntax.application.concept.ConceptIdentity;
 import com.java.semantic.syntax.application.concept.ConceptIdentityOrdering;

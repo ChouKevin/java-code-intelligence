@@ -1,10 +1,9 @@
-package com.java.semantic.identity;
+package com.java.semantic.model.codefact;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 
-/** Java 宣告識別的共用正規化規則 */
 public final class JavaIdentityNormalizer {
 
     private JavaIdentityNormalizer() {
@@ -12,24 +11,22 @@ public final class JavaIdentityNormalizer {
     }
 
     public static String className(String packageName, String declarationName) {
-        Objects.requireNonNull(packageName, "packageName is required");
-        String value = Objects.requireNonNull(declarationName, "declarationName is required").trim()
-                .replace('$', '.');
+        Objects.requireNonNull(packageName, "package name is required");
+        String value = Objects.requireNonNull(declarationName, "declaration name is required").trim().replace('$', '.');
         String prefix = packageName.isBlank() ? "" : packageName + ".";
         return value.startsWith(prefix) ? value.substring(prefix.length()) : value;
     }
 
     public static List<String> parameterTypes(List<String> parameterTypes) {
-        Objects.requireNonNull(parameterTypes, "parameterTypes is required");
         List<String> normalized = new ArrayList<>();
-        for (String parameterType : parameterTypes) {
+        for (String parameterType : Objects.requireNonNull(parameterTypes, "parameter types are required")) {
             normalized.add(parameterType(parameterType));
         }
         return List.copyOf(normalized);
     }
 
     public static String parameterType(String parameterType) {
-        String value = Objects.requireNonNull(parameterType, "parameterType is required").trim();
+        String value = Objects.requireNonNull(parameterType, "parameter type is required").trim();
         if (value.isBlank()) {
             return "";
         }

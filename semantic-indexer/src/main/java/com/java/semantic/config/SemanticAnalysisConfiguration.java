@@ -1,4 +1,5 @@
 package com.java.semantic.config;
+import com.java.semantic.model.codefact.SourceRange;
 
 import java.util.List;
 

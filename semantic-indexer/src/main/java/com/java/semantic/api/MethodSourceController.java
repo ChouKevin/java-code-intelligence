@@ -1,11 +1,12 @@
 package com.java.semantic.api;
+import com.java.semantic.model.codefact.SourceRange;
 
 import com.java.semantic.api.dto.GetMethodSourceRequest;
 import com.java.semantic.api.dto.SourceSegmentPayload;
 import com.java.semantic.api.dto.MethodSourceResponse;
-import com.java.semantic.repository.domain.RepositoryId;
-import com.java.semantic.repository.domain.RepositoryRevision;
-import com.java.semantic.identity.MethodTarget;
+import com.java.semantic.model.repository.RepositoryId;
+import com.java.semantic.model.repository.RepositoryRevision;
+import com.java.semantic.model.codefact.MethodTarget;
 import com.java.semantic.syntax.application.MethodSourceApplicationService;
 import com.java.semantic.syntax.application.MethodSourceQuery;
 import com.java.semantic.syntax.application.MethodSourceResult;

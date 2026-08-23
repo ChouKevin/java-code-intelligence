@@ -28,7 +28,7 @@ public final class DiscoverTypeMembersRequest {
     private String repoId;
 
     @NotBlank
-    @Pattern(regexp = "^[0-9a-f]{40}$|^FIXTURE$")
+    @Pattern(regexp = "^[0-9a-f]{40}$")
     private String expectedRevision;
 
     @NotNull

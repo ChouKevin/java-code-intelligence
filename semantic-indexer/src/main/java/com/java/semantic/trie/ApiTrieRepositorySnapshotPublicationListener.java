@@ -1,6 +1,6 @@
 package com.java.semantic.trie;
 
-import com.java.semantic.repository.domain.RepositoryId;
+import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.repository.domain.RepositorySnapshot;
 import com.java.semantic.repository.port.RepositoryMutationListener;
 import com.java.semantic.repository.port.RepositorySnapshotPublicationListener;

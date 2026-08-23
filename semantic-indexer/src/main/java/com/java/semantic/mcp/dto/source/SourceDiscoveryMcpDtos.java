@@ -1,6 +1,6 @@
 package com.java.semantic.mcp.dto.source;
 
-import com.java.semantic.identity.MethodTarget;
+import com.java.semantic.model.codefact.MethodTarget;
 import com.java.semantic.mcp.dto.McpRevisionPinnedInput;
 import com.java.semantic.monitoring.MonitoringField;
 import com.java.semantic.monitoring.MonitoringMode;
@@ -8,8 +8,8 @@ import com.java.semantic.semantic.application.InternalSourceReferenceResult;
 import com.java.semantic.syntax.application.EvidenceSourceQuery;
 import com.java.semantic.syntax.application.RevisionBoundSourceSymbolResolution;
 import com.java.semantic.syntax.application.SourceSymbolContext;
-import com.java.semantic.syntax.domain.SourceRange;
-import com.java.semantic.syntax.domain.SyntaxPosition;
+import com.java.semantic.model.codefact.SourceRange;
+import com.java.semantic.model.codefact.SyntaxPosition;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
@@ -32,7 +32,7 @@ public final class SourceDiscoveryMcpDtos {
             @MonitoringField(MonitoringMode.VALUE) @NotBlank
             @Pattern(regexp = "^[a-z0-9][a-z0-9._-]{0,63}$") String repoId,
             @MonitoringField(MonitoringMode.VALUE) @NotBlank
-            @Pattern(regexp = "^[0-9a-f]{40}$|^FIXTURE$") String expectedRevision,
+            @Pattern(regexp = "^[0-9a-f]{40}$") String expectedRevision,
             @MonitoringField(MonitoringMode.NESTED) @NotNull @Valid SourceSymbolContext context,
             @MonitoringField(MonitoringMode.VALUE) @NotBlank String symbol,
             @MonitoringField(MonitoringMode.NESTED) @NotNull Optional<@Valid SyntaxPosition> position)
@@ -49,7 +49,7 @@ public final class SourceDiscoveryMcpDtos {
             @MonitoringField(MonitoringMode.VALUE) @NotBlank
             @Pattern(regexp = "^[a-z0-9][a-z0-9._-]{0,63}$") String repoId,
             @MonitoringField(MonitoringMode.VALUE) @NotBlank
-            @Pattern(regexp = "^[0-9a-f]{40}$|^FIXTURE$") String expectedRevision,
+            @Pattern(regexp = "^[0-9a-f]{40}$") String expectedRevision,
             @MonitoringField(MonitoringMode.NESTED) @NotNull @Valid McpExactSourceDeclarationTargetPayload target,
             @MonitoringField(MonitoringMode.VALUE) @NotNull @Min(0) Integer offset,
             @MonitoringField(MonitoringMode.VALUE) @NotNull @Min(1) @Max(100) Integer limit)
@@ -66,7 +66,7 @@ public final class SourceDiscoveryMcpDtos {
             @MonitoringField(MonitoringMode.VALUE) @NotBlank
             @Pattern(regexp = "^[a-z0-9][a-z0-9._-]{0,63}$") String repoId,
             @MonitoringField(MonitoringMode.VALUE) @NotBlank
-            @Pattern(regexp = "^[0-9a-f]{40}$|^FIXTURE$") String expectedRevision,
+            @Pattern(regexp = "^[0-9a-f]{40}$") String expectedRevision,
             @MonitoringField(MonitoringMode.NESTED) @NotNull @Valid SourceRange location,
             @MonitoringField(MonitoringMode.VALUE) @NotNull @Min(0) @Max(20) Integer contextLines)
             implements McpRevisionPinnedInput {
@@ -88,7 +88,7 @@ public final class SourceDiscoveryMcpDtos {
             @MonitoringField(MonitoringMode.VALUE) @NotBlank
             @Pattern(regexp = "^[a-z0-9][a-z0-9._-]{0,63}$") String repoId,
             @MonitoringField(MonitoringMode.VALUE) @NotBlank
-            @Pattern(regexp = "^[0-9a-f]{40}$|^FIXTURE$") String expectedRevision,
+            @Pattern(regexp = "^[0-9a-f]{40}$") String expectedRevision,
             @MonitoringField(MonitoringMode.NESTED) @NotNull @Valid MethodTarget target)
             implements McpRevisionPinnedInput {
     }
@@ -116,7 +116,7 @@ public final class SourceDiscoveryMcpDtos {
             @MonitoringField(MonitoringMode.VALUE) @NotBlank
             @Pattern(regexp = "^[a-z0-9][a-z0-9._-]{0,63}$") String repoId,
             @MonitoringField(MonitoringMode.VALUE) @NotBlank
-            @Pattern(regexp = "^[0-9a-f]{40}$|^FIXTURE$") String expectedRevision,
+            @Pattern(regexp = "^[0-9a-f]{40}$") String expectedRevision,
             @MonitoringField(MonitoringMode.NESTED) @NotNull @Valid McpEvidenceIdentityPayload identity)
             implements McpRevisionPinnedInput {
     }

@@ -9,9 +9,9 @@ import com.java.semantic.repository.application.RepositoryMutationException;
 import com.java.semantic.repository.application.RepositoryNotFoundException;
 import com.java.semantic.repository.application.RepositoryNotReadyException;
 import com.java.semantic.repository.application.RepositoryRevisionMismatchException;
-import com.java.semantic.repository.domain.RepositoryId;
+import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.repository.domain.RepositoryMode;
-import com.java.semantic.repository.domain.RepositoryRevision;
+import com.java.semantic.model.repository.RepositoryRevision;
 import com.java.semantic.repository.domain.RepositoryStatus;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -60,7 +60,7 @@ class RepositoryControllerTest {
             RepositoryMode.LOCAL_FIXTURE,
             "test-repo",
             Optional.empty(),
-            Optional.of(RepositoryRevision.fixture()),
+            Optional.of(RepositoryRevision.ofSha("0".repeat(40))),
             true);
 
     @Autowired
@@ -327,7 +327,7 @@ class RepositoryControllerTest {
                 .andExpect(jsonPath(prefix + ".mode").value("LOCAL_FIXTURE"))
                 .andExpect(jsonPath(prefix + ".displayName").value("test-repo"))
                 .andExpect(jsonPath(prefix + ".currentBranch").doesNotExist())
-                .andExpect(jsonPath(prefix + ".currentRevision").value("FIXTURE"))
+                .andExpect(jsonPath(prefix + ".currentRevision").value("0000000000000000000000000000000000000000"))
                 .andExpect(jsonPath(prefix + ".cloned").value(true))
                 .andExpect(jsonPath(prefix + ".sourceRoot").doesNotExist())
                 .andExpect(jsonPath(prefix + ".path").doesNotExist())

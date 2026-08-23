@@ -8,8 +8,8 @@ import com.java.semantic.syntax.domain.MapperStatementEvidence;
 import com.java.semantic.syntax.domain.RepositorySyntax;
 import com.java.semantic.syntax.domain.RevisionBoundRepositorySyntaxProvider;
 import com.java.semantic.syntax.domain.RevisionPinnedSourceRangeReader;
-import com.java.semantic.syntax.domain.SourceRange;
-import com.java.semantic.syntax.domain.SourceRangeSegment;
+import com.java.semantic.model.codefact.SourceRange;
+import com.java.semantic.model.codefact.SourceRangeSegment;
 
 import java.util.Objects;
 import java.util.Optional;

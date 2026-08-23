@@ -1,8 +1,9 @@
 package com.java.semantic.repository.application;
+import com.java.semantic.model.repository.InvalidRepositoryIdException;
 
 import com.java.semantic.repository.config.RepositoryProperties;
-import com.java.semantic.repository.domain.InvalidRepositoryIdException;
-import com.java.semantic.repository.domain.RepositoryId;
+import com.java.semantic.model.repository.InvalidRepositoryIdException;
+import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.repository.domain.RepositoryMode;
 import com.java.semantic.repository.domain.RepositoryRuntime;
 import org.springframework.stereotype.Component;

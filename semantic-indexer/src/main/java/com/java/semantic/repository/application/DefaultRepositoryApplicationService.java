@@ -2,10 +2,10 @@ package com.java.semantic.repository.application;
 
 import com.java.semantic.diagnostic.ExpectedFailure;
 import com.java.semantic.repository.config.RepositoryProperties;
-import com.java.semantic.repository.domain.InvalidRepositoryIdException;
-import com.java.semantic.repository.domain.RepositoryId;
+import com.java.semantic.model.repository.InvalidRepositoryIdException;
+import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.repository.domain.RepositoryMode;
-import com.java.semantic.repository.domain.RepositoryRevision;
+import com.java.semantic.model.repository.RepositoryRevision;
 import com.java.semantic.repository.domain.RepositoryRuntime;
 import com.java.semantic.repository.domain.RepositorySnapshot;
 import com.java.semantic.repository.domain.RepositoryStatus;
@@ -151,7 +151,7 @@ public class DefaultRepositoryApplicationService implements RepositoryApplicatio
                     || !Files.isReadable(runtime.workingTree())) {
                 throw new RepositoryMutationException("fixture path is unavailable");
             }
-            RepositoryRevision revision = RepositoryRevision.fixture();
+            RepositoryRevision revision = RepositoryRevision.ofSha("0".repeat(40));
             runtime.publish(revision, "");
             notifyAfterPublication(new RepositorySnapshot(
                     runtime.repositoryId(), runtime.workingTree(), revision));

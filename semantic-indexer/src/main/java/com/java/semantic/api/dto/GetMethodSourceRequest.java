@@ -18,7 +18,7 @@ public record GetMethodSourceRequest(
         @NotBlank @Pattern(regexp = "^[a-z0-9][a-z0-9._-]{0,63}$")
         String repoId,
         @MonitoringField(MonitoringMode.VALUE)
-        @NotBlank @Pattern(regexp = "^[0-9a-f]{40}$|^FIXTURE$")
+        @NotBlank @Pattern(regexp = "^[0-9a-f]{40}$")
         String expectedRevision,
         @MonitoringField(MonitoringMode.NESTED) @NotNull @Valid MethodTargetPayload target) {
 

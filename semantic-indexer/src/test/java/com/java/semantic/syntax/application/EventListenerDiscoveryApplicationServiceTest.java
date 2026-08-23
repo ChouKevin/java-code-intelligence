@@ -2,8 +2,8 @@ package com.java.semantic.syntax.application;
 
 import com.java.semantic.repository.application.RepositoryApplicationService;
 import com.java.semantic.repository.application.RepositoryRevisionMismatchException;
-import com.java.semantic.repository.domain.RepositoryId;
-import com.java.semantic.repository.domain.RepositoryRevision;
+import com.java.semantic.model.repository.RepositoryId;
+import com.java.semantic.model.repository.RepositoryRevision;
 import com.java.semantic.repository.domain.RepositorySnapshot;
 import com.java.semantic.syntax.domain.RepositorySyntax;
 import com.java.semantic.syntax.domain.RevisionBoundRepositorySyntaxProvider;
@@ -44,7 +44,7 @@ class EventListenerDiscoveryApplicationServiceTest {
     @Test
     void should_extract_once_inside_the_expected_revision_snapshot_and_return_exact_snapshot_revision() {
         RepositoryId repositoryId = RepositoryId.of("orders");
-        RepositoryRevision expectedRevision = RepositoryRevision.fixture();
+        RepositoryRevision expectedRevision = RepositoryRevision.ofSha("0".repeat(40));
         RepositorySnapshot snapshot = new RepositorySnapshot(repositoryId, root, expectedRevision);
         EventListenerDiscoveryQuery query = new EventListenerDiscoveryQuery(
                 repositoryId, expectedRevision, "com.acme.OrderPlaced", 0, 50);
@@ -74,7 +74,7 @@ class EventListenerDiscoveryApplicationServiceTest {
     @Test
     void should_propagate_repository_revision_mismatch_without_parsing() {
         RepositoryId repositoryId = RepositoryId.of("orders");
-        RepositoryRevision expectedRevision = RepositoryRevision.fixture();
+        RepositoryRevision expectedRevision = RepositoryRevision.ofSha("0".repeat(40));
         EventListenerDiscoveryQuery query = new EventListenerDiscoveryQuery(
                 repositoryId, expectedRevision, "com.acme.OrderPlaced", 0, 50);
         RepositoryRevisionMismatchException mismatch = new RepositoryRevisionMismatchException(
@@ -90,7 +90,7 @@ class EventListenerDiscoveryApplicationServiceTest {
     @Test
     void should_request_revision_bound_syntax_for_each_query_and_keep_empty_results_bound_to_the_requested_event_type() {
         RepositoryId repositoryId = RepositoryId.of("orders");
-        RepositoryRevision revision = RepositoryRevision.fixture();
+        RepositoryRevision revision = RepositoryRevision.ofSha("0".repeat(40));
         RepositorySnapshot snapshot = new RepositorySnapshot(repositoryId, root, revision);
         EventListenerDiscoveryQuery orderQuery = new EventListenerDiscoveryQuery(
                 repositoryId, revision, "com.acme.OrderPlaced", 0, 50);

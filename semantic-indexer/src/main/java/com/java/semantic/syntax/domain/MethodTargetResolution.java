@@ -5,7 +5,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 
-import com.java.semantic.identity.MethodTarget;
+import com.java.semantic.model.codefact.MethodTarget;
 
 /** 驗證單一方法宣告解析為 canonical 目標的結果 */
 public record MethodTargetResolution(

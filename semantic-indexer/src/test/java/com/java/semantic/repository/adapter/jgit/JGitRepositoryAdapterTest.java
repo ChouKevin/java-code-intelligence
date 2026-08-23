@@ -2,7 +2,7 @@ package com.java.semantic.repository.adapter.jgit;
 
 import com.java.semantic.repository.application.RepositoryMutationException;
 import com.java.semantic.repository.config.RepositoryProperties;
-import com.java.semantic.repository.domain.RepositoryRevision;
+import com.java.semantic.model.repository.RepositoryRevision;
 import org.eclipse.jgit.api.Git;
 import org.eclipse.jgit.api.errors.JGitInternalException;
 import org.eclipse.jgit.lib.StoredConfig;

@@ -6,8 +6,8 @@ import com.java.semantic.api.dto.ApiRouteObservationResponse;
 import com.java.semantic.trie.ApiRouteCandidate;
 import com.java.semantic.trie.ApiRouteMatchBatch;
 import com.java.semantic.trie.ApiRouteObservation;
-import com.java.semantic.repository.domain.RepositoryId;
-import com.java.semantic.repository.domain.RepositoryRevision;
+import com.java.semantic.model.repository.RepositoryId;
+import com.java.semantic.model.repository.RepositoryRevision;
 import org.springframework.stereotype.Component;
 
 import java.util.Objects;

@@ -1,7 +1,7 @@
 package com.java.semantic.semantic.adapter.jdtls;
 
-import com.java.semantic.repository.domain.RepositoryId;
-import com.java.semantic.repository.domain.RepositoryRevision;
+import com.java.semantic.model.repository.RepositoryId;
+import com.java.semantic.model.repository.RepositoryRevision;
 import org.eclipse.lsp4j.services.LanguageServer;
 import org.springframework.util.Assert;
 import org.springframework.util.StringUtils;

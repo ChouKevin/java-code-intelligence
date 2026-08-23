@@ -1,7 +1,7 @@
 package com.java.semantic.semantic.adapter.jdtls;
 
 import com.java.semantic.repository.domain.RepositorySnapshot;
-import com.java.semantic.identity.MethodTarget;
+import com.java.semantic.model.codefact.MethodTarget;
 import com.java.semantic.semantic.domain.JavaSemanticService;
 import com.java.semantic.semantic.domain.SemanticAmbiguousTypeException;
 import com.java.semantic.semantic.domain.SemanticCall;

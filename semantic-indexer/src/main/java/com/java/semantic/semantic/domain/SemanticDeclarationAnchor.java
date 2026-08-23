@@ -1,6 +1,6 @@
 package com.java.semantic.semantic.domain;
 
-import com.java.semantic.identity.MethodTarget;
+import com.java.semantic.model.codefact.MethodTarget;
 
 import java.util.Objects;
 

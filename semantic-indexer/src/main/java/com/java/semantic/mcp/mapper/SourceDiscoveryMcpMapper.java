@@ -11,8 +11,8 @@ import com.java.semantic.syntax.application.EvidenceSourceQuery;
 import com.java.semantic.syntax.application.MethodSourceResult;
 import com.java.semantic.syntax.application.RevisionBoundSourceSymbolResolution;
 import com.java.semantic.syntax.application.SourceSegmentResult;
-import com.java.semantic.syntax.domain.SourceRange;
-import com.java.semantic.syntax.domain.SourceRangeSegment;
+import com.java.semantic.model.codefact.SourceRange;
+import com.java.semantic.model.codefact.SourceRangeSegment;
 import com.java.semantic.syntax.domain.ExactSourceDeclarationTarget;
 import org.springframework.stereotype.Component;
 

@@ -6,9 +6,9 @@ import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 
-import com.java.semantic.identity.JavaTypeIdentity;
-import com.java.semantic.identity.MethodTarget;
-import com.java.semantic.identity.SourceTypeIdentity;
+import com.java.semantic.model.codefact.JavaTypeIdentity;
+import com.java.semantic.model.codefact.MethodTarget;
+import com.java.semantic.model.codefact.SourceTypeIdentity;
 import com.java.semantic.syntax.application.concept.DeclarationConceptIdentity.FieldConceptIdentity;
 import com.java.semantic.syntax.application.concept.DeclarationConceptIdentity.MethodConceptIdentity;
 import com.java.semantic.syntax.application.concept.DeclarationConceptIdentity.TypeConceptIdentity;
@@ -35,9 +35,9 @@ import com.java.semantic.syntax.domain.NamedTypeReference;
 import com.java.semantic.syntax.domain.RepositorySyntax;
 import com.java.semantic.syntax.domain.ScheduleEntryPoint;
 import com.java.semantic.syntax.domain.ScheduleTriggerKind;
-import com.java.semantic.syntax.domain.SourceRange;
-import com.java.semantic.syntax.domain.SyntaxPosition;
-import com.java.semantic.syntax.domain.SyntaxRange;
+import com.java.semantic.model.codefact.SourceRange;
+import com.java.semantic.model.codefact.SyntaxPosition;
+import com.java.semantic.model.codefact.SyntaxRange;
 
 import org.junit.jupiter.api.Test;
 

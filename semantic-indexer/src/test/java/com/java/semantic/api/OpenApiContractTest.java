@@ -1,4 +1,5 @@
 package com.java.semantic.api;
+import com.java.semantic.model.codefact.SourceRange;
 
 import com.java.semantic.api.dto.GraphEdgeResponse;
 import com.java.semantic.api.dto.GraphErrorResponse;
@@ -47,7 +48,7 @@ import static org.assertj.core.api.Assertions.entry;
 
 class OpenApiContractTest {
 
-    private static final String REVISION_PATTERN = "^[0-9a-f]{40}$|^FIXTURE$";
+    private static final String REVISION_PATTERN = "^[0-9a-f]{40}$";
     private static final String SOURCE_FILE_PATTERN = "^[^\\u0000-\\u001F\\u007F-\\u009F]*[^\\u0000-\\u0020\\u007F-\\u009F\\u1680\\u2000-\\u2006\\u2008-\\u200A\\u2028-\\u2029\\u205F\\u3000][^\\u0000-\\u001F\\u007F-\\u009F]*$";
     private static final String CLASS_NAME_PATTERN = "^[\\p{L}\\p{Nl}\\p{Sc}\\p{Pc}][\\p{L}\\p{Nl}\\p{Sc}\\p{Pc}\\p{Mn}\\p{Mc}\\p{Nd}]*(?:\\.[\\p{L}\\p{Nl}\\p{Sc}\\p{Pc}][\\p{L}\\p{Nl}\\p{Sc}\\p{Pc}\\p{Mn}\\p{Mc}\\p{Nd}]*)*$";
     private static final String METHOD_NAME_PATTERN = "^[\\p{L}\\p{Nl}\\p{Sc}\\p{Pc}][\\p{L}\\p{Nl}\\p{Sc}\\p{Pc}\\p{Mn}\\p{Mc}\\p{Nd}]*$";
@@ -931,7 +932,7 @@ class OpenApiContractTest {
                 List.of("com.example.PlaceOrderRequest"));
         Constructor<?> requestConstructor = requestType.getConstructor(
                 String.class, String.class, Integer.class, targetType);
-        Object request = requestConstructor.newInstance("order-service", "FIXTURE", null, target);
+        Object request = requestConstructor.newInstance("order-service", "0000000000000000000000000000000000000000", null, target);
 
         Method depth = requestType.getMethod("depth");
         assertThat(depth.invoke(request)).isEqualTo(2);
@@ -965,7 +966,7 @@ class OpenApiContractTest {
         assertThatThrownBy(() -> OBJECT_MAPPER.readValue("""
                 {
                   "repoId":"order-service",
-                  "expectedRevision":"FIXTURE",
+                  "expectedRevision":"0000000000000000000000000000000000000000",
                   "target":{
                     "sourceType":{
                       "javaType":{"packageName":"","className":"OrderController"},
@@ -1057,7 +1058,7 @@ class OpenApiContractTest {
         List<GraphErrorResponse> errors = new ArrayList<>(List.of(new GraphErrorResponse("CHILD_FAILURE", "failure", "node")));
         OutgoingCallGraphResponse response = new OutgoingCallGraphResponse(
                 "SUCCESS",
-                "FIXTURE",
+                "0000000000000000000000000000000000000000",
                 "node",
                 new GraphTraversalResponse(1, 0, 0, true, "NONE"),
                 nodes,
@@ -1074,7 +1075,7 @@ class OpenApiContractTest {
         assertThat(response.errors()).hasSize(1);
         assertThatThrownBy(() -> new OutgoingCallGraphResponse(
                 "SUCCESS",
-                "FIXTURE",
+                "0000000000000000000000000000000000000000",
                 "node",
                 new GraphTraversalResponse(1, 0, 0, true, "NONE"),
                 null,
@@ -1084,7 +1085,7 @@ class OpenApiContractTest {
                 .isInstanceOf(NullPointerException.class);
         assertThatThrownBy(() -> new OutgoingCallGraphResponse(
                 "SUCCESS",
-                "FIXTURE",
+                "0000000000000000000000000000000000000000",
                 "node",
                 new GraphTraversalResponse(1, 0, 0, true, "NONE"),
                 List.of(),
@@ -1094,7 +1095,7 @@ class OpenApiContractTest {
                 .isInstanceOf(NullPointerException.class);
         assertThatThrownBy(() -> new OutgoingCallGraphResponse(
                 "SUCCESS",
-                "FIXTURE",
+                "0000000000000000000000000000000000000000",
                 "node",
                 new GraphTraversalResponse(1, 0, 0, true, "NONE"),
                 List.of(),
@@ -1104,7 +1105,7 @@ class OpenApiContractTest {
                 .isInstanceOf(NullPointerException.class);
         assertThatThrownBy(() -> new OutgoingCallGraphResponse(
                 "SUCCESS",
-                "FIXTURE",
+                "0000000000000000000000000000000000000000",
                 "node",
                 new GraphTraversalResponse(1, 0, 0, true, "NONE"),
                 List.of(),
@@ -1115,7 +1116,7 @@ class OpenApiContractTest {
 
         IncomingCallGraphResponse incomingResponse = new IncomingCallGraphResponse(
                 "SUCCESS",
-                "FIXTURE",
+                "0000000000000000000000000000000000000000",
                 "node",
                 new GraphTraversalResponse(1, 0, 0, true, "NONE"),
                 List.of(),
@@ -1211,7 +1212,7 @@ class OpenApiContractTest {
         assertThat(expectedRevision).containsEntry("in", "query").containsEntry("required", Boolean.TRUE);
         assertThat(map(expectedRevision.get("schema")))
                 .containsEntry("type", "string")
-                .containsEntry("pattern", "^[0-9a-f]{40}$|^FIXTURE$");
+                .containsEntry("pattern", "^[0-9a-f]{40}$");
     }
 
     @Test

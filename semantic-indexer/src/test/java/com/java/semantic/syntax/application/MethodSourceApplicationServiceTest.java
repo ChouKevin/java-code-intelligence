@@ -1,9 +1,10 @@
 package com.java.semantic.syntax.application;
+import com.java.semantic.model.codefact.SourceRange;
 
-import com.java.semantic.identity.MethodTarget;
+import com.java.semantic.model.codefact.MethodTarget;
 import com.java.semantic.repository.application.RepositoryApplicationService;
-import com.java.semantic.repository.domain.RepositoryId;
-import com.java.semantic.repository.domain.RepositoryRevision;
+import com.java.semantic.model.repository.RepositoryId;
+import com.java.semantic.model.repository.RepositoryRevision;
 import com.java.semantic.repository.domain.RepositorySnapshot;
 import com.java.semantic.repository.domain.RepositorySourceContainment;
 import com.java.semantic.repository.domain.RepositoryStatus;
@@ -28,7 +29,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class MethodSourceApplicationServiceTest {
 
     private static final RepositoryId REPOSITORY_ID = RepositoryId.of("orders");
-    private static final RepositoryRevision REVISION = RepositoryRevision.fixture();
+    private static final RepositoryRevision REVISION = RepositoryRevision.ofSha("0".repeat(40));
 
     @Test
     void should_include_attached_javadoc_in_the_canonical_declaration_location(@TempDir Path repositoryRoot)

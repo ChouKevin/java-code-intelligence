@@ -2,7 +2,7 @@ package com.java.semantic.mcp.dto.callgraph;
 
 import com.java.semantic.callgraph.domain.IncomingGraphFragment;
 import com.java.semantic.callgraph.domain.OutgoingGraphFragment;
-import com.java.semantic.identity.MethodTarget;
+import com.java.semantic.model.codefact.MethodTarget;
 import com.java.semantic.mcp.dto.McpRevisionPinnedInput;
 import com.java.semantic.monitoring.MonitoringField;
 import com.java.semantic.monitoring.MonitoringMode;
@@ -25,7 +25,7 @@ public final class CallGraphMcpDtos {
             @MonitoringField(MonitoringMode.VALUE) @NotBlank
             @Pattern(regexp = "^[a-z0-9][a-z0-9._-]{0,63}$") String repoId,
             @MonitoringField(MonitoringMode.VALUE) @NotBlank
-            @Pattern(regexp = "^[0-9a-f]{40}$|^FIXTURE$") String expectedRevision,
+            @Pattern(regexp = "^[0-9a-f]{40}$") String expectedRevision,
             @MonitoringField(MonitoringMode.VALUE) @NotNull @Min(1) @Max(2) Integer depth,
             @MonitoringField(MonitoringMode.NESTED) @NotNull @Valid MethodTarget target)
             implements McpRevisionPinnedInput {

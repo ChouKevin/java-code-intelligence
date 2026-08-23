@@ -1,6 +1,6 @@
 package com.java.semantic.semantic.application;
 
-import com.java.semantic.syntax.domain.SyntaxRange;
+import com.java.semantic.model.codefact.SyntaxRange;
 
 import java.util.Objects;
 

@@ -2,9 +2,9 @@ package com.java.semantic.syntax.domain;
 
 import com.java.semantic.syntax.domain.SourceMethodMetadata;
 
-import com.java.semantic.identity.JavaTypeIdentity;
-import com.java.semantic.identity.MethodTarget;
-import com.java.semantic.identity.SourceTypeIdentity;
+import com.java.semantic.model.codefact.JavaTypeIdentity;
+import com.java.semantic.model.codefact.MethodTarget;
+import com.java.semantic.model.codefact.SourceTypeIdentity;
 import com.java.semantic.syntax.adapter.jdt.JdtSyntaxExtractionService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;

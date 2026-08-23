@@ -5,8 +5,8 @@ import com.java.semantic.mcp.StrictMcpToolInputDecoder;
 import com.java.semantic.mcp.dto.callgraph.CallGraphMcpDtos;
 import com.java.semantic.mcp.dto.repository.RepositoryMcpDtos;
 import com.java.semantic.mcp.dto.route.ApiRouteMcpDtos;
-import com.java.semantic.repository.domain.RepositoryId;
-import com.java.semantic.repository.domain.RepositoryRevision;
+import com.java.semantic.model.repository.RepositoryId;
+import com.java.semantic.model.repository.RepositoryRevision;
 import com.java.semantic.trie.ApiRouteApplicationService;
 import com.java.semantic.trie.ApiRouteMatchBatch;
 import jakarta.validation.Validation;
@@ -73,12 +73,12 @@ class CoreQueryMcpToolsTest {
         given(apiRouteApplicationService.suggestMatches(any(), any(), any(), any(), anyInt())).willReturn(result);
 
         ApiRouteMcpDtos.LookupInput lookup = decoder.decode(
-                Map.of("repoId", "orders", "expectedRevision", "FIXTURE", "apiPath", "/orders"),
+                Map.of("repoId", "orders", "expectedRevision", "0000000000000000000000000000000000000000", "apiPath", "/orders"),
                 ApiRouteMcpDtos.LookupInput.class);
         ApiRouteMcpDtos.SuggestInput suggest = decoder.decode(
                 Map.of(
                         "repoId", "orders",
-                        "expectedRevision", "FIXTURE",
+                        "expectedRevision", "0000000000000000000000000000000000000000",
                         "apiPath", "/orders",
                         "limit", 5),
                 ApiRouteMcpDtos.SuggestInput.class);
@@ -88,12 +88,12 @@ class CoreQueryMcpToolsTest {
 
         then(apiRouteApplicationService).should().lookupMatches(
                 RepositoryId.of("orders"),
-                new RepositoryRevision("FIXTURE"),
+                new RepositoryRevision("0000000000000000000000000000000000000000"),
                 "/orders",
                 Optional.empty());
         then(apiRouteApplicationService).should().suggestMatches(
                 RepositoryId.of("orders"),
-                new RepositoryRevision("FIXTURE"),
+                new RepositoryRevision("0000000000000000000000000000000000000000"),
                 "/orders",
                 Optional.empty(),
                 5);

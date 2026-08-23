@@ -1,6 +1,8 @@
 package com.java.semantic.syntax.domain;
+import com.java.semantic.model.codefact.SyntaxPosition;
+import com.java.semantic.model.codefact.SourceRange;
 
-import com.java.semantic.identity.JavaTypeIdentity;
+import com.java.semantic.model.codefact.JavaTypeIdentity;
 
 import java.util.List;
 import java.util.Objects;

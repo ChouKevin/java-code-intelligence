@@ -45,7 +45,7 @@ public final class RepositoryMcpDtos {
             @MonitoringField(MonitoringMode.VALUE) @NotBlank
             @Pattern(regexp = "^[a-z0-9][a-z0-9._-]{0,63}$") String repoId,
             @MonitoringField(MonitoringMode.VALUE) @NotBlank
-            @Pattern(regexp = "^[0-9a-f]{40}$|^FIXTURE$") String expectedRevision,
+            @Pattern(regexp = "^[0-9a-f]{40}$") String expectedRevision,
             @MonitoringField(MonitoringMode.SIZE) @NotNull Set<@NotNull EntryPointType> types)
             implements McpRevisionPinnedInput {
     }

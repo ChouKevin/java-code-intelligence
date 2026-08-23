@@ -1,9 +1,9 @@
 package com.java.semantic.syntax.application;
 
-import com.java.semantic.syntax.domain.SourceRange;
+import com.java.semantic.model.codefact.SourceRange;
 
-import com.java.semantic.identity.MethodTarget;
-import com.java.semantic.identity.JavaTypeIdentity;
+import com.java.semantic.model.codefact.MethodTarget;
+import com.java.semantic.model.codefact.JavaTypeIdentity;
 import com.java.semantic.syntax.domain.AnalysisTargetStatus;
 import com.java.semantic.syntax.domain.AnnotationEvidence;
 import com.java.semantic.syntax.domain.MethodTargetResolution;

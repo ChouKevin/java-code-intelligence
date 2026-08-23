@@ -4,8 +4,8 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.node.ObjectNode;
 import com.java.semantic.api.security.ApiTokenFilter;
-import com.java.semantic.repository.domain.RepositoryId;
-import com.java.semantic.repository.domain.RepositoryRevision;
+import com.java.semantic.model.repository.RepositoryId;
+import com.java.semantic.model.repository.RepositoryRevision;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -123,22 +123,22 @@ class SemanticFacadeVerticalJdtLsIT {
                 .textNode("com.example.vertical.PlaceOrderRequest"));
         assertThat(fixtureSchedule.path("className").asText()).isEqualTo("OrderJob");
 
-        JsonNode restFragment = analyze(FIXTURE_REPOSITORY, "FIXTURE", fixtureRest, 2, "outgoing");
-        assertThat(restFragment.path("analyzedRevision").asText()).isEqualTo("FIXTURE");
+        JsonNode restFragment = analyze(FIXTURE_REPOSITORY, "0000000000000000000000000000000000000000", fixtureRest, 2, "outgoing");
+        assertThat(restFragment.path("analyzedRevision").asText()).isEqualTo("0000000000000000000000000000000000000000");
         assertFullSource(nodeById(restFragment, restFragment.path("rootNodeId").asText()));
         assertDirectNodesHaveFullSource(restFragment);
         assertProvenEdgesHaveCallRangesAndEvidence(restFragment);
 
         ObjectNode depthBoundary = targetOfFirstDepthBoundary(restFragment);
-        JsonNode reRootedFixtureFragment = analyze(FIXTURE_REPOSITORY, "FIXTURE", depthBoundary, 2, "outgoing");
+        JsonNode reRootedFixtureFragment = analyze(FIXTURE_REPOSITORY, "0000000000000000000000000000000000000000", depthBoundary, 2, "outgoing");
         JsonNode reRootedFixtureRoot = nodeById(
                 reRootedFixtureFragment, reRootedFixtureFragment.path("rootNodeId").asText());
-        assertThat(reRootedFixtureFragment.path("analyzedRevision").asText()).isEqualTo("FIXTURE");
+        assertThat(reRootedFixtureFragment.path("analyzedRevision").asText()).isEqualTo("0000000000000000000000000000000000000000");
         assertThat(reRootedFixtureRoot.path("target")).isEqualTo(depthBoundary);
         assertFullSource(reRootedFixtureRoot);
 
-        JsonNode mqFragment = analyze(FIXTURE_REPOSITORY, "FIXTURE", fixtureMq, 2, "outgoing");
-        assertThat(mqFragment.path("analyzedRevision").asText()).isEqualTo("FIXTURE");
+        JsonNode mqFragment = analyze(FIXTURE_REPOSITORY, "0000000000000000000000000000000000000000", fixtureMq, 2, "outgoing");
+        assertThat(mqFragment.path("analyzedRevision").asText()).isEqualTo("0000000000000000000000000000000000000000");
         JsonNode mqRoot = nodeById(mqFragment, mqFragment.path("rootNodeId").asText());
         JsonNode serviceNode = nodeByClassAndMethod(mqFragment, "OrderService", "placeFromMessage");
         assertFullSource(mqRoot);
@@ -150,7 +150,7 @@ class SemanticFacadeVerticalJdtLsIT {
         });
 
         ObjectNode ambiguityRoot = targetByClassAndMethod(mqFragment, "OrderService", "placeFromMessage");
-        JsonNode ambiguityFragment = analyze(FIXTURE_REPOSITORY, "FIXTURE", ambiguityRoot, 2, "outgoing");
+        JsonNode ambiguityFragment = analyze(FIXTURE_REPOSITORY, "0000000000000000000000000000000000000000", ambiguityRoot, 2, "outgoing");
         JsonNode immutableAmbiguityFragment = ambiguityFragment.deepCopy();
         assertThat(ambiguityFragment.path("status").asText()).isEqualTo("PARTIAL");
         assertThat(candidateIdentities(ambiguityFragment)).containsExactlyInAnyOrder(
@@ -166,14 +166,14 @@ class SemanticFacadeVerticalJdtLsIT {
         });
 
         ObjectNode candidate = firstCandidate(ambiguityFragment);
-        JsonNode candidateFragment = analyze(FIXTURE_REPOSITORY, "FIXTURE", candidate, 2, "outgoing");
+        JsonNode candidateFragment = analyze(FIXTURE_REPOSITORY, "0000000000000000000000000000000000000000", candidate, 2, "outgoing");
         JsonNode candidateRoot = nodeById(candidateFragment, candidateFragment.path("rootNodeId").asText());
         assertThat(candidateRoot.path("target")).isEqualTo(candidate);
         assertFullSource(candidateRoot);
         assertThat(ambiguityFragment).isEqualTo(immutableAmbiguityFragment);
 
         ObjectNode serviceTarget = targetByClassAndMethod(mqFragment, "OrderService", "placeFromMessage");
-        JsonNode incomingServiceFragment = analyze(FIXTURE_REPOSITORY, "FIXTURE", serviceTarget, 2, "incoming");
+        JsonNode incomingServiceFragment = analyze(FIXTURE_REPOSITORY, "0000000000000000000000000000000000000000", serviceTarget, 2, "incoming");
         JsonNode incomingServiceRoot = nodeById(incomingServiceFragment, incomingServiceFragment.path("rootNodeId").asText());
         assertFullSource(incomingServiceRoot);
         assertIncomingDirectNodesHaveFullSource(incomingServiceFragment);
@@ -182,7 +182,7 @@ class SemanticFacadeVerticalJdtLsIT {
                 .contains(new TargetIdentity("OrderListener", "consume"));
 
         ObjectNode uncalledTarget = target("OverloadedTarget", "uncalled", List.of());
-        JsonNode uncalledIncomingFragment = analyze(FIXTURE_REPOSITORY, "FIXTURE", uncalledTarget, 2, "incoming");
+        JsonNode uncalledIncomingFragment = analyze(FIXTURE_REPOSITORY, "0000000000000000000000000000000000000000", uncalledTarget, 2, "incoming");
         assertThat(uncalledIncomingFragment.path("status").asText()).isEqualTo("SUCCESS");
         assertThat(stream(uncalledIncomingFragment.path("nodes")).toList()).hasSize(1);
         assertFullSource(nodeById(uncalledIncomingFragment, uncalledIncomingFragment.path("rootNodeId").asText()));
@@ -191,13 +191,13 @@ class SemanticFacadeVerticalJdtLsIT {
         assertThat(stream(uncalledIncomingFragment.path("errors")).toList()).hasSize(0);
 
         ObjectNode stringOverloadTarget = target("OverloadedTarget", "accept", List.of("java.lang.String"));
-        JsonNode stringIncomingFragment = analyze(FIXTURE_REPOSITORY, "FIXTURE", stringOverloadTarget, 2, "incoming");
+        JsonNode stringIncomingFragment = analyze(FIXTURE_REPOSITORY, "0000000000000000000000000000000000000000", stringOverloadTarget, 2, "incoming");
         assertThat(incomingCallerIdentities(stringIncomingFragment))
                 .contains(new TargetIdentity("OverloadedCaller", "callString"))
                 .doesNotContain(new TargetIdentity("OverloadedCaller", "callInt"));
         assertIncomingDirectNodesHaveFullSource(stringIncomingFragment);
 
-        JsonNode budgetFragment = analyze(FIXTURE_REPOSITORY, "FIXTURE", stringOverloadTarget, 2, "incoming");
+        JsonNode budgetFragment = analyze(FIXTURE_REPOSITORY, "0000000000000000000000000000000000000000", stringOverloadTarget, 2, "incoming");
         JsonNode directCaller = nodeByClassAndMethod(budgetFragment, "OverloadedCaller", "callString");
         JsonNode cutoffCaller = nodeByClassAndMethod(budgetFragment, "OverloadedCaller", "callStringEntry");
         assertFullSource(directCaller);
@@ -208,14 +208,14 @@ class SemanticFacadeVerticalJdtLsIT {
                 .map(warning -> warning.path("code").asText()).toList()).contains("NODE_BUDGET_REACHED");
 
         ObjectNode cutoffTarget = objectNode(cutoffCaller.path("target")).deepCopy();
-        JsonNode rerootedCutoffFragment = analyze(FIXTURE_REPOSITORY, "FIXTURE", cutoffTarget, 2, "incoming");
+        JsonNode rerootedCutoffFragment = analyze(FIXTURE_REPOSITORY, "0000000000000000000000000000000000000000", cutoffTarget, 2, "incoming");
         JsonNode rerootedCutoffRoot = nodeById(rerootedCutoffFragment, rerootedCutoffFragment.path("rootNodeId").asText());
         assertThat(rerootedCutoffRoot.path("target")).isEqualTo(cutoffTarget);
         assertFullSource(rerootedCutoffRoot);
         assertStatelessExpansion(rerootedCutoffFragment);
 
         ObjectNode callStringTarget = target("OverloadedCaller", "callString", List.of());
-        JsonNode callStringOutgoingFragment = analyze(FIXTURE_REPOSITORY, "FIXTURE", callStringTarget, 2, "outgoing");
+        JsonNode callStringOutgoingFragment = analyze(FIXTURE_REPOSITORY, "0000000000000000000000000000000000000000", callStringTarget, 2, "outgoing");
         assertThat(normalizedRootEdges(callStringOutgoingFragment, "outgoing"))
                 .containsExactlyElementsOf(normalizedRootEdges(stringIncomingFragment, "incoming"));
 
@@ -232,7 +232,7 @@ class SemanticFacadeVerticalJdtLsIT {
 
         RepositoryId fixtureRepositoryId = RepositoryId.of(FIXTURE_REPOSITORY);
         WorkspaceActivityLease indexingLease = workspaceManager.acquireActivity(
-                fixtureRepositoryId, RepositoryRevision.fixture(), WorkspaceActivityKind.INDEXING);
+                fixtureRepositoryId, RepositoryRevision.ofSha("0".repeat(40)), WorkspaceActivityKind.INDEXING);
         try {
             LIFECYCLE_TICKER.advance(Duration.ofMinutes(31));
             workspaceIdleReaper.runOnce();
@@ -253,7 +253,7 @@ class SemanticFacadeVerticalJdtLsIT {
         assertThat(fixtureProcess.isAlive()).isFalse();
         assertThat(workspaceManager.activeProcessIds()).isEmpty();
 
-        JsonNode restartedFixtureFragment = analyze(FIXTURE_REPOSITORY, "FIXTURE", callStringTarget, 2, "outgoing");
+        JsonNode restartedFixtureFragment = analyze(FIXTURE_REPOSITORY, "0000000000000000000000000000000000000000", callStringTarget, 2, "outgoing");
         assertThat(restartedFixtureFragment.path("status").asText()).isEqualTo("SUCCESS");
         assertFullSource(nodeById(restartedFixtureFragment, restartedFixtureFragment.path("rootNodeId").asText()));
         Set<Long> restartedProcessIds = workspaceManager.activeProcessIds();

@@ -1,12 +1,13 @@
 package com.java.semantic.api;
+import com.java.semantic.model.codefact.SyntaxRange;
 
 import com.java.semantic.api.dto.identity.JavaTypeIdentityPayload;
 import com.java.semantic.api.dto.identity.MethodTargetPayload;
 import com.java.semantic.api.dto.identity.SourceMemberIdentityPayload;
 import com.java.semantic.api.dto.identity.SourceTypeIdentityPayload;
-import com.java.semantic.identity.JavaTypeIdentity;
-import com.java.semantic.identity.MethodTarget;
-import com.java.semantic.identity.SourceTypeIdentity;
+import com.java.semantic.model.codefact.JavaTypeIdentity;
+import com.java.semantic.model.codefact.MethodTarget;
+import com.java.semantic.model.codefact.SourceTypeIdentity;
 import com.java.semantic.syntax.domain.SourceMemberIdentity;
 
 import java.util.Objects;

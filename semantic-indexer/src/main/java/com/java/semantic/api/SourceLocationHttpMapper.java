@@ -6,9 +6,9 @@ import com.java.semantic.api.dto.location.TextRangePayload;
 import com.java.semantic.callgraph.domain.CallSiteRange;
 import com.java.semantic.semantic.domain.SemanticPosition;
 import com.java.semantic.semantic.domain.SemanticRange;
-import com.java.semantic.syntax.domain.SourceRange;
-import com.java.semantic.syntax.domain.SyntaxPosition;
-import com.java.semantic.syntax.domain.SyntaxRange;
+import com.java.semantic.model.codefact.SourceRange;
+import com.java.semantic.model.codefact.SyntaxPosition;
+import com.java.semantic.model.codefact.SyntaxRange;
 import org.springframework.stereotype.Component;
 
 import java.util.Objects;

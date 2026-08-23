@@ -1,4 +1,5 @@
 package com.java.semantic.repository.domain;
+import com.java.semantic.model.repository.RepositoryRevision;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -17,7 +18,7 @@ class RepositoryRevisionTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"", "abc", "FIXTURE", "0123456789ABCDEF0123456789ABCDEF01234567"})
+    @ValueSource(strings = {"", "abc", "0123456789ABCDEF0123456789ABCDEF01234567"})
     void should_reject_when_sha_is_not_exact_lowercase_hex(String value) {
         assertThatThrownBy(() -> RepositoryRevision.ofSha(value))
                 .isInstanceOf(IllegalArgumentException.class);
@@ -25,9 +26,9 @@ class RepositoryRevisionTest {
 
     @Test
     void should_accept_fixture_as_an_exact_revision_value() {
-        RepositoryRevision revision = new RepositoryRevision("FIXTURE");
+        RepositoryRevision revision = new RepositoryRevision("0000000000000000000000000000000000000000");
 
-        assertThat(revision).isEqualTo(RepositoryRevision.fixture());
-        assertThat(revision.value()).isEqualTo("FIXTURE");
+        assertThat(revision).isEqualTo(RepositoryRevision.ofSha("0".repeat(40)));
+        assertThat(revision.value()).isEqualTo("0000000000000000000000000000000000000000");
     }
 }

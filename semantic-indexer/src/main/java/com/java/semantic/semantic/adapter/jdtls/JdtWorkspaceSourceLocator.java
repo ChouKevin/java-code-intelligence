@@ -1,6 +1,6 @@
 package com.java.semantic.semantic.adapter.jdtls;
 
-import com.java.semantic.identity.MethodTarget;
+import com.java.semantic.model.codefact.MethodTarget;
 import com.java.semantic.repository.domain.RepositorySnapshot;
 import com.java.semantic.repository.domain.RepositorySourceContainment;
 import com.java.semantic.repository.domain.RepositorySourceContainmentResult;

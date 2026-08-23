@@ -4,7 +4,7 @@ import com.java.semantic.callgraph.domain.EvidenceVisibility;
 import com.java.semantic.callgraph.domain.MethodId;
 import com.java.semantic.callgraph.domain.ReadPolicy;
 import com.java.semantic.callgraph.domain.TypeId;
-import com.java.semantic.identity.JavaIdentityNormalizer;
+import com.java.semantic.model.codefact.JavaIdentityNormalizer;
 import org.springframework.util.Assert;
 
 import java.util.Objects;

@@ -20,7 +20,7 @@ import com.java.semantic.syntax.domain.RepositorySyntax;
 import com.java.semantic.syntax.domain.SourceExtractionOutcome;
 import com.java.semantic.syntax.domain.SourceExtractionStatus;
 import com.java.semantic.syntax.domain.SyntaxInvocation;
-import com.java.semantic.syntax.domain.SyntaxPosition;
+import com.java.semantic.model.codefact.SyntaxPosition;
 import com.java.semantic.syntax.application.AnnotationMatchKind;
 import com.java.semantic.syntax.application.EventListenerDiscoveryPage;
 import com.java.semantic.syntax.application.EventListenerDiscoveryPolicy;

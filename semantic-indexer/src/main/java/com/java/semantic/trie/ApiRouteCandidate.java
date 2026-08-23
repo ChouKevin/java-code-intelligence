@@ -3,8 +3,8 @@ package com.java.semantic.trie;
 import java.util.List;
 import java.util.Objects;
 
-import com.java.semantic.identity.MethodTarget;
-import com.java.semantic.identity.SourceTypeIdentity;
+import com.java.semantic.model.codefact.MethodTarget;
+import com.java.semantic.model.codefact.SourceTypeIdentity;
 import com.java.semantic.syntax.domain.MethodTargetResolution;
 
 /** 服務邊界的 API 路由候選資料，欄位順序刻意與 {@link ApiEntryPointRef} 不同 */

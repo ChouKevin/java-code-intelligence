@@ -3,7 +3,7 @@ package com.java.semantic.syntax.application.concept;
 import java.util.Objects;
 import java.util.Optional;
 
-import com.java.semantic.identity.MethodTarget;
+import com.java.semantic.model.codefact.MethodTarget;
 import com.java.semantic.syntax.domain.MqBroker;
 import com.java.semantic.syntax.domain.ScheduleTriggerKind;
 import org.springframework.util.Assert;

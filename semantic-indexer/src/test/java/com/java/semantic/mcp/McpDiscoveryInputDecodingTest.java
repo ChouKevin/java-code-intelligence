@@ -69,7 +69,7 @@ class McpDiscoveryInputDecodingTest {
     private static Map<String, Object> conceptResolveArguments() {
         return Map.of(
                 "repoId", "orders",
-                "expectedRevision", "FIXTURE",
+                "expectedRevision", "0000000000000000000000000000000000000000",
                 "identity", Map.of(
                         "kind", "API_ROUTE",
                         "target", methodTarget(),
@@ -80,7 +80,7 @@ class McpDiscoveryInputDecodingTest {
     private static Map<String, Object> internalReferenceArguments() {
         return Map.of(
                 "repoId", "orders",
-                "expectedRevision", "FIXTURE",
+                "expectedRevision", "0000000000000000000000000000000000000000",
                 "target", Map.of(
                         "kind", "MEMBER",
                         "identity", Map.of(
@@ -95,7 +95,7 @@ class McpDiscoveryInputDecodingTest {
     private static Map<String, Object> evidenceSourceArguments() {
         return Map.of(
                 "repoId", "orders",
-                "expectedRevision", "FIXTURE",
+                "expectedRevision", "0000000000000000000000000000000000000000",
                 "identity", Map.of(
                         "kind", "MAPPER_FRAGMENT",
                         "identity", Map.of(
@@ -109,7 +109,7 @@ class McpDiscoveryInputDecodingTest {
     private static Map<String, Object> scheduleConceptResolveArguments() {
         return Map.of(
                 "repoId", "orders",
-                "expectedRevision", "FIXTURE",
+                "expectedRevision", "0000000000000000000000000000000000000000",
                 "identity", Map.of(
                         "kind", "SCHEDULE",
                         "target", methodTarget(),
@@ -119,7 +119,7 @@ class McpDiscoveryInputDecodingTest {
     private static Map<String, Object> mapperConceptResolveArguments() {
         return Map.of(
                 "repoId", "orders",
-                "expectedRevision", "FIXTURE",
+                "expectedRevision", "0000000000000000000000000000000000000000",
                 "identity", Map.of(
                         "kind", "MAPPER_STATEMENT_VARIANT",
                         "identity", Map.of(

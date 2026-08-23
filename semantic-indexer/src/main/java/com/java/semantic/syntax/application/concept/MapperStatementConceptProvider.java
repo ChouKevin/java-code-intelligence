@@ -1,6 +1,6 @@
 package com.java.semantic.syntax.application.concept;
 
-import com.java.semantic.identity.MethodTarget;
+import com.java.semantic.model.codefact.MethodTarget;
 import com.java.semantic.syntax.application.concept.MapperConceptIdentity.MapperStatementConceptIdentity;
 import com.java.semantic.syntax.application.concept.MapperConceptIdentity.MapperStatementVariantEvidenceIdentity;
 import com.java.semantic.syntax.domain.MapperStatementEvidence;

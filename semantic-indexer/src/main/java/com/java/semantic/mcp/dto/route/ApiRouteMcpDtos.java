@@ -23,7 +23,7 @@ public final class ApiRouteMcpDtos {
             @MonitoringField(MonitoringMode.VALUE) @NotBlank
             @Pattern(regexp = "^[a-z0-9][a-z0-9._-]{0,63}$") String repoId,
             @MonitoringField(MonitoringMode.VALUE) @NotBlank
-            @Pattern(regexp = "^[0-9a-f]{40}$|^FIXTURE$") String expectedRevision,
+            @Pattern(regexp = "^[0-9a-f]{40}$") String expectedRevision,
             @MonitoringField(MonitoringMode.VALUE) @NotBlank String apiPath,
             @MonitoringField(MonitoringMode.VALUE) String httpMethod)
             implements McpRevisionPinnedInput {
@@ -34,7 +34,7 @@ public final class ApiRouteMcpDtos {
             @MonitoringField(MonitoringMode.VALUE) @NotBlank
             @Pattern(regexp = "^[a-z0-9][a-z0-9._-]{0,63}$") String repoId,
             @MonitoringField(MonitoringMode.VALUE) @NotBlank
-            @Pattern(regexp = "^[0-9a-f]{40}$|^FIXTURE$") String expectedRevision,
+            @Pattern(regexp = "^[0-9a-f]{40}$") String expectedRevision,
             @MonitoringField(MonitoringMode.VALUE) @NotBlank String apiPath,
             @MonitoringField(MonitoringMode.VALUE) String httpMethod,
             @MonitoringField(MonitoringMode.VALUE) @NotNull @Min(1) @Max(20) Integer limit)

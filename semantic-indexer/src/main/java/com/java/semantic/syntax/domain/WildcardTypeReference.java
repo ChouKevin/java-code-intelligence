@@ -3,7 +3,7 @@ package com.java.semantic.syntax.domain;
 import java.util.Objects;
 import java.util.Optional;
 
-import com.java.semantic.identity.JavaTypeIdentity;
+import com.java.semantic.model.codefact.JavaTypeIdentity;
 
 /** 上界或下界擇一的萬用字元型別證據 */
 public record WildcardTypeReference(

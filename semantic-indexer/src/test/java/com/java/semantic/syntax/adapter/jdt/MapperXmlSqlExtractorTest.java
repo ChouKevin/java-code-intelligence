@@ -13,7 +13,7 @@ import com.java.semantic.syntax.domain.MapperFragmentIdentity;
 import com.java.semantic.syntax.domain.MapperStatementEvidence;
 import com.java.semantic.syntax.domain.MapperStatementIdentity;
 import com.java.semantic.syntax.domain.MapperStatementKey;
-import com.java.semantic.syntax.domain.SourceRange;
+import com.java.semantic.model.codefact.SourceRange;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;

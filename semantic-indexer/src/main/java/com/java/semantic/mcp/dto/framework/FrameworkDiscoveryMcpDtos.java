@@ -1,6 +1,6 @@
 package com.java.semantic.mcp.dto.framework;
 
-import com.java.semantic.identity.MethodTarget;
+import com.java.semantic.model.codefact.MethodTarget;
 import com.java.semantic.mcp.dto.McpRevisionPinnedInput;
 import com.java.semantic.monitoring.MonitoringField;
 import com.java.semantic.monitoring.MonitoringMode;
@@ -26,7 +26,7 @@ public final class FrameworkDiscoveryMcpDtos {
             @MonitoringField(MonitoringMode.VALUE) @NotBlank
             @Pattern(regexp = "^[a-z0-9][a-z0-9._-]{0,63}$") String repoId,
             @MonitoringField(MonitoringMode.VALUE) @NotBlank
-            @Pattern(regexp = "^[0-9a-f]{40}$|^FIXTURE$") String expectedRevision,
+            @Pattern(regexp = "^[0-9a-f]{40}$") String expectedRevision,
             @MonitoringField(MonitoringMode.VALUE) @NotBlank String eventType,
             @MonitoringField(MonitoringMode.VALUE) @Min(0) Integer offset,
             @MonitoringField(MonitoringMode.VALUE) @NotNull @Min(1) @Max(100) Integer limit)
@@ -43,7 +43,7 @@ public final class FrameworkDiscoveryMcpDtos {
             @MonitoringField(MonitoringMode.VALUE) @NotBlank
             @Pattern(regexp = "^[a-z0-9][a-z0-9._-]{0,63}$") String repoId,
             @MonitoringField(MonitoringMode.VALUE) @NotBlank
-            @Pattern(regexp = "^[0-9a-f]{40}$|^FIXTURE$") String expectedRevision,
+            @Pattern(regexp = "^[0-9a-f]{40}$") String expectedRevision,
             @MonitoringField(MonitoringMode.NESTED) @NotNull @Valid MethodTarget declarationTarget)
             implements McpRevisionPinnedInput {
     }

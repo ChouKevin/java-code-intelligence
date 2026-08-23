@@ -1,6 +1,6 @@
 package com.java.semantic.semantic.domain;
 
-import com.java.semantic.identity.RepositoryRelativeSource;
+import com.java.semantic.model.codefact.RepositoryRelativeSource;
 
 /** 語意供應者位置經 adapter 安全判定後的來源分類 */
 public sealed interface SemanticSourceClassification permits

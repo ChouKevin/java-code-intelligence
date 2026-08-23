@@ -20,7 +20,7 @@ import java.util.Objects;
 @JsonIgnoreProperties(ignoreUnknown = false)
 public record AnalyzeIncomingCallGraphRequest(
         @MonitoringField(MonitoringMode.VALUE) @NotBlank String repoId,
-        @MonitoringField(MonitoringMode.VALUE) @NotBlank @Pattern(regexp = "^[0-9a-f]{40}$|^FIXTURE$") String expectedRevision,
+        @MonitoringField(MonitoringMode.VALUE) @NotBlank @Pattern(regexp = "^[0-9a-f]{40}$") String expectedRevision,
         @MonitoringField(MonitoringMode.VALUE) @Min(1) @Max(2) Integer depth,
         @MonitoringField(MonitoringMode.NESTED) @NotNull @Valid MethodTargetPayload target) {
 

@@ -1,9 +1,9 @@
 package com.java.semantic.semantic.application;
 
 import com.java.semantic.callgraph.application.ImplementationCandidate;
-import com.java.semantic.identity.MethodTarget;
-import com.java.semantic.repository.domain.RepositoryId;
-import com.java.semantic.repository.domain.RepositoryRevision;
+import com.java.semantic.model.codefact.MethodTarget;
+import com.java.semantic.model.repository.RepositoryId;
+import com.java.semantic.model.repository.RepositoryRevision;
 
 import java.util.List;
 import java.util.Objects;

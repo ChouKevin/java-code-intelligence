@@ -1,7 +1,7 @@
 package com.java.semantic.semantic.application;
 
-import com.java.semantic.identity.MethodTarget;
-import com.java.semantic.identity.SourceTypeIdentity;
+import com.java.semantic.model.codefact.MethodTarget;
+import com.java.semantic.model.codefact.SourceTypeIdentity;
 
 import java.util.Objects;
 

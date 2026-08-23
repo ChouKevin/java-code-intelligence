@@ -10,12 +10,12 @@ import com.java.semantic.callgraph.domain.IncomingGraphFragment;
 import com.java.semantic.callgraph.domain.OutgoingGraphFragment;
 import com.java.semantic.config.IncomingGraphProperties;
 import com.java.semantic.config.OutgoingGraphProperties;
-import com.java.semantic.identity.JavaTypeIdentity;
-import com.java.semantic.identity.MethodTarget;
-import com.java.semantic.identity.SourceTypeIdentity;
+import com.java.semantic.model.codefact.JavaTypeIdentity;
+import com.java.semantic.model.codefact.MethodTarget;
+import com.java.semantic.model.codefact.SourceTypeIdentity;
 import com.java.semantic.repository.application.RepositoryApplicationService;
-import com.java.semantic.repository.domain.RepositoryId;
-import com.java.semantic.repository.domain.RepositoryRevision;
+import com.java.semantic.model.repository.RepositoryId;
+import com.java.semantic.model.repository.RepositoryRevision;
 import com.java.semantic.repository.domain.RepositorySnapshot;
 import com.java.semantic.semantic.domain.JavaSemanticService;
 import com.java.semantic.semantic.domain.SemanticDeclarationAnchor;
@@ -27,10 +27,10 @@ import com.java.semantic.syntax.domain.CanonicalMethodDeclarationResolver;
 import com.java.semantic.syntax.domain.SourceTypeMetadata;
 import com.java.semantic.syntax.domain.MethodTargetResolution;
 import com.java.semantic.syntax.domain.RepositorySyntax;
-import com.java.semantic.syntax.domain.SourceRange;
+import com.java.semantic.model.codefact.SourceRange;
 import com.java.semantic.syntax.domain.RevisionBoundRepositorySyntaxProvider;
-import com.java.semantic.syntax.domain.SyntaxPosition;
-import com.java.semantic.syntax.domain.SyntaxRange;
+import com.java.semantic.model.codefact.SyntaxPosition;
+import com.java.semantic.model.codefact.SyntaxRange;
 import com.java.semantic.syntax.domain.TypeReference;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -70,7 +70,7 @@ class SemanticAnalysisApplicationServiceTest {
     @Test
     void should_hold_one_revision_locked_snapshot_for_the_exact_outgoing_sequence() {
         RepositoryId repositoryId = RepositoryId.of("orders");
-        RepositoryRevision revision = RepositoryRevision.fixture();
+        RepositoryRevision revision = RepositoryRevision.ofSha("0".repeat(40));
         RepositorySnapshot snapshot = new RepositorySnapshot(repositoryId, root, revision);
         MethodTarget target = new MethodTarget(
                 new SourceTypeIdentity(
@@ -117,7 +117,7 @@ class SemanticAnalysisApplicationServiceTest {
     @Test
     void should_hold_one_revision_locked_snapshot_for_the_exact_incoming_sequence() {
         RepositoryId repositoryId = RepositoryId.of("orders");
-        RepositoryRevision revision = RepositoryRevision.fixture();
+        RepositoryRevision revision = RepositoryRevision.ofSha("0".repeat(40));
         RepositorySnapshot snapshot = new RepositorySnapshot(repositoryId, root, revision);
         MethodTarget target = new MethodTarget(
                 new SourceTypeIdentity(

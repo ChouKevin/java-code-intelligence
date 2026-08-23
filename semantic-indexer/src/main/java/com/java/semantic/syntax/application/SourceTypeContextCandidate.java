@@ -1,6 +1,6 @@
 package com.java.semantic.syntax.application;
 
-import com.java.semantic.identity.RepositoryRelativeSource;
+import com.java.semantic.model.codefact.RepositoryRelativeSource;
 
 /** type ambiguity 的 repository source selector evidence */
 public record SourceTypeContextCandidate(String sourceFile) implements SourceContextCandidate {

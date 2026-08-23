@@ -1,7 +1,7 @@
 package com.java.semantic.syntax.application;
 
-import com.java.semantic.identity.JavaTypeIdentity;
-import com.java.semantic.identity.RepositoryRelativeSource;
+import com.java.semantic.model.codefact.JavaTypeIdentity;
+import com.java.semantic.model.codefact.RepositoryRelativeSource;
 
 import java.util.List;
 import java.util.Objects;

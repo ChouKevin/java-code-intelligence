@@ -1,6 +1,6 @@
 package com.java.semantic.syntax.application;
 
-import com.java.semantic.identity.MethodTarget;
+import com.java.semantic.model.codefact.MethodTarget;
 
 import java.util.Objects;
 /** overload ambiguity 的 canonical method selector evidence */

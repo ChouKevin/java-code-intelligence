@@ -1,11 +1,12 @@
 package com.java.semantic.api;
+import com.java.semantic.model.codefact.SourceRange;
 
 import com.java.semantic.api.dto.EvidenceSourceIdentityPayload;
 import com.java.semantic.api.dto.EvidenceSourceRequest;
 import com.java.semantic.api.dto.EvidenceSourceResponse;
 import com.java.semantic.api.dto.SourceSegmentPayload;
-import com.java.semantic.repository.domain.RepositoryId;
-import com.java.semantic.repository.domain.RepositoryRevision;
+import com.java.semantic.model.repository.RepositoryId;
+import com.java.semantic.model.repository.RepositoryRevision;
 import com.java.semantic.syntax.application.EvidenceSourceApplicationService;
 import com.java.semantic.syntax.application.EvidenceSourceQuery;
 import com.java.semantic.syntax.application.EvidenceSourceResult;

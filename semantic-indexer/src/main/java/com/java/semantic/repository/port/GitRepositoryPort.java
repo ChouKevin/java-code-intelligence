@@ -1,6 +1,6 @@
 package com.java.semantic.repository.port;
 
-import com.java.semantic.repository.domain.RepositoryRevision;
+import com.java.semantic.model.repository.RepositoryRevision;
 
 import java.nio.file.Path;
 

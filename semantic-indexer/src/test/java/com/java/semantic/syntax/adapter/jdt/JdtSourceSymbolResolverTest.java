@@ -1,9 +1,9 @@
 package com.java.semantic.syntax.adapter.jdt;
 
-import com.java.semantic.identity.JavaTypeIdentity;
-import com.java.semantic.identity.MethodTarget;
-import com.java.semantic.repository.domain.RepositoryId;
-import com.java.semantic.repository.domain.RepositoryRevision;
+import com.java.semantic.model.codefact.JavaTypeIdentity;
+import com.java.semantic.model.codefact.MethodTarget;
+import com.java.semantic.model.repository.RepositoryId;
+import com.java.semantic.model.repository.RepositoryRevision;
 import com.java.semantic.repository.domain.RepositorySnapshot;
 import com.java.semantic.syntax.application.SourceMethodContextCandidate;
 import com.java.semantic.syntax.application.SourceSymbolCandidate;
@@ -13,7 +13,7 @@ import com.java.semantic.syntax.application.SourceSymbolResolution;
 import com.java.semantic.syntax.application.SourceSymbolResolutionQuery;
 import com.java.semantic.syntax.application.SourceSymbolResolutionStatus;
 import com.java.semantic.syntax.application.SourceTypeContextCandidate;
-import com.java.semantic.syntax.domain.SyntaxPosition;
+import com.java.semantic.model.codefact.SyntaxPosition;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -221,7 +221,7 @@ class JdtSourceSymbolResolverTest {
             String symbol,
             Optional<SyntaxPosition> position) {
         return new SourceSymbolResolutionQuery(
-                RepositoryId.of("order-service"), RepositoryRevision.fixture(), context, symbol, position);
+                RepositoryId.of("order-service"), RepositoryRevision.ofSha("0".repeat(40)), context, symbol, position);
     }
 
     private SourceSymbolContext typeContext(String className) {
@@ -241,7 +241,7 @@ class JdtSourceSymbolResolverTest {
 
     private RepositorySnapshot snapshot(Path repositoryRoot) {
         return new RepositorySnapshot(
-                RepositoryId.of("order-service"), repositoryRoot, RepositoryRevision.fixture());
+                RepositoryId.of("order-service"), repositoryRoot, RepositoryRevision.ofSha("0".repeat(40)));
     }
 
     private void write(Path repositoryRoot, String relativePath, String source) throws IOException {

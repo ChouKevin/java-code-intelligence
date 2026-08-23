@@ -1,6 +1,6 @@
 package com.java.semantic.syntax.domain;
 
-import com.java.semantic.identity.SourceTypeIdentity;
+import com.java.semantic.model.codefact.SourceTypeIdentity;
 
 import java.util.List;
 import java.util.Objects;

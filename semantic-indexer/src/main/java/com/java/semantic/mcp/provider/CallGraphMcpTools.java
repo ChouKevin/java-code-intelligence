@@ -4,8 +4,8 @@ import com.java.semantic.mcp.McpQueryProvider;
 import com.java.semantic.mcp.McpQueryRegistration;
 import com.java.semantic.mcp.dto.callgraph.CallGraphMcpDtos;
 import com.java.semantic.mcp.mapper.CallGraphMcpMapper;
-import com.java.semantic.repository.domain.RepositoryId;
-import com.java.semantic.repository.domain.RepositoryRevision;
+import com.java.semantic.model.repository.RepositoryId;
+import com.java.semantic.model.repository.RepositoryRevision;
 import com.java.semantic.semantic.application.SemanticAnalysisApplicationService;
 import org.springframework.stereotype.Component;
 

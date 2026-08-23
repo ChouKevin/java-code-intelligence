@@ -7,8 +7,8 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.TreeSet;
 
-import com.java.semantic.identity.JavaIdentityNormalizer;
-import com.java.semantic.identity.JavaTypeIdentity;
+import com.java.semantic.model.codefact.JavaIdentityNormalizer;
+import com.java.semantic.model.codefact.JavaTypeIdentity;
 
 import org.eclipse.jdt.core.dom.ASTNode;
 import org.eclipse.jdt.core.dom.ASTVisitor;

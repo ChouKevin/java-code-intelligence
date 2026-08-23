@@ -1,4 +1,5 @@
 package com.java.semantic.api.dto;
+import com.java.semantic.model.codefact.SourceRange;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.java.semantic.api.dto.location.SourceRangePayload;

@@ -1,8 +1,8 @@
 package com.java.semantic.syntax.application.concept;
 
-import com.java.semantic.identity.JavaTypeIdentity;
-import com.java.semantic.identity.MethodTarget;
-import com.java.semantic.identity.SourceTypeIdentity;
+import com.java.semantic.model.codefact.JavaTypeIdentity;
+import com.java.semantic.model.codefact.MethodTarget;
+import com.java.semantic.model.codefact.SourceTypeIdentity;
 import com.java.semantic.syntax.domain.SourceMemberIdentity.TypeMember;
 import com.java.semantic.syntax.application.concept.DeclarationConceptIdentity.FieldConceptIdentity;
 import com.java.semantic.syntax.application.concept.DeclarationConceptIdentity.MethodConceptIdentity;

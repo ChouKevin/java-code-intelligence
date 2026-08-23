@@ -1,10 +1,10 @@
 package com.java.semantic.syntax.application;
 
-import com.java.semantic.syntax.domain.SourceRange;
+import com.java.semantic.model.codefact.SourceRange;
 
-import com.java.semantic.identity.MethodTarget;
+import com.java.semantic.model.codefact.MethodTarget;
 import com.java.semantic.syntax.domain.SourceMemberIdentity;
-import com.java.semantic.identity.SourceTypeIdentity;
+import com.java.semantic.model.codefact.SourceTypeIdentity;
 
 import java.util.Objects;
 import java.util.Optional;
