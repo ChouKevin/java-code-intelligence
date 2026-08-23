@@ -2,21 +2,21 @@
 
 ## Project Structure & Module Organization
 
-`java-semantic-service` is a standalone Java 21/Spring Boot Maven project; it is not a module of the root application. Its canonical repository is `git@github.com:ChouKevin/java-code-intelligence.git`; the current directory is the temporary source for a history-preserving extraction. Never maintain parallel service implementations in both repositories. Production code lives under `src/main/java/com/java/semantic`. Packages separate HTTP contracts (`api`), graph construction (`callgraph`), repository lifecycle (`repository`), JDT LS integration (`semantic`), JDT syntax extraction (`syntax`), route matching (`trie`), and shared identity/diagnostics/configuration. Runtime configuration is in `src/main/resources/application.yml`; the versioned contract is `src/main/resources/openapi/semantic-api-v1.yaml`. Tests mirror production packages under `src/test/java`, with fixture repositories in `src/test/resources/fixtures`.
+`java-semantic-service` is a Java 21/Spring Boot Maven reactor. Its canonical repository is `git@github.com:ChouKevin/java-code-intelligence.git`; the current directory is the temporary source for a history-preserving extraction. Never maintain parallel service implementations in both repositories. The root POM owns dependency and plugin management and orders the modules as `semantic-model`, `semantic-indexer`, and `semantic-query`. `semantic-model` is the shared model boundary; `semantic-indexer` contains the current Spring Boot application and all production code; `semantic-query` is an empty query boundary that currently depends only on `semantic-model`. In `semantic-indexer`, production code lives under `src/main/java/com/java/semantic`. Packages separate HTTP contracts (`api`), graph construction (`callgraph`), repository lifecycle (`repository`), JDT LS integration (`semantic`), JDT syntax extraction (`syntax`), route matching (`trie`), and shared identity/diagnostics/configuration. Runtime configuration is in `semantic-indexer/src/main/resources/application.yml`; the versioned contract is `semantic-indexer/src/main/resources/openapi/semantic-api-v1.yaml`. Tests mirror production packages under `semantic-indexer/src/test/java`, with fixture repositories in `semantic-indexer/src/test/resources/fixtures`.
 
 Domain vocabulary is summarized in [`docs/domain-model.md`](docs/domain-model.md).
 
 ## Build, Test, and Development Commands
 
-Run commands from the service project root. Before extraction, enter `java-semantic-service/`; after extraction, this directory is the new repository root:
+Run commands from the reactor root:
 
 ```bash
 mvn clean test
-mvn spring-boot:run
-JDTLS_HOME=/opt/jdtls mvn -Pjdtls-it test
+mvn -pl semantic-indexer -am package && java -jar semantic-indexer/target/semantic-indexer-0.0.1-SNAPSHOT.jar
+JDTLS_HOME=/opt/jdtls mvn -pl semantic-indexer -am -Pjdtls-it test
 ```
 
-The first command runs the ordinary suite without launching JDT LS. The profile command enables real-server integration tests and requires a valid `JDTLS_HOME`.
+The first command runs the ordinary suite without Docker, Mongo, or a real JDT LS. The profile command includes only real-server JDT LS integration tests and requires a valid `JDTLS_HOME`. The `mongo-it` profile includes only Mongo/Testcontainers integration tests when they are added.
 
 ## Coding Style & Naming Conventions
 

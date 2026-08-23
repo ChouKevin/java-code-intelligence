@@ -75,14 +75,15 @@ From the service project root:
 
 ```bash
 mvn clean test
-mvn spring-boot:run
+mvn -pl semantic-indexer -am package
+java -jar semantic-indexer/target/semantic-indexer-0.0.1-SNAPSHOT.jar
 ```
 
 For a real JDT LS installation, set `JDTLS_HOME` and use the service's
 `jdtls-it` profile for integration verification:
 
 ```bash
-JDTLS_HOME=/opt/jdtls mvn -Pjdtls-it test
+JDTLS_HOME=/opt/jdtls mvn -pl semantic-indexer -am -Pjdtls-it test
 ```
 
 ## Configuration and authentication
@@ -93,7 +94,7 @@ HTTP request and every `/mcp` request must send the token in the
 client environment file.
 
 The repository and JDT LS defaults can be overridden with the environment
-variables in `src/main/resources/application.yml`, including:
+variables in `semantic-indexer/src/main/resources/application.yml`, including:
 
 ```bash
 export SEMANTIC_API_TOKEN=<token>

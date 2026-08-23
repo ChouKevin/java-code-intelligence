@@ -14,12 +14,20 @@
     <groupId>com.java.semantic</groupId>
     <artifactId>java-semantic-service</artifactId>
     <version>0.0.1-SNAPSHOT</version>
+    <packaging>pom</packaging>
+
+    <modules>
+        <module>semantic-model</module>
+        <module>semantic-indexer</module>
+        <module>semantic-query</module>
+    </modules>
 
     <properties>
         <java.version>21</java.version>
         <archunit.version>1.3.0</archunit.version>
-        <!-- unit runs exclude the real-server tag; the jdtls-it profile clears it -->
-        <test.excluded.groups>jdtls-it</test.excluded.groups>
+        <!-- Ordinary runs do not require Docker or a real JDT language server. -->
+        <test.excluded.groups>jdtls-it,mongo-it</test.excluded.groups>
+        <test.included.groups></test.included.groups>
     </properties>
 
     <dependencyManagement>
@@ -31,109 +39,68 @@
                 <type>pom</type>
                 <scope>import</scope>
             </dependency>
+            <dependency>
+                <groupId>org.eclipse.lsp4j</groupId>
+                <artifactId>org.eclipse.lsp4j</artifactId>
+                <version>1.0.0</version>
+            </dependency>
+            <dependency>
+                <groupId>org.eclipse.jdt</groupId>
+                <artifactId>org.eclipse.jdt.core</artifactId>
+                <version>3.46.0</version>
+            </dependency>
+            <dependency>
+                <groupId>org.eclipse.jgit</groupId>
+                <artifactId>org.eclipse.jgit</artifactId>
+                <version>6.10.1.202505221210-r</version>
+            </dependency>
+            <dependency>
+                <groupId>com.tngtech.archunit</groupId>
+                <artifactId>archunit-junit5</artifactId>
+                <version>${archunit.version}</version>
+            </dependency>
         </dependencies>
     </dependencyManagement>
 
-    <dependencies>
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-webmvc</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-validation</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-actuator</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>org.springframework.ai</groupId>
-            <artifactId>spring-ai-starter-mcp-server-webmvc</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>com.github.ben-manes.caffeine</groupId>
-            <artifactId>caffeine</artifactId>
-        </dependency>
-
-        <dependency>
-            <groupId>org.eclipse.lsp4j</groupId>
-            <artifactId>org.eclipse.lsp4j</artifactId>
-            <version>1.0.0</version>
-        </dependency>
-        <dependency>
-            <groupId>org.eclipse.jdt</groupId>
-            <artifactId>org.eclipse.jdt.core</artifactId>
-            <version>3.46.0</version>
-        </dependency>
-
-        <!-- JGit is NOT managed by the Spring Boot BOM; the explicit version is required -->
-        <dependency>
-            <groupId>org.eclipse.jgit</groupId>
-            <artifactId>org.eclipse.jgit</artifactId>
-            <version>6.10.1.202505221210-r</version>
-        </dependency>
-
-        <dependency>
-            <groupId>org.projectlombok</groupId>
-            <artifactId>lombok</artifactId>
-            <optional>true</optional>
-        </dependency>
-
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-test</artifactId>
-            <scope>test</scope>
-        </dependency>
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-webmvc-test</artifactId>
-            <scope>test</scope>
-        </dependency>
-        <dependency>
-            <groupId>com.tngtech.archunit</groupId>
-            <artifactId>archunit-junit5</artifactId>
-            <version>${archunit.version}</version>
-            <scope>test</scope>
-        </dependency>
-        <dependency>
-            <groupId>tools.jackson.dataformat</groupId>
-            <artifactId>jackson-dataformat-yaml</artifactId>
-            <scope>test</scope>
-        </dependency>
-    </dependencies>
-
     <build>
-        <plugins>
-            <plugin>
-                <groupId>org.springframework.boot</groupId>
-                <artifactId>spring-boot-maven-plugin</artifactId>
-            </plugin>
-            <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-surefire-plugin</artifactId>
-                <configuration>
-                    <!-- discover *IT too, but never run the jdtls-it tag unless the profile clears it;
-                         unit tests thus never launch a real JDT LS -->
-                    <includes>
-                        <include>**/Test*.java</include>
-                        <include>**/*Test.java</include>
-                        <include>**/*Tests.java</include>
-                        <include>**/*TestCase.java</include>
-                        <include>**/*IT.java</include>
-                    </includes>
-                    <excludedGroups>${test.excluded.groups}</excludedGroups>
-                </configuration>
-            </plugin>
-        </plugins>
+        <pluginManagement>
+            <plugins>
+                <plugin>
+                    <groupId>org.springframework.boot</groupId>
+                    <artifactId>spring-boot-maven-plugin</artifactId>
+                </plugin>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-surefire-plugin</artifactId>
+                    <configuration>
+                        <includes>
+                            <include>**/Test*.java</include>
+                            <include>**/*Test.java</include>
+                            <include>**/*Tests.java</include>
+                            <include>**/*TestCase.java</include>
+                            <include>**/*IT.java</include>
+                        </includes>
+                        <groups>${test.included.groups}</groups>
+                        <excludedGroups>${test.excluded.groups}</excludedGroups>
+                    </configuration>
+                </plugin>
+            </plugins>
+        </pluginManagement>
     </build>
 
     <profiles>
         <profile>
-            <!-- real JDT LS integration tests; require JDTLS_HOME and skip cleanly without it -->
             <id>jdtls-it</id>
             <properties>
-                <test.excluded.groups></test.excluded.groups>
+                <test.included.groups>jdtls-it</test.included.groups>
+                <test.excluded.groups>mongo-it</test.excluded.groups>
+            </properties>
+        </profile>
+        <profile>
+            <id>mongo-it</id>
+            <properties>
+                <test.included.groups>mongo-it</test.included.groups>
+                <test.excluded.groups>jdtls-it</test.excluded.groups>
             </properties>
         </profile>
     </profiles>
