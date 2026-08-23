@@ -30,6 +30,7 @@ import com.java.semantic.model.index.GenerationManifestDocument;
 import com.java.semantic.model.index.GenerationWriteState;
 import com.java.semantic.model.index.IndexSchemaVersion;
 import com.java.semantic.model.index.IndexCollections;
+import com.java.semantic.model.index.IndexSchemaContract;
 import com.java.semantic.model.index.ManifestDigest;
 import com.java.semantic.model.index.ProjectionName;
 import com.java.semantic.model.index.ProjectionRequirements;
@@ -44,6 +45,7 @@ import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.model.repository.RepositoryRevision;
 import java.time.Instant;
 import java.util.List;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -134,6 +136,19 @@ class IndexDocumentContractTest {
                 ProjectionName.ENTRY_POINTS, ProjectionName.SEARCH), Set.of(ProjectionName.values()));
         assertEquals(List.of(IndexCollections.GENERATION_FILES, IndexCollections.SOURCE_ARTIFACTS),
                 IndexCollections.PROJECTION_COLLECTIONS.get(ProjectionName.SOURCES));
+    }
+
+    @Test
+    void schema_index_keys_preserve_compound_order_without_exposing_mutable_contract_state() {
+        IndexSchemaContract.IndexSpec index = IndexSchemaContract.collections().stream()
+                .flatMap(collection -> collection.indexes().stream())
+                .filter(candidate -> candidate.name().equals("generation_file_unique"))
+                .findFirst()
+                .orElseThrow();
+        LinkedHashMap<String, Integer> callerCopy = index.keys();
+        callerCopy.clear();
+
+        assertEquals(List.of("repoId", "generationId", "sourcePath"), List.copyOf(index.keys().keySet()));
     }
 
     @Test
@@ -375,7 +390,7 @@ class IndexDocumentContractTest {
                 "worker-1",
                 new RepositoryFence(1),
                 Instant.parse("2026-08-23T00:00:00Z"),
-                GenerationWriteState.SEALED,
+                GenerationWriteState.SEALED_VALID,
                 1,
                 new IndexSchemaVersion(1),
                 List.of(new ProjectionVersion(ProjectionName.SYMBOLS, 1)),

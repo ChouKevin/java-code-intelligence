@@ -1,4 +1,6 @@
 spring:
+  mongodb:
+    uri: ${SEMANTIC_MONGODB_URI:mongodb://localhost:27017/semantic?serverSelectionTimeoutMS=2000&connectTimeoutMS=2000&socketTimeoutMS=2000}
   ai:
     mcp:
       server:
@@ -64,3 +66,8 @@ semantic:
 logging:
   level:
     org.springframework.web.servlet.mvc.method.annotation.ExceptionHandlerExceptionResolver: INFO
+
+management:
+  health:
+    mongodb:
+      enabled: false
