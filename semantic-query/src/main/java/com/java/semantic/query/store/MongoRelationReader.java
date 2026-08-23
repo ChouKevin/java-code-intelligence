@@ -1,6 +1,7 @@
 package com.java.semantic.query.store;
 
 import com.java.semantic.model.repository.RepositoryId;
+import com.java.semantic.model.repository.RepositoryRevision;
 import org.bson.Document;
 import org.springframework.data.mongodb.core.MongoTemplate;
 
@@ -11,7 +12,7 @@ public final class MongoRelationReader extends MongoProjectionReader {
         super(template);
     }
 
-    public List<Document> read(RepositoryId repositoryId) {
-        return selected("relations", repositoryId);
+    public List<Document> read(RepositoryId repositoryId, RepositoryRevision expectedRevision) {
+        return selected("relations", repositoryId, expectedRevision);
     }
 }

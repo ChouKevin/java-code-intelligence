@@ -1,6 +1,7 @@
 package com.java.semantic.query.store;
 
 import com.java.semantic.model.repository.RepositoryId;
+import com.java.semantic.model.repository.RepositoryRevision;
 import com.mongodb.MongoException;
 import com.mongodb.client.model.Filters;
 import org.bson.Document;
@@ -11,10 +12,10 @@ import java.util.Optional;
 
 public final class MongoSourceReader extends MongoProjectionReader {
     public MongoSourceReader(MongoTemplate template) { super(template); }
-    public Document read(RepositoryId repositoryId, String normalizedPath) {
+    public Document read(RepositoryId repositoryId, RepositoryRevision expectedRevision, String normalizedPath) {
         Objects.requireNonNull(normalizedPath, "normalized source path is required");
         try {
-            MongoCurrentGenerationReader.CurrentGeneration generation = new MongoCurrentGenerationReader(template).read(repositoryId);
+            com.java.semantic.model.query.CurrentGeneration generation = new MongoCurrentGenerationReader(template).read(repositoryId, expectedRevision);
             Document mapping = Optional.ofNullable(template.getCollection("generation_files").find(Filters.and(Filters.eq("repoId", repositoryId.value()),
                     Filters.eq("generationId", generation.generationId().value()), Filters.eq("sourcePath", normalizedPath))).first())
                     .orElseThrow(() -> new IndexNotReadyException("source is not in current generation"));
