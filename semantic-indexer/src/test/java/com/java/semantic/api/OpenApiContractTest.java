@@ -80,9 +80,6 @@ class OpenApiContractTest {
         assertThat(paths.keySet()).containsExactlyInAnyOrderElementsOf(Set.of(
                 "/v1/repositories",
                 "/v1/repositories/{repoId}",
-                "/v1/repositories/{repoId}/ensure",
-                "/v1/repositories/{repoId}/sync",
-                "/v1/repositories/{repoId}/checkout",
                 "/v1/repositories/{repoId}/entry-points",
                 "/v1/analyses/call-graphs/outgoing",
                 "/v1/analyses/call-graphs/incoming",
@@ -120,6 +117,31 @@ class OpenApiContractTest {
         assertRequiredRequestBody(
                 operation(paths, "/v1/analyses/call-graphs/incoming", "post"),
                 "#/components/schemas/AnalyzeIncomingCallGraphRequest");
+    }
+
+    @Test
+    void should_describe_the_complete_indexer_admin_and_job_contract_without_credentials() throws Exception {
+        Map<String, Object> indexer = indexerDocument();
+        Map<String, Object> paths = map(indexer.get("paths"));
+
+        assertThat(paths.keySet()).containsExactlyInAnyOrder(
+                "/index/repositories/{repoId}/ensure",
+                "/index/repositories/{repoId}/sync",
+                "/index/repositories/{repoId}/checkout",
+                "/index/repositories/{repoId}/rebuild",
+                "/index/repositories/{repoId}/rollback",
+                "/index/jobs/{jobId}");
+        for (String path : paths.keySet()) {
+            String method = path.startsWith("/index/jobs/") ? "get" : "post";
+            Map<String, Object> operation = operation(paths, path, method);
+            assertThat(operation.get("parameters")).isNotNull();
+            assertThat(map(operation.get("responses"))).containsKeys("401", "403", "404", "409");
+        }
+        assertThat(map(map(operation(paths, "/index/repositories/{repoId}/ensure", "post").get("responses"))
+                .get("202"))).isEqualTo(Map.of("$ref", "#/components/responses/IndexJobAccepted"));
+        assertThat(map(map(operation(paths, "/index/jobs/{jobId}", "get").get("responses"))
+                .get("200"))).isEqualTo(Map.of("$ref", "#/components/responses/IndexJob"));
+        assertThat(YAML_MAPPER.writeValueAsString(indexer)).doesNotContain("admin-token", "read-token");
     }
 
     @Test
@@ -1138,12 +1160,6 @@ class OpenApiContractTest {
         Map<String, Object> paths = map(document.get("paths"));
         assertThat(map(paths.get("/v1/repositories"))).containsOnlyKeys("get");
         assertThat(map(paths.get("/v1/repositories/{repoId}"))).containsOnlyKeys("parameters", "get");
-        assertThat(map(paths.get("/v1/repositories/{repoId}/ensure")))
-                .containsOnlyKeys("parameters", "post");
-        assertThat(map(paths.get("/v1/repositories/{repoId}/sync")))
-                .containsOnlyKeys("parameters", "post");
-        assertThat(map(paths.get("/v1/repositories/{repoId}/checkout")))
-                .containsOnlyKeys("parameters", "post");
         assertThat(map(paths.get("/v1/repositories/{repoId}/entry-points")))
                 .containsOnlyKeys("parameters", "get");
         assertThat(map(paths.get("/v1/api-routes/lookup"))).containsOnlyKeys("post");
@@ -1154,12 +1170,6 @@ class OpenApiContractTest {
         assertResponseCodes(operation(paths, "/v1/repositories", "get"), "200", "401", "403", "409");
         assertResponseCodes(operation(paths, "/v1/repositories/{repoId}", "get"),
                 "200", "400", "401", "403", "404", "409");
-        assertResponseCodes(operation(paths, "/v1/repositories/{repoId}/ensure", "post"),
-                "200", "400", "401", "403", "404", "409", "500");
-        assertResponseCodes(operation(paths, "/v1/repositories/{repoId}/sync", "post"),
-                "200", "400", "401", "403", "404", "409", "500");
-        assertResponseCodes(operation(paths, "/v1/repositories/{repoId}/checkout", "post"),
-                "200", "400", "401", "403", "404", "409", "500");
         assertResponseCodes(operation(paths, "/v1/repositories/{repoId}/entry-points", "get"),
                 "200", "400", "401", "403", "404", "409", "500");
         assertResponseCodes(operation(paths, "/v1/api-routes/lookup", "post"), "200", "400", "401", "403", "404", "409", "500");
@@ -1173,12 +1183,6 @@ class OpenApiContractTest {
     @Test
     void should_require_preserved_request_bodies_and_revision_pinned_entry_point_queries() {
         Map<String, Object> paths = map(document.get("paths"));
-        assertRequiredRequestBody(
-                operation(paths, "/v1/repositories/{repoId}/sync", "post"),
-                "#/components/schemas/SyncRepositoryRequest");
-        assertRequiredRequestBody(
-                operation(paths, "/v1/repositories/{repoId}/checkout", "post"),
-                "#/components/schemas/CheckoutRepositoryRequest");
         assertRequiredRequestBody(
                 operation(paths, "/v1/api-routes/lookup", "post"),
                 "#/components/schemas/ApiRouteLookupRequest");
@@ -1355,10 +1359,6 @@ class OpenApiContractTest {
         assertThat(schema(properties(status), "currentRevision"))
                 .containsEntry("nullable", Boolean.TRUE)
                 .containsEntry("pattern", REVISION_PATTERN);
-
-        Map<String, Object> checkout = schema(schemas, "CheckoutRepositoryRequest");
-        assertThat(required(checkout)).containsExactly("revision");
-        assertNonBlankString(properties(checkout), "revision");
 
         Map<String, Object> repoId = schema(map(components.get("parameters")), "RepoId");
         assertThat(schema(repoId, "schema"))
@@ -1664,6 +1664,14 @@ class OpenApiContractTest {
         assertExactPropertiesAndRequired(request, "repoId", "expectedRevision", authorityName);
         assertThat(schema(properties(request), "expectedRevision"))
                 .containsEntry("pattern", REVISION_PATTERN);
+    }
+
+    private Map<String, Object> indexerDocument() throws IOException {
+        try (InputStream input = Objects.requireNonNull(
+                getClass().getResourceAsStream("/openapi/semantic-indexer-api-v1.yaml"),
+                "Indexer OpenAPI document is required")) {
+            return YAML_MAPPER.convertValue(YAML_MAPPER.readTree(input), DOCUMENT_TYPE);
+        }
     }
 
     private Map<String, Object> operation(Map<String, Object> paths, String path, String method) {

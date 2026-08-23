@@ -28,6 +28,7 @@ public class ApiTokenFilter extends OncePerRequestFilter {
     public static final String AUTH_ERROR_CODE_ATTRIBUTE = "semantic.apiAuthenticationErrorCode";
 
     private static final String HEALTH_PATH = "/actuator/health";
+    private static final String INDEX_ADMIN_PATH = "/index/";
     private final ApiSecurityProperties properties;
     private final ObjectMapper objectMapper;
 
@@ -39,23 +40,39 @@ public class ApiTokenFilter extends OncePerRequestFilter {
     /** health 供 compose 探測,是唯一豁免項 */
     @Override
     protected boolean shouldNotFilter(HttpServletRequest request) {
-        return HEALTH_PATH.equals(request.getRequestURI());
+        return HEALTH_PATH.equals(applicationPath(request));
     }
 
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response,
                                     FilterChain filterChain) throws ServletException, IOException {
-        if (!properties.hasApiToken()) {
+        boolean adminRequest = applicationPath(request).startsWith(INDEX_ADMIN_PATH);
+        if (adminRequest && !properties.hasAdminToken()) {
+            writeError(request, response, HttpStatus.FORBIDDEN, "SEMANTIC_ADMIN_AUTH_DISABLED",
+                    "semantic.api.admin-token is not configured; the service refuses index administration");
+            return;
+        }
+        if (!adminRequest && !properties.hasApiToken()) {
             writeError(request, response, HttpStatus.FORBIDDEN, "SEMANTIC_AUTH_DISABLED",
                     "semantic.api.api-token is not configured; the service refuses all traffic");
             return;
         }
-        if (!properties.matchesApiToken(request.getHeader(API_TOKEN_HEADER))) {
+        boolean authorized = adminRequest
+                ? properties.matchesAdminToken(request.getHeader(API_TOKEN_HEADER))
+                : properties.matchesApiToken(request.getHeader(API_TOKEN_HEADER));
+        if (!authorized) {
             writeError(request, response, HttpStatus.UNAUTHORIZED, "SEMANTIC_UNAUTHORIZED",
                     API_TOKEN_HEADER + " header is required");
             return;
         }
         filterChain.doFilter(request, response);
+    }
+
+    private static String applicationPath(HttpServletRequest request) {
+        String contextPath = request.getContextPath();
+        String requestUri = request.getRequestURI();
+        String path = requestUri.startsWith(contextPath) ? requestUri.substring(contextPath.length()) : requestUri;
+        return path.replaceAll(";[^/]*", "");
     }
 
     private void writeError(

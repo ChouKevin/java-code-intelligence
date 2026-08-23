@@ -12,6 +12,7 @@ import org.springframework.data.mongodb.core.FindAndModifyOptions;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.aggregation.AggregationUpdate;
 import org.springframework.data.mongodb.core.query.BasicQuery;
+import org.springframework.stereotype.Component;
 
 import java.time.Instant;
 import java.util.Date;
@@ -21,7 +22,8 @@ import java.util.Objects;
 import java.util.Optional;
 
 /** Atomically publishes or rolls back the one current repository pointer on a standalone MongoDB server. */
-public final class MongoPublicationWriter {
+@Component
+public final class MongoPublicationWriter implements PublicationPort {
 
     private static final String REPOSITORY_ID = "repoId";
     private static final String GENERATION_ID = "generationId";

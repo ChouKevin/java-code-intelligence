@@ -41,78 +41,6 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           $ref: '#/components/responses/Conflict'
-  /v1/repositories/{repoId}/ensure:
-    parameters:
-      - $ref: '#/components/parameters/RepoId'
-    post:
-      operationId: ensureRepository
-      responses:
-        '200':
-          $ref: '#/components/responses/RepositoryStatus'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/AuthDisabled'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        '409':
-          $ref: '#/components/responses/Conflict'
-        '500':
-          $ref: '#/components/responses/MutationFailed'
-  /v1/repositories/{repoId}/sync:
-    parameters:
-      - $ref: '#/components/parameters/RepoId'
-    post:
-      operationId: syncRepository
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/SyncRepositoryRequest'
-      responses:
-        '200':
-          $ref: '#/components/responses/RepositoryStatus'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/AuthDisabled'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        '409':
-          $ref: '#/components/responses/Conflict'
-        '500':
-          $ref: '#/components/responses/MutationFailed'
-  /v1/repositories/{repoId}/checkout:
-    parameters:
-      - $ref: '#/components/parameters/RepoId'
-    post:
-      operationId: checkoutRepository
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/CheckoutRepositoryRequest'
-      responses:
-        '200':
-          $ref: '#/components/responses/RepositoryStatus'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/AuthDisabled'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        '409':
-          $ref: '#/components/responses/Conflict'
-        '500':
-          $ref: '#/components/responses/MutationFailed'
   /v1/repositories/{repoId}/entry-points:
     parameters:
       - $ref: '#/components/parameters/RepoId'
@@ -678,20 +606,6 @@ components:
           schema:
             $ref: '#/components/schemas/ApiErrorResponse'
   schemas:
-    SyncRepositoryRequest:
-      type: object
-      properties:
-        branch:
-          type: string
-    CheckoutRepositoryRequest:
-      type: object
-      required:
-        - revision
-      properties:
-        revision:
-          type: string
-          minLength: 1
-          pattern: '.*\S.*'
     AnalyzeOutgoingCallGraphRequest:
       type: object
       additionalProperties: false

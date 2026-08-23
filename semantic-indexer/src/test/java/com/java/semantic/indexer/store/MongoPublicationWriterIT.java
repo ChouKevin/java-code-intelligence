@@ -146,7 +146,7 @@ class MongoPublicationWriterIT {
             claim(template, "orders", "job-3", "worker-2", "g3", 3L);
             Document activeJob = Objects.requireNonNull(template.getCollection(IndexCollections.INDEX_JOBS)
                     .find(new Document("jobId", "job-2")).first(), "workflow job should exist");
-            assertThat(activeJob.getString("state")).isEqualTo("ACTIVE");
+            assertThat(activeJob.getBoolean("active")).isTrue();
             assertThatThrownBy(() -> writer.publish(invalidManifest)).isInstanceOf(PublicationConflictException.class);
             assertThat(current(template).getString("generationId")).isEqualTo("g1");
             assertThat(template.getCollection(IndexCollections.GENERATION_MANIFESTS)
@@ -246,7 +246,7 @@ class MongoPublicationWriterIT {
 
     private static void job(MongoTemplate template, String jobId, String repositoryId, String state) {
         template.getCollection(IndexCollections.INDEX_JOBS).insertOne(new Document("jobId", jobId)
-                .append("repoId", repositoryId).append("state", state));
+                .append("repoId", repositoryId).append("active", "ACTIVE".equals(state)));
     }
 
     private static Document withoutValidatedAt(Document manifest) {

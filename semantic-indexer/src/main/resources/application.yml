@@ -47,6 +47,7 @@ semantic:
         maximum-entry-weight: ${INTERNAL_REFERENCE_CACHE_MAXIMUM_ENTRY_WEIGHT:1000}
   api:
     api-token: ${SEMANTIC_API_TOKEN:}
+    admin-token: ${SEMANTIC_INDEXER_ADMIN_TOKEN:}
   jdtls:
     enabled: ${JDTLS_ENABLED:true}
     home: ${JDTLS_HOME:/opt/jdtls}

@@ -78,6 +78,41 @@ class ApiTokenFilterTest {
     }
 
     @Test
+    void should_use_the_context_relative_path_for_health_and_index_administration() throws Exception {
+        ApiTokenFilter filter = filterWithTokens(CONFIGURED_TOKEN, "admin-token");
+        MockHttpServletRequest health = new MockHttpServletRequest("GET", "/service/actuator/health");
+        health.setContextPath("/service");
+        MockHttpServletRequest admin = new MockHttpServletRequest("POST", "/service/index/repositories/orders/ensure;jsessionid=x");
+        admin.setContextPath("/service");
+        admin.addHeader(ApiTokenFilter.API_TOKEN_HEADER, "admin-token");
+
+        assertThat(invoke(filter, health).filterChain().getRequest()).isNotNull();
+        assertThat(invoke(filter, admin).filterChain().getRequest()).isNotNull();
+    }
+
+    @Test
+    void should_never_downgrade_matrix_parameterized_admin_paths_to_the_read_token() throws Exception {
+        ApiTokenFilter filter = filterWithTokens(CONFIGURED_TOKEN, "admin-token");
+        MockHttpServletRequest request = new MockHttpServletRequest("POST", "/index;tenant=internal/repositories/orders/rebuild");
+        request.addHeader(ApiTokenFilter.API_TOKEN_HEADER, CONFIGURED_TOKEN);
+
+        FilterResult result = invoke(filter, request);
+
+        assertThat(result.response().getStatus()).isEqualTo(401);
+        assertThat(result.filterChain().getRequest()).isNull();
+    }
+
+    @Test
+    void should_fail_closed_when_read_and_admin_tokens_are_equal() throws Exception {
+        ApiTokenFilter filter = filterWithTokens(CONFIGURED_TOKEN, CONFIGURED_TOKEN);
+
+        FilterResult result = invoke(filter, "POST", "/index/repositories/orders/ensure", CONFIGURED_TOKEN);
+
+        assertThat(result.response().getStatus()).isEqualTo(403);
+        assertThat(result.filterChain().getRequest()).isNull();
+    }
+
+    @Test
     void should_reject_when_path_only_starts_with_the_health_path() throws Exception {
         FilterResult result = invokeWithoutToken(
                 filterWith(CONFIGURED_TOKEN), "GET", "/actuator/health-extra");
@@ -136,8 +171,13 @@ class ApiTokenFilterTest {
     }
 
     private ApiTokenFilter filterWith(String token) {
+        return filterWithTokens(token, "");
+    }
+
+    private ApiTokenFilter filterWithTokens(String token, String adminToken) {
         ApiSecurityProperties properties = new ApiSecurityProperties();
         properties.setApiToken(token);
+        properties.setAdminToken(adminToken);
         return new ApiTokenFilter(properties, OBJECT_MAPPER);
     }
 

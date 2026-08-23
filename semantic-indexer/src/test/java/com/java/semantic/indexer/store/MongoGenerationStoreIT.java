@@ -41,7 +41,7 @@ class MongoGenerationStoreIT {
             template.getCollection("generation_manifests").insertOne(new Document("repoId", "orders").append("generationId", "g1")
                     .append("ownerJobId", "job-1").append("ownerWorkerId", "worker-1").append("fence", 1L)
                     .append("writeState", "WRITING").append("sealUntil", new java.util.Date(System.currentTimeMillis() + 60_000L)));
-            template.getCollection("index_jobs").insertOne(new Document("jobId", "job-1").append("repoId", "orders").append("state", "ACTIVE")
+            template.getCollection("index_jobs").insertOne(new Document("jobId", "job-1").append("repoId", "orders").append("active", true)
                     .append("outstandingBatches", List.of()).append("failedOrAmbiguousBatches", List.of()));
             MongoGenerationWriter writer = new MongoGenerationWriter(template);
             MongoGenerationWriter.GenerationLease lease = new MongoGenerationWriter.GenerationLease(new RepositoryId("orders"), new GenerationId("g1"), "job-1", "worker-1", 1L);
@@ -49,7 +49,9 @@ class MongoGenerationStoreIT {
             MongoGenerationWriter.StoredDocument conflicting = new MongoGenerationWriter.StoredDocument("symbols", new Document("symbolId", "s1").append("name", "second"));
             writer.writeBatch(lease, "b1", List.of(first));
             assertThatThrownBy(() -> writer.writeBatch(lease, "b2", List.of(conflicting))).isInstanceOf(IllegalStateException.class);
-            assertThat(template.getCollection("index_jobs").find(new Document("jobId", "job-1")).first().getString("state")).isEqualTo("FAILED");
+            assertThat(template.getCollection("index_jobs").find(new Document("jobId", "job-1")).first().getBoolean("active")).isTrue();
+            assertThat(template.getCollection("index_jobs").find(new Document("jobId", "job-1")).first()
+                    .getList("failedOrAmbiguousBatches", String.class)).containsExactly("b2");
             assertThat(template.getCollection("generation_manifests").find(new Document("repoId", "orders")).first().getString("writeState")).isEqualTo("FAILED");
             assertThatThrownBy(() -> writer.writeBatch(lease, "b3", List.of(first))).isInstanceOf(IllegalStateException.class);
             assertThatThrownBy(() -> writer.seal(lease, "digest")).isInstanceOf(IllegalStateException.class);
@@ -104,7 +106,9 @@ class MongoGenerationStoreIT {
 
             assertThatThrownBy(() -> retryingWriter.writeBatch(lease, "batch-loss", List.of(attemptedPayload))).isInstanceOf(IllegalStateException.class);
 
-            assertThat(template.getCollection("index_jobs").find(new Document("jobId", "job-1")).first().getString("state")).isEqualTo("FAILED");
+            assertThat(template.getCollection("index_jobs").find(new Document("jobId", "job-1")).first().getBoolean("active")).isTrue();
+            assertThat(template.getCollection("index_jobs").find(new Document("jobId", "job-1")).first()
+                    .getList("failedOrAmbiguousBatches", String.class)).containsExactly("batch-loss");
             assertThat(template.getCollection("generation_manifests").find(new Document("repoId", "orders")).first().getString("writeState")).isEqualTo("FAILED");
             assertThat(template.getCollection("symbols").countDocuments()).isZero();
             assertThatThrownBy(() -> retryingWriter.seal(lease, "digest")).isInstanceOf(IllegalStateException.class);
@@ -116,7 +120,7 @@ class MongoGenerationStoreIT {
                 Arguments.of("repositories", new Document("repoId", "orders"), new Document("repoId", "orders").append("fence", 2L)),
                 Arguments.of("generation_manifests", generation("g1"), generation("g1").append("digest", "changed")),
                 Arguments.of("index_jobs", new Document("jobId", "job-1"), new Document("jobId", "job-1").append("repoId", "other")),
-                Arguments.of("index_jobs", new Document("jobId", "a").append("repoId", "orders").append("state", "ACTIVE"), new Document("jobId", "b").append("repoId", "orders").append("state", "ACTIVE")),
+                Arguments.of("index_jobs", new Document("jobId", "a").append("repoId", "orders").append("active", true), new Document("jobId", "b").append("repoId", "orders").append("active", true)),
                 Arguments.of("generation_files", scoped("sourcePath", "A.java"), scoped("sourcePath", "A.java").append("sourceArtifactId", "changed")),
                 Arguments.of("source_artifacts", new Document("sourceArtifactId", "a").append("contentHash", "one"), new Document("sourceArtifactId", "a").append("contentHash", "two")),
                 Arguments.of("source_artifacts", new Document("sourceArtifactId", "a").append("contentHash", "one"), new Document("sourceArtifactId", "b").append("contentHash", "one")),
@@ -136,7 +140,7 @@ class MongoGenerationStoreIT {
                 .append("activeWorkerId", workerId).append("activeGenerationId", generationId).append("fence", fence).append("claimUntil", leaseUntil));
         template.getCollection(IndexCollections.GENERATION_MANIFESTS).insertOne(new Document("repoId", repositoryId).append("generationId", generationId)
                 .append("ownerJobId", jobId).append("ownerWorkerId", workerId).append("fence", fence).append("writeState", "WRITING").append("sealUntil", leaseUntil));
-        template.getCollection(IndexCollections.INDEX_JOBS).insertOne(new Document("jobId", jobId).append("repoId", repositoryId).append("state", "ACTIVE")
+        template.getCollection(IndexCollections.INDEX_JOBS).insertOne(new Document("jobId", jobId).append("repoId", repositoryId).append("active", true)
                 .append("outstandingBatches", List.of()).append("failedOrAmbiguousBatches", List.of()));
         return new MongoGenerationWriter.GenerationLease(new RepositoryId(repositoryId), new GenerationId(generationId), jobId, workerId, fence);
     }

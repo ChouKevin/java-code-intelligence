@@ -122,7 +122,7 @@ public final class MongoGenerationWriter {
                 throw new IllegalStateException("generation lease is not active");
             }
             if (Optional.ofNullable(template.getCollection("index_jobs").find(Filters.and(Filters.eq("jobId", lease.jobId()),
-                    Filters.eq("repoId", lease.repositoryId().value()), Filters.eq("state", "ACTIVE"))).first()).isEmpty()) {
+                    Filters.eq("repoId", lease.repositoryId().value()), Filters.eq("active", true))).first()).isEmpty()) {
                 throw new IllegalStateException("index job is not active");
             }
         } catch (DataAccessResourceFailureException exception) {
@@ -135,7 +135,7 @@ public final class MongoGenerationWriter {
     private void markOutstanding(GenerationLease lease, String batchId) {
         try {
             long matched = template.getCollection("index_jobs").updateOne(Filters.and(Filters.eq("jobId", lease.jobId()),
-                            Filters.eq("repoId", lease.repositoryId().value()), Filters.eq("state", "ACTIVE"),
+                            Filters.eq("repoId", lease.repositoryId().value()), Filters.eq("active", true),
                             Filters.ne("outstandingBatches", batchId), Filters.ne("acknowledgedBatches", batchId)),
                     Updates.addToSet("outstandingBatches", batchId)).getModifiedCount();
             if (matched != 1L) { throw new IllegalStateException("index job batch registration failed closed"); }
@@ -176,7 +176,7 @@ public final class MongoGenerationWriter {
 
     private void acknowledgeBatch(GenerationLease lease, String batchId) {
         long jobChanged = template.getCollection("index_jobs").updateOne(Filters.and(Filters.eq("jobId", lease.jobId()),
-                        Filters.eq("repoId", lease.repositoryId().value()), Filters.eq("state", "ACTIVE"),
+                        Filters.eq("repoId", lease.repositoryId().value()), Filters.eq("active", true),
                         Filters.eq("outstandingBatches", batchId)),
                 Updates.combine(Updates.pull("outstandingBatches", batchId), Updates.addToSet("acknowledgedBatches", batchId))).getModifiedCount();
         if (jobChanged != 1L) { throw new IllegalStateException("index job batch acknowledgement failed closed"); }
@@ -189,8 +189,8 @@ public final class MongoGenerationWriter {
     private void failGeneration(GenerationLease lease, String batchId) {
         try {
             long jobChanged = template.getCollection("index_jobs").updateOne(Filters.and(Filters.eq("jobId", lease.jobId()),
-                            Filters.eq("repoId", lease.repositoryId().value()), Filters.eq("state", "ACTIVE")),
-                    Updates.combine(Updates.addToSet("failedOrAmbiguousBatches", batchId), Updates.set("state", "FAILED"))).getModifiedCount();
+                            Filters.eq("repoId", lease.repositoryId().value()), Filters.eq("active", true)),
+                    Updates.addToSet("failedOrAmbiguousBatches", batchId)).getModifiedCount();
             long manifestChanged = template.getCollection("generation_manifests").updateOne(ownedWritingManifest(lease),
                     Updates.combine(Updates.addToSet("failedOrAmbiguousBatches", batchId), Updates.set("writeState", GenerationWriteState.FAILED.name()))).getModifiedCount();
             if (jobChanged != 1L || manifestChanged != 1L) { throw new IllegalStateException("generation failure recording failed closed"); }

@@ -4,6 +4,9 @@ import com.java.semantic.model.repository.RepositoryRevision;
 import com.java.semantic.model.repository.InvalidRepositoryIdException;
 
 import com.java.semantic.api.dto.ApiErrorResponse;
+import com.java.semantic.indexer.job.IndexJobAlreadyActiveException;
+import com.java.semantic.indexer.job.IndexSchemaRebuildRequiredException;
+import com.java.semantic.indexer.store.PublicationConflictException;
 import com.java.semantic.api.dto.ConceptKindUnavailableResponse;
 import com.java.semantic.api.dto.identity.MethodTargetPayload;
 import com.java.semantic.model.codefact.MethodTarget;
@@ -13,7 +16,6 @@ import com.java.semantic.repository.application.RepositoryMutationException;
 import com.java.semantic.repository.application.RepositoryNotFoundException;
 import com.java.semantic.repository.application.RepositoryNotReadyException;
 import com.java.semantic.repository.application.RepositoryRevisionMismatchException;
-import com.java.semantic.model.repository.InvalidRepositoryIdException;
 import com.java.semantic.semantic.application.ImplementationTargetUnsupportedException;
 import com.java.semantic.semantic.application.SourceDeclarationNotFoundException;
 import com.java.semantic.semantic.domain.SemanticBindingAmbiguousException;
@@ -136,6 +138,21 @@ public class ApiExceptionHandler {
     @ExceptionHandler(RepositoryMutationException.class)
     public ResponseEntity<ApiErrorResponse> mutationFailed(HttpServletRequest request) {
         return response(HttpStatus.INTERNAL_SERVER_ERROR, "INTERNAL_ERROR", "request failed", request);
+    }
+
+    @ExceptionHandler(IndexSchemaRebuildRequiredException.class)
+    public ResponseEntity<ApiErrorResponse> schemaRebuildRequired(HttpServletRequest request) {
+        return response(HttpStatus.CONFLICT, "SCHEMA_REBUILD_REQUIRED", "schema rebuild requires explicit authorization", request);
+    }
+
+    @ExceptionHandler(PublicationConflictException.class)
+    public ResponseEntity<ApiErrorResponse> publicationConflict(HttpServletRequest request) {
+        return response(HttpStatus.CONFLICT, "INDEX_POINTER_CONFLICT", "index pointer no longer matches", request);
+    }
+
+    @ExceptionHandler(IndexJobAlreadyActiveException.class)
+    public ResponseEntity<ApiErrorResponse> indexJobAlreadyActive(HttpServletRequest request) {
+        return response(HttpStatus.CONFLICT, "INDEX_JOB_ALREADY_ACTIVE", "an index job is already active", request);
     }
 
     @ExceptionHandler(SemanticTargetNotFoundException.class)

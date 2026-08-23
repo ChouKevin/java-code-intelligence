@@ -91,21 +91,6 @@ class MethodSourceApplicationServiceTest {
     private RepositoryApplicationService repositoryApplicationService(RepositorySnapshot snapshot) {
         return new RepositoryApplicationService() {
             @Override
-            public RepositoryStatus ensure(RepositoryId repositoryId) {
-                throw new UnsupportedOperationException();
-            }
-
-            @Override
-            public RepositoryStatus sync(RepositoryId repositoryId, Optional<String> branch) {
-                throw new UnsupportedOperationException();
-            }
-
-            @Override
-            public RepositoryStatus checkout(RepositoryId repositoryId, String revision) {
-                throw new UnsupportedOperationException();
-            }
-
-            @Override
             public RepositoryStatus status(RepositoryId repositoryId) {
                 throw new UnsupportedOperationException();
             }

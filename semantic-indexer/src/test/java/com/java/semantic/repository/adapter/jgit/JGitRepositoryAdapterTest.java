@@ -108,6 +108,41 @@ class JGitRepositoryAdapterTest {
                 .isInstanceOf(JGitInternalException.class);
     }
 
+    @Test
+    void should_resolve_remote_branch_and_existing_exact_revision_without_a_worktree_checkout() throws Exception {
+        try (RemoteFixture fixture = createRemote()) {
+            JGitRepositoryAdapter adapter = new JGitRepositoryAdapter(new RepositoryProperties());
+            String historicalRevision = fixture.seed().getRepository().resolve("refs/heads/main").getName();
+            String revision = commit(fixture.seed(), fixture.seedRoot(), "new-main-tip");
+            pushBranch(fixture.seed(), "main");
+            String sourceBefore = Files.readString(fixture.seedRoot().resolve("sample.txt"));
+
+            assertThat(adapter.resolveRemoteRef(fixture.remote().toUri().toString(), "main").value())
+                    .isEqualTo(revision);
+            assertThat(adapter.resolveRemoteRef(fixture.remote().toUri().toString(), revision).value())
+                    .isEqualTo(revision);
+            assertThat(adapter.resolveRemoteRef(fixture.remote().toUri().toString(), historicalRevision).value())
+                    .isEqualTo(historicalRevision);
+            assertThatThrownBy(() -> adapter.resolveRemoteRef(fixture.remote().toUri().toString(), "f".repeat(40)))
+                    .isInstanceOf(RepositoryMutationException.class);
+            assertThat(Files.readString(fixture.seedRoot().resolve("sample.txt"))).isEqualTo(sourceBefore);
+        }
+    }
+
+    @Test
+    void should_peel_an_annotated_remote_tag_to_its_reachable_commit() throws Exception {
+        try (RemoteFixture fixture = createRemote()) {
+            String revision = commit(fixture.seed(), fixture.seedRoot(), "tagged");
+            fixture.seed().tag().setName("annotated-v1").setAnnotated(true).setMessage("release").call();
+            fixture.seed().push().setRemote("origin").setPushTags().call();
+
+            RepositoryRevision resolved = new JGitRepositoryAdapter(new RepositoryProperties())
+                    .resolveRemoteRef(fixture.remote().toUri().toString(), "annotated-v1");
+
+            assertThat(resolved.value()).isEqualTo(revision);
+        }
+    }
+
     private RemoteFixture createRemote() throws Exception {
         Path remote = tempDirectory.resolve("remote.git");
         try (Git bare = Git.init().setBare(true).setDirectory(remote.toFile()).call()) {

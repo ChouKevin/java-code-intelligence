@@ -27,7 +27,7 @@ public final class IndexSchemaContract {
             collection(IndexCollections.REPOSITORIES, index("repository_id_unique", keys("repoId", 1), true, Map.of())),
             collection(IndexCollections.GENERATION_MANIFESTS, index("repository_generation_unique", keys("repoId", 1, "generationId", 1), true, Map.of())),
             collection(IndexCollections.INDEX_JOBS, index("job_id_unique", keys("jobId", 1), true, Map.of()),
-                    index("one_active_job_per_repository", keys("repoId", 1), true, Map.of("state", "ACTIVE"))),
+                    index("one_active_job_per_repository", keys("repoId", 1), true, Map.of("active", true))),
             collection(IndexCollections.GENERATION_FILES, index("generation_file_unique", keys("repoId", 1, "generationId", 1, "sourcePath", 1), true, Map.of())),
             collection(IndexCollections.SOURCE_ARTIFACTS, index("source_artifact_id_unique", keys("sourceArtifactId", 1), true, Map.of()),
                     index("content_hash_unique", keys("contentHash", 1), true, Map.of())),

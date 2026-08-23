@@ -186,21 +186,6 @@ class InternalSourceReferenceApplicationServiceTest {
         }
 
         @Override
-        public RepositoryStatus ensure(RepositoryId repositoryId) {
-            throw new UnsupportedOperationException("not used");
-        }
-
-        @Override
-        public RepositoryStatus sync(RepositoryId repositoryId, Optional<String> branch) {
-            throw new UnsupportedOperationException("not used");
-        }
-
-        @Override
-        public RepositoryStatus checkout(RepositoryId repositoryId, String revision) {
-            throw new UnsupportedOperationException("not used");
-        }
-
-        @Override
         public RepositoryStatus status(RepositoryId repositoryId) {
             throw new UnsupportedOperationException("not used");
         }

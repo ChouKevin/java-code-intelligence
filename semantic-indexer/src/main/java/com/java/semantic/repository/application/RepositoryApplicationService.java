@@ -12,12 +12,6 @@ import java.util.function.Function;
 /** 儲存庫生命週期的應用服務邊界 */
 public interface RepositoryApplicationService {
 
-    RepositoryStatus ensure(RepositoryId repositoryId);
-
-    RepositoryStatus sync(RepositoryId repositoryId, Optional<String> branch);
-
-    RepositoryStatus checkout(RepositoryId repositoryId, String revision);
-
     RepositoryStatus status(RepositoryId repositoryId);
 
     List<RepositoryStatus> list();

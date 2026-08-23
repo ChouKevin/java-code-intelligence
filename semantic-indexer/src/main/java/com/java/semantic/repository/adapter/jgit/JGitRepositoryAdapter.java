@@ -10,9 +10,17 @@ import org.eclipse.jgit.api.CreateBranchCommand;
 import org.eclipse.jgit.api.FetchCommand;
 import org.eclipse.jgit.api.Git;
 import org.eclipse.jgit.api.ResetCommand;
+import org.eclipse.jgit.api.LsRemoteCommand;
 import org.eclipse.jgit.api.errors.GitAPIException;
+import org.eclipse.jgit.internal.storage.dfs.DfsRepositoryDescription;
+import org.eclipse.jgit.internal.storage.dfs.InMemoryRepository;
+import org.eclipse.jgit.util.FS;
 import org.eclipse.jgit.lib.ObjectId;
+import org.eclipse.jgit.lib.Ref;
+import org.eclipse.jgit.revwalk.RevWalk;
+import org.eclipse.jgit.revwalk.RevObject;
 import org.eclipse.jgit.transport.CredentialsProvider;
+import org.eclipse.jgit.transport.RefSpec;
 import org.eclipse.jgit.transport.UsernamePasswordCredentialsProvider;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
@@ -20,6 +28,7 @@ import org.springframework.util.StringUtils;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Collection;
 import java.util.Objects;
 import java.util.Optional;
 
@@ -113,6 +122,60 @@ public class JGitRepositoryAdapter implements GitRepositoryPort {
         } catch (IOException | RuntimeException exception) {
             throw new RepositoryMutationException("cannot read current branch", exception);
         }
+    }
+
+    @Override
+    public RepositoryRevision resolveRemoteRef(String remoteUrl, String ref) {
+        try {
+            LsRemoteCommand command = Git.lsRemoteRepository().setRemote(remoteUrl).setHeads(true).setTags(true);
+            credentialsProvider().ifPresent(command::setCredentialsProvider);
+            Collection<Ref> advertisedRefs = command.call();
+            if (ref.matches("[0-9a-f]{40}")) {
+                return resolveReachableCommit(remoteUrl, ObjectId.fromString(ref));
+            }
+            Optional<RepositoryRevision> advertisedRevision = advertisedRefs.stream()
+                    .filter(reference -> matchesAdvertisedRef(reference, ref))
+                    .findFirst()
+                    .map(Ref::getObjectId)
+                    .map(objectId -> resolveReachableCommit(remoteUrl, objectId));
+            if (advertisedRevision.isPresent()) {
+                return advertisedRevision.orElseThrow();
+            }
+            throw new RepositoryMutationException("remote ref was not found");
+        } catch (RepositoryMutationException exception) {
+            throw exception;
+        } catch (GitAPIException | RuntimeException exception) {
+            throw new RepositoryMutationException("remote revision selection failed", exception);
+        }
+    }
+
+    private RepositoryRevision resolveReachableCommit(String remoteUrl, ObjectId revision) {
+        DfsRepositoryDescription description = new DfsRepositoryDescription("remote-revision-validation");
+        InMemoryRepository.Builder builder = new InMemoryRepository.Builder()
+                .setRepositoryDescription(description)
+                .setFS(FS.DETECTED);
+        try (InMemoryRepository repository = builder.build();
+             Git git = new Git(repository)) {
+            FetchCommand fetch = git.fetch()
+                    .setRemote(remoteUrl)
+                    .setRefSpecs(
+                            new RefSpec("+refs/heads/*:refs/remotes/origin/*"),
+                            new RefSpec("+refs/tags/*:refs/tags/*"));
+            credentialsProvider().ifPresent(fetch::setCredentialsProvider);
+            fetch.call();
+            try (RevWalk walk = new RevWalk(repository)) {
+                RevObject object = walk.parseAny(revision);
+                RevObject peeled = walk.peel(object);
+                return RepositoryRevision.ofSha(walk.parseCommit(peeled).getId().getName());
+            }
+        } catch (IOException | GitAPIException | RuntimeException exception) {
+            throw new RepositoryMutationException("remote revision selection failed", exception);
+        }
+    }
+
+    private static boolean matchesAdvertisedRef(Ref reference, String ref) {
+        return ref.equals(reference.getName()) || ("refs/heads/" + ref).equals(reference.getName())
+                || ("refs/tags/" + ref).equals(reference.getName());
     }
 
     private boolean remoteBranchExists(Git git, String branch) throws IOException {

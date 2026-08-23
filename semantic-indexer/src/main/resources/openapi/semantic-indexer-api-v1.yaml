@@ -1,0 +1,216 @@
+openapi: 3.0.3
+info:
+  title: Semantic Indexer Admin API
+  version: v1
+  description: >-
+    Private asynchronous administration API. Every build command selects its
+    source revision before returning an accepted job; it never indexes inline.
+security:
+  - indexerAdminToken: []
+paths:
+  /index/repositories/{repoId}/ensure:
+    post:
+      operationId: ensureRepositoryIndex
+      parameters: [ { $ref: '#/components/parameters/RepositoryId' } ]
+      responses:
+        '202': { $ref: '#/components/responses/IndexJobAccepted' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/RepositoryNotFound' }
+        '409': { $ref: '#/components/responses/IndexConflict' }
+  /index/repositories/{repoId}/sync:
+    post:
+      operationId: syncRepositoryIndex
+      parameters: [ { $ref: '#/components/parameters/RepositoryId' } ]
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SyncRequest' }
+      responses:
+        '202': { $ref: '#/components/responses/IndexJobAccepted' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/RepositoryNotFound' }
+        '409': { $ref: '#/components/responses/IndexConflict' }
+  /index/repositories/{repoId}/checkout:
+    post:
+      operationId: checkoutRepositoryIndex
+      parameters: [ { $ref: '#/components/parameters/RepositoryId' } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CheckoutRequest' }
+      responses:
+        '202': { $ref: '#/components/responses/IndexJobAccepted' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/RepositoryNotFound' }
+        '409': { $ref: '#/components/responses/IndexConflict' }
+  /index/repositories/{repoId}/rebuild:
+    post:
+      operationId: rebuildRepositoryIndex
+      parameters: [ { $ref: '#/components/parameters/RepositoryId' } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RebuildRequest' }
+      responses:
+        '202': { $ref: '#/components/responses/IndexJobAccepted' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/RepositoryNotFound' }
+        '409': { $ref: '#/components/responses/IndexConflict' }
+  /index/repositories/{repoId}/rollback:
+    post:
+      operationId: rollbackRepositoryIndex
+      parameters: [ { $ref: '#/components/parameters/RepositoryId' } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RollbackRequest' }
+      responses:
+        '202': { $ref: '#/components/responses/IndexJobAccepted' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/RepositoryNotFound' }
+        '409': { $ref: '#/components/responses/IndexConflict' }
+  /index/jobs/{jobId}:
+    get:
+      operationId: getIndexJob
+      parameters: [ { $ref: '#/components/parameters/IndexJobId' } ]
+      responses:
+        '200': { $ref: '#/components/responses/IndexJob' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/IndexJobNotFound' }
+        '409': { $ref: '#/components/responses/IndexConflict' }
+components:
+  securitySchemes:
+    indexerAdminToken:
+      type: apiKey
+      in: header
+      name: X-Api-Token
+      description: Distinct Indexer-admin credential; never use the Semantic read credential.
+  parameters:
+    RepositoryId:
+      name: repoId
+      in: path
+      required: true
+      schema: { type: string, minLength: 1 }
+    IndexJobId:
+      name: jobId
+      in: path
+      required: true
+      schema: { type: string, minLength: 1 }
+  responses:
+    IndexJobAccepted:
+      description: Source revision selected and asynchronous job accepted.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/IndexJobResponse' }
+    IndexJob:
+      description: Current asynchronous index-job status.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/IndexJobResponse' }
+    Unauthorized:
+      description: Missing or invalid Indexer-admin credential.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ApiError' }
+    Forbidden:
+      description: Indexer administration is disabled because no admin credential is configured.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ApiError' }
+    RepositoryNotFound:
+      description: The repository is not configured.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ApiError' }
+    IndexJobNotFound:
+      description: The requested asynchronous job does not exist.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ApiError' }
+    BadRequest:
+      description: The administrative request is malformed or violates a command precondition.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ApiError' }
+    IndexConflict:
+      description: An active job, required schema rebuild, or expected pointer prevents the operation.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ApiError' }
+  schemas:
+    IndexJobResponse:
+      type: object
+      additionalProperties: false
+      required: [jobId, repositoryId, revision, generationId, phase]
+      properties:
+        jobId: { type: string }
+        repositoryId: { type: string }
+        revision: { type: string, pattern: '^[0-9a-f]{40}$' }
+        generationId: { type: string }
+        phase:
+          type: string
+          enum: [ACCEPTED, CHECKOUT, PLAN, EXTRACT, WRITE, VALIDATE, PUBLISH, COMPLETE, FAILED]
+        failureCategory:
+          type: string
+          nullable: true
+          enum: [WORKER_INTERRUPTED, SOURCE_UNAVAILABLE, SCHEMA_REBUILD_REQUIRED, PUBLICATION_CONFLICT, VALIDATION_FAILED]
+    ApiError:
+      type: object
+      additionalProperties: false
+      required: [errorCode, message, candidates, requestId]
+      properties:
+        errorCode: { type: string }
+        message: { type: string }
+        repoId: { type: string, nullable: true }
+        expectedRevision: { type: string, nullable: true }
+        currentRevision: { type: string, nullable: true }
+        target: { type: object, nullable: true }
+        candidates: { type: array, items: { type: object } }
+        requestId: { type: string }
+    SyncRequest:
+      type: object
+      additionalProperties: false
+      properties: { branch: { type: string } }
+    CheckoutRequest:
+      type: object
+      additionalProperties: false
+      required: [revision]
+      properties: { revision: { type: string, pattern: '^[0-9a-f]{40}$' } }
+    RebuildRequest:
+      type: object
+      additionalProperties: false
+      required: [authorizeIncompatibleSchema]
+      properties: { authorizeIncompatibleSchema: { type: boolean } }
+    GenerationPointer:
+      type: object
+      additionalProperties: false
+      required: [revision, generationId, manifestDigest, committedJobId, publishedAt]
+      properties:
+        revision: { type: string, pattern: '^[0-9a-f]{40}$' }
+        generationId: { type: string }
+        manifestDigest: { type: string, pattern: '^[0-9a-f]{64}$' }
+        committedJobId: { type: string }
+        publishedAt: { type: string, format: date-time }
+    RollbackRequest:
+      type: object
+      additionalProperties: false
+      required: [expectedCurrent, expectedRollback]
+      properties:
+        expectedCurrent: { $ref: '#/components/schemas/GenerationPointer' }
+        expectedRollback: { $ref: '#/components/schemas/GenerationPointer' }

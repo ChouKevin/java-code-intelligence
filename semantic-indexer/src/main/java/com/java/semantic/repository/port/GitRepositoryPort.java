@@ -18,4 +18,8 @@ public interface GitRepositoryPort {
     RepositoryRevision currentRevision(Path workingTree);
 
     String currentBranch(Path workingTree);
+
+    default RepositoryRevision resolveRemoteRef(String remoteUrl, String ref) {
+        throw new UnsupportedOperationException("remote revision selection is not available");
+    }
 }
