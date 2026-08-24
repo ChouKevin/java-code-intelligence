@@ -147,11 +147,11 @@ class TypeUsageConceptProviderTest {
                 MethodTargetResolution.resolved(target()),
                 true,
                 false,
-                false);
+                false, List.of());
     }
 
     private static SourceFieldMetadata field(String name, String declaredType, TypeReference reference) {
-        return new SourceFieldMetadata(name, declaredType, "", reference, List.of());
+        return new SourceFieldMetadata(name, declaredType, "", reference, List.of(), com.java.semantic.model.codefact.CodeFactKind.FIELD, new com.java.semantic.model.codefact.SourceRange("TypeUsageConceptProviderTest.java", new com.java.semantic.model.codefact.SyntaxRange(new com.java.semantic.model.codefact.SyntaxPosition(0, 0), new com.java.semantic.model.codefact.SyntaxPosition(0, 1))));
     }
 
     private static FieldDeclarationSubjectIdentity fieldSubject(String name, String ignoredDeclaredType) {

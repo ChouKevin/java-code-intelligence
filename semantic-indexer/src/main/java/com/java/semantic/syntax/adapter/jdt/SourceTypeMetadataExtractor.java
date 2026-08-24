@@ -12,6 +12,7 @@ import com.java.semantic.model.codefact.JavaIdentityNormalizer;
 import com.java.semantic.model.codefact.JavaTypeIdentity;
 import com.java.semantic.syntax.domain.ArrayTypeReference;
 import com.java.semantic.syntax.domain.AnnotationEvidence;
+import com.java.semantic.syntax.domain.AnnotationValueEvidence;
 import com.java.semantic.syntax.domain.CompilationUnitContext;
 import com.java.semantic.syntax.domain.CompositeTypeReference;
 import com.java.semantic.syntax.domain.CompositeTypeReference.CompositeKind;
@@ -28,6 +29,7 @@ import com.java.semantic.syntax.domain.SourceTypeKind;
 import com.java.semantic.syntax.domain.SourceTypeMembers;
 import com.java.semantic.syntax.domain.SourceTypeMetadata;
 import com.java.semantic.syntax.domain.SourceTypeRelationships;
+import com.java.semantic.syntax.domain.SourceThrownTypeMetadata;
 import com.java.semantic.model.codefact.SourceRange;
 import com.java.semantic.syntax.domain.SqlSourceKind;
 import com.java.semantic.syntax.domain.TypeReference;
@@ -38,13 +40,17 @@ import com.java.semantic.model.codefact.SourceTypeIdentity;
 
 import org.eclipse.jdt.core.dom.AbstractTypeDeclaration;
 import org.eclipse.jdt.core.dom.Annotation;
+import org.eclipse.jdt.core.dom.ArrayInitializer;
 import org.eclipse.jdt.core.dom.ArrayType;
 import org.eclipse.jdt.core.dom.BodyDeclaration;
 import org.eclipse.jdt.core.dom.CompilationUnit;
 import org.eclipse.jdt.core.dom.EnumDeclaration;
+import org.eclipse.jdt.core.dom.EnumConstantDeclaration;
+import org.eclipse.jdt.core.dom.Expression;
 import org.eclipse.jdt.core.dom.FieldDeclaration;
 import org.eclipse.jdt.core.dom.ImportDeclaration;
 import org.eclipse.jdt.core.dom.MethodDeclaration;
+import org.eclipse.jdt.core.dom.MemberValuePair;
 import org.eclipse.jdt.core.dom.Modifier;
 import org.eclipse.jdt.core.dom.NameQualifiedType;
 import org.eclipse.jdt.core.dom.ParameterizedType;
@@ -53,6 +59,9 @@ import org.eclipse.jdt.core.dom.QualifiedType;
 import org.eclipse.jdt.core.dom.RecordDeclaration;
 import org.eclipse.jdt.core.dom.SimpleType;
 import org.eclipse.jdt.core.dom.SingleVariableDeclaration;
+import org.eclipse.jdt.core.dom.SingleMemberAnnotation;
+import org.eclipse.jdt.core.dom.NormalAnnotation;
+import org.eclipse.jdt.core.dom.StringLiteral;
 import org.eclipse.jdt.core.dom.Type;
 import org.eclipse.jdt.core.dom.TypeDeclaration;
 import org.eclipse.jdt.core.dom.VariableDeclarationFragment;
@@ -101,12 +110,12 @@ final class SourceTypeMetadataExtractor {
                         extendedTypeReferencesOf(type),
                         implementedTypeReferencesOf(type)),
                 new SourceTypeMembers(
-                        fieldsOf(type),
+                        fieldsOf(unit, parsed.source().repositoryRelativePath(), type),
                         methodsOf(parsed, type, fullyQualifiedName, sqlIndex, analysisTargetOf),
                         hasFluentAccessors(type),
                         hasChainedAccessors(type)),
                 new FrameworkTypeFacts(
-                        annotationEvidenceOf(type),
+                        annotationEvidenceOf(unit, type),
                         profilesOf(type),
                         AnnotationReader.isPresent(type, PRIMARY),
                         qualifierValuesOf(type)),
@@ -171,7 +180,7 @@ final class SourceTypeMetadataExtractor {
 
     // --- 成員 ---
 
-    private static List<SourceFieldMetadata> fieldsOf(AbstractTypeDeclaration type) {
+    private static List<SourceFieldMetadata> fieldsOf(CompilationUnit unit, String sourceFile, AbstractTypeDeclaration type) {
         List<SourceFieldMetadata> fields = new ArrayList<>();
         if (type instanceof RecordDeclaration record) {
             for (Object component : record.recordComponents()) {
@@ -181,7 +190,18 @@ final class SourceTypeMetadataExtractor {
                         TypeNames.simpleNameOf(parameter.getType()),
                         qualifierValueOf(parameter),
                         typeReferenceOf(parameter.getType()),
-                        annotationEvidenceOf(parameter)));
+                        annotationEvidenceOf(unit, parameter),
+                        com.java.semantic.model.codefact.CodeFactKind.RECORD_COMPONENT,
+                        new SourceRange(sourceFile, AstSourceRanges.range(unit, parameter))));
+            }
+        }
+        if (type instanceof EnumDeclaration enumDeclaration) {
+            for (Object constant : enumDeclaration.enumConstants()) {
+                EnumConstantDeclaration enumConstant = (EnumConstantDeclaration) constant;
+                fields.add(new SourceFieldMetadata(enumConstant.getName().getIdentifier(), type.getName().getIdentifier(), "",
+                        new NamedTypeReference(type.getName().getIdentifier(), type.getName().getIdentifier(), Optional.empty(), true), List.of(),
+                        com.java.semantic.model.codefact.CodeFactKind.ENUM_CONSTANT,
+                        new SourceRange(sourceFile, AstSourceRanges.range(unit, enumConstant))));
             }
         }
         for (Object member : SourceTypes.declaredMembersOf(type)) {
@@ -195,7 +215,8 @@ final class SourceTypeMetadataExtractor {
                         typeName,
                         qualifierValueOf(field),
                         typeReferenceOf(field.getType()),
-                        annotationEvidenceOf(field)));
+                        annotationEvidenceOf(unit, field), com.java.semantic.model.codefact.CodeFactKind.FIELD,
+                        new SourceRange(sourceFile, AstSourceRanges.range(unit, (VariableDeclarationFragment) variable))));
             }
         }
         return List.copyOf(fields);
@@ -233,15 +254,40 @@ final class SourceTypeMetadataExtractor {
                     parameterTypeReferencesOf(method),
                     returnTypeReferenceOf(method),
                     InvocationExtractor.extract(unit, method, parsed.text()),
-                    annotationEvidenceOf(method),
+                    annotationEvidenceOf(unit, method),
                     BodyTypeReferenceExtractor.extract(method),
                     AstSourceRanges.range(unit, method.getName()).start(),
                     analysisTargetOf.apply(method),
                     Objects.nonNull(method.getBody()),
                     isAbstractDeclaration(type, method),
-                    isOverridableDeclaration(type, method)));
+                    isOverridableDeclaration(type, method),
+                    thrownTypesOf(unit, parsed.source().repositoryRelativePath(), method)));
         }
         return List.copyOf(methods);
+    }
+
+    private static List<SourceThrownTypeMetadata> thrownTypesOf(CompilationUnit unit, String sourceFile,
+                                                                  MethodDeclaration method) {
+        List<SourceThrownTypeMetadata> thrownTypes = new ArrayList<>();
+        for (Object exception : method.thrownExceptionTypes()) {
+            Type exceptionType = (Type) exception;
+            ITypeBinding binding = exceptionType.resolveBinding();
+            Optional<JavaTypeIdentity> resolved = Optional.ofNullable(binding)
+                    .map(ITypeBinding::getErasure)
+                    .map(ITypeBinding::getQualifiedName)
+                    .filter(StringUtils::hasText)
+                    .map(SourceTypeMetadataExtractor::javaTypeIdentity);
+            thrownTypes.add(new SourceThrownTypeMetadata(exceptionType.toString(), resolved,
+                    new SourceRange(sourceFile, AstSourceRanges.range(unit, exceptionType))));
+        }
+        return List.copyOf(thrownTypes);
+    }
+
+    private static JavaTypeIdentity javaTypeIdentity(String fullyQualifiedName) {
+        int separator = fullyQualifiedName.lastIndexOf('.');
+        String packageName = separator < 0 ? "" : fullyQualifiedName.substring(0, separator);
+        String className = separator < 0 ? fullyQualifiedName : fullyQualifiedName.substring(separator + 1);
+        return new JavaTypeIdentity(packageName, className);
     }
 
     private static boolean isOverridableDeclaration(AbstractTypeDeclaration enclosingType, MethodDeclaration method) {
@@ -530,9 +576,9 @@ final class SourceTypeMetadataExtractor {
                 .toList();
     }
 
-    private static List<AnnotationEvidence> annotationEvidenceOf(BodyDeclaration declaration) {
+    private static List<AnnotationEvidence> annotationEvidenceOf(CompilationUnit unit, BodyDeclaration declaration) {
         return AnnotationReader.annotationsOf(declaration).stream()
-                .map(SourceTypeMetadataExtractor::annotationEvidenceOf)
+                .map(annotation -> annotationEvidenceOf(unit, annotation))
                 .toList();
     }
 
@@ -542,27 +588,58 @@ final class SourceTypeMetadataExtractor {
                 .toList();
     }
 
-    private static List<AnnotationEvidence> annotationEvidenceOf(SingleVariableDeclaration declaration) {
+    private static List<AnnotationEvidence> annotationEvidenceOf(CompilationUnit unit, SingleVariableDeclaration declaration) {
         return AnnotationReader.annotationsOf(declaration).stream()
-                .map(SourceTypeMetadataExtractor::annotationEvidenceOf)
+                .map(annotation -> annotationEvidenceOf(unit, annotation))
                 .toList();
     }
 
-    private static AnnotationEvidence annotationEvidenceOf(Annotation annotation) {
+    private static AnnotationEvidence annotationEvidenceOf(CompilationUnit unit, Annotation annotation) {
         ITypeBinding binding = annotation.resolveTypeBinding();
         if (Objects.isNull(binding) || binding.isRecovered()) {
-            return new AnnotationEvidence(AnnotationReader.writtenNameOf(annotation), Optional.empty());
+            return new AnnotationEvidence(AnnotationReader.writtenNameOf(annotation), Optional.empty(),
+                    Optional.of(AstSourceRanges.range(unit, annotation)), annotationValuesOf(unit, annotation));
         }
         ITypeBinding declaration = binding.getTypeDeclaration();
         String qualifiedName = declaration.getQualifiedName();
         if (declaration.isRecovered() || !StringUtils.hasText(qualifiedName)) {
-            return new AnnotationEvidence(AnnotationReader.writtenNameOf(annotation), Optional.empty());
+            return new AnnotationEvidence(AnnotationReader.writtenNameOf(annotation), Optional.empty(),
+                    Optional.of(AstSourceRanges.range(unit, annotation)), annotationValuesOf(unit, annotation));
         }
         String packageName = declaration.getPackage().getName();
         return new AnnotationEvidence(
                 AnnotationReader.writtenNameOf(annotation),
                 Optional.of(new JavaTypeIdentity(
-                        packageName, JavaIdentityNormalizer.className(packageName, qualifiedName))));
+                        packageName, JavaIdentityNormalizer.className(packageName, qualifiedName))),
+                Optional.of(AstSourceRanges.range(unit, annotation)), annotationValuesOf(unit, annotation));
+    }
+
+    private static List<AnnotationValueEvidence> annotationValuesOf(CompilationUnit unit, Annotation annotation) {
+        List<AnnotationValueEvidence> values = new ArrayList<>();
+        if (annotation instanceof SingleMemberAnnotation single) {
+            addAnnotationValue(values, unit, "value", single.getValue());
+        } else if (annotation instanceof NormalAnnotation normal) {
+            for (Object value : normal.values()) {
+                MemberValuePair pair = (MemberValuePair) value;
+                addAnnotationValue(values, unit, pair.getName().getIdentifier(), pair.getValue());
+            }
+        }
+        return List.copyOf(values);
+    }
+
+    private static void addAnnotationValue(List<AnnotationValueEvidence> values, CompilationUnit unit,
+                                           String memberName, Expression expression) {
+        if (expression instanceof ArrayInitializer array) {
+            for (Object item : array.expressions()) {
+                addAnnotationValue(values, unit, memberName, (Expression) item);
+            }
+            return;
+        }
+        Optional<String> literalValue = expression instanceof StringLiteral literal
+                ? Optional.of(literal.getLiteralValue())
+                : Optional.empty();
+        values.add(new AnnotationValueEvidence(memberName, expression.toString(), literalValue,
+                AstSourceRanges.range(unit, expression)));
     }
 
     private static String qualifierValueOf(BodyDeclaration declaration) {

@@ -156,7 +156,7 @@ class DataAccessEvidenceTest {
                 name, paramTypes, sqlSource,
                 sqlSource == SqlSourceKind.ANNOTATION ? Optional.of(declarationLocation) : Optional.empty(),
                 declarationLocation, List.of(), Optional.empty(), List.of(), List.of(),
-                List.of(), range.start(), MethodTargetResolution.unresolved("test-fixture"), true, false, true);
+                List.of(), range.start(), MethodTargetResolution.unresolved("test-fixture"), true, false, true, List.of());
     }
 
     private static MethodTarget target(String className, String methodName) {

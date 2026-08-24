@@ -210,7 +210,7 @@ class CaffeineRevisionBoundRepositorySyntaxProviderTest {
                 "java.util.List",
                 "",
                 new ParameterizedTypeReference("java.util.List", rawType, typeArguments),
-                List.of());
+                List.of(), com.java.semantic.model.codefact.CodeFactKind.FIELD, new com.java.semantic.model.codefact.SourceRange("CaffeineRevisionBoundRepositorySyntaxProviderTest.java", new com.java.semantic.model.codefact.SyntaxRange(new com.java.semantic.model.codefact.SyntaxPosition(0, 0), new com.java.semantic.model.codefact.SyntaxPosition(0, 1))));
         SyntaxRange declarationRange = new SyntaxRange(
                 new SyntaxPosition(0, 0), new SyntaxPosition(1, 0));
         RepositorySyntax nestedSyntax = new RepositorySyntax(

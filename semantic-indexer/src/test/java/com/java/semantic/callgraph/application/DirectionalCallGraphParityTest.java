@@ -111,7 +111,7 @@ class DirectionalCallGraphParityTest {
                 target.methodName(), target.parameterTypes(), null, Optional.empty(),
                 new SourceRange(target.sourceFile(), range), List.<TypeReference>of(),
                 Optional.empty(), invocations, List.of(), List.of(), range.start(),
-                MethodTargetResolution.resolved(target), true, false, true);
+                MethodTargetResolution.resolved(target), true, false, true, List.of());
         return com.java.semantic.syntax.domain.SourceTypeMetadataFixture.sourceType(
                 target.className(), target.packageName(), target.packageName() + "." + target.className(),
                 target.sourceFile(), SourceTypeKind.CLASS, false,
@@ -124,7 +124,7 @@ class DirectionalCallGraphParityTest {
                 new SyntaxPosition(range.start().line(), range.start().character()),
                 new SyntaxPosition(range.end().line(), range.end().character()));
         return new SyntaxInvocation(SyntaxInvocation.InvocationKind.METHOD, syntaxRange, "work(value)",
-                "target", "", "", Optional.empty(), syntaxRange.start());
+                "target", "", "", Optional.empty(), syntaxRange.start(), List.of());
     }
 
     private static final class FakeSemanticService implements JavaSemanticService {

@@ -4,7 +4,8 @@ import com.java.semantic.model.support.ModelValidation;
 
 import java.util.Objects;
 
-public sealed interface ExternalTarget permits ExternalTarget.NominalType, ExternalTarget.Endpoint, ExternalTarget.Destination {
+public sealed interface ExternalTarget permits ExternalTarget.NominalType, ExternalTarget.Endpoint, ExternalTarget.Destination,
+        ExternalTarget.ConfigurationKey, ExternalTarget.SqlIdentifier, ExternalTarget.UnresolvedCall {
 
     String canonicalForm();
 
@@ -43,6 +44,46 @@ public sealed interface ExternalTarget permits ExternalTarget.NominalType, Exter
         @Override
         public String canonicalForm() {
             return broker + ":" + destination;
+        }
+    }
+
+    record ConfigurationKey(String key) implements ExternalTarget {
+
+        public ConfigurationKey {
+            key = ModelValidation.requiredText(key, "configuration key");
+        }
+
+        @Override
+        public String canonicalForm() {
+            return key;
+        }
+    }
+
+    record SqlIdentifier(String identifier) implements ExternalTarget {
+
+        public SqlIdentifier {
+            identifier = ModelValidation.requiredText(identifier, "SQL identifier");
+        }
+
+        @Override
+        public String canonicalForm() {
+            return identifier;
+        }
+    }
+
+    /** A call site whose exact written target could not be resolved against the current classpath. */
+    record UnresolvedCall(String expression, String receiver, String methodName, int arity) implements ExternalTarget {
+
+        public UnresolvedCall {
+            expression = ModelValidation.requiredText(expression, "call expression");
+            receiver = Objects.requireNonNullElse(receiver, "");
+            methodName = ModelValidation.requiredText(methodName, "call method name");
+            ModelValidation.require(arity >= 0, "call arity must not be negative");
+        }
+
+        @Override
+        public String canonicalForm() {
+            return expression + "|" + receiver + "|" + methodName + "|" + arity;
         }
     }
 }

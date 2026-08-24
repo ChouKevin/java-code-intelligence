@@ -1,0 +1,3 @@
+<mapper namespace="com.example.payment.PaymentMapper">
+    <select id="findByMethod">select * from payment_fee where method = #{method}</select>
+</mapper>

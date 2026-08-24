@@ -285,7 +285,8 @@ class DirectCallRelationshipResolverTest {
                 "com.example.OrderService",
                 "",
                 Optional.empty(),
-                new SyntaxPosition(3, 28));
+                new SyntaxPosition(3, 28),
+                List.of());
         FakeSemanticService semantic = new FakeSemanticService().resolution(caller,
                 SemanticCallResolution.resolved(resolvedCall(local, 3)));
 
@@ -319,7 +320,8 @@ class DirectCallRelationshipResolverTest {
                 "com.example.Port",
                 "fast",
                 Optional.empty(),
-                new SyntaxPosition(2, 0));
+                new SyntaxPosition(2, 0),
+                List.of());
         FakeSemanticService semantic = new FakeSemanticService()
                 .outgoing(caller, call)
                 .implementations(declaration, outgoingMethod(fastTarget, 30), outgoingMethod(slowTarget, 40));
@@ -354,10 +356,10 @@ class DirectCallRelationshipResolverTest {
         SemanticCall call = resolvedCall(declaration, 2);
         SyntaxInvocation first = new SyntaxInvocation(
                 SyntaxInvocation.InvocationKind.METHOD, range(2, 0, 2, 20), "port.handle()",
-                "port", "com.example.Port", "fast", Optional.empty(), new SyntaxPosition(2, 0));
+                "port", "com.example.Port", "fast", Optional.empty(), new SyntaxPosition(2, 0), List.of());
         SyntaxInvocation second = new SyntaxInvocation(
                 SyntaxInvocation.InvocationKind.METHOD, range(2, 0, 2, 15), "port.handle()",
-                "port", "com.example.Port", "fast", Optional.empty(), new SyntaxPosition(2, 0));
+                "port", "com.example.Port", "fast", Optional.empty(), new SyntaxPosition(2, 0), List.of());
         FakeSemanticService semantic = new FakeSemanticService()
                 .outgoing(caller, call)
                 .implementations(declaration, outgoingMethod(fastTarget, 30), outgoingMethod(slowTarget, 40));
@@ -487,7 +489,7 @@ class DirectCallRelationshipResolverTest {
                 target.methodName(), target.parameterTypes(), null, Optional.empty(),
                 new SourceRange(target.sourceFile(), methodRange),
                 List.<TypeReference>of(), Optional.empty(), invocations, List.of(), List.of(), methodRange.start(),
-                MethodTargetResolution.resolved(target), executableDeclaration, !executableDeclaration, true);
+                MethodTargetResolution.resolved(target), executableDeclaration, !executableDeclaration, true, List.of());
         return com.java.semantic.syntax.domain.SourceTypeMetadataFixture.sourceType(
                 target.className(), target.packageName(), target.packageName() + "." + target.className(),
                 target.sourceFile(), kind, false, List.of(), List.of(), List.of(), List.of(), List.of(),
@@ -510,7 +512,7 @@ class DirectCallRelationshipResolverTest {
     private static SyntaxInvocation invocation(String expression, int line, int anchorCharacter) {
         SyntaxRange range = range(line, 0, line, 4);
         return new SyntaxInvocation(SyntaxInvocation.InvocationKind.METHOD, range, expression,
-                "worker", "", "", Optional.empty(), new SyntaxPosition(line, anchorCharacter));
+                "worker", "", "", Optional.empty(), new SyntaxPosition(line, anchorCharacter), List.of());
     }
 
     private static SemanticRange semanticRange(SyntaxRange range) {

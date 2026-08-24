@@ -254,7 +254,7 @@ class StructuredConceptCatalogProjectorTest {
                 resolved(),
                 true,
                 false,
-                false);
+                false, List.of());
         SourceFieldMetadata field = new SourceFieldMetadata(
                 "orderState",
                 "OrderState[][]",
@@ -263,7 +263,7 @@ class StructuredConceptCatalogProjectorTest {
                         "OrderState[][]",
                         namedTypeReference("OrderState", "com.acme.order.OrderState"),
                         2),
-                List.of(annotation("Autowired", "org.springframework.beans.factory.annotation.Autowired")));
+                List.of(annotation("Autowired", "org.springframework.beans.factory.annotation.Autowired")), com.java.semantic.model.codefact.CodeFactKind.FIELD, new com.java.semantic.model.codefact.SourceRange("StructuredConceptCatalogProjectorTest.java", new com.java.semantic.model.codefact.SyntaxRange(new com.java.semantic.model.codefact.SyntaxPosition(0, 0), new com.java.semantic.model.codefact.SyntaxPosition(0, 1))));
         return SourceTypeMetadataFixture.sourceType(
                 "OrderHandler",
                 "com.acme.order",
@@ -293,7 +293,7 @@ class StructuredConceptCatalogProjectorTest {
                 writtenType,
                 "",
                 namedTypeReference(writtenType, resolvedType),
-                List.of(annotation("Autowired", "org.springframework.beans.factory.annotation.Autowired")));
+                List.of(annotation("Autowired", "org.springframework.beans.factory.annotation.Autowired")), com.java.semantic.model.codefact.CodeFactKind.FIELD, new com.java.semantic.model.codefact.SourceRange("StructuredConceptCatalogProjectorTest.java", new com.java.semantic.model.codefact.SyntaxRange(new com.java.semantic.model.codefact.SyntaxPosition(0, 0), new com.java.semantic.model.codefact.SyntaxPosition(0, 1))));
         return new SourceTypeMetadata(
                 metadata.declaration(),
                 metadata.relationships(),
@@ -336,7 +336,7 @@ class StructuredConceptCatalogProjectorTest {
     private static AnnotationEvidence annotation(String writtenName, String resolvedType) {
         return new AnnotationEvidence(writtenName, Optional.of(new JavaTypeIdentity(
                 resolvedType.substring(0, resolvedType.lastIndexOf('.')),
-                resolvedType.substring(resolvedType.lastIndexOf('.') + 1))));
+                resolvedType.substring(resolvedType.lastIndexOf('.') + 1))), Optional.empty(), List.of());
     }
 
     private static NamedTypeReference namedTypeReference(String writtenType, String resolvedType) {

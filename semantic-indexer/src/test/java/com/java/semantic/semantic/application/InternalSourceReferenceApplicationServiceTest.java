@@ -138,7 +138,7 @@ class InternalSourceReferenceApplicationServiceTest {
                 target.methodName(), target.parameterTypes(), null, Optional.empty(),
                 new SourceRange(target.sourceFile(), methodRange),
                 List.<TypeReference>of(), Optional.empty(), List.of(), List.of(), List.of(),
-                new SyntaxPosition(10, 9), MethodTargetResolution.resolved(target), true, false, true);
+                new SyntaxPosition(10, 9), MethodTargetResolution.resolved(target), true, false, true, List.of());
         return SourceTypeMetadataFixture.sourceType(
                 sourceType.javaType().className(),
                 sourceType.javaType().packageName(),

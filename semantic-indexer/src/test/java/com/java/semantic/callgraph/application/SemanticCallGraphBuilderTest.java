@@ -683,7 +683,7 @@ class SemanticCallGraphBuilderTest {
     private static SyntaxInvocation receiverInvocation(String expression, int line, String receiverDeclaration) {
         SyntaxRange invocationRange = range(line, 0, line, expression.length());
         return new SyntaxInvocation(SyntaxInvocation.InvocationKind.METHOD, invocationRange, expression,
-                "receiver", receiverDeclaration, "", Optional.empty(), invocationRange.start());
+                "receiver", receiverDeclaration, "", Optional.empty(), invocationRange.start(), List.of());
     }
 
     private static SourceTypeMetadata lombokDataType(String fullyQualifiedName, String fieldName) {
@@ -693,7 +693,7 @@ class SemanticCallGraphBuilderTest {
         SyntaxRange range = range(0, 0, 10, 0);
         SourceFieldMetadata field = new SourceFieldMetadata(
                 fieldName, "BigDecimal", "", new NamedTypeReference(
-                        "BigDecimal", "BigDecimal", Optional.empty(), false), List.of());
+                        "BigDecimal", "BigDecimal", Optional.empty(), false), List.of(), com.java.semantic.model.codefact.CodeFactKind.FIELD, new com.java.semantic.model.codefact.SourceRange("SemanticCallGraphBuilderTest.java", new com.java.semantic.model.codefact.SyntaxRange(new com.java.semantic.model.codefact.SyntaxPosition(0, 0), new com.java.semantic.model.codefact.SyntaxPosition(0, 1))));
         return com.java.semantic.syntax.domain.SourceTypeMetadataFixture.sourceType(
                 simpleName, packageName, fullyQualifiedName, simpleName + ".java",
                 SourceTypeKind.CLASS, false, List.of(), List.of(), List.of("Data"), List.of(),
@@ -719,7 +719,7 @@ class SemanticCallGraphBuilderTest {
                 sqlSource == SqlSourceKind.ANNOTATION ? Optional.of(declarationLocation) : Optional.empty(),
                 declarationLocation,
                 List.<TypeReference>of(), Optional.empty(), List.of(), List.of(), List.of(), methodRange.start(),
-                MethodTargetResolution.resolved(target), false, true, false);
+                MethodTargetResolution.resolved(target), false, true, false, List.of());
         return com.java.semantic.syntax.domain.SourceTypeMetadataFixture.sourceType(
                 target.className(), target.packageName(), target.packageName() + "." + target.className(),
                 target.sourceFile(), SourceTypeKind.INTERFACE, false,
@@ -793,8 +793,8 @@ class SemanticCallGraphBuilderTest {
                 target.methodName(), target.parameterTypes(), null, Optional.empty(),
                 new SourceRange(target.sourceFile(), range),
                 List.<TypeReference>of(), Optional.empty(), List.of(),
-                List.of(new AnnotationEvidence("Async", Optional.empty())), List.of(), range.start(),
-                MethodTargetResolution.resolved(target), true, false, true);
+                List.of(new AnnotationEvidence("Async", Optional.empty(), Optional.empty(), List.of())), List.of(), range.start(),
+                MethodTargetResolution.resolved(target), true, false, true, List.of());
     }
 
     private static SourceTypeMetadata type(MethodTarget target, SourceTypeKind kind, boolean executableDeclaration) {
@@ -824,7 +824,7 @@ class SemanticCallGraphBuilderTest {
                 target.methodName(), target.parameterTypes(), null, Optional.empty(),
                 new SourceRange(target.sourceFile(), range),
                 List.<TypeReference>of(), Optional.empty(), invocations, List.of(), List.of(), range.start(),
-                MethodTargetResolution.resolved(target), executableDeclaration, !executableDeclaration, true);
+                MethodTargetResolution.resolved(target), executableDeclaration, !executableDeclaration, true, List.of());
     }
 
     private static SemanticCall externalCall(String rawSignature, int line) {
@@ -836,7 +836,7 @@ class SemanticCallGraphBuilderTest {
     private static SyntaxInvocation invocation(String expression, int line) {
         SyntaxRange range = range(line, 0, line, 4);
         return new SyntaxInvocation(SyntaxInvocation.InvocationKind.METHOD, range, expression,
-                "worker", "", "", Optional.empty(), range.start());
+                "worker", "", "", Optional.empty(), range.start(), List.of());
     }
 
     private static SyntaxRange range(int startLine, int startCharacter, int endLine, int endCharacter) {

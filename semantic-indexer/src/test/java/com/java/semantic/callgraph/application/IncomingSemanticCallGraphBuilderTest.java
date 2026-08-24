@@ -527,7 +527,7 @@ class IncomingSemanticCallGraphBuilderTest {
                 sqlSource == SqlSourceKind.ANNOTATION ? Optional.of(declarationLocation) : Optional.empty(),
                 declarationLocation, List.<TypeReference>of(),
                 Optional.empty(), List.of(), List.of(), List.of(), range.start(),
-                MethodTargetResolution.resolved(target), false, true, true);
+                MethodTargetResolution.resolved(target), false, true, true, List.of());
         return com.java.semantic.syntax.domain.SourceTypeMetadataFixture.sourceType(
                 target.className(), target.packageName(), target.packageName() + "." + target.className(),
                 target.sourceFile(), SourceTypeKind.INTERFACE, false,
@@ -558,7 +558,7 @@ class IncomingSemanticCallGraphBuilderTest {
                 target.methodName(), target.parameterTypes(), null, Optional.empty(),
                 new SourceRange(target.sourceFile(), range), List.<TypeReference>of(),
                 Optional.empty(), invocations, List.of(), List.of(), range.start(),
-                MethodTargetResolution.resolved(target), true, false, true);
+                MethodTargetResolution.resolved(target), true, false, true, List.of());
         return com.java.semantic.syntax.domain.SourceTypeMetadataFixture.sourceType(
                 target.className(), target.packageName(), target.packageName() + "." + target.className(),
                 target.sourceFile(), SourceTypeKind.CLASS, false,
@@ -574,8 +574,8 @@ class IncomingSemanticCallGraphBuilderTest {
                 target.methodName(), target.parameterTypes(), null, Optional.empty(),
                 new SourceRange(target.sourceFile(), range),
                 List.<TypeReference>of(), Optional.empty(), invocations,
-                List.of(new AnnotationEvidence("Async", Optional.empty())), List.of(), range.start(),
-                MethodTargetResolution.resolved(target), true, false, true);
+                List.of(new AnnotationEvidence("Async", Optional.empty(), Optional.empty(), List.of())), List.of(), range.start(),
+                MethodTargetResolution.resolved(target), true, false, true, List.of());
         return com.java.semantic.syntax.domain.SourceTypeMetadataFixture.sourceType(
                 target.className(), target.packageName(), target.packageName() + "." + target.className(),
                 target.sourceFile(), SourceTypeKind.CLASS, false,
@@ -589,7 +589,7 @@ class IncomingSemanticCallGraphBuilderTest {
                 target.methodName(), target.parameterTypes(), null, Optional.empty(),
                 new SourceRange(target.sourceFile(), range), List.<TypeReference>of(),
                 Optional.empty(), List.of(), List.of(), List.of(), range.start(),
-                MethodTargetResolution.resolved(target), false, true, true);
+                MethodTargetResolution.resolved(target), false, true, true, List.of());
         return com.java.semantic.syntax.domain.SourceTypeMetadataFixture.sourceType(
                 target.className(), target.packageName(), target.packageName() + "." + target.className(),
                 target.sourceFile(), SourceTypeKind.INTERFACE, false,
@@ -600,7 +600,7 @@ class IncomingSemanticCallGraphBuilderTest {
     private static SyntaxInvocation invocation(int line) {
         SyntaxRange range = new SyntaxRange(new SyntaxPosition(line, 0), new SyntaxPosition(line, 4));
         return new SyntaxInvocation(SyntaxInvocation.InvocationKind.METHOD, range, "work()",
-                "worker", "", "", Optional.empty(), range.start());
+                "worker", "", "", Optional.empty(), range.start(), List.of());
     }
 
     private static SemanticRange semanticRange(int line) {

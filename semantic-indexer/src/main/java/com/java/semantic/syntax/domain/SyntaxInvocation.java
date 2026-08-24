@@ -4,6 +4,7 @@ import com.java.semantic.model.codefact.SyntaxRange;
 
 import java.util.Objects;
 import java.util.Optional;
+import java.util.List;
 
 /** 一個呼叫位置的原始語法證據 */
 public record SyntaxInvocation(
@@ -14,7 +15,8 @@ public record SyntaxInvocation(
         String receiverDeclaration,
         String qualifier,
         Optional<InvocationTarget> resolvedTarget,
-        SyntaxPosition resolutionAnchor) {
+        SyntaxPosition resolutionAnchor,
+        List<SyntaxInvocationArgument> arguments) {
 
     public SyntaxInvocation {
         Objects.requireNonNull(kind, "kind is required");
@@ -25,6 +27,7 @@ public record SyntaxInvocation(
         qualifier = Objects.requireNonNullElse(qualifier, "");
         resolvedTarget = Objects.requireNonNull(resolvedTarget, "resolvedTarget is required");
         resolutionAnchor = Objects.requireNonNull(resolutionAnchor, "resolutionAnchor is required");
+        arguments = List.copyOf(Objects.requireNonNull(arguments, "arguments are required"));
     }
 
     /** JDT Core 能直接辨識的呼叫語法種類 */

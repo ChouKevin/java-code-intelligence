@@ -11,6 +11,7 @@ import java.util.Optional;
 import com.java.semantic.syntax.domain.SyntaxInvocation;
 import com.java.semantic.syntax.domain.SyntaxInvocation.InvocationKind;
 import com.java.semantic.syntax.domain.InvocationTarget;
+import com.java.semantic.syntax.domain.SyntaxInvocationArgument;
 import com.java.semantic.model.codefact.SyntaxPosition;
 import com.java.semantic.model.codefact.JavaIdentityNormalizer;
 
@@ -20,6 +21,7 @@ import org.eclipse.jdt.core.dom.ClassInstanceCreation;
 import org.eclipse.jdt.core.dom.CompilationUnit;
 import org.eclipse.jdt.core.dom.CreationReference;
 import org.eclipse.jdt.core.dom.Expression;
+import org.eclipse.jdt.core.dom.StringLiteral;
 import org.eclipse.jdt.core.dom.ExpressionMethodReference;
 import org.eclipse.jdt.core.dom.FieldAccess;
 import org.eclipse.jdt.core.dom.FieldDeclaration;
@@ -120,7 +122,8 @@ final class InvocationExtractor {
                 declaration,
                 "",
                 invocationTarget(method),
-                AstSourceRanges.range(unit, node.getName()).start());
+                AstSourceRanges.range(unit, node.getName()).start(),
+                List.of());
     }
 
     private static SyntaxInvocation invocation(InvocationKind kind, ASTNode node, ASTNode receiver,
@@ -136,7 +139,26 @@ final class InvocationExtractor {
                 receiverDeclaration,
                 qualifier,
                 invocationTarget(node),
-                resolutionAnchor(node, unit));
+                resolutionAnchor(node, unit),
+                argumentsOf(node, unit, source));
+    }
+
+    private static List<SyntaxInvocationArgument> argumentsOf(ASTNode node, CompilationUnit unit, String source) {
+        List<?> values = switch (node) {
+            case MethodInvocation invocation -> invocation.arguments();
+            case ClassInstanceCreation creation -> creation.arguments();
+            default -> List.of();
+        };
+        List<SyntaxInvocationArgument> arguments = new ArrayList<>();
+        for (Object value : values) {
+            Expression expression = (Expression) value;
+            Optional<String> literalValue = expression instanceof StringLiteral literal
+                    ? Optional.of(literal.getLiteralValue())
+                    : Optional.empty();
+            arguments.add(new SyntaxInvocationArgument(AstSourceRanges.range(unit, expression),
+                    AstSourceRanges.text(source, expression), literalValue));
+        }
+        return List.copyOf(arguments);
     }
 
     private static SyntaxPosition resolutionAnchor(ASTNode node, CompilationUnit unit) {

@@ -35,7 +35,7 @@ class EventListenerDiscoveryPolicyTest {
     void should_match_unbound_written_event_listener_name() {
         EventListenerDiscoveryPage page = policy.discover(syntax(method(
                 "onOrder", resolvedTarget("events/OrderListeners.java", "onOrder", List.of(EVENT_TYPE)),
-                List.of(new AnnotationEvidence("org.springframework.context.event.EventListener", Optional.empty())))),
+                List.of(new AnnotationEvidence("org.springframework.context.event.EventListener", Optional.empty(), Optional.empty(), List.of())))),
                 EVENT_TYPE, 0, 50);
 
         assertThat(page.candidates().candidates()).singleElement().satisfies(candidate -> {
@@ -90,8 +90,8 @@ class EventListenerDiscoveryPolicyTest {
         EventListenerDiscoveryPage page = policy.discover(syntax(method(
                 "onOrder", resolvedTarget("events/OrderListeners.java", "onOrder", List.of(EVENT_TYPE)),
                 List.of(
-                        new AnnotationEvidence("TransactionalEventListener", Optional.empty()),
-                        new AnnotationEvidence("EventListener", Optional.empty())))), EVENT_TYPE, 0, 50);
+                        new AnnotationEvidence("TransactionalEventListener", Optional.empty(), Optional.empty(), List.of()),
+                        new AnnotationEvidence("EventListener", Optional.empty(), Optional.empty(), List.of())))), EVENT_TYPE, 0, 50);
 
         assertThat(page.candidates().candidates()).singleElement().satisfies(candidate ->
                 assertThat(candidate.annotationEvidence())
@@ -106,10 +106,10 @@ class EventListenerDiscoveryPolicyTest {
         EventListenerDiscoveryPage page = policy.discover(syntax(method(
                 "onOrder", resolvedTarget("events/OrderListeners.java", "onOrder", List.of(EVENT_TYPE)),
                 List.of(
-                        new AnnotationEvidence("EventListener", Optional.empty()),
+                        new AnnotationEvidence("EventListener", Optional.empty(), Optional.empty(), List.of()),
                         resolvedAnnotation("eventAlias", "org.springframework.context.event", "EventListener"),
-                        new AnnotationEvidence("EventListener", Optional.empty()),
-                        new AnnotationEvidence("TransactionalEventListener", Optional.empty())))), EVENT_TYPE, 0, 50);
+                        new AnnotationEvidence("EventListener", Optional.empty(), Optional.empty(), List.of()),
+                        new AnnotationEvidence("TransactionalEventListener", Optional.empty(), Optional.empty(), List.of())))), EVENT_TYPE, 0, 50);
 
         assertThat(page.candidates().candidates()).singleElement().satisfies(candidate ->
                 assertThat(candidate.annotationEvidence()).containsExactly(
@@ -125,7 +125,7 @@ class EventListenerDiscoveryPolicyTest {
         MethodTarget target = resolvedTarget("events/OrderListeners.java", "onOrder", List.of(EVENT_TYPE));
         EventListenerDiscoveryPage page = policy.discover(syntax(method(
                 "onOrder", target,
-                List.of(new AnnotationEvidence("EventListener", Optional.empty())))), EVENT_TYPE, 0, 50);
+                List.of(new AnnotationEvidence("EventListener", Optional.empty(), Optional.empty(), List.of())))), EVENT_TYPE, 0, 50);
 
         assertThat(page.candidates().candidates()).singleElement().satisfies(candidate -> {
             assertThat(candidate.target()).isSameAs(target);
@@ -138,7 +138,7 @@ class EventListenerDiscoveryPolicyTest {
         MethodTarget target = resolvedTarget("events/OrderListeners.java", "onOrder", List.of(EVENT_TYPE + "[]"));
         EventListenerDiscoveryPage page = policy.discover(syntax(method(
                 "onOrder", target,
-                List.of(new AnnotationEvidence("EventListener", Optional.empty())))), EVENT_TYPE, 0, 50);
+                List.of(new AnnotationEvidence("EventListener", Optional.empty(), Optional.empty(), List.of())))), EVENT_TYPE, 0, 50);
 
         assertThat(page.candidates().candidates()).isEmpty();
     }
@@ -262,11 +262,11 @@ class EventListenerDiscoveryPolicyTest {
     }
 
     private static List<AnnotationEvidence> eventListener() {
-        return List.of(new AnnotationEvidence("EventListener", Optional.empty()));
+        return List.of(new AnnotationEvidence("EventListener", Optional.empty(), Optional.empty(), List.of()));
     }
 
     private static AnnotationEvidence resolvedAnnotation(String writtenName, String packageName, String className) {
-        return new AnnotationEvidence(writtenName, Optional.of(new JavaTypeIdentity(packageName, className)));
+        return new AnnotationEvidence(writtenName, Optional.of(new JavaTypeIdentity(packageName, className)), Optional.empty(), List.of());
     }
 
     private static MethodTarget resolvedTarget(String sourceFile, String methodName, List<String> parameters) {
@@ -317,14 +317,14 @@ class EventListenerDiscoveryPolicyTest {
         return new SourceMethodMetadata(name, List.of("DifferentReference"), null, Optional.empty(),
                 new SourceRange(sourceFile, range()),
                 List.of(new NamedTypeReference(EVENT_TYPE, EVENT_TYPE, Optional.empty(), false)), Optional.empty(), List.of(),
-                annotations, List.of(), new SyntaxPosition(2, 4), targetResolution, true, false, false);
+                annotations, List.of(), new SyntaxPosition(2, 4), targetResolution, true, false, false, List.of());
     }
 
     private static SourceMethodMetadata unresolvedMethod(String name) {
         return new SourceMethodMetadata(name, List.of(), null, Optional.empty(),
                 new SourceRange(name + ".java", range()), List.of(), Optional.empty(), List.of(), eventListener(),
                 List.of(), new SyntaxPosition(2, 4), MethodTargetResolution.unresolved("BINDING_UNAVAILABLE"),
-                true, false, false);
+                true, false, false, List.of());
     }
 
     private static SyntaxRange range() {

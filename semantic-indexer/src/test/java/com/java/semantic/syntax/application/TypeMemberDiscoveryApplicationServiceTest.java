@@ -480,7 +480,7 @@ class TypeMemberDiscoveryApplicationServiceTest {
                         "Order[][]",
                         namedTypeReference("Order", "com.acme.order.Order"),
                         2),
-                List.of());
+                List.of(), com.java.semantic.model.codefact.CodeFactKind.FIELD, new com.java.semantic.model.codefact.SourceRange("TypeMemberDiscoveryApplicationServiceTest.java", new com.java.semantic.model.codefact.SyntaxRange(new com.java.semantic.model.codefact.SyntaxPosition(0, 0), new com.java.semantic.model.codefact.SyntaxPosition(0, 1))));
         return SourceTypeMetadataFixture.sourceType(
                 "OrderService",
                 "com.acme.order",
@@ -548,7 +548,7 @@ class TypeMemberDiscoveryApplicationServiceTest {
                 MethodTargetResolution.resolved(target),
                 true,
                 false,
-                false);
+                false, List.of());
     }
 
     private static SourceMethodMetadata abstractMethod(String sourceFile, String name, List<String> parameterTypes) {
@@ -573,7 +573,7 @@ class TypeMemberDiscoveryApplicationServiceTest {
                 MethodTargetResolution.resolved(target),
                 false,
                 true,
-                true);
+                true, List.of());
     }
 
     private static SourceFieldMetadata field(String name, String writtenType, String resolvedType) {
@@ -582,7 +582,7 @@ class TypeMemberDiscoveryApplicationServiceTest {
                 writtenType,
                 "",
                 namedTypeReference(writtenType, resolvedType),
-                List.of(new AnnotationEvidence("Autowired", Optional.empty())));
+                List.of(new AnnotationEvidence("Autowired", Optional.empty(), Optional.empty(), List.of())), com.java.semantic.model.codefact.CodeFactKind.FIELD, new com.java.semantic.model.codefact.SourceRange("TypeMemberDiscoveryApplicationServiceTest.java", new com.java.semantic.model.codefact.SyntaxRange(new com.java.semantic.model.codefact.SyntaxPosition(0, 0), new com.java.semantic.model.codefact.SyntaxPosition(0, 1))));
     }
 
     private static NamedTypeReference namedTypeReference(String writtenType, String resolvedType) {

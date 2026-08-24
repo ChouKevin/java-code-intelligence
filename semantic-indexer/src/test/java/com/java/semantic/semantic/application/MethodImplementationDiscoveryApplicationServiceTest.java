@@ -503,7 +503,7 @@ class MethodImplementationDiscoveryApplicationServiceTest {
                 MethodTargetResolution.resolved(target),
                 executableDeclaration,
                 abstractDeclaration,
-                true);
+                true, List.of());
         return com.java.semantic.syntax.domain.SourceTypeMetadataFixture.sourceType(
                 target.className(),
                 target.packageName(),

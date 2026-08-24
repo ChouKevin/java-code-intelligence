@@ -5,6 +5,7 @@ public enum CodeFactKind {
     METHOD,
     FIELD,
     ENUM_CONSTANT,
+    RECORD_COMPONENT,
     MAPPER_STATEMENT,
     ANNOTATION_USAGE,
     TYPE_USAGE,

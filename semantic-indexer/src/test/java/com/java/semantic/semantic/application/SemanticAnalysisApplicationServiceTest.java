@@ -180,7 +180,7 @@ class SemanticAnalysisApplicationServiceTest {
                 MethodTargetResolution.resolved(target),
                 true,
                 false,
-                true);
+                true, List.of());
         SourceTypeMetadata metadata = com.java.semantic.syntax.domain.SourceTypeMetadataFixture.sourceType(
                 target.className(),
                 target.packageName(),

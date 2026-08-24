@@ -45,7 +45,7 @@ public final class SourceTypeMetadataFixture {
                 new SourceTypeRelationships(nominalTypes(extendedTypes), nominalTypes(implementedTypes)),
                 new SourceTypeMembers(fields, methods, fluentSetters, chainedAccessors),
                 new FrameworkTypeFacts(annotationNames.stream()
-                        .map(name -> new AnnotationEvidence(name, Optional.empty()))
+                        .map(name -> new AnnotationEvidence(name, Optional.empty(), Optional.empty(), List.of()))
                         .toList(), profiles, primary, beanQualifiers),
                 new CompilationUnitContext(imports));
     }

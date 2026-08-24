@@ -107,7 +107,7 @@ class CanonicalTargetProjectionTest {
                 target.methodName(), target.parameterTypes(), null, Optional.empty(),
                 new SourceRange(target.sourceFile(), methodRange),
                 List.<TypeReference>of(), Optional.empty(), List.of(), List.of(), List.of(), methodRange.start(),
-                MethodTargetResolution.resolved(target), true, false, true);
+                MethodTargetResolution.resolved(target), true, false, true, List.of());
         SyntaxRange typeRange = new SyntaxRange(new SyntaxPosition(0, 0), new SyntaxPosition(5, 0));
         return com.java.semantic.syntax.domain.SourceTypeMetadataFixture.sourceType(
                 target.className(), target.packageName(), target.packageName() + "." + target.className(),

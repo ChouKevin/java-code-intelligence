@@ -36,6 +36,17 @@ public sealed interface RelationTarget permits RelationTarget.External, Relation
             if (target instanceof ExternalTarget.Destination destination) {
                 return "external-destination" + framed(destination.broker()) + framed(destination.destination());
             }
+            if (target instanceof ExternalTarget.ConfigurationKey configurationKey) {
+                return "external-configuration-key" + framed(configurationKey.key());
+            }
+            if (target instanceof ExternalTarget.SqlIdentifier sqlIdentifier) {
+                return "external-sql-identifier" + framed(sqlIdentifier.identifier());
+            }
+            if (target instanceof ExternalTarget.UnresolvedCall unresolvedCall) {
+                return "external-unresolved-call" + framed(unresolvedCall.expression())
+                        + framed(unresolvedCall.receiver()) + framed(unresolvedCall.methodName())
+                        + framed(Integer.toString(unresolvedCall.arity()));
+            }
             throw new IllegalStateException("unsupported external relation target");
         }
     }

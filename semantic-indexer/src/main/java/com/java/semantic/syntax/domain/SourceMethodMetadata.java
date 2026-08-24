@@ -24,7 +24,8 @@ public record SourceMethodMetadata(
         MethodTargetResolution analysisTarget,
         boolean executableDeclaration,
         boolean abstractDeclaration,
-        boolean overridableDeclaration) {
+        boolean overridableDeclaration,
+        List<SourceThrownTypeMetadata> thrownTypes) {
 
     public SourceMethodMetadata {
         paramTypes = List.copyOf(paramTypes);
@@ -37,6 +38,7 @@ public record SourceMethodMetadata(
         bodyTypeReferences = List.copyOf(bodyTypeReferences);
         namePosition = Objects.requireNonNull(namePosition, "namePosition is required");
         analysisTarget = Objects.requireNonNull(analysisTarget, "analysisTarget is required");
+        thrownTypes = List.copyOf(thrownTypes);
         if (sqlSource == SqlSourceKind.ANNOTATION && annotationSqlLocation.isEmpty()) {
             throw new IllegalArgumentException("annotation SQL requires annotationSqlLocation");
         }

@@ -37,6 +37,7 @@ public record SymbolDocument(
                         || kind == CodeFactKind.METHOD
                         || kind == CodeFactKind.FIELD
                         || kind == CodeFactKind.ENUM_CONSTANT
+                        || kind == CodeFactKind.RECORD_COMPONENT
                         || kind == CodeFactKind.MAPPER_STATEMENT,
                 "symbol kind must be a declaration kind");
         owner = Objects.requireNonNull(owner, "owner is required");

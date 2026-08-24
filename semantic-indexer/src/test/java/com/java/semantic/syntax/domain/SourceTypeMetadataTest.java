@@ -62,7 +62,7 @@ class SourceTypeMetadataTest {
         assertThatThrownBy(() -> new SourceMethodMetadata(
                 "process", List.of(), null, Optional.empty(), declarationLocation,
                 List.of(), Optional.empty(), List.of(), List.of(), List.of(), range.start(),
-                MethodTargetResolution.resolved(target), true, false, true))
+                MethodTargetResolution.resolved(target), true, false, true, List.of()))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessage("analysis target sourceFile must match declarationLocation");
     }

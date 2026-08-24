@@ -162,7 +162,7 @@ class GeneratedMemberEvidenceTest {
 
     private static SourceFieldMetadata field(String name, String type) {
         return new SourceFieldMetadata(name, type, "", new NamedTypeReference(
-                type, type, Optional.empty(), false), List.of());
+                type, type, Optional.empty(), false), List.of(), com.java.semantic.model.codefact.CodeFactKind.FIELD, new com.java.semantic.model.codefact.SourceRange("GeneratedMemberEvidenceTest.java", new com.java.semantic.model.codefact.SyntaxRange(new com.java.semantic.model.codefact.SyntaxPosition(0, 0), new com.java.semantic.model.codefact.SyntaxPosition(0, 1))));
     }
 
     private static SourceMethodMetadata method(String name, List<String> paramTypes) {
@@ -170,13 +170,13 @@ class GeneratedMemberEvidenceTest {
         return new SourceMethodMetadata(
                 name, paramTypes, null, Optional.empty(),
                 new SourceRange("Generated.java", range), List.of(), Optional.empty(), List.of(), List.of(),
-                List.of(), range.start(), MethodTargetResolution.unresolved("test-fixture"), true, false, true);
+                List.of(), range.start(), MethodTargetResolution.unresolved("test-fixture"), true, false, true, List.of());
     }
 
     private static SyntaxInvocation invocation(InvocationKind kind, String expression, String receiverDeclaration) {
         SyntaxRange range = range(0, 0, 0, expression.length());
         return new SyntaxInvocation(
-                kind, range, expression, "receiver", receiverDeclaration, "", Optional.empty(), range.start());
+                kind, range, expression, "receiver", receiverDeclaration, "", Optional.empty(), range.start(), List.of());
     }
 
     private static SyntaxRange range(int startLine, int startCharacter, int endLine, int endCharacter) {

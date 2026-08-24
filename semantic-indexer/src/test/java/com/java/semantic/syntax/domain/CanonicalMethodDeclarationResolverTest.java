@@ -209,7 +209,7 @@ class CanonicalMethodDeclarationResolverTest {
                 method.declarationLocation(),
                 method.parameterTypeReferences(), method.returnType(), method.invocations(), method.annotationEvidence(),
                 method.bodyTypeReferences(), method.namePosition(), resolution,
-                method.executableDeclaration(), method.abstractDeclaration(), method.overridableDeclaration());
+                method.executableDeclaration(), method.abstractDeclaration(), method.overridableDeclaration(), List.of());
         return new SourceTypeMetadata(metadata.declaration(), metadata.relationships(),
                 new SourceTypeMembers(metadata.members().fields(), List.of(replacement),
                         metadata.members().fluentSetters(), metadata.members().chainedAccessors()),

@@ -3,8 +3,14 @@ package com.java.semantic.model.codefact;
 public enum RelationKind {
     REFERENCES,
     CALLS,
-    DECLARES,
-    ANNOTATED_WITH,
-    PUBLISHES_TO,
-    USES
+    IMPLEMENTS,
+    OVERRIDES,
+    EXTENDS,
+    USES_TYPE,
+    USES_ANNOTATION,
+    READS_CONFIGURATION,
+    USES_SQL_IDENTIFIER,
+    CALLS_OUTBOUND_API,
+    PUBLISHES_MESSAGE,
+    DECLARES_ERROR_CONTRACT
 }

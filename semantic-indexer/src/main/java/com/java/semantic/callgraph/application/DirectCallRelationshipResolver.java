@@ -344,7 +344,8 @@ public final class DirectCallRelationshipResolver {
                         "",
                         "",
                         Optional.empty(),
-                        syntaxRange(callSite).start()));
+                        syntaxRange(callSite).start(),
+                        List.of()));
     }
 
     private List<SyntaxInvocation> invocations(
