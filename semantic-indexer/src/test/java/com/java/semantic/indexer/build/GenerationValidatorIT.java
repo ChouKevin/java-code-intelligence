@@ -115,6 +115,9 @@ class GenerationValidatorIT {
                 Arguments.of("missing entry method", (java.util.function.Consumer<MongoTemplate>) template ->
                         template.getCollection(IndexCollections.ENTRY_POINTS).updateOne(new Document(),
                                 new Document("$set", new Document("method", "missing-method"))), "MISSING_ENTRY_POINT_METHOD"),
+                Arguments.of("mismatched entry route path", (java.util.function.Consumer<MongoTemplate>) template ->
+                        template.getCollection(IndexCollections.ENTRY_POINTS).updateOne(new Document(),
+                                new Document("$set", new Document("path", "/admin"))), "PROJECTION_IDENTITY_MISMATCH"),
                 Arguments.of("unsupported schema", (java.util.function.Consumer<MongoTemplate>) template ->
                         template.getCollection(IndexCollections.GENERATION_MANIFESTS).updateOne(new Document("generationId", "g1"),
                                 new Document("$set", new Document("schemaVersion", 99))), "UNSUPPORTED_SCHEMA"),
@@ -126,6 +129,15 @@ class GenerationValidatorIT {
                         template.getCollection(IndexCollections.SEARCH).deleteOne(new Document("authority", "ENTRY_POINTS")), "INCOMPLETE_SEARCH"),
                 Arguments.of("orphan search authority", (java.util.function.Consumer<MongoTemplate>) template ->
                         template.getCollection(IndexCollections.SEARCH).insertOne(orphanSearch(template)), "ORPHAN_SEARCH"),
+                Arguments.of("mismatched search tokens", (java.util.function.Consumer<MongoTemplate>) template ->
+                        template.getCollection(IndexCollections.SEARCH).updateOne(new Document(),
+                                new Document("$set", new Document("tokens", List.of("tampered")))), "SEARCH_AUTHORITY_MISMATCH"),
+                Arguments.of("mismatched search package", (java.util.function.Consumer<MongoTemplate>) template ->
+                        template.getCollection(IndexCollections.SEARCH).updateOne(new Document(),
+                                new Document("$set", new Document("package", "tampered"))), "SEARCH_AUTHORITY_MISMATCH"),
+                Arguments.of("missing projection source path", (java.util.function.Consumer<MongoTemplate>) template ->
+                        template.getCollection(IndexCollections.SYMBOLS).updateOne(new Document(),
+                                new Document("$unset", new Document("sourcePath", ""))), "INVALID_RANGE"),
                 Arguments.of("mismatched source artifact", (java.util.function.Consumer<MongoTemplate>) template ->
                         template.getCollection(IndexCollections.SYMBOLS).updateOne(new Document(),
                                 new Document("$set", new Document("sourceArtifactId", new Document("value", "f".repeat(64))))),
@@ -134,6 +146,12 @@ class GenerationValidatorIT {
                     template.getCollection(IndexCollections.REPOSITORIES).dropIndex("repository_id_unique");
                     template.getCollection(IndexCollections.REPOSITORIES).createIndex(new Document("wrongKey", 1),
                             new IndexOptions().name("repository_id_unique"));
+                }, "INVALID_REQUIRED_INDEX"),
+                Arguments.of("wrong compound index order with correct name", (java.util.function.Consumer<MongoTemplate>) template -> {
+                    template.getCollection(IndexCollections.SYMBOLS).dropIndex("symbol_canonical");
+                    template.getCollection(IndexCollections.SYMBOLS).createIndex(
+                            new Document("generationId", 1).append("repoId", 1).append("canonical", 1),
+                            new IndexOptions().name("symbol_canonical"));
                 }, "INVALID_REQUIRED_INDEX"));
     }
 

@@ -2,6 +2,7 @@ package com.java.semantic.indexer.store;
 
 import com.java.semantic.model.index.IndexSchemaContract;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -21,7 +22,8 @@ public final class MongoIndexDefinitionMatcher {
         Map<String, Object> actualPartial = Optional.ofNullable(partial)
                 .map(MongoIndexDefinitionMatcher::canonicalFilter)
                 .orElse(Map.of());
-        return new Document(required.keys()).equals(key)
+        return Objects.nonNull(key)
+                && List.copyOf(key.entrySet()).equals(List.copyOf(required.keys().entrySet()))
                 && unique == required.unique()
                 && actualPartial.equals(required.partialFilter());
     }

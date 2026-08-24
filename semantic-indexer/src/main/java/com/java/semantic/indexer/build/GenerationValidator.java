@@ -28,6 +28,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Stream;
 import org.bson.Document;
@@ -376,7 +377,8 @@ public final class GenerationValidator {
                         entryPoint.fact().identity().repositoryRevision(), issues);
                 if (!entryPoint.fact().id().value().equals(document.getString("entryPointId"))
                         || !entryPoint.fact().identity().canonicalForm().equals(document.getString("canonical"))
-                        || !entryPoint.method().canonicalForm().equals(document.getString("method"))) {
+                        || !entryPoint.method().canonicalForm().equals(document.getString("method"))
+                        || !entryPoint.trigger().httpPath().equals(Optional.ofNullable(document.getString("path")))) {
                     issues.add(issue("PROJECTION_IDENTITY_MISMATCH", "entry-point storage identity differs from its authoritative fact"));
                 }
                 entryPoints.add(new StoredEntryPoint(document, entryPoint));
@@ -467,7 +469,9 @@ public final class GenerationValidator {
                     || !authority.projection().name().equals(document.getString("authority"))
                     || !authority.kind().name().equals(document.getString("kind"))
                     || !authority.canonical().equals(document.getString("canonical"))
-                    || !authority.sourcePath().equals(document.getString("sourcePath"))) {
+                    || !Objects.equals(authority.sourcePath(), document.getString("sourcePath"))
+                    || !search.normalizedTokens().equals(document.getList("tokens", String.class))
+                    || !search.packageName().orElse("").equals(document.getString("package"))) {
                 issues.add(issue("SEARCH_AUTHORITY_MISMATCH", "search projection differs from its authoritative fact"));
             }
         }
