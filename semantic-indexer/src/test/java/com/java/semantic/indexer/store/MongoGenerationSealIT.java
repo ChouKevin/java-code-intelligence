@@ -32,6 +32,7 @@ class MongoGenerationSealIT {
             assertThat(template.getCollection("index_jobs").find(new Document("jobId", "job-1")).first().getList("acknowledgedBatches", String.class)).containsExactly("acknowledged");
             assertThat(template.getCollection("generation_manifests").find(new Document("repoId", "orders")).first().getList("outstandingBatches", String.class)).isEmpty();
             assertThat(template.getCollection("generation_manifests").find(new Document("repoId", "orders")).first().getList("acknowledgedBatches", String.class)).containsExactly("acknowledged");
+            markValidated(template);
             writer.seal(lease, "digest");
             assertThat(template.getCollection("generation_manifests").find(new Document("repoId", "orders")).first().getString("writeState")).isEqualTo("SEALED_VALID");
             assertThatThrownBy(() -> writer.writeBatch(lease, "late", List.of())).isInstanceOf(IllegalStateException.class);
@@ -70,6 +71,7 @@ class MongoGenerationSealIT {
 
             batch.start();
             await(registrationReached);
+            markValidated(template);
             writer.seal(lease, "digest");
             permitRegistration.countDown();
             join(batch);
@@ -152,5 +154,11 @@ class MongoGenerationSealIT {
             Thread.currentThread().interrupt();
             throw new AssertionError("interrupted while joining batch thread", exception);
         }
+    }
+
+    private static void markValidated(org.springframework.data.mongodb.core.MongoTemplate template) {
+        template.getCollection("generation_manifests").updateOne(new Document("repoId", "orders"), new Document("$set",
+                new Document("validationResult", "VALID").append("validatedAt", new java.util.Date())
+                        .append("sealedCollectionCounts", new Document("symbols", 0L))));
     }
 }

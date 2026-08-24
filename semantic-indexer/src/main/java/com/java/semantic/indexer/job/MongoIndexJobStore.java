@@ -208,7 +208,7 @@ public final class MongoIndexJobStore implements IndexJobStore {
             return true;
         }
         if (revoke(job)) {
-            failAfterRevocation(job);
+            failAfterRevocation(job, IndexFailureCategory.WORKER_INTERRUPTED);
         } else {
             reconcileCommitted(job.repositoryId());
         }
@@ -226,12 +226,13 @@ public final class MongoIndexJobStore implements IndexJobStore {
     }
 
     @Override
-    public boolean failAfterRevocation(IndexJob job) {
+    public boolean failAfterRevocation(IndexJob job, IndexFailureCategory category) {
+        Objects.requireNonNull(category, "failure category is required");
         String workerId = job.workerId().orElseThrow();
         long fence = job.fence().orElseThrow().value();
         UpdateResult updated = template.updateFirst(new BasicQuery(jobOwnership(job, workerId, fence).append("operation", job.operation().name())),
                 new Update().set(ACTIVE, false).set("phase", IndexJobPhase.FAILED.name())
-                        .set("failureCategory", IndexFailureCategory.WORKER_INTERRUPTED.name()), IndexCollections.INDEX_JOBS);
+                        .set("failureCategory", category.name()), IndexCollections.INDEX_JOBS);
         return updated.getModifiedCount() == 1;
     }
 
@@ -243,7 +244,7 @@ public final class MongoIndexJobStore implements IndexJobStore {
         java.util.List<IndexJob> expired = expiredClaims.stream().map(this::jobForClaim).flatMap(Optional::stream).toList();
         for (IndexJob job : expired) {
             if (revoke(job)) {
-                failAfterRevocation(job);
+                failAfterRevocation(job, IndexFailureCategory.WORKER_INTERRUPTED);
             }
         }
     }
@@ -423,7 +424,7 @@ public final class MongoIndexJobStore implements IndexJobStore {
             Document repository = template.getCollection(IndexCollections.REPOSITORIES)
                     .find(repositoryWithoutAuthorityForUncommittedJob(job)).first();
             if (Objects.nonNull(repository)) {
-                failAfterRevocation(job);
+                failAfterRevocation(job, IndexFailureCategory.WORKER_INTERRUPTED);
             }
         }
     }

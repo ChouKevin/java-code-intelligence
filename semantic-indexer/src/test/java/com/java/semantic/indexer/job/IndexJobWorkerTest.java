@@ -190,7 +190,7 @@ class IndexJobWorkerTest {
         assertThat(new IndexJobWorker(jobs, publication).failOrCancel(job)).isFalse();
 
         verify(jobs).reconcileCommitted(job.repositoryId());
-        verify(jobs, never()).failAfterRevocation(job);
+        verify(jobs, never()).failAfterRevocation(job, IndexFailureCategory.WORKER_INTERRUPTED);
     }
 
     private static IndexJob claimedJob(IndexJobOperation operation) {

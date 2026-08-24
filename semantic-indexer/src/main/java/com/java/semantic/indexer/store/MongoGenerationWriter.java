@@ -76,6 +76,8 @@ public final class MongoGenerationWriter {
         try {
             verifyLease(lease);
             Document query = ownedWritingManifest(lease).append("identityDigest", digest)
+                    .append("validationResult", "VALID").append("validatedAt", new Document("$exists", true))
+                    .append("sealedCollectionCounts", new Document("$exists", true))
                     .append("$expr", new Document("$and", List.of(
                             new Document("$gt", List.of("$sealUntil", "$$NOW")),
                             noBatches("outstandingBatches"),
@@ -83,6 +85,25 @@ public final class MongoGenerationWriter {
             long changed = template.getCollection("generation_manifests").updateOne(query,
                     Updates.set("writeState", GenerationWriteState.SEALED_VALID.name())).getModifiedCount();
             if (changed != 1L) { throw new IllegalStateException("generation seal precondition failed"); }
+        } catch (MongoException exception) {
+            throw new SemanticIndexUnavailableException("SEMANTIC_INDEX_UNAVAILABLE", exception);
+        } catch (DataAccessResourceFailureException exception) {
+            throw new SemanticIndexUnavailableException("SEMANTIC_INDEX_UNAVAILABLE", exception);
+        }
+    }
+
+    /** Mirrors the exact coordinator expiry into the owned WRITING manifest, or fails closed. */
+    public java.util.Date currentClaimUntil(GenerationLease lease) {
+        Objects.requireNonNull(lease, "generation lease is required");
+        Document repository = new Document("repoId", lease.repositoryId().value()).append("activeJobId", lease.jobId())
+                .append("activeWorkerId", lease.workerId()).append("activeGenerationId", lease.generationId().value())
+                .append("fence", lease.fence()).append("$expr", new Document("$gt", List.of("$claimUntil", "$$NOW")));
+        try {
+            Document current = template.getCollection("repositories").find(repository).first();
+            if (Objects.isNull(current) || Objects.isNull(current.getDate("claimUntil"))) {
+                throw new IllegalStateException("generation lease is not active");
+            }
+            return current.getDate("claimUntil");
         } catch (MongoException exception) {
             throw new SemanticIndexUnavailableException("SEMANTIC_INDEX_UNAVAILABLE", exception);
         } catch (DataAccessResourceFailureException exception) {
@@ -104,8 +125,8 @@ public final class MongoGenerationWriter {
             Document manifest = new Document("repoId", lease.repositoryId().value()).append("generationId", lease.generationId().value())
                     .append("ownerJobId", lease.jobId()).append("ownerWorkerId", lease.workerId()).append("fence", lease.fence())
                     .append("writeState", GenerationWriteState.WRITING.name());
-            long modified = template.getCollection("generation_manifests").updateOne(manifest, Updates.set("sealUntil", successfulClaimUntil)).getModifiedCount();
-            if (modified != 1L) { throw new IllegalStateException("manifest lease mirror failed closed"); }
+            long matched = template.getCollection("generation_manifests").updateOne(manifest, Updates.set("sealUntil", successfulClaimUntil)).getMatchedCount();
+            if (matched != 1L) { throw new IllegalStateException("manifest lease mirror failed closed"); }
         } catch (MongoException exception) {
             throw new SemanticIndexUnavailableException("SEMANTIC_INDEX_UNAVAILABLE", exception);
         } catch (DataAccessResourceFailureException exception) {
@@ -149,6 +170,7 @@ public final class MongoGenerationWriter {
     private void registerOutstandingOnManifest(GenerationLease lease, String batchId) {
         Document query = ownedWritingManifest(lease).append("outstandingBatches", new Document("$ne", batchId))
                 .append("acknowledgedBatches", new Document("$ne", batchId))
+                .append("validationResult", new Document("$exists", false))
                 .append("$expr", new Document("$gt", List.of("$sealUntil", "$$NOW")));
         try {
             long changed = template.getCollection("generation_manifests").updateOne(query,

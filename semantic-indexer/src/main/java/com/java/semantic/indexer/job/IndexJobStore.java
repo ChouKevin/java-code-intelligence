@@ -18,7 +18,7 @@ public interface IndexJobStore {
     Optional<IndexJob> claim(IndexJobId jobId, String workerId, Duration claimLifetime);
     boolean renew(IndexJob claimedJob, Duration claimLifetime);
     boolean revoke(IndexJob claimedJob);
-    boolean failAfterRevocation(IndexJob claimedJob);
+    boolean failAfterRevocation(IndexJob claimedJob, IndexFailureCategory category);
     void failExpiredClaims();
     void reconcileCommittedJobs();
     void recoverRevokedClaims();

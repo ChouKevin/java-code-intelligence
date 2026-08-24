@@ -1,5 +1,6 @@
 package com.java.semantic.indexer.job;
 
+import com.java.semantic.indexer.build.IndexBuildService;
 import com.java.semantic.indexer.store.PublicationPort;
 import com.java.semantic.model.index.ManifestDigest;
 import com.java.semantic.model.index.PublishGenerationCommand;
@@ -32,11 +33,33 @@ public final class IndexJobWorker {
         return jobs.renew(job, claimLifetime);
     }
 
+    /** Delegates full-build sequencing to the build service while retaining this worker's claim lifecycle boundary. */
+    public void build(IndexJob job, IndexBuildService buildService) {
+        Objects.requireNonNull(job, "job is required");
+        Objects.requireNonNull(buildService, "build service is required");
+        buildService.build(job);
+    }
+
+    /** Runs a full build inside the same heartbeat/lease guard used by all long-running worker work. */
+    public void buildWithHeartbeat(IndexJob job, IndexBuildService buildService, Duration heartbeatInterval,
+                                   Duration claimLifetime, ScheduledExecutorService scheduler) {
+        Objects.requireNonNull(job, "job is required");
+        Objects.requireNonNull(buildService, "build service is required");
+        runWithHeartbeat(job, heartbeatInterval, claimLifetime, scheduler, guard -> buildService.build(job, guard));
+    }
+
     /** Revocation is intentionally before any terminal job mutation. */
     public boolean failOrCancel(IndexJob job) {
+        return failOrCancel(job, IndexFailureCategory.WORKER_INTERRUPTED);
+    }
+
+    /** Revocation remains the inverse of publication even when a safe failure category is available. */
+    public boolean failOrCancel(IndexJob job, IndexFailureCategory category) {
+        Objects.requireNonNull(job, "job is required");
+        Objects.requireNonNull(category, "failure category is required");
         boolean revoked = jobs.revoke(job);
         if (revoked) {
-            return jobs.failAfterRevocation(job);
+            return jobs.failAfterRevocation(job, category);
         }
         jobs.reconcileCommitted(job.repositoryId());
         return false;

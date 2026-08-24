@@ -177,7 +177,7 @@ class MongoIndexJobStoreIT {
             assertThatThrownBy(() -> new com.java.semantic.indexer.store.MongoPublicationWriter(template).publish(buildCommand(revokeClaimed, revokeIntent)))
                     .isInstanceOf(com.java.semantic.indexer.store.PublicationConflictException.class);
             assertThat(store.find(revokeClaimed.id()).orElseThrow().active()).isTrue();
-            assertThat(store.failAfterRevocation(revokeClaimed)).isTrue();
+            assertThat(store.failAfterRevocation(revokeClaimed, IndexFailureCategory.WORKER_INTERRUPTED)).isTrue();
 
             IndexJob publishAccepted = store.admit(RepositoryId.of("publish-win"), new RepositoryRevision("b".repeat(40)), false);
             IndexJob publishClaimed = store.claim(publishAccepted.id(), "worker-b", Duration.ofSeconds(60)).orElseThrow();
