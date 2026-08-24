@@ -1,9 +1,14 @@
 package com.java.semantic.query.application;
 
 import com.java.semantic.model.codefact.SourceTypeIdentity;
+import com.java.semantic.model.codefact.CodeFact;
+import com.java.semantic.model.codefact.CodeFactId;
+import com.java.semantic.model.codefact.CodeFactIdentity;
+import com.java.semantic.model.codefact.CodeFactKind;
 import com.java.semantic.model.index.GenerationFileDocument;
 import com.java.semantic.model.index.IndexCollections;
 import com.java.semantic.model.index.SourceArtifactId;
+import com.java.semantic.model.index.SymbolDocument;
 import com.java.semantic.model.query.CurrentGeneration;
 import com.mongodb.MongoException;
 import com.mongodb.client.model.Filters;
@@ -28,9 +33,10 @@ public final class CurrentSourceQueryService {
     }
 
     public PublishedSource getSource(String repositoryId, String revision, SourceTypeIdentity sourceType) {
+        CurrentGeneration current = selector.selectSource(repositoryId, revision, sourceType);
         SourceTypeIdentity identity = Objects.requireNonNull(sourceType, "source type identity is required");
-        CurrentGeneration current = selector.selectSource(repositoryId, revision, identity);
         try {
+            requireAuthorizedCurrentSource(current, identity);
             Document mapping = template.getCollection(IndexCollections.GENERATION_FILES).find(Filters.and(
                             Filters.eq("repoId", current.repositoryId().value()), Filters.eq("generationId", current.generationId().value()),
                             Filters.eq("sourcePath", identity.sourceFile()))).maxTime(storageTimeout.toMillis(), TimeUnit.MILLISECONDS).first();
@@ -43,7 +49,52 @@ public final class CurrentSourceQueryService {
             return new PublishedSource(current, identity.sourceFile(), artifactContent(artifact, new SourceArtifactId(artifactId)));
         } catch (MongoException | DataAccessException exception) {
             throw new SemanticIndexUnavailableException(exception);
-        } catch (IndexNotReadyException | IndexContractMismatchException exception) {
+        } catch (RepositoryNotFoundException | IndexNotReadyException | IndexContractMismatchException exception) {
+            throw exception;
+        } catch (RuntimeException exception) {
+            throw new IndexContractMismatchException();
+        }
+    }
+
+    private void requireAuthorizedCurrentSource(CurrentGeneration current, SourceTypeIdentity identity) {
+        CodeFactIdentity expectedIdentity = new CodeFactIdentity(current.repositoryId(), current.revision(), CodeFactKind.TYPE, identity);
+        CodeFactId expectedId = CodeFactId.from(expectedIdentity);
+        boolean foundRequestedType = false;
+        try {
+            for (Document stored : template.getCollection(IndexCollections.SYMBOLS).find(Filters.and(
+                    Filters.eq("repoId", current.repositoryId().value()), Filters.eq("generationId", current.generationId().value()),
+                    Filters.eq("sourcePath", identity.sourceFile()))).maxTime(storageTimeout.toMillis(), TimeUnit.MILLISECONDS)) {
+                SymbolDocument symbol = decodeSymbol(stored, current);
+                if (expectedId.equals(symbol.fact().id()) && expectedIdentity.equals(symbol.fact().identity())
+                        && CodeFactKind.TYPE == symbol.kind() && expectedIdentity.canonicalForm().equals(requiredText(stored, "canonical"))) {
+                    foundRequestedType = true;
+                }
+                selector.requireVisible(current, symbol.fact().identity());
+            }
+        } catch (MongoException | DataAccessException exception) {
+            throw new SemanticIndexUnavailableException(exception);
+        } catch (RepositoryNotFoundException | IndexContractMismatchException exception) {
+            throw exception;
+        } catch (RuntimeException exception) {
+            throw new IndexContractMismatchException();
+        }
+        if (!foundRequestedType) { throw new IndexNotReadyException(); }
+    }
+
+    private SymbolDocument decodeSymbol(Document stored, CurrentGeneration current) {
+        try {
+            Document converterDocument = new Document(stored);
+            converterDocument.put("generationId", new Document("value", current.generationId().value()));
+            SymbolDocument decoded = template.getConverter().read(SymbolDocument.class, converterDocument);
+            CodeFact fact = decoded.fact();
+            if (!current.repositoryId().equals(decoded.repositoryId()) || !current.generationId().equals(decoded.generationId())
+                    || !current.repositoryId().equals(fact.identity().repositoryId()) || !current.revision().equals(fact.identity().repositoryRevision())
+                    || !fact.id().equals(CodeFactId.from(fact.identity())) || !fact.identity().canonicalForm().equals(requiredText(stored, "canonical"))
+                    || !fact.id().value().equals(requiredText(stored, "symbolId")) || !decoded.range().sourceFile().equals(requiredText(stored, "sourcePath"))) {
+                throw new IndexContractMismatchException();
+            }
+            return decoded;
+        } catch (IndexContractMismatchException exception) {
             throw exception;
         } catch (RuntimeException exception) {
             throw new IndexContractMismatchException();
@@ -71,9 +122,15 @@ public final class CurrentSourceQueryService {
         Object contentHash = artifact.get("contentHash");
         Object content = artifact.get("utf8Content");
         if (!(artifactId instanceof String storedId) || !(contentHash instanceof String storedHash) || !(content instanceof String utf8Content)
-                || !expectedId.value().equals(storedId) || !expectedId.value().equals(storedHash) || !StringUtils.hasText(utf8Content)) {
+                || !expectedId.value().equals(storedId) || !expectedId.value().equals(storedHash)) {
             throw new IndexContractMismatchException();
         }
         return utf8Content;
+    }
+
+    private static String requiredText(Document document, String field) {
+        Object value = document.get(field);
+        if (!(value instanceof String text) || !StringUtils.hasText(text)) { throw new IndexContractMismatchException(); }
+        return text;
     }
 }

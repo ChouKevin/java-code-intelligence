@@ -32,7 +32,7 @@ import java.util.concurrent.TimeUnit;
 
 /** The sole policy boundary for every generation-backed query read. */
 public final class CurrentGenerationSelector {
-    public static final ProjectionRequirements SOURCES = new ProjectionRequirements(EnumSet.of(ProjectionName.SOURCES));
+    public static final ProjectionRequirements SOURCES = new ProjectionRequirements(EnumSet.of(ProjectionName.SOURCES, ProjectionName.SYMBOLS));
     public static final ProjectionRequirements SYMBOLS = new ProjectionRequirements(EnumSet.of(ProjectionName.SYMBOLS));
     public static final ProjectionRequirements ALL_PROJECTIONS = new ProjectionRequirements(EnumSet.allOf(ProjectionName.class));
     private final MongoTemplate template;
@@ -52,6 +52,12 @@ public final class CurrentGenerationSelector {
         if (!readPolicy.isSourceVisible(request.repositoryId(), identity)) { throw new RepositoryNotFoundException(); }
         verifyManifest(current, SOURCES);
         return current;
+    }
+
+    void requireVisible(CurrentGeneration current, CodeFactIdentity codeFact) {
+        Objects.requireNonNull(current, "current generation is required");
+        CodeFactIdentity identity = Objects.requireNonNull(codeFact, "code fact identity is required");
+        if (!readPolicy.isCodeFactVisible(current.repositoryId(), identity)) { throw new RepositoryNotFoundException(); }
     }
 
     public CurrentGeneration selectCodeFact(String requestedRepositoryId, String requestedRevision, CodeFactIdentity codeFact) {

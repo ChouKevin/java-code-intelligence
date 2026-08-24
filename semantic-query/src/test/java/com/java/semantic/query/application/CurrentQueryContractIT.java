@@ -3,13 +3,19 @@ package com.java.semantic.query.application;
 import com.java.semantic.model.codefact.CodeFactId;
 import com.java.semantic.model.codefact.CodeFactIdentity;
 import com.java.semantic.model.codefact.CodeFactKind;
+import com.java.semantic.model.codefact.DeclaredType;
 import com.java.semantic.model.codefact.JavaTypeIdentity;
 import com.java.semantic.model.codefact.MethodTarget;
+import com.java.semantic.model.codefact.MapperStatementIdentity;
+import com.java.semantic.model.codefact.SourceRange;
 import com.java.semantic.model.codefact.SourceTypeIdentity;
+import com.java.semantic.model.codefact.SyntaxPosition;
+import com.java.semantic.model.codefact.SyntaxRange;
 import com.java.semantic.model.index.GenerationFileDocument;
 import com.java.semantic.model.index.GenerationId;
 import com.java.semantic.model.index.SourceArtifactDocument;
 import com.java.semantic.model.index.SourceArtifactId;
+import com.java.semantic.model.index.SymbolDocument;
 import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.model.repository.RepositoryRevision;
 import com.java.semantic.query.config.ConfiguredReadPolicy;
@@ -57,16 +63,8 @@ class CurrentQueryContractIT {
         seedCurrent("orders");
         seedManifest("orders", true);
         String content = "package example.api; class OrderService {}";
-        SourceArtifactDocument artifact = SourceArtifactDocument.create(content);
-        template.getCollection("source_artifacts").insertOne(new Document("sourceArtifactId", artifact.id().value())
-                .append("contentHash", artifact.contentHash()).append("utf8Content", content));
-        GenerationFileDocument mapping = new GenerationFileDocument(new RepositoryId("orders"), new GenerationId("g1"),
-                type.sourceFile(), new SourceArtifactId(artifact.id().value()), artifact.contentHash());
-        Document stored = new Document();
-        template.getConverter().write(mapping, stored);
-        stored.put("repoId", "orders");
-        stored.put("generationId", "g1");
-        template.getCollection("generation_files").insertOne(stored);
+        SourceArtifactDocument artifact = seedSource("orders", "g1", type.sourceFile(), content);
+        seedTypeSymbol("orders", REVISION, "g1", type, artifact.id());
 
         assertThat(sourceService(policy()).getSource("orders", REVISION, type).utf8Content()).isEqualTo(content);
         assertThatThrownBy(() -> sourceService(policy(new ReadPolicyProperties.PackageRule("orders", "example")))
@@ -101,15 +99,82 @@ class CurrentQueryContractIT {
         CodeFactIdentity identity = new CodeFactIdentity(new RepositoryId("orders"), new RepositoryRevision(REVISION), CodeFactKind.METHOD, method);
         seedCurrent("orders");
         seedManifest("orders", true);
-        template.getCollection("symbols").insertOne(new Document("repoId", "orders").append("generationId", "g1")
-                .append("symbolId", CodeFactId.from(identity).value()).append("canonical", identity.canonicalForm())
-                .append("sourcePath", method.sourceFile()));
+        seedMethodSymbol("orders", REVISION, "g1", method);
         CurrentSymbolQueryService service = new CurrentSymbolQueryService(template, selector(policy()), Duration.ofSeconds(2));
 
         assertThat(service.getSymbol("orders", REVISION, identity).symbolId()).isEqualTo(CodeFactId.from(identity).value());
         assertThatThrownBy(() -> new CurrentSymbolQueryService(template, selector(policy(new ReadPolicyProperties.MethodRule(
                 "orders", "example.api", "OrderService", "find", List.of("java.lang.String")))), Duration.ofSeconds(2))
                 .getSymbol("orders", REVISION, identity)).isInstanceOf(RepositoryNotFoundException.class);
+    }
+
+    @Test
+    void hides_forbidden_repositories_before_validating_typed_identities() {
+        assertThatThrownBy(() -> sourceService(policy("orders")).getSource("orders", REVISION, null))
+                .isInstanceOf(RepositoryNotFoundException.class);
+        assertThatThrownBy(() -> new CurrentSymbolQueryService(template, selector(policy("orders")), Duration.ofSeconds(2))
+                .getSymbol("orders", REVISION, null)).isInstanceOf(RepositoryNotFoundException.class);
+    }
+
+    @Test
+    void denies_source_reads_when_a_requested_type_is_spoofed_or_a_colocated_declaration_is_denied() {
+        SourceTypeIdentity allowed = new SourceTypeIdentity(new JavaTypeIdentity("example.api", "PublicFacade"),
+                "src/main/java/example/api/Shared.java");
+        SourceTypeIdentity denied = new SourceTypeIdentity(new JavaTypeIdentity("example.api", "SecretAdmin"),
+                allowed.sourceFile());
+        seedCurrent("orders");
+        seedManifest("orders", true);
+        SourceArtifactDocument artifact = seedSource("orders", "g1", allowed.sourceFile(), "class PublicFacade {} class SecretAdmin {}");
+        seedTypeSymbol("orders", REVISION, "g1", allowed, artifact.id());
+        seedTypeSymbol("orders", REVISION, "g1", denied, artifact.id());
+
+        assertThatThrownBy(() -> sourceService(policy(new ReadPolicyProperties.ClassRule(
+                "orders", "example.api", "SecretAdmin"))).getSource("orders", REVISION, allowed))
+                .isInstanceOf(RepositoryNotFoundException.class);
+    }
+
+    @Test
+    void denies_a_persisted_mapper_symbol_when_its_namespace_method_is_forbidden() {
+        MapperStatementIdentity statement = new MapperStatementIdentity("example.api.OrderMapper", "find",
+                "src/main/resources/OrderMapper.xml");
+        CodeFactIdentity identity = new CodeFactIdentity(new RepositoryId("orders"), new RepositoryRevision(REVISION),
+                CodeFactKind.MAPPER_STATEMENT, statement);
+        seedCurrent("orders");
+        seedManifest("orders", true);
+        seedMapperSymbol("orders", REVISION, "g1", statement);
+
+        assertThatThrownBy(() -> new CurrentSymbolQueryService(template, selector(policy(new ReadPolicyProperties.MethodRule(
+                "orders", "example.api", "OrderMapper", "find", List.of("java.lang.String")))), Duration.ofSeconds(2))
+                .getSymbol("orders", REVISION, identity)).isInstanceOf(RepositoryNotFoundException.class);
+    }
+
+    @Test
+    void reads_a_valid_empty_source_artifact() {
+        SourceTypeIdentity type = sourceType();
+        seedCurrent("orders");
+        seedManifest("orders", true);
+        SourceArtifactDocument artifact = seedSource("orders", "g1", type.sourceFile(), "");
+        seedTypeSymbol("orders", REVISION, "g1", type, artifact.id());
+
+        assertThat(sourceService(policy()).getSource("orders", REVISION, type).utf8Content()).isEmpty();
+    }
+
+    @Test
+    void normalizes_nested_classes_and_parameter_forms_without_overmatching_package_boundaries() {
+        RepositoryId repositoryId = new RepositoryId("orders");
+        SourceTypeIdentity nestedType = new SourceTypeIdentity(new JavaTypeIdentity("example.api", "Outer.Inner"),
+                "src/main/java/example/api/Outer.java");
+        MethodTarget method = new MethodTarget(nestedType, "save", List.of("java.util.List<java.lang.String>..."));
+        ConfiguredReadPolicy classPolicy = policy(new ReadPolicyProperties.ClassRule("orders", "example.api", "Outer$Inner"));
+        ConfiguredReadPolicy methodPolicy = policy(new ReadPolicyProperties.MethodRule(
+                "orders", "example.api", "Outer.Inner", "save", List.of("List[]")));
+        ConfiguredReadPolicy packagePolicy = policy(new ReadPolicyProperties.PackageRule("orders", "example.api"));
+
+        assertThat(classPolicy.isSourceVisible(repositoryId, nestedType)).isFalse();
+        assertThat(methodPolicy.isCodeFactVisible(repositoryId, new CodeFactIdentity(repositoryId, new RepositoryRevision(REVISION),
+                CodeFactKind.METHOD, method))).isFalse();
+        assertThat(packagePolicy.isSourceVisible(repositoryId, new SourceTypeIdentity(new JavaTypeIdentity("example.apix", "Visible"),
+                "src/main/java/example/apix/Visible.java"))).isTrue();
     }
 
     private CurrentSourceQueryService sourceService(ConfiguredReadPolicy policy) {
@@ -123,6 +188,9 @@ class CurrentQueryContractIT {
     private ConfiguredReadPolicy policy() { return policy(List.of(), List.of(), List.of()); }
     private ConfiguredReadPolicy policy(String forbiddenRepository) { return policy(List.of(forbiddenRepository), List.of(), List.of()); }
     private ConfiguredReadPolicy policy(ReadPolicyProperties.PackageRule packageRule) { return policy(List.of(), List.of(packageRule), List.of()); }
+    private ConfiguredReadPolicy policy(ReadPolicyProperties.ClassRule classRule) {
+        return new ConfiguredReadPolicy(new ReadPolicyProperties(List.of(), List.of(), List.of(classRule), List.of()));
+    }
     private ConfiguredReadPolicy policy(ReadPolicyProperties.MethodRule methodRule) { return policy(List.of(), List.of(), List.of(methodRule)); }
     private ConfiguredReadPolicy policy(List<String> repositories, List<ReadPolicyProperties.PackageRule> packages,
                                        List<ReadPolicyProperties.MethodRule> methods) {
@@ -147,5 +215,74 @@ class CurrentQueryContractIT {
 
     private static SourceTypeIdentity sourceType() {
         return new SourceTypeIdentity(new JavaTypeIdentity("example.api", "OrderService"), "src/main/java/example/api/OrderService.java");
+    }
+
+    private SourceArtifactDocument seedSource(String repositoryId, String generationId, String sourcePath, String content) {
+        SourceArtifactDocument artifact = SourceArtifactDocument.create(content);
+        template.getCollection("source_artifacts").insertOne(new Document("sourceArtifactId", artifact.id().value())
+                .append("contentHash", artifact.contentHash()).append("utf8Content", content));
+        GenerationFileDocument mapping = new GenerationFileDocument(new RepositoryId(repositoryId), new GenerationId(generationId),
+                sourcePath, artifact.id(), artifact.contentHash());
+        Document stored = new Document();
+        template.getConverter().write(mapping, stored);
+        stored.put("repoId", repositoryId);
+        stored.put("generationId", generationId);
+        template.getCollection("generation_files").insertOne(stored);
+        return artifact;
+    }
+
+    private void seedTypeSymbol(String repositoryId, String revision, String generationId, SourceTypeIdentity sourceType,
+                                SourceArtifactId artifactId) {
+        CodeFactIdentity identity = new CodeFactIdentity(new RepositoryId(repositoryId), new RepositoryRevision(revision),
+                CodeFactKind.TYPE, sourceType);
+        com.java.semantic.model.codefact.CodeFact fact = new com.java.semantic.model.codefact.CodeFact(CodeFactId.from(identity), identity);
+        SymbolDocument symbol = new SymbolDocument(new RepositoryId(repositoryId), new GenerationId(generationId), fact,
+                CodeFactKind.TYPE, sourceType.fullyQualifiedName(), sourceType.javaType().className(), sourceType.canonicalForm(),
+                new DeclaredType(sourceType.fullyQualifiedName()), java.util.Set.of(), List.of(), artifactId,
+                new SourceRange(sourceType.sourceFile(), new SyntaxRange(new SyntaxPosition(0, 0), new SyntaxPosition(0, 1))));
+        Document stored = new Document();
+        template.getConverter().write(symbol, stored);
+        stored.put("repoId", repositoryId);
+        stored.put("generationId", generationId);
+        stored.put("symbolId", fact.id().value());
+        stored.put("canonical", identity.canonicalForm());
+        stored.put("sourcePath", sourceType.sourceFile());
+        template.getCollection("symbols").insertOne(stored);
+    }
+
+    private void seedMethodSymbol(String repositoryId, String revision, String generationId, MethodTarget method) {
+        CodeFactIdentity identity = new CodeFactIdentity(new RepositoryId(repositoryId), new RepositoryRevision(revision),
+                CodeFactKind.METHOD, method);
+        com.java.semantic.model.codefact.CodeFact fact = new com.java.semantic.model.codefact.CodeFact(CodeFactId.from(identity), identity);
+        SymbolDocument symbol = new SymbolDocument(new RepositoryId(repositoryId), new GenerationId(generationId), fact,
+                CodeFactKind.METHOD, method.fullyQualifiedClassName(), method.methodName(), method.canonicalForm(),
+                new DeclaredType("void"), java.util.Set.of(), List.of(), new SourceArtifactId("a".repeat(64)),
+                new SourceRange(method.sourceFile(), new SyntaxRange(new SyntaxPosition(0, 0), new SyntaxPosition(0, 1))));
+        Document stored = new Document();
+        template.getConverter().write(symbol, stored);
+        stored.put("repoId", repositoryId);
+        stored.put("generationId", generationId);
+        stored.put("symbolId", fact.id().value());
+        stored.put("canonical", identity.canonicalForm());
+        stored.put("sourcePath", method.sourceFile());
+        template.getCollection("symbols").insertOne(stored);
+    }
+
+    private void seedMapperSymbol(String repositoryId, String revision, String generationId, MapperStatementIdentity statement) {
+        CodeFactIdentity identity = new CodeFactIdentity(new RepositoryId(repositoryId), new RepositoryRevision(revision),
+                CodeFactKind.MAPPER_STATEMENT, statement);
+        com.java.semantic.model.codefact.CodeFact fact = new com.java.semantic.model.codefact.CodeFact(CodeFactId.from(identity), identity);
+        SymbolDocument symbol = new SymbolDocument(new RepositoryId(repositoryId), new GenerationId(generationId), fact,
+                CodeFactKind.MAPPER_STATEMENT, statement.namespace(), statement.statementId(), statement.canonicalForm(),
+                new DeclaredType("mapper-statement"), java.util.Set.of(), List.of(), new SourceArtifactId("a".repeat(64)),
+                new SourceRange(statement.resourcePath(), new SyntaxRange(new SyntaxPosition(0, 0), new SyntaxPosition(0, 1))));
+        Document stored = new Document();
+        template.getConverter().write(symbol, stored);
+        stored.put("repoId", repositoryId);
+        stored.put("generationId", generationId);
+        stored.put("symbolId", fact.id().value());
+        stored.put("canonical", identity.canonicalForm());
+        stored.put("sourcePath", statement.resourcePath());
+        template.getCollection("symbols").insertOne(stored);
     }
 }

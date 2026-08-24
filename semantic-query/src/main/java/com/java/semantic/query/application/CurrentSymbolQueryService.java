@@ -2,7 +2,9 @@ package com.java.semantic.query.application;
 
 import com.java.semantic.model.codefact.CodeFactId;
 import com.java.semantic.model.codefact.CodeFactIdentity;
+import com.java.semantic.model.codefact.CodeFact;
 import com.java.semantic.model.index.IndexCollections;
+import com.java.semantic.model.index.SymbolDocument;
 import com.java.semantic.model.query.CurrentGeneration;
 import com.mongodb.MongoException;
 import com.mongodb.client.model.Filters;
@@ -27,21 +29,46 @@ public final class CurrentSymbolQueryService {
     }
 
     public CurrentSymbol getSymbol(String repositoryId, String revision, CodeFactIdentity identity) {
+        CurrentGeneration current = selector.selectCodeFact(repositoryId, revision, identity);
         CodeFactIdentity requestedIdentity = Objects.requireNonNull(identity, "code fact identity is required");
-        CurrentGeneration current = selector.selectCodeFact(repositoryId, revision, requestedIdentity);
         CodeFactId symbolId = CodeFactId.from(requestedIdentity);
         try {
             Document symbol = template.getCollection(IndexCollections.SYMBOLS).find(Filters.and(
                             Filters.eq("repoId", current.repositoryId().value()), Filters.eq("generationId", current.generationId().value()),
                             Filters.eq("symbolId", symbolId.value()))).maxTime(storageTimeout.toMillis(), TimeUnit.MILLISECONDS).first();
             if (Objects.isNull(symbol)) { throw new IndexNotReadyException(); }
+            SymbolDocument decoded = decodeSymbol(symbol, current);
             String canonical = text(symbol, "canonical");
             String sourcePath = text(symbol, "sourcePath");
-            if (!requestedIdentity.canonicalForm().equals(canonical)) { throw new IndexContractMismatchException(); }
+            CodeFact fact = decoded.fact();
+            if (!requestedIdentity.equals(fact.identity()) || !symbolId.equals(fact.id())
+                    || !requestedIdentity.canonicalForm().equals(canonical) || !sourcePath.equals(decoded.range().sourceFile())) {
+                throw new IndexContractMismatchException();
+            }
             return new CurrentSymbol(current, symbolId.value(), canonical, sourcePath);
         } catch (MongoException | DataAccessException exception) {
             throw new SemanticIndexUnavailableException(exception);
         } catch (IndexNotReadyException | IndexContractMismatchException exception) {
+            throw exception;
+        } catch (RuntimeException exception) {
+            throw new IndexContractMismatchException();
+        }
+    }
+
+    private SymbolDocument decodeSymbol(Document stored, CurrentGeneration current) {
+        try {
+            Document converterDocument = new Document(stored);
+            converterDocument.put("generationId", new Document("value", current.generationId().value()));
+            SymbolDocument decoded = template.getConverter().read(SymbolDocument.class, converterDocument);
+            CodeFact fact = decoded.fact();
+            if (!current.repositoryId().equals(decoded.repositoryId()) || !current.generationId().equals(decoded.generationId())
+                    || !current.repositoryId().equals(fact.identity().repositoryId()) || !current.revision().equals(fact.identity().repositoryRevision())
+                    || !fact.id().equals(CodeFactId.from(fact.identity())) || !fact.id().value().equals(text(stored, "symbolId"))
+                    || !fact.identity().canonicalForm().equals(text(stored, "canonical")) || !decoded.range().sourceFile().equals(text(stored, "sourcePath"))) {
+                throw new IndexContractMismatchException();
+            }
+            return decoded;
+        } catch (IndexContractMismatchException exception) {
             throw exception;
         } catch (RuntimeException exception) {
             throw new IndexContractMismatchException();
