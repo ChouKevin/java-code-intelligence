@@ -7,6 +7,8 @@ import com.java.semantic.query.application.CurrentSymbolQueryService;
 import com.java.semantic.query.config.ConfiguredReadPolicy;
 import com.java.semantic.query.config.ReadPolicyProperties;
 import com.java.semantic.query.config.SemanticQueryProperties;
+import com.java.semantic.query.store.MongoIndexSchemaVerifier;
+import org.springframework.boot.ApplicationRunner;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
@@ -38,13 +40,20 @@ public class SemanticQueryApplication {
     }
 
     @Bean
-    CurrentSourceQueryService currentSourceQueryService(MongoTemplate template, CurrentGenerationSelector selector) {
-        return new CurrentSourceQueryService(template, selector);
+    CurrentSourceQueryService currentSourceQueryService(MongoTemplate template, CurrentGenerationSelector selector,
+                                                         SemanticQueryProperties properties) {
+        return new CurrentSourceQueryService(template, selector, properties.storageTimeout());
     }
 
     @Bean
-    CurrentSymbolQueryService currentSymbolQueryService(MongoTemplate template, CurrentGenerationSelector selector) {
-        return new CurrentSymbolQueryService(template, selector);
+    CurrentSymbolQueryService currentSymbolQueryService(MongoTemplate template, CurrentGenerationSelector selector,
+                                                         SemanticQueryProperties properties) {
+        return new CurrentSymbolQueryService(template, selector, properties.storageTimeout());
+    }
+
+    @Bean
+    ApplicationRunner semanticIndexSchemaGate(MongoTemplate template, SemanticQueryProperties properties) {
+        return arguments -> new MongoIndexSchemaVerifier(template, properties.storageTimeout()).verify();
     }
 
 }
