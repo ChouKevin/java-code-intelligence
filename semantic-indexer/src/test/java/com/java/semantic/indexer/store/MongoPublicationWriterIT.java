@@ -15,10 +15,11 @@ import org.junit.jupiter.api.Test;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.testcontainers.mongodb.MongoDBContainer;
 
-import java.util.Date;
-import java.time.Instant;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
+import java.time.Instant;
+import java.util.Date;
 import java.util.Objects;
 import java.util.Optional;
 
@@ -27,6 +28,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 @Tag("mongo-it")
 class MongoPublicationWriterIT {
+    private static final long ACTIVE_UNTIL_MILLIS = System.currentTimeMillis() + Duration.ofHours(1).toMillis();
 
     @Test
     void publishes_only_a_valid_sealed_generation_and_keeps_one_bounded_rollback_pointer() {
@@ -103,7 +105,7 @@ class MongoPublicationWriterIT {
             new IndexSchemaBootstrap(template).bootstrap();
             template.getCollection(IndexCollections.REPOSITORIES).insertOne(new Document("repoId", "orders")
                     .append("fence", 1L).append("activeJobId", "job-1").append("activeWorkerId", "worker-1")
-                    .append("activeGenerationId", "g1").append("claimUntil", new Date(System.currentTimeMillis() + 60_000L)));
+                    .append("activeGenerationId", "g1").append("claimUntil", activeUntil()));
             template.getCollection(IndexCollections.GENERATION_MANIFESTS).insertOne(
                     sealedManifest("orders", "a", "g1", digest("1"), "job-1", "worker-1", 1L));
             assertThat(template.getCollection(IndexCollections.INDEX_JOBS).countDocuments()).isZero();
@@ -113,6 +115,26 @@ class MongoPublicationWriterIT {
 
             assertThat(published.generationId()).isEqualTo(new GenerationId("g1"));
             assertThat(current(template).containsKey("rollbackPointer")).isFalse();
+        }
+    }
+
+    @Test
+    void rejects_a_sealed_manifest_whose_expiry_is_stale_after_repository_renewal() {
+        try (MongoDBContainer container = MongoSchemaTestSupport.container()) {
+            MongoTemplate template = MongoSchemaTestSupport.template(container);
+            new IndexSchemaBootstrap(template).bootstrap();
+            Document manifest = sealedManifest("orders", "a", "g1", digest("1"), "job-1", "worker-1", 1L);
+            Date sealedUntil = manifest.getDate("sealUntil");
+            template.getCollection(IndexCollections.REPOSITORIES).insertOne(new Document("repoId", "orders")
+                    .append("fence", 1L).append("activeJobId", "job-1").append("activeWorkerId", "worker-1")
+                    .append("activeGenerationId", "g1").append("claimUntil", new Date(sealedUntil.getTime() + 60_000L)));
+            template.getCollection(IndexCollections.GENERATION_MANIFESTS).insertOne(manifest);
+
+            assertThatThrownBy(() -> new MongoPublicationWriter(template).publish(
+                    command("orders", "a", "g1", "1", "job-1", "worker-1", 1L, Optional.empty())))
+                    .isInstanceOf(PublicationConflictException.class);
+            assertThat(current(template).containsKey("generationId")).isFalse();
+            assertThat(current(template).getString("activeJobId")).isEqualTo("job-1");
         }
     }
 
@@ -167,7 +189,7 @@ class MongoPublicationWriterIT {
                 .append("activeJobId", jobId)
                 .append("activeWorkerId", workerId)
                 .append("activeGenerationId", generationId)
-                .append("claimUntil", new Date(System.currentTimeMillis() + 60_000L))
+                .append("claimUntil", activeUntil())
                 .append("revision", current.revision().value())
                 .append("generationId", current.generationId().value())
                 .append("manifestDigest", current.manifestDigest().value())
@@ -189,7 +211,7 @@ class MongoPublicationWriterIT {
                 .append("ownerJobId", ownerJobId)
                 .append("ownerWorkerId", ownerWorkerId)
                 .append("fence", fence)
-                .append("sealUntil", new Date(System.currentTimeMillis() + 60_000L))
+                .append("sealUntil", activeUntil())
                 .append("writeState", "SEALED_VALID")
                 .append("writeEpoch", 1L)
                 .append("schemaVersion", 1)
@@ -241,7 +263,11 @@ class MongoPublicationWriterIT {
     private static void claim(MongoTemplate template, String repositoryId, String jobId, String workerId, String generationId, long fence) {
         template.getCollection(IndexCollections.REPOSITORIES).updateOne(new Document("repoId", repositoryId), new Document("$set",
                 new Document("activeJobId", jobId).append("activeWorkerId", workerId).append("activeGenerationId", generationId)
-                        .append("fence", fence).append("claimUntil", new Date(System.currentTimeMillis() + 60_000L))));
+                        .append("fence", fence).append("claimUntil", activeUntil())));
+    }
+
+    private static Date activeUntil() {
+        return new Date(ACTIVE_UNTIL_MILLIS);
     }
 
     private static void job(MongoTemplate template, String jobId, String repositoryId, String state) {

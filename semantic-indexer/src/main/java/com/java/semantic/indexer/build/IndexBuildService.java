@@ -55,6 +55,7 @@ public final class IndexBuildService {
             }
             guard.requireHeld();
             FullIndexPlan plan = planner.plan(checkout.root());
+            guard.requireHeld();
             insertWritingManifest(job, lease);
             guard.requireHeld();
             List<SourceIndexBatch> batches = exporter.export(job.repositoryId(), job.revision(), job.generationId(), plan);

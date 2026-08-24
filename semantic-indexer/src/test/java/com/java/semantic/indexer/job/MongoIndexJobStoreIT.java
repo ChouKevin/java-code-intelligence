@@ -315,7 +315,7 @@ class MongoIndexJobStoreIT {
         return new org.bson.Document("repoId", job.repositoryId().value()).append("sourceRevision", job.revision().value())
                 .append("generationId", job.generationId().value()).append("ownerJobId", job.id().value())
                 .append("ownerWorkerId", job.workerId().orElseThrow()).append("fence", job.fence().orElseThrow().value())
-                .append("sealUntil", java.util.Date.from(java.time.Instant.now().plusSeconds(60))).append("writeState", "SEALED_VALID")
+                .append("sealUntil", Date.from(job.claimUntil().orElseThrow())).append("writeState", "SEALED_VALID")
                 .append("writeEpoch", 1L).append("schemaVersion", 1)
                 .append("projectionVersions", List.of(new org.bson.Document("name", "SOURCES").append("version", 1),
                         new org.bson.Document("name", "SYMBOLS").append("version", 1),

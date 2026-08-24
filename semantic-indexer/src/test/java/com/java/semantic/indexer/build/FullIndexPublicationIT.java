@@ -36,6 +36,7 @@ import com.java.semantic.model.index.ProjectionName;
 import com.java.semantic.model.index.RelationDocument;
 import com.java.semantic.model.index.SearchDocument;
 import com.java.semantic.model.index.SourceArtifactDocument;
+import com.java.semantic.model.index.SourceArtifactId;
 import com.java.semantic.model.index.SymbolDocument;
 import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.model.repository.RepositoryRevision;
@@ -95,6 +96,57 @@ class FullIndexPublicationIT {
             IndexJob failed = store.find(job.id()).orElseThrow();
             assertThat(failed.phase()).isEqualTo(IndexJobPhase.FAILED);
             assertThat(failed.failureCategory()).contains(IndexFailureCategory.VALIDATION_FAILED);
+        }
+    }
+
+    @ParameterizedTest(name = "{0} mapped batch leaves the old pointer current")
+    @MethodSource("invalidBatchScenarios")
+    void invalid_mapped_batch_never_seals_or_publishes(String scenario,
+                                                       java.util.function.UnaryOperator<SourceIndexBatch> mutation,
+                                                       String expectedError) throws Exception {
+        try (MongoDBContainer container = new MongoDBContainer("mongo:8.0.4")) {
+            container.start();
+            MongoTemplate template = template(container);
+            seedPreviousPointer(template);
+            MongoIndexJobStore store = new MongoIndexJobStore(template);
+            IndexJob job = claimedJob(store);
+            RepositoryIndexExporter exporter = (repositoryId, requestedRevision, generationId, plan) ->
+                    List.of(mutation.apply(validBatch(repositoryId, requestedRevision, generationId)));
+            IndexBuildService service = service(template, store, exporter, checkout(scenario, revision()));
+
+            assertThatThrownBy(() -> service.build(job)).isInstanceOf(RuntimeException.class)
+                    .hasMessageContaining(expectedError)
+                    .satisfies(FullIndexPublicationIT::assertSafeMessage);
+
+            assertPreviousPointer(template);
+            assertThat(manifest(template, job.generationId()).getString("writeState"))
+                    .isEqualTo(GenerationWriteState.WRITING.name());
+            assertThat(store.find(job.id()).orElseThrow().failureCategory()).contains(IndexFailureCategory.VALIDATION_FAILED);
+        }
+    }
+
+    @Test
+    void claim_loss_after_planning_prevents_manifest_insertion() throws Exception {
+        try (MongoDBContainer container = new MongoDBContainer("mongo:8.0.4")) {
+            container.start();
+            MongoTemplate template = template(container);
+            seedPreviousPointer(template);
+            MongoIndexJobStore store = new MongoIndexJobStore(template);
+            IndexJob job = claimedJob(store);
+            IndexBuildService service = service(template, store, exporter(template, ignored -> { }),
+                    checkout("planner-claim-loss", revision()));
+            java.util.concurrent.atomic.AtomicInteger guardChecks = new java.util.concurrent.atomic.AtomicInteger();
+
+            assertThatThrownBy(() -> service.build(job, () -> {
+                if (guardChecks.incrementAndGet() == 3) {
+                    throw new IllegalStateException("claim lost after planning");
+                }
+            })).isInstanceOf(IllegalStateException.class).hasMessage("claim lost after planning");
+
+            assertThat(template.getCollection(IndexCollections.GENERATION_MANIFESTS)
+                    .countDocuments(new Document("repoId", "orders").append("generationId", job.generationId().value())))
+                    .isZero();
+            assertPreviousPointer(template);
         }
     }
 
@@ -175,7 +227,7 @@ class FullIndexPublicationIT {
                     .append("generationId", job.generationId().value()))).isEqualTo(1L);
             assertThat(counts).containsEntry(IndexCollections.SOURCE_ARTIFACTS, 1L).containsEntry(IndexCollections.GENERATION_FILES, 1L)
                     .containsEntry(IndexCollections.SYMBOLS, 1L).containsEntry(IndexCollections.RELATIONS, 1L)
-                    .containsEntry(IndexCollections.ENTRY_POINTS, 1L).containsEntry(IndexCollections.SEARCH, 1L);
+                    .containsEntry(IndexCollections.ENTRY_POINTS, 1L).containsEntry(IndexCollections.SEARCH, 3L);
             assertThat(manifest.getString("validationResult")).isEqualTo("VALID");
             assertThat(manifest.getString("identityDigest")).isEqualTo(repository.getString("manifestDigest"))
                     .isNotEqualTo("0".repeat(64));
@@ -209,6 +261,35 @@ class FullIndexPublicationIT {
                 scenario("incomplete projection versions", template -> template.getCollection(IndexCollections.GENERATION_MANIFESTS)
                         .updateOne(writingManifest(), new Document("$set", new Document("projectionVersions", List.of(
                                 new Document("name", "SOURCES").append("version", 1))))), "INCOMPLETE_PROJECTION_VERSIONS"));
+    }
+
+    private static Stream<Arguments> invalidBatchScenarios() {
+        return Stream.of(
+                Arguments.of("wrong projection revision", (java.util.function.UnaryOperator<SourceIndexBatch>) batch ->
+                        validBatch(batch.repositoryId(), revision("b"), batch.generationId()), "PROJECTION_REVISION_MISMATCH"),
+                Arguments.of("missing search authority", (java.util.function.UnaryOperator<SourceIndexBatch>) batch ->
+                        copyBatch(batch, batch.symbols(), batch.search().subList(0, batch.search().size() - 1)), "INCOMPLETE_SEARCH"),
+                Arguments.of("orphan search authority", (java.util.function.UnaryOperator<SourceIndexBatch>) batch -> {
+                    java.util.ArrayList<SearchDocument> search = new java.util.ArrayList<>(batch.search());
+                    search.add(orphanSearch(batch.repositoryId(), revision(), batch.generationId()));
+                    return copyBatch(batch, batch.symbols(), search);
+                }, "ORPHAN_SEARCH"),
+                Arguments.of("mismatched projection artifact", (java.util.function.UnaryOperator<SourceIndexBatch>) batch -> {
+                    SymbolDocument symbol = batch.symbols().getFirst();
+                    SymbolDocument mismatched = new SymbolDocument(symbol.repositoryId(), symbol.generationId(), symbol.fact(), symbol.kind(),
+                            symbol.owner(), symbol.name(), symbol.signature(), symbol.declaredType(), symbol.modifiers(), symbol.annotations(),
+                            new SourceArtifactId("f".repeat(64)), symbol.range());
+                    return copyBatch(batch, List.of(mismatched), batch.search());
+                }, "PROJECTION_ARTIFACT_MISMATCH"),
+                Arguments.of("character crosses source line", (java.util.function.UnaryOperator<SourceIndexBatch>) batch -> {
+                    SymbolDocument symbol = batch.symbols().getFirst();
+                    SourceRange invalid = new SourceRange(batch.sourcePath(),
+                            new SyntaxRange(new SyntaxPosition(0, 200), new SyntaxPosition(0, 201)));
+                    SymbolDocument outOfLine = new SymbolDocument(symbol.repositoryId(), symbol.generationId(), symbol.fact(), symbol.kind(),
+                            symbol.owner(), symbol.name(), symbol.signature(), symbol.declaredType(), symbol.modifiers(), symbol.annotations(),
+                            symbol.sourceArtifactId(), invalid);
+                    return copyBatch(batch, List.of(outOfLine), batch.search());
+                }, "INVALID_RANGE"));
     }
 
     private static Arguments scenario(String name, Consumer<MongoTemplate> mutation, String error) {
@@ -251,7 +332,7 @@ class FullIndexPublicationIT {
         return store.claim(accepted.id(), "worker-1", Duration.ofMinutes(5)).orElseThrow();
     }
 
-    private static SourceIndexBatch validBatch(RepositoryId repositoryId, RepositoryRevision requestedRevision, GenerationId generationId) {
+    static SourceIndexBatch validBatch(RepositoryId repositoryId, RepositoryRevision requestedRevision, GenerationId generationId) {
         String sourcePath = "src/Order.java";
         SourceArtifactDocument artifact = SourceArtifactDocument.create(SOURCE_BODY);
         SourceTypeIdentity sourceType = new SourceTypeIdentity(new JavaTypeIdentity("orders", "Secret"), sourcePath);
@@ -272,9 +353,27 @@ class FullIndexPublicationIT {
         CodeFactIdentity entryFactIdentity = new CodeFactIdentity(repositoryId, requestedRevision, CodeFactKind.API_ROUTE, entryIdentity);
         EntryPointDocument entry = new EntryPointDocument(repositoryId, generationId,
                 new CodeFact(CodeFactId.from(entryFactIdentity), entryFactIdentity), EntryPointKind.HTTP, method, trigger, range);
-        SearchDocument search = new SearchDocument(repositoryId, generationId, methodFact.id(), CodeFactKind.METHOD, List.of("orders", "place"),
+        SearchDocument symbolSearch = new SearchDocument(repositoryId, generationId, methodFact.id(), CodeFactKind.METHOD, List.of("orders", "place"),
                 Optional.of("orders"), ProjectionName.SYMBOLS, methodIdentity);
-        return new SourceIndexBatch(repositoryId, generationId, sourcePath, 0, artifact, List.of(symbol), List.of(relation), List.of(entry), List.of(search));
+        SearchDocument relationSearch = new SearchDocument(repositoryId, generationId, relation.fact().id(), relation.fact().identity().kind(),
+                List.of("orders", "calls"), Optional.of("orders"), ProjectionName.RELATIONS, relation.fact().identity());
+        SearchDocument entrySearch = new SearchDocument(repositoryId, generationId, entry.fact().id(), entry.fact().identity().kind(),
+                List.of("orders", "entry"), Optional.of("orders"), ProjectionName.ENTRY_POINTS, entry.fact().identity());
+        return new SourceIndexBatch(repositoryId, generationId, sourcePath, 0, artifact, List.of(symbol), List.of(relation), List.of(entry),
+                List.of(symbolSearch, relationSearch, entrySearch));
+    }
+
+    private static SourceIndexBatch copyBatch(SourceIndexBatch batch, List<SymbolDocument> symbols, List<SearchDocument> search) {
+        return new SourceIndexBatch(batch.repositoryId(), batch.generationId(), batch.sourcePath(), batch.sourceChunk(), batch.sourceArtifact(),
+                symbols, batch.relations(), batch.entryPoints(), search);
+    }
+
+    private static SearchDocument orphanSearch(RepositoryId repositoryId, RepositoryRevision requestedRevision, GenerationId generationId) {
+        SourceTypeIdentity sourceType = new SourceTypeIdentity(new JavaTypeIdentity("orders", "Secret"), "src/Order.java");
+        CodeFactIdentity orphan = new CodeFactIdentity(repositoryId, requestedRevision, CodeFactKind.METHOD,
+                new MethodTarget(sourceType, "missing", List.of()));
+        return new SearchDocument(repositoryId, generationId, CodeFactId.from(orphan), CodeFactKind.METHOD, List.of("orders", "missing"),
+                Optional.of("orders"), ProjectionName.SYMBOLS, orphan);
     }
 
     private static String writingGeneration(MongoTemplate template) {

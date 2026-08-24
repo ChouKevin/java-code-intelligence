@@ -1,12 +1,21 @@
 package com.java.semantic.indexer.build;
 
 import com.java.semantic.indexer.store.MongoGenerationWriter;
+import com.java.semantic.indexer.store.MongoIndexDefinitionMatcher;
+import com.java.semantic.model.codefact.CodeFactKind;
+import com.java.semantic.model.index.EntryPointDocument;
 import com.java.semantic.model.index.IndexCollections;
 import com.java.semantic.model.index.IndexSchemaContract;
 import com.java.semantic.model.index.ManifestDigest;
+import com.java.semantic.model.index.ProjectionName;
+import com.java.semantic.model.index.RelationDocument;
+import com.java.semantic.model.index.SearchDocument;
+import com.java.semantic.model.index.SymbolDocument;
 import com.java.semantic.model.repository.RepositoryRevision;
 import com.mongodb.client.MongoCollection;
+import com.mongodb.client.model.FindOneAndUpdateOptions;
 import com.mongodb.client.model.Filters;
+import com.mongodb.client.model.ReturnDocument;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -31,9 +40,11 @@ public final class GenerationValidator {
             IndexCollections.ENTRY_POINTS, IndexCollections.SEARCH);
 
     private final MongoTemplate template;
+    private final SourceIndexBatchDocumentMapper projectionMapper;
 
     public GenerationValidator(MongoTemplate template) {
         this.template = Objects.requireNonNull(template, "mongo template is required");
+        projectionMapper = new SourceIndexBatchDocumentMapper(template.getConverter());
     }
 
     public ValidationResult validate(MongoGenerationWriter.GenerationLease lease, RepositoryRevision requestedRevision,
@@ -45,6 +56,15 @@ public final class GenerationValidator {
         Document manifest = template.getCollection(IndexCollections.GENERATION_MANIFESTS).find(manifestFilter(lease)).first();
         if (Objects.isNull(manifest)) {
             issues.add(issue("MISSING_MANIFEST", "generation manifest is not owned by this claim"));
+            return new ValidationResult(new ManifestDigest("0".repeat(64)), Map.of(), issues);
+        }
+        if (!claimActive(lease)) {
+            issues.add(issue("CLAIM_LOST", "repository claim is no longer active for this worker and fence"));
+            return new ValidationResult(new ManifestDigest("0".repeat(64)), Map.of(), issues);
+        }
+        manifest = freezeForValidation(lease);
+        if (Objects.isNull(manifest)) {
+            issues.add(issue("VALIDATION_FREEZE_FAILED", "generation changed or has unfinished batches before validation"));
             return new ValidationResult(new ManifestDigest("0".repeat(64)), Map.of(), issues);
         }
         validateManifest(manifest, requestedRevision, issues);
@@ -64,6 +84,11 @@ public final class GenerationValidator {
         validateRelations(symbols, relations, issues);
         validateEntryPoints(symbols, entryPoints, issues);
         validateRanges(symbols, relations, entryPoints, files, artifacts, issues);
+        ProjectionDocuments projections = validateProjectionDocuments(lease, requestedRevision, symbols, relations, entryPoints, search,
+                issues);
+        validateProjectionArtifacts(files, projections.symbols(), projections.relations(), issues);
+        validateSearchCoverage(projections, search, issues);
+        validateClaim(lease, issues);
         Map<String, Long> counts = collectionCounts(files, artifacts, symbols, relations, entryPoints, search);
         ManifestDigest digest = digest(files, symbols, relations, entryPoints, search);
         return new ValidationResult(digest, counts, issues);
@@ -79,7 +104,9 @@ public final class GenerationValidator {
         Document update = new Document("$set", new Document("identityDigest", result.identityDigest().value())
                 .append("sealedCollectionCounts", new Document(result.collectionCounts()))
                 .append("validationResult", "VALID").append("validatedAt", Date.from(Instant.now())));
-        long changed = template.getCollection(IndexCollections.GENERATION_MANIFESTS).updateOne(manifestFilter(lease), update).getModifiedCount();
+        Document filter = manifestFilter(lease).append("validationResult", "VALIDATING")
+                .append("$expr", new Document("$gt", List.of("$sealUntil", "$$NOW")));
+        long changed = template.getCollection(IndexCollections.GENERATION_MANIFESTS).updateOne(filter, update).getModifiedCount();
         if (changed != 1L) {
             throw new IllegalStateException("generation validation record lost its claim");
         }
@@ -99,24 +126,41 @@ public final class GenerationValidator {
     }
 
     private void validateClaim(MongoGenerationWriter.GenerationLease lease, List<GenerationValidationIssue> issues) {
-        Document repositoryFilter = new Document("repoId", lease.repositoryId().value()).append("activeJobId", lease.jobId())
-                .append("activeWorkerId", lease.workerId()).append("activeGenerationId", lease.generationId().value())
-                .append("fence", lease.fence()).append("$expr", new Document("$gt", List.of("$claimUntil", "$$NOW")));
-        if (Objects.isNull(template.getCollection(IndexCollections.REPOSITORIES).find(repositoryFilter).first())) {
+        if (!claimActive(lease)) {
             issues.add(issue("CLAIM_LOST", "repository claim is no longer active for this worker and fence"));
         }
     }
 
+    private boolean claimActive(MongoGenerationWriter.GenerationLease lease) {
+        Document repositoryFilter = new Document("repoId", lease.repositoryId().value()).append("activeJobId", lease.jobId())
+                .append("activeWorkerId", lease.workerId()).append("activeGenerationId", lease.generationId().value())
+                .append("fence", lease.fence()).append("$expr", new Document("$gt", List.of("$claimUntil", "$$NOW")));
+        return Objects.nonNull(template.getCollection(IndexCollections.REPOSITORIES).find(repositoryFilter).first());
+    }
+
+    private Document freezeForValidation(MongoGenerationWriter.GenerationLease lease) {
+        Document filter = manifestFilter(lease).append("validationResult", new Document("$exists", false))
+                .append("$expr", new Document("$and", List.of(
+                        new Document("$gt", List.of("$sealUntil", "$$NOW")),
+                        noBatches("outstandingBatches"), noBatches("failedOrAmbiguousBatches"))));
+        return template.getCollection(IndexCollections.GENERATION_MANIFESTS).findOneAndUpdate(filter,
+                new Document("$set", new Document("validationResult", "VALIDATING")),
+                new FindOneAndUpdateOptions().returnDocument(ReturnDocument.AFTER));
+    }
+
     private void validateRequiredIndexes(List<GenerationValidationIssue> issues) {
         for (IndexSchemaContract.CollectionSpec collectionSpec : IndexSchemaContract.collections()) {
-            Set<String> installed = new LinkedHashSet<>();
+            Map<String, Document> installed = new LinkedHashMap<>();
             MongoCollection<Document> collection = template.getCollection(collectionSpec.name());
             for (Document index : collection.listIndexes()) {
-                installed.add(index.getString("name"));
+                installed.put(index.getString("name"), index);
             }
             for (IndexSchemaContract.IndexSpec required : collectionSpec.indexes()) {
-                if (!installed.contains(required.name())) {
+                Document actual = installed.get(required.name());
+                if (Objects.isNull(actual)) {
                     issues.add(issue("MISSING_REQUIRED_INDEX", "required index " + required.name() + " is absent"));
+                } else if (!MongoIndexDefinitionMatcher.matches(actual, required)) {
+                    issues.add(issue("INVALID_REQUIRED_INDEX", "required index " + required.name() + " has an incompatible definition"));
                 }
             }
         }
@@ -141,12 +185,9 @@ public final class GenerationValidator {
         return artifacts;
     }
 
-    /** Generation files use the converter's SourceArtifactId value-object shape; old rows stored the scalar directly. */
+    /** Generation files use the converter's SourceArtifactId value-object shape. */
     private static String sourceArtifactId(Document file) {
         Object value = file.get("sourceArtifactId");
-        if (value instanceof String artifactId) {
-            return artifactId;
-        }
         if (value instanceof Document artifact) {
             return artifact.getString("value");
         }
@@ -210,10 +251,16 @@ public final class GenerationValidator {
         Stream.concat(Stream.concat(symbols.stream(), relations.stream()), entryPoints.stream()).forEach(document -> {
             String sourcePath = document.getString("sourcePath");
             Document artifact = artifacts.get(sourcePath);
-            if (!generationFiles.containsKey(sourcePath) || Objects.isNull(artifact) || !rangeFits(rangeDocument(document), artifact)) {
+            Document range = rangeDocument(document);
+            if (!generationFiles.containsKey(sourcePath) || Objects.isNull(artifact)
+                    || !Objects.equals(sourcePath, rangeSourceFile(range)) || !rangeFits(range, artifact)) {
                 issues.add(issue("INVALID_RANGE", "a projection range does not fit its generation source artifact"));
             }
         });
+    }
+
+    private static String rangeSourceFile(Document range) {
+        return Objects.isNull(range) ? null : range.getString("sourceFile"); // cs-allow
     }
 
     private static boolean rangeFits(Document range, Document artifact) {
@@ -260,13 +307,177 @@ public final class GenerationValidator {
     private static boolean offsetsFit(int startLine, int startCharacter, int endLine, int endCharacter, Document artifact) {
         List<Integer> offsets = artifact.getList("lineOffsets", Integer.class);
         String source = artifact.getString("utf8Content");
-        if (Objects.isNull(offsets) || Objects.isNull(source) || startLine < 0 || endLine < startLine
-                || startLine >= offsets.size() || endLine >= offsets.size()) {
+        if (Objects.isNull(offsets) || Objects.isNull(source) || startLine < 0 || startCharacter < 0 || endLine < startLine
+                || endCharacter < 0 || startLine >= offsets.size() || endLine >= offsets.size()
+                || startCharacter > lineLength(offsets, source, startLine) || endCharacter > lineLength(offsets, source, endLine)
+                || (startLine == endLine && startCharacter > endCharacter)) {
             return false;
         }
         int startOffset = offsets.get(startLine) + startCharacter;
         int endOffset = offsets.get(endLine) + endCharacter;
         return startOffset >= 0 && endOffset >= startOffset && endOffset <= source.length();
+    }
+
+    private static int lineLength(List<Integer> offsets, String source, int line) {
+        int start = offsets.get(line);
+        int end = line + 1 < offsets.size() ? offsets.get(line + 1) : source.length();
+        if (end > start && source.charAt(end - 1) == '\n') {
+            end--;
+        }
+        if (end > start && source.charAt(end - 1) == '\r') {
+            end--;
+        }
+        return end - start;
+    }
+
+    private ProjectionDocuments validateProjectionDocuments(MongoGenerationWriter.GenerationLease lease,
+                                                              RepositoryRevision requestedRevision,
+                                                              List<Document> symbolDocuments,
+                                                              List<Document> relationDocuments,
+                                                              List<Document> entryPointDocuments,
+                                                              List<Document> searchDocuments,
+                                                              List<GenerationValidationIssue> issues) {
+        List<StoredSymbol> symbols = new ArrayList<>();
+        for (Document document : symbolDocuments) {
+            try {
+                SymbolDocument symbol = template.getConverter().read(SymbolDocument.class, document);
+                validateScope(lease, requestedRevision, symbol.repositoryId().value(), symbol.generationId().value(),
+                        symbol.fact().identity().repositoryRevision(), issues);
+                if (!symbol.fact().id().value().equals(document.getString("symbolId"))
+                        || !symbol.fact().identity().canonicalForm().equals(document.getString("canonical"))) {
+                    issues.add(issue("PROJECTION_IDENTITY_MISMATCH", "symbol storage identity differs from its authoritative fact"));
+                }
+                symbols.add(new StoredSymbol(document, symbol));
+            } catch (RuntimeException exception) {
+                issues.add(issue("INVALID_PROJECTION_DOCUMENT", "symbol projection cannot be reconstructed"));
+            }
+        }
+        List<StoredRelation> relations = new ArrayList<>();
+        for (Document document : relationDocuments) {
+            try {
+                RelationDocument relation = projectionMapper.reconstructRelation(document);
+                validateScope(lease, requestedRevision, relation.repositoryId().value(), relation.generationId().value(),
+                        relation.fact().identity().repositoryRevision(), issues);
+                if (!relation.fact().id().value().equals(document.getString("relationId"))
+                        || !relation.from().canonicalForm().equals(document.getString("from"))
+                        || !relation.target().canonicalForm().equals(document.getString("target"))) {
+                    issues.add(issue("PROJECTION_IDENTITY_MISMATCH", "relation storage identity differs from its authoritative fact"));
+                }
+                relations.add(new StoredRelation(document, relation));
+            } catch (RuntimeException exception) {
+                issues.add(issue("INVALID_PROJECTION_DOCUMENT", "relation projection cannot be reconstructed"));
+            }
+        }
+        List<StoredEntryPoint> entryPoints = new ArrayList<>();
+        for (Document document : entryPointDocuments) {
+            try {
+                EntryPointDocument entryPoint = projectionMapper.reconstructEntryPoint(document);
+                validateScope(lease, requestedRevision, entryPoint.repositoryId().value(), entryPoint.generationId().value(),
+                        entryPoint.fact().identity().repositoryRevision(), issues);
+                if (!entryPoint.fact().id().value().equals(document.getString("entryPointId"))
+                        || !entryPoint.fact().identity().canonicalForm().equals(document.getString("canonical"))
+                        || !entryPoint.method().canonicalForm().equals(document.getString("method"))) {
+                    issues.add(issue("PROJECTION_IDENTITY_MISMATCH", "entry-point storage identity differs from its authoritative fact"));
+                }
+                entryPoints.add(new StoredEntryPoint(document, entryPoint));
+            } catch (RuntimeException exception) {
+                issues.add(issue("INVALID_PROJECTION_DOCUMENT", "entry-point projection cannot be reconstructed"));
+            }
+        }
+        List<StoredSearch> search = new ArrayList<>();
+        for (Document document : searchDocuments) {
+            try {
+                SearchDocument searchDocument = projectionMapper.reconstructSearch(document);
+                validateScope(lease, requestedRevision, searchDocument.repositoryId().value(), searchDocument.generationId().value(),
+                        searchDocument.authoritativeIdentity().repositoryRevision(), issues);
+                search.add(new StoredSearch(document, searchDocument));
+            } catch (RuntimeException exception) {
+                issues.add(issue("INVALID_PROJECTION_DOCUMENT", "search projection cannot be reconstructed"));
+            }
+        }
+        return new ProjectionDocuments(symbols, relations, entryPoints, search);
+    }
+
+    private static void validateScope(MongoGenerationWriter.GenerationLease lease, RepositoryRevision requestedRevision,
+                                      String repositoryId, String generationId, RepositoryRevision projectionRevision,
+                                      List<GenerationValidationIssue> issues) {
+        if (!lease.repositoryId().value().equals(repositoryId) || !lease.generationId().value().equals(generationId)) {
+            issues.add(issue("PROJECTION_SCOPE_MISMATCH", "projection repository or generation differs from the build"));
+        }
+        if (!requestedRevision.equals(projectionRevision)) {
+            issues.add(issue("PROJECTION_REVISION_MISMATCH", "projection revision differs from the requested revision"));
+        }
+    }
+
+    private static void validateProjectionArtifacts(List<Document> files, List<StoredSymbol> symbols,
+                                                    List<StoredRelation> relations,
+                                                    List<GenerationValidationIssue> issues) {
+        Map<String, String> artifactIdsByPath = new LinkedHashMap<>();
+        for (Document file : files) {
+            artifactIdsByPath.put(file.getString("sourcePath"), sourceArtifactId(file));
+        }
+        for (StoredSymbol stored : symbols) {
+            String expected = artifactIdsByPath.get(stored.document().getString("sourcePath"));
+            if (!stored.symbol().sourceArtifactId().value().equals(expected)) {
+                issues.add(issue("PROJECTION_ARTIFACT_MISMATCH", "symbol source artifact differs from its generation file"));
+            }
+        }
+        for (StoredRelation stored : relations) {
+            String expected = artifactIdsByPath.get(stored.document().getString("sourcePath"));
+            if (!stored.relation().sourceArtifactId().value().equals(expected)) {
+                issues.add(issue("PROJECTION_ARTIFACT_MISMATCH", "relation source artifact differs from its generation file"));
+            }
+        }
+    }
+
+    private static void validateSearchCoverage(ProjectionDocuments projections, List<Document> storedSearch,
+                                               List<GenerationValidationIssue> issues) {
+        Map<String, ExpectedSearch> expected = new LinkedHashMap<>();
+        for (StoredSymbol stored : projections.symbols()) {
+            SymbolDocument symbol = stored.symbol();
+            expected.put(symbol.fact().id().value(), new ExpectedSearch(ProjectionName.SYMBOLS,
+                    symbol.fact().identity().kind(), symbol.fact().identity().canonicalForm(),
+                    stored.document().getString("sourcePath")));
+        }
+        for (StoredRelation stored : projections.relations()) {
+            RelationDocument relation = stored.relation();
+            expected.put(relation.fact().id().value(), new ExpectedSearch(ProjectionName.RELATIONS,
+                    relation.fact().identity().kind(), relation.fact().identity().canonicalForm(),
+                    stored.document().getString("sourcePath")));
+        }
+        for (StoredEntryPoint stored : projections.entryPoints()) {
+            EntryPointDocument entryPoint = stored.entryPoint();
+            expected.put(entryPoint.fact().id().value(), new ExpectedSearch(ProjectionName.ENTRY_POINTS,
+                    entryPoint.fact().identity().kind(), entryPoint.fact().identity().canonicalForm(),
+                    stored.document().getString("sourcePath")));
+        }
+        Set<String> found = new LinkedHashSet<>();
+        for (StoredSearch stored : projections.search()) {
+            Document document = stored.document();
+            SearchDocument search = stored.search();
+            String factId = document.getString("factId");
+            ExpectedSearch authority = expected.get(factId);
+            if (!search.factId().value().equals(factId) || Objects.isNull(authority) || !found.add(factId)) {
+                issues.add(issue("ORPHAN_SEARCH", "search projection has no unique authoritative fact"));
+                continue;
+            }
+            if (search.authoritativeProjection() != authority.projection()
+                    || search.kind() != authority.kind()
+                    || !search.authoritativeIdentity().canonicalForm().equals(authority.canonical())
+                    || !authority.projection().name().equals(document.getString("authority"))
+                    || !authority.kind().name().equals(document.getString("kind"))
+                    || !authority.canonical().equals(document.getString("canonical"))
+                    || !authority.sourcePath().equals(document.getString("sourcePath"))) {
+                issues.add(issue("SEARCH_AUTHORITY_MISMATCH", "search projection differs from its authoritative fact"));
+            }
+        }
+        if (!found.containsAll(expected.keySet()) || storedSearch.size() != projections.search().size()) {
+            issues.add(issue("INCOMPLETE_SEARCH", "not every authoritative fact has one valid search projection"));
+        }
+    }
+
+    private static Document noBatches(String field) {
+        return new Document("$eq", List.of(new Document("$size", new Document("$ifNull", List.of("$" + field, List.of()))), 0));
     }
 
     private static Map<String, Long> collectionCounts(List<Document> files, Map<String, Document> artifacts, List<Document> symbols,
@@ -359,6 +570,26 @@ public final class GenerationValidator {
 
     private static GenerationValidationIssue issue(String code, String detail) {
         return new GenerationValidationIssue(code, detail);
+    }
+
+    private record StoredSymbol(Document document, SymbolDocument symbol) { }
+
+    private record StoredRelation(Document document, RelationDocument relation) { }
+
+    private record StoredEntryPoint(Document document, EntryPointDocument entryPoint) { }
+
+    private record StoredSearch(Document document, SearchDocument search) { }
+
+    private record ExpectedSearch(ProjectionName projection, CodeFactKind kind, String canonical, String sourcePath) { }
+
+    private record ProjectionDocuments(List<StoredSymbol> symbols, List<StoredRelation> relations,
+                                       List<StoredEntryPoint> entryPoints, List<StoredSearch> search) {
+        private ProjectionDocuments {
+            symbols = List.copyOf(symbols);
+            relations = List.copyOf(relations);
+            entryPoints = List.copyOf(entryPoints);
+            search = List.copyOf(search);
+        }
     }
 
     public record ValidationResult(ManifestDigest identityDigest, Map<String, Long> collectionCounts,

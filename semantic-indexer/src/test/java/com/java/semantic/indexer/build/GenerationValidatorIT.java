@@ -1,6 +1,7 @@
 package com.java.semantic.indexer.build;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.java.semantic.indexer.store.IndexSchemaBootstrap;
 import com.java.semantic.indexer.store.MongoGenerationWriter;
@@ -9,6 +10,7 @@ import com.java.semantic.model.index.IndexCollections;
 import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.model.repository.RepositoryRevision;
 import com.mongodb.client.MongoClients;
+import com.mongodb.client.model.IndexOptions;
 import java.time.Duration;
 import java.util.Date;
 import java.util.List;
@@ -64,23 +66,54 @@ class GenerationValidatorIT {
         }
     }
 
+    @Test
+    void validation_freeze_rejects_a_late_batch_before_it_changes_the_generation() {
+        try (MongoDBContainer container = new MongoDBContainer("mongo:8.0.4")) {
+            container.start();
+            MongoTemplate template = new MongoTemplate(MongoClients.create(container.getConnectionString()), "semantic");
+            new IndexSchemaBootstrap(template).bootstrap();
+            seedValidWritingGeneration(template);
+            GenerationValidator validator = new GenerationValidator(template);
+
+            GenerationValidator.ValidationResult result = validator.validate(lease(), revision(), revision());
+            long searchBefore = template.getCollection(IndexCollections.SEARCH).countDocuments();
+            MongoGenerationWriter.StoredDocument lateSearch = new MongoGenerationWriter.StoredDocument(IndexCollections.SEARCH,
+                    new Document("repoId", "orders").append("generationId", "g1").append("factId", "late-fact")
+                            .append("canonical", "late-canonical"));
+
+            assertThat(result.valid()).isTrue();
+            assertThatThrownBy(() -> new MongoGenerationWriter(template).writeBatch(lease(), "late#0", List.of(lateSearch)))
+                    .isInstanceOf(IllegalStateException.class).hasMessageContaining("registration failed closed");
+            assertThat(template.getCollection(IndexCollections.SEARCH).countDocuments()).isEqualTo(searchBefore);
+            validator.recordValid(lease(), result);
+            assertThat(template.getCollection(IndexCollections.GENERATION_MANIFESTS).find(new Document("generationId", "g1")).first()
+                    .getString("validationResult")).isEqualTo("VALID");
+        }
+    }
+
     private static Stream<Arguments> invalidGenerationMutations() {
         return Stream.of(
                 Arguments.of("missing artifact", (java.util.function.Consumer<MongoTemplate>) template ->
                         template.getCollection(IndexCollections.SOURCE_ARTIFACTS).deleteMany(new Document()), "MISSING_ARTIFACT"),
                 Arguments.of("duplicate canonical", (java.util.function.Consumer<MongoTemplate>) template ->
-                        template.getCollection(IndexCollections.SYMBOLS).insertOne(symbol("symbol-2", "method-1")), "DUPLICATE_CANONICAL"),
+                        template.getCollection(IndexCollections.SYMBOLS).insertOne(duplicateSymbol(template)), "DUPLICATE_CANONICAL"),
                 Arguments.of("dangling internal relation", (java.util.function.Consumer<MongoTemplate>) template ->
-                        template.getCollection(IndexCollections.RELATIONS).updateOne(new Document("relationId", "relation-1"),
+                        template.getCollection(IndexCollections.RELATIONS).updateOne(new Document(),
                                 new Document("$set", new Document("target", "internal[14]missing-method"))), "DANGLING_INTERNAL_RELATION"),
                 Arguments.of("unclassified unresolved relation", (java.util.function.Consumer<MongoTemplate>) template ->
-                        template.getCollection(IndexCollections.RELATIONS).updateOne(new Document("relationId", "relation-1"),
+                        template.getCollection(IndexCollections.RELATIONS).updateOne(new Document(),
                                 new Document("$set", new Document("target", "unknown-target"))), "UNCLASSIFIED_RELATION_TARGET"),
                 Arguments.of("invalid range", (java.util.function.Consumer<MongoTemplate>) template ->
-                        template.getCollection(IndexCollections.SYMBOLS).updateOne(new Document("symbolId", "symbol-1"),
+                        template.getCollection(IndexCollections.SYMBOLS).updateOne(new Document(),
                                 new Document("$set", new Document("range", sourceRange(9, 0, 9, 1)))), "INVALID_RANGE"),
+                Arguments.of("negative line character", (java.util.function.Consumer<MongoTemplate>) template ->
+                        template.getCollection(IndexCollections.SYMBOLS).updateOne(new Document(),
+                                new Document("$set", new Document("range.range.start.character", -1))), "INVALID_RANGE"),
+                Arguments.of("reversed same-line range", (java.util.function.Consumer<MongoTemplate>) template ->
+                        template.getCollection(IndexCollections.SYMBOLS).updateOne(new Document(), new Document("$set",
+                                new Document("range.range.start.character", 1).append("range.range.end.character", 0))), "INVALID_RANGE"),
                 Arguments.of("missing entry method", (java.util.function.Consumer<MongoTemplate>) template ->
-                        template.getCollection(IndexCollections.ENTRY_POINTS).updateOne(new Document("entryPointId", "entry-1"),
+                        template.getCollection(IndexCollections.ENTRY_POINTS).updateOne(new Document(),
                                 new Document("$set", new Document("method", "missing-method"))), "MISSING_ENTRY_POINT_METHOD"),
                 Arguments.of("unsupported schema", (java.util.function.Consumer<MongoTemplate>) template ->
                         template.getCollection(IndexCollections.GENERATION_MANIFESTS).updateOne(new Document("generationId", "g1"),
@@ -88,7 +121,20 @@ class GenerationValidatorIT {
                 Arguments.of("incomplete projections", (java.util.function.Consumer<MongoTemplate>) template ->
                         template.getCollection(IndexCollections.GENERATION_MANIFESTS).updateOne(new Document("generationId", "g1"),
                                 new Document("$set", new Document("projectionVersions", List.of(new Document("name", "SOURCES").append("version", 1))))),
-                        "INCOMPLETE_PROJECTION_VERSIONS"));
+                        "INCOMPLETE_PROJECTION_VERSIONS"),
+                Arguments.of("missing search authority", (java.util.function.Consumer<MongoTemplate>) template ->
+                        template.getCollection(IndexCollections.SEARCH).deleteOne(new Document("authority", "ENTRY_POINTS")), "INCOMPLETE_SEARCH"),
+                Arguments.of("orphan search authority", (java.util.function.Consumer<MongoTemplate>) template ->
+                        template.getCollection(IndexCollections.SEARCH).insertOne(orphanSearch(template)), "ORPHAN_SEARCH"),
+                Arguments.of("mismatched source artifact", (java.util.function.Consumer<MongoTemplate>) template ->
+                        template.getCollection(IndexCollections.SYMBOLS).updateOne(new Document(),
+                                new Document("$set", new Document("sourceArtifactId", new Document("value", "f".repeat(64))))),
+                        "PROJECTION_ARTIFACT_MISMATCH"),
+                Arguments.of("wrong index definition with correct name", (java.util.function.Consumer<MongoTemplate>) template -> {
+                    template.getCollection(IndexCollections.REPOSITORIES).dropIndex("repository_id_unique");
+                    template.getCollection(IndexCollections.REPOSITORIES).createIndex(new Document("wrongKey", 1),
+                            new IndexOptions().name("repository_id_unique"));
+                }, "INVALID_REQUIRED_INDEX"));
     }
 
     static void seedValidWritingGeneration(MongoTemplate template) {
@@ -98,40 +144,36 @@ class GenerationValidatorIT {
                 .append("revision", "b".repeat(40)).append("generationId", "old-generation").append("manifestDigest", "c".repeat(64))
                 .append("committedJobId", "old-job").append("publishedAt", new Date(0L)));
         template.getCollection(IndexCollections.INDEX_JOBS).insertOne(new Document("jobId", "job-1").append("repoId", "orders")
-                .append("active", true).append("workerId", "worker-1").append("fence", 1L));
+                .append("active", true).append("workerId", "worker-1").append("fence", 1L)
+                .append("outstandingBatches", List.of()).append("acknowledgedBatches", List.of())
+                .append("failedOrAmbiguousBatches", List.of()));
         template.getCollection(IndexCollections.GENERATION_MANIFESTS).insertOne(new Document("repoId", "orders").append("generationId", "g1")
                 .append("sourceRevision", revision().value()).append("ownerJobId", "job-1").append("ownerWorkerId", "worker-1")
                 .append("fence", 1L).append("writeState", "WRITING").append("sealUntil", until).append("writeEpoch", 0L)
                 .append("schemaVersion", 1).append("projectionVersions", projectionVersions()).append("identityDigest", "0".repeat(64))
-                .append("outstandingBatches", List.of()).append("failedOrAmbiguousBatches", List.of()));
-        template.getCollection(IndexCollections.SOURCE_ARTIFACTS).insertOne(new Document("sourceArtifactId", "a".repeat(64))
-                .append("contentHash", "a".repeat(64)).append("utf8Content", "class Secret { String token = \"token-123\"; }")
-                .append("lineOffsets", List.of(0)));
-        template.getCollection(IndexCollections.GENERATION_FILES).insertOne(new Document("repoId", "orders").append("generationId", "g1")
-                .append("sourcePath", "src/Order.java").append("sourceArtifactId", "a".repeat(64)).append("contentHash", "a".repeat(64)));
-        template.getCollection(IndexCollections.SYMBOLS).insertOne(symbol("symbol-1", "method-1"));
-        template.getCollection(IndexCollections.RELATIONS).insertOne(new Document("repoId", "orders").append("generationId", "g1")
-                .append("relationId", "relation-1").append("from", "method-1").append("target", "internal[8]method-1")
-                .append("sourceArtifactId", "a".repeat(64)).append("sourcePath", "src/Order.java").append("range", sourceRange(0, 0, 0, 1)));
-        template.getCollection(IndexCollections.ENTRY_POINTS).insertOne(new Document("repoId", "orders").append("generationId", "g1")
-                .append("entryPointId", "entry-1").append("canonical", "entry-1").append("method", "method-1")
-                .append("sourcePath", "src/Order.java").append("entryPoint", new Document("range", storedRange(0, 0, 0, 1))));
-        template.getCollection(IndexCollections.SEARCH).insertOne(new Document("repoId", "orders").append("generationId", "g1")
-                .append("factId", "symbol-1").append("canonical", "method-1"));
+                .append("outstandingBatches", List.of()).append("acknowledgedBatches", List.of())
+                .append("failedOrAmbiguousBatches", List.of()));
+        SourceIndexBatch batch = FullIndexPublicationIT.validBatch(RepositoryId.of("orders"), revision(), new GenerationId("g1"));
+        new MongoIndexBatchWriter(new MongoGenerationWriter(template), lease(),
+                new SourceIndexBatchDocumentMapper(template.getConverter())).write(batch);
     }
 
-    private static Document symbol(String id, String canonical) {
-        return new Document("repoId", "orders").append("generationId", "g1").append("symbolId", id).append("canonical", canonical)
-                .append("sourceArtifactId", "a".repeat(64)).append("sourcePath", "src/Order.java").append("range", sourceRange(0, 0, 0, 1));
+    private static Document duplicateSymbol(MongoTemplate template) {
+        Document duplicate = new Document(template.getCollection(IndexCollections.SYMBOLS).find().first());
+        duplicate.remove("_id");
+        duplicate.put("symbolId", "symbol-duplicate");
+        return duplicate;
+    }
+
+    private static Document orphanSearch(MongoTemplate template) {
+        Document orphan = new Document(template.getCollection(IndexCollections.SEARCH).find().first());
+        orphan.remove("_id");
+        orphan.put("factId", "orphan-fact");
+        return orphan;
     }
 
     private static Document sourceRange(int startLine, int startCharacter, int endLine, int endCharacter) {
         return new Document("sourceFile", "src/Order.java").append("range", syntaxRange(startLine, startCharacter, endLine, endCharacter));
-    }
-
-    private static Document storedRange(int startLine, int startCharacter, int endLine, int endCharacter) {
-        return new Document("sourceFile", "src/Order.java").append("startLine", startLine).append("startCharacter", startCharacter)
-                .append("endLine", endLine).append("endCharacter", endCharacter);
     }
 
     private static Document syntaxRange(int startLine, int startCharacter, int endLine, int endCharacter) {

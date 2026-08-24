@@ -42,8 +42,8 @@ public final class MongoPublicationWriter implements PublicationPort {
     public PublishedGenerationPointer publish(PublishGenerationCommand command) {
         Objects.requireNonNull(command, "publish command is required");
         try {
-            requireSealedManifest(command);
-            Document published = template.findAndModify(new BasicQuery(publicationFilter(command)), publicationUpdate(command),
+            Date sealedUntil = requireSealedManifest(command);
+            Document published = template.findAndModify(new BasicQuery(publicationFilter(command, sealedUntil)), publicationUpdate(command),
                     FindAndModifyOptions.options().returnNew(true), Document.class, IndexCollections.REPOSITORIES);
             if (Objects.isNull(published)) {
                 throw new PublicationConflictException();
@@ -74,7 +74,7 @@ public final class MongoPublicationWriter implements PublicationPort {
         }
     }
 
-    private void requireSealedManifest(PublishGenerationCommand command) {
+    private Date requireSealedManifest(PublishGenerationCommand command) {
         Document filter = new Document(REPOSITORY_ID, command.repositoryId().value())
                 .append("sourceRevision", command.targetRevision().value())
                 .append(GENERATION_ID, command.targetGenerationId().value())
@@ -88,6 +88,7 @@ public final class MongoPublicationWriter implements PublicationPort {
         if (!compatibleAndValidated(manifest)) {
             throw new PublicationConflictException();
         }
+        return manifest.getDate("sealUntil");
     }
 
     private void requireSealedPointer(String repositoryId, PublishedGenerationPointer pointer) {
@@ -146,9 +147,9 @@ public final class MongoPublicationWriter implements PublicationPort {
         return true;
     }
 
-    private static Document publicationFilter(PublishGenerationCommand command) {
+    private static Document publicationFilter(PublishGenerationCommand command, Date sealedUntil) {
         Document filter = activeLeaseFilter(command.repositoryId().value(), command.activeJobId(), command.activeWorkerId(),
-                command.targetGenerationId().value(), command.activeFence().value());
+                command.targetGenerationId().value(), command.activeFence().value()).append("claimUntil", sealedUntil);
         command.expectedParent().ifPresentOrElse(pointer -> addPointerMatch(filter, "", pointer),
                 () -> requireNoCurrentPointer(filter));
         return filter;

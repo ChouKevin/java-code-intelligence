@@ -1,8 +1,16 @@
 package com.java.semantic.indexer.build;
 
 import com.java.semantic.indexer.store.MongoGenerationWriter.StoredDocument;
+import com.java.semantic.model.codefact.CodeFact;
+import com.java.semantic.model.codefact.RelationIdentity;
+import com.java.semantic.model.codefact.RelationKind;
+import com.java.semantic.model.codefact.SourceRange;
 import com.java.semantic.model.index.GenerationFileDocument;
+import com.java.semantic.model.index.GenerationId;
 import com.java.semantic.model.index.IndexCollections;
+import com.java.semantic.model.index.RelationDocument;
+import com.java.semantic.model.index.SourceArtifactId;
+import com.java.semantic.model.repository.RepositoryId;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
@@ -82,6 +90,18 @@ public final class SourceIndexBatchDocumentMapper {
         IndexProjectionPersistence.EntryPointPersistence persistence = converter.read(
                 IndexProjectionPersistence.EntryPointPersistence.class, document);
         return persistence.toModel();
+    }
+
+    RelationDocument reconstructRelation(Document document) {
+        CodeFact fact = converter.read(CodeFact.class, document.get("fact", Document.class));
+        SourceArtifactId sourceArtifactId = converter.read(SourceArtifactId.class,
+                document.get("sourceArtifactId", Document.class));
+        SourceRange range = converter.read(SourceRange.class, document.get("range", Document.class));
+        if (!(fact.identity().canonicalIdentity() instanceof RelationIdentity identity)) {
+            throw new IllegalArgumentException("relation fact has no relation identity");
+        }
+        return new RelationDocument(new RepositoryId(document.getString("repoId")), new GenerationId(document.getString("generationId")),
+                fact, RelationKind.valueOf(document.getString("kind")), identity.from(), identity.target(), sourceArtifactId, range);
     }
 
     com.java.semantic.model.index.SearchDocument reconstructSearch(Document document) {

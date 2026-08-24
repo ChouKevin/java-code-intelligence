@@ -9,7 +9,6 @@ import org.springframework.dao.DataAccessException;
 import org.springframework.data.mongodb.core.MongoTemplate;
 
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 
@@ -35,7 +34,7 @@ final class MongoIndexSchemaWriter {
             Optional<Document> matching = existing.stream().filter(index -> specification.name().equals(index.getString("name"))).findFirst();
             if (matching.isEmpty()) {
                 mongoCollection.createIndex(new Document(specification.keys()), options(specification));
-            } else if (!compatible(matching.orElseThrow(), specification)) {
+            } else if (!MongoIndexDefinitionMatcher.matches(matching.orElseThrow(), specification)) {
                 throw new IndexSchemaConflictException("conflicting index " + collection.name() + "." + specification.name());
             }
         }
@@ -82,25 +81,4 @@ final class MongoIndexSchemaWriter {
         return result;
     }
 
-    private static boolean compatible(Document existing, IndexSchemaContract.IndexSpec specification) {
-        Document key = existing.get("key", Document.class);
-        boolean unique = Boolean.TRUE.equals(existing.getBoolean("unique", false));
-        Document partial = existing.get("partialFilterExpression", Document.class);
-        Map<String, Object> actualPartial = Optional.ofNullable(partial).map(MongoIndexSchemaWriter::canonicalFilter).orElse(Map.of());
-        return new Document(specification.keys()).equals(key) && unique == specification.unique()
-                && actualPartial.equals(specification.partialFilter());
-    }
-
-    private static Map<String, Object> canonicalFilter(Document filter) {
-        java.util.LinkedHashMap<String, Object> result = new java.util.LinkedHashMap<>();
-        for (Map.Entry<String, Object> entry : filter.entrySet()) {
-            Object value = entry.getValue();
-            if (value instanceof Document document && document.size() == 1 && document.containsKey("$eq")) {
-                result.put(entry.getKey(), document.get("$eq"));
-            } else {
-                result.put(entry.getKey(), value);
-            }
-        }
-        return Map.copyOf(result);
-    }
 }
