@@ -225,10 +225,10 @@ class MongoPublicationWriterIT {
     private static java.util.List<Document> projectionVersions() {
         return java.util.List.of(
                 new Document("name", "SOURCES").append("version", 1),
-                new Document("name", "SYMBOLS").append("version", 1),
+                new Document("name", "SYMBOLS").append("version", 2),
                 new Document("name", "RELATIONS").append("version", 1),
-                new Document("name", "ENTRY_POINTS").append("version", 1),
-                new Document("name", "SEARCH").append("version", 1));
+                new Document("name", "ENTRY_POINTS").append("version", 2),
+                new Document("name", "SEARCH").append("version", 2));
     }
 
     private static String digest(String digit) {

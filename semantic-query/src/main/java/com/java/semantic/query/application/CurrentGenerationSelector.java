@@ -12,6 +12,7 @@ import com.java.semantic.model.query.CurrentGeneration;
 import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.model.repository.RepositoryRevision;
 import com.java.semantic.query.config.ConfiguredReadPolicy;
+import com.java.semantic.query.config.SearchAccessPlan;
 import com.mongodb.MongoException;
 import com.mongodb.client.FindIterable;
 import com.mongodb.client.model.Filters;
@@ -34,6 +35,10 @@ import java.util.concurrent.TimeUnit;
 public final class CurrentGenerationSelector {
     public static final ProjectionRequirements SOURCES = new ProjectionRequirements(EnumSet.of(ProjectionName.SOURCES, ProjectionName.SYMBOLS));
     public static final ProjectionRequirements SYMBOLS = new ProjectionRequirements(EnumSet.of(ProjectionName.SYMBOLS));
+    public static final ProjectionRequirements ENTRY_POINTS = new ProjectionRequirements(EnumSet.of(ProjectionName.ENTRY_POINTS, ProjectionName.SYMBOLS));
+    public static final ProjectionRequirements SEARCH = new ProjectionRequirements(EnumSet.of(ProjectionName.SEARCH, ProjectionName.SYMBOLS));
+    public static final ProjectionRequirements SEARCH_WITH_SOURCES = new ProjectionRequirements(EnumSet.of(ProjectionName.SEARCH,
+            ProjectionName.SOURCES, ProjectionName.SYMBOLS));
     public static final ProjectionRequirements ALL_PROJECTIONS = new ProjectionRequirements(EnumSet.allOf(ProjectionName.class));
     private final MongoTemplate template;
     private final ConfiguredReadPolicy readPolicy;
@@ -48,8 +53,8 @@ public final class CurrentGenerationSelector {
     public CurrentGeneration selectSource(String requestedRepositoryId, String requestedRevision, SourceTypeIdentity sourceType) {
         Request request = request(requestedRepositoryId, requestedRevision);
         SourceTypeIdentity identity = Objects.requireNonNull(sourceType, "source type identity is required");
-        CurrentGeneration current = selectedPointer(request);
         if (!readPolicy.isSourceVisible(request.repositoryId(), identity)) { throw new RepositoryNotFoundException(); }
+        CurrentGeneration current = selectedPointer(request);
         verifyManifest(current, SOURCES);
         return current;
     }
@@ -66,10 +71,33 @@ public final class CurrentGenerationSelector {
         if (!request.repositoryId().equals(identity.repositoryId()) || !request.revision().equals(identity.repositoryRevision())) {
             throw new IllegalArgumentException("code fact identity repository and revision must match the request");
         }
-        CurrentGeneration current = selectedPointer(request);
         if (!readPolicy.isCodeFactVisible(request.repositoryId(), identity)) { throw new RepositoryNotFoundException(); }
-        verifyManifest(current, SYMBOLS);
+        CurrentGeneration current = selectedPointer(request);
+        verifyManifest(current, requirementsFor(identity));
         return current;
+    }
+
+    /** Selects an authorized current generation before a bounded projection query. */
+    public CurrentGeneration select(String requestedRepositoryId, String requestedRevision,
+                                    ProjectionRequirements requirements) {
+        Request request = request(requestedRepositoryId, requestedRevision);
+        ProjectionRequirements requiredRequirements = Objects.requireNonNull(requirements, "projection requirements are required");
+        CurrentGeneration current = selectedPointer(request);
+        verifyManifest(current, requiredRequirements);
+        return current;
+    }
+
+    public SearchAccessPlan searchAccessPlan(String requestedRepositoryId) {
+        return readPolicy.searchAccessPlan(new RepositoryId(requestedRepositoryId));
+    }
+
+    private static ProjectionRequirements requirementsFor(CodeFactIdentity identity) {
+        return switch (identity.kind()) {
+            case ANNOTATION_USAGE, TYPE_USAGE, SQL_IDENTIFIER, CONFIGURATION_KEY, OUTBOUND_API, MQ_PUBLISHER, ERROR_CONTRACT ->
+                    new ProjectionRequirements(EnumSet.of(ProjectionName.RELATIONS, ProjectionName.SYMBOLS));
+            case API_ROUTE, MQ_DESTINATION, SCHEDULE -> ENTRY_POINTS;
+            default -> SYMBOLS;
+        };
     }
 
     public CurrentGeneration currentRepository(String requestedRepositoryId) {

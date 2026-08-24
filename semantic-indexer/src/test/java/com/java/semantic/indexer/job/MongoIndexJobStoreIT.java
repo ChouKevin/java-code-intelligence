@@ -318,10 +318,10 @@ class MongoIndexJobStoreIT {
                 .append("sealUntil", Date.from(job.claimUntil().orElseThrow())).append("writeState", "SEALED_VALID")
                 .append("writeEpoch", 1L).append("schemaVersion", 1)
                 .append("projectionVersions", List.of(new org.bson.Document("name", "SOURCES").append("version", 1),
-                        new org.bson.Document("name", "SYMBOLS").append("version", 1),
+                        new org.bson.Document("name", "SYMBOLS").append("version", 2),
                         new org.bson.Document("name", "RELATIONS").append("version", 1),
-                        new org.bson.Document("name", "ENTRY_POINTS").append("version", 1),
-                        new org.bson.Document("name", "SEARCH").append("version", 1)))
+                        new org.bson.Document("name", "ENTRY_POINTS").append("version", 2),
+                        new org.bson.Document("name", "SEARCH").append("version", 2)))
                 .append("sealedCollectionCounts", new org.bson.Document("symbols", 1L)).append("identityDigest", digest.value())
                 .append("validationResult", "VALID").append("validatedAt", new java.util.Date());
     }
@@ -383,10 +383,10 @@ class MongoIndexJobStoreIT {
                                                          long fence, boolean requiredProjections, int schemaVersion) {
         List<org.bson.Document> projections = requiredProjections
                 ? List.of(new org.bson.Document("name", "SOURCES").append("version", 1),
-                        new org.bson.Document("name", "SYMBOLS").append("version", 1),
+                        new org.bson.Document("name", "SYMBOLS").append("version", 2),
                         new org.bson.Document("name", "RELATIONS").append("version", 1),
-                        new org.bson.Document("name", "ENTRY_POINTS").append("version", 1),
-                        new org.bson.Document("name", "SEARCH").append("version", 1))
+                        new org.bson.Document("name", "ENTRY_POINTS").append("version", 2),
+                        new org.bson.Document("name", "SEARCH").append("version", 2))
                 : List.of(new org.bson.Document("name", "SOURCES").append("version", 0));
         return new org.bson.Document("repoId", repositoryId).append("sourceRevision", pointer.revision().value())
                 .append("generationId", pointer.generationId().value()).append("ownerJobId", pointer.committedJobId())

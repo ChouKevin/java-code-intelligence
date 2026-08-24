@@ -5,6 +5,7 @@ import com.java.semantic.model.codefact.CodeFact;
 import com.java.semantic.model.codefact.CodeFactId;
 import com.java.semantic.model.codefact.CodeFactIdentity;
 import com.java.semantic.model.codefact.CodeFactKind;
+import com.java.semantic.model.codefact.CodeFactScope;
 import com.java.semantic.model.codefact.DeclaredType;
 import com.java.semantic.model.codefact.EntryPointIdentity;
 import com.java.semantic.model.codefact.EntryPointKind;
@@ -94,7 +95,9 @@ final class IndexProjectionPersistence {
 
     record StoredSearch(String repositoryId, String generationId, String factId, String kind, List<String> normalizedTokens,
                         boolean hasPackageName, String packageName, String authoritativeProjection,
-                        StoredCodeFactIdentity authoritativeIdentity) {
+                        StoredCodeFactIdentity authoritativeIdentity, String scopePackage, String scopeClass,
+                        boolean hasScopeMethod, String scopeMethod, List<String> scopeParameters,
+                        boolean hasScopePath, String scopePath) {
 
         StoredSearch {
             repositoryId = Objects.requireNonNull(repositoryId, "stored repository id is required");
@@ -105,6 +108,11 @@ final class IndexProjectionPersistence {
             packageName = Objects.requireNonNull(packageName, "stored package name is required");
             authoritativeProjection = Objects.requireNonNull(authoritativeProjection, "stored authoritative projection is required");
             authoritativeIdentity = Objects.requireNonNull(authoritativeIdentity, "stored authoritative identity is required");
+            scopePackage = Objects.requireNonNull(scopePackage, "stored scope package is required");
+            scopeClass = Objects.requireNonNull(scopeClass, "stored scope class is required");
+            scopeMethod = Objects.requireNonNull(scopeMethod, "stored scope method is required");
+            scopeParameters = List.copyOf(Objects.requireNonNull(scopeParameters, "stored scope parameters are required"));
+            scopePath = Objects.requireNonNull(scopePath, "stored scope path is required");
         }
 
         static StoredSearch from(SearchDocument document) {
@@ -112,14 +120,19 @@ final class IndexProjectionPersistence {
             return new StoredSearch(requiredDocument.repositoryId().value(), requiredDocument.generationId().value(), requiredDocument.factId().value(),
                     requiredDocument.kind().name(), requiredDocument.normalizedTokens(), requiredDocument.packageName().isPresent(),
                     requiredDocument.packageName().orElse(""), requiredDocument.authoritativeProjection().name(),
-                    StoredCodeFactIdentity.from(requiredDocument.authoritativeIdentity()));
+                    StoredCodeFactIdentity.from(requiredDocument.authoritativeIdentity()), requiredDocument.scope().packageName(),
+                    requiredDocument.scope().className(), requiredDocument.scope().methodName().isPresent(),
+                    requiredDocument.scope().methodName().orElse(""), requiredDocument.scope().parameterTypes(),
+                    requiredDocument.scope().sourcePath().isPresent(), requiredDocument.scope().sourcePath().orElse(""));
         }
 
         SearchDocument toModel() {
             Optional<String> packageValue = hasPackageName ? Optional.of(packageName) : Optional.empty();
             return new SearchDocument(new RepositoryId(repositoryId), new GenerationId(generationId), new CodeFactId(factId),
                     CodeFactKind.valueOf(kind), normalizedTokens, packageValue, ProjectionName.valueOf(authoritativeProjection),
-                    authoritativeIdentity.toModel());
+                    authoritativeIdentity.toModel(), new CodeFactScope(scopePackage, scopeClass,
+                    hasScopeMethod ? Optional.of(scopeMethod) : Optional.empty(), scopeParameters,
+                    hasScopePath ? Optional.of(scopePath) : Optional.empty()));
         }
     }
 

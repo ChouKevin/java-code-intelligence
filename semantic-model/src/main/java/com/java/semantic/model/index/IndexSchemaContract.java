@@ -14,7 +14,7 @@ public final class IndexSchemaContract {
 
     public static final int SCHEMA_VERSION = 1;
     private static final Map<String, Integer> REQUIRED_PROJECTION_VERSIONS = Map.of(
-            "SOURCES", 1, "SYMBOLS", 1, "RELATIONS", 1, "ENTRY_POINTS", 1, "SEARCH", 1);
+            "SOURCES", 2, "SYMBOLS", 2, "RELATIONS", 1, "ENTRY_POINTS", 2, "SEARCH", 2);
     private static final List<ImmutablePayloadCollectionSpec> IMMUTABLE_PAYLOAD_COLLECTIONS = List.of(
             payload(IndexCollections.GENERATION_FILES, PayloadScope.GENERATION, "repoId", "generationId", "sourcePath"),
             payload(IndexCollections.SOURCE_ARTIFACTS, PayloadScope.GLOBAL, "sourceArtifactId"),
@@ -33,14 +33,14 @@ public final class IndexSchemaContract {
                     index("content_hash_unique", keys("contentHash", 1), true, Map.of())),
             collection(IndexCollections.SYMBOLS, index("symbol_unique", keys("repoId", 1, "generationId", 1, "symbolId", 1), true, Map.of()),
                     index("symbol_canonical", keys("repoId", 1, "generationId", 1, "canonical", 1), false, Map.of()),
-                    index("symbol_owner_name_source", keys("repoId", 1, "generationId", 1, "owner", 1, "name", 1, "sourcePath", 1), false, Map.of())),
+                    index("symbol_owner_name_source", keys("repoId", 1, "generationId", 1, "scopePackage", 1, "scopeClass", 1, "scopeMethod", 1, "scopeParameters", 1, "owner", 1, "name", 1, "sourcePath", 1), false, Map.of())),
             collection(IndexCollections.RELATIONS, index("relation_unique", keys("repoId", 1, "generationId", 1, "relationId", 1), true, Map.of()),
                     index("relation_from_target_source", keys("repoId", 1, "generationId", 1, "from", 1, "target", 1, "sourcePath", 1), false, Map.of())),
             collection(IndexCollections.ENTRY_POINTS, index("entry_point_unique", keys("repoId", 1, "generationId", 1, "entryPointId", 1), true, Map.of()),
-                    index("entry_point_route", keys("repoId", 1, "generationId", 1, "method", 1, "path", 1), false, Map.of()),
+                    index("entry_point_route", keys("repoId", 1, "generationId", 1, "scopePackage", 1, "scopeClass", 1, "scopeMethod", 1, "scopeParameters", 1, "httpMethod", 1, "path", 1), false, Map.of()),
                     index("entry_point_method_kind", keys("repoId", 1, "generationId", 1, "method", 1, "kind", 1), false, Map.of())),
             collection(IndexCollections.SEARCH, index("search_unique", keys("repoId", 1, "generationId", 1, "factId", 1), true, Map.of()),
-                    index("search_kind_tokens_package_authority", keys("repoId", 1, "generationId", 1, "kind", 1, "tokens", 1, "package", 1, "authority", 1), false, Map.of())));
+                    index("search_kind_tokens_package_authority", keys("repoId", 1, "generationId", 1, "scopePackage", 1, "scopeClass", 1, "scopeMethod", 1, "scopeParameters", 1, "kind", 1, "tokens", 1, "package", 1, "authority", 1), false, Map.of())));
 
     private IndexSchemaContract() { }
 

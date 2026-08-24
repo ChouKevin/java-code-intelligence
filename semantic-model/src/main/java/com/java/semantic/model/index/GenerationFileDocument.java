@@ -10,7 +10,9 @@ public record GenerationFileDocument(
         GenerationId generationId,
         String sourcePath,
         SourceArtifactId sourceArtifactId,
-        String contentHash) {
+        String contentHash,
+        String extractionIssueCode,
+        SourceIndexScope scope) {
 
     public GenerationFileDocument {
         repositoryId = Objects.requireNonNull(repositoryId, "repository id is required");
@@ -19,5 +21,10 @@ public record GenerationFileDocument(
         sourceArtifactId = Objects.requireNonNull(sourceArtifactId, "source artifact id is required");
         contentHash = ModelValidation.sha256(contentHash, "content hash");
         ModelValidation.require(sourceArtifactId.value().equals(contentHash), "source artifact id must equal content hash");
+        extractionIssueCode = Objects.requireNonNull(extractionIssueCode, "extraction issue code is required");
+        if (!extractionIssueCode.isEmpty()) {
+            extractionIssueCode = ModelValidation.requiredText(extractionIssueCode, "extraction issue code");
+        }
+        scope = Objects.requireNonNull(scope, "scope is required");
     }
 }

@@ -3,6 +3,7 @@ package com.java.semantic.model.index;
 import com.java.semantic.model.codefact.CodeFactId;
 import com.java.semantic.model.codefact.CodeFactIdentity;
 import com.java.semantic.model.codefact.CodeFactKind;
+import com.java.semantic.model.codefact.CodeFactScope;
 import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.model.support.ModelValidation;
 
@@ -20,7 +21,15 @@ public record SearchDocument(
         List<String> normalizedTokens,
         Optional<String> packageName,
         ProjectionName authoritativeProjection,
-        CodeFactIdentity authoritativeIdentity) {
+        CodeFactIdentity authoritativeIdentity,
+        CodeFactScope scope) {
+
+    public SearchDocument(RepositoryId repositoryId, GenerationId generationId, CodeFactId factId, CodeFactKind kind,
+                          List<String> normalizedTokens, Optional<String> packageName,
+                          ProjectionName authoritativeProjection, CodeFactIdentity authoritativeIdentity) {
+        this(repositoryId, generationId, factId, kind, normalizedTokens, packageName, authoritativeProjection,
+                authoritativeIdentity, CodeFactScope.from(authoritativeIdentity));
+    }
 
     public SearchDocument {
         repositoryId = Objects.requireNonNull(repositoryId, "repository id is required");
@@ -31,6 +40,7 @@ public record SearchDocument(
         packageName = Objects.requireNonNull(packageName, "package name is required");
         authoritativeProjection = Objects.requireNonNull(authoritativeProjection, "authoritative projection is required");
         authoritativeIdentity = Objects.requireNonNull(authoritativeIdentity, "authoritative identity is required");
+        scope = Objects.requireNonNull(scope, "authority scope is required");
         ModelValidation.require(repositoryId.equals(authoritativeIdentity.repositoryId()), "search repository must match authority");
         ModelValidation.require(kind == authoritativeIdentity.kind(), "search kind must match authority");
         ModelValidation.require(!normalizedTokens.isEmpty(), "normalized tokens must not be empty");
@@ -47,6 +57,8 @@ public record SearchDocument(
                 "search fact id must match authoritative identity");
         ModelValidation.require(authoritativeProjection == expectedProjection(kind),
                 "search authority must match code fact kind");
+        ModelValidation.require(scope.equals(CodeFactScope.from(authoritativeIdentity)),
+                "search authority scope must match authoritative identity");
     }
 
     private static ProjectionName expectedProjection(CodeFactKind kind) {

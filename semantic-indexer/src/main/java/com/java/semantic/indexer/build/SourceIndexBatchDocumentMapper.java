@@ -2,6 +2,7 @@ package com.java.semantic.indexer.build;
 
 import com.java.semantic.indexer.store.MongoGenerationWriter.StoredDocument;
 import com.java.semantic.model.codefact.CodeFact;
+import com.java.semantic.model.codefact.CodeFactScope;
 import com.java.semantic.model.codefact.RelationIdentity;
 import com.java.semantic.model.codefact.RelationKind;
 import com.java.semantic.model.codefact.SourceRange;
@@ -9,6 +10,7 @@ import com.java.semantic.model.index.GenerationFileDocument;
 import com.java.semantic.model.index.GenerationId;
 import com.java.semantic.model.index.IndexCollections;
 import com.java.semantic.model.index.RelationDocument;
+import com.java.semantic.model.index.persistence.EntryPointPersistence;
 import com.java.semantic.model.index.SourceArtifactId;
 import com.java.semantic.model.repository.RepositoryId;
 import java.util.ArrayList;
@@ -44,13 +46,27 @@ public final class SourceIndexBatchDocumentMapper {
         }
         if (includeGenerationFile) {
             GenerationFileDocument generationFile = new GenerationFileDocument(batch.repositoryId(), batch.generationId(), batch.sourcePath(),
-                    batch.sourceArtifact().id(), batch.sourceArtifact().contentHash());
-            documents.add(stored(IndexCollections.GENERATION_FILES, generationFile, document -> document.put("sourcePath", batch.sourcePath())));
+                    batch.sourceArtifact().id(), batch.sourceArtifact().contentHash(),
+                    batch.extractionIssue().map(com.java.semantic.model.index.SourceIndexIssue::code).orElse(""), batch.sourceScope());
+            documents.add(stored(IndexCollections.GENERATION_FILES, generationFile, document -> {
+                document.put("sourcePath", batch.sourcePath());
+                document.put("extractionIssueCode", batch.extractionIssue().map(com.java.semantic.model.index.SourceIndexIssue::code).orElse(""));
+                document.put("scopeUsable", batch.sourceScope().usableScopes());
+                document.put("scopePackages", batch.sourceScope().packages());
+                document.put("scopeClassKeys", batch.sourceScope().classKeys());
+                document.put("scopeMethodKeys", batch.sourceScope().methodKeys());
+            }));
         }
         batch.symbols().forEach(symbol -> documents.add(stored(IndexCollections.SYMBOLS, symbol, document -> {
+            CodeFactScope scope = CodeFactScope.from(symbol.fact().identity());
             document.put("symbolId", symbol.fact().id().value());
             document.put("canonical", symbol.fact().identity().canonicalForm());
             document.put("sourcePath", batch.sourcePath());
+            document.put("scopePackage", scope.packageName());
+            document.put("scopeClass", scope.className());
+            document.put("scopeMethod", scope.methodName().orElse(""));
+            document.put("scopeParameters", scope.parameterTypes());
+            document.put("scopePath", scope.sourcePath().orElse(""));
         })));
         batch.relations().forEach(relation -> documents.add(stored(IndexCollections.RELATIONS, relation, document -> {
             document.put("relationId", relation.fact().id().value());
@@ -59,12 +75,19 @@ public final class SourceIndexBatchDocumentMapper {
             document.put("sourcePath", batch.sourcePath());
         })));
         batch.entryPoints().forEach(entryPoint -> documents.add(stored(IndexCollections.ENTRY_POINTS,
-                IndexProjectionPersistence.EntryPointPersistence.from(entryPoint), document -> {
+                EntryPointPersistence.from(entryPoint), document -> {
+            CodeFactScope scope = CodeFactScope.from(entryPoint.fact().identity());
             document.put("entryPointId", entryPoint.fact().id().value());
             document.put("canonical", entryPoint.fact().identity().canonicalForm());
             document.put("sourcePath", batch.sourcePath());
             document.put("method", entryPoint.method().canonicalForm());
             entryPoint.trigger().httpPath().ifPresent(path -> document.put("path", path));
+            entryPoint.trigger().httpMethod().ifPresent(method -> document.put("httpMethod", method));
+            document.put("scopePackage", scope.packageName());
+            document.put("scopeClass", scope.className());
+            document.put("scopeMethod", scope.methodName().orElse(""));
+            document.put("scopeParameters", scope.parameterTypes());
+            document.put("scopePath", scope.sourcePath().orElse(""));
         })));
         batch.search().forEach(search -> documents.add(stored(IndexCollections.SEARCH,
                 IndexProjectionPersistence.SearchPersistence.from(search), document -> {
@@ -74,6 +97,11 @@ public final class SourceIndexBatchDocumentMapper {
             document.put("package", search.packageName().orElse(""));
             document.put("authority", search.authoritativeProjection().name());
             document.put("canonical", search.authoritativeIdentity().canonicalForm());
+            document.put("scopePackage", search.scope().packageName());
+            document.put("scopeClass", search.scope().className());
+            document.put("scopeMethod", search.scope().methodName().orElse(""));
+            document.put("scopeParameters", search.scope().parameterTypes());
+            document.put("scopePath", search.scope().sourcePath().orElse(""));
             document.put("sourcePath", batch.sourcePath());
         })));
         return List.copyOf(documents);
@@ -87,8 +115,7 @@ public final class SourceIndexBatchDocumentMapper {
     }
 
     com.java.semantic.model.index.EntryPointDocument reconstructEntryPoint(Document document) {
-        IndexProjectionPersistence.EntryPointPersistence persistence = converter.read(
-                IndexProjectionPersistence.EntryPointPersistence.class, document);
+        EntryPointPersistence persistence = converter.read(EntryPointPersistence.class, document);
         return persistence.toModel();
     }
 

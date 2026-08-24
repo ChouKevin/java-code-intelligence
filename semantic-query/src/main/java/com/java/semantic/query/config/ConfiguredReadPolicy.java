@@ -8,6 +8,8 @@ import com.java.semantic.model.codefact.MapperStatementIdentity;
 import com.java.semantic.model.codefact.MemberIdentity;
 import com.java.semantic.model.codefact.MethodTarget;
 import com.java.semantic.model.codefact.SourceTypeIdentity;
+import com.java.semantic.model.codefact.RelationIdentity;
+import com.java.semantic.model.codefact.EntryPointIdentity;
 
 import java.util.Objects;
 
@@ -23,6 +25,14 @@ public final class ConfiguredReadPolicy {
     public boolean isRepositoryVisible(RepositoryId repositoryId) {
         Objects.requireNonNull(repositoryId, "repository id is required");
         return !properties.forbiddenRepositories().contains(repositoryId.value());
+    }
+
+    public SearchAccessPlan searchAccessPlan(RepositoryId repositoryId) {
+        RepositoryId identity = Objects.requireNonNull(repositoryId, "repository id is required");
+        if (!isRepositoryVisible(identity)) {
+            throw new com.java.semantic.query.application.RepositoryNotFoundException();
+        }
+        return new SearchAccessPlan(identity, properties);
     }
 
     public boolean isSourceVisible(RepositoryId repositoryId, SourceTypeIdentity sourceType) {
@@ -54,6 +64,13 @@ public final class ConfiguredReadPolicy {
         }
         if (identity.canonicalIdentity() instanceof JavaTypeIdentity javaType) {
             return isJavaTypeVisible(repositoryId, javaType);
+        }
+        if (identity.canonicalIdentity() instanceof RelationIdentity relation) {
+            return isCodeFactVisible(repositoryId, relation.from());
+        }
+        if (identity.canonicalIdentity() instanceof EntryPointIdentity entryPoint) {
+            return isCodeFactVisible(repositoryId, new CodeFactIdentity(repositoryId, identity.repositoryRevision(),
+                    com.java.semantic.model.codefact.CodeFactKind.METHOD, entryPoint.method()));
         }
         return false;
     }

@@ -4,6 +4,11 @@ import com.java.semantic.query.application.CurrentGenerationSelector;
 import com.java.semantic.query.application.CurrentRepositoryQueryService;
 import com.java.semantic.query.application.CurrentSourceQueryService;
 import com.java.semantic.query.application.CurrentSymbolQueryService;
+import com.java.semantic.query.application.CodeFactReadService;
+import com.java.semantic.query.application.CodeFactSearchService;
+import com.java.semantic.query.application.PublishedDiscoveryQueryService;
+import com.java.semantic.query.application.PublishedEntryPointQueryService;
+import com.java.semantic.query.application.PublishedSourceToolService;
 import com.java.semantic.query.config.ConfiguredReadPolicy;
 import com.java.semantic.query.config.ReadPolicyProperties;
 import com.java.semantic.query.config.SemanticQueryProperties;
@@ -49,6 +54,34 @@ public class SemanticQueryApplication {
     CurrentSymbolQueryService currentSymbolQueryService(MongoTemplate template, CurrentGenerationSelector selector,
                                                          SemanticQueryProperties properties) {
         return new CurrentSymbolQueryService(template, selector, properties.storageTimeout());
+    }
+
+    @Bean
+    CodeFactReadService codeFactReadService(MongoTemplate template, CurrentGenerationSelector selector, SemanticQueryProperties properties) {
+        return new CodeFactReadService(template, selector, properties.storageTimeout());
+    }
+
+    @Bean
+    CodeFactSearchService codeFactSearchService(MongoTemplate template, CurrentGenerationSelector selector, SemanticQueryProperties properties) {
+        return new CodeFactSearchService(template, selector, properties.storageTimeout());
+    }
+
+    @Bean
+    PublishedDiscoveryQueryService publishedDiscoveryQueryService(MongoTemplate template, CurrentGenerationSelector selector,
+                                                                   SemanticQueryProperties properties) {
+        return new PublishedDiscoveryQueryService(template, selector, properties.storageTimeout());
+    }
+
+    @Bean
+    PublishedEntryPointQueryService publishedEntryPointQueryService(MongoTemplate template, CurrentGenerationSelector selector,
+                                                                     SemanticQueryProperties properties) {
+        return new PublishedEntryPointQueryService(template, selector, properties.storageTimeout());
+    }
+
+    @Bean
+    PublishedSourceToolService publishedSourceToolService(CurrentSourceQueryService sourceQueryService,
+                                                          CodeFactReadService codeFactReadService) {
+        return new PublishedSourceToolService(sourceQueryService, codeFactReadService);
     }
 
     @Bean

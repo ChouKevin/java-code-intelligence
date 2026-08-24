@@ -15,6 +15,7 @@ import com.java.semantic.model.index.IndexCollections;
 import com.java.semantic.model.index.SourceArtifactDocument;
 import com.java.semantic.model.repository.RepositoryId;
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.CopyOnWriteArrayList;
 import org.junit.jupiter.api.Test;
 import org.springframework.data.mongodb.core.convert.MappingMongoConverter;
@@ -65,7 +66,7 @@ class MongoIndexBatchWriterTest {
 
     private static SourceIndexBatch batch(RepositoryId repositoryId, GenerationId generationId, int chunk) {
         return new SourceIndexBatch(repositoryId, generationId, "src/main/java/example/OrderService.java", chunk,
-                SourceArtifactDocument.create("class OrderService {}"), List.of(), List.of(), List.of(), List.of());
+                SourceArtifactDocument.create("class OrderService {}"), Optional.empty(), List.of(), List.of(), List.of(), List.of());
     }
 
     private static SourceIndexBatchDocumentMapper mapper() {

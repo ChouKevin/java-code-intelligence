@@ -359,13 +359,13 @@ class FullIndexPublicationIT {
                 List.of("orders", "calls"), Optional.of("orders"), ProjectionName.RELATIONS, relation.fact().identity());
         SearchDocument entrySearch = new SearchDocument(repositoryId, generationId, entry.fact().id(), entry.fact().identity().kind(),
                 List.of("orders", "entry"), Optional.of("orders"), ProjectionName.ENTRY_POINTS, entry.fact().identity());
-        return new SourceIndexBatch(repositoryId, generationId, sourcePath, 0, artifact, List.of(symbol), List.of(relation), List.of(entry),
+        return new SourceIndexBatch(repositoryId, generationId, sourcePath, 0, artifact, Optional.empty(), List.of(symbol), List.of(relation), List.of(entry),
                 List.of(symbolSearch, relationSearch, entrySearch));
     }
 
     private static SourceIndexBatch copyBatch(SourceIndexBatch batch, List<SymbolDocument> symbols, List<SearchDocument> search) {
         return new SourceIndexBatch(batch.repositoryId(), batch.generationId(), batch.sourcePath(), batch.sourceChunk(), batch.sourceArtifact(),
-                symbols, batch.relations(), batch.entryPoints(), search);
+                batch.extractionIssue(), symbols, batch.relations(), batch.entryPoints(), search);
     }
 
     private static SearchDocument orphanSearch(RepositoryId repositoryId, RepositoryRevision requestedRevision, GenerationId generationId) {

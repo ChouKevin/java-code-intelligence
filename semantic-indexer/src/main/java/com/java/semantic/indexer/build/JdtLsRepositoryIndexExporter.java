@@ -6,6 +6,8 @@ import com.java.semantic.model.index.RelationDocument;
 import com.java.semantic.model.index.SearchDocument;
 import com.java.semantic.model.index.SourceArtifactDocument;
 import com.java.semantic.model.index.SymbolDocument;
+import com.java.semantic.model.index.SourceIndexIssue;
+import com.java.semantic.model.index.SourceIndexScope;
 import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.model.repository.RepositoryRevision;
 import com.java.semantic.repository.domain.RepositorySnapshot;
@@ -13,6 +15,7 @@ import com.java.semantic.semantic.domain.JavaSemanticService;
 import com.java.semantic.syntax.adapter.jdt.JdtSyntaxExtractionService;
 import com.java.semantic.syntax.domain.RepositorySyntax;
 import com.java.semantic.syntax.domain.SourceMethodMetadata;
+import com.java.semantic.syntax.domain.SourceExtractionStatus;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
@@ -21,6 +24,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 
 /** Production exporter: syntax extraction stays in Indexer and model documents contain no JDT/LSP types. */
 public final class JdtLsRepositoryIndexExporter implements RepositoryIndexExporter {
@@ -73,7 +77,8 @@ public final class JdtLsRepositoryIndexExporter implements RepositoryIndexExport
                     syntax, source.sourcePath(), source.contentArtifact(), plan.repositoryRoot(), snapshot, semanticCallTargetResolver);
             List<EntryPointDocument> entryPoints = entryPointProjector.project(repositoryId, revision,
                     generationId, syntax, source.sourcePath());
-            return split(repositoryId, generationId, source.sourcePath(), source.contentArtifact(), symbols, relations, entryPoints,
+            SourceIndexScope sourceScope = SourceIndexScope.from(symbols);
+            return split(repositoryId, generationId, source.sourcePath(), source.contentArtifact(), extractionIssue(syntax, source.sourcePath()), sourceScope, symbols, relations, entryPoints,
                     searchProjector.project(symbols, relations, entryPoints)).stream();
             }).toList();
             semanticCallTargetResolver.requireSemanticResolution();
@@ -109,7 +114,8 @@ public final class JdtLsRepositoryIndexExporter implements RepositoryIndexExport
     }
 
     static List<SourceIndexBatch> split(RepositoryId repositoryId, GenerationId generationId, String sourcePath,
-                                        SourceArtifactDocument artifact, List<SymbolDocument> symbols,
+                                        SourceArtifactDocument artifact, Optional<SourceIndexIssue> extractionIssue, SourceIndexScope sourceScope,
+                                        List<SymbolDocument> symbols,
                                         List<RelationDocument> relations, List<EntryPointDocument> entryPoints,
                                         List<SearchDocument> search) {
         List<SourceIndexBatch> batches = new ArrayList<>();
@@ -129,12 +135,24 @@ public final class JdtLsRepositoryIndexExporter implements RepositoryIndexExport
                     .filter(EntryPointDocument.class::isInstance).map(EntryPointDocument.class::cast).toList();
             List<SearchDocument> chunkSearch = chunk.stream()
                     .filter(SearchDocument.class::isInstance).map(SearchDocument.class::cast).toList();
-            batches.add(new SourceIndexBatch(repositoryId, generationId, sourcePath, batches.size(), artifact, chunkSymbols,
+            batches.add(new SourceIndexBatch(repositoryId, generationId, sourcePath, batches.size(), artifact, extractionIssue, sourceScope, chunkSymbols,
                     chunkRelations, chunkEntryPoints, chunkSearch));
             if (documents.isEmpty()) {
                 break;
             }
         }
         return List.copyOf(batches);
+    }
+
+    private static Optional<SourceIndexIssue> extractionIssue(RepositorySyntax syntax, String sourcePath) {
+        for (com.java.semantic.syntax.domain.SourceExtractionOutcome outcome : syntax.extractionOutcomes()) {
+            if (sourcePath.equals(outcome.sourceFile())) {
+                if (outcome.status() == SourceExtractionStatus.EXTRACTED) {
+                    return Optional.empty();
+                }
+                return outcome.reasonCode().map(code -> new SourceIndexIssue(sourcePath, code));
+            }
+        }
+        return Optional.empty();
     }
 }

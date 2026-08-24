@@ -14,10 +14,12 @@ import com.java.semantic.model.codefact.SyntaxPosition;
 import com.java.semantic.model.codefact.SyntaxRange;
 import com.java.semantic.model.index.GenerationId;
 import com.java.semantic.model.index.SourceArtifactDocument;
+import com.java.semantic.model.index.SourceIndexScope;
 import com.java.semantic.model.index.SymbolDocument;
 import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.model.repository.RepositoryRevision;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 import java.util.stream.IntStream;
 import org.junit.jupiter.api.Test;
@@ -36,9 +38,9 @@ class SourceIndexBatchPartitioningTest {
                 .mapToObj(this::symbol).toList();
 
         List<SourceIndexBatch> first = JdtLsRepositoryIndexExporter.split(REPOSITORY_ID, GENERATION_ID, SOURCE_PATH,
-                ARTIFACT, symbols, List.of(), List.of(), List.of());
+                ARTIFACT, Optional.empty(), SourceIndexScope.from(symbols), symbols, List.of(), List.of(), List.of());
         List<SourceIndexBatch> second = JdtLsRepositoryIndexExporter.split(REPOSITORY_ID, GENERATION_ID, SOURCE_PATH,
-                ARTIFACT, symbols, List.of(), List.of(), List.of());
+                ARTIFACT, Optional.empty(), SourceIndexScope.from(symbols), symbols, List.of(), List.of(), List.of());
 
         assertThat(first).extracting(SourceIndexBatch::queryDocumentCount)
                 .containsExactly(SourceIndexBatch.MAX_QUERY_DOCUMENTS, 1);
@@ -48,6 +50,7 @@ class SourceIndexBatchPartitioningTest {
             assertThat(batch.generationId()).isEqualTo(GENERATION_ID);
             assertThat(batch.sourcePath()).isEqualTo(SOURCE_PATH);
             assertThat(batch.sourceArtifact()).isEqualTo(ARTIFACT);
+            assertThat(batch.sourceScope()).isEqualTo(SourceIndexScope.from(symbols));
         });
         assertThat(first.stream().flatMap(batch -> batch.symbols().stream()).map(symbol -> symbol.fact().id()).toList())
                 .containsExactlyElementsOf(symbols.stream().map(symbol -> symbol.fact().id()).toList());

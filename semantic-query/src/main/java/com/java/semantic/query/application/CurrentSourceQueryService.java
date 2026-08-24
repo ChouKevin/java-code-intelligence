@@ -41,7 +41,7 @@ public final class CurrentSourceQueryService {
                             Filters.eq("repoId", current.repositoryId().value()), Filters.eq("generationId", current.generationId().value()),
                             Filters.eq("sourcePath", identity.sourceFile()))).maxTime(storageTimeout.toMillis(), TimeUnit.MILLISECONDS).first();
             if (Objects.isNull(mapping)) { throw new IndexNotReadyException(); }
-            GenerationFileDocument generationFile = decodeGenerationFile(mapping, current, identity);
+            GenerationFileDocument generationFile = decodeGenerationFile(mapping, current, identity.sourceFile());
             String artifactId = generationFile.sourceArtifactId().value();
             Document artifact = template.getCollection(IndexCollections.SOURCE_ARTIFACTS).find(Filters.eq("sourceArtifactId", artifactId))
                     .maxTime(storageTimeout.toMillis(), TimeUnit.MILLISECONDS).first();
@@ -50,6 +50,28 @@ public final class CurrentSourceQueryService {
         } catch (MongoException | DataAccessException exception) {
             throw new SemanticIndexUnavailableException(exception);
         } catch (RepositoryNotFoundException | IndexNotReadyException | IndexContractMismatchException exception) {
+            throw exception;
+        } catch (RuntimeException exception) {
+            throw new IndexContractMismatchException();
+        }
+    }
+
+    PublishedSource getSource(CurrentGeneration current, String sourcePath) {
+        CurrentGeneration selected = Objects.requireNonNull(current, "current generation is required");
+        String path = com.java.semantic.model.support.ModelValidation.repositoryRelativePath(sourcePath);
+        try {
+            Document mapping = template.getCollection(IndexCollections.GENERATION_FILES).find(Filters.and(
+                    Filters.eq("repoId", selected.repositoryId().value()), Filters.eq("generationId", selected.generationId().value()),
+                    Filters.eq("sourcePath", path))).maxTime(storageTimeout.toMillis(), TimeUnit.MILLISECONDS).first();
+            if (Objects.isNull(mapping)) { throw new IndexNotReadyException(); }
+            GenerationFileDocument generationFile = decodeGenerationFile(mapping, selected, path);
+            Document artifact = template.getCollection(IndexCollections.SOURCE_ARTIFACTS).find(Filters.eq("sourceArtifactId", generationFile.sourceArtifactId().value()))
+                    .maxTime(storageTimeout.toMillis(), TimeUnit.MILLISECONDS).first();
+            if (Objects.isNull(artifact)) { throw new IndexNotReadyException(); }
+            return new PublishedSource(selected, path, artifactContent(artifact, generationFile.sourceArtifactId()));
+        } catch (MongoException | DataAccessException exception) {
+            throw new SemanticIndexUnavailableException(exception);
+        } catch (IndexNotReadyException | IndexContractMismatchException exception) {
             throw exception;
         } catch (RuntimeException exception) {
             throw new IndexContractMismatchException();
@@ -101,14 +123,14 @@ public final class CurrentSourceQueryService {
         }
     }
 
-    private GenerationFileDocument decodeGenerationFile(Document stored, CurrentGeneration current, SourceTypeIdentity identity) {
+    private GenerationFileDocument decodeGenerationFile(Document stored, CurrentGeneration current, String sourcePath) {
         try {
             Document converterDocument = new Document(stored);
             // Generation scope is deliberately flattened by the immutable writer; restore its value-object shape for decoding.
             converterDocument.put("generationId", new Document("value", current.generationId().value()));
             GenerationFileDocument decoded = template.getConverter().read(GenerationFileDocument.class, converterDocument);
             if (!current.repositoryId().equals(decoded.repositoryId()) || !current.generationId().equals(decoded.generationId())
-                    || !identity.sourceFile().equals(decoded.sourcePath())) { throw new IndexContractMismatchException(); }
+                    || !sourcePath.equals(decoded.sourcePath())) { throw new IndexContractMismatchException(); }
             return decoded;
         } catch (IndexContractMismatchException exception) {
             throw exception;

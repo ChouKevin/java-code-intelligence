@@ -12,6 +12,7 @@ import com.java.semantic.model.codefact.SourceTypeIdentity;
 import com.java.semantic.model.codefact.SyntaxPosition;
 import com.java.semantic.model.codefact.SyntaxRange;
 import com.java.semantic.model.index.GenerationFileDocument;
+import com.java.semantic.model.index.SourceIndexScope;
 import com.java.semantic.model.index.GenerationId;
 import com.java.semantic.model.index.SourceArtifactDocument;
 import com.java.semantic.model.index.SourceArtifactId;
@@ -327,9 +328,9 @@ class CurrentQueryContractIT {
     }
 
     private void seedManifest(String repositoryId, String revision, String generationId, String digest, boolean compatible) {
-        List<Document> projections = compatible ? List.of(new Document("name", "SOURCES").append("version", 1),
-                new Document("name", "SYMBOLS").append("version", 1), new Document("name", "RELATIONS").append("version", 1),
-                new Document("name", "ENTRY_POINTS").append("version", 1), new Document("name", "SEARCH").append("version", 1))
+        List<Document> projections = compatible ? List.of(new Document("name", "SOURCES").append("version", 2),
+                new Document("name", "SYMBOLS").append("version", 2), new Document("name", "RELATIONS").append("version", 1),
+                new Document("name", "ENTRY_POINTS").append("version", 2), new Document("name", "SEARCH").append("version", 2))
                 : List.of(new Document("name", "SOURCES").append("version", 0));
         template.getCollection("generation_manifests").insertOne(new Document("repoId", repositoryId).append("sourceRevision", revision)
                 .append("generationId", generationId).append("identityDigest", digest).append("writeState", "SEALED_VALID")
@@ -351,7 +352,8 @@ class CurrentQueryContractIT {
 
     private void seedGenerationFile(String repositoryId, String generationId, String sourcePath, SourceArtifactDocument artifact) {
         GenerationFileDocument mapping = new GenerationFileDocument(new RepositoryId(repositoryId), new GenerationId(generationId),
-                sourcePath, artifact.id(), artifact.contentHash());
+                sourcePath, artifact.id(), artifact.contentHash(), "",
+                new SourceIndexScope(false, java.util.List.of(), java.util.List.of(), java.util.List.of()));
         Document stored = new Document();
         template.getConverter().write(mapping, stored);
         stored.put("repoId", repositoryId);

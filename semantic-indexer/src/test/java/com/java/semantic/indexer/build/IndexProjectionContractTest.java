@@ -15,6 +15,7 @@ import com.java.semantic.model.repository.RepositoryRevision;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -27,7 +28,7 @@ class IndexProjectionContractTest {
     void source_batch_keeps_documents_bound_to_one_authoritative_source_and_content_artifact() {
         SourceArtifactDocument artifact = SourceArtifactDocument.create("class Invoice {}\r\n// \uD83D\uDE00\r\n");
         SourceIndexBatch batch = new SourceIndexBatch(new RepositoryId("invoices"), new GenerationId("invoice-generation"),
-                "src/main/java/example/Invoice.java", 0, artifact, List.of(), List.of(), List.of(), List.of());
+                "src/main/java/example/Invoice.java", 0, artifact, Optional.empty(), List.of(), List.of(), List.of(), List.of());
 
         assertEquals("src/main/java/example/Invoice.java", batch.sourcePath());
         assertEquals(List.of(0, 18, 25), batch.sourceArtifact().lineOffsets());
@@ -52,6 +53,8 @@ class IndexProjectionContractTest {
         assertTrue(batches.stream().flatMap(batch -> batch.symbols().stream())
                 .anyMatch(symbol -> symbol.kind() == com.java.semantic.model.codefact.CodeFactKind.MAPPER_STATEMENT
                         && "find".equals(symbol.name())));
+        assertTrue(batches.stream().filter(batch -> batch.sourcePath().equals("src/main/resources/mapper/OrderMapper.xml"))
+                .allMatch(batch -> batch.extractionIssue().isEmpty()));
     }
 
     @Test
@@ -119,5 +122,20 @@ class IndexProjectionContractTest {
                                 new com.java.semantic.model.codefact.DeclaredType("java.io.IOException")))
                         && relation.range().range().start().line() == 5
                         && relation.range().range().start().character() == 53));
+    }
+
+    @Test
+    void carries_the_real_syntax_failure_outcome_into_its_source_batch() throws Exception {
+        Path source = repository.resolve("src/main/java/example/Broken.java");
+        Files.createDirectories(source.getParent());
+        Files.writeString(source, "package example; class Broken {");
+
+        java.util.List<SourceIndexBatch> batches = new JdtLsRepositoryIndexExporter().export(new RepositoryId("orders"),
+                new RepositoryRevision("a".repeat(40)), new GenerationId("g1"), new FullIndexPlanner().plan(repository));
+
+        assertEquals(1, batches.size());
+        assertEquals("JDT_SYNTAX_PROBLEM", batches.getFirst().extractionIssue().orElseThrow().code());
+        assertTrue(batches.getFirst().symbols().isEmpty());
+        assertFalse(batches.getFirst().sourceScope().usableScopes());
     }
 }

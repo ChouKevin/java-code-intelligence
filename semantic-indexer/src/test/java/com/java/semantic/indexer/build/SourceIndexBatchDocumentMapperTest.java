@@ -3,12 +3,14 @@ package com.java.semantic.indexer.build;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.java.semantic.indexer.store.MongoGenerationWriter.StoredDocument;
 import com.java.semantic.model.codefact.CodeFact;
 import com.java.semantic.model.codefact.CodeFactId;
 import com.java.semantic.model.codefact.CodeFactIdentity;
 import com.java.semantic.model.codefact.CodeFactKind;
+import com.java.semantic.model.codefact.DeclaredType;
 import com.java.semantic.model.codefact.EntryPointIdentity;
 import com.java.semantic.model.codefact.EntryPointKind;
 import com.java.semantic.model.codefact.EntryPointTrigger;
@@ -26,10 +28,14 @@ import com.java.semantic.model.codefact.SyntaxPosition;
 import com.java.semantic.model.codefact.SyntaxRange;
 import com.java.semantic.model.index.EntryPointDocument;
 import com.java.semantic.model.index.GenerationId;
+import com.java.semantic.model.index.GenerationFileDocument;
 import com.java.semantic.model.index.IndexCollections;
 import com.java.semantic.model.index.ProjectionName;
 import com.java.semantic.model.index.SearchDocument;
 import com.java.semantic.model.index.SourceArtifactDocument;
+import com.java.semantic.model.index.SourceIndexIssue;
+import com.java.semantic.model.index.SourceIndexScope;
+import com.java.semantic.model.index.SymbolDocument;
 import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.model.repository.RepositoryRevision;
 import java.util.List;
@@ -49,7 +55,7 @@ class SourceIndexBatchDocumentMapperTest {
     void round_trips_all_entry_point_trigger_shapes_through_converter_safe_storage(EntryPointDocument entryPoint) {
         SourceIndexBatch batch = new SourceIndexBatch(entryPoint.repositoryId(), entryPoint.generationId(),
                 "src/main/java/example/api/InvoiceController.java", 0, SourceArtifactDocument.create("class InvoiceController {}"),
-                List.of(), List.of(), List.of(entryPoint), List.of());
+                Optional.empty(), List.of(), List.of(), List.of(entryPoint), List.of());
 
         SourceIndexBatchDocumentMapper mapper = new SourceIndexBatchDocumentMapper(converter());
         List<StoredDocument> documents = mapper.map(batch);
@@ -84,7 +90,7 @@ class SourceIndexBatchDocumentMapperTest {
     void round_trips_typed_search_authority_without_canonical_string_substitutes(SearchDocument search) {
         SourceIndexBatch batch = new SourceIndexBatch(search.repositoryId(), search.generationId(),
                 "src/main/java/example/api/InvoiceController.java", 0, SourceArtifactDocument.create("class InvoiceController {}"),
-                List.of(), List.of(), List.of(), List.of(search));
+                Optional.empty(), List.of(), List.of(), List.of(), List.of(search));
 
         SourceIndexBatchDocumentMapper mapper = new SourceIndexBatchDocumentMapper(converter());
         Document document = mapper.map(batch).stream().filter(stored -> IndexCollections.SEARCH.equals(stored.collection()))
@@ -113,6 +119,75 @@ class SourceIndexBatchDocumentMapperTest {
             assertEquals(relation.occurrence().range().start().line(), occurrence.getInteger("startLine"));
             assertFalse(target.isEmpty());
         }
+    }
+
+    @org.junit.jupiter.api.Test
+    void persists_real_extraction_issue_and_flattened_symbol_scope_in_generation_file() {
+        CodeFactIdentity identity = methodIdentity();
+        SourceArtifactDocument artifact = SourceArtifactDocument.create("class InvoiceController {}");
+        SourceIndexIssue issue = new SourceIndexIssue("src/main/java/example/api/InvoiceController.java", "JDT_SYNTAX_PROBLEM");
+        SourceIndexBatch batch = new SourceIndexBatch(repositoryId(), generationId(), issue.sourcePath(), 0, artifact, Optional.of(issue),
+                List.of(symbol(identity, artifact)), List.of(), List.of(), List.of());
+
+        Document document = new SourceIndexBatchDocumentMapper(converter()).map(batch).stream()
+                .filter(stored -> IndexCollections.GENERATION_FILES.equals(stored.collection())).findFirst().orElseThrow().document();
+
+        assertEquals("JDT_SYNTAX_PROBLEM", document.getString("extractionIssueCode"));
+        assertEquals(true, document.getBoolean("scopeUsable"));
+        assertEquals(List.of("example.api"), document.getList("scopePackages", String.class));
+        assertEquals(List.of(SourceIndexScope.classKey("example.api", "InvoiceController")), document.getList("scopeClassKeys", String.class));
+        assertEquals(List.of(SourceIndexScope.methodKey("example.api", "InvoiceController", "create",
+                List.of("CreateInvoiceRequest"))), document.getList("scopeMethodKeys", String.class));
+
+        SourceIndexBatch extracted = new SourceIndexBatch(repositoryId(), generationId(), issue.sourcePath(), 0, artifact,
+                Optional.empty(), List.of(symbol(identity, artifact)), List.of(), List.of(), List.of());
+        Document extractedDocument = new SourceIndexBatchDocumentMapper(converter()).map(extracted).stream()
+                .filter(stored -> IndexCollections.GENERATION_FILES.equals(stored.collection())).findFirst().orElseThrow().document();
+        assertEquals("", extractedDocument.getString("extractionIssueCode"));
+        assertEquals(true, extractedDocument.getBoolean("scopeUsable"));
+    }
+
+    @org.junit.jupiter.api.Test
+    void round_trips_a_default_package_scope_without_dropping_its_authority_key() {
+        String sourcePath = "src/main/java/DefaultService.java";
+        SourceTypeIdentity type = new SourceTypeIdentity(new JavaTypeIdentity("", "DefaultService"), sourcePath);
+        CodeFactIdentity identity = new CodeFactIdentity(repositoryId(), revision(), CodeFactKind.METHOD,
+                new MethodTarget(type, "run", List.of()));
+        SourceArtifactDocument artifact = SourceArtifactDocument.create("class DefaultService { void run() {} }");
+        SourceIndexBatch batch = new SourceIndexBatch(repositoryId(), generationId(), sourcePath, 0, artifact, Optional.empty(),
+                List.of(symbol(identity, artifact)), List.of(), List.of(), List.of());
+
+        Document document = new SourceIndexBatchDocumentMapper(converter()).map(batch).stream()
+                .filter(stored -> IndexCollections.GENERATION_FILES.equals(stored.collection())).findFirst().orElseThrow().document();
+
+        assertEquals(List.of(""), document.getList("scopePackages", String.class));
+        assertEquals(List.of(SourceIndexScope.classKey("", "DefaultService")), document.getList("scopeClassKeys", String.class));
+        assertEquals(List.of(SourceIndexScope.methodKey("", "DefaultService", "run", List.of())),
+                document.getList("scopeMethodKeys", String.class));
+        assertTrue(document.getBoolean("scopeUsable"));
+        GenerationFileDocument restored = converter().read(GenerationFileDocument.class, document);
+        assertEquals(new SourceIndexScope(true, List.of(""), List.of(SourceIndexScope.classKey("", "DefaultService")),
+                List.of(SourceIndexScope.methodKey("", "DefaultService", "run", List.of()))), restored.scope());
+    }
+
+    @org.junit.jupiter.api.Test
+    void persists_scope_from_the_entire_source_when_its_symbols_are_split_into_batches() {
+        SourceArtifactDocument artifact = SourceArtifactDocument.create("class InvoiceController {}");
+        CodeFactIdentity first = methodIdentity();
+        CodeFactIdentity second = new CodeFactIdentity(repositoryId(), revision(), CodeFactKind.METHOD,
+                new MethodTarget(sourceType(), "cancel", List.of()));
+        SymbolDocument firstSymbol = symbol(first, artifact);
+        SymbolDocument secondSymbol = symbol(second, artifact);
+        SourceIndexScope fullScope = SourceIndexScope.from(List.of(firstSymbol, secondSymbol));
+        SourceIndexBatch firstBatch = new SourceIndexBatch(repositoryId(), generationId(), "src/main/java/example/api/InvoiceController.java",
+                0, artifact, Optional.empty(), fullScope, List.of(firstSymbol), List.of(), List.of(), List.of());
+
+        Document document = new SourceIndexBatchDocumentMapper(converter()).map(firstBatch).stream()
+                .filter(stored -> IndexCollections.GENERATION_FILES.equals(stored.collection())).findFirst().orElseThrow().document();
+
+        assertEquals(List.of(SourceIndexScope.methodKey("example.api", "InvoiceController", "cancel", List.of()),
+                SourceIndexScope.methodKey("example.api", "InvoiceController", "create", List.of("CreateInvoiceRequest"))),
+                document.getList("scopeMethodKeys", String.class));
     }
 
     private static Stream<EntryPointDocument> entryPoints() {
@@ -159,6 +234,13 @@ class SourceIndexBatchDocumentMapperTest {
 
     private static EntryPointDocument httpEntryPoint() {
         return entryPoint(EntryPointKind.HTTP, new EntryPointTrigger(Optional.of("POST"), Optional.of("/invoices"), Optional.empty(), Optional.empty()));
+    }
+
+    private static SymbolDocument symbol(CodeFactIdentity identity, SourceArtifactDocument artifact) {
+        MethodTarget target = (MethodTarget) identity.canonicalIdentity();
+        return new SymbolDocument(repositoryId(), generationId(), new CodeFact(CodeFactId.from(identity), identity), CodeFactKind.METHOD,
+                target.sourceType().fullyQualifiedName(), target.methodName(), target.canonicalForm(), new DeclaredType("void"),
+                java.util.Set.of(), List.of(), artifact.id(), sourceRange());
     }
 
     private static EntryPointDocument mqEntryPoint() {

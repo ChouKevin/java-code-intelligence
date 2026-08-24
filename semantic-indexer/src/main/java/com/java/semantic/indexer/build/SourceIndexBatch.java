@@ -4,11 +4,14 @@ import com.java.semantic.model.index.EntryPointDocument;
 import com.java.semantic.model.index.RelationDocument;
 import com.java.semantic.model.index.SearchDocument;
 import com.java.semantic.model.index.SourceArtifactDocument;
+import com.java.semantic.model.index.SourceIndexIssue;
+import com.java.semantic.model.index.SourceIndexScope;
 import com.java.semantic.model.index.SymbolDocument;
 import com.java.semantic.model.index.GenerationId;
 import com.java.semantic.model.repository.RepositoryId;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 
 /** Bounded write unit: every projected record originates from exactly one source path. */
 public record SourceIndexBatch(
@@ -17,6 +20,8 @@ public record SourceIndexBatch(
         String sourcePath,
         int sourceChunk,
         SourceArtifactDocument sourceArtifact,
+        Optional<SourceIndexIssue> extractionIssue,
+        SourceIndexScope sourceScope,
         List<SymbolDocument> symbols,
         List<RelationDocument> relations,
         List<EntryPointDocument> entryPoints,
@@ -33,6 +38,15 @@ public record SourceIndexBatch(
             throw new IllegalArgumentException("source chunk must not be negative");
         }
         sourceArtifact = Objects.requireNonNull(sourceArtifact, "source artifact is required");
+        extractionIssue = Objects.requireNonNull(extractionIssue, "extraction issue is required")
+                .map(issue -> Objects.requireNonNull(issue, "extraction issue is required"));
+        String validatedSourcePath = sourcePath;
+        extractionIssue.ifPresent(issue -> {
+            if (!validatedSourcePath.equals(issue.sourcePath())) {
+                throw new IllegalArgumentException("extraction issue source path must match batch source path");
+            }
+        });
+        sourceScope = Objects.requireNonNull(sourceScope, "source scope is required");
         symbols = List.copyOf(Objects.requireNonNull(symbols, "symbols are required"));
         relations = List.copyOf(Objects.requireNonNull(relations, "relations are required"));
         entryPoints = List.copyOf(Objects.requireNonNull(entryPoints, "entry points are required"));
@@ -40,6 +54,14 @@ public record SourceIndexBatch(
         if (queryDocumentCount(symbols, relations, entryPoints, search) > MAX_QUERY_DOCUMENTS) {
             throw new IllegalArgumentException("source batch exceeds maximum query document count");
         }
+    }
+
+    public SourceIndexBatch(RepositoryId repositoryId, GenerationId generationId, String sourcePath, int sourceChunk,
+                            SourceArtifactDocument sourceArtifact, Optional<SourceIndexIssue> extractionIssue,
+                            List<SymbolDocument> symbols, List<RelationDocument> relations,
+                            List<EntryPointDocument> entryPoints, List<SearchDocument> search) {
+        this(repositoryId, generationId, sourcePath, sourceChunk, sourceArtifact, extractionIssue,
+                SourceIndexScope.from(symbols), symbols, relations, entryPoints, search);
     }
 
     public String batchId() {
