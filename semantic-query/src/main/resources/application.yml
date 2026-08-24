@@ -1,3 +1,12 @@
 spring:
   mongodb:
     uri: ${SEMANTIC_MONGODB_URI:mongodb://localhost:27017/semantic?serverSelectionTimeoutMS=2000&connectTimeoutMS=2000&socketTimeoutMS=2000}
+
+semantic:
+  query:
+    storage-timeout: ${SEMANTIC_QUERY_STORAGE_TIMEOUT:2s}
+    read-policy:
+      forbidden-repositories: []
+      forbidden-packages: []
+      forbidden-classes: []
+      forbidden-methods: []
