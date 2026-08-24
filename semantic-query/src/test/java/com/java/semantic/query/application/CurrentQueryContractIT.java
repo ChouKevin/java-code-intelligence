@@ -20,7 +20,14 @@ import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.model.repository.RepositoryRevision;
 import com.java.semantic.query.config.ConfiguredReadPolicy;
 import com.java.semantic.query.config.ReadPolicyProperties;
+import com.mongodb.ConnectionString;
+import com.mongodb.MongoClientSettings;
+import com.mongodb.client.MongoClient;
 import com.mongodb.client.MongoClients;
+import com.mongodb.client.model.ReplaceOptions;
+import com.mongodb.event.CommandListener;
+import com.mongodb.event.CommandStartedEvent;
+import org.bson.BsonDocument;
 import org.bson.Document;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
@@ -33,6 +40,7 @@ import org.testcontainers.utility.DockerImageName;
 
 import java.time.Duration;
 import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -40,7 +48,9 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 @Tag("mongo-it")
 class CurrentQueryContractIT {
     private static final String REVISION = "1".repeat(40);
+    private static final String REVISION_2 = "3".repeat(40);
     private static final String DIGEST = "2".repeat(64);
+    private static final String DIGEST_2 = "4".repeat(64);
     private static MongoDBContainer container;
     private static MongoTemplate template;
 
@@ -70,10 +80,22 @@ class CurrentQueryContractIT {
         assertThatThrownBy(() -> sourceService(policy(new ReadPolicyProperties.PackageRule("orders", "example")))
                 .getSource("orders", REVISION, type)).isInstanceOf(RepositoryNotFoundException.class);
 
-        template.getCollection("repositories").updateOne(new Document("repoId", "orders"), new Document("$set",
-                new Document("revision", "3".repeat(40)).append("generationId", "g2").append("manifestDigest", "4".repeat(64))));
+        seedManifest("orders", REVISION_2, "g2", DIGEST_2, true);
+        String currentContent = "package example.api; class OrderService { String revision = \"R2\"; }";
+        SourceArtifactDocument currentArtifact = seedSource("orders", "g2", type.sourceFile(), currentContent);
+        seedTypeSymbol("orders", REVISION_2, "g2", type, currentArtifact.id());
+        seedCurrent("orders", REVISION_2, "g2", DIGEST_2);
+
         assertThatThrownBy(() -> sourceService(policy()).getSource("orders", REVISION, type))
-                .isInstanceOf(RevisionOutdatedException.class);
+                .isInstanceOfSatisfying(RevisionOutdatedException.class,
+                        exception -> assertThat(exception.currentRevision().value()).isEqualTo(REVISION_2));
+        assertThat(sourceService(policy()).getSource("orders", REVISION_2, type).utf8Content()).isEqualTo(currentContent);
+
+        seedCurrent("orders", REVISION, "g1", DIGEST);
+        assertThat(sourceService(policy()).getSource("orders", REVISION, type).utf8Content()).isEqualTo(content);
+        assertThatThrownBy(() -> sourceService(policy()).getSource("orders", REVISION_2, type))
+                .isInstanceOfSatisfying(RevisionOutdatedException.class,
+                        exception -> assertThat(exception.currentRevision().value()).isEqualTo(REVISION));
     }
 
     @Test
@@ -83,12 +105,17 @@ class CurrentQueryContractIT {
         seedManifest("published", true);
         seedCurrent("incompatible");
         seedManifest("incompatible", false);
+        seedCurrent("malformed");
+        seedManifest("malformed", true);
+        template.getCollection("generation_manifests").updateOne(new Document("repoId", "malformed"),
+                new Document("$set", new Document("schemaVersion", "1")));
         CurrentRepositoryQueryService visible = new CurrentRepositoryQueryService(selector(policy()));
 
         assertThat(visible.listRepositories()).extracting(current -> current.repositoryId().value()).containsExactly("published");
         assertThatThrownBy(() -> visible.getRepository("absent")).isInstanceOf(RepositoryNotFoundException.class);
         assertThatThrownBy(() -> visible.getRepository("unpublished")).isInstanceOf(IndexNotReadyException.class);
         assertThatThrownBy(() -> visible.getRepository("incompatible")).isInstanceOf(IndexContractMismatchException.class);
+        assertThatThrownBy(() -> visible.getRepository("malformed")).isInstanceOf(IndexContractMismatchException.class);
         assertThatThrownBy(() -> new CurrentRepositoryQueryService(selector(policy("published"))).getRepository("published"))
                 .isInstanceOf(RepositoryNotFoundException.class);
     }
@@ -177,6 +204,92 @@ class CurrentQueryContractIT {
                 "src/main/java/example/apix/Visible.java"))).isTrue();
     }
 
+    @Test
+    void keeps_shared_artifacts_scoped_by_current_repository_generation_membership() {
+        SourceTypeIdentity ordersType = sourceType();
+        SourceTypeIdentity billingType = new SourceTypeIdentity(new JavaTypeIdentity("example.billing", "BillingService"),
+                ordersType.sourceFile());
+        seedCurrent("orders");
+        seedManifest("orders", true);
+        seedCurrent("billing");
+        seedManifest("billing", true);
+        String content = "package example.api; class OrderService {}";
+        SourceArtifactDocument shared = seedSource("orders", "g1", ordersType.sourceFile(), content);
+        seedTypeSymbol("orders", REVISION, "g1", ordersType, shared.id());
+        seedTypeSymbol("billing", REVISION, "g1", billingType, shared.id());
+
+        assertThatThrownBy(() -> sourceService(policy()).getSource("billing", REVISION, billingType))
+                .isInstanceOf(IndexNotReadyException.class);
+
+        seedGenerationFile("billing", "g1", billingType.sourceFile(), shared);
+        assertThat(sourceService(policy()).getSource("billing", REVISION, billingType).utf8Content()).isEqualTo(content);
+        assertThatThrownBy(() -> sourceService(policy("billing")).getSource("billing", REVISION, billingType))
+                .isInstanceOf(RepositoryNotFoundException.class);
+    }
+
+    @Test
+    void hides_missing_unpublished_current_and_stale_repositories_with_one_result() {
+        template.getCollection("repositories").insertOne(new Document("repoId", "hidden-unpublished"));
+        seedCurrent("hidden-current");
+        seedManifest("hidden-current", true);
+        seedCurrent("hidden-stale", REVISION_2, "g2", DIGEST_2);
+        seedManifest("hidden-stale", REVISION_2, "g2", DIGEST_2, true);
+
+        for (String repositoryId : List.of("hidden-missing", "hidden-unpublished", "hidden-current", "hidden-stale")) {
+            assertThatThrownBy(() -> sourceService(policy(repositoryId)).getSource(repositoryId, REVISION, null))
+                    .isInstanceOf(RepositoryNotFoundException.class)
+                    .hasMessage("REPOSITORY_NOT_FOUND")
+                    .hasNoCause();
+        }
+    }
+
+    @Test
+    void maps_unavailable_storage_and_bounds_every_source_read_without_rereading_the_pointer() {
+        try (MongoClient unavailableClient = MongoClients.create(
+                "mongodb://127.0.0.1:1/semantic?serverSelectionTimeoutMS=100&connectTimeoutMS=100")) {
+            MongoTemplate unavailableTemplate = new MongoTemplate(unavailableClient, "semantic");
+            CurrentSourceQueryService unavailable = new CurrentSourceQueryService(unavailableTemplate,
+                    new CurrentGenerationSelector(unavailableTemplate, policy(), Duration.ofMillis(250)), Duration.ofMillis(250));
+            assertThatThrownBy(() -> unavailable.getSource("orders", REVISION, sourceType()))
+                    .isInstanceOf(SemanticIndexUnavailableException.class)
+                    .hasMessage("SEMANTIC_INDEX_UNAVAILABLE");
+        }
+
+        SourceTypeIdentity type = sourceType();
+        seedCurrent("orders");
+        seedManifest("orders", true);
+        SourceArtifactDocument artifact = seedSource("orders", "g1", type.sourceFile(), "class OrderService {}");
+        seedTypeSymbol("orders", REVISION, "g1", type, artifact.id());
+        Duration timeout = Duration.ofMillis(750);
+        List<BsonDocument> commands = new CopyOnWriteArrayList<>();
+        CommandListener listener = new CommandListener() {
+            @Override
+            public void commandStarted(CommandStartedEvent event) {
+                if ("find".equals(event.getCommandName())) {
+                    commands.add(event.getCommand().clone());
+                }
+            }
+        };
+        MongoClientSettings settings = MongoClientSettings.builder()
+                .applyConnectionString(new ConnectionString(container.getConnectionString()))
+                .addCommandListener(listener)
+                .build();
+        try (MongoClient client = MongoClients.create(settings)) {
+            MongoTemplate observedTemplate = new MongoTemplate(client, "semantic_query_contract_test");
+            CurrentGenerationSelector observedSelector = new CurrentGenerationSelector(observedTemplate, policy(), timeout);
+            CurrentSourceQueryService observedService = new CurrentSourceQueryService(observedTemplate, observedSelector, timeout);
+
+            assertThat(observedService.getSource("orders", REVISION, type).utf8Content()).isEqualTo("class OrderService {}");
+        }
+
+        List<String> expectedCollections = List.of(
+                "repositories", "generation_manifests", "symbols", "generation_files", "source_artifacts");
+        assertThat(commands).extracting(command -> command.getString("find").getValue()).containsAll(expectedCollections);
+        assertThat(commands).filteredOn(command -> expectedCollections.contains(command.getString("find").getValue()))
+                .allSatisfy(command -> assertThat(command.getNumber("maxTimeMS").longValue()).isEqualTo(timeout.toMillis()));
+        assertThat(commands).filteredOn(command -> "repositories".equals(command.getString("find").getValue())).hasSize(1);
+    }
+
     private CurrentSourceQueryService sourceService(ConfiguredReadPolicy policy) {
         return new CurrentSourceQueryService(template, selector(policy), Duration.ofSeconds(2));
     }
@@ -198,18 +311,28 @@ class CurrentQueryContractIT {
     }
 
     private void seedCurrent(String repositoryId) {
-        template.getCollection("repositories").insertOne(new Document("repoId", repositoryId).append("revision", REVISION)
-                .append("generationId", "g1").append("manifestDigest", DIGEST).append("committedJobId", "job-1")
-                .append("publishedAt", new java.util.Date()));
+        seedCurrent(repositoryId, REVISION, "g1", DIGEST);
+    }
+
+    private void seedCurrent(String repositoryId, String revision, String generationId, String digest) {
+        Document pointer = new Document("repoId", repositoryId).append("revision", revision)
+                .append("generationId", generationId).append("manifestDigest", digest).append("committedJobId", "job-" + generationId)
+                .append("publishedAt", new java.util.Date());
+        template.getCollection("repositories").replaceOne(new Document("repoId", repositoryId), pointer,
+                new ReplaceOptions().upsert(true));
     }
 
     private void seedManifest(String repositoryId, boolean compatible) {
+        seedManifest(repositoryId, REVISION, "g1", DIGEST, compatible);
+    }
+
+    private void seedManifest(String repositoryId, String revision, String generationId, String digest, boolean compatible) {
         List<Document> projections = compatible ? List.of(new Document("name", "SOURCES").append("version", 1),
                 new Document("name", "SYMBOLS").append("version", 1), new Document("name", "RELATIONS").append("version", 1),
                 new Document("name", "ENTRY_POINTS").append("version", 1), new Document("name", "SEARCH").append("version", 1))
                 : List.of(new Document("name", "SOURCES").append("version", 0));
-        template.getCollection("generation_manifests").insertOne(new Document("repoId", repositoryId).append("sourceRevision", REVISION)
-                .append("generationId", "g1").append("identityDigest", DIGEST).append("writeState", "SEALED_VALID")
+        template.getCollection("generation_manifests").insertOne(new Document("repoId", repositoryId).append("sourceRevision", revision)
+                .append("generationId", generationId).append("identityDigest", digest).append("writeState", "SEALED_VALID")
                 .append("schemaVersion", 1).append("projectionVersions", projections));
     }
 
@@ -219,8 +342,14 @@ class CurrentQueryContractIT {
 
     private SourceArtifactDocument seedSource(String repositoryId, String generationId, String sourcePath, String content) {
         SourceArtifactDocument artifact = SourceArtifactDocument.create(content);
-        template.getCollection("source_artifacts").insertOne(new Document("sourceArtifactId", artifact.id().value())
-                .append("contentHash", artifact.contentHash()).append("utf8Content", content));
+        template.getCollection("source_artifacts").replaceOne(new Document("sourceArtifactId", artifact.id().value()),
+                new Document("sourceArtifactId", artifact.id().value()).append("contentHash", artifact.contentHash())
+                        .append("utf8Content", content), new ReplaceOptions().upsert(true));
+        seedGenerationFile(repositoryId, generationId, sourcePath, artifact);
+        return artifact;
+    }
+
+    private void seedGenerationFile(String repositoryId, String generationId, String sourcePath, SourceArtifactDocument artifact) {
         GenerationFileDocument mapping = new GenerationFileDocument(new RepositoryId(repositoryId), new GenerationId(generationId),
                 sourcePath, artifact.id(), artifact.contentHash());
         Document stored = new Document();
@@ -228,7 +357,6 @@ class CurrentQueryContractIT {
         stored.put("repoId", repositoryId);
         stored.put("generationId", generationId);
         template.getCollection("generation_files").insertOne(stored);
-        return artifact;
     }
 
     private void seedTypeSymbol(String repositoryId, String revision, String generationId, SourceTypeIdentity sourceType,
