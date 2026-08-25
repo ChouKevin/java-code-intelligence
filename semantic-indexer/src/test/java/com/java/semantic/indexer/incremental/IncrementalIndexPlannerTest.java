@@ -67,6 +67,29 @@ class IncrementalIndexPlannerTest {
     }
 
     @Test
+    void should_full_fallback_include_parent_deletions_after_earlier_uncertainty() {
+        GitRevisionDiff diff = (publishedRevision, selectedRevision) -> List.of(
+                ChangedSource.modify("api/Current.java", "old", "new"),
+                ChangedSource.delete("api/Deleted.java", "public class Deleted {}"),
+                ChangedSource.rename("api/Renamed.java", "api/RenamedCurrent.java", "public class Renamed {}",
+                        "public class RenamedCurrent {}"));
+        SourceContractChangeDetector detector = (changedSource, declarations) -> changedSource.kind() == ChangeKind.MODIFY
+                ? SourceContractChangeDetector.Impact.uncertainChange()
+                : SourceContractChangeDetector.Impact.publicDeclarationChange();
+        IncrementalIndexPlanner planner = new IncrementalIndexPlanner(diff, detector, noModules());
+
+        IncrementalIndexPlan plan = planner.plan(publishedIndex(List.of("api/Current.java", "api/Deleted.java",
+                        "api/Renamed.java")), "published", "selected",
+                List.of("api/Current.java", "api/RenamedCurrent.java"));
+
+        assertThat(plan.fullRepository()).isTrue();
+        assertThat(plan.reanalyzePaths()).containsExactly("api/Current.java", "api/RenamedCurrent.java");
+        assertThat(plan.copyPaths()).isEmpty();
+        assertThat(plan.deletedPaths()).containsExactly("api/Deleted.java", "api/Renamed.java");
+        assertThat(plan.diagnosticReasons()).containsExactly("UNCERTAIN_CONTRACT:api/Current.java");
+    }
+
+    @Test
     void should_full_fallback_include_selected_only_added_source() {
         GitRevisionDiff diff = (publishedRevision, selectedRevision) -> List.of(
                 ChangedSource.add("api/B.java", "public class B {}"),

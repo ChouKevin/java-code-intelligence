@@ -43,6 +43,15 @@ class SourceContractChangeDetectorTest {
                 Arguments.of("feign client", "@FeignClient(name = \"catalog\") interface Client {}",
                         "@FeignClient(name = \"inventory\") interface Client {}"),
                 Arguments.of("get mapping value", "@GetMapping(\"/orders\") void get() {}",
-                        "@GetMapping(\"/payments\") void get() {}"));
+                        "@GetMapping(\"/payments\") void get() {}"),
+                Arguments.of("get mapping value with comments", """
+                        @GetMapping /* before arguments */
+                        (value = \"/orders\" /* parentheses: ) ( */)
+                        void get() {}
+                        """, """
+                        @GetMapping // before arguments
+                        (value = \"/payments\" /* parentheses: ) ( */)
+                        void get() {}
+                        """));
     }
 }

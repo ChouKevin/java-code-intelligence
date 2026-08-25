@@ -37,13 +37,14 @@ public final class IncrementalIndexPlanner {
         List<ChangedSource> changes = List.copyOf(revisionDiff.diff(Objects.requireNonNull(publishedRevision,
                 "published revision is required"), Objects.requireNonNull(selectedRevision, "selected revision is required")));
         TreeSet<String> selectedSources = sortedPaths(selectedSupportedSourcePaths, "selected supported source paths");
+        TreeSet<String> deletedParentPaths = deletedParentPaths(changes);
         TreeSet<String> reanalyze = new TreeSet<>();
         TreeSet<String> deleted = new TreeSet<>();
         TreeSet<String> reasons = new TreeSet<>();
         for (ChangedSource change : changes) {
             if (isBuildInput(change)) {
                 if (!selectBuildClosure(change, reanalyze, reasons)) {
-                    return full(selectedSources, "UNCERTAIN_MODULE_CLOSURE:" + pathOf(change), deleted);
+                    return full(selectedSources, "UNCERTAIN_MODULE_CLOSURE:" + pathOf(change), deletedParentPaths);
                 }
                 continue;
             }
@@ -58,7 +59,7 @@ public final class IncrementalIndexPlanner {
             }
             SourceContractChangeDetector.Impact impact = contractChangeDetector.detect(change, index.declarations());
             if (impact.uncertain()) {
-                return full(selectedSources, "UNCERTAIN_CONTRACT:" + pathOf(change), deleted);
+                return full(selectedSources, "UNCERTAIN_CONTRACT:" + pathOf(change), deletedParentPaths);
             }
             if (impact.publicDeclaration() || change.kind() == ChangeKind.DELETE || change.kind() == ChangeKind.RENAME) {
                 reanalyze.addAll(index.dependentPaths(change.oldPath()));
@@ -105,6 +106,17 @@ public final class IncrementalIndexPlanner {
         TreeSet<String> deleted = sortedPaths(deletedPaths, "deleted paths");
         deleted.removeAll(reanalyze);
         return new IncrementalIndexPlan(true, List.copyOf(reanalyze), List.of(), List.copyOf(deleted), List.of(reason));
+    }
+
+    private static TreeSet<String> deletedParentPaths(Collection<ChangedSource> changes) {
+        TreeSet<String> deleted = new TreeSet<>();
+        for (ChangedSource change : changes) {
+            if (change.affectsSupportedSource()
+                    && (change.kind() == ChangeKind.DELETE || change.kind() == ChangeKind.RENAME)) {
+                deleted.add(change.oldPath());
+            }
+        }
+        return deleted;
     }
 
     private static String pathOf(ChangedSource change) {

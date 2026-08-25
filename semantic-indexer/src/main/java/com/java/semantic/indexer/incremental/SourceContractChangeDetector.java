@@ -136,7 +136,10 @@ public interface SourceContractChangeDetector {
                 return AnnotationRead.uncertainResult();
             }
             String name = source.substring(nameStart, position);
-            int argumentsStart = skipWhitespace(source, position);
+            int argumentsStart = skipWhitespaceAndComments(source, position);
+            if (argumentsStart < 0) {
+                return AnnotationRead.uncertainResult();
+            }
             if (argumentsStart >= source.length() || source.charAt(argumentsStart) != '(') {
                 return new AnnotationRead(simpleNameOf(name), name, position, false);
             }
@@ -144,7 +147,11 @@ public interface SourceContractChangeDetector {
             if (argumentsEnd < 0) {
                 return AnnotationRead.uncertainResult();
             }
-            return new AnnotationRead(simpleNameOf(name), normalize(source.substring(start, argumentsEnd)), argumentsEnd, false);
+            NormalizedAnnotation normalized = normalize(source.substring(start, argumentsEnd));
+            if (normalized.uncertain()) {
+                return AnnotationRead.uncertainResult();
+            }
+            return new AnnotationRead(simpleNameOf(name), normalized.value(), argumentsEnd, false);
         }
 
         private static int matchingParenthesis(String source, int start) {
@@ -158,6 +165,15 @@ public interface SourceContractChangeDetector {
                         return -1;
                     }
                     position = literalEnd;
+                    continue;
+                }
+                if (current == '/' && position + 1 < source.length()
+                        && (source.charAt(position + 1) == '/' || source.charAt(position + 1) == '*')) {
+                    int commentEnd = skipComment(source, position);
+                    if (commentEnd < 0) {
+                        return -1;
+                    }
+                    position = commentEnd;
                     continue;
                 }
                 if (current == '(') {
@@ -176,6 +192,14 @@ public interface SourceContractChangeDetector {
         private static int skipLineComment(String source, int position) {
             int lineEnd = source.indexOf('\n', position);
             return lineEnd < 0 ? source.length() : lineEnd + 1;
+        }
+
+        private static int skipComment(String source, int position) {
+            if (source.charAt(position + 1) == '/') {
+                return skipLineComment(source, position + 2);
+            }
+            int commentEnd = source.indexOf("*/", position + 2);
+            return commentEnd < 0 ? -1 : commentEnd + 2;
         }
 
         private static int skipLiteral(String source, int start, char quote) {
@@ -198,10 +222,20 @@ public interface SourceContractChangeDetector {
             return Character.isJavaIdentifierPart(value) || value == '.' || value == '$';
         }
 
-        private static int skipWhitespace(String source, int position) {
+        private static int skipWhitespaceAndComments(String source, int position) {
             int result = position;
-            while (result < source.length() && Character.isWhitespace(source.charAt(result))) {
-                result++;
+            while (result < source.length()) {
+                while (result < source.length() && Character.isWhitespace(source.charAt(result))) {
+                    result++;
+                }
+                if (result + 1 >= source.length() || source.charAt(result) != '/'
+                        || (source.charAt(result + 1) != '/' && source.charAt(result + 1) != '*')) {
+                    return result;
+                }
+                result = skipComment(source, result);
+                if (result < 0) {
+                    return -1;
+                }
             }
             return result;
         }
@@ -211,7 +245,7 @@ public interface SourceContractChangeDetector {
             return separator < 0 ? annotationName : annotationName.substring(separator + 1);
         }
 
-        private static String normalize(String annotation) {
+        private static NormalizedAnnotation normalize(String annotation) {
             StringBuilder normalized = new StringBuilder();
             boolean quoted = false;
             char quote = 0;
@@ -230,11 +264,18 @@ public interface SourceContractChangeDetector {
                     quoted = true;
                     quote = current;
                     normalized.append(current);
+                } else if (current == '/' && position + 1 < annotation.length()
+                        && (annotation.charAt(position + 1) == '/' || annotation.charAt(position + 1) == '*')) {
+                    int commentEnd = skipComment(annotation, position);
+                    if (commentEnd < 0) {
+                        return NormalizedAnnotation.uncertainResult();
+                    }
+                    position = commentEnd - 1;
                 } else if (!Character.isWhitespace(current)) {
                     normalized.append(current);
                 }
             }
-            return normalized.toString();
+            return new NormalizedAnnotation(normalized.toString(), false);
         }
 
         private record AnnotationExtraction(Set<String> contracts, boolean uncertain) {
@@ -246,6 +287,12 @@ public interface SourceContractChangeDetector {
         private record AnnotationRead(String simpleName, String contract, int end, boolean uncertain) {
             private static AnnotationRead uncertainResult() {
                 return new AnnotationRead("", "", 0, true);
+            }
+        }
+
+        private record NormalizedAnnotation(String value, boolean uncertain) {
+            private static NormalizedAnnotation uncertainResult() {
+                return new NormalizedAnnotation("", true);
             }
         }
     }
