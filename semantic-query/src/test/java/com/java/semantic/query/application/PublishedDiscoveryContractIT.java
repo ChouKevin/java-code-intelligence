@@ -9,6 +9,8 @@ import com.java.semantic.model.codefact.CodeFactKind;
 import com.java.semantic.model.index.SourceIndexScope;
 import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.model.repository.RepositoryRevision;
+import com.java.semantic.query.config.ConfiguredReadPolicy;
+import com.java.semantic.query.config.ReadPolicyProperties;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.data.mongodb.core.MongoTemplate;
@@ -107,6 +109,37 @@ class PublishedDiscoveryContractIT extends PublishedMongoITSupport {
                 assertThat(command.getInt32("skip").getValue()).isEqualTo(1);
                 assertThat(command.getInt32("limit").getValue()).isEqualTo(1);
             });
+        }
+    }
+
+    @Test
+    void excludes_canonically_forbidden_listener_before_mongo_listener_paging() {
+        try (MongoDBContainer container = new MongoDBContainer(DockerImageName.parse("mongo:8.0.4"))) {
+            container.start();
+            MongoTemplate template = new MongoTemplate(MongoClients.create(container.getConnectionString()), "published_listener_authorization");
+            seedCurrent(template, "orders");
+            com.java.semantic.model.codefact.CodeFactIdentity forbidden = methodIdentity("example.private", "PrivateListener", "onVideo",
+                    "src/main/java/example/private/PrivateListener.java");
+            seedMethod(template, forbidden, List.of(new AnnotationFact("org.springframework.context.event.EventListener")));
+            template.getCollection("symbols").updateOne(new org.bson.Document("symbolId",
+                    com.java.semantic.model.codefact.CodeFactId.from(forbidden).value()), new org.bson.Document("$set",
+                    new org.bson.Document("scopePackage", "example.video").append("scopeClass", "VisibleListener")
+                            .append("scopeMethod", "onVideo").append("scopeParameters", List.of("example.events.VideoReady"))
+                            .append("scopePath", "src/main/java/example/video/VisibleListener.java")));
+            seedMethod(template, methodIdentity("example.video", "VisibleListener", "onVideo",
+                    "src/main/java/example/video/VisibleListener.java"),
+                    List.of(new AnnotationFact("org.springframework.context.event.EventListener")));
+            ConfiguredReadPolicy deniedPolicy = new ConfiguredReadPolicy(new ReadPolicyProperties(List.of(), List.of(), List.of(),
+                    List.of(new ReadPolicyProperties.MethodRule("orders", "example.private", "PrivateListener", "onVideo",
+                            List.of("example.events.VideoReady")))));
+            PublishedDiscoveryQueryService service = new PublishedDiscoveryQueryService(template, selector(template, deniedPolicy), Duration.ofSeconds(2));
+
+            com.java.semantic.model.codefact.EventListenerResult result = service.discoverEventListeners(new EventListenerQuery(
+                    new RepositoryId("orders"), new RepositoryRevision(REVISION), "example.events.VideoReady", 1, 1));
+
+            assertThat(result.totalCount()).isEqualTo(1);
+            assertThat(result.hasMore()).isFalse();
+            assertThat(result.candidates()).isEmpty();
         }
     }
 

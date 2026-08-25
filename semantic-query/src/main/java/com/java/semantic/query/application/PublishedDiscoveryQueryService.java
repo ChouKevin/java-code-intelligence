@@ -1,6 +1,7 @@
 package com.java.semantic.query.application;
 
 import com.java.semantic.model.codefact.CodeFactKind;
+import com.java.semantic.model.codefact.CodeFactScope;
 import com.java.semantic.model.codefact.CodeFactSummary;
 import com.java.semantic.model.codefact.DeclarationResolutionQuery;
 import com.java.semantic.model.codefact.DeclarationResolutionResult;
@@ -21,6 +22,7 @@ import com.mongodb.client.model.Sorts;
 import org.bson.Document;
 import org.springframework.dao.DataAccessException;
 import org.springframework.data.mongodb.core.MongoTemplate;
+import org.springframework.util.StringUtils;
 
 import java.time.Duration;
 import java.util.ArrayList;
@@ -82,7 +84,7 @@ public final class PublishedDiscoveryQueryService {
         CurrentGeneration current = selector.select(requiredQuery.repositoryId().value(), requiredQuery.revision().value(),
                 CurrentGenerationSelector.SYMBOLS);
         try {
-            org.bson.conversions.Bson filter = accessPlan.authorized(listenerFilter(current, requiredQuery));
+            org.bson.conversions.Bson filter = accessPlan.authorizedMethod(listenerFilter(current, requiredQuery));
             long total = template.getCollection(IndexCollections.SYMBOLS).countDocuments(filter,
                     new com.mongodb.client.model.CountOptions().maxTime(storageTimeout.toMillis(), TimeUnit.MILLISECONDS));
             FindIterable<Document> rows = template.getCollection(IndexCollections.SYMBOLS).find(filter)
@@ -91,7 +93,7 @@ public final class PublishedDiscoveryQueryService {
             List<EventListenerCandidate> candidates = new ArrayList<>();
             for (Document row : rows) {
                 SymbolDocument symbol = CodeFactReadService.decode(row, current, template);
-                candidates.add(listenerCandidate(symbol, current, requiredQuery));
+                candidates.add(listenerCandidate(row, symbol, current, requiredQuery));
             }
             return new EventListenerResult(current, requiredQuery, candidates, total,
                     requiredQuery.offset() + candidates.size() < total);
@@ -111,13 +113,48 @@ public final class PublishedDiscoveryQueryService {
                 Filters.in("annotations.typeName", LISTENER_ANNOTATIONS));
     }
 
-    private EventListenerCandidate listenerCandidate(SymbolDocument symbol, CurrentGeneration current, EventListenerQuery query) {
+    private EventListenerCandidate listenerCandidate(Document row, SymbolDocument symbol, CurrentGeneration current, EventListenerQuery query) {
         if (!(symbol.fact().identity().canonicalIdentity() instanceof MethodTarget target)
                 || !target.parameterTypes().contains(query.eventType()) || !hasListenerAnnotation(symbol)) {
             throw new IndexContractMismatchException();
         }
         selector.requireVisible(current, symbol.fact().identity());
+        if (!CodeFactScope.from(symbol.fact().identity()).equals(flattenedScope(row))) {
+            throw new IndexContractMismatchException();
+        }
         return new EventListenerCandidate(target, symbol.range(), listenerAnnotations(symbol));
+    }
+
+    private static CodeFactScope flattenedScope(Document document) {
+        Object rawParameters = document.get("scopeParameters");
+        if (!(rawParameters instanceof List<?> parameters)) {
+            throw new IndexContractMismatchException();
+        }
+        List<String> parameterTypes = new ArrayList<>();
+        for (Object parameter : parameters) {
+            if (!(parameter instanceof String value) || !StringUtils.hasText(value)) {
+                throw new IndexContractMismatchException();
+            }
+            parameterTypes.add(value);
+        }
+        return new CodeFactScope(requiredPackage(document), required(document, "scopeClass"),
+                Optional.of(required(document, "scopeMethod")), parameterTypes, Optional.of(required(document, "scopePath")));
+    }
+
+    private static String requiredPackage(Document document) {
+        Object value = document.get("scopePackage");
+        if (!(value instanceof String packageName) || (!packageName.isEmpty() && !StringUtils.hasText(packageName))) {
+            throw new IndexContractMismatchException();
+        }
+        return packageName;
+    }
+
+    private static String required(Document document, String field) {
+        Object value = document.get(field);
+        if (!(value instanceof String text) || !StringUtils.hasText(text)) {
+            throw new IndexContractMismatchException();
+        }
+        return text;
     }
 
     public TypeMemberResult discoverTypeMembers(TypeMemberQuery query) {
