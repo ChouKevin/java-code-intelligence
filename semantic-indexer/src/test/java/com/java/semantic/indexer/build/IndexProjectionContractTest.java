@@ -8,10 +8,13 @@ import com.java.semantic.model.codefact.CodeFactKind;
 import com.java.semantic.model.codefact.ExternalTarget;
 import com.java.semantic.model.codefact.RelationKind;
 import com.java.semantic.model.codefact.RelationTarget;
+import com.java.semantic.model.codefact.MethodTarget;
 import com.java.semantic.model.index.SourceArtifactDocument;
 import com.java.semantic.model.index.GenerationId;
 import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.model.repository.RepositoryRevision;
+import com.java.semantic.syntax.domain.RepositorySyntax;
+import com.java.semantic.syntax.domain.SourceExtractionOutcome;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
@@ -137,5 +140,51 @@ class IndexProjectionContractTest {
         assertEquals("JDT_SYNTAX_PROBLEM", batches.getFirst().extractionIssue().orElseThrow().code());
         assertTrue(batches.getFirst().symbols().isEmpty());
         assertFalse(batches.getFirst().sourceScope().usableScopes());
+    }
+
+    @Test
+    void projects_search_tokens_with_camel_digit_and_separator_boundaries() throws Exception {
+        Path source = repository.resolve("src/main/java/example/SearchNames.java");
+        Files.createDirectories(source.getParent());
+        Files.writeString(source, "package example; class SearchNames { void get2D() { } void find_payment() { } }");
+
+        List<SourceIndexBatch> batches = new JdtLsRepositoryIndexExporter().export(new RepositoryId("orders"),
+                new RepositoryRevision("d".repeat(40)), new GenerationId("g4"), new FullIndexPlanner().plan(repository));
+
+        List<String> get2DTokens = searchTokens(batches, "get2D");
+        List<String> findPaymentTokens = searchTokens(batches, "find_payment");
+        assertTrue(get2DTokens.contains("get2"));
+        assertTrue(get2DTokens.contains("d"));
+        assertFalse(get2DTokens.contains("get2d"));
+        assertTrue(findPaymentTokens.contains("find"));
+        assertTrue(findPaymentTokens.contains("payment"));
+        assertFalse(findPaymentTokens.contains("find_payment"));
+    }
+
+    @Test
+    void indexes_extraction_outcomes_once_by_source_path_and_rejects_duplicates() {
+        RepositorySyntax syntax = new RepositorySyntax(List.of(), List.of(), List.of(
+                SourceExtractionOutcome.extracted("src/main/java/example/Ready.java"),
+                SourceExtractionOutcome.syntaxFailed("src/main/java/example/Broken.java", "JDT_SYNTAX_PROBLEM")));
+
+        java.util.Map<String, Optional<com.java.semantic.model.index.SourceIndexIssue>> outcomes =
+                JdtLsRepositoryIndexExporter.extractionIssues(syntax);
+
+        assertEquals(Optional.empty(), outcomes.get("src/main/java/example/Ready.java"));
+        assertEquals(Optional.of(new com.java.semantic.model.index.SourceIndexIssue("src/main/java/example/Broken.java", "JDT_SYNTAX_PROBLEM")),
+                outcomes.get("src/main/java/example/Broken.java"));
+        assertTrue(outcomes.containsKey("src/main/java/example/Ready.java"));
+        RepositorySyntax duplicates = new RepositorySyntax(List.of(), List.of(), List.of(
+                SourceExtractionOutcome.extracted("src/main/java/example/Ready.java"),
+                SourceExtractionOutcome.extracted("src/main/java/example/Ready.java")));
+        org.junit.jupiter.api.Assertions.assertThrows(IllegalArgumentException.class,
+                () -> JdtLsRepositoryIndexExporter.extractionIssues(duplicates));
+    }
+
+    private static List<String> searchTokens(List<SourceIndexBatch> batches, String methodName) {
+        return batches.stream().flatMap(batch -> batch.search().stream())
+                .filter(document -> document.authoritativeIdentity().canonicalIdentity() instanceof MethodTarget target
+                        && methodName.equals(target.methodName()))
+                .findFirst().orElseThrow().normalizedTokens();
     }
 }

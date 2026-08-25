@@ -22,7 +22,9 @@ import java.nio.file.Files;
 import java.nio.file.NoSuchFileException;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 
@@ -65,6 +67,7 @@ public final class JdtLsRepositoryIndexExporter implements RepositoryIndexExport
             validatePlannedSources(plan, "before syntax extraction");
             RepositorySyntax syntax = syntaxExtractionService.extract(plan.repositoryRoot());
             validatePlannedSources(plan, "after syntax extraction");
+            Map<String, Optional<SourceIndexIssue>> extractionIssues = extractionIssues(syntax);
             RepositorySnapshot snapshot = new RepositorySnapshot(repositoryId, plan.repositoryRoot(), revision);
             semanticWorkspaceProbe(syntax).ifPresent(method -> semanticCallTargetResolver.verifySemanticWorkspace(snapshot, method));
             List<SourceIndexBatch> batches = plan.sources().stream().flatMap(source -> {
@@ -78,7 +81,8 @@ public final class JdtLsRepositoryIndexExporter implements RepositoryIndexExport
             List<EntryPointDocument> entryPoints = entryPointProjector.project(repositoryId, revision,
                     generationId, syntax, source.sourcePath());
             SourceIndexScope sourceScope = SourceIndexScope.from(symbols);
-            return split(repositoryId, generationId, source.sourcePath(), source.contentArtifact(), extractionIssue(syntax, source.sourcePath()), sourceScope, symbols, relations, entryPoints,
+            return split(repositoryId, generationId, source.sourcePath(), source.contentArtifact(),
+                    extractionIssues.getOrDefault(source.sourcePath(), Optional.empty()), sourceScope, symbols, relations, entryPoints,
                     searchProjector.project(symbols, relations, entryPoints)).stream();
             }).toList();
             semanticCallTargetResolver.requireSemanticResolution();
@@ -144,15 +148,17 @@ public final class JdtLsRepositoryIndexExporter implements RepositoryIndexExport
         return List.copyOf(batches);
     }
 
-    private static Optional<SourceIndexIssue> extractionIssue(RepositorySyntax syntax, String sourcePath) {
-        for (com.java.semantic.syntax.domain.SourceExtractionOutcome outcome : syntax.extractionOutcomes()) {
-            if (sourcePath.equals(outcome.sourceFile())) {
-                if (outcome.status() == SourceExtractionStatus.EXTRACTED) {
-                    return Optional.empty();
-                }
-                return outcome.reasonCode().map(code -> new SourceIndexIssue(sourcePath, code));
+    static Map<String, Optional<SourceIndexIssue>> extractionIssues(RepositorySyntax syntax) {
+        RepositorySyntax requiredSyntax = Objects.requireNonNull(syntax, "repository syntax is required");
+        Map<String, Optional<SourceIndexIssue>> result = new LinkedHashMap<>();
+        for (com.java.semantic.syntax.domain.SourceExtractionOutcome outcome : requiredSyntax.extractionOutcomes()) {
+            if (result.containsKey(outcome.sourceFile())) {
+                throw new IllegalArgumentException("duplicate extraction outcome for " + outcome.sourceFile());
             }
+            Optional<SourceIndexIssue> issue = outcome.status() == SourceExtractionStatus.EXTRACTED
+                    ? Optional.empty() : outcome.reasonCode().map(code -> new SourceIndexIssue(outcome.sourceFile(), code));
+            result.put(outcome.sourceFile(), issue);
         }
-        return Optional.empty();
+        return Map.copyOf(result);
     }
 }

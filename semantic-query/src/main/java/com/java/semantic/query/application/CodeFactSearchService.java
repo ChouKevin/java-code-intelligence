@@ -4,6 +4,7 @@ import com.java.semantic.model.codefact.CodeFactSearchQuery;
 import com.java.semantic.model.codefact.CodeFactSearchResult;
 import com.java.semantic.model.codefact.CodeFactSummary;
 import com.java.semantic.model.codefact.CodeFactKind;
+import com.java.semantic.model.codefact.CodeFactTokenizer;
 import com.java.semantic.model.index.IndexCollections;
 import com.java.semantic.model.query.CurrentGeneration;
 import com.java.semantic.query.config.SearchAccessPlan;
@@ -19,7 +20,6 @@ import org.springframework.data.mongodb.core.MongoTemplate;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Locale;
 import java.util.Objects;
 import java.util.regex.Pattern;
 import java.util.concurrent.TimeUnit;
@@ -92,9 +92,10 @@ public final class CodeFactSearchService {
     }
 
     static List<String> normalizedTokens(String query) {
-        String normalized = query.replaceAll("([a-z0-9])([A-Z])", "$1 $2").replaceAll("[^A-Za-z0-9]+", " ")
-                .toLowerCase(Locale.ROOT).trim();
-        if (normalized.isEmpty()) { throw new InvalidCodeFactQueryException("query has no searchable tokens", new IllegalArgumentException()); }
-        return List.of(normalized.split(" +"));
+        List<String> tokens = CodeFactTokenizer.tokenize(query);
+        if (tokens.isEmpty()) {
+            throw new InvalidCodeFactQueryException("query has no searchable tokens", new IllegalArgumentException());
+        }
+        return tokens;
     }
 }

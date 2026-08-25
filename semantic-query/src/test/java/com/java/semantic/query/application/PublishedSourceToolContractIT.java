@@ -1,6 +1,7 @@
 package com.java.semantic.query.application;
 
 import com.java.semantic.model.codefact.CodeFactIdentity;
+import com.java.semantic.model.codefact.CodeFactId;
 import com.java.semantic.model.codefact.SourceRange;
 import com.java.semantic.model.codefact.SourceSegmentQuery;
 import com.java.semantic.model.codefact.SourceTypeIdentity;
@@ -19,6 +20,7 @@ import com.mongodb.event.CommandStartedEvent;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.data.mongodb.core.MongoTemplate;
+import org.bson.Document;
 import org.testcontainers.mongodb.MongoDBContainer;
 import org.testcontainers.utility.DockerImageName;
 
@@ -50,6 +52,19 @@ class PublishedSourceToolContractIT extends PublishedMongoITSupport {
             assertThat(service.methodSource("orders", REVISION, method).content()).isEqualTo("😀method");
             SourceRange emojiAndMethod = new SourceRange(path, new SyntaxRange(new SyntaxPosition(1, 0), new SyntaxPosition(1, 8)));
             assertThat(service.sourceSegment(new SourceSegmentQuery(new RepositoryId("orders"), new RepositoryRevision(REVISION), type, emojiAndMethod)).content()).isEqualTo("😀method");
+            SourceRange callerCrossLine = new SourceRange(path, new SyntaxRange(new SyntaxPosition(0, 2), new SyntaxPosition(1, 0)));
+            assertThatThrownBy(() -> service.sourceSegment(new SourceSegmentQuery(new RepositoryId("orders"),
+                    new RepositoryRevision(REVISION), type, callerCrossLine))).isInstanceOf(IndexContractMismatchException.class);
+            SourceRange callerCrLf = new SourceRange(path, new SyntaxRange(new SyntaxPosition(1, 8), new SyntaxPosition(1, 9)));
+            assertThatThrownBy(() -> service.sourceSegment(new SourceSegmentQuery(new RepositoryId("orders"),
+                    new RepositoryRevision(REVISION), type, callerCrLf))).isInstanceOf(IndexContractMismatchException.class);
+            Document malformedRange = new Document("sourceFile", path).append("range", new Document("start",
+                    new Document("line", 0).append("character", 2)).append("end",
+                    new Document("line", 1).append("character", 0)));
+            template.getCollection("symbols").updateOne(new Document("symbolId", CodeFactId.from(method).value()),
+                    new Document("$set", new Document("range", malformedRange)));
+            assertThatThrownBy(() -> service.methodSource("orders", REVISION, method))
+                    .isInstanceOf(IndexContractMismatchException.class);
             SourceRange invalid = new SourceRange(path, new SyntaxRange(new SyntaxPosition(9, 0), new SyntaxPosition(9, 1)));
             assertThatThrownBy(() -> service.sourceSegment(new SourceSegmentQuery(new RepositoryId("orders"), new RepositoryRevision(REVISION), type, invalid)))
                     .isInstanceOf(IndexContractMismatchException.class);

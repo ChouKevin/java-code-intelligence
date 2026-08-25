@@ -1,6 +1,7 @@
 package com.java.semantic.indexer.build;
 
 import com.java.semantic.model.codefact.CodeFact;
+import com.java.semantic.model.codefact.CodeFactTokenizer;
 import com.java.semantic.model.codefact.CanonicalIdentity;
 import com.java.semantic.model.codefact.EntryPointIdentity;
 import com.java.semantic.model.codefact.MapperStatementIdentity;
@@ -14,11 +15,8 @@ import com.java.semantic.model.index.RelationDocument;
 import com.java.semantic.model.index.SearchDocument;
 import com.java.semantic.model.index.SymbolDocument;
 import java.util.ArrayList;
-import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Locale;
 import java.util.Optional;
-import java.util.Set;
 
 /** Builds search records exclusively from canonical identities and stored code-derived fields. */
 public final class SearchProjector {
@@ -43,14 +41,7 @@ public final class SearchProjector {
     }
 
     private static List<String> tokens(String canonicalForm) {
-        Set<String> tokens = new LinkedHashSet<>();
-        String normalized = canonicalForm.replaceAll("([a-z])([A-Z])", "$1 $2").toLowerCase(Locale.ROOT);
-        for (String token : normalized.split("[^a-z0-9_.-]+")) {
-            if (!token.isBlank()) {
-                tokens.add(token);
-            }
-        }
-        return List.copyOf(tokens);
+        return CodeFactTokenizer.tokenize(canonicalForm);
     }
 
     private static Optional<String> packageName(CodeFact fact) {

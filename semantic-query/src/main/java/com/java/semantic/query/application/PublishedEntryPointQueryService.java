@@ -2,6 +2,7 @@ package com.java.semantic.query.application;
 
 import com.java.semantic.model.codefact.EntryPointKind;
 import com.java.semantic.model.codefact.PublishedEntryPoint;
+import com.java.semantic.model.codefact.CodeFactScope;
 import com.java.semantic.model.index.IndexCollections;
 import com.java.semantic.model.index.EntryPointDocument;
 import com.java.semantic.model.index.persistence.EntryPointPersistence;
@@ -20,6 +21,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Pattern;
 
@@ -54,6 +56,10 @@ public final class PublishedEntryPointQueryService {
                         || !requestedPath.equals(entryPoint.trigger().httpPath().orElse(""))
                         || !entryPoint.fact().id().value().equals(required(row, "entryPointId"))
                         || !entryPoint.fact().identity().canonicalForm().equals(required(row, "canonical"))) { throw new IndexContractMismatchException(); }
+                selector.requireVisible(current, entryPoint.fact().identity());
+                if (!CodeFactScope.from(entryPoint.fact().identity()).equals(flattenedScope(row))) {
+                    throw new IndexContractMismatchException();
+                }
                 result.add(new PublishedEntryPoint(current, entryPoint.fact().id().value(), entryPoint.fact().identity().canonicalForm(),
                         entryPoint.kind(), entryPoint.method().canonicalForm(), entryPoint.trigger().httpPath().orElseThrow(IndexContractMismatchException::new),
                         entryPoint.range().sourceFile()));
@@ -63,9 +69,35 @@ public final class PublishedEntryPointQueryService {
             throw new SemanticIndexUnavailableException(exception);
         } catch (IndexContractMismatchException exception) {
             throw exception;
+        } catch (RepositoryNotFoundException exception) {
+            throw exception;
         } catch (RuntimeException exception) {
             throw new IndexContractMismatchException();
         }
+    }
+
+    private static CodeFactScope flattenedScope(Document document) {
+        Object rawParameters = document.get("scopeParameters");
+        if (!(rawParameters instanceof List<?> parameters)) {
+            throw new IndexContractMismatchException();
+        }
+        List<String> parameterTypes = new ArrayList<>();
+        for (Object parameter : parameters) {
+            if (!(parameter instanceof String value) || !StringUtils.hasText(value)) {
+                throw new IndexContractMismatchException();
+            }
+            parameterTypes.add(value);
+        }
+        return new CodeFactScope(requiredPackage(document), required(document, "scopeClass"),
+                Optional.of(required(document, "scopeMethod")), parameterTypes, Optional.of(required(document, "scopePath")));
+    }
+
+    private static String requiredPackage(Document document) {
+        Object value = document.get("scopePackage");
+        if (!(value instanceof String packageName) || (!packageName.isEmpty() && !StringUtils.hasText(packageName))) {
+            throw new IndexContractMismatchException();
+        }
+        return packageName;
     }
 
     private static String required(Document document, String field) {

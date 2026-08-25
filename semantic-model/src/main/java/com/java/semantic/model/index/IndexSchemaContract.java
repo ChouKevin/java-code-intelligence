@@ -40,7 +40,11 @@ public final class IndexSchemaContract {
                     index("entry_point_route", keys("repoId", 1, "generationId", 1, "scopePackage", 1, "scopeClass", 1, "scopeMethod", 1, "scopeParameters", 1, "httpMethod", 1, "path", 1), false, Map.of()),
                     index("entry_point_method_kind", keys("repoId", 1, "generationId", 1, "method", 1, "kind", 1), false, Map.of())),
             collection(IndexCollections.SEARCH, index("search_unique", keys("repoId", 1, "generationId", 1, "factId", 1), true, Map.of()),
-                    index("search_kind_tokens_package_authority", keys("repoId", 1, "generationId", 1, "scopePackage", 1, "scopeClass", 1, "scopeMethod", 1, "scopeParameters", 1, "kind", 1, "tokens", 1, "package", 1, "authority", 1), false, Map.of())));
+                    index("search_tokens_by_generation_kind_package", keys("repoId", 1, "generationId", 1, "kind", 1,
+                            "package", 1, "authority", 1, "tokens", 1), false, Map.of()),
+                    index("search_scope_by_generation_authority", keys("repoId", 1, "generationId", 1,
+                            "scopePackage", 1, "scopeClass", 1, "scopeMethod", 1, "scopeParameters", 1,
+                            "kind", 1, "package", 1, "authority", 1), false, Map.of())));
 
     private IndexSchemaContract() { }
 

@@ -63,15 +63,20 @@ public final class PublishedSourceToolService {
     }
 
     private static int offset(String content, SyntaxPosition position) {
-        int offset = 0;
+        int lineStart = 0;
         for (int line = 0; line < position.line(); line++) {
-            int newline = content.indexOf('\n', offset);
+            int newline = content.indexOf('\n', lineStart);
             if (newline < 0) { throw new IndexContractMismatchException(); }
-            offset = newline + 1;
+            lineStart = newline + 1;
         }
-        int result = offset + position.character();
-        if (result < offset || result > content.length()) { throw new IndexContractMismatchException(); }
-        return result;
+        int newline = content.indexOf('\n', lineStart);
+        int lineEnd = newline < 0 ? content.length() : newline;
+        if (lineEnd > lineStart && content.charAt(lineEnd - 1) == '\r') {
+            lineEnd--;
+        }
+        int logicalLineLength = lineEnd - lineStart;
+        if (position.character() > logicalLineLength) { throw new IndexContractMismatchException(); }
+        return lineStart + position.character();
     }
 
     private static int contextStart(String content, int offset, int lines) {

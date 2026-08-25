@@ -14,11 +14,18 @@ import org.junit.jupiter.api.Test;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.testcontainers.mongodb.MongoDBContainer;
 import org.testcontainers.utility.DockerImageName;
+import com.mongodb.ConnectionString;
+import com.mongodb.MongoClientSettings;
+import com.mongodb.client.MongoClient;
+import com.mongodb.client.MongoClients;
+import com.mongodb.event.CommandListener;
+import com.mongodb.event.CommandStartedEvent;
 
 import java.time.Duration;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.CopyOnWriteArrayList;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -57,6 +64,49 @@ class PublishedDiscoveryContractIT extends PublishedMongoITSupport {
                     Set.of(CodeFactKind.ENUM_CONSTANT), 99, 1)).members()).extracting(member ->
                     ((com.java.semantic.model.codefact.MemberIdentity) member.fact().identity().canonicalIdentity()).name())
                     .containsExactly("FAILED", "READY");
+        }
+    }
+
+    @Test
+    void filters_and_pages_event_listeners_in_mongo_before_decoding() {
+        try (MongoDBContainer container = new MongoDBContainer(DockerImageName.parse("mongo:8.0.4"))) {
+            container.start();
+            MongoTemplate template = new MongoTemplate(MongoClients.create(container.getConnectionString()), "published_listener_page");
+            seedCurrent(template, "orders");
+            seedMethod(template, methodIdentity("example.video", "AlphaListener", "onVideo", "src/main/java/example/video/AlphaListener.java"),
+                    List.of(new AnnotationFact("org.springframework.context.event.EventListener")));
+            seedMethod(template, methodIdentity("example.video", "BetaListener", "onVideo", "src/main/java/example/video/BetaListener.java"),
+                    List.of(new AnnotationFact("org.springframework.context.event.EventListener")));
+            seedMethod(template, methodIdentity("example.video", "IgnoredListener", "onVideo", "src/main/java/example/video/IgnoredListener.java"), List.of());
+            CopyOnWriteArrayList<org.bson.BsonDocument> symbolFinds = new CopyOnWriteArrayList<>();
+            CommandListener listener = new CommandListener() {
+                @Override
+                public void commandStarted(CommandStartedEvent event) {
+                    if ("find".equals(event.getCommandName()) && "symbols".equals(event.getCommand().getString("find").getValue())) {
+                        symbolFinds.add(event.getCommand().clone());
+                    }
+                }
+            };
+            MongoClientSettings settings = MongoClientSettings.builder().applyConnectionString(new ConnectionString(container.getConnectionString()))
+                    .addCommandListener(listener).build();
+            try (MongoClient client = MongoClients.create(settings)) {
+                MongoTemplate observedTemplate = new MongoTemplate(client, "published_listener_page");
+                PublishedDiscoveryQueryService service = new PublishedDiscoveryQueryService(observedTemplate,
+                        selector(observedTemplate, policy()), Duration.ofSeconds(2));
+
+                com.java.semantic.model.codefact.EventListenerResult result = service.discoverEventListeners(new EventListenerQuery(
+                        new RepositoryId("orders"), new RepositoryRevision(REVISION), "example.events.VideoReady", 1, 1));
+
+                assertThat(result.totalCount()).isEqualTo(2);
+                assertThat(result.hasMore()).isFalse();
+                assertThat(result.candidates()).extracting(candidate -> candidate.target().fullyQualifiedClassName())
+                        .containsExactly("example.video.BetaListener");
+            }
+            assertThat(symbolFinds).singleElement().satisfies(command -> {
+                assertThat(command.getDocument("filter").toJson()).contains("annotations.typeName", "parameterTypes", "example.events.VideoReady");
+                assertThat(command.getInt32("skip").getValue()).isEqualTo(1);
+                assertThat(command.getInt32("limit").getValue()).isEqualTo(1);
+            });
         }
     }
 

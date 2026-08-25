@@ -82,23 +82,19 @@ public final class PublishedDiscoveryQueryService {
         CurrentGeneration current = selector.select(requiredQuery.repositoryId().value(), requiredQuery.revision().value(),
                 CurrentGenerationSelector.SYMBOLS);
         try {
-            FindIterable<Document> rows = template.getCollection(IndexCollections.SYMBOLS).find(accessPlan.authorized(Filters.and(
-                    Filters.eq("repoId", current.repositoryId().value()), Filters.eq("generationId", current.generationId().value()),
-                    Filters.eq("kind", CodeFactKind.METHOD.name()))))
-                    .sort(Sorts.ascending("canonical")).maxTime(storageTimeout.toMillis(), TimeUnit.MILLISECONDS);
+            org.bson.conversions.Bson filter = accessPlan.authorized(listenerFilter(current, requiredQuery));
+            long total = template.getCollection(IndexCollections.SYMBOLS).countDocuments(filter,
+                    new com.mongodb.client.model.CountOptions().maxTime(storageTimeout.toMillis(), TimeUnit.MILLISECONDS));
+            FindIterable<Document> rows = template.getCollection(IndexCollections.SYMBOLS).find(filter)
+                    .sort(Sorts.ascending("canonical")).skip(requiredQuery.offset()).limit(requiredQuery.limit())
+                    .maxTime(storageTimeout.toMillis(), TimeUnit.MILLISECONDS);
             List<EventListenerCandidate> candidates = new ArrayList<>();
             for (Document row : rows) {
                 SymbolDocument symbol = CodeFactReadService.decode(row, current, template);
-                if (symbol.fact().identity().canonicalIdentity() instanceof MethodTarget target
-                        && target.parameterTypes().contains(requiredQuery.eventType()) && hasListenerAnnotation(symbol)) {
-                    selector.requireVisible(current, symbol.fact().identity());
-                    candidates.add(new EventListenerCandidate(target, symbol.range(), listenerAnnotations(symbol)));
-                }
+                candidates.add(listenerCandidate(symbol, current, requiredQuery));
             }
-            candidates.sort(Comparator.comparing(candidate -> candidate.target().canonicalForm()));
-            int start = Math.min(requiredQuery.offset(), candidates.size());
-            int end = Math.min(start + requiredQuery.limit(), candidates.size());
-            return new EventListenerResult(current, requiredQuery, candidates.subList(start, end), candidates.size(), end < candidates.size());
+            return new EventListenerResult(current, requiredQuery, candidates, total,
+                    requiredQuery.offset() + candidates.size() < total);
         } catch (MongoException | DataAccessException exception) {
             throw new SemanticIndexUnavailableException(exception);
         } catch (RepositoryNotFoundException | IndexContractMismatchException exception) {
@@ -106,6 +102,22 @@ public final class PublishedDiscoveryQueryService {
         } catch (RuntimeException exception) {
             throw new IndexContractMismatchException();
         }
+    }
+
+    private static org.bson.conversions.Bson listenerFilter(CurrentGeneration current, EventListenerQuery query) {
+        return Filters.and(Filters.eq("repoId", current.repositoryId().value()), Filters.eq("generationId", current.generationId().value()),
+                Filters.eq("kind", CodeFactKind.METHOD.name()),
+                Filters.eq("fact.identity.canonicalIdentity.parameterTypes", query.eventType()),
+                Filters.in("annotations.typeName", LISTENER_ANNOTATIONS));
+    }
+
+    private EventListenerCandidate listenerCandidate(SymbolDocument symbol, CurrentGeneration current, EventListenerQuery query) {
+        if (!(symbol.fact().identity().canonicalIdentity() instanceof MethodTarget target)
+                || !target.parameterTypes().contains(query.eventType()) || !hasListenerAnnotation(symbol)) {
+            throw new IndexContractMismatchException();
+        }
+        selector.requireVisible(current, symbol.fact().identity());
+        return new EventListenerCandidate(target, symbol.range(), listenerAnnotations(symbol));
     }
 
     public TypeMemberResult discoverTypeMembers(TypeMemberQuery query) {

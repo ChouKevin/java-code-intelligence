@@ -13,6 +13,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 @Tag("mongo-it")
@@ -36,6 +37,23 @@ class IndexSchemaBootstrapIT {
                     new com.mongodb.client.model.IndexOptions().name("repository_id_unique"));
             IndexSchemaBootstrap bootstrap = new IndexSchemaBootstrap(template);
             assertThatThrownBy(bootstrap::bootstrap).isInstanceOf(IndexSchemaConflictException.class);
+        }
+    }
+
+    @Test
+    void permits_a_search_row_with_tokens_and_method_parameter_arrays() {
+        try (MongoDBContainer container = MongoSchemaTestSupport.container()) {
+            org.springframework.data.mongodb.core.MongoTemplate template = MongoSchemaTestSupport.template(container);
+            new IndexSchemaBootstrap(template).bootstrap();
+
+            assertThatCode(() -> template.getCollection("search").insertOne(new Document("repoId", "orders")
+                    .append("generationId", "g1").append("factId", "fact-1").append("kind", "METHOD")
+                    .append("tokens", List.of("get", "2", "d")).append("package", "example.payment")
+                    .append("authority", "SYMBOLS").append("canonical", "method[1]example.payment.Invoice#get2D(java.lang.String)")
+                    .append("scopePackage", "example.payment").append("scopeClass", "Invoice")
+                    .append("scopeMethod", "get2D").append("scopeParameters", List.of("java.lang.String"))
+                    .append("scopePath", "src/main/java/example/payment/Invoice.java")))
+                    .doesNotThrowAnyException();
         }
     }
 

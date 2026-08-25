@@ -113,4 +113,62 @@ class PublishedRouteContractIT extends PublishedMongoITSupport {
                     .fact().identity()).isEqualTo(identity);
         }
     }
+
+    @Test
+    void denies_forged_route_scope_by_typed_identity_and_fails_closed_for_malformed_scope() {
+        try (MongoDBContainer container = new MongoDBContainer(DockerImageName.parse("mongo:8.0.4"))) {
+            container.start();
+            MongoTemplate template = new MongoTemplate(com.mongodb.client.MongoClients.create(container.getConnectionString()), "published_route_scope");
+            seedCurrent(template, "orders");
+            EntryPointDocument hidden = entryPoint("example.private", "HiddenPayments", "hidden", "/hidden");
+            storeEntryPoint(template, hidden, new CodeFactScope("example.api", "Payments", java.util.Optional.of("hidden"),
+                    java.util.List.of(), java.util.Optional.of("src/main/java/HiddenPayments.java")));
+            PublishedEntryPointQueryService denied = new PublishedEntryPointQueryService(template,
+                    selector(template, policy(new com.java.semantic.query.config.ReadPolicyProperties.PackageRule("orders", "example.private"))),
+                    Duration.ofSeconds(2));
+
+            assertThatThrownBy(() -> denied.findRoutes("orders", REVISION, "GET", "/hidden"))
+                    .isInstanceOf(RepositoryNotFoundException.class);
+
+            EntryPointDocument malformed = entryPoint("example.api", "Payments", "malformed", "/malformed");
+            storeEntryPoint(template, malformed, new CodeFactScope("example.api", "ForgedPayments", java.util.Optional.of("malformed"),
+                    java.util.List.of(), java.util.Optional.of("src/main/java/Payments.java")));
+            PublishedEntryPointQueryService allowed = new PublishedEntryPointQueryService(template, selector(template, policy()), Duration.ofSeconds(2));
+
+            assertThatThrownBy(() -> allowed.findRoutes("orders", REVISION, "GET", "/malformed"))
+                    .isInstanceOf(IndexContractMismatchException.class);
+        }
+    }
+
+    private static EntryPointDocument entryPoint(String packageName, String className, String methodName, String path) {
+        SourceTypeIdentity type = new SourceTypeIdentity(new JavaTypeIdentity(packageName, className),
+                "src/main/java/" + className + ".java");
+        MethodTarget method = new MethodTarget(type, methodName, java.util.List.of());
+        EntryPointTrigger trigger = new EntryPointTrigger(java.util.Optional.of("GET"), java.util.Optional.of(path),
+                java.util.Optional.empty(), java.util.Optional.empty());
+        CodeFactIdentity identity = new CodeFactIdentity(new RepositoryId("orders"), new RepositoryRevision(REVISION), CodeFactKind.API_ROUTE,
+                new EntryPointIdentity(EntryPointKind.HTTP, method, trigger));
+        return new EntryPointDocument(new RepositoryId("orders"), new GenerationId("g1"), new CodeFact(CodeFactId.from(identity), identity),
+                EntryPointKind.HTTP, method, trigger, new SourceRange(type.sourceFile(),
+                new SyntaxRange(new SyntaxPosition(0, 0), new SyntaxPosition(0, 1))));
+    }
+
+    private static void storeEntryPoint(MongoTemplate template, EntryPointDocument entryPoint, CodeFactScope flattenedScope) {
+        Document stored = new Document();
+        template.getConverter().write(EntryPointPersistence.from(entryPoint), stored);
+        stored.put("repoId", entryPoint.repositoryId().value());
+        stored.put("generationId", entryPoint.generationId().value());
+        stored.put("entryPointId", entryPoint.fact().id().value());
+        stored.put("canonical", entryPoint.fact().identity().canonicalForm());
+        stored.put("method", entryPoint.method().canonicalForm());
+        stored.put("path", entryPoint.trigger().httpPath().orElseThrow());
+        stored.put("httpMethod", entryPoint.trigger().httpMethod().orElseThrow());
+        stored.put("sourcePath", entryPoint.range().sourceFile());
+        stored.put("scopePackage", flattenedScope.packageName());
+        stored.put("scopeClass", flattenedScope.className());
+        stored.put("scopeMethod", flattenedScope.methodName().orElse(""));
+        stored.put("scopeParameters", flattenedScope.parameterTypes());
+        stored.put("scopePath", flattenedScope.sourcePath().orElse(""));
+        template.getCollection("entry_points").insertOne(stored);
+    }
 }
