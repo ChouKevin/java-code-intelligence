@@ -99,7 +99,7 @@ Content-Type: application/json
 
 {{resolvedMethodSourceRequest}}
 
-### Resolve a source type from type context and inspect its type-member/concept follow-ups.
+### Resolve a source type from type context and inspect its type-member follow-ups.
 POST {{baseUrl}}/v1/discovery/source-symbols/resolve
 X-Api-Token: {{apiToken}}
 Content-Type: application/json

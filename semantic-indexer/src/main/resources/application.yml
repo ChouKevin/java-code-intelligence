@@ -3,30 +3,6 @@ spring:
     uri: ${SEMANTIC_MONGODB_URI:mongodb://localhost:27017/semantic?serverSelectionTimeoutMS=2000&connectTimeoutMS=2000&socketTimeoutMS=2000}
 
 semantic:
-  syntax:
-    cache:
-      # weight 為 RepositorySyntax 結構性 metadata 數量，不是原始碼位元組數
-      maximum-weight: ${REPOSITORY_SYNTAX_CACHE_MAXIMUM_WEIGHT:10000}
-      maximum-entry-weight: ${REPOSITORY_SYNTAX_CACHE_MAXIMUM_ENTRY_WEIGHT:1000}
-      expire-after-access: ${REPOSITORY_SYNTAX_CACHE_EXPIRE_AFTER_ACCESS:10m}
-  analysis:
-    outgoing:
-      depth-two-node-budget: ${OUTGOING_DEPTH_TWO_NODE_BUDGET:40}
-    incoming:
-      depth-two-node-budget: ${INCOMING_DEPTH_TWO_NODE_BUDGET:40}
-    read-policy:
-      forbidden-repositories: []
-      forbidden-packages: []
-      forbidden-classes: []
-      forbidden-methods: []
-  discovery:
-    source-symbol-resolution:
-      context-candidate-limit: ${SOURCE_SYMBOL_CONTEXT_CANDIDATE_LIMIT:100}
-    internal-references:
-      cache:
-        maximum-weight: ${INTERNAL_REFERENCE_CACHE_MAXIMUM_WEIGHT:10000}
-        expire-after-access: ${INTERNAL_REFERENCE_CACHE_EXPIRE_AFTER_ACCESS:10m}
-        maximum-entry-weight: ${INTERNAL_REFERENCE_CACHE_MAXIMUM_ENTRY_WEIGHT:1000}
   indexer:
     admin-token: ${SEMANTIC_INDEXER_ADMIN_TOKEN:}
   jdtls:

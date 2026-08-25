@@ -6,8 +6,9 @@ COPY semantic-indexer/pom.xml semantic-indexer/pom.xml
 COPY semantic-query/pom.xml semantic-query/pom.xml
 RUN mvn --batch-mode --no-transfer-progress -pl semantic-indexer -am dependency:go-offline
 COPY semantic-model semantic-model
+COPY semantic-query semantic-query
 COPY semantic-indexer semantic-indexer
-RUN mvn --batch-mode --no-transfer-progress -pl semantic-indexer -am -DskipTests package
+RUN mvn --batch-mode --no-transfer-progress -pl semantic-indexer -am -Dmaven.test.skip=true package
 
 FROM eclipse-temurin:21-jdk
 RUN apt-get update && apt-get install -y --no-install-recommends curl git && rm -rf /var/lib/apt/lists/*

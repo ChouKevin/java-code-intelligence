@@ -7,5 +7,5 @@ import org.springframework.web.bind.annotation.PostMapping;
 public interface RemoteVideoCatalog {
 
     @PostMapping("/transcoding/jobs")
-    public void createTranscodingJob(String videoId) { }
+    void createTranscodingJob(String videoId);
 }

@@ -1,290 +1,46 @@
-# Java Semantic Service
+# Java Code Intelligence
 
-## Repository ownership and extraction status
+Java Code Intelligence is an offline semantic-index service with two independently deployable applications:
 
-The canonical repository for this service is
-`git@github.com:ChouKevin/java-code-intelligence.git`. The current
-`java-system-agent/java-semantic-service/` location is temporary while its Git history, delivery
-baseline, and Agent consumer handoff are prepared. Do not establish long-lived development in both
-locations. The Agent repository retains the extraction procedure in
-[`docs/handoffs/java-code-intelligence-extraction.md`](https://github.com/ChouKevin/java-system-agent/blob/uat/docs/handoffs/java-code-intelligence-extraction.md),
-while this service retains its post-extraction direction in [`docs/roadmap.md`](docs/roadmap.md).
+- **Indexer** accepts private administrative commands, reads Git repositories, runs JDT LS, and publishes immutable MongoDB generations.
+- **Query** is read-only. It serves the current sealed MongoDB generation through HTTP and MCP; it never opens a repository, starts JDT LS, or performs index mutation.
 
-Until extraction, run the commands below from this service directory:
+The deterministic fixture pipeline indexes the payment, order, and video services through the same production exporter used for all repositories. There is no LLM, chat, prompt, or embedding model in the applications or their runtime configuration.
+
+## Build and verification
+
+Requirements: Java 21, Maven 3.9+, Docker for Mongo/image checks, and JDT LS only for the Indexer smoke and end-to-end fixture checks.
 
 ```bash
-cd java-semantic-service
+mvn --batch-mode --no-transfer-progress clean test
+mvn --batch-mode --no-transfer-progress -pl semantic-indexer,semantic-query -am -Pmongo-it test
+mvn --batch-mode --no-transfer-progress -f semantic-indexer/fixtures/uat/payment-service/pom.xml test
+mvn --batch-mode --no-transfer-progress -f semantic-indexer/fixtures/uat/order-service/pom.xml test
+mvn --batch-mode --no-transfer-progress -f semantic-indexer/fixtures/uat/video-service/pom.xml test
+docker build -f Dockerfile.indexer -t java-semantic-indexer:uat .
+docker build -f Dockerfile.query -t java-semantic-query:uat .
+scripts/smoke-jdtls-image.sh java-semantic-indexer:uat
+scripts/test-query-image.sh java-semantic-query:uat
+JDTLS_HOME=/opt/jdtls scripts/test-indexer-query-contract.sh
 ```
 
-After extraction, the service directory becomes the root of `java-code-intelligence`, so the same
-Maven commands continue to apply without path rewriting.
+The full operational runbook is [offline-index.md](docs/operations/offline-index.md).
 
-## MCP SDK validation and result contract
+## Credentials and endpoints
 
-Project contract tests cover MCP protocol versions `2025-06-18` and `2025-11-25`. The current SDK
-also accepts `2025-03-26`, but that is not a project-tested guarantee.
-
-General server-side clients must omit the `Origin` header on `/mcp`. An absent header proceeds;
-any present header is rejected before MCP transport and tool callbacks with HTTP `403 Forbidden`
-and fixed JSON `MCP_ORIGIN_FORBIDDEN` / `Origin header is not allowed`. The response never echoes
-the Origin value, request body, exception class, stack trace, or private details.
-
-The SDK owns pre-callback JSON Schema checks for structure, types, required fields, enums, numeric
-ranges, and collection bounds; those rejections are not tool execution. Strict JSON decoding,
-Jakarta validation, and cross-field validation inside the callback map to project error
-`INVALID_TOOL_INPUT`. Java-specific `\p{...}` regex patterns are not projected into MCP JSON
-Schema because other regex engines may reject them; runtime Jakarta validation remains
-authoritative.
-
-A successful tool result uses `isError=false`, places its typed output in `structuredContent`, and
-adds one short `Query completed` compatibility text without duplicating source bodies or sensitive
-content. A failure uses `isError=true`, has no `structuredContent`, and has exactly one
-`content[0].text` containing compact JSON `McpToolFailure`. The failure carries fixed
-`errorCode` / `message`, repository and revision identity when available, and
-`recovery.retryable` plus typed follow-up arguments.
-
-A revision mismatch is not automatically retryable. Its failure supplies a
-`semantic_get_repository` follow-up for the same `repoId`; after invoking that follow-up and
-accepting the current revision, the caller must explicitly resubmit the original tool call with
-the new `expectedRevision`.
-
-Java Semantic Service is a standalone Java 21 service for repository lifecycle,
-JDT LS-backed semantic analysis, structured discovery, API-route indexing, and
-bounded call-graph queries. The service is intentionally suitable for future
-extraction into its own repository: its HTTP and MCP adapters are inbound
-transport boundaries over the same framework-neutral semantic capabilities.
-
-The root Agent continues to call the HTTP adapter. MCP is a parallel transport
-for MCP-aware clients; this milestone does not connect the root Agent runtime
-to an MCP client.
-
-## Runtime prerequisites
-
-- Java 21
-- Maven 3.9 or newer
-- Spring Boot 4.1.0
-- Spring AI 2.0.0
-- A JDT Language Server installation for real semantic analysis
-- Git access for repositories configured by the deployment
-
-The ordinary Maven test suite does not launch JDT LS. A running service needs
-JDT LS unless it is deliberately configured with `JDTLS_ENABLED=false` for an
-environment that does not perform semantic analysis.
-
-From the service project root:
+Set separate credentials for each application. `SEMANTIC_INDEXER_ADMIN_TOKEN` authorizes only Indexer administration endpoints; `SEMANTIC_QUERY_API_TOKEN` authorizes Query HTTP and MCP reads. Never share these tokens or grant Query a Git credential.
 
 ```bash
-mvn clean test
-mvn -pl semantic-indexer -am package
-java -jar semantic-indexer/target/semantic-indexer-0.0.1-SNAPSHOT.jar
-```
-
-For a real JDT LS installation, set `JDTLS_HOME` and use the service's
-`jdtls-it` profile for integration verification:
-
-```bash
-JDTLS_HOME=/opt/jdtls mvn -pl semantic-indexer -am -Pjdtls-it test
-```
-
-## Configuration and authentication
-
-Set a non-empty `SEMANTIC_API_TOKEN` before exposing the service. Every `/v1`
-HTTP request and every `/mcp` request must send the token in the
-`X-Api-Token` header. Do not commit the token or put it in a checked-in HTTP
-client environment file.
-
-The repository and JDT LS defaults can be overridden with the environment
-variables in `semantic-indexer/src/main/resources/application.yml`, including:
-
-```bash
-export SEMANTIC_API_TOKEN=<token>
+export SEMANTIC_MONGODB_URI='mongodb://query-reader:...@mongo/semantic?tls=true'
+export SEMANTIC_INDEXER_ADMIN_TOKEN='<indexer-admin-token>'
+export SEMANTIC_QUERY_API_TOKEN='<query-read-token>'
 export JDTLS_HOME=/opt/jdtls
-export JDTLS_WORKSPACE_DATA_ROOT=/data/jdtls
-export GIT_USERNAME=<read-only-git-user>
-export GIT_TOKEN=<read-only-git-token>
+export GIT_USERNAME='<read-only-git-user>'
+export GIT_TOKEN='<read-only-git-token>'
 ```
 
-Git credentials are used only by repository lifecycle operations. They are not
-returned by the API and are not part of MCP tool inputs or outputs.
+The Indexer admin API is rooted at `/index/repositories/{repoId}` and accepts asynchronous `ensure`, `sync`, `checkout`, `rebuild`, and `rollback` commands. Query exposes only read HTTP and the stateless `/mcp` transport. Query requests specify `repositoryId` and an exact `revision`; the service reads only a sealed generation selected by the repository pointer.
 
-## Repository lifecycle and revisions
+## Compatibility boundary
 
-Repositories are identified by the opaque, validated `repoId`; clients do not
-send local paths, remote URLs, credentials, or a repository object. The normal
-HTTP lifecycle is:
-
-```http
-GET /v1/repositories
-GET /v1/repositories/{repoId}
-POST /v1/repositories/{repoId}/ensure
-POST /v1/repositories/{repoId}/sync
-POST /v1/repositories/{repoId}/checkout
-```
-
-Use `ensure` to create or prepare a configured repository, `sync` to update it,
-and `checkout` to select a known revision. Then call `GET
-/v1/repositories/{repoId}` and copy the returned `currentRevision` into the
-next query's `expectedRevision`. A semantic query must carry both `repoId` and
-`expectedRevision` (the catalog list/get operations are the exception). The
-service rejects a query when the revision is no longer current; after a sync or
-checkout, obtain a fresh revision instead of retrying the old request.
-
-The revision is a snapshot guard, not a server-side client session. HTTP
-requests and MCP tool calls are stateless and must repeat the identity and
-revision on every query. Repository mutation endpoints remain HTTP-only; they
-are not published as MCP tools.
-
-## HTTP usage
-
-All examples require `X-Api-Token`. The following route query is pinned to one
-repository snapshot:
-
-```http
-POST https://semantic.example.invalid/v1/api-routes/lookup
-X-Api-Token: <token>
-Content-Type: application/json
-
-{
-  "repoId": "<repo-id>",
-  "expectedRevision": "<40-hex-revision>",
-  "apiPath": "/orders",
-  "httpMethod": "GET"
-}
-```
-
-The entry-point query carries the same revision as a required query parameter:
-
-```http
-GET https://semantic.example.invalid/v1/repositories/<repo-id>/entry-points?expectedRevision=<40-hex-revision>&types=API
-X-Api-Token: <token>
-```
-
-The committed [`uat/structured-concept-discovery.http`](uat/structured-concept-discovery.http)
-file contains revision-pinned HTTP discovery, source, and graph handoffs. It
-uses placeholders only; populate the returned repository revision and typed
-identities before running it.
-
-## MCP usage
-
-MCP is a stateless streamable HTTP transport at `/mcp`. A client must:
-
-1. send an authenticated JSON-RPC `initialize` request with
-   `MCP-Protocol-Version: 2025-06-18`
-2. send `tools/list` to obtain the published catalog
-3. send `tools/call` requests with the exact tool name and typed arguments
-4. include `repoId` and `expectedRevision` in every repository-scoped query
-
-No MCP session identifier is required for the stateless protocol. A minimal
-client exchange is:
-
-```http
-POST https://semantic.example.invalid/mcp
-X-Api-Token: <token>
-MCP-Protocol-Version: 2025-06-18
-Content-Type: application/json
-Accept: application/json, text/event-stream
-
-{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"example-client","version":"1"}}}
-```
-
-Then request `tools/list`, followed by a typed call such as:
-
-```json
-{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"semantic_list_entry_points","arguments":{"repoId":"<repo-id>","expectedRevision":"<40-hex-revision>","types":["API"]}}}
-```
-
-The service returns structured tool content. Discovery results may expose a
-typed `availableFollowUps` entry; pass its `toolName` and `arguments` to the
-next `tools/call` without inventing or translating an endpoint. The committed
-[`uat/semantic-mcp-query.http`](uat/semantic-mcp-query.http) demonstrates this
-flow, including a dynamically captured source-segment follow-up.
-
-### Published MCP catalog
-
-The catalog is exactly these 17 read-only, non-destructive, idempotent tools:
-
-| Tool | HTTP operation |
-| --- | --- |
-| `semantic_analyze_incoming_call_graph` | `POST /v1/analyses/call-graphs/incoming` |
-| `semantic_analyze_outgoing_call_graph` | `POST /v1/analyses/call-graphs/outgoing` |
-| `semantic_discover_concepts` | `POST /v1/discovery/concepts` |
-| `semantic_discover_event_listeners` | `POST /v1/discovery/event-listeners` |
-| `semantic_discover_method_implementations` | `POST /v1/discovery/method-implementations` |
-| `semantic_discover_type_members` | `POST /v1/discovery/type-members` |
-| `semantic_find_internal_references` | `POST /v1/discovery/internal-references` |
-| `semantic_get_evidence_source` | `POST /v1/discovery/evidence-source` |
-| `semantic_get_method_source` | `POST /v1/discovery/method-source` |
-| `semantic_get_repository` | `GET /v1/repositories/{repoId}` |
-| `semantic_get_source_segment` | `POST /v1/discovery/source-segment` |
-| `semantic_list_entry_points` | `GET /v1/repositories/{repoId}/entry-points` |
-| `semantic_list_repositories` | `GET /v1/repositories` |
-| `semantic_lookup_api_routes` | `POST /v1/api-routes/lookup` |
-| `semantic_resolve_concept` | `POST /v1/discovery/concepts/resolve` |
-| `semantic_resolve_source_symbol` | `POST /v1/discovery/source-symbols/resolve` |
-| `semantic_suggest_api_routes` | `POST /v1/api-routes/suggest` |
-
-The three repository mutation operations (`ensure`, `sync`, and `checkout`)
-are deliberately absent from this catalog.
-
-## Failures and recovery
-
-| Situation | HTTP behavior | MCP behavior |
-| --- | --- | --- |
-| Missing or invalid token | `401` with `SEMANTIC_UNAUTHORIZED` | transport rejection, normally `401` |
-| Malformed JSON-RPC request | `400` with `REQUEST_INVALID` | sanitized JSON-RPC transport error |
-| JSON Schema rejection before callback | not applicable | SDK-owned JSON-RPC/tool input rejection; not monitored as callback execution |
-| Callback decoding, Jakarta, or cross-field rejection | not applicable | typed tool failure with `INVALID_TOOL_INPUT` |
-| Unknown MCP tool | not applicable | JSON-RPC `-32602` |
-| Revision changed since the query was planned | `409` with `REPOSITORY_REVISION_MISMATCH` | typed tool failure with the same semantic error category |
-| Route index absent or published for another revision | `409` with `API_ROUTE_INDEX_NOT_READY` | typed tool failure with the same semantic error category |
-| Repository or semantic engine not ready | typed `409` or `503` service error | typed tool failure; retry only after readiness is restored |
-
-`REPOSITORY_REVISION_MISMATCH` is resolved by invoking the supplied
-`semantic_get_repository` follow-up for the same `repoId`, accepting its current revision, and
-explicitly reissuing the query with the new `expectedRevision`. The failure is marked
-`retryable=false`; do not silently substitute the current revision for the caller's expected
-revision. For
-`API_ROUTE_INDEX_NOT_READY`, wait for the repository analysis/index publication
-to complete and retry with the same revision only when that revision remains
-current.
-
-## Monitoring and redaction
-
-Both adapters emit request-correlation metadata, outcome categories, and
-duration. HTTP monitoring records the method, path, status, error category, and
-safe typed projections. MCP monitoring records the tool name and safe typed
-request/response projections; transport monitoring records method, `/mcp`,
-status, authentication error code, and duration.
-
-The monitoring projection is allowlisted by field annotations. Source bodies
-and source segments are marked `OMIT`, so source content is not logged.
-Credentials, raw JSON-RPC payloads, repository paths, remote URLs, and other
-unannotated sensitive values are not logged. In particular, a malformed or
-authenticated MCP request must never cause its raw JSON-RPC body to appear in
-service logs.
-
-## Troubleshooting
-
-- `401` or `SEMANTIC_UNAUTHORIZED`: confirm the service has a non-empty
-  `SEMANTIC_API_TOKEN` and that the client sends the same value in
-  `X-Api-Token`.
-- `REPOSITORY_NOT_READY`: run the repository lifecycle operation, verify the
-  repository status, and wait for JDT LS import/readiness.
-- `REPOSITORY_REVISION_MISMATCH`: invoke the supplied `semantic_get_repository`
-  follow-up, accept the current revision, and explicitly resubmit each query with the new
-  `expectedRevision`; do not mix revisions in one discovery sequence.
-- `API_ROUTE_INDEX_NOT_READY`: the route index has not been published for the
-  requested revision. Wait for analysis/indexing, then retry against the same
-  revision if it is still current.
-- `INVALID_TOOL_INPUT` or `REQUEST_INVALID`: obtain the input schema from
-  `tools/list`, preserve required fields and enum values, and pass typed
-  repository-relative identities rather than local paths or source text.
-- `SEMANTIC_ENGINE_START_FAILED`, `SEMANTIC_REQUEST_TIMEOUT`, or
-  `SEMANTIC_PROTOCOL_ERROR`: inspect JDT LS installation, workspace data
-  permissions, configured timeouts, and service logs without exposing tokens or
-  source content.
-
-For a manual smoke test, configure the environment variables at the top of
-`uat/semantic-mcp-query.http` and run each request in order. The file includes
-the HTTP client response handler needed to invoke one server-provided
-`availableFollowUps` request.
+The pre-split, single-image cutover can be reproduced only from pinned Git revision `9ff90b7e51eafbb6ef954e4ae0cc8a6a22173f9c` (the parent of split commit `2f1d0e8deadbd552b6ef2b5253a4252debe9631f`). No current CI, deployment, or runtime path uses a legacy image, compatibility file, or unpinned revision.
