@@ -22,6 +22,7 @@ public record IndexJob(
         Optional<RepositoryFence> fence,
         Optional<Instant> claimUntil,
         Optional<IndexFailureCategory> failureCategory,
+        boolean rebuild,
         IndexJobOperation operation) {
     public IndexJob {
         id = Objects.requireNonNull(id, "job id is required");
@@ -44,6 +45,22 @@ public record IndexJob(
                     Optional<RepositoryFence> fence, Optional<Instant> claimUntil,
                     Optional<IndexFailureCategory> failureCategory) {
         this(id, repositoryId, revision, generationId, generation, phase, active, workerId, fence, claimUntil,
-                failureCategory, IndexJobOperation.BUILD);
+                failureCategory, false, IndexJobOperation.BUILD);
+    }
+
+    public IndexJob(IndexJobId id, RepositoryId repositoryId, RepositoryRevision revision, GenerationId generationId,
+                    long generation, IndexJobPhase phase, boolean active, Optional<String> workerId,
+                    Optional<RepositoryFence> fence, Optional<Instant> claimUntil,
+                    Optional<IndexFailureCategory> failureCategory, IndexJobOperation operation) {
+        this(id, repositoryId, revision, generationId, generation, phase, active, workerId, fence, claimUntil,
+                failureCategory, false, operation);
+    }
+
+    public IndexJob(IndexJobId id, RepositoryId repositoryId, RepositoryRevision revision, GenerationId generationId,
+                    long generation, IndexJobPhase phase, boolean active, Optional<String> workerId,
+                    Optional<RepositoryFence> fence, Optional<Instant> claimUntil,
+                    Optional<IndexFailureCategory> failureCategory, boolean rebuild) {
+        this(id, repositoryId, revision, generationId, generation, phase, active, workerId, fence, claimUntil,
+                failureCategory, rebuild, IndexJobOperation.BUILD);
     }
 }

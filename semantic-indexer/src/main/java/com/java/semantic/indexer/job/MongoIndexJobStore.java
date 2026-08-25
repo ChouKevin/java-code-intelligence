@@ -39,16 +39,24 @@ public final class MongoIndexJobStore implements IndexJobStore {
     private static final String ACTIVE = "active";
     private final MongoTemplate template;
     private final ClaimJobDocumentTransition claimJobDocumentTransition;
+    private final CaptureBuildParentTransition captureBuildParentTransition;
 
     @Autowired
     public MongoIndexJobStore(MongoTemplate template) {
-        this(template, MongoIndexJobStore::claimJobDocument);
+        this(template, MongoIndexJobStore::claimJobDocument, MongoIndexJobStore::captureBuildParent);
     }
 
     MongoIndexJobStore(MongoTemplate template, ClaimJobDocumentTransition claimJobDocumentTransition) {
+        this(template, claimJobDocumentTransition, MongoIndexJobStore::captureBuildParent);
+    }
+
+    MongoIndexJobStore(MongoTemplate template, ClaimJobDocumentTransition claimJobDocumentTransition,
+                       CaptureBuildParentTransition captureBuildParentTransition) {
         this.template = Objects.requireNonNull(template, "mongo template is required");
         this.claimJobDocumentTransition = Objects.requireNonNull(claimJobDocumentTransition,
                 "claim job document transition is required");
+        this.captureBuildParentTransition = Objects.requireNonNull(captureBuildParentTransition,
+                "capture build parent transition is required");
     }
 
     @Override
@@ -184,9 +192,18 @@ public final class MongoIndexJobStore implements IndexJobStore {
             releaseExactRepositoryClaim(job, workerId, fenceValue.longValue());
             return Optional.empty();
         }
-        if (!captureBuildParent(job, workerId, fenceValue.longValue(), repository)) {
-            releaseExactRepositoryClaim(job, workerId, fenceValue.longValue());
-            return Optional.empty();
+        try {
+            if (!captureBuildParentTransition.capture(template, job, workerId, fenceValue.longValue(), repository)) {
+                compensateClaim(job, workerId, fenceValue.longValue());
+                return Optional.empty();
+            }
+        } catch (RuntimeException exception) {
+            try {
+                compensateClaim(job, workerId, fenceValue.longValue());
+            } catch (RuntimeException cleanupException) {
+                exception.addSuppressed(cleanupException);
+            }
+            throw exception;
         }
         return Optional.of(claimed).map(MongoIndexJobStore::from);
     }
@@ -591,7 +608,7 @@ public final class MongoIndexJobStore implements IndexJobStore {
         }
     }
 
-    private static Document claimJobDocument(MongoTemplate template, IndexJob job, String workerId, long fence, Date claimUntil) {
+    static Document claimJobDocument(MongoTemplate template, IndexJob job, String workerId, long fence, Date claimUntil) {
         return template.findAndModify(new BasicQuery(new Document(JOB_ID, job.id().value()).append(ACTIVE, true)
                         .append("phase", IndexJobPhase.ACCEPTED.name())),
                 new Update().set("workerId", workerId).set("fence", fence).set("claimUntil", claimUntil)
@@ -600,7 +617,7 @@ public final class MongoIndexJobStore implements IndexJobStore {
     }
 
     /** The parent pointer is frozen immediately after the repository claim and reused as publication's CAS predicate. */
-    private boolean captureBuildParent(IndexJob job, String workerId, long fence, Document repository) {
+    private static boolean captureBuildParent(MongoTemplate template, IndexJob job, String workerId, long fence, Document repository) {
         Update update = new Update().set("buildParentCaptured", true);
         pointerFromRepository(repository).ifPresent(pointer -> update.set("buildParent", pointerDocument(pointer)));
         UpdateResult captured = template.updateFirst(new BasicQuery(jobOwnership(job, workerId, fence)
@@ -611,6 +628,14 @@ public final class MongoIndexJobStore implements IndexJobStore {
     private void releaseExactRepositoryClaim(IndexJob job, String workerId, long fence) {
         template.updateFirst(new BasicQuery(repositoryClaim(job, workerId, fence)), new Update().unset("activeJobId")
                 .unset("activeWorkerId").unset("activeGenerationId").unset("claimUntil"), IndexCollections.REPOSITORIES);
+    }
+
+    /** Reverts a partially claimed job before releasing its matching repository authority for an immediate retry. */
+    private void compensateClaim(IndexJob job, String workerId, long fence) {
+        template.updateFirst(new BasicQuery(jobOwnership(job, workerId, fence)), new Update().set("phase", IndexJobPhase.ACCEPTED.name())
+                .unset("workerId").unset("fence").unset("claimUntil").unset("buildParentCaptured").unset("buildParent"),
+                IndexCollections.INDEX_JOBS);
+        releaseExactRepositoryClaim(job, workerId, fence);
     }
 
     private boolean mirrorManifestExpiry(IndexJob job, String workerId, long fence, Date claimUntil) {
@@ -642,11 +667,17 @@ public final class MongoIndexJobStore implements IndexJobStore {
                 document.getLong("generation"), IndexJobPhase.valueOf(document.getString("phase")), Boolean.TRUE.equals(document.getBoolean(ACTIVE)),
                 Optional.ofNullable(workerId), Optional.ofNullable(fence).map(value -> new RepositoryFence(value.longValue())),
                 Optional.ofNullable(until).map(Date::toInstant), Optional.ofNullable(category).map(IndexFailureCategory::valueOf),
+                Boolean.TRUE.equals(document.getBoolean("rebuild")),
                 Optional.ofNullable(document.getString("operation")).map(IndexJobOperation::valueOf).orElse(IndexJobOperation.BUILD));
     }
 
     @FunctionalInterface
     interface ClaimJobDocumentTransition {
         Document claim(MongoTemplate template, IndexJob job, String workerId, long fence, Date claimUntil);
+    }
+
+    @FunctionalInterface
+    interface CaptureBuildParentTransition {
+        boolean capture(MongoTemplate template, IndexJob job, String workerId, long fence, Document repository);
     }
 }

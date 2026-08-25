@@ -65,9 +65,11 @@ class IncrementalGenerationBuilderIT {
             template.getCollection(IndexCollections.REPOSITORIES).updateOne(new Document("repoId", "orders"), new Document("$set",
                     new Document("revision", "c".repeat(40)).append("generationId", "concurrent-generation")
                             .append("manifestDigest", "d".repeat(64))));
-            Path source = Files.writeString(temporaryDirectory.resolve("Order.java"), "class Order { }");
+            com.java.semantic.model.index.SourceArtifactDocument parentArtifact = FullIndexPublicationIT.validBatch(RepositoryId.of("orders"),
+                    GenerationValidatorIT.revision(), GenerationValidatorIT.lease().generationId()).sourceArtifact();
+            Path source = Files.writeString(temporaryDirectory.resolve("Order.java"), parentArtifact.utf8Content());
             FullIndexPlan selected = new FullIndexPlan(temporaryDirectory, List.of(new FullIndexPlan.SourceInput("src/Order.java", source,
-                    com.java.semantic.model.index.SourceArtifactDocument.create("class Order { }"))));
+                    parentArtifact)));
             IncrementalIndexPlanner planner = new IncrementalIndexPlanner((parent, selectedRevision) -> List.of(),
                     (change, declarations) -> com.java.semantic.indexer.incremental.SourceContractChangeDetector.Impact.bodyOrPrivateChange(),
                     modules());
@@ -119,6 +121,95 @@ class IncrementalGenerationBuilderIT {
             assertThat(template.getCollection(IndexCollections.GENERATION_FILES).countDocuments(new Document("generationId", "g2"))).isZero();
             assertThat(template.getCollection(IndexCollections.SYMBOLS).countDocuments(new Document("generationId", "g2"))).isZero();
         }
+    }
+
+    @Test
+    void explicit_rebuild_exports_every_selected_source_without_copying_a_compatible_parent() throws Exception {
+        try (MongoDBContainer container = new MongoDBContainer("mongo:8.0.4")) {
+            container.start();
+            MongoTemplate template = new MongoTemplate(MongoClients.create(container.getConnectionString()), "semantic");
+            new IndexSchemaBootstrap(template).bootstrap();
+            preparePublishedParent(template);
+            MongoGenerationWriter.GenerationLease childLease = childLease(template);
+            insertChildManifest(template, childLease);
+            com.java.semantic.model.index.SourceArtifactDocument parentArtifact = FullIndexPublicationIT.validBatch(RepositoryId.of("orders"),
+                    GenerationValidatorIT.revision(), GenerationValidatorIT.lease().generationId()).sourceArtifact();
+            Path parentSource = Files.writeString(temporaryDirectory.resolve("Order.java"), parentArtifact.utf8Content());
+            Path selectedOnlySource = Files.writeString(temporaryDirectory.resolve("Added.java"), "class Added { }");
+            FullIndexPlan selected = new FullIndexPlan(temporaryDirectory, List.of(
+                    new FullIndexPlan.SourceInput("src/Order.java", parentSource, parentArtifact),
+                    new FullIndexPlan.SourceInput("src/Added.java", selectedOnlySource,
+                            com.java.semantic.model.index.SourceArtifactDocument.create("class Added { }"))));
+
+            IncrementalGenerationBuilder.BuildSelection selection = new IncrementalGenerationBuilder(template, emptyDiffPlanner(),
+                    new ParentGenerationCopier(template, new MongoGenerationWriter(template))).assemble(childJob(true), childLease, selected);
+
+            assertThat(selection.incremental()).isFalse();
+            assertThat(selection.exportPaths()).containsExactly("src/Order.java", "src/Added.java");
+            assertThat(template.getCollection(IndexCollections.GENERATION_FILES).countDocuments(new Document("generationId", "g2"))).isZero();
+        }
+    }
+
+    @Test
+    void stale_parent_artifact_is_reanalyzed_instead_of_copied() throws Exception {
+        try (MongoDBContainer container = new MongoDBContainer("mongo:8.0.4")) {
+            container.start();
+            MongoTemplate template = new MongoTemplate(MongoClients.create(container.getConnectionString()), "semantic");
+            new IndexSchemaBootstrap(template).bootstrap();
+            preparePublishedParent(template);
+            MongoGenerationWriter.GenerationLease childLease = childLease(template);
+            insertChildManifest(template, childLease);
+            Path source = Files.writeString(temporaryDirectory.resolve("Order.java"), "class Order { changed(); }");
+            FullIndexPlan selected = new FullIndexPlan(temporaryDirectory, List.of(new FullIndexPlan.SourceInput("src/Order.java", source,
+                    com.java.semantic.model.index.SourceArtifactDocument.create("class Order { changed(); }"))));
+
+            IncrementalGenerationBuilder.BuildSelection selection = new IncrementalGenerationBuilder(template, emptyDiffPlanner(),
+                    new ParentGenerationCopier(template, new MongoGenerationWriter(template))).assemble(childJob(), childLease, selected);
+
+            assertThat(selection.incremental()).isTrue();
+            assertThat(selection.plan().copyPaths()).isEmpty();
+            assertThat(selection.exportPaths()).containsExactly("src/Order.java");
+            assertThat(template.getCollection(IndexCollections.GENERATION_FILES).countDocuments(new Document("generationId", "g2"))).isZero();
+        }
+    }
+
+    @Test
+    void selected_source_missing_from_parent_inventory_is_reanalyzed_when_the_diff_is_empty() throws Exception {
+        try (MongoDBContainer container = new MongoDBContainer("mongo:8.0.4")) {
+            container.start();
+            MongoTemplate template = new MongoTemplate(MongoClients.create(container.getConnectionString()), "semantic");
+            new IndexSchemaBootstrap(template).bootstrap();
+            preparePublishedParent(template);
+            MongoGenerationWriter.GenerationLease childLease = childLease(template);
+            insertChildManifest(template, childLease);
+            com.java.semantic.model.index.SourceArtifactDocument parentArtifact = FullIndexPublicationIT.validBatch(RepositoryId.of("orders"),
+                    GenerationValidatorIT.revision(), GenerationValidatorIT.lease().generationId()).sourceArtifact();
+            Path parentSource = Files.writeString(temporaryDirectory.resolve("Order.java"), parentArtifact.utf8Content());
+            Path selectedOnlySource = Files.writeString(temporaryDirectory.resolve("Added.java"), "class Added { }");
+            FullIndexPlan selected = new FullIndexPlan(temporaryDirectory, List.of(
+                    new FullIndexPlan.SourceInput("src/Order.java", parentSource, parentArtifact),
+                    new FullIndexPlan.SourceInput("src/Added.java", selectedOnlySource,
+                            com.java.semantic.model.index.SourceArtifactDocument.create("class Added { }"))));
+
+            IncrementalGenerationBuilder.BuildSelection selection = new IncrementalGenerationBuilder(template, emptyDiffPlanner(),
+                    new ParentGenerationCopier(template, new MongoGenerationWriter(template))).assemble(childJob(), childLease, selected);
+
+            assertThat(selection.plan().copyPaths()).containsExactly("src/Order.java");
+            assertThat(selection.plan().reanalyzePaths()).containsExactly("src/Added.java");
+            assertThat(selection.exportPaths()).containsExactly("src/Added.java");
+        }
+    }
+
+    private static void preparePublishedParent(MongoTemplate template) {
+        GenerationValidatorIT.seedValidWritingGeneration(template);
+        MongoGenerationWriter writer = new MongoGenerationWriter(template);
+        GenerationValidator validator = new GenerationValidator(template);
+        GenerationValidator.ValidationResult parentResult = validator.validate(GenerationValidatorIT.lease(), GenerationValidatorIT.revision(),
+                GenerationValidatorIT.revision());
+        validator.recordValid(GenerationValidatorIT.lease(), parentResult);
+        writer.mirrorSealUntil(GenerationValidatorIT.lease(), writer.currentClaimUntil(GenerationValidatorIT.lease()));
+        writer.seal(GenerationValidatorIT.lease(), parentResult.identityDigest().value());
+        publishParent(template, parentResult.identityDigest().value());
     }
 
     private static void publishParent(MongoTemplate template, String digest) {
@@ -178,10 +269,14 @@ class IncrementalGenerationBuilderIT {
     }
 
     private static com.java.semantic.indexer.job.IndexJob childJob() {
+        return childJob(false);
+    }
+
+    private static com.java.semantic.indexer.job.IndexJob childJob(boolean rebuild) {
         return new com.java.semantic.indexer.job.IndexJob(new com.java.semantic.indexer.job.IndexJobId("job-2"), RepositoryId.of("orders"),
                 new RepositoryRevision("b".repeat(40)), new GenerationId("g2"), 2L,
                 com.java.semantic.indexer.job.IndexJobPhase.CHECKOUT, true, Optional.of("worker-2"),
                 Optional.of(new com.java.semantic.model.index.RepositoryFence(2L)), Optional.of(java.time.Instant.now().plusSeconds(300)),
-                Optional.empty());
+                Optional.empty(), rebuild);
     }
 }

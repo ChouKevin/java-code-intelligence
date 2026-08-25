@@ -4,6 +4,7 @@ import com.java.semantic.indexer.incremental.IncrementalIndexPlan;
 import com.java.semantic.indexer.incremental.IncrementalIndexPlanner;
 import com.java.semantic.indexer.job.IndexJob;
 import com.java.semantic.indexer.store.MongoGenerationWriter;
+import com.java.semantic.model.index.GenerationFileDocument;
 import com.java.semantic.model.index.GenerationId;
 import com.java.semantic.model.index.IndexCollections;
 import com.java.semantic.model.index.IndexSchemaContract;
@@ -14,6 +15,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
+import java.util.TreeMap;
+import java.util.TreeSet;
 import org.bson.Document;
 import org.springframework.data.mongodb.core.MongoTemplate;
 
@@ -37,6 +41,9 @@ public final class IncrementalGenerationBuilder {
         Objects.requireNonNull(lease, "generation lease is required");
         FullIndexPlan completePlan = Objects.requireNonNull(selectedRevisionPlan, "selected revision plan is required");
         List<String> selectedPaths = completePlan.sources().stream().map(FullIndexPlan.SourceInput::sourcePath).sorted().toList();
+        if (job.rebuild()) {
+            return BuildSelection.full(fullPlan(selectedPaths, "EXPLICIT_REBUILD"), completePlan);
+        }
         Optional<Parent> parent = compatibleParent(job);
         if (parent.isEmpty()) {
             return BuildSelection.full(fullPlan(selectedPaths, "PARENT_CONTRACT_MISMATCH"), completePlan);
@@ -46,8 +53,52 @@ public final class IncrementalGenerationBuilder {
         if (plan.fullRepository()) {
             return BuildSelection.full(plan, completePlan);
         }
-        copier.copy(lease, current.generationId(), current.revision(), job.revision(), plan.copyPaths());
-        return new BuildSelection(true, plan, subset(completePlan, plan.reanalyzePaths()));
+        IncrementalIndexPlan adjusted = safePlan(plan, completePlan, job, current);
+        copier.copy(lease, current.generationId(), current.revision(), job.revision(), adjusted.copyPaths());
+        return new BuildSelection(true, adjusted, subset(completePlan, adjusted.reanalyzePaths()));
+    }
+
+    /** Reconciles planner output with the selected checkout and validates every copied parent artifact. */
+    private IncrementalIndexPlan safePlan(IncrementalIndexPlan plan, FullIndexPlan completePlan, IndexJob job, Parent parent) {
+        Map<String, FullIndexPlan.SourceInput> selected = selectedSources(completePlan);
+        Set<String> selectedPaths = selected.keySet();
+        TreeSet<String> reanalyze = new TreeSet<>(plan.reanalyzePaths());
+        reanalyze.retainAll(selectedPaths);
+        TreeSet<String> copy = new TreeSet<>(plan.copyPaths());
+        copy.retainAll(selectedPaths);
+        copy.removeAll(reanalyze);
+        for (String path : selectedPaths) {
+            if (!copy.contains(path) && !reanalyze.contains(path)) {
+                reanalyze.add(path);
+            }
+        }
+        for (String path : Set.copyOf(copy)) {
+            if (!matchesParentArtifact(job, parent, path, selected.get(path))) {
+                copy.remove(path);
+                reanalyze.add(path);
+            }
+        }
+        return new IncrementalIndexPlan(false, List.copyOf(reanalyze), List.copyOf(copy), plan.deletedPaths(), plan.diagnosticReasons());
+    }
+
+    private static Map<String, FullIndexPlan.SourceInput> selectedSources(FullIndexPlan completePlan) {
+        TreeMap<String, FullIndexPlan.SourceInput> selected = new TreeMap<>();
+        for (FullIndexPlan.SourceInput source : completePlan.sources()) {
+            selected.put(source.sourcePath(), source);
+        }
+        return Map.copyOf(selected);
+    }
+
+    private boolean matchesParentArtifact(IndexJob job, Parent parent, String path, FullIndexPlan.SourceInput selected) {
+        Document scope = new Document("repoId", job.repositoryId().value()).append("generationId", parent.generationId().value())
+                .append("sourcePath", path);
+        Document document = template.getCollection(IndexCollections.GENERATION_FILES).find(scope).first();
+        if (Objects.isNull(document)) {
+            return false;
+        }
+        GenerationFileDocument parentFile = template.getConverter().read(GenerationFileDocument.class, document);
+        return parentFile.sourceArtifactId().equals(selected.contentArtifact().id())
+                && parentFile.contentHash().equals(selected.contentArtifact().contentHash());
     }
 
     private Optional<Parent> compatibleParent(IndexJob job) {

@@ -85,6 +85,32 @@ class MongoIndexJobStoreIT {
     }
 
     @Test
+    void capture_parent_failure_releases_both_claims_so_the_job_can_retry_immediately() {
+        try (MongoDBContainer container = new MongoDBContainer("mongo:8.0.4")) {
+            container.start();
+            MongoTemplate template = new MongoTemplate(com.mongodb.client.MongoClients.create(container.getConnectionString()), "semantic");
+            new IndexSchemaBootstrap(template).bootstrap();
+            MongoIndexJobStore failingStore = new MongoIndexJobStore(template, MongoIndexJobStore::claimJobDocument,
+                    (mongo, job, worker, fence, expiry) -> {
+                        throw new IllegalStateException("capture parent failed");
+                    });
+            IndexJob accepted = failingStore.admit(RepositoryId.of("orders"), new RepositoryRevision("d".repeat(40)), false);
+
+            assertThatThrownBy(() -> failingStore.claim(accepted.id(), "worker-a", Duration.ofSeconds(30)))
+                    .isInstanceOf(IllegalStateException.class).hasMessage("capture parent failed");
+
+            org.bson.Document repository = template.getCollection(IndexCollections.REPOSITORIES)
+                    .find(new org.bson.Document("repoId", "orders")).first();
+            IndexJob reset = failingStore.find(accepted.id()).orElseThrow();
+            assertThat(repository.containsKey("activeJobId")).isFalse();
+            assertThat(reset.phase()).isEqualTo(IndexJobPhase.ACCEPTED);
+            assertThat(reset.workerId()).isEmpty();
+            assertThat(reset.fence()).isEmpty();
+            assertThat(new MongoIndexJobStore(template).claim(accepted.id(), "worker-b", Duration.ofSeconds(30))).isPresent();
+        }
+    }
+
+    @Test
     void build_publication_reconciles_only_when_its_persisted_intent_and_sealed_owner_match() {
         try (MongoDBContainer container = new MongoDBContainer("mongo:8.0.4")) {
             container.start();
@@ -151,6 +177,7 @@ class MongoIndexJobStoreIT {
             assertThat(noWork.active()).isFalse();
             assertThat(stale.operation()).isEqualTo(IndexJobOperation.BUILD);
             assertThat(stale.active()).isTrue();
+            assertThat(stale.rebuild()).isTrue();
             assertThat(template.getCollection(IndexCollections.INDEX_JOBS).find(new org.bson.Document("jobId", stale.id().value()))
                     .first().getBoolean("rebuild")).isTrue();
             assertThatThrownBy(() -> store.admitEnsure(RepositoryId.of("incompatible"), revision))
