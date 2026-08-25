@@ -35,6 +35,7 @@ import java.util.concurrent.TimeUnit;
 public final class CurrentGenerationSelector {
     public static final ProjectionRequirements SOURCES = new ProjectionRequirements(EnumSet.of(ProjectionName.SOURCES, ProjectionName.SYMBOLS));
     public static final ProjectionRequirements SYMBOLS = new ProjectionRequirements(EnumSet.of(ProjectionName.SYMBOLS));
+    public static final ProjectionRequirements RELATIONS = new ProjectionRequirements(EnumSet.of(ProjectionName.RELATIONS, ProjectionName.SYMBOLS));
     public static final ProjectionRequirements ENTRY_POINTS = new ProjectionRequirements(EnumSet.of(ProjectionName.ENTRY_POINTS, ProjectionName.SYMBOLS));
     public static final ProjectionRequirements SEARCH = new ProjectionRequirements(EnumSet.of(ProjectionName.SEARCH, ProjectionName.SYMBOLS));
     public static final ProjectionRequirements SEARCH_WITH_SOURCES = new ProjectionRequirements(EnumSet.of(ProjectionName.SEARCH,
@@ -68,12 +69,25 @@ public final class CurrentGenerationSelector {
     public CurrentGeneration selectCodeFact(String requestedRepositoryId, String requestedRevision, CodeFactIdentity codeFact) {
         Request request = request(requestedRepositoryId, requestedRevision);
         CodeFactIdentity identity = Objects.requireNonNull(codeFact, "code fact identity is required");
+        return selectCodeFact(request, identity, requirementsFor(identity));
+    }
+
+    /** Selects one authorized generation for a fact query requiring additional projections. */
+    public CurrentGeneration selectCodeFact(String requestedRepositoryId, String requestedRevision, CodeFactIdentity codeFact,
+                                            ProjectionRequirements requirements) {
+        Request request = request(requestedRepositoryId, requestedRevision);
+        CodeFactIdentity identity = Objects.requireNonNull(codeFact, "code fact identity is required");
+        ProjectionRequirements requiredRequirements = Objects.requireNonNull(requirements, "projection requirements are required");
+        return selectCodeFact(request, identity, requiredRequirements);
+    }
+
+    private CurrentGeneration selectCodeFact(Request request, CodeFactIdentity identity, ProjectionRequirements requiredRequirements) {
         if (!request.repositoryId().equals(identity.repositoryId()) || !request.revision().equals(identity.repositoryRevision())) {
             throw new IllegalArgumentException("code fact identity repository and revision must match the request");
         }
         if (!readPolicy.isCodeFactVisible(request.repositoryId(), identity)) { throw new RepositoryNotFoundException(); }
         CurrentGeneration current = selectedPointer(request);
-        verifyManifest(current, requirementsFor(identity));
+        verifyManifest(current, requiredRequirements);
         return current;
     }
 

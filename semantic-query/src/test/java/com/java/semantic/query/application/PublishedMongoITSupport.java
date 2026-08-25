@@ -79,6 +79,31 @@ abstract class PublishedMongoITSupport {
         return symbol;
     }
 
+    static com.java.semantic.model.index.RelationDocument seedRelation(
+            MongoTemplate template,
+            CodeFactIdentity from,
+            com.java.semantic.model.codefact.RelationKind kind,
+            com.java.semantic.model.codefact.RelationTarget target,
+            SourceRange range) {
+        com.java.semantic.model.codefact.RelationIdentity relationIdentity = new com.java.semantic.model.codefact.RelationIdentity(from, kind, target, range);
+        CodeFactIdentity relationFactIdentity = new CodeFactIdentity(from.repositoryId(), from.repositoryRevision(),
+                CodeFactKind.TYPE_USAGE, relationIdentity);
+        CodeFact fact = new CodeFact(CodeFactId.from(relationFactIdentity), relationFactIdentity);
+        com.java.semantic.model.index.RelationDocument relation = new com.java.semantic.model.index.RelationDocument(
+                from.repositoryId(), new com.java.semantic.model.index.GenerationId("g1"), fact, kind, from, target,
+                new com.java.semantic.model.index.SourceArtifactId("a".repeat(64)), range);
+        Document stored = new Document();
+        template.getConverter().write(relation, stored);
+        stored.put("repoId", "orders");
+        stored.put("generationId", "g1");
+        stored.put("relationId", fact.id().value());
+        stored.put("from", from.canonicalForm());
+        stored.put("target", target.canonicalForm());
+        stored.put("sourcePath", range.sourceFile());
+        template.getCollection("relations").insertOne(stored);
+        return relation;
+    }
+
     static SourceArtifactDocument seedSource(MongoTemplate template, String sourcePath, String content) {
         SourceArtifactDocument artifact = SourceArtifactDocument.create(content);
         template.getCollection("source_artifacts").insertOne(new Document("sourceArtifactId", artifact.id().value()).append("contentHash", artifact.contentHash()).append("utf8Content", content));
