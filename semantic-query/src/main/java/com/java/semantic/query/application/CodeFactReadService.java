@@ -71,7 +71,7 @@ public final class CodeFactReadService {
             return details;
         } catch (MongoException | DataAccessException exception) {
             throw new SemanticIndexUnavailableException(exception);
-        } catch (RepositoryNotFoundException | CodeFactNotFoundException | IndexContractMismatchException exception) {
+        } catch (RevisionOutdatedException | RepositoryNotFoundException | CodeFactNotFoundException | IndexContractMismatchException exception) {
             throw exception;
         } catch (RuntimeException exception) {
             throw new IndexContractMismatchException();

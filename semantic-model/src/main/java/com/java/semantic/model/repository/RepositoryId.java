@@ -6,7 +6,10 @@ import java.util.regex.Pattern;
 
 public record RepositoryId(String value) {
 
-    private static final Pattern SAFE = Pattern.compile("^[a-z0-9][a-z0-9._-]{0,63}$");
+    public static final String PATTERN = "^[a-z0-9][a-z0-9._-]{0,63}$";
+    public static final int MIN_LENGTH = 1;
+    public static final int MAX_LENGTH = 64;
+    private static final Pattern SAFE = Pattern.compile(PATTERN);
 
     public RepositoryId {
         try {

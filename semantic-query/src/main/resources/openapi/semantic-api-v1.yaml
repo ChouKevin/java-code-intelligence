@@ -8,12 +8,22 @@ paths:
   /v1/repositories:
     get:
       summary: List configured repository metadata; this is not generation-backed.
-      responses: {'200': {description: Repository metadata., content: {application/json: {schema: {$ref: '#/components/schemas/RepositoryMetadataList'}}}}}
+      responses:
+        '200': {description: Repository metadata., content: {application/json: {schema: {$ref: '#/components/schemas/RepositoryMetadataList'}}}}
+        '401': {$ref: '#/components/responses/AuthenticationRequired'}
+        '403': {$ref: '#/components/responses/AccessForbidden'}
+        '503': {$ref: '#/components/responses/QueryUnavailable'}
   /v1/repositories/{repositoryId}:
     get:
       summary: Read configured repository metadata; this is not generation-backed.
       parameters: [{$ref: '#/components/parameters/RepositoryId'}]
-      responses: {'200': {description: Repository metadata., content: {application/json: {schema: {$ref: '#/components/schemas/RepositoryMetadata'}}}}}
+      responses:
+        '200': {description: Repository metadata., content: {application/json: {schema: {$ref: '#/components/schemas/RepositoryMetadata'}}}}
+        '400': {$ref: '#/components/responses/RequestInvalid'}
+        '401': {$ref: '#/components/responses/AuthenticationRequired'}
+        '403': {$ref: '#/components/responses/AccessForbidden'}
+        '404': {$ref: '#/components/responses/QueryNotFound'}
+        '503': {$ref: '#/components/responses/QueryUnavailable'}
   /v1/repositories/{repositoryId}/entry-points:
     get:
       summary: List entry points from one exact published repository revision.
@@ -92,12 +102,12 @@ components:
       name: repositoryId
       in: path
       required: true
-      schema: {type: string, minLength: 1}
+      schema: {type: string, minLength: 1, maxLength: 64, pattern: '^[a-z0-9][a-z0-9._-]{0,63}$'}
     Revision:
       name: revision
       in: query
       required: true
-      schema: {type: string, minLength: 1}
+      schema: {type: string, minLength: 40, maxLength: 40, pattern: '^[0-9a-f]{40}$'}
   responses:
     RevisionOutdated:
       description: Requested revision is no longer current. Retry with the returned exact currentRevision.
@@ -106,6 +116,16 @@ components:
           schema: {$ref: '#/components/schemas/RevisionOutdatedError'}
     RequestInvalid:
       description: Request does not satisfy the exact endpoint contract.
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/QueryFailure'}
+    AuthenticationRequired:
+      description: Query token is missing or invalid.
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/QueryFailure'}
+    AccessForbidden:
+      description: Query transport access is disabled.
       content:
         application/json:
           schema: {$ref: '#/components/schemas/QueryFailure'}
@@ -238,8 +258,8 @@ components:
       additionalProperties: false
       required: [repositoryId, revision, query]
       properties:
-        repositoryId: {type: string, description: Exact configured repository id; aliases are rejected.}
-        revision: {type: string, description: Exact published revision; aliases are rejected.}
+        repositoryId: {type: string, minLength: 1, maxLength: 64, pattern: '^[a-z0-9][a-z0-9._-]{0,63}$', description: Exact configured repository id; aliases are rejected.}
+        revision: {type: string, minLength: 40, maxLength: 40, pattern: '^[0-9a-f]{40}$', description: Exact published revision; aliases are rejected.}
         query: {type: string, minLength: 2, maxLength: 256}
         kinds:
           type: array
@@ -255,23 +275,23 @@ components:
       additionalProperties: false
       required: [repositoryId, revision, factId]
       properties:
-        repositoryId: {type: string}
-        revision: {type: string}
-        factId: {type: string}
+        repositoryId: {type: string, minLength: 1, maxLength: 64, pattern: '^[a-z0-9][a-z0-9._-]{0,63}$'}
+        revision: {type: string, minLength: 40, maxLength: 40, pattern: '^[0-9a-f]{40}$'}
+        factId: {type: string, minLength: 64, maxLength: 64, pattern: '^[0-9a-f]{64}$'}
     GenerationRequest:
       type: object
       additionalProperties: false
       required: [repositoryId, revision]
       properties:
-        repositoryId: {type: string, description: Exact configured repository id; aliases are rejected.}
-        revision: {type: string, description: Exact published revision; aliases are rejected.}
+        repositoryId: {type: string, minLength: 1, maxLength: 64, pattern: '^[a-z0-9][a-z0-9._-]{0,63}$', description: Exact configured repository id; aliases are rejected.}
+        revision: {type: string, minLength: 40, maxLength: 40, pattern: '^[0-9a-f]{40}$', description: Exact published revision; aliases are rejected.}
     EventListenerRequest:
       type: object
       additionalProperties: false
       required: [repositoryId, revision, eventType]
       properties:
-        repositoryId: {type: string, minLength: 1}
-        revision: {type: string, minLength: 1}
+        repositoryId: {type: string, minLength: 1, maxLength: 64, pattern: '^[a-z0-9][a-z0-9._-]{0,63}$'}
+        revision: {type: string, minLength: 40, maxLength: 40, pattern: '^[0-9a-f]{40}$'}
         eventType: {type: string, minLength: 1}
         offset: {type: integer, minimum: 0}
         limit: {type: integer, minimum: 1, maximum: 100}
@@ -280,12 +300,12 @@ components:
       additionalProperties: false
       required: [repositoryId, revision, packageName, className, sourceFile, kinds]
       properties:
-        repositoryId: {type: string, minLength: 1}
-        revision: {type: string, minLength: 1}
+        repositoryId: {type: string, minLength: 1, maxLength: 64, pattern: '^[a-z0-9][a-z0-9._-]{0,63}$'}
+        revision: {type: string, minLength: 40, maxLength: 40, pattern: '^[0-9a-f]{40}$'}
         packageName: {type: string, minLength: 1}
         className: {type: string, minLength: 1}
         sourceFile: {type: string, minLength: 1}
-        kinds: {type: array, items: {type: string, enum: [TYPE, METHOD, FIELD, ENUM_CONSTANT, RECORD_COMPONENT, MAPPER_STATEMENT, ANNOTATION_USAGE, TYPE_USAGE, SQL_IDENTIFIER, CONFIGURATION_KEY, OUTBOUND_API, MQ_PUBLISHER, ERROR_CONTRACT, API_ROUTE, MQ_DESTINATION, SCHEDULE]}}
+        kinds: {type: array, items: {type: string, enum: [METHOD, FIELD, ENUM_CONSTANT, RECORD_COMPONENT]}}
         offset: {type: integer, minimum: 0}
         limit: {type: integer, minimum: 1, maximum: 100}
     SourceSymbolRequest:
@@ -294,8 +314,8 @@ components:
       dependentRequired: {line: [character], character: [line]}
       required: [repositoryId, revision, packageName, className, sourceFile, symbol]
       properties:
-        repositoryId: {type: string, minLength: 1}
-        revision: {type: string, minLength: 1}
+        repositoryId: {type: string, minLength: 1, maxLength: 64, pattern: '^[a-z0-9][a-z0-9._-]{0,63}$'}
+        revision: {type: string, minLength: 40, maxLength: 40, pattern: '^[0-9a-f]{40}$'}
         packageName: {type: string, minLength: 1}
         className: {type: string, minLength: 1}
         sourceFile: {type: string, minLength: 1}
@@ -307,8 +327,8 @@ components:
       additionalProperties: false
       required: [repositoryId, revision, packageName, className, sourceFile, startLine, startCharacter, endLine, endCharacter]
       properties:
-        repositoryId: {type: string, minLength: 1}
-        revision: {type: string, minLength: 1}
+        repositoryId: {type: string, minLength: 1, maxLength: 64, pattern: '^[a-z0-9][a-z0-9._-]{0,63}$'}
+        revision: {type: string, minLength: 40, maxLength: 40, pattern: '^[0-9a-f]{40}$'}
         packageName: {type: string, minLength: 1}
         className: {type: string, minLength: 1}
         sourceFile: {type: string, minLength: 1}
@@ -321,8 +341,8 @@ components:
       additionalProperties: false
       required: [repositoryId, revision, packageName, className, sourceFile, methodName, parameterTypes]
       properties:
-        repositoryId: {type: string, minLength: 1}
-        revision: {type: string, minLength: 1}
+        repositoryId: {type: string, minLength: 1, maxLength: 64, pattern: '^[a-z0-9][a-z0-9._-]{0,63}$'}
+        revision: {type: string, minLength: 40, maxLength: 40, pattern: '^[0-9a-f]{40}$'}
         packageName: {type: string, minLength: 1}
         className: {type: string, minLength: 1}
         sourceFile: {type: string, minLength: 1}
@@ -335,8 +355,8 @@ components:
       additionalProperties: false
       required: [repositoryId, revision, packageName, className, sourceFile, methodName, parameterTypes]
       properties:
-        repositoryId: {type: string, minLength: 1}
-        revision: {type: string, minLength: 1}
+        repositoryId: {type: string, minLength: 1, maxLength: 64, pattern: '^[a-z0-9][a-z0-9._-]{0,63}$'}
+        revision: {type: string, minLength: 40, maxLength: 40, pattern: '^[0-9a-f]{40}$'}
         packageName: {type: string, minLength: 1}
         className: {type: string, minLength: 1}
         sourceFile: {type: string, minLength: 1}
@@ -349,8 +369,8 @@ components:
       additionalProperties: false
       required: [repositoryId, revision, packageName, className, sourceFile, methodName, parameterTypes]
       properties:
-        repositoryId: {type: string, minLength: 1}
-        revision: {type: string, minLength: 1}
+        repositoryId: {type: string, minLength: 1, maxLength: 64, pattern: '^[a-z0-9][a-z0-9._-]{0,63}$'}
+        revision: {type: string, minLength: 40, maxLength: 40, pattern: '^[0-9a-f]{40}$'}
         packageName: {type: string}
         className: {type: string}
         sourceFile: {type: string}
@@ -361,8 +381,8 @@ components:
       additionalProperties: false
       required: [repositoryId, revision, httpMethod, path]
       properties:
-        repositoryId: {type: string, minLength: 1}
-        revision: {type: string, minLength: 1}
+        repositoryId: {type: string, minLength: 1, maxLength: 64, pattern: '^[a-z0-9][a-z0-9._-]{0,63}$'}
+        revision: {type: string, minLength: 40, maxLength: 40, pattern: '^[0-9a-f]{40}$'}
         httpMethod: {type: string}
         path: {type: string}
     GenerationBackedResponse:

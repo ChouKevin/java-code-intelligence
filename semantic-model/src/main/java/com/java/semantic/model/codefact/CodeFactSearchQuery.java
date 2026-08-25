@@ -21,13 +21,15 @@ public record CodeFactSearchQuery(
 
     public static final int DEFAULT_OFFSET = 0;
     public static final int DEFAULT_LIMIT = 20;
+    public static final int MIN_QUERY_LENGTH = 2;
+    public static final int MAX_QUERY_LENGTH = 256;
     private static final Pattern PACKAGE_PREFIX = Pattern.compile("^[A-Za-z_$][A-Za-z0-9_$]*(?:\\.[A-Za-z_$][A-Za-z0-9_$]*)*$");
 
     public CodeFactSearchQuery {
         repositoryId = Objects.requireNonNull(repositoryId, "repository id is required");
         revision = Objects.requireNonNull(revision, "revision is required");
         query = ModelValidation.requiredText(query, "query");
-        ModelValidation.require(query.length() >= 2 && query.length() <= 256,
+        ModelValidation.require(query.length() >= MIN_QUERY_LENGTH && query.length() <= MAX_QUERY_LENGTH,
                 "query length must be between 2 and 256 characters");
         kinds = Set.copyOf(Objects.requireNonNull(kinds, "kinds are required"));
         packagePrefix = Objects.requireNonNull(packagePrefix, "package prefix is required")

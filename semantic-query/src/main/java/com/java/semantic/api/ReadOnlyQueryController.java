@@ -24,7 +24,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
-/** HTTP aliases for the Query catalog; concept endpoints intentionally have no mapping. */
+/** HTTP aliases for the Query catalog; removed endpoints intentionally have no mapping. */
 @RestController
 @RequestMapping("/v1")
 public final class ReadOnlyQueryController {

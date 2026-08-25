@@ -11,8 +11,16 @@ import com.java.semantic.query.application.RevisionOutdatedException;
 import com.java.semantic.query.application.SemanticIndexUnavailableException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.validation.BindException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.bind.MissingServletRequestParameterException;
+import org.springframework.web.bind.ServletRequestBindingException;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+import org.springframework.http.converter.HttpMessageNotReadableException;
+
+import jakarta.validation.ConstraintViolationException;
 
 import java.util.Map;
 
@@ -35,10 +43,21 @@ public final class QueryApiExceptionHandler {
         return ResponseEntity.status(definition.status()).body(new QueryFailureResponse(definition.code(), definition.retryable(), null)); // cs-allow
     }
 
+    @ExceptionHandler({MethodArgumentNotValidException.class, HttpMessageNotReadableException.class, BindException.class,
+            MissingServletRequestParameterException.class, ServletRequestBindingException.class,
+            MethodArgumentTypeMismatchException.class, ConstraintViolationException.class})
+    public ResponseEntity<QueryFailureResponse> requestFailure(Exception exception) {
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(requestInvalidResponse());
+    }
+
     /** Stable, sanitized MCP error body for the same authoritative Query failures. */
     public static Map<String, Object> failureBody(RuntimeException exception) {
         FailureDefinition definition = failureDefinition(exception);
         return Map.of("code", definition.code(), "retryable", definition.retryable());
+    }
+
+    public static QueryFailureResponse requestInvalidResponse() {
+        return new QueryFailureResponse("REQUEST_INVALID", false, null); // cs-allow
     }
 
     private static FailureDefinition failureDefinition(RuntimeException exception) {

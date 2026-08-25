@@ -8,9 +8,12 @@ import java.util.Objects;
 
 public record CodeFactId(String value) {
 
+    public static final String PATTERN = "^[0-9a-f]{64}$";
+    public static final int LENGTH = 64;
+
     public CodeFactId {
         Objects.requireNonNull(value, "code fact id is required");
-        if (!value.matches("^[0-9a-f]{64}$")) {
+        if (!value.matches(PATTERN)) {
             throw new IllegalArgumentException("code fact id must be a lowercase SHA-256 hash");
         }
     }

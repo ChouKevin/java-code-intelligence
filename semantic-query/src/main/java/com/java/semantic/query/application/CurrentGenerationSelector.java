@@ -24,6 +24,7 @@ import org.springframework.util.StringUtils;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.Date;
 import java.util.EnumSet;
 import java.util.List;
@@ -142,6 +143,7 @@ public final class CurrentGenerationSelector {
                     // Catalogs omit unpublished or incompatible rows.
                 }
             }
+            result.sort(Comparator.comparing(current -> current.repositoryId().value()));
             return List.copyOf(result);
         } catch (MongoException | DataAccessException exception) {
             throw unavailable(exception);

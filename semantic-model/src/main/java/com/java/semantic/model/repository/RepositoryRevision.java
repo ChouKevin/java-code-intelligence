@@ -6,7 +6,9 @@ import java.util.regex.Pattern;
 
 public record RepositoryRevision(String value) {
 
-    private static final Pattern SHA = Pattern.compile("^[0-9a-f]{40}$");
+    public static final String PATTERN = "^[0-9a-f]{40}$";
+    public static final int LENGTH = 40;
+    private static final Pattern SHA = Pattern.compile(PATTERN);
 
     public RepositoryRevision {
         value = ModelValidation.requiredText(value, "repository revision");

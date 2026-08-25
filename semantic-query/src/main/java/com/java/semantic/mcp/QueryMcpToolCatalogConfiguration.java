@@ -95,19 +95,23 @@ public class QueryMcpToolCatalogConfiguration {
     private static Map<String, Object> inputSchema(ToolProjectionRequirement requirement) {
         Map<String, Object> allProperties = new LinkedHashMap<>();
         Map<String, Object> properties = new LinkedHashMap<>();
-        allProperties.put("repositoryId", Map.of("type", "string", "description", "Exact repository identifier."));
+        allProperties.put("repositoryId", Map.of("type", "string", "minLength", RepositoryId.MIN_LENGTH,
+                "maxLength", RepositoryId.MAX_LENGTH, "pattern", RepositoryId.PATTERN, "description", "Exact repository identifier."));
         if (requirement.projections().isPresent()) {
-            allProperties.put("revision", Map.of("type", "string", "description", "Exact published revision; never omit or substitute it."));
+            allProperties.put("revision", Map.of("type", "string", "minLength", RepositoryRevision.LENGTH,
+                    "maxLength", RepositoryRevision.LENGTH, "pattern", RepositoryRevision.PATTERN,
+                    "description", "Exact published revision; never omit or substitute it."));
         }
-        allProperties.put("query", Map.of("type", "string"));
-        allProperties.put("factId", Map.of("type", "string", "description", "Opaque factId returned by semantic_search_code_facts."));
+        allProperties.put("query", Map.of("type", "string", "minLength", CodeFactSearchQuery.MIN_QUERY_LENGTH,
+                "maxLength", CodeFactSearchQuery.MAX_QUERY_LENGTH));
+        allProperties.put("factId", Map.of("type", "string", "minLength", CodeFactId.LENGTH, "maxLength", CodeFactId.LENGTH,
+                "pattern", CodeFactId.PATTERN, "description", "Opaque factId returned by semantic_search_code_facts."));
         allProperties.put("packageName", Map.of("type", "string"));
         allProperties.put("className", Map.of("type", "string"));
         allProperties.put("sourceFile", Map.of("type", "string"));
         allProperties.put("methodName", Map.of("type", "string"));
         allProperties.put("parameterTypes", Map.of("type", "array", "items", Map.of("type", "string")));
-        allProperties.put("kinds", Map.of("type", "array", "items", Map.of("type", "string", "enum", CodeFactKind.values()),
-                "description", "Optional CodeFactKind filters: TYPE, METHOD, FIELD, ENUM_CONSTANT, RECORD_COMPONENT, MAPPER_STATEMENT, ANNOTATION_USAGE, TYPE_USAGE, SQL_IDENTIFIER, CONFIGURATION_KEY, OUTBOUND_API, MQ_PUBLISHER, ERROR_CONTRACT, API_ROUTE, MQ_DESTINATION, SCHEDULE. Omit unknown filters rather than guessing."));
+        allProperties.put("kinds", kindsSchema(requirement.toolName()));
         allProperties.put("packagePrefix", Map.of("type", "string", "description", "Optional Java package prefix. Omit it when unknown."));
         allProperties.put("eventType", Map.of("type", "string"));
         allProperties.put("symbol", Map.of("type", "string"));
@@ -132,12 +136,47 @@ public class QueryMcpToolCatalogConfiguration {
 
     private static Map<String, Object> outputSchema(ToolProjectionRequirement requirement) {
         if (requirement.projections().isEmpty()) {
-            return "semantic_list_repositories".equals(requirement.toolName())
-                    ? Map.of("type", "array") : Map.of("type", "object");
+            Map<String, Object> success = "semantic_list_repositories".equals(requirement.toolName())
+                    ? Map.of("type", "array", "items", repositoryMetadataSchema()) : repositoryMetadataSchema();
+            return Map.of("oneOf", List.of(success, queryFailureSchema()));
         }
-        return Map.of("type", "object", "required", List.of("repositoryId", "revision", "result"),
+        Map<String, Object> success = Map.of("type", "object", "required", List.of("repositoryId", "revision", "result"),
                 "properties", Map.of("repositoryId", Map.of("type", "string"), "revision", Map.of("type", "string"),
                         "result", Map.of()), "additionalProperties", false);
+        return Map.of("oneOf", List.of(success, revisionOutdatedSchema(), queryFailureSchema()));
+    }
+
+    private static Map<String, Object> kindsSchema(String toolName) {
+        Set<CodeFactKind> kinds = "semantic_discover_type_members".equals(toolName)
+                ? TypeMemberQuery.MEMBER_KINDS : Set.of(CodeFactKind.values());
+        List<String> names = kinds.stream().map(Enum::name).sorted().toList();
+        return Map.of("type", "array", "items", Map.of("type", "string", "enum", names),
+                "description", "Optional exact CodeFactKind filters. Omit unknown filters rather than guessing.");
+    }
+
+    private static Map<String, Object> repositoryMetadataSchema() {
+        return Map.of("type", "object", "required", List.of("repositoryId", "revision", "generationId", "manifestDigest", "publishedAt"),
+                "properties", Map.of("repositoryId", valueObjectSchema(), "revision", valueObjectSchema(),
+                        "generationId", valueObjectSchema(), "manifestDigest", valueObjectSchema(),
+                        "publishedAt", Map.of("type", "string", "format", "date-time")), "additionalProperties", false);
+    }
+
+    private static Map<String, Object> valueObjectSchema() {
+        return Map.of("type", "object", "required", List.of("value"), "properties", Map.of("value", Map.of("type", "string")),
+                "additionalProperties", false);
+    }
+
+    private static Map<String, Object> revisionOutdatedSchema() {
+        return Map.of("type", "object", "required", List.of("code", "repositoryId", "requestedRevision", "currentRevision", "retryGuidance"),
+                "properties", Map.of("code", Map.of("const", "REVISION_OUTDATED"), "repositoryId", Map.of("type", "string"),
+                        "requestedRevision", Map.of("type", "string"), "currentRevision", Map.of("type", "string"),
+                        "retryGuidance", Map.of("type", "string")), "additionalProperties", false);
+    }
+
+    private static Map<String, Object> queryFailureSchema() {
+        return Map.of("type", "object", "required", List.of("code", "retryable"),
+                "properties", Map.of("code", Map.of("type", "string"), "retryable", Map.of("type", "boolean")),
+                "additionalProperties", false);
     }
 
     private static Set<String> allowedFields(String toolName, boolean generationBacked) {

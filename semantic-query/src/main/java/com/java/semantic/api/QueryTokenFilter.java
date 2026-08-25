@@ -40,13 +40,19 @@ public final class QueryTokenFilter extends OncePerRequestFilter {
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain chain)
             throws ServletException, IOException {
         if (!properties.hasApiToken()) {
-            response.sendError(HttpServletResponse.SC_FORBIDDEN, "query access is disabled");
+            writeFailure(response, HttpServletResponse.SC_FORBIDDEN, "QUERY_ACCESS_DISABLED");
             return;
         }
         if (!properties.matches(request.getHeader(TOKEN_HEADER))) {
-            response.sendError(HttpServletResponse.SC_UNAUTHORIZED, "query token is required");
+            writeFailure(response, HttpServletResponse.SC_UNAUTHORIZED, "QUERY_TOKEN_REQUIRED");
             return;
         }
         chain.doFilter(request, response);
+    }
+
+    private static void writeFailure(HttpServletResponse response, int status, String code) throws IOException {
+        response.setStatus(status);
+        response.setContentType("application/json");
+        response.getWriter().write("{\"code\":\"" + code + "\",\"retryable\":false}");
     }
 }
