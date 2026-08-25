@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.assertj.core.api.Assertions.assertThat;
 
 class ToolProjectionCatalogTest {
 
@@ -30,5 +31,18 @@ class ToolProjectionCatalogTest {
                         "semantic_suggest_api_routes"),
                 ToolProjectionCatalog.toolNames());
         assertEquals(17, ToolProjectionCatalog.requirements().size());
+    }
+
+    @Test
+    void code_fact_catalog_declares_the_search_stage_and_leaves_authority_selection_to_the_stored_kind() {
+        assertThat(requirement("semantic_search_code_facts").projections().orElseThrow().names())
+                .containsExactly(com.java.semantic.model.index.ProjectionName.SEARCH);
+        assertThat(requirement("semantic_get_code_fact").projections().orElseThrow().names())
+                .containsExactly(com.java.semantic.model.index.ProjectionName.SEARCH);
+    }
+
+    private static com.java.semantic.model.query.ToolProjectionRequirement requirement(String toolName) {
+        return ToolProjectionCatalog.requirements().stream().filter(candidate -> candidate.toolName().equals(toolName))
+                .findFirst().orElseThrow();
     }
 }

@@ -79,4 +79,27 @@ class IndexAdminSecurityTest {
 
         assertThat(adminResponse.getStatus()).isEqualTo(403);
     }
+
+    @Test
+    void index_paths_remain_protected_below_a_servlet_context_path() throws Exception {
+        IndexerAdminSecurityProperties properties = new IndexerAdminSecurityProperties();
+        properties.setAdminToken("admin-token");
+        IndexerAdminTokenFilter filter = new IndexerAdminTokenFilter(properties);
+        MockHttpServletRequest absentToken = new MockHttpServletRequest("POST", "/semantic/index/repositories/orders/ensure");
+        absentToken.setContextPath("/semantic");
+        absentToken.setServletPath("/index/repositories/orders/ensure");
+        MockHttpServletResponse absentTokenResponse = new MockHttpServletResponse();
+        filter.doFilter(absentToken, absentTokenResponse, (request, response) ->
+                ((jakarta.servlet.http.HttpServletResponse) response).setStatus(204));
+        assertThat(absentTokenResponse.getStatus()).isEqualTo(401);
+
+        MockHttpServletRequest validToken = new MockHttpServletRequest("POST", "/semantic/index/repositories/orders/ensure");
+        validToken.setContextPath("/semantic");
+        validToken.setServletPath("/index/repositories/orders/ensure");
+        validToken.addHeader(IndexerAdminTokenFilter.TOKEN_HEADER, "admin-token");
+        MockHttpServletResponse validTokenResponse = new MockHttpServletResponse();
+        filter.doFilter(validToken, validTokenResponse, (request, response) ->
+                ((jakarta.servlet.http.HttpServletResponse) response).setStatus(204));
+        assertThat(validTokenResponse.getStatus()).isEqualTo(204);
+    }
 }

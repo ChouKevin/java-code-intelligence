@@ -52,11 +52,18 @@ public final class CurrentGenerationSelector {
     }
 
     public CurrentGeneration selectSource(String requestedRepositoryId, String requestedRevision, SourceTypeIdentity sourceType) {
+        return selectSource(requestedRepositoryId, requestedRevision, sourceType, SOURCES);
+    }
+
+    /** Selects an authorized source scope while requiring only the caller's actual persisted projections. */
+    public CurrentGeneration selectSource(String requestedRepositoryId, String requestedRevision, SourceTypeIdentity sourceType,
+                                          ProjectionRequirements requirements) {
         Request request = request(requestedRepositoryId, requestedRevision);
         SourceTypeIdentity identity = Objects.requireNonNull(sourceType, "source type identity is required");
+        ProjectionRequirements requiredRequirements = Objects.requireNonNull(requirements, "projection requirements are required");
         if (!readPolicy.isSourceVisible(request.repositoryId(), identity)) { throw new RepositoryNotFoundException(); }
         CurrentGeneration current = selectedPointer(request);
-        verifyManifest(current, SOURCES);
+        verifyManifest(current, requiredRequirements);
         return current;
     }
 
@@ -115,9 +122,7 @@ public final class CurrentGenerationSelector {
     }
 
     public CurrentGeneration currentRepository(String requestedRepositoryId) {
-        CurrentGeneration current = currentPointer(parseAndAuthorize(requestedRepositoryId));
-        verifyManifest(current, ALL_PROJECTIONS);
-        return current;
+        return currentPointer(parseAndAuthorize(requestedRepositoryId));
     }
 
     public List<CurrentGeneration> listCurrentRepositories() {
@@ -131,9 +136,7 @@ public final class CurrentGenerationSelector {
                 try {
                     RepositoryId repositoryId = new RepositoryId(value);
                     if (readPolicy.isRepositoryVisible(repositoryId)) {
-                        CurrentGeneration current = pointer(repositoryId, candidate);
-                        verifyManifest(current, ALL_PROJECTIONS);
-                        result.add(current);
+                    result.add(pointer(repositoryId, candidate));
                     }
                 } catch (IndexNotReadyException | IndexContractMismatchException | IllegalArgumentException exception) {
                     // Catalogs omit unpublished or incompatible rows.

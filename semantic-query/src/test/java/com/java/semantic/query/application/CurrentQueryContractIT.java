@@ -112,11 +112,12 @@ class CurrentQueryContractIT {
                 new Document("$set", new Document("schemaVersion", "1")));
         CurrentRepositoryQueryService visible = new CurrentRepositoryQueryService(selector(policy()));
 
-        assertThat(visible.listRepositories()).extracting(current -> current.repositoryId().value()).containsExactly("published");
+        assertThat(visible.listRepositories()).extracting(current -> current.repositoryId().value())
+                .containsExactly("incompatible", "malformed", "published");
         assertThatThrownBy(() -> visible.getRepository("absent")).isInstanceOf(RepositoryNotFoundException.class);
         assertThatThrownBy(() -> visible.getRepository("unpublished")).isInstanceOf(IndexNotReadyException.class);
-        assertThatThrownBy(() -> visible.getRepository("incompatible")).isInstanceOf(IndexContractMismatchException.class);
-        assertThatThrownBy(() -> visible.getRepository("malformed")).isInstanceOf(IndexContractMismatchException.class);
+        assertThat(visible.getRepository("incompatible").repositoryId().value()).isEqualTo("incompatible");
+        assertThat(visible.getRepository("malformed").repositoryId().value()).isEqualTo("malformed");
         assertThatThrownBy(() -> new CurrentRepositoryQueryService(selector(policy("published"))).getRepository("published"))
                 .isInstanceOf(RepositoryNotFoundException.class);
     }

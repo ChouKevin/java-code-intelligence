@@ -15,9 +15,10 @@ public final class ToolProjectionCatalog {
             ToolProjectionRequirement.generation("semantic_analyze_outgoing_call_graph", projections(ProjectionName.RELATIONS, ProjectionName.SYMBOLS)),
             ToolProjectionRequirement.generation("semantic_discover_event_listeners", projections(ProjectionName.SYMBOLS)),
             ToolProjectionRequirement.generation("semantic_discover_method_implementations", projections(ProjectionName.RELATIONS, ProjectionName.SYMBOLS)),
-            ToolProjectionRequirement.generation("semantic_discover_type_members", projections(ProjectionName.SEARCH, ProjectionName.SYMBOLS)),
+            ToolProjectionRequirement.generation("semantic_discover_type_members", projections(ProjectionName.SYMBOLS)),
             ToolProjectionRequirement.generation("semantic_find_internal_references", projections(ProjectionName.RELATIONS, ProjectionName.SYMBOLS)),
-            ToolProjectionRequirement.generation("semantic_get_code_fact", projections(ProjectionName.SEARCH, ProjectionName.SYMBOLS)),
+            // Code-fact readers first select SEARCH, then derive the only required authoritative projection from the stored kind.
+            ToolProjectionRequirement.generation("semantic_get_code_fact", projections(ProjectionName.SEARCH)),
             ToolProjectionRequirement.generation("semantic_get_evidence_source", projections(ProjectionName.SOURCES, ProjectionName.SYMBOLS)),
             ToolProjectionRequirement.generation("semantic_get_method_source", projections(ProjectionName.SOURCES, ProjectionName.SYMBOLS)),
             ToolProjectionRequirement.metadata("semantic_get_repository"),
@@ -25,8 +26,8 @@ public final class ToolProjectionCatalog {
             ToolProjectionRequirement.generation("semantic_list_entry_points", projections(ProjectionName.ENTRY_POINTS, ProjectionName.SYMBOLS)),
             ToolProjectionRequirement.metadata("semantic_list_repositories"),
             ToolProjectionRequirement.generation("semantic_lookup_api_routes", projections(ProjectionName.ENTRY_POINTS, ProjectionName.SYMBOLS)),
-            ToolProjectionRequirement.generation("semantic_resolve_source_symbol", projections(ProjectionName.SEARCH, ProjectionName.SYMBOLS)),
-            ToolProjectionRequirement.generation("semantic_search_code_facts", projections(ProjectionName.SEARCH, ProjectionName.SYMBOLS)),
+            ToolProjectionRequirement.generation("semantic_resolve_source_symbol", projections(ProjectionName.SYMBOLS)),
+            ToolProjectionRequirement.generation("semantic_search_code_facts", projections(ProjectionName.SEARCH)),
             ToolProjectionRequirement.generation("semantic_suggest_api_routes", projections(ProjectionName.ENTRY_POINTS, ProjectionName.SYMBOLS)));
 
     private ToolProjectionCatalog() {

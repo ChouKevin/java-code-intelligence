@@ -53,7 +53,7 @@ public final class PublishedDiscoveryQueryService {
         DeclarationResolutionQuery requiredQuery = Objects.requireNonNull(query, "query is required");
         SearchAccessPlan accessPlan = selector.searchAccessPlan(requiredQuery.repositoryId().value());
         CurrentGeneration current = selector.selectSource(requiredQuery.repositoryId().value(), requiredQuery.revision().value(),
-                requiredQuery.context());
+                requiredQuery.context(), CurrentGenerationSelector.SYMBOLS);
         try {
             FindIterable<Document> rows = template.getCollection(IndexCollections.SYMBOLS).find(accessPlan.authorized(Filters.and(
                     Filters.eq("repoId", current.repositoryId().value()), Filters.eq("generationId", current.generationId().value()),
@@ -161,7 +161,7 @@ public final class PublishedDiscoveryQueryService {
         TypeMemberQuery requiredQuery = Objects.requireNonNull(query, "query is required");
         SearchAccessPlan accessPlan = selector.searchAccessPlan(requiredQuery.repositoryId().value());
         CurrentGeneration current = selector.selectSource(requiredQuery.repositoryId().value(), requiredQuery.revision().value(),
-                requiredQuery.sourceType());
+                requiredQuery.sourceType(), CurrentGenerationSelector.SYMBOLS);
         try {
             List<String> kinds = requiredQuery.kinds().stream().map(Enum::name).sorted().toList();
             org.bson.conversions.Bson filter = accessPlan.authorized(Filters.and(Filters.eq("repoId", current.repositoryId().value()),

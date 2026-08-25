@@ -13,6 +13,7 @@ import com.java.semantic.model.index.EntryPointDocument;
 import com.java.semantic.model.index.GenerationId;
 import com.java.semantic.model.index.IndexCollections;
 import com.java.semantic.model.index.ProjectionName;
+import com.java.semantic.model.index.ProjectionRequirements;
 import com.java.semantic.model.index.RelationDocument;
 import com.java.semantic.model.index.SourceArtifactId;
 import com.java.semantic.model.index.SymbolDocument;
@@ -30,9 +31,11 @@ import org.springframework.util.StringUtils;
 
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.EnumSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
 /** Resolves derived search rows to their one authoritative current-generation fact. */
@@ -51,15 +54,19 @@ public final class CodeFactReadService {
     public CodeFactDetails get(CodeFactReadQuery query) {
         CodeFactReadQuery request = Objects.requireNonNull(query, "code fact read query is required");
         SearchAccessPlan accessPlan = selector.searchAccessPlan(request.repositoryId().value());
-        CurrentGeneration current = selector.select(request.repositoryId().value(), request.revision().value(),
-                CurrentGenerationSelector.ALL_PROJECTIONS);
+        CurrentGeneration searchGeneration = selector.select(request.repositoryId().value(), request.revision().value(),
+                new ProjectionRequirements(EnumSet.of(ProjectionName.SEARCH)));
         try {
-            Bson filter = accessPlan.authorized(Filters.and(Filters.eq("repoId", current.repositoryId().value()),
-                    Filters.eq("generationId", current.generationId().value()), Filters.eq("factId", request.factId().value())));
+            Bson filter = accessPlan.authorized(Filters.and(Filters.eq("repoId", searchGeneration.repositoryId().value()),
+                    Filters.eq("generationId", searchGeneration.generationId().value()), Filters.eq("factId", request.factId().value())));
             Document row = template.getCollection(IndexCollections.SEARCH).find(filter)
                     .maxTime(storageTimeout.toMillis(), TimeUnit.MILLISECONDS).first();
             if (Objects.isNull(row)) { throw new CodeFactNotFoundException(); }
-            CodeFactDetails details = authoritative(row, current);
+            SearchRow search = searchRow(row, searchGeneration);
+            CurrentGeneration current = selector.select(request.repositoryId().value(), request.revision().value(),
+                    requirementsForSearchKinds(Set.of(search.kind())));
+            CodeFactDetails details = authoritative(current, search.kind(), search.factId());
+            verifySearchRow(search, details, current);
             selector.requireVisible(current, details.fact().identity());
             return details;
         } catch (MongoException | DataAccessException exception) {
@@ -100,6 +107,16 @@ public final class CodeFactReadService {
         } catch (RuntimeException exception) {
             throw new IndexContractMismatchException();
         }
+    }
+
+    static ProjectionRequirements requirementsForSearchKinds(Set<CodeFactKind> requestedKinds) {
+        Set<CodeFactKind> kinds = Objects.requireNonNull(requestedKinds, "requested kinds are required");
+        EnumSet<ProjectionName> projections = EnumSet.of(ProjectionName.SEARCH);
+        Set<CodeFactKind> effectiveKinds = kinds.isEmpty() ? EnumSet.allOf(CodeFactKind.class) : kinds;
+        for (CodeFactKind kind : effectiveKinds) {
+            projections.add(authorityFor(kind));
+        }
+        return new ProjectionRequirements(projections);
     }
 
     private CodeFactDetails authoritative(CurrentGeneration current, CodeFactKind kind, CodeFactId id) {

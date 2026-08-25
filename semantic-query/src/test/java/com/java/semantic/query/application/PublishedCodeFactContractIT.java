@@ -46,6 +46,48 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 @Tag("mongo-it")
 class PublishedCodeFactContractIT extends PublishedMongoITSupport {
+
+    @Test
+    void method_search_and_get_ignore_unrelated_incompatible_projections_but_require_symbols() {
+        try (MongoDBContainer container = new MongoDBContainer(DockerImageName.parse("mongo:8.0.4"))) {
+            container.start();
+            MongoTemplate template = new MongoTemplate(com.mongodb.client.MongoClients.create(container.getConnectionString()),
+                    "published_codefact_partial_projection");
+            seedCurrent(template, "orders");
+            CodeFactIdentity identity = methodIdentity("example.payment", "PaymentService", "findPayment",
+                    "src/main/java/example/payment/PaymentService.java");
+            seedMethod(template, identity, List.of());
+            seedSearch(template, identity, "SYMBOLS", List.of("find", "payment"));
+            template.getCollection("generation_manifests").updateOne(new Document("repoId", "orders"),
+                    new Document("$set", new Document("projectionVersions", List.of(
+                            new Document("name", "SOURCES").append("version", 1),
+                            new Document("name", "SYMBOLS").append("version", 2),
+                            new Document("name", "RELATIONS").append("version", 1),
+                            new Document("name", "ENTRY_POINTS").append("version", 1),
+                            new Document("name", "SEARCH").append("version", 2)))));
+
+            CodeFactSearchService search = new CodeFactSearchService(template, selector(template, policy()), Duration.ofSeconds(2));
+            CodeFactReadService reader = new CodeFactReadService(template, selector(template, policy()), Duration.ofSeconds(2));
+            CodeFactSearchResult results = search.search(new CodeFactSearchQuery(new RepositoryId("orders"),
+                    new RepositoryRevision(REVISION), "findPayment", java.util.Set.of(CodeFactKind.METHOD), Optional.empty(), 0, 20));
+
+            assertThat(results.facts()).extracting(summary -> summary.fact().identity()).containsExactly(identity);
+            assertThat(reader.get(new CodeFactReadQuery(new RepositoryId("orders"), new RepositoryRevision(REVISION),
+                    CodeFactId.from(identity))).fact().identity()).isEqualTo(identity);
+
+            template.getCollection("generation_manifests").updateOne(new Document("repoId", "orders"),
+                    new Document("$set", new Document("projectionVersions", List.of(
+                            new Document("name", "SOURCES").append("version", 1),
+                            new Document("name", "SYMBOLS").append("version", 1),
+                            new Document("name", "RELATIONS").append("version", 1),
+                            new Document("name", "ENTRY_POINTS").append("version", 1),
+                            new Document("name", "SEARCH").append("version", 2)))));
+
+            assertThatThrownBy(() -> search.search(new CodeFactSearchQuery(new RepositoryId("orders"),
+                    new RepositoryRevision(REVISION), "findPayment", java.util.Set.of(CodeFactKind.METHOD), Optional.empty(), 0, 20)))
+                    .isInstanceOf(IndexContractMismatchException.class);
+        }
+    }
     @Test
     void searches_authorized_derived_rows_and_rejects_denied_package_scope() {
         try (MongoDBContainer container = new MongoDBContainer(DockerImageName.parse("mongo:8.0.4"))) {
@@ -143,7 +185,7 @@ class PublishedCodeFactContractIT extends PublishedMongoITSupport {
     }
 
     @Test
-    void verifies_every_search_dereference_projection_before_search_or_exact_read() {
+    void unfiltered_search_requires_all_possible_authorities_while_exact_read_requires_only_its_authority() {
         try (MongoDBContainer container = new MongoDBContainer(DockerImageName.parse("mongo:8.0.4"))) {
             container.start();
             MongoTemplate template = new MongoTemplate(com.mongodb.client.MongoClients.create(container.getConnectionString()), "published_codefact_projection");
@@ -163,8 +205,8 @@ class PublishedCodeFactContractIT extends PublishedMongoITSupport {
 
             assertThatThrownBy(() -> search.search(new CodeFactSearchQuery(new RepositoryId("orders"),
                     new RepositoryRevision(REVISION), "findPayment"))).isInstanceOf(IndexContractMismatchException.class);
-            assertThatThrownBy(() -> reader.get(new CodeFactReadQuery(new RepositoryId("orders"), new RepositoryRevision(REVISION),
-                    CodeFactId.from(identity)))).isInstanceOf(IndexContractMismatchException.class);
+            assertThat(reader.get(new CodeFactReadQuery(new RepositoryId("orders"), new RepositoryRevision(REVISION),
+                    CodeFactId.from(identity))).fact().identity()).isEqualTo(identity);
         }
     }
 

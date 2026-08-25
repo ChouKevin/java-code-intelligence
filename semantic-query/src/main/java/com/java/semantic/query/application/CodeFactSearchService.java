@@ -46,7 +46,7 @@ public final class CodeFactSearchService {
         requiredQuery.packagePrefix().filter(prefix -> !accessPlan.isPackageVisible(prefix))
                 .ifPresent(prefix -> { throw new RepositoryNotFoundException(); });
         CurrentGeneration current = selector.select(requiredQuery.repositoryId().value(), requiredQuery.revision().value(),
-                CurrentGenerationSelector.ALL_PROJECTIONS);
+                CodeFactReadService.requirementsForSearchKinds(requiredQuery.kinds()));
         List<String> tokens = normalizedTokens(requiredQuery.query());
         try {
             Bson filter = accessPlan.authorized(filter(current, requiredQuery, tokens));

@@ -5,6 +5,7 @@ import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.web.filter.OncePerRequestFilter;
+import org.springframework.util.StringUtils;
 
 import java.io.IOException;
 import java.util.Objects;
@@ -20,7 +21,18 @@ public final class IndexerAdminTokenFilter extends OncePerRequestFilter {
 
     @Override
     protected boolean shouldNotFilter(HttpServletRequest request) {
-        return !request.getRequestURI().startsWith("/index/");
+        return !applicationRelativePath(request).startsWith("/index/");
+    }
+
+    private static String applicationRelativePath(HttpServletRequest request) {
+        String servletPath = request.getServletPath();
+        if (StringUtils.hasText(servletPath)) {
+            return servletPath;
+        }
+        String requestUri = request.getRequestURI();
+        String contextPath = request.getContextPath();
+        return StringUtils.hasText(contextPath) && requestUri.startsWith(contextPath)
+                ? requestUri.substring(contextPath.length()) : requestUri;
     }
 
     @Override
