@@ -11,6 +11,8 @@ import java.util.Optional;
 
 public interface IndexJobStore {
     IndexJob admit(RepositoryId repositoryId, RepositoryRevision revision, boolean rebuild);
+    IndexJob admitRebuild(RepositoryId repositoryId, RepositoryRevision revision,
+                          PublishedGenerationPointer expectedCurrent);
     IndexJob admitEnsure(RepositoryId repositoryId, RepositoryRevision revision);
     IndexJob admitRollback(RepositoryId repositoryId, PublishedGenerationPointer expectedCurrent,
                            PublishedGenerationPointer expectedRollback);
@@ -25,7 +27,7 @@ public interface IndexJobStore {
     void recoverRevokedClaims(RepositoryId repositoryId);
     Optional<IndexJob> reconcileCommitted(RepositoryId repositoryId);
     Optional<RepositoryRevision> currentRevision(RepositoryId repositoryId);
-    Optional<PublishedGenerationPointer> currentPointer(RepositoryId repositoryId);
+    Optional<IndexPublicationState> publicationState(RepositoryId repositoryId);
     Optional<RollbackGenerationCommand> rollbackCommand(IndexJob job);
     Optional<IndexPublicationIntent> prepareBuildPublication(IndexJob job, ManifestDigest sealedManifestDigest);
     Optional<IndexPublicationIntent> publicationIntent(IndexJobId jobId);

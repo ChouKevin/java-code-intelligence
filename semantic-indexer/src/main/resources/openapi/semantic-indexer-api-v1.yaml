@@ -8,6 +8,15 @@ info:
 security:
   - indexerAdminToken: []
 paths:
+  /index/repositories/{repoId}/publication:
+    get:
+      operationId: getRepositoryPublication
+      parameters: [ { $ref: '#/components/parameters/RepositoryId' } ]
+      responses:
+        '200': { $ref: '#/components/responses/IndexPublication' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/RepositoryNotFound' }
   /index/repositories/{repoId}/jobs/{jobId}:
     get:
       operationId: getRepositoryIndexJob
@@ -126,6 +135,11 @@ components:
       content:
         application/json:
           schema: { $ref: '#/components/schemas/IndexJobStatusResponse' }
+    IndexPublication:
+      description: Current and bounded rollback pointers from one repository coordinator document.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/IndexPublicationResponse' }
     Unauthorized:
       description: Missing or invalid Indexer-admin credential.
       content:
@@ -192,6 +206,17 @@ components:
         currentPointer:
           allOf: [{ $ref: '#/components/schemas/GenerationPointer' }]
           nullable: true
+    IndexPublicationResponse:
+      type: object
+      additionalProperties: false
+      required: [currentPointer, rollbackPointer]
+      properties:
+        currentPointer:
+          allOf: [{ $ref: '#/components/schemas/GenerationPointer' }]
+          nullable: true
+        rollbackPointer:
+          allOf: [{ $ref: '#/components/schemas/GenerationPointer' }]
+          nullable: true
     ApiError:
       type: object
       additionalProperties: false
@@ -217,8 +242,10 @@ components:
     RebuildRequest:
       type: object
       additionalProperties: false
-      required: [authorizeIncompatibleSchema]
-      properties: { authorizeIncompatibleSchema: { type: boolean } }
+      required: [authorizeIncompatibleSchema, expectedCurrent]
+      properties:
+        authorizeIncompatibleSchema: { type: boolean }
+        expectedCurrent: { $ref: '#/components/schemas/GenerationPointer' }
     GenerationPointer:
       type: object
       additionalProperties: false

@@ -3,6 +3,7 @@ package com.java.semantic.indexer.api;
 import com.java.semantic.indexer.job.IndexJob;
 import com.java.semantic.indexer.job.IndexJobId;
 import com.java.semantic.indexer.job.IndexJobPhase;
+import com.java.semantic.indexer.job.IndexPublicationState;
 import com.java.semantic.indexer.job.IndexRequestService;
 import com.java.semantic.model.index.GenerationId;
 import com.java.semantic.model.index.ManifestDigest;
@@ -42,17 +43,18 @@ class IndexRepositoryControllerTest {
         IndexRequestService service = mock(IndexRequestService.class);
         RepositoryId repositoryId = RepositoryId.of("orders");
         IndexJob job = job("c");
-        when(service.sync(repositoryId, Optional.of("main"))).thenReturn(job);
-        when(service.checkout(repositoryId, "c".repeat(40))).thenReturn(job);
-        when(service.rebuild(repositoryId, true)).thenReturn(job);
         PublishedGenerationPointer current = pointer("a", "g-current", "1", "old-current");
         PublishedGenerationPointer rollback = pointer("b", "g-rollback", "2", "old-rollback");
+        when(service.sync(repositoryId, Optional.of("main"))).thenReturn(job);
+        when(service.checkout(repositoryId, "c".repeat(40))).thenReturn(job);
+        when(service.rebuild(repositoryId, true, current)).thenReturn(job);
         when(service.rollback(repositoryId, current, rollback)).thenReturn(job);
         IndexRepositoryController controller = new IndexRepositoryController(service);
 
         assertThat(controller.sync("orders", new SyncIndexRequest("main")).getStatusCode()).isEqualTo(HttpStatus.ACCEPTED);
         assertThat(controller.checkout("orders", new CheckoutIndexRequest("c".repeat(40))).getStatusCode()).isEqualTo(HttpStatus.ACCEPTED);
-        assertThat(controller.rebuild("orders", new RebuildIndexRequest(true)).getStatusCode()).isEqualTo(HttpStatus.ACCEPTED);
+        assertThat(controller.rebuild("orders", new RebuildIndexRequest(true, requestPointer(current))).getStatusCode())
+                .isEqualTo(HttpStatus.ACCEPTED);
         assertThat(controller.rollback("orders", request(current, rollback)).getStatusCode()).isEqualTo(HttpStatus.ACCEPTED);
     }
 
@@ -78,6 +80,26 @@ class IndexRepositoryControllerTest {
         assertThatThrownBy(() -> controller.job("payments", job.id().value()))
                 .isInstanceOf(org.springframework.web.server.ResponseStatusException.class)
                 .hasMessageContaining("index job was not found");
+    }
+
+    @Test
+    void publication_returns_the_exact_current_and_bounded_rollback_pointers() {
+        IndexRequestService service = mock(IndexRequestService.class);
+        RepositoryId repositoryId = RepositoryId.of("orders");
+        PublishedGenerationPointer current = pointer("e", "g-current", "3", "published-current");
+        PublishedGenerationPointer rollback = pointer("f", "g-rollback", "4", "published-rollback");
+        when(service.publicationState(repositoryId)).thenReturn(Optional.of(
+                new IndexPublicationState(Optional.of(current), Optional.of(rollback))));
+        IndexRepositoryController controller = new IndexRepositoryController(service);
+
+        ResponseEntity<IndexRepositoryController.IndexPublicationResponse> response = controller.publication("orders");
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(response.getBody().currentPointer().committedJobId()).isEqualTo("published-current");
+        assertThat(response.getBody().rollbackPointer().committedJobId()).isEqualTo("published-rollback");
+        assertThatThrownBy(() -> controller.publication("missing"))
+                .isInstanceOf(org.springframework.web.server.ResponseStatusException.class)
+                .hasMessageContaining("repository publication was not found");
     }
 
     private static RollbackIndexRequest request(PublishedGenerationPointer current, PublishedGenerationPointer rollback) {

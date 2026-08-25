@@ -342,6 +342,47 @@ class MongoIndexJobStoreIT {
     }
 
     @Test
+    void publication_state_returns_current_and_bounded_rollback_together() {
+        try (MongoDBContainer container = new MongoDBContainer("mongo:8.0.4")) {
+            container.start();
+            MongoTemplate template = new MongoTemplate(com.mongodb.client.MongoClients.create(container.getConnectionString()), "semantic");
+            new IndexSchemaBootstrap(template).bootstrap();
+            MongoIndexJobStore store = new MongoIndexJobStore(template);
+            PublishedGenerationPointer previous = pointer("a", "g-previous", "job-previous");
+            PublishedGenerationPointer current = pointer("b", "g-current", "job-current");
+            seedRepositoryWithRollback(template, "orders", current, previous);
+
+            IndexPublicationState state = store.publicationState(RepositoryId.of("orders")).orElseThrow();
+
+            assertThat(state.currentPointer()).contains(current);
+            assertThat(state.rollbackPointer()).contains(previous);
+            assertThat(store.publicationState(RepositoryId.of("missing"))).isEmpty();
+        }
+    }
+
+    @Test
+    void rebuild_claim_fails_terminally_when_the_recorded_parent_changed_after_admission() {
+        try (MongoDBContainer container = new MongoDBContainer("mongo:8.0.4")) {
+            container.start();
+            MongoTemplate template = new MongoTemplate(com.mongodb.client.MongoClients.create(container.getConnectionString()), "semantic");
+            new IndexSchemaBootstrap(template).bootstrap();
+            MongoIndexJobStore store = new MongoIndexJobStore(template);
+            PublishedGenerationPointer recorded = pointer("a", "g-recorded", "job-recorded");
+            PublishedGenerationPointer changed = pointer("b", "g-changed", "job-changed");
+            seedPublished(template, "orders", recorded, true, IndexSchemaContract.SCHEMA_VERSION);
+            IndexJob rebuild = store.admitRebuild(RepositoryId.of("orders"), recorded.revision(), recorded);
+            template.getCollection(IndexCollections.REPOSITORIES).updateOne(new org.bson.Document("repoId", "orders"),
+                    new org.bson.Document("$set", pointerDocument(changed)));
+
+            assertThat(store.claim(rebuild.id(), "worker-rebuild", Duration.ofSeconds(60))).isEmpty();
+            IndexJob failed = store.find(rebuild.id()).orElseThrow();
+            assertThat(failed.active()).isFalse();
+            assertThat(failed.phase()).isEqualTo(IndexJobPhase.FAILED);
+            assertThat(failed.failureCategory()).contains(IndexFailureCategory.PUBLICATION_CONFLICT);
+        }
+    }
+
+    @Test
     void renews_the_exact_repository_claim_then_expires_and_retries_with_a_higher_fence() {
         try (MongoDBContainer container = new MongoDBContainer("mongo:8.0.4")) {
             container.start();

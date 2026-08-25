@@ -21,7 +21,7 @@ class IndexAdminSecurityTest {
 
         String[] paths = {"/index/repositories/orders/ensure", "/index/repositories/orders/sync",
                 "/index/repositories/orders/checkout", "/index/repositories/orders/rebuild",
-                "/index/repositories/orders/rollback"};
+                "/index/repositories/orders/rollback", "/index/repositories/orders/publication"};
         for (String path : paths) {
             MockHttpServletRequest absentTokenRequest = new MockHttpServletRequest(methodFor(path), path);
             MockHttpServletResponse absentTokenResponse = new MockHttpServletResponse();
@@ -65,7 +65,7 @@ class IndexAdminSecurityTest {
     }
 
     private static String methodFor(String path) {
-        return "POST";
+        return path.endsWith("/publication") ? "GET" : "POST";
     }
 
     @Test

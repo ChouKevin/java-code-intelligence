@@ -73,6 +73,23 @@ public final class MongoIndexJobStore implements IndexJobStore {
 
     @Override
     public IndexJob admit(RepositoryId repositoryId, RepositoryRevision revision, boolean rebuild) {
+        return admitBuild(repositoryId, revision, rebuild, Optional.empty());
+    }
+
+    @Override
+    public IndexJob admitRebuild(RepositoryId repositoryId, RepositoryRevision revision,
+                                 PublishedGenerationPointer expectedCurrent) {
+        Objects.requireNonNull(expectedCurrent, "expected current pointer is required");
+        Document current = template.getCollection(IndexCollections.REPOSITORIES)
+                .find(currentPointerFilter(repositoryId, expectedCurrent)).first();
+        if (Objects.isNull(current)) {
+            throw new PublicationConflictException();
+        }
+        return admitBuild(repositoryId, revision, true, Optional.of(expectedCurrent));
+    }
+
+    private IndexJob admitBuild(RepositoryId repositoryId, RepositoryRevision revision, boolean rebuild,
+                                Optional<PublishedGenerationPointer> expectedCurrent) {
         IndexJobId jobId = IndexJobId.create();
         long generation = nextGeneration(repositoryId);
         GenerationId generationId = new GenerationId("g-" + jobId.value().replace("-", ""));
@@ -86,6 +103,7 @@ public final class MongoIndexJobStore implements IndexJobStore {
                 .append("rebuild", rebuild)
                 .append("operation", IndexJobOperation.BUILD.name())
                 .append("createdAt", new Date());
+        expectedCurrent.ifPresent(pointer -> document.append("expectedParent", pointerDocument(pointer)));
         try {
             template.getCollection(IndexCollections.INDEX_JOBS).insertOne(document);
         } catch (DuplicateKeyException exception) {
@@ -150,8 +168,7 @@ public final class MongoIndexJobStore implements IndexJobStore {
 
     @Override
     public Optional<IndexJob> find(IndexJobId jobId) {
-        Document document = template.getCollection(IndexCollections.INDEX_JOBS)
-                .find(new Document(JOB_ID, jobId.value())).first();
+        Document document = findDocument(jobId);
         return Optional.ofNullable(document).map(MongoIndexJobStore::from);
     }
 
@@ -160,10 +177,14 @@ public final class MongoIndexJobStore implements IndexJobStore {
         Objects.requireNonNull(jobId, "job id is required");
         Objects.requireNonNull(workerId, "worker id is required");
         requirePositive(claimLifetime, "claim lifetime");
-        IndexJob job = find(jobId).orElse(null); // cs-allow
+        Document jobDocument = findDocument(jobId);
+        IndexJob job = Optional.ofNullable(jobDocument).map(MongoIndexJobStore::from).orElse(null); // cs-allow
         if (Objects.isNull(job) || !job.active()) {
             return Optional.empty();
         }
+        Optional<PublishedGenerationPointer> expectedParent = Optional.ofNullable(
+                Objects.requireNonNull(jobDocument, "active job document is required").get("expectedParent", Document.class))
+                .map(MongoIndexJobStore::pointerFrom);
         AggregationUpdate claimUpdate = AggregationUpdate.update()
                 .set("fence").toValue(new Document("$add", java.util.List.of(
                         new Document("$ifNull", java.util.List.of("$fence", 0)), 1)))
@@ -174,13 +195,16 @@ public final class MongoIndexJobStore implements IndexJobStore {
         Document repository;
         try {
             repository = template.findAndModify(
-                    new BasicQuery(new Document(REPO_ID, job.repositoryId().value())
-                            .append("activeJobId", new Document("$exists", false))),
+                    new BasicQuery(repositoryAdmissionFilter(job, expectedParent)),
                     claimUpdate, FindAndModifyOptions.options().upsert(true).returnNew(true), Document.class, IndexCollections.REPOSITORIES);
         } catch (DuplicateKeyException | MongoWriteException | org.springframework.dao.DuplicateKeyException exception) {
-            return Optional.empty();
+            repository = null; // cs-allow
         }
         if (Objects.isNull(repository)) {
+            if (expectedParent.isPresent() && Objects.isNull(template.getCollection(IndexCollections.REPOSITORIES)
+                    .find(currentPointerFilter(job.repositoryId(), expectedParent.orElseThrow())).first())) {
+                failAcceptedJob(job, IndexFailureCategory.PUBLICATION_CONFLICT);
+            }
             return Optional.empty();
         }
         Number fenceValue = repository.get("fence", Number.class);
@@ -336,11 +360,12 @@ public final class MongoIndexJobStore implements IndexJobStore {
     }
 
     @Override
-    public Optional<PublishedGenerationPointer> currentPointer(RepositoryId repositoryId) {
+    public Optional<IndexPublicationState> publicationState(RepositoryId repositoryId) {
         Objects.requireNonNull(repositoryId, "repository id is required");
         Document repository = template.getCollection(IndexCollections.REPOSITORIES)
                 .find(new Document(REPO_ID, repositoryId.value())).first();
-        return Optional.ofNullable(repository).flatMap(MongoIndexJobStore::pointerFromRepository);
+        return Optional.ofNullable(repository).map(value -> new IndexPublicationState(pointerFromRepository(value),
+                Optional.ofNullable(value.get("rollbackPointer", Document.class)).map(MongoIndexJobStore::pointerFrom)));
     }
 
     @Override
@@ -451,6 +476,32 @@ public final class MongoIndexJobStore implements IndexJobStore {
     private static Document repositoryClaim(IndexJob job, String workerId, long fence) {
         return new Document(REPO_ID, job.repositoryId().value()).append("activeJobId", job.id().value())
                 .append("activeWorkerId", workerId).append("activeGenerationId", job.generationId().value()).append("fence", fence);
+    }
+
+    private static Document repositoryAdmissionFilter(IndexJob job,
+                                                      Optional<PublishedGenerationPointer> expectedParent) {
+        Document filter = new Document(REPO_ID, job.repositoryId().value())
+                .append("activeJobId", new Document("$exists", false));
+        expectedParent.ifPresent(pointer -> pointerDocument(pointer).forEach(filter::append));
+        return filter;
+    }
+
+    private static Document currentPointerFilter(RepositoryId repositoryId, PublishedGenerationPointer pointer) {
+        Document filter = pointerDocument(pointer);
+        filter.put(REPO_ID, repositoryId.value());
+        return filter;
+    }
+
+    private Document findDocument(IndexJobId jobId) {
+        return template.getCollection(IndexCollections.INDEX_JOBS)
+                .find(new Document(JOB_ID, jobId.value())).first();
+    }
+
+    private void failAcceptedJob(IndexJob job, IndexFailureCategory category) {
+        template.updateFirst(new BasicQuery(new Document(JOB_ID, job.id().value()).append(ACTIVE, true)
+                        .append("phase", IndexJobPhase.ACCEPTED.name())),
+                new Update().set(ACTIVE, false).set("phase", IndexJobPhase.FAILED.name())
+                        .set("failureCategory", category.name()), IndexCollections.INDEX_JOBS);
     }
 
     private static Document repositoryWithoutAuthorityForUncommittedJob(IndexJob job) {

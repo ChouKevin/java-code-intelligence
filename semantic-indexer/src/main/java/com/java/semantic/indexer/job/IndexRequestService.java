@@ -35,13 +35,17 @@ public final class IndexRequestService {
         return admit(repositoryId, source.checkout(repositoryId, revision), false);
     }
 
-    public IndexJob rebuild(RepositoryId repositoryId, boolean authorizeIncompatibleSchema) {
+    public IndexJob rebuild(RepositoryId repositoryId, boolean authorizeIncompatibleSchema,
+                            PublishedGenerationPointer expectedCurrent) {
         if (!authorizeIncompatibleSchema) {
             throw new IllegalArgumentException("incompatible schema rebuild requires explicit authorization");
         }
+        Objects.requireNonNull(expectedCurrent, "expected current pointer is required");
         RepositoryRevision revision = jobs.currentRevision(repositoryId)
                 .orElseThrow(() -> new RepositoryNotFoundException(repositoryId));
-        return admit(repositoryId, revision, true);
+        jobs.reconcileCommitted(repositoryId);
+        jobs.recoverRevokedClaims(repositoryId);
+        return jobs.admitRebuild(repositoryId, revision, expectedCurrent);
     }
 
     public Optional<IndexJob> job(IndexJobId jobId) {
@@ -49,7 +53,11 @@ public final class IndexRequestService {
     }
 
     public Optional<PublishedGenerationPointer> currentPointer(RepositoryId repositoryId) {
-        return jobs.currentPointer(repositoryId);
+        return jobs.publicationState(repositoryId).flatMap(IndexPublicationState::currentPointer);
+    }
+
+    public Optional<IndexPublicationState> publicationState(RepositoryId repositoryId) {
+        return jobs.publicationState(repositoryId);
     }
 
     public IndexJob rollback(RepositoryId repositoryId, PublishedGenerationPointer expectedCurrent,

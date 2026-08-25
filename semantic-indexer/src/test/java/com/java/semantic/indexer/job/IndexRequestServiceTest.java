@@ -50,15 +50,15 @@ class IndexRequestServiceTest {
         when(source.checkout(repositoryId, revision.value())).thenReturn(revision);
         when(store.currentRevision(repositoryId)).thenReturn(Optional.of(revision));
         when(store.admit(repositoryId, revision, false)).thenReturn(job);
-        when(store.admit(repositoryId, revision, true)).thenReturn(job);
+        when(store.admitRebuild(repositoryId, revision, current)).thenReturn(job);
         when(store.admitRollback(repositoryId, current, rollback)).thenReturn(job);
 
         IndexRequestService service = new IndexRequestService(source, store);
         assertThat(service.sync(repositoryId, Optional.of("main"))).isEqualTo(job);
         assertThat(service.checkout(repositoryId, revision.value())).isEqualTo(job);
-        assertThat(service.rebuild(repositoryId, true)).isEqualTo(job);
+        assertThat(service.rebuild(repositoryId, true, current)).isEqualTo(job);
         assertThat(service.rollback(repositoryId, current, rollback)).isEqualTo(job);
-        verify(store).admit(repositoryId, revision, true);
+        verify(store).admitRebuild(repositoryId, revision, current);
         verify(store).admitRollback(repositoryId, current, rollback);
     }
 

@@ -2,6 +2,7 @@ package com.java.semantic.indexer.api;
 
 import com.java.semantic.indexer.job.IndexJob;
 import com.java.semantic.indexer.job.IndexJobId;
+import com.java.semantic.indexer.job.IndexPublicationState;
 import com.java.semantic.indexer.job.IndexRequestService;
 import com.java.semantic.model.index.PublishedGenerationPointer;
 import com.java.semantic.model.repository.RepositoryId;
@@ -47,9 +48,9 @@ public final class IndexRepositoryController {
     }
 
     @PostMapping("/rebuild")
-    public ResponseEntity<IndexJobResponse> rebuild(@PathVariable String repoId, @RequestBody RebuildIndexRequest request) {
+    public ResponseEntity<IndexJobResponse> rebuild(@PathVariable String repoId, @Valid @RequestBody RebuildIndexRequest request) {
         return accepted(requests.rebuild(RepositoryId.of(repoId), Objects.requireNonNull(request, "rebuild request is required")
-                .authorizeIncompatibleSchema()));
+                .authorizeIncompatibleSchema(), request.expectedCurrent().toPointer()));
     }
 
     @PostMapping("/rollback")
@@ -67,6 +68,14 @@ public final class IndexRepositoryController {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "index job was not found");
         }
         return ResponseEntity.ok(IndexJobStatusResponse.from(job, requests.currentPointer(repositoryId)));
+    }
+
+    @GetMapping("/publication")
+    public ResponseEntity<IndexPublicationResponse> publication(@PathVariable String repoId) {
+        IndexPublicationState state = requests.publicationState(RepositoryId.of(repoId))
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND,
+                        "repository publication was not found"));
+        return ResponseEntity.ok(IndexPublicationResponse.from(state));
     }
 
     private static ResponseEntity<IndexJobResponse> accepted(IndexJob job) {
@@ -97,6 +106,14 @@ public final class IndexRepositoryController {
         static GenerationPointerResponse from(PublishedGenerationPointer pointer) {
             return new GenerationPointerResponse(pointer.revision().value(), pointer.generationId().value(),
                     pointer.manifestDigest().value(), pointer.committedJobId(), pointer.publishedAt());
+        }
+    }
+
+    public record IndexPublicationResponse(GenerationPointerResponse currentPointer,
+                                           GenerationPointerResponse rollbackPointer) {
+        static IndexPublicationResponse from(IndexPublicationState state) {
+            return new IndexPublicationResponse(state.currentPointer().map(GenerationPointerResponse::from).orElse(null), // cs-allow
+                    state.rollbackPointer().map(GenerationPointerResponse::from).orElse(null)); // cs-allow
         }
     }
 }
