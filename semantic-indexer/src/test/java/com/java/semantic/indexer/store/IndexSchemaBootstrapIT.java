@@ -41,6 +41,26 @@ class IndexSchemaBootstrapIT {
     }
 
     @Test
+    void worker_schema_gate_requires_bootstrap_before_projection_generation_and_explains_conflicts() {
+        try (MongoDBContainer container = MongoSchemaTestSupport.container()) {
+            org.springframework.data.mongodb.core.MongoTemplate template = MongoSchemaTestSupport.template(container);
+            MongoGenerationWriter writer = new MongoGenerationWriter(template);
+
+            assertThatThrownBy(writer::verifySchemaBeforeGeneration).isInstanceOf(IndexSchemaMaintenanceRequiredException.class)
+                    .hasMessageContaining("schema-maintenance identity");
+            new IndexSchemaBootstrap(template).bootstrap();
+            assertThatCode(writer::verifySchemaBeforeGeneration).doesNotThrowAnyException();
+
+            template.getCollection("search").dropIndex("search_generation_fact_lookup");
+            template.getCollection("search").createIndex(new Document("unexpected", 1),
+                    new com.mongodb.client.model.IndexOptions().name("search_generation_fact_lookup"));
+            assertThatThrownBy(writer::verifySchemaBeforeGeneration).isInstanceOf(IndexSchemaMaintenanceRequiredException.class)
+                    .hasMessageContaining("conflicting index search.search_generation_fact_lookup")
+                    .hasMessageContaining("schema-maintenance identity");
+        }
+    }
+
+    @Test
     void permits_a_search_row_with_tokens_and_method_parameter_arrays() {
         try (MongoDBContainer container = MongoSchemaTestSupport.container()) {
             org.springframework.data.mongodb.core.MongoTemplate template = MongoSchemaTestSupport.template(container);

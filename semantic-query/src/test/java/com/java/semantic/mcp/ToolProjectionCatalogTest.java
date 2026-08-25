@@ -1,12 +1,15 @@
 package com.java.semantic.mcp;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Tag;
 
 import java.util.List;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.assertj.core.api.Assertions.assertThat;
 
+@Tag("mongo-it")
 class ToolProjectionCatalogTest {
 
     @Test
@@ -39,6 +42,29 @@ class ToolProjectionCatalogTest {
                 .containsExactly(com.java.semantic.model.index.ProjectionName.SEARCH);
         assertThat(requirement("semantic_get_code_fact").projections().orElseThrow().names())
                 .containsExactly(com.java.semantic.model.index.ProjectionName.SEARCH);
+    }
+
+    @Test
+    void rejects_catalog_drift_including_a_new_runtime_tool_without_an_acceptance_case() {
+        List<com.java.semantic.model.query.ToolProjectionRequirement> requirements = ToolProjectionCatalog.requirements();
+        Set<com.java.semantic.model.index.ProjectionName> produced = java.util.EnumSet.allOf(com.java.semantic.model.index.ProjectionName.class);
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> ToolProjectionCatalog.validate(requirements, produced, produced,
+                        List.of("semantic_search_code_facts", "semantic_new_tool"), List.of("semantic_search_code_facts")))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("every runtime tool must have a projection requirement");
+        List<com.java.semantic.model.query.ToolProjectionRequirement> expandedRequirements = new java.util.ArrayList<>(requirements);
+        expandedRequirements.add(com.java.semantic.model.query.ToolProjectionRequirement.metadata("semantic_new_tool"));
+        List<String> expandedRuntime = new java.util.ArrayList<>(ToolProjectionCatalog.toolNames());
+        expandedRuntime.add("semantic_new_tool");
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> ToolProjectionCatalog.validate(expandedRequirements, produced, produced,
+                        expandedRuntime, ToolProjectionCatalog.toolNames()))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("every runtime MCP tool must have exactly one acceptance case");
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> ToolProjectionCatalog.validate(requirements, produced,
+                        Set.of(com.java.semantic.model.index.ProjectionName.SEARCH), ToolProjectionCatalog.toolNames(), ToolProjectionCatalog.toolNames()))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("every produced projection requires validator and count coverage");
     }
 
     private static com.java.semantic.model.query.ToolProjectionRequirement requirement(String toolName) {

@@ -30,6 +30,11 @@ public final class MongoGenerationWriter {
         this.batchRegistrationGate = Objects.requireNonNull(batchRegistrationGate, "batch registration gate is required");
     }
 
+    /** Fails before checkout or exporter invocation when an administrator has not installed the current contract. */
+    public void verifySchemaBeforeGeneration() {
+        new MongoIndexSchemaReadinessVerifier(template).verify();
+    }
+
     public void insertManifest(Document manifest) {
         try {
             insertImmutable("generation_manifests", manifest, List.of("repoId", "generationId"));

@@ -49,8 +49,9 @@ public final class IndexBuildService {
     public void build(IndexJob job, LeaseGuard guard) {
         Objects.requireNonNull(job, "job is required");
         Objects.requireNonNull(guard, "lease guard is required");
-        MongoGenerationWriter.GenerationLease lease = lease(job);
         try {
+            generationWriter.verifySchemaBeforeGeneration();
+            MongoGenerationWriter.GenerationLease lease = lease(job);
             guard.requireHeld();
             CheckedOutRepository checkout = checkedOutRepository.checkout(job);
             if (!job.revision().equals(checkout.revision())) {
@@ -113,6 +114,9 @@ public final class IndexBuildService {
     }
 
     private static IndexFailureCategory category(RuntimeException exception) {
+        if (exception instanceof com.java.semantic.indexer.store.IndexSchemaMaintenanceRequiredException) {
+            return IndexFailureCategory.SCHEMA_REBUILD_REQUIRED;
+        }
         if (exception instanceof GenerationValidationException) {
             return IndexFailureCategory.VALIDATION_FAILED;
         }

@@ -1,6 +1,7 @@
 package com.java.semantic.mcp;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Tag;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -14,6 +15,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.mockito.ArgumentMatchers.any;
 
+@Tag("mongo-it")
 class QueryMcpToolCatalogConfigurationTest {
 
     @Test

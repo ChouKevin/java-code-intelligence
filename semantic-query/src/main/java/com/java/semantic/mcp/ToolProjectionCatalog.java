@@ -34,16 +34,8 @@ public final class ToolProjectionCatalog {
     }
 
     static {
-        Set<ProjectionName> current = IndexSchemaContract.requiredProjectionVersions().keySet().stream()
-                .map(ProjectionName::valueOf)
-                .collect(java.util.stream.Collectors.toUnmodifiableSet());
-        for (ToolProjectionRequirement requirement : REQUIREMENTS) {
-            requirement.projections().ifPresent(projections -> {
-                if (!current.containsAll(projections.names())) {
-                    throw new IllegalStateException("tool requires a projection outside the current index contract");
-                }
-            });
-        }
+        validate(REQUIREMENTS, java.util.EnumSet.allOf(ProjectionName.class), IndexSchemaContract.requiredProjectionVersions().keySet().stream()
+                .map(ProjectionName::valueOf).collect(java.util.stream.Collectors.toUnmodifiableSet()), toolNames(), toolNames());
     }
 
     public static List<ToolProjectionRequirement> requirements() {
@@ -52,6 +44,33 @@ public final class ToolProjectionCatalog {
 
     public static List<String> toolNames() {
         return REQUIREMENTS.stream().map(ToolProjectionRequirement::toolName).toList();
+    }
+
+    /** Validates the finite tool/data contract; tests pass the independently loaded runtime and acceptance sets. */
+    static void validate(List<ToolProjectionRequirement> requirements, Set<ProjectionName> produced,
+                         Set<ProjectionName> validatorAndCountCoverage, List<String> runtimeTools,
+                         List<String> acceptanceTools) {
+        Set<String> requirementTools = requirements.stream().map(ToolProjectionRequirement::toolName)
+                .collect(java.util.stream.Collectors.toUnmodifiableSet());
+        if (requirementTools.size() != requirements.size()) {
+            throw new IllegalStateException("every runtime tool must have exactly one projection requirement");
+        }
+        if (!requirementTools.equals(Set.copyOf(runtimeTools))) {
+            throw new IllegalStateException("every runtime tool must have a projection requirement");
+        }
+        if (!Set.copyOf(runtimeTools).equals(Set.copyOf(acceptanceTools))) {
+            throw new IllegalStateException("every runtime MCP tool must have exactly one acceptance case");
+        }
+        for (ToolProjectionRequirement requirement : requirements) {
+            requirement.projections().ifPresent(projections -> {
+                if (!produced.containsAll(projections.names())) {
+                    throw new IllegalStateException("tool requires a projection not produced by the Indexer");
+                }
+            });
+        }
+        if (!validatorAndCountCoverage.containsAll(produced)) {
+            throw new IllegalStateException("every produced projection requires validator and count coverage");
+        }
     }
 
     private static ProjectionRequirements projections(ProjectionName first, ProjectionName second) {

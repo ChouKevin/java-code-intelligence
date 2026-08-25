@@ -8,6 +8,13 @@ import com.java.semantic.model.index.GenerationId;
 import com.java.semantic.model.index.IndexCollections;
 import com.java.semantic.model.index.GenerationWriteState;
 import com.java.semantic.model.index.RelationDocument;
+import com.java.semantic.model.index.EntryPointDocument;
+import com.java.semantic.model.index.SearchDocument;
+import com.java.semantic.model.index.SymbolDocument;
+import com.java.semantic.model.codefact.CodeFactKind;
+import com.java.semantic.model.codefact.EntryPointKind;
+import com.java.semantic.model.codefact.MethodTarget;
+import com.java.semantic.model.codefact.SourceTypeIdentity;
 import com.java.semantic.model.codefact.ExternalTarget;
 import com.java.semantic.model.codefact.RelationKind;
 import com.java.semantic.model.codefact.RelationTarget;
@@ -21,15 +28,34 @@ import com.java.semantic.semantic.adapter.jdtls.JdtLsProcessFactory;
 import com.java.semantic.semantic.adapter.jdtls.JdtLsReadinessProbe;
 import com.java.semantic.semantic.adapter.jdtls.JdtWorkspaceLifecycleMetrics;
 import com.java.semantic.semantic.adapter.jdtls.Lsp4jJavaSemanticService;
+import com.java.semantic.mcp.QueryMcpToolCatalogConfiguration;
+import com.java.semantic.mcp.ToolProjectionCatalog;
+import com.java.semantic.model.query.ToolProjectionRequirement;
+import com.java.semantic.query.application.CodeFactReadService;
+import com.java.semantic.query.application.CodeFactSearchService;
+import com.java.semantic.query.application.CurrentGenerationSelector;
+import com.java.semantic.query.application.CurrentRepositoryQueryService;
+import com.java.semantic.query.application.CurrentSourceQueryService;
+import com.java.semantic.query.application.PublishedCallGraphService;
+import com.java.semantic.query.application.PublishedDiscoveryQueryService;
+import com.java.semantic.query.application.PublishedEntryPointQueryService;
+import com.java.semantic.query.application.PublishedRelationQueryService;
+import com.java.semantic.query.application.PublishedSourceToolService;
+import com.java.semantic.query.config.ConfiguredReadPolicy;
+import com.java.semantic.query.config.ReadPolicyProperties;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.Date;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Stream;
 import org.bson.Document;
-import org.testcontainers.containers.MongoDBContainer;
+import org.testcontainers.containers.GenericContainer;
+import org.testcontainers.utility.DockerImageName;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -51,14 +77,17 @@ class FixtureFullIndexJdtLsIT {
             throws IOException {
         Path jdtLsHome = requiredJdtLsHome();
         DefaultJdtWorkspaceManager manager = manager(jdtLsHome);
-        try (MongoDBContainer mongo = new MongoDBContainer("mongo:7.0.5")) {
+        try (GenericContainer<?> mongo = new GenericContainer<>(DockerImageName.parse("mongo:8.0.4")).withExposedPorts(27017)) {
             mongo.start();
             org.springframework.data.mongodb.core.MongoTemplate template = new org.springframework.data.mongodb.core.MongoTemplate(
-                    com.mongodb.client.MongoClients.create(mongo.getConnectionString()), "fixture_index");
+                    com.mongodb.client.MongoClients.create("mongodb://" + mongo.getHost() + ":" + mongo.getMappedPort(27017)), "fixture_index");
             new IndexSchemaBootstrap(template).bootstrap();
             List<SourceIndexBatch> payment = exportAndPersist(manager, template, PAYMENT_FIXTURE, "payment-service", "a".repeat(40), "payment-generation");
             List<SourceIndexBatch> video = exportAndPersist(manager, template, VIDEO_FIXTURE, "video-service", "b".repeat(40), "video-generation");
-            exportAndPersist(manager, template, ORDER_FIXTURE, "order-service", "c".repeat(40), "order-generation");
+            List<SourceIndexBatch> order = exportAndPersist(manager, template, ORDER_FIXTURE, "order-service", "c".repeat(40), "order-generation");
+            publish(template, "payment-service", "a".repeat(40), "payment-generation");
+            publish(template, "video-service", "b".repeat(40), "video-generation");
+            publish(template, "order-service", "c".repeat(40), "order-generation");
 
             assertThat(video).flatMap(SourceIndexBatch::symbols).extracting(document -> document.name())
                     .contains("VideoFormat", "MP4", "WEBM", "MOV", "upload");
@@ -116,9 +145,120 @@ class FixtureFullIndexJdtLsIT {
                     });
             assertThat(template.getCollection(IndexCollections.SEARCH).find(new Document()).into(new java.util.ArrayList<>()))
                     .allSatisfy(document -> assertThat(document.getString("sourcePath")).isNotBlank());
+            executes_every_registered_query_case_against_the_exact_published_fixture_generations(template, payment, video, order);
         } finally {
             manager.shutdownAll();
         }
+    }
+
+    private static void publish(org.springframework.data.mongodb.core.MongoTemplate template, String repositoryId,
+                                String revision, String generationId) {
+        String digest = revision.substring(0, 1).repeat(64);
+        template.getCollection(IndexCollections.GENERATION_MANIFESTS).updateOne(
+                new Document("repoId", repositoryId).append("generationId", generationId), new Document("$set",
+                        new Document("sourceRevision", revision).append("identityDigest", digest)
+                                .append("schemaVersion", com.java.semantic.model.index.IndexSchemaContract.SCHEMA_VERSION)
+                                .append("writeState", GenerationWriteState.SEALED_VALID.name())
+                                .append("projectionVersions", com.java.semantic.model.index.IndexSchemaContract.requiredProjectionVersions().entrySet().stream()
+                                        .map(entry -> new Document("name", entry.getKey()).append("version", entry.getValue())).toList())));
+        template.getCollection(IndexCollections.REPOSITORIES).updateOne(new Document("repoId", repositoryId), new Document("$set",
+                new Document("revision", revision).append("generationId", generationId).append("manifestDigest", digest)
+                        .append("committedJobId", generationId + "-job").append("publishedAt", new Date())));
+    }
+
+    private static void executes_every_registered_query_case_against_the_exact_published_fixture_generations(
+            org.springframework.data.mongodb.core.MongoTemplate template, List<SourceIndexBatch> payment,
+            List<SourceIndexBatch> video, List<SourceIndexBatch> order) {
+        Duration timeout = Duration.ofSeconds(2);
+        ConfiguredReadPolicy policy = new ConfiguredReadPolicy(new ReadPolicyProperties(List.of(), List.of(), List.of(), List.of()));
+        CurrentGenerationSelector selector = new CurrentGenerationSelector(template, policy, timeout);
+        CodeFactReadService codeFacts = new CodeFactReadService(template, selector, timeout);
+        CurrentSourceQueryService sources = new CurrentSourceQueryService(template, selector, timeout);
+        CurrentRepositoryQueryService repositories = new CurrentRepositoryQueryService(selector);
+        CodeFactSearchService search = new CodeFactSearchService(template, selector, timeout);
+        PublishedCallGraphService callGraphs = new PublishedCallGraphService(template, selector, timeout);
+        PublishedDiscoveryQueryService discovery = new PublishedDiscoveryQueryService(template, selector, timeout);
+        PublishedEntryPointQueryService entryPoints = new PublishedEntryPointQueryService(template, selector, timeout);
+        PublishedRelationQueryService relations = new PublishedRelationQueryService(template, selector, timeout);
+        PublishedSourceToolService sourceTools = new PublishedSourceToolService(sources, codeFacts);
+        MethodTarget paymentMethod = method(payment);
+        SourceTypeIdentity paymentType = paymentMethod.sourceType();
+        SearchDocument paymentSearch = search(payment);
+        EntryPointDocument videoRoute = httpRoute(video);
+
+        assertThat(repositories.listRepositories()).extracting(current -> current.repositoryId().value())
+                .containsExactlyInAnyOrder("payment-service", "video-service", "order-service");
+        for (ToolProjectionRequirement requirement : ToolProjectionCatalog.requirements()) {
+            Object response = QueryMcpToolCatalogConfiguration.execute(requirement,
+                    arguments(requirement.toolName(), paymentMethod, paymentType, paymentSearch, videoRoute), repositories, search,
+                    codeFacts, callGraphs, discovery, entryPoints, relations, sourceTools);
+            if (requirement.projections().isPresent()) {
+                assertThat(response).isInstanceOf(QueryMcpToolCatalogConfiguration.GenerationBackedResponse.class);
+                QueryMcpToolCatalogConfiguration.GenerationBackedResponse generation =
+                        (QueryMcpToolCatalogConfiguration.GenerationBackedResponse) response;
+                assertThat(generation.repositoryId()).isIn("payment-service", "video-service");
+                assertThat(generation.revision()).hasSize(40);
+                assertThat(generation.result()).isNotNull();
+            } else {
+                assertThat(response).isNotNull();
+            }
+        }
+    }
+
+    private static Map<String, Object> arguments(String toolName, MethodTarget paymentMethod, SourceTypeIdentity paymentType,
+                                                  SearchDocument paymentSearch, EntryPointDocument videoRoute) {
+        Map<String, Object> payment = new LinkedHashMap<>();
+        payment.put("repositoryId", "payment-service");
+        payment.put("revision", "a".repeat(40));
+        payment.put("packageName", paymentType.javaType().packageName());
+        payment.put("className", paymentType.javaType().className());
+        payment.put("sourceFile", paymentType.sourceFile());
+        payment.put("methodName", paymentMethod.methodName());
+        payment.put("parameterTypes", paymentMethod.parameterTypes());
+        return switch (toolName) {
+            case "semantic_list_repositories" -> Map.of();
+            case "semantic_get_repository" -> Map.of("repositoryId", "order-service");
+            case "semantic_search_code_facts" -> Map.of("repositoryId", "payment-service", "revision", "a".repeat(40),
+                    "query", paymentSearch.normalizedTokens().getFirst(), "kinds", List.of(paymentSearch.kind().name()));
+            case "semantic_get_code_fact" -> Map.of("repositoryId", "payment-service", "revision", "a".repeat(40),
+                    "factId", paymentSearch.factId().value());
+            case "semantic_analyze_incoming_call_graph", "semantic_analyze_outgoing_call_graph",
+                    "semantic_discover_method_implementations", "semantic_find_internal_references",
+                    "semantic_get_evidence_source", "semantic_get_method_source" -> Map.copyOf(payment);
+            case "semantic_discover_event_listeners" -> Map.of("repositoryId", "payment-service", "revision", "a".repeat(40),
+                    "eventType", "com.example.missing.NoEvent");
+            case "semantic_discover_type_members" -> Map.of("repositoryId", "payment-service", "revision", "a".repeat(40),
+                    "packageName", paymentType.javaType().packageName(), "className", paymentType.javaType().className(),
+                    "sourceFile", paymentType.sourceFile(), "kinds", List.of(CodeFactKind.METHOD.name()));
+            case "semantic_get_source_segment" -> Map.of("repositoryId", "payment-service", "revision", "a".repeat(40),
+                    "packageName", paymentType.javaType().packageName(), "className", paymentType.javaType().className(),
+                    "sourceFile", paymentType.sourceFile(), "startLine", 0, "startCharacter", 0, "endLine", 0, "endCharacter", 0);
+            case "semantic_lookup_api_routes", "semantic_suggest_api_routes" -> Map.of("repositoryId", "video-service", "revision", "b".repeat(40),
+                    "httpMethod", videoRoute.trigger().httpMethod().orElseThrow(), "path", videoRoute.trigger().httpPath().orElseThrow());
+            case "semantic_resolve_source_symbol" -> Map.of("repositoryId", "payment-service", "revision", "a".repeat(40),
+                    "packageName", paymentType.javaType().packageName(), "className", paymentType.javaType().className(),
+                    "sourceFile", paymentType.sourceFile(), "symbol", paymentMethod.methodName());
+            case "semantic_list_entry_points" -> Map.of("repositoryId", "video-service", "revision", "b".repeat(40));
+            default -> throw new IllegalStateException("missing acceptance arguments for " + toolName);
+        };
+    }
+
+    private static MethodTarget method(List<SourceIndexBatch> batches) {
+        return batches.stream().flatMap(batch -> batch.symbols().stream())
+                .filter(symbol -> symbol.kind() == CodeFactKind.METHOD)
+                .map(SymbolDocument::fact).map(fact -> fact.identity().canonicalIdentity())
+                .filter(MethodTarget.class::isInstance).map(MethodTarget.class::cast).findFirst().orElseThrow();
+    }
+
+    private static SearchDocument search(List<SourceIndexBatch> batches) {
+        return batches.stream().flatMap(batch -> batch.search().stream())
+                .filter(document -> document.authoritativeProjection() == com.java.semantic.model.index.ProjectionName.SYMBOLS)
+                .findFirst().orElseThrow();
+    }
+
+    private static EntryPointDocument httpRoute(List<SourceIndexBatch> batches) {
+        return batches.stream().flatMap(batch -> batch.entryPoints().stream())
+                .filter(document -> document.kind() == EntryPointKind.HTTP).findFirst().orElseThrow();
     }
 
     private List<SourceIndexBatch> exportAndPersist(DefaultJdtWorkspaceManager manager,
