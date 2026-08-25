@@ -28,15 +28,19 @@ The full operational runbook is [offline-index.md](docs/operations/offline-index
 
 ## Credentials and endpoints
 
-Set separate credentials for each application. `SEMANTIC_INDEXER_ADMIN_TOKEN` authorizes only Indexer administration endpoints; `SEMANTIC_QUERY_API_TOKEN` authorizes Query HTTP and MCP reads. Never share these tokens or grant Query a Git credential.
+Set separate credentials for each application. `SEMANTIC_INDEXER_ADMIN_TOKEN` authorizes only Indexer administration endpoints; `SEMANTIC_QUERY_API_TOKEN` authorizes Query HTTP and MCP reads. Each deployment uses its own value for the common `SEMANTIC_MONGODB_URI` configuration key. Never share these tokens or grant Query a Git credential.
 
 ```bash
-export SEMANTIC_MONGODB_URI='mongodb://query-reader:...@mongo/semantic?tls=true'
+# Indexer deployment: write-capable generation/job/pointer role.
+export SEMANTIC_MONGODB_URI='mongodb://index-writer:...@mongo/semantic?tls=true'
 export SEMANTIC_INDEXER_ADMIN_TOKEN='<indexer-admin-token>'
-export SEMANTIC_QUERY_API_TOKEN='<query-read-token>'
 export JDTLS_HOME=/opt/jdtls
 export GIT_USERNAME='<read-only-git-user>'
 export GIT_TOKEN='<read-only-git-token>'
+
+# Query deployment: sealed-generation and pointer read-only role.
+export SEMANTIC_MONGODB_URI='mongodb://query-reader:...@mongo/semantic?tls=true'
+export SEMANTIC_QUERY_API_TOKEN='<query-read-token>'
 ```
 
 The Indexer admin API is rooted at `/index/repositories/{repoId}` and accepts asynchronous `ensure`, `sync`, `checkout`, `rebuild`, and `rollback` commands. Query exposes only read HTTP and the stateless `/mcp` transport. Query requests specify `repositoryId` and an exact `revision`; the service reads only a sealed generation selected by the repository pointer.
