@@ -139,6 +139,11 @@ class IndexDocumentContractTest {
     }
 
     @Test
+    void requires_the_canonical_relations_projection_version() {
+        assertEquals(2, IndexSchemaContract.requiredProjectionVersions().get(ProjectionName.RELATIONS.name()));
+    }
+
+    @Test
     void schema_index_keys_preserve_compound_order_without_exposing_mutable_contract_state() {
         IndexSchemaContract.IndexSpec index = IndexSchemaContract.collections().stream()
                 .flatMap(collection -> collection.indexes().stream())

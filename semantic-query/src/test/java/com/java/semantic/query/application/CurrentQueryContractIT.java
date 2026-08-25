@@ -329,7 +329,7 @@ class CurrentQueryContractIT {
 
     private void seedManifest(String repositoryId, String revision, String generationId, String digest, boolean compatible) {
         List<Document> projections = compatible ? List.of(new Document("name", "SOURCES").append("version", 2),
-                new Document("name", "SYMBOLS").append("version", 2), new Document("name", "RELATIONS").append("version", 1),
+                new Document("name", "SYMBOLS").append("version", 2), new Document("name", "RELATIONS").append("version", 2),
                 new Document("name", "ENTRY_POINTS").append("version", 2), new Document("name", "SEARCH").append("version", 2))
                 : List.of(new Document("name", "SOURCES").append("version", 0));
         template.getCollection("generation_manifests").insertOne(new Document("repoId", repositoryId).append("sourceRevision", revision)

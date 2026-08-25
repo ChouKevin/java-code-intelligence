@@ -14,7 +14,7 @@ public final class IndexSchemaContract {
 
     public static final int SCHEMA_VERSION = 1;
     private static final Map<String, Integer> REQUIRED_PROJECTION_VERSIONS = Map.of(
-            "SOURCES", 2, "SYMBOLS", 2, "RELATIONS", 1, "ENTRY_POINTS", 2, "SEARCH", 2);
+            "SOURCES", 2, "SYMBOLS", 2, "RELATIONS", 2, "ENTRY_POINTS", 2, "SEARCH", 2);
     private static final List<ImmutablePayloadCollectionSpec> IMMUTABLE_PAYLOAD_COLLECTIONS = List.of(
             payload(IndexCollections.GENERATION_FILES, PayloadScope.GENERATION, "repoId", "generationId", "sourcePath"),
             payload(IndexCollections.SOURCE_ARTIFACTS, PayloadScope.GLOBAL, "sourceArtifactId"),
