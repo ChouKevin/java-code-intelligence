@@ -8,6 +8,7 @@ import com.java.semantic.indexer.store.MongoGenerationWriter;
 import com.java.semantic.model.index.GenerationWriteState;
 import com.java.semantic.model.index.IndexSchemaContract;
 import com.java.semantic.model.repository.RepositoryRevision;
+import com.java.semantic.repository.application.RepositoryMutationException;
 import java.nio.file.Path;
 import java.util.Date;
 import java.util.List;
@@ -114,6 +115,9 @@ public final class IndexBuildService {
     }
 
     private static IndexFailureCategory category(RuntimeException exception) {
+        if (exception instanceof RepositoryMutationException) {
+            return IndexFailureCategory.SOURCE_UNAVAILABLE;
+        }
         if (exception instanceof com.java.semantic.indexer.store.IndexSchemaMaintenanceRequiredException) {
             return IndexFailureCategory.SCHEMA_REBUILD_REQUIRED;
         }

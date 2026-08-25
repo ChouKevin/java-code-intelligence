@@ -48,6 +48,29 @@ class JGitRepositoryAdapterTest {
     }
 
     @Test
+    void should_detach_head_when_a_local_branch_has_the_same_name_as_the_exact_revision() throws Exception {
+        try (RemoteFixture fixture = createRemote()) {
+            JGitRepositoryAdapter adapter = new JGitRepositoryAdapter(new RepositoryProperties());
+            Path clone = tempDirectory.resolve("clone-with-sha-branch");
+            RepositoryRevision revision = RepositoryRevision.ofSha(
+                    fixture.seed().getRepository().resolve("refs/heads/main").getName());
+
+            adapter.clone(clone, fixture.remote().toUri().toString());
+            try (Git local = Git.open(clone.toFile())) {
+                local.branchCreate().setName(revision.value()).setStartPoint(revision.value()).call();
+            }
+
+            adapter.checkoutDetached(clone, revision);
+
+            try (Git checkedOut = Git.open(clone.toFile())) {
+                Ref head = checkedOut.getRepository().exactRef("HEAD");
+                assertThat(head.isSymbolic()).isFalse();
+                assertThat(head.getObjectId().getName()).isEqualTo(revision.value());
+            }
+        }
+    }
+
+    @Test
     void should_wrap_as_repository_mutation_exception_when_jgit_clone_fails()
             throws Exception {
         JGitRepositoryAdapter adapter = new JGitRepositoryAdapter(new RepositoryProperties());

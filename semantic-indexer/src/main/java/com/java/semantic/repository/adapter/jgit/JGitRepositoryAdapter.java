@@ -14,6 +14,7 @@ import org.eclipse.jgit.internal.storage.dfs.InMemoryRepository;
 import org.eclipse.jgit.util.FS;
 import org.eclipse.jgit.lib.ObjectId;
 import org.eclipse.jgit.lib.Ref;
+import org.eclipse.jgit.lib.RefUpdate;
 import org.eclipse.jgit.revwalk.RevWalk;
 import org.eclipse.jgit.revwalk.RevObject;
 import org.eclipse.jgit.transport.CredentialsProvider;
@@ -80,6 +81,7 @@ public class JGitRepositoryAdapter implements GitRepositoryPort {
     public void checkoutDetached(Path workingTree, RepositoryRevision revision) {
         try (Git git = Git.open(workingTree.toFile())) {
             git.checkout().setName(revision.value()).setForced(true).call();
+            detachHead(git, revision);
         } catch (RepositoryMutationException exception) {
             throw exception;
         } catch (IOException | GitAPIException | RuntimeException exception) {
@@ -166,6 +168,18 @@ public class JGitRepositoryAdapter implements GitRepositoryPort {
             throw new RepositoryMutationException("repository has no HEAD");
         }
         return RepositoryRevision.ofSha(head.getName());
+    }
+
+    private static void detachHead(Git git, RepositoryRevision revision) throws IOException {
+        RefUpdate update = git.getRepository().updateRef("HEAD", true);
+        update.setDetachingSymbolicRef();
+        update.setNewObjectId(ObjectId.fromString(revision.value()));
+        update.forceUpdate();
+        Ref head = Objects.requireNonNull(git.getRepository().exactRef("HEAD"), "repository has no HEAD");
+        ObjectId headRevision = Objects.requireNonNull(head.getObjectId(), "repository HEAD has no revision");
+        if (head.isSymbolic() || !revision.value().equals(headRevision.getName())) {
+            throw new RepositoryMutationException("repository HEAD was not detached at the requested revision");
+        }
     }
 
     private Optional<CredentialsProvider> credentialsProvider() {

@@ -5,6 +5,7 @@ import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.repository.domain.RepositoryRuntime;
 import com.java.semantic.repository.config.RepositoryProperties;
 import org.springframework.stereotype.Component;
+import org.springframework.util.Assert;
 import org.springframework.util.StringUtils;
 
 import java.nio.file.Path;
@@ -47,19 +48,18 @@ public class RepositoryRuntimeRegistry {
             RepositoryId repositoryId,
             RepositoryProperties.RepositoryConfig config,
             Path dataRoot) {
+        Assert.hasText(config.getUrl(), "repository url is required");
+        Assert.hasText(config.getDefaultBranch(), "repository default branch is required");
         String displayName = StringUtils.hasText(config.getDisplayName())
                 ? config.getDisplayName()
                 : repositoryId.value();
-        String defaultBranch = StringUtils.hasText(config.getDefaultBranch())
-                ? config.getDefaultBranch()
-                : "main";
         Path workingTree = resolveWorkingTree(repositoryId, dataRoot);
         return new RepositoryRuntime(
                 repositoryId,
                 displayName,
                 workingTree,
                 config.getUrl(),
-                defaultBranch);
+                config.getDefaultBranch());
     }
 
     private Path resolveWorkingTree(

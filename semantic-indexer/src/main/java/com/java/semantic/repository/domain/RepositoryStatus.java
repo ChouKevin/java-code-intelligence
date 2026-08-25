@@ -9,7 +9,6 @@ import java.util.Optional;
 public record RepositoryStatus(
         RepositoryId repositoryId,
         String displayName,
-        String remoteUrl,
         String defaultBranch,
         Optional<RepositoryRevision> currentRevision,
         boolean cloned) {
@@ -17,7 +16,6 @@ public record RepositoryStatus(
     public RepositoryStatus {
         Objects.requireNonNull(repositoryId, "repositoryId is required");
         Objects.requireNonNull(displayName, "displayName is required");
-        Objects.requireNonNull(remoteUrl, "remoteUrl is required");
         Objects.requireNonNull(defaultBranch, "defaultBranch is required");
         Objects.requireNonNull(currentRevision, "currentRevision is required");
     }

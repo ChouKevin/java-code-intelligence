@@ -65,7 +65,6 @@ public final class RepositoryRuntime {
         return new RepositoryStatus(
                 repositoryId,
                 displayName,
-                remoteUrl,
                 defaultBranch,
                 currentSnapshot.map(RepositorySnapshot::revision),
                 currentSnapshot.isPresent());
