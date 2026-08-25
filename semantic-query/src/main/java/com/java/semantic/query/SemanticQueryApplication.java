@@ -22,7 +22,7 @@ import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.context.annotation.Bean;
 import org.springframework.data.mongodb.core.MongoTemplate;
 
-@SpringBootApplication
+@SpringBootApplication(scanBasePackages = {"com.java.semantic.query", "com.java.semantic.api", "com.java.semantic.mcp"})
 @EnableConfigurationProperties({SemanticQueryProperties.class, ReadPolicyProperties.class})
 public class SemanticQueryApplication {
 

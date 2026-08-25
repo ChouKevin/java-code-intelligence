@@ -1,24 +1,6 @@
 spring:
   mongodb:
     uri: ${SEMANTIC_MONGODB_URI:mongodb://localhost:27017/semantic?serverSelectionTimeoutMS=2000&connectTimeoutMS=2000&socketTimeoutMS=2000}
-  ai:
-    mcp:
-      server:
-        enabled: true
-        protocol: STATELESS
-        type: SYNC
-        stdio: false
-        tool-callback-converter: false
-        annotation-scanner:
-          enabled: false
-        streamable-http:
-          # STATELESS mode still uses this Spring AI endpoint property
-          mcp-endpoint: /mcp
-        capabilities:
-          tool: true
-          resource: false
-          prompt: false
-          completion: false
 
 semantic:
   syntax:
@@ -45,8 +27,7 @@ semantic:
         maximum-weight: ${INTERNAL_REFERENCE_CACHE_MAXIMUM_WEIGHT:10000}
         expire-after-access: ${INTERNAL_REFERENCE_CACHE_EXPIRE_AFTER_ACCESS:10m}
         maximum-entry-weight: ${INTERNAL_REFERENCE_CACHE_MAXIMUM_ENTRY_WEIGHT:1000}
-  api:
-    api-token: ${SEMANTIC_API_TOKEN:}
+  indexer:
     admin-token: ${SEMANTIC_INDEXER_ADMIN_TOKEN:}
   jdtls:
     enabled: ${JDTLS_ENABLED:true}
@@ -67,8 +48,3 @@ semantic:
 logging:
   level:
     org.springframework.web.servlet.mvc.method.annotation.ExceptionHandlerExceptionResolver: INFO
-
-management:
-  health:
-    mongodb:
-      enabled: false

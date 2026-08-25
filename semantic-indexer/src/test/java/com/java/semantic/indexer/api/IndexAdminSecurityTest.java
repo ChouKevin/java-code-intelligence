@@ -1,7 +1,5 @@
 package com.java.semantic.indexer.api;
 
-import com.java.semantic.api.security.ApiSecurityProperties;
-import com.java.semantic.api.security.ApiTokenFilter;
 import com.java.semantic.indexer.job.IndexJob;
 import com.java.semantic.indexer.job.IndexJobId;
 import com.java.semantic.indexer.job.IndexJobPhase;
@@ -17,14 +15,13 @@ import static org.assertj.core.api.Assertions.assertThat;
 class IndexAdminSecurityTest {
     @Test
     void index_paths_require_the_separate_admin_token() throws Exception {
-        ApiSecurityProperties properties = new ApiSecurityProperties();
-        properties.setApiToken("read-token");
+        IndexerAdminSecurityProperties properties = new IndexerAdminSecurityProperties();
         properties.setAdminToken("admin-token");
-        ApiTokenFilter filter = new ApiTokenFilter(properties, new tools.jackson.databind.ObjectMapper());
+        IndexerAdminTokenFilter filter = new IndexerAdminTokenFilter(properties);
 
         String[] paths = {"/index/repositories/orders/ensure", "/index/repositories/orders/sync",
                 "/index/repositories/orders/checkout", "/index/repositories/orders/rebuild",
-                "/index/repositories/orders/rollback", "/index/jobs/job-1"};
+                "/index/repositories/orders/rollback"};
         for (String path : paths) {
             MockHttpServletRequest absentTokenRequest = new MockHttpServletRequest(methodFor(path), path);
             MockHttpServletResponse absentTokenResponse = new MockHttpServletResponse();
@@ -33,14 +30,14 @@ class IndexAdminSecurityTest {
             assertThat(absentTokenResponse.getStatus()).isEqualTo(401);
 
             MockHttpServletRequest readTokenRequest = new MockHttpServletRequest(methodFor(path), path);
-            readTokenRequest.addHeader(ApiTokenFilter.API_TOKEN_HEADER, "read-token");
+            readTokenRequest.addHeader(IndexerAdminTokenFilter.TOKEN_HEADER, "wrong-token");
             MockHttpServletResponse readTokenResponse = new MockHttpServletResponse();
             filter.doFilter(readTokenRequest, readTokenResponse, (request, response) -> ((jakarta.servlet.http.HttpServletResponse) response).setStatus(204));
             assertThat(readTokenResponse.getStatus()).isEqualTo(401);
-            assertThat(readTokenResponse.getContentAsString()).doesNotContain("read-token", "admin-token");
+            assertThat(readTokenResponse.getContentAsString()).doesNotContain("admin-token");
 
             MockHttpServletRequest adminTokenRequest = new MockHttpServletRequest(methodFor(path), path);
-            adminTokenRequest.addHeader(ApiTokenFilter.API_TOKEN_HEADER, "admin-token");
+            adminTokenRequest.addHeader(IndexerAdminTokenFilter.TOKEN_HEADER, "admin-token");
             MockHttpServletResponse adminTokenResponse = new MockHttpServletResponse();
             filter.doFilter(adminTokenRequest, adminTokenResponse, (request, response) -> ((jakarta.servlet.http.HttpServletResponse) response).setStatus(204));
             assertThat(adminTokenResponse.getStatus()).isEqualTo(204);
@@ -49,10 +46,9 @@ class IndexAdminSecurityTest {
 
     @Test
     void admin_token_is_redacted_from_properties_responses_and_job_representation() throws Exception {
-        ApiSecurityProperties properties = new ApiSecurityProperties();
-        properties.setApiToken("read-token");
+        IndexerAdminSecurityProperties properties = new IndexerAdminSecurityProperties();
         properties.setAdminToken("admin-token");
-        ApiTokenFilter filter = new ApiTokenFilter(properties, new tools.jackson.databind.ObjectMapper());
+        IndexerAdminTokenFilter filter = new IndexerAdminTokenFilter(properties);
         MockHttpServletRequest request = new MockHttpServletRequest("POST", "/index/repositories/orders/ensure");
         MockHttpServletResponse response = new MockHttpServletResponse();
         filter.doFilter(request, response, (servletRequest, servletResponse) ->
@@ -63,30 +59,24 @@ class IndexAdminSecurityTest {
                 java.util.Optional.empty(), java.util.Optional.empty());
 
         assertThat(response.getContentAsString()).doesNotContain("admin-token");
-        assertThat(properties.toString()).doesNotContain("admin-token", "read-token");
+        assertThat(properties.toString()).doesNotContain("admin-token");
         assertThat(new tools.jackson.databind.ObjectMapper().writeValueAsString(job))
                 .doesNotContain("admin-token", "read-token");
     }
 
     private static String methodFor(String path) {
-        return path.startsWith("/index/jobs/") ? "GET" : "POST";
+        return "POST";
     }
 
     @Test
-    void fails_closed_when_admin_auth_is_unset_but_allows_a_read_token_on_read_api() throws Exception {
-        ApiSecurityProperties properties = new ApiSecurityProperties();
-        properties.setApiToken("read-token");
-        ApiTokenFilter filter = new ApiTokenFilter(properties, new tools.jackson.databind.ObjectMapper());
-        MockHttpServletRequest adminRequest = new MockHttpServletRequest("GET", "/index/jobs/job-1");
-        adminRequest.addHeader(ApiTokenFilter.API_TOKEN_HEADER, "read-token");
+    void fails_closed_when_admin_auth_is_unset() throws Exception {
+        IndexerAdminSecurityProperties properties = new IndexerAdminSecurityProperties();
+        IndexerAdminTokenFilter filter = new IndexerAdminTokenFilter(properties);
+        MockHttpServletRequest adminRequest = new MockHttpServletRequest("POST", "/index/repositories/orders/ensure");
+        adminRequest.addHeader(IndexerAdminTokenFilter.TOKEN_HEADER, "wrong-token");
         MockHttpServletResponse adminResponse = new MockHttpServletResponse();
         filter.doFilter(adminRequest, adminResponse, (request, response) -> ((jakarta.servlet.http.HttpServletResponse) response).setStatus(204));
-        MockHttpServletRequest readRequest = new MockHttpServletRequest("GET", "/v1/repositories/orders");
-        readRequest.addHeader(ApiTokenFilter.API_TOKEN_HEADER, "read-token");
-        MockHttpServletResponse readResponse = new MockHttpServletResponse();
-        filter.doFilter(readRequest, readResponse, (request, response) -> ((jakarta.servlet.http.HttpServletResponse) response).setStatus(204));
 
         assertThat(adminResponse.getStatus()).isEqualTo(403);
-        assertThat(readResponse.getStatus()).isEqualTo(204);
     }
 }

@@ -83,17 +83,6 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/RepositoryNotFound' }
         '409': { $ref: '#/components/responses/IndexConflict' }
-  /index/jobs/{jobId}:
-    get:
-      operationId: getIndexJob
-      parameters: [ { $ref: '#/components/parameters/IndexJobId' } ]
-      responses:
-        '200': { $ref: '#/components/responses/IndexJob' }
-        '400': { $ref: '#/components/responses/BadRequest' }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-        '403': { $ref: '#/components/responses/Forbidden' }
-        '404': { $ref: '#/components/responses/IndexJobNotFound' }
-        '409': { $ref: '#/components/responses/IndexConflict' }
 components:
   securitySchemes:
     indexerAdminToken:

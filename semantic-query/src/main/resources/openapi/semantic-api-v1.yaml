@@ -1,0 +1,177 @@
+openapi: 3.1.0
+info:
+  title: Semantic Query API
+  version: v1
+paths:
+  /v1/repositories:
+    get:
+      summary: List configured repository metadata; this is not generation-backed.
+      responses: {'200': {description: Repository metadata.}}
+  /v1/repositories/{repositoryId}:
+    get:
+      summary: Read configured repository metadata; this is not generation-backed.
+      parameters: [{$ref: '#/components/parameters/RepositoryId'}]
+      responses: {'200': {description: Repository metadata.}}
+  /v1/repositories/{repositoryId}/entry-points:
+    get:
+      summary: List entry points from one exact published repository revision.
+      parameters: [{$ref: '#/components/parameters/RepositoryId'}, {$ref: '#/components/parameters/Revision'}]
+      responses: {'200': {description: Revision-pinned entry points.}, '409': {$ref: '#/components/responses/RevisionOutdated'}}
+  /v1/code-facts/search:
+    post:
+      summary: Search published code facts using a revision-pinned flat query
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SearchCodeFactsRequest'
+      responses:
+        '200':
+          description: A bounded page; omit unknown kinds and package filters rather than guessing them.
+  /v1/code-facts/get:
+    post:
+      summary: Read one fact returned by code-fact search
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GetCodeFactRequest'
+      responses:
+        '200':
+          description: The selected fact.
+  /v1/analyses/call-graphs/outgoing:
+    $ref: '#/components/pathItems/CallGraph'
+  /v1/analyses/call-graphs/incoming:
+    $ref: '#/components/pathItems/CallGraph'
+  /v1/api-routes/lookup:
+    $ref: '#/components/pathItems/RouteQuery'
+  /v1/api-routes/suggest:
+    $ref: '#/components/pathItems/RouteQuery'
+  /v1/discovery/event-listeners:
+    $ref: '#/components/pathItems/GenerationQuery'
+  /v1/discovery/method-implementations:
+    $ref: '#/components/pathItems/MethodQuery'
+  /v1/discovery/type-members:
+    $ref: '#/components/pathItems/GenerationQuery'
+  /v1/discovery/internal-references:
+    $ref: '#/components/pathItems/MethodQuery'
+  /v1/discovery/source-symbols/resolve:
+    $ref: '#/components/pathItems/GenerationQuery'
+  /v1/discovery/source-segment:
+    $ref: '#/components/pathItems/GenerationQuery'
+  /v1/discovery/method-source:
+    $ref: '#/components/pathItems/MethodQuery'
+  /v1/discovery/evidence-source:
+    $ref: '#/components/pathItems/MethodQuery'
+components:
+  parameters:
+    RepositoryId:
+      name: repositoryId
+      in: path
+      required: true
+      schema: {type: string, minLength: 1}
+    Revision:
+      name: revision
+      in: query
+      required: true
+      schema: {type: string, minLength: 1}
+  responses:
+    RevisionOutdated:
+      description: Requested revision is no longer current. Retry with the returned exact currentRevision.
+  pathItems:
+    GenerationQuery:
+      post:
+        summary: Read only an exact stored generation; repository identity aliases repoId and expectedRevision are rejected.
+        requestBody:
+          required: true
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/GenerationRequest'}
+        responses:
+          '200': {description: A result echoing repositoryId and revision.}
+          '409': {$ref: '#/components/responses/RevisionOutdated'}
+    MethodQuery:
+      post:
+        summary: Read a method-scoped stored generation result.
+        requestBody:
+          required: true
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MethodRequest'}
+        responses:
+          '200': {description: A result echoing repositoryId and revision.}
+          '409': {$ref: '#/components/responses/RevisionOutdated'}
+    CallGraph:
+      post:
+        summary: Read a persisted incoming or outgoing call graph.
+        requestBody:
+          required: true
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MethodRequest'}
+        responses:
+          '200': {description: A result echoing repositoryId and revision.}
+          '409': {$ref: '#/components/responses/RevisionOutdated'}
+    RouteQuery:
+      post:
+        summary: Lookup persisted API routes by method and path.
+        requestBody:
+          required: true
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/RouteRequest'}
+        responses:
+          '200': {description: A result echoing repositoryId and revision.}
+          '409': {$ref: '#/components/responses/RevisionOutdated'}
+  schemas:
+    SearchCodeFactsRequest:
+      type: object
+      additionalProperties: false
+      required: [repositoryId, revision, query]
+      properties:
+        repositoryId: {type: string, description: Exact configured repository id; aliases are rejected.}
+        revision: {type: string, description: Exact published revision; aliases are rejected.}
+        query: {type: string, minLength: 2, maxLength: 256}
+        kinds:
+          type: array
+          description: Optional CodeFactKind values. Omit unknown filters rather than guessing them.
+          items: {type: string}
+        packagePrefix: {type: string}
+        offset: {type: integer, minimum: 0, default: 0}
+        limit: {type: integer, minimum: 1, maximum: 100, default: 20}
+    GetCodeFactRequest:
+      type: object
+      additionalProperties: false
+      required: [repositoryId, revision, factId]
+      properties:
+        repositoryId: {type: string}
+        revision: {type: string}
+        factId: {type: string}
+    GenerationRequest:
+      type: object
+      additionalProperties: false
+      required: [repositoryId, revision]
+      properties:
+        repositoryId: {type: string, description: Exact configured repository id; aliases are rejected.}
+        revision: {type: string, description: Exact published revision; aliases are rejected.}
+    MethodRequest:
+      allOf:
+        - {$ref: '#/components/schemas/GenerationRequest'}
+        - type: object
+          required: [packageName, className, sourceFile, methodName, parameterTypes]
+          properties:
+            packageName: {type: string}
+            className: {type: string}
+            sourceFile: {type: string}
+            methodName: {type: string}
+            parameterTypes: {type: array, items: {type: string}}
+    RouteRequest:
+      allOf:
+        - {$ref: '#/components/schemas/GenerationRequest'}
+        - type: object
+          required: [httpMethod, path]
+          properties:
+            httpMethod: {type: string}
+            path: {type: string}

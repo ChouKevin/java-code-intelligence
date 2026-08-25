@@ -76,6 +76,40 @@ public final class PublishedEntryPointQueryService {
         }
     }
 
+    /** Lists only persisted, policy-visible entry points from one exact published revision. */
+    public List<PublishedEntryPoint> listEntryPoints(String repositoryId, String revision) {
+        SearchAccessPlan accessPlan = selector.searchAccessPlan(repositoryId);
+        CurrentGeneration current = selector.select(repositoryId, revision, CurrentGenerationSelector.ENTRY_POINTS);
+        try {
+            FindIterable<Document> rows = template.getCollection(IndexCollections.ENTRY_POINTS).find(accessPlan.authorized(Filters.and(
+                    Filters.eq("repoId", current.repositoryId().value()), Filters.eq("generationId", current.generationId().value()))))
+                    .sort(Sorts.ascending("kind", "method", "canonical")).maxTime(storageTimeout.toMillis(), TimeUnit.MILLISECONDS);
+            List<PublishedEntryPoint> result = new ArrayList<>();
+            for (Document row : rows) {
+                EntryPointDocument entryPoint = template.getConverter().read(EntryPointPersistence.class, row).toModel();
+                if (!current.repositoryId().equals(entryPoint.repositoryId()) || !current.generationId().equals(entryPoint.generationId())
+                        || !entryPoint.fact().id().value().equals(required(row, "entryPointId"))
+                        || !entryPoint.fact().identity().canonicalForm().equals(required(row, "canonical"))) {
+                    throw new IndexContractMismatchException();
+                }
+                selector.requireVisible(current, entryPoint.fact().identity());
+                if (!CodeFactScope.from(entryPoint.fact().identity()).equals(flattenedScope(row))) {
+                    throw new IndexContractMismatchException();
+                }
+                result.add(new PublishedEntryPoint(current, entryPoint.fact().id().value(), entryPoint.fact().identity().canonicalForm(),
+                        entryPoint.kind(), entryPoint.method().canonicalForm(), entryPoint.trigger().httpPath().orElse(""),
+                        entryPoint.range().sourceFile()));
+            }
+            return List.copyOf(result);
+        } catch (MongoException | DataAccessException exception) {
+            throw new SemanticIndexUnavailableException(exception);
+        } catch (IndexContractMismatchException | RepositoryNotFoundException exception) {
+            throw exception;
+        } catch (RuntimeException exception) {
+            throw new IndexContractMismatchException();
+        }
+    }
+
     private static CodeFactScope flattenedScope(Document document) {
         Object rawParameters = document.get("scopeParameters");
         if (!(rawParameters instanceof List<?> parameters)) {

@@ -151,7 +151,9 @@ public final class CurrentGenerationSelector {
 
     private CurrentGeneration selectedPointer(Request request) {
         CurrentGeneration current = currentPointer(request.repositoryId());
-        if (!current.revision().equals(request.revision())) { throw new RevisionOutdatedException(request.revision(), current.revision()); }
+        if (!current.revision().equals(request.revision())) {
+            throw new RevisionOutdatedException(request.repositoryId(), request.revision(), current.revision());
+        }
         return current;
     }
 

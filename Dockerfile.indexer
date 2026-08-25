@@ -1,0 +1,20 @@
+FROM maven:3.9.11-eclipse-temurin-21 AS build
+WORKDIR /workspace
+COPY pom.xml ./
+COPY semantic-model/pom.xml semantic-model/pom.xml
+COPY semantic-indexer/pom.xml semantic-indexer/pom.xml
+COPY semantic-query/pom.xml semantic-query/pom.xml
+RUN mvn --batch-mode --no-transfer-progress -pl semantic-indexer -am dependency:go-offline
+COPY semantic-model semantic-model
+COPY semantic-indexer semantic-indexer
+RUN mvn --batch-mode --no-transfer-progress -pl semantic-indexer -am -DskipTests package
+
+FROM eclipse-temurin:21-jdk
+RUN apt-get update && apt-get install -y --no-install-recommends curl git && rm -rf /var/lib/apt/lists/*
+COPY scripts/install-jdtls.sh /usr/local/bin/install-jdtls
+RUN /usr/local/bin/install-jdtls /opt/jdtls
+WORKDIR /app
+COPY --from=build /workspace/semantic-indexer/target/semantic-indexer-0.0.1-SNAPSHOT.jar /app/semantic-indexer.jar
+VOLUME ["/data/repos", "/data/jdtls"]
+EXPOSE 8080
+ENTRYPOINT ["java", "-jar", "/app/semantic-indexer.jar"]

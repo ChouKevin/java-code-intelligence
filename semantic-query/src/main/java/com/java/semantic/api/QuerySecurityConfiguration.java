@@ -1,0 +1,20 @@
+package com.java.semantic.api;
+
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import org.springframework.boot.web.servlet.FilterRegistrationBean;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.core.Ordered;
+
+/** Registers the Query-only HTTP and MCP security boundary. */
+@Configuration
+@EnableConfigurationProperties(QuerySecurityProperties.class)
+public class QuerySecurityConfiguration {
+    @Bean
+    public FilterRegistrationBean<QueryTokenFilter> queryTokenFilter(QuerySecurityProperties properties) {
+        FilterRegistrationBean<QueryTokenFilter> registration = new FilterRegistrationBean<>(new QueryTokenFilter(properties));
+        registration.addUrlPatterns("/v1/*", "/mcp");
+        registration.setOrder(Ordered.HIGHEST_PRECEDENCE);
+        return registration;
+    }
+}

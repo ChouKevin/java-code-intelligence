@@ -4,7 +4,6 @@ import com.java.semantic.indexer.job.IndexJob;
 import com.java.semantic.indexer.job.IndexJobId;
 import com.java.semantic.indexer.job.IndexJobPhase;
 import com.java.semantic.indexer.job.IndexRequestService;
-import com.java.semantic.api.dto.ApiErrorResponse;
 import com.java.semantic.model.index.GenerationId;
 import com.java.semantic.model.index.ManifestDigest;
 import com.java.semantic.model.index.PublishedGenerationPointer;
@@ -54,37 +53,6 @@ class IndexRepositoryControllerTest {
         assertThat(controller.checkout("orders", new CheckoutIndexRequest("c".repeat(40))).getStatusCode()).isEqualTo(HttpStatus.ACCEPTED);
         assertThat(controller.rebuild("orders", new RebuildIndexRequest(true)).getStatusCode()).isEqualTo(HttpStatus.ACCEPTED);
         assertThat(controller.rollback("orders", request(current, rollback)).getStatusCode()).isEqualTo(HttpStatus.ACCEPTED);
-    }
-
-    @Test
-    void job_status_returns_the_job_without_exposing_a_working_tree() {
-        IndexRequestService service = mock(IndexRequestService.class);
-        IndexJob job = job("d");
-        when(service.job(job.id())).thenReturn(Optional.of(job));
-
-        ResponseEntity<?> response = new IndexJobController(service).job(job.id().value());
-
-        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
-        assertThat(response.getBody()).isInstanceOf(IndexRepositoryController.IndexJobResponse.class);
-        IndexRepositoryController.IndexJobResponse body =
-                (IndexRepositoryController.IndexJobResponse) response.getBody();
-        assertThat(body.repositoryId()).isEqualTo("orders");
-        assertThat(body.revision()).isEqualTo("d".repeat(40));
-    }
-
-    @Test
-    void unknown_job_has_the_stable_not_found_error_shape() {
-        IndexRequestService service = mock(IndexRequestService.class);
-        IndexJobId unknown = new IndexJobId("unknown-job");
-        when(service.job(unknown)).thenReturn(Optional.empty());
-
-        ResponseEntity<?> response = new IndexJobController(service).job(unknown.value());
-
-        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
-        assertThat(response.getBody()).isInstanceOf(ApiErrorResponse.class);
-        ApiErrorResponse body = (ApiErrorResponse) response.getBody();
-        assertThat(body.errorCode()).isEqualTo("INDEX_JOB_NOT_FOUND");
-        assertThat(body.message()).isEqualTo("index job was not found");
     }
 
     private static RollbackIndexRequest request(PublishedGenerationPointer current, PublishedGenerationPointer rollback) {
