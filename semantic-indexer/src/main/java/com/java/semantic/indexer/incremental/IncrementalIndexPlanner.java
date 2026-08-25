@@ -28,17 +28,22 @@ public final class IncrementalIndexPlanner {
         this.moduleLocator = Objects.requireNonNull(moduleLocator, "module locator is required");
     }
 
-    public IncrementalIndexPlan plan(PublishedIndex publishedIndex, String publishedRevision, String selectedRevision) {
+    /**
+     * Plans one selected revision from its authoritative supported-source inventory, separately from parent facts.
+     */
+    public IncrementalIndexPlan plan(PublishedIndex publishedIndex, String publishedRevision, String selectedRevision,
+                                     Collection<String> selectedSupportedSourcePaths) {
         PublishedIndex index = Objects.requireNonNull(publishedIndex, "published index is required");
         List<ChangedSource> changes = List.copyOf(revisionDiff.diff(Objects.requireNonNull(publishedRevision,
                 "published revision is required"), Objects.requireNonNull(selectedRevision, "selected revision is required")));
+        TreeSet<String> selectedSources = sortedPaths(selectedSupportedSourcePaths, "selected supported source paths");
         TreeSet<String> reanalyze = new TreeSet<>();
         TreeSet<String> deleted = new TreeSet<>();
         TreeSet<String> reasons = new TreeSet<>();
         for (ChangedSource change : changes) {
             if (isBuildInput(change)) {
                 if (!selectBuildClosure(change, reanalyze, reasons)) {
-                    return full(index, "UNCERTAIN_MODULE_CLOSURE:" + pathOf(change), deleted);
+                    return full(selectedSources, "UNCERTAIN_MODULE_CLOSURE:" + pathOf(change), deleted);
                 }
                 continue;
             }
@@ -48,12 +53,12 @@ public final class IncrementalIndexPlanner {
             if (change.kind() == ChangeKind.DELETE || change.kind() == ChangeKind.RENAME) {
                 deleted.add(change.oldPath());
             }
-            if (change.kind() != ChangeKind.DELETE && index.supportedSourcePaths().contains(change.newPath())) {
+            if (change.kind() != ChangeKind.DELETE && selectedSources.contains(change.newPath())) {
                 reanalyze.add(change.newPath());
             }
             SourceContractChangeDetector.Impact impact = contractChangeDetector.detect(change, index.declarations());
             if (impact.uncertain()) {
-                return full(index, "UNCERTAIN_CONTRACT:" + pathOf(change), deleted);
+                return full(selectedSources, "UNCERTAIN_CONTRACT:" + pathOf(change), deleted);
             }
             if (impact.publicDeclaration() || change.kind() == ChangeKind.DELETE || change.kind() == ChangeKind.RENAME) {
                 reanalyze.addAll(index.dependentPaths(change.oldPath()));
@@ -65,8 +70,10 @@ public final class IncrementalIndexPlanner {
             }
             reasons.add((impact.publicDeclaration() ? "PUBLIC_CONTRACT:" : "BODY_OR_PRIVATE:") + pathOf(change));
         }
+        reanalyze.retainAll(selectedSources);
         reanalyze.removeAll(deleted);
         TreeSet<String> copy = new TreeSet<>(index.supportedSourcePaths());
+        copy.retainAll(selectedSources);
         copy.removeAll(reanalyze);
         copy.removeAll(deleted);
         return new IncrementalIndexPlan(false, List.copyOf(reanalyze), List.copyOf(copy), List.copyOf(deleted), List.copyOf(reasons));
@@ -92,8 +99,12 @@ public final class IncrementalIndexPlanner {
         return true;
     }
 
-    private static IncrementalIndexPlan full(PublishedIndex index, String reason, Collection<String> deletedPaths) {
-        return new IncrementalIndexPlan(true, index.supportedSourcePaths(), List.of(), List.copyOf(deletedPaths), List.of(reason));
+    private static IncrementalIndexPlan full(Collection<String> selectedSupportedSourcePaths, String reason,
+                                             Collection<String> deletedPaths) {
+        TreeSet<String> reanalyze = sortedPaths(selectedSupportedSourcePaths, "selected supported source paths");
+        TreeSet<String> deleted = sortedPaths(deletedPaths, "deleted paths");
+        deleted.removeAll(reanalyze);
+        return new IncrementalIndexPlan(true, List.copyOf(reanalyze), List.of(), List.copyOf(deleted), List.of(reason));
     }
 
     private static String pathOf(ChangedSource change) {
@@ -106,6 +117,14 @@ public final class IncrementalIndexPlanner {
         return filename.equals("pom.xml") || filename.equals("build.gradle") || filename.equals("build.gradle.kts")
                 || filename.equals("settings.gradle") || filename.equals("settings.gradle.kts")
                 || filename.equals("gradle.properties") || filename.equals("maven.config");
+    }
+
+    private static TreeSet<String> sortedPaths(Collection<String> paths, String name) {
+        TreeSet<String> sorted = new TreeSet<>();
+        for (String path : Objects.requireNonNull(paths, name + " are required")) {
+            sorted.add(Objects.requireNonNull(path, name + " must not contain null"));
+        }
+        return sorted;
     }
 
     /** Read snapshot projected from the published manifest and fact collections; the planner never queries Mongo or JDT LS. */

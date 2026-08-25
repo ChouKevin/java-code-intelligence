@@ -27,15 +27,24 @@ public interface SourceContractChangeDetector {
     final class LightweightDetector implements SourceContractChangeDetector {
         private static final Pattern PUBLIC_DECLARATION = Pattern.compile("(?m)^\\s*(?:@[A-Za-z_$][\\w$.]*(?:\\([^\\n]*\\))?\\s*)*(?:(?:public|protected)\\s+)[^{;]+(?:\\{|;)");
         private static final Pattern INHERITANCE = Pattern.compile("\\b(?:extends|implements)\\b");
-        private static final Pattern FRAMEWORK_ANNOTATION = Pattern.compile("@(?:[\\w$.]*\\.)?(?:Controller|Service|Component|Repository|Configuration|Bean|RequestMapping|GetMapping|PostMapping|KafkaListener|Scheduled)\\b");
+        private static final Set<String> FRAMEWORK_ANNOTATIONS = Set.of(
+                "Bean", "Component", "Configuration", "Controller", "ControllerAdvice", "DeleteMapping",
+                "EventListener", "FeignClient", "GetMapping", "KafkaListener", "PatchMapping", "PostMapping",
+                "PutMapping", "RabbitListener", "Repository", "RequestMapping", "RestController",
+                "RestControllerAdvice", "Scheduled", "Service", "TransactionalEventListener");
 
         @Override
         public Impact detect(ChangedSource changedSource, List<SymbolDocument> persistedDeclarations) {
             ChangedSource requiredChange = Objects.requireNonNull(changedSource, "changed source is required");
             List<SymbolDocument> requiredDeclarations = List.copyOf(Objects.requireNonNull(persistedDeclarations,
                     "persisted declarations are required"));
-            if (!requiredChange.newPath().endsWith(".java") || requiredChange.kind() == ChangeKind.ADD) {
+            if (!javaSource(requiredChange)) {
                 return Impact.publicDeclarationChange();
+            }
+            AnnotationExtraction oldAnnotations = annotationsOf(requiredChange.oldContent());
+            AnnotationExtraction newAnnotations = annotationsOf(requiredChange.newContent());
+            if (oldAnnotations.uncertain() || newAnnotations.uncertain()) {
+                return Impact.uncertainChange();
             }
             Set<String> oldDeclarations = declarationLines(requiredChange.oldContent());
             Set<String> newDeclarations = declarationLines(requiredChange.newContent());
@@ -46,8 +55,12 @@ public interface SourceContractChangeDetector {
             }
             boolean contractChanged = !oldDeclarations.equals(newDeclarations);
             boolean inheritanceChanged = changed(INHERITANCE, requiredChange.oldContent(), requiredChange.newContent());
-            boolean annotationChanged = changed(FRAMEWORK_ANNOTATION, requiredChange.oldContent(), requiredChange.newContent());
+            boolean annotationChanged = !oldAnnotations.contracts().equals(newAnnotations.contracts());
             return new Impact(contractChanged || inheritanceChanged || annotationChanged, inheritanceChanged, annotationChanged, false);
+        }
+
+        private static boolean javaSource(ChangedSource change) {
+            return (change.newPath().isEmpty() ? change.oldPath() : change.newPath()).endsWith(".java");
         }
 
         private static Set<String> declarationLines(String source) {
@@ -70,6 +83,170 @@ public interface SourceContractChangeDetector {
                 matches.add(matcher.group());
             }
             return Set.copyOf(matches);
+        }
+
+        private static AnnotationExtraction annotationsOf(String source) {
+            java.util.TreeSet<String> contracts = new java.util.TreeSet<>();
+            int position = 0;
+            while (position < source.length()) {
+                char current = source.charAt(position);
+                if (current == '/' && position + 1 < source.length() && source.charAt(position + 1) == '/') {
+                    position = skipLineComment(source, position + 2);
+                    continue;
+                }
+                if (current == '/' && position + 1 < source.length() && source.charAt(position + 1) == '*') {
+                    int commentEnd = source.indexOf("*/", position + 2);
+                    if (commentEnd < 0) {
+                        return AnnotationExtraction.uncertainResult();
+                    }
+                    position = commentEnd + 2;
+                    continue;
+                }
+                if (current == '\"' || current == '\'') {
+                    int literalEnd = skipLiteral(source, position, current);
+                    if (literalEnd < 0) {
+                        return AnnotationExtraction.uncertainResult();
+                    }
+                    position = literalEnd;
+                    continue;
+                }
+                if (current != '@') {
+                    position++;
+                    continue;
+                }
+                AnnotationRead annotation = readAnnotation(source, position);
+                if (annotation.uncertain()) {
+                    return AnnotationExtraction.uncertainResult();
+                }
+                if (FRAMEWORK_ANNOTATIONS.contains(annotation.simpleName())) {
+                    contracts.add(annotation.contract());
+                }
+                position = annotation.end();
+            }
+            return new AnnotationExtraction(Set.copyOf(contracts), false);
+        }
+
+        private static AnnotationRead readAnnotation(String source, int start) {
+            int nameStart = start + 1;
+            int position = nameStart;
+            while (position < source.length() && annotationNameCharacter(source.charAt(position))) {
+                position++;
+            }
+            if (position == nameStart) {
+                return AnnotationRead.uncertainResult();
+            }
+            String name = source.substring(nameStart, position);
+            int argumentsStart = skipWhitespace(source, position);
+            if (argumentsStart >= source.length() || source.charAt(argumentsStart) != '(') {
+                return new AnnotationRead(simpleNameOf(name), name, position, false);
+            }
+            int argumentsEnd = matchingParenthesis(source, argumentsStart);
+            if (argumentsEnd < 0) {
+                return AnnotationRead.uncertainResult();
+            }
+            return new AnnotationRead(simpleNameOf(name), normalize(source.substring(start, argumentsEnd)), argumentsEnd, false);
+        }
+
+        private static int matchingParenthesis(String source, int start) {
+            int depth = 0;
+            int position = start;
+            while (position < source.length()) {
+                char current = source.charAt(position);
+                if (current == '\"' || current == '\'') {
+                    int literalEnd = skipLiteral(source, position, current);
+                    if (literalEnd < 0) {
+                        return -1;
+                    }
+                    position = literalEnd;
+                    continue;
+                }
+                if (current == '(') {
+                    depth++;
+                } else if (current == ')') {
+                    depth--;
+                    if (depth == 0) {
+                        return position + 1;
+                    }
+                }
+                position++;
+            }
+            return -1;
+        }
+
+        private static int skipLineComment(String source, int position) {
+            int lineEnd = source.indexOf('\n', position);
+            return lineEnd < 0 ? source.length() : lineEnd + 1;
+        }
+
+        private static int skipLiteral(String source, int start, char quote) {
+            int position = start + 1;
+            while (position < source.length()) {
+                char current = source.charAt(position);
+                if (current == '\\') {
+                    position += 2;
+                    continue;
+                }
+                if (current == quote) {
+                    return position + 1;
+                }
+                position++;
+            }
+            return -1;
+        }
+
+        private static boolean annotationNameCharacter(char value) {
+            return Character.isJavaIdentifierPart(value) || value == '.' || value == '$';
+        }
+
+        private static int skipWhitespace(String source, int position) {
+            int result = position;
+            while (result < source.length() && Character.isWhitespace(source.charAt(result))) {
+                result++;
+            }
+            return result;
+        }
+
+        private static String simpleNameOf(String annotationName) {
+            int separator = annotationName.lastIndexOf('.');
+            return separator < 0 ? annotationName : annotationName.substring(separator + 1);
+        }
+
+        private static String normalize(String annotation) {
+            StringBuilder normalized = new StringBuilder();
+            boolean quoted = false;
+            char quote = 0;
+            for (int position = 0; position < annotation.length(); position++) {
+                char current = annotation.charAt(position);
+                if (quoted) {
+                    normalized.append(current);
+                    if (current == '\\' && position + 1 < annotation.length()) {
+                        normalized.append(annotation.charAt(++position));
+                    } else if (current == quote) {
+                        quoted = false;
+                    }
+                    continue;
+                }
+                if (current == '\"' || current == '\'') {
+                    quoted = true;
+                    quote = current;
+                    normalized.append(current);
+                } else if (!Character.isWhitespace(current)) {
+                    normalized.append(current);
+                }
+            }
+            return normalized.toString();
+        }
+
+        private record AnnotationExtraction(Set<String> contracts, boolean uncertain) {
+            private static AnnotationExtraction uncertainResult() {
+                return new AnnotationExtraction(Set.of(), true);
+            }
+        }
+
+        private record AnnotationRead(String simpleName, String contract, int end, boolean uncertain) {
+            private static AnnotationRead uncertainResult() {
+                return new AnnotationRead("", "", 0, true);
+            }
         }
     }
 }
