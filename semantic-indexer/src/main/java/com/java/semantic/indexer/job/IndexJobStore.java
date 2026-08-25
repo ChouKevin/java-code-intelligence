@@ -25,6 +25,7 @@ public interface IndexJobStore {
     void recoverRevokedClaims(RepositoryId repositoryId);
     Optional<IndexJob> reconcileCommitted(RepositoryId repositoryId);
     Optional<RepositoryRevision> currentRevision(RepositoryId repositoryId);
+    Optional<PublishedGenerationPointer> currentPointer(RepositoryId repositoryId);
     Optional<RollbackGenerationCommand> rollbackCommand(IndexJob job);
     Optional<IndexPublicationIntent> prepareBuildPublication(IndexJob job, ManifestDigest sealedManifestDigest);
     Optional<IndexPublicationIntent> publicationIntent(IndexJobId jobId);

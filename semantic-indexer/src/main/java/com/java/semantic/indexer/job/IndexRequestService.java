@@ -48,6 +48,10 @@ public final class IndexRequestService {
         return jobs.find(jobId);
     }
 
+    public Optional<PublishedGenerationPointer> currentPointer(RepositoryId repositoryId) {
+        return jobs.currentPointer(repositoryId);
+    }
+
     public IndexJob rollback(RepositoryId repositoryId, PublishedGenerationPointer expectedCurrent,
                              PublishedGenerationPointer expectedRollback) {
         jobs.reconcileCommitted(repositoryId);

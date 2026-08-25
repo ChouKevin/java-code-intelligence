@@ -17,6 +17,7 @@ import java.util.Optional;
 import java.time.Instant;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -53,6 +54,30 @@ class IndexRepositoryControllerTest {
         assertThat(controller.checkout("orders", new CheckoutIndexRequest("c".repeat(40))).getStatusCode()).isEqualTo(HttpStatus.ACCEPTED);
         assertThat(controller.rebuild("orders", new RebuildIndexRequest(true)).getStatusCode()).isEqualTo(HttpStatus.ACCEPTED);
         assertThat(controller.rollback("orders", request(current, rollback)).getStatusCode()).isEqualTo(HttpStatus.ACCEPTED);
+    }
+
+    @Test
+    void job_returns_the_admin_visible_terminal_state_and_missing_jobs_are_not_found() {
+        IndexRequestService service = mock(IndexRequestService.class);
+        IndexJob job = job("d");
+        when(service.job(job.id())).thenReturn(Optional.of(job));
+        PublishedGenerationPointer current = pointer("e", "g-current", "3", "published-current");
+        when(service.currentPointer(RepositoryId.of("orders"))).thenReturn(Optional.of(current));
+        IndexRepositoryController controller = new IndexRepositoryController(service);
+
+        ResponseEntity<IndexRepositoryController.IndexJobStatusResponse> response = controller.job("orders", job.id().value());
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(response.getBody().jobId()).isEqualTo(job.id().value());
+        assertThat(response.getBody().operation()).isEqualTo(job.operation().name());
+        assertThat(response.getBody().active()).isTrue();
+        assertThat(response.getBody().currentPointer().generationId()).isEqualTo(current.generationId().value());
+        assertThatThrownBy(() -> controller.job("orders", "00000000-0000-0000-0000-000000000000"))
+                .isInstanceOf(org.springframework.web.server.ResponseStatusException.class)
+                .hasMessageContaining("index job was not found");
+        assertThatThrownBy(() -> controller.job("payments", job.id().value()))
+                .isInstanceOf(org.springframework.web.server.ResponseStatusException.class)
+                .hasMessageContaining("index job was not found");
     }
 
     private static RollbackIndexRequest request(PublishedGenerationPointer current, PublishedGenerationPointer rollback) {

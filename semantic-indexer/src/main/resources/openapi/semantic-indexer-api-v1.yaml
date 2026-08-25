@@ -8,6 +8,15 @@ info:
 security:
   - indexerAdminToken: []
 paths:
+  /index/repositories/{repoId}/jobs/{jobId}:
+    get:
+      operationId: getRepositoryIndexJob
+      parameters: [ { $ref: '#/components/parameters/RepositoryId' }, { $ref: '#/components/parameters/IndexJobId' } ]
+      responses:
+        '200': { $ref: '#/components/responses/IndexJobStatus' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/IndexJobNotFound' }
   /index/repositories/{repoId}/ensure:
     post:
       operationId: ensureRepositoryIndex
@@ -112,6 +121,11 @@ components:
       content:
         application/json:
           schema: { $ref: '#/components/schemas/IndexJobResponse' }
+    IndexJobStatus:
+      description: Current asynchronous index-job status for bounded deployment polling.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/IndexJobStatusResponse' }
     Unauthorized:
       description: Missing or invalid Indexer-admin credential.
       content:
@@ -159,6 +173,25 @@ components:
           type: string
           nullable: true
           enum: [WORKER_INTERRUPTED, SOURCE_UNAVAILABLE, SCHEMA_REBUILD_REQUIRED, PUBLICATION_CONFLICT, VALIDATION_FAILED]
+    IndexJobStatusResponse:
+      type: object
+      additionalProperties: false
+      required: [jobId, repositoryId, revision, generationId, operation, phase, active]
+      properties:
+        jobId: { type: string }
+        repositoryId: { type: string }
+        revision: { type: string, pattern: '^[0-9a-f]{40}$' }
+        generationId: { type: string }
+        operation: { type: string, enum: [BUILD, ROLLBACK, NO_WORK] }
+        phase: { type: string, enum: [ACCEPTED, CHECKOUT, PLAN, EXTRACT, WRITE, VALIDATE, PUBLISH, COMPLETE, FAILED] }
+        active: { type: boolean }
+        failureCategory:
+          type: string
+          nullable: true
+          enum: [WORKER_INTERRUPTED, SOURCE_UNAVAILABLE, SCHEMA_REBUILD_REQUIRED, PUBLICATION_CONFLICT, VALIDATION_FAILED]
+        currentPointer:
+          allOf: [{ $ref: '#/components/schemas/GenerationPointer' }]
+          nullable: true
     ApiError:
       type: object
       additionalProperties: false

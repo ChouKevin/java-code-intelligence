@@ -1,7 +1,9 @@
 package com.java.semantic.indexer.api;
 
 import com.java.semantic.indexer.job.IndexJob;
+import com.java.semantic.indexer.job.IndexJobId;
 import com.java.semantic.indexer.job.IndexRequestService;
+import com.java.semantic.model.index.PublishedGenerationPointer;
 import com.java.semantic.model.repository.RepositoryId;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -9,9 +11,11 @@ import jakarta.validation.Valid;
 import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.util.Objects;
 import java.util.Optional;
@@ -54,6 +58,17 @@ public final class IndexRepositoryController {
                 request.expectedRollback().toPointer()));
     }
 
+    @GetMapping("/jobs/{jobId}")
+    public ResponseEntity<IndexJobStatusResponse> job(@PathVariable String repoId, @PathVariable String jobId) {
+        RepositoryId repositoryId = RepositoryId.of(repoId);
+        IndexJob job = requests.job(new IndexJobId(jobId))
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "index job was not found"));
+        if (!job.repositoryId().equals(repositoryId)) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "index job was not found");
+        }
+        return ResponseEntity.ok(IndexJobStatusResponse.from(job, requests.currentPointer(repositoryId)));
+    }
+
     private static ResponseEntity<IndexJobResponse> accepted(IndexJob job) {
         return ResponseEntity.status(HttpStatus.ACCEPTED).body(IndexJobResponse.from(job));
     }
@@ -63,6 +78,25 @@ public final class IndexRepositoryController {
         static IndexJobResponse from(IndexJob job) {
             return new IndexJobResponse(job.id().value(), job.repositoryId().value(), job.revision().value(), job.generationId().value(),
                     job.phase().name(), job.failureCategory().map(Enum::name).orElse(null)); // cs-allow
+        }
+    }
+
+    public record IndexJobStatusResponse(String jobId, String repositoryId, String revision, String generationId,
+                                         String operation, String phase, boolean active, String failureCategory,
+                                         GenerationPointerResponse currentPointer) {
+        static IndexJobStatusResponse from(IndexJob job, Optional<PublishedGenerationPointer> currentPointer) {
+            return new IndexJobStatusResponse(job.id().value(), job.repositoryId().value(), job.revision().value(),
+                    job.generationId().value(), job.operation().name(), job.phase().name(), job.active(),
+                    job.failureCategory().map(Enum::name).orElse(null), // cs-allow
+                    currentPointer.map(GenerationPointerResponse::from).orElse(null)); // cs-allow
+        }
+    }
+
+    public record GenerationPointerResponse(String revision, String generationId, String manifestDigest, String committedJobId,
+                                            java.time.Instant publishedAt) {
+        static GenerationPointerResponse from(PublishedGenerationPointer pointer) {
+            return new GenerationPointerResponse(pointer.revision().value(), pointer.generationId().value(),
+                    pointer.manifestDigest().value(), pointer.committedJobId(), pointer.publishedAt());
         }
     }
 }

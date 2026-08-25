@@ -336,6 +336,14 @@ public final class MongoIndexJobStore implements IndexJobStore {
     }
 
     @Override
+    public Optional<PublishedGenerationPointer> currentPointer(RepositoryId repositoryId) {
+        Objects.requireNonNull(repositoryId, "repository id is required");
+        Document repository = template.getCollection(IndexCollections.REPOSITORIES)
+                .find(new Document(REPO_ID, repositoryId.value())).first();
+        return Optional.ofNullable(repository).flatMap(MongoIndexJobStore::pointerFromRepository);
+    }
+
+    @Override
     public Optional<RollbackGenerationCommand> rollbackCommand(IndexJob job) {
         Objects.requireNonNull(job, "job is required");
         if (job.operation() != IndexJobOperation.ROLLBACK || job.workerId().isEmpty() || job.fence().isEmpty()) {
