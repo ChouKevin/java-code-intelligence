@@ -10,7 +10,8 @@ cd "${root_dir}"
 # The JDT-LS fixture test starts disposable MongoDB and produces payment, order, and video
 # generations using the production exporter; no Query documents or projection constants are seeded here.
 mvn --batch-mode --no-transfer-progress -pl semantic-indexer -am -Pjdtls-it \
-  -Dtest=FixtureFullIndexJdtLsIT -Dsurefire.failIfNoSpecifiedTests=false test
+  -Dtest=FixtureFullIndexJdtLsIT,ToolProjectionImplementationContractTest \
+  -Dsurefire.failIfNoSpecifiedTests=false test
 
 # Fail immediately when the independently declared acceptance set drifts from the runtime catalog.
 acceptance_tools="$(jq -r '.tools[]' acceptance/tool-cases.json | sort -u)"

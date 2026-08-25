@@ -36,6 +36,13 @@ import org.springframework.data.mongodb.core.MongoTemplate;
 
 /** Validates one unpublished generation without ever returning stored source content. */
 public final class GenerationValidator {
+    private static final List<ValidatedProjection> VALIDATION_DISPATCH = List.of(
+            new ValidatedProjection(ProjectionName.SOURCES, "sourcePath"),
+            new ValidatedProjection(ProjectionName.SYMBOLS, "canonical"),
+            new ValidatedProjection(ProjectionName.RELATIONS, "relationId"),
+            new ValidatedProjection(ProjectionName.ENTRY_POINTS, "entryPointId"),
+            new ValidatedProjection(ProjectionName.SEARCH, "factId"));
+
     private final MongoTemplate template;
     private final SourceIndexBatchDocumentMapper projectionMapper;
 
@@ -71,11 +78,12 @@ public final class GenerationValidator {
         validateClaim(lease, issues);
         validateRequiredIndexes(issues);
 
-        List<Document> files = documents(IndexCollections.GENERATION_FILES, lease);
-        List<Document> symbols = documents(IndexCollections.SYMBOLS, lease);
-        List<Document> relations = documents(IndexCollections.RELATIONS, lease);
-        List<Document> entryPoints = documents(IndexCollections.ENTRY_POINTS, lease);
-        List<Document> search = documents(IndexCollections.SEARCH, lease);
+        Map<ProjectionName, List<Document>> persistedProjections = projectionDocuments(lease);
+        List<Document> files = persistedProjections.get(ProjectionName.SOURCES);
+        List<Document> symbols = persistedProjections.get(ProjectionName.SYMBOLS);
+        List<Document> relations = persistedProjections.get(ProjectionName.RELATIONS);
+        List<Document> entryPoints = persistedProjections.get(ProjectionName.ENTRY_POINTS);
+        List<Document> search = persistedProjections.get(ProjectionName.SEARCH);
         Map<String, Document> artifacts = artifactsById(files, issues);
         validateCanonicalIdentities(symbols, issues);
         validateRelations(symbols, relations, issues);
@@ -86,9 +94,15 @@ public final class GenerationValidator {
         validateProjectionArtifacts(files, projections.symbols(), projections.relations(), issues);
         validateSearchCoverage(projections, search, issues);
         validateClaim(lease, issues);
-        Map<String, Long> counts = collectionCounts(files, artifacts, symbols, relations, entryPoints, search);
-        ManifestDigest digest = digest(files, symbols, relations, entryPoints, search);
+        Map<String, Long> counts = collectionCounts(persistedProjections, artifacts);
+        ManifestDigest digest = digest(persistedProjections);
         return new ValidationResult(digest, counts, issues);
+    }
+
+    /** Keys of the production dispatch that reads, validates, counts, and digests persisted projections. */
+    public static Set<ProjectionName> validatedCountedAndDigestedProjections() {
+        return VALIDATION_DISPATCH.stream().map(ValidatedProjection::name)
+                .collect(java.util.stream.Collectors.toUnmodifiableSet());
     }
 
     /** Records the exact values that publication re-checks before the manifest is sealed. */
@@ -480,26 +494,22 @@ public final class GenerationValidator {
         return new Document("$eq", List.of(new Document("$size", new Document("$ifNull", List.of("$" + field, List.of()))), 0));
     }
 
-    private static Map<String, Long> collectionCounts(List<Document> files, Map<String, Document> artifacts, List<Document> symbols,
-                                                       List<Document> relations, List<Document> entryPoints, List<Document> search) {
+    private static Map<String, Long> collectionCounts(Map<ProjectionName, List<Document>> projections,
+                                                       Map<String, Document> artifacts) {
         Map<String, Long> counts = new LinkedHashMap<>();
-        counts.put(IndexSchemaContract.projectionCollection(ProjectionName.SOURCES), (long) files.size());
         counts.put(IndexCollections.SOURCE_ARTIFACTS, (long) new LinkedHashSet<>(artifacts.values()).size());
-        counts.put(IndexSchemaContract.projectionCollection(ProjectionName.SYMBOLS), (long) symbols.size());
-        counts.put(IndexSchemaContract.projectionCollection(ProjectionName.RELATIONS), (long) relations.size());
-        counts.put(IndexSchemaContract.projectionCollection(ProjectionName.ENTRY_POINTS), (long) entryPoints.size());
-        counts.put(IndexSchemaContract.projectionCollection(ProjectionName.SEARCH), (long) search.size());
+        for (ValidatedProjection projection : VALIDATION_DISPATCH) {
+            counts.put(IndexSchemaContract.projectionCollection(projection.name()), (long) projections.get(projection.name()).size());
+        }
         return Map.copyOf(counts);
     }
 
-    private static ManifestDigest digest(List<Document> files, List<Document> symbols, List<Document> relations,
-                                         List<Document> entryPoints, List<Document> search) {
+    private static ManifestDigest digest(Map<ProjectionName, List<Document>> projections) {
         List<String> identities = new ArrayList<>();
-        addIdentities(identities, IndexSchemaContract.projectionCollection(ProjectionName.SOURCES), files, "sourcePath");
-        addIdentities(identities, IndexSchemaContract.projectionCollection(ProjectionName.SYMBOLS), symbols, "canonical");
-        addIdentities(identities, IndexSchemaContract.projectionCollection(ProjectionName.RELATIONS), relations, "relationId");
-        addIdentities(identities, IndexSchemaContract.projectionCollection(ProjectionName.ENTRY_POINTS), entryPoints, "entryPointId");
-        addIdentities(identities, IndexSchemaContract.projectionCollection(ProjectionName.SEARCH), search, "factId");
+        for (ValidatedProjection projection : VALIDATION_DISPATCH) {
+            addIdentities(identities, IndexSchemaContract.projectionCollection(projection.name()),
+                    projections.get(projection.name()), projection.identityField());
+        }
         identities.sort(Comparator.naturalOrder());
         try {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
@@ -522,6 +532,14 @@ public final class GenerationValidator {
     private List<Document> documents(String collection, MongoGenerationWriter.GenerationLease lease) {
         return template.getCollection(collection).find(Filters.and(Filters.eq("repoId", lease.repositoryId().value()),
                 Filters.eq("generationId", lease.generationId().value()))).into(new ArrayList<>());
+    }
+
+    private Map<ProjectionName, List<Document>> projectionDocuments(MongoGenerationWriter.GenerationLease lease) {
+        Map<ProjectionName, List<Document>> projections = new LinkedHashMap<>();
+        for (ValidatedProjection projection : VALIDATION_DISPATCH) {
+            projections.put(projection.name(), documents(IndexSchemaContract.projectionCollection(projection.name()), lease));
+        }
+        return Map.copyOf(projections);
     }
 
     private static Map<String, Integer> projectionVersions(Document manifest) {
@@ -555,6 +573,13 @@ public final class GenerationValidator {
             return start + length == target.length() ? target.substring(start) : "";
         } catch (NumberFormatException exception) {
             return "";
+        }
+    }
+
+    private record ValidatedProjection(ProjectionName name, String identityField) {
+        private ValidatedProjection {
+            name = Objects.requireNonNull(name, "projection name is required");
+            identityField = Objects.requireNonNull(identityField, "projection identity field is required");
         }
     }
 

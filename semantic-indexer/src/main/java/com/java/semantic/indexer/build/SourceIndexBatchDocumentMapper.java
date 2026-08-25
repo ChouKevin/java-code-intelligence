@@ -18,11 +18,20 @@ import com.java.semantic.model.repository.RepositoryId;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
+import java.util.stream.Collectors;
 import org.bson.Document;
 import org.springframework.data.mongodb.core.convert.MongoConverter;
 
 /** Maps one bounded source batch to the immutable Task 5 storage collections. */
 public final class SourceIndexBatchDocumentMapper {
+    private static final List<ProjectionName> PROJECTION_DISPATCH = List.of(
+            ProjectionName.SOURCES,
+            ProjectionName.SYMBOLS,
+            ProjectionName.RELATIONS,
+            ProjectionName.ENTRY_POINTS,
+            ProjectionName.SEARCH);
+
     private final MongoConverter converter;
 
     public SourceIndexBatchDocumentMapper(MongoConverter converter) {
@@ -46,20 +55,47 @@ public final class SourceIndexBatchDocumentMapper {
                 document.put("contentHash", batch.sourceArtifact().contentHash());
             }));
         }
-        if (includeGenerationFile) {
-            GenerationFileDocument generationFile = new GenerationFileDocument(batch.repositoryId(), batch.generationId(), batch.sourcePath(),
-                    batch.sourceArtifact().id(), batch.sourceArtifact().contentHash(),
-                    batch.extractionIssue().map(com.java.semantic.model.index.SourceIndexIssue::code).orElse(""), batch.sourceScope());
-            documents.add(stored(IndexSchemaContract.projectionCollection(ProjectionName.SOURCES), generationFile, document -> {
-                document.put("sourcePath", batch.sourcePath());
-                document.put("extractionIssueCode", batch.extractionIssue().map(com.java.semantic.model.index.SourceIndexIssue::code).orElse(""));
-                document.put("scopeUsable", batch.sourceScope().usableScopes());
-                document.put("scopePackages", batch.sourceScope().packages());
-                document.put("scopeClassKeys", batch.sourceScope().classKeys());
-                document.put("scopeMethodKeys", batch.sourceScope().methodKeys());
-            }));
+        for (ProjectionName projection : PROJECTION_DISPATCH) {
+            documents.addAll(projectionDocuments(projection, batch, includeGenerationFile));
         }
-        batch.symbols().forEach(symbol -> documents.add(stored(IndexSchemaContract.projectionCollection(ProjectionName.SYMBOLS), symbol, document -> {
+        return List.copyOf(documents);
+    }
+
+    /** Keys of the production dispatch that actually writes projection documents. */
+    public static Set<ProjectionName> producedProjections() {
+        return PROJECTION_DISPATCH.stream().collect(Collectors.toUnmodifiableSet());
+    }
+
+    private List<StoredDocument> projectionDocuments(ProjectionName projection, SourceIndexBatch batch,
+                                                     boolean includeGenerationFile) {
+        return switch (projection) {
+            case SOURCES -> sourceDocuments(batch, includeGenerationFile);
+            case SYMBOLS -> symbolDocuments(batch);
+            case RELATIONS -> relationDocuments(batch);
+            case ENTRY_POINTS -> entryPointDocuments(batch);
+            case SEARCH -> searchDocuments(batch);
+        };
+    }
+
+    private List<StoredDocument> sourceDocuments(SourceIndexBatch batch, boolean includeGenerationFile) {
+        if (!includeGenerationFile) {
+            return List.of();
+        }
+        GenerationFileDocument generationFile = new GenerationFileDocument(batch.repositoryId(), batch.generationId(), batch.sourcePath(),
+                batch.sourceArtifact().id(), batch.sourceArtifact().contentHash(),
+                batch.extractionIssue().map(com.java.semantic.model.index.SourceIndexIssue::code).orElse(""), batch.sourceScope());
+        return List.of(stored(IndexSchemaContract.projectionCollection(ProjectionName.SOURCES), generationFile, document -> {
+            document.put("sourcePath", batch.sourcePath());
+            document.put("extractionIssueCode", batch.extractionIssue().map(com.java.semantic.model.index.SourceIndexIssue::code).orElse(""));
+            document.put("scopeUsable", batch.sourceScope().usableScopes());
+            document.put("scopePackages", batch.sourceScope().packages());
+            document.put("scopeClassKeys", batch.sourceScope().classKeys());
+            document.put("scopeMethodKeys", batch.sourceScope().methodKeys());
+        }));
+    }
+
+    private List<StoredDocument> symbolDocuments(SourceIndexBatch batch) {
+        return batch.symbols().stream().map(symbol -> stored(IndexSchemaContract.projectionCollection(ProjectionName.SYMBOLS), symbol, document -> {
             CodeFactScope scope = CodeFactScope.from(symbol.fact().identity());
             document.put("symbolId", symbol.fact().id().value());
             document.put("canonical", symbol.fact().identity().canonicalForm());
@@ -69,15 +105,21 @@ public final class SourceIndexBatchDocumentMapper {
             document.put("scopeMethod", scope.methodName().orElse(""));
             document.put("scopeParameters", scope.parameterTypes());
             document.put("scopePath", scope.sourcePath().orElse(""));
-        })));
-        batch.relations().forEach(relation -> documents.add(stored(IndexSchemaContract.projectionCollection(ProjectionName.RELATIONS), relation, document -> {
+        })).toList();
+    }
+
+    private List<StoredDocument> relationDocuments(SourceIndexBatch batch) {
+        return batch.relations().stream().map(relation -> stored(IndexSchemaContract.projectionCollection(ProjectionName.RELATIONS), relation, document -> {
             document.put("relationId", relation.fact().id().value());
             document.put("canonical", relation.fact().identity().canonicalForm());
             document.put("from", relation.from().canonicalForm());
             document.put("target", relation.target().canonicalForm());
             document.put("sourcePath", batch.sourcePath());
-        })));
-        batch.entryPoints().forEach(entryPoint -> documents.add(stored(IndexSchemaContract.projectionCollection(ProjectionName.ENTRY_POINTS),
+        })).toList();
+    }
+
+    private List<StoredDocument> entryPointDocuments(SourceIndexBatch batch) {
+        return batch.entryPoints().stream().map(entryPoint -> stored(IndexSchemaContract.projectionCollection(ProjectionName.ENTRY_POINTS),
                 EntryPointPersistence.from(entryPoint), document -> {
             CodeFactScope scope = CodeFactScope.from(entryPoint.fact().identity());
             document.put("entryPointId", entryPoint.fact().id().value());
@@ -91,8 +133,11 @@ public final class SourceIndexBatchDocumentMapper {
             document.put("scopeMethod", scope.methodName().orElse(""));
             document.put("scopeParameters", scope.parameterTypes());
             document.put("scopePath", scope.sourcePath().orElse(""));
-        })));
-        batch.search().forEach(search -> documents.add(stored(IndexSchemaContract.projectionCollection(ProjectionName.SEARCH),
+        })).toList();
+    }
+
+    private List<StoredDocument> searchDocuments(SourceIndexBatch batch) {
+        return batch.search().stream().map(search -> stored(IndexSchemaContract.projectionCollection(ProjectionName.SEARCH),
                 IndexProjectionPersistence.SearchPersistence.from(search), document -> {
             document.put("factId", search.factId().value());
             document.put("kind", search.kind().name());
@@ -106,8 +151,7 @@ public final class SourceIndexBatchDocumentMapper {
             document.put("scopeParameters", search.scope().parameterTypes());
             document.put("scopePath", search.scope().sourcePath().orElse(""));
             document.put("sourcePath", batch.sourcePath());
-        })));
-        return List.copyOf(documents);
+        })).toList();
     }
 
     private StoredDocument stored(String collection, Object value, java.util.function.Consumer<Document> enrich) {

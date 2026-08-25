@@ -65,13 +65,8 @@ public final class IndexSchemaContract {
 
     public static Map<String, Integer> requiredProjectionVersions() { return REQUIRED_PROJECTION_VERSIONS; }
 
-    /** Actual persisted projection producers; exporters use each specification's collection rather than an enum-only list. */
-    public static Set<ProjectionName> producedProjections() {
-        return PROJECTIONS.stream().map(ProjectionSpec::name).collect(Collectors.toUnmodifiableSet());
-    }
-
-    /** Validation and sealing count the same persisted projection contract that exporters write. */
-    public static Set<ProjectionName> validatorAndCountedProjections() {
+    /** Projections required by the persisted schema; implementation coverage is declared by Indexer dispatchers. */
+    public static Set<ProjectionName> projectionNames() {
         return PROJECTIONS.stream().map(ProjectionSpec::name).collect(Collectors.toUnmodifiableSet());
     }
 

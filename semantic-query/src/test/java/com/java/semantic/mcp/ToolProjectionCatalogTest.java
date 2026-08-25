@@ -47,7 +47,7 @@ class ToolProjectionCatalogTest {
     @Test
     void rejects_catalog_drift_including_a_new_runtime_tool_without_an_acceptance_case() {
         List<com.java.semantic.model.query.ToolProjectionRequirement> requirements = ToolProjectionCatalog.requirements();
-        Set<com.java.semantic.model.index.ProjectionName> produced = com.java.semantic.model.index.IndexSchemaContract.producedProjections();
+        Set<com.java.semantic.model.index.ProjectionName> produced = com.java.semantic.model.index.IndexSchemaContract.projectionNames();
 
         org.assertj.core.api.Assertions.assertThatThrownBy(() -> ToolProjectionCatalog.validate(requirements, produced, produced,
                         List.of("semantic_search_code_facts", "semantic_new_tool"), List.of("semantic_search_code_facts")))

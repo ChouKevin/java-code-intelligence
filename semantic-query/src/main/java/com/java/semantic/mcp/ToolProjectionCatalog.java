@@ -34,8 +34,7 @@ public final class ToolProjectionCatalog {
     }
 
     static {
-        validate(REQUIREMENTS, IndexSchemaContract.producedProjections(), IndexSchemaContract.validatorAndCountedProjections(),
-                toolNames(), toolNames());
+        validateRequiredProjections(REQUIREMENTS, IndexSchemaContract.projectionNames());
     }
 
     public static List<ToolProjectionRequirement> requirements() {
@@ -44,6 +43,12 @@ public final class ToolProjectionCatalog {
 
     public static List<String> toolNames() {
         return REQUIREMENTS.stream().map(ToolProjectionRequirement::toolName).toList();
+    }
+
+    /** Called by the cross-application contract with the production Indexer dispatcher keys. */
+    public static void validateImplementationCoverage(Set<ProjectionName> produced,
+                                                      Set<ProjectionName> validatedCountedAndDigested) {
+        validateProjectionCoverage(REQUIREMENTS, produced, validatedCountedAndDigested);
     }
 
     /** Validates the finite tool/data contract; tests pass the independently loaded runtime and acceptance sets. */
@@ -61,6 +66,23 @@ public final class ToolProjectionCatalog {
         if (!Set.copyOf(runtimeTools).equals(Set.copyOf(acceptanceTools))) {
             throw new IllegalStateException("every runtime MCP tool must have exactly one acceptance case");
         }
+        validateProjectionCoverage(requirements, produced, validatorAndCountCoverage);
+    }
+
+    private static void validateRequiredProjections(List<ToolProjectionRequirement> requirements,
+                                                    Set<ProjectionName> schemaProjections) {
+        for (ToolProjectionRequirement requirement : requirements) {
+            requirement.projections().ifPresent(projections -> {
+                if (!schemaProjections.containsAll(projections.names())) {
+                    throw new IllegalStateException("tool requires a projection outside the current schema contract");
+                }
+            });
+        }
+    }
+
+    private static void validateProjectionCoverage(List<ToolProjectionRequirement> requirements,
+                                                   Set<ProjectionName> produced,
+                                                   Set<ProjectionName> validatedCountedAndDigested) {
         for (ToolProjectionRequirement requirement : requirements) {
             requirement.projections().ifPresent(projections -> {
                 if (!produced.containsAll(projections.names())) {
@@ -68,7 +90,7 @@ public final class ToolProjectionCatalog {
                 }
             });
         }
-        if (!validatorAndCountCoverage.containsAll(produced)) {
+        if (!validatedCountedAndDigested.containsAll(produced)) {
             throw new IllegalStateException("every produced projection requires validator and count coverage");
         }
     }
