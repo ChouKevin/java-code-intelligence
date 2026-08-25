@@ -8,6 +8,9 @@ import com.java.semantic.indexer.job.IndexJob;
 import com.java.semantic.indexer.job.IndexJobPhase;
 import com.java.semantic.indexer.job.IndexJobWorker;
 import com.java.semantic.indexer.job.MongoIndexJobStore;
+import com.java.semantic.indexer.incremental.IncrementalIndexPlanner;
+import com.java.semantic.indexer.incremental.ModuleLocator;
+import com.java.semantic.indexer.incremental.SourceContractChangeDetector;
 import com.java.semantic.indexer.store.IndexSchemaBootstrap;
 import com.java.semantic.indexer.store.MongoGenerationWriter;
 import com.java.semantic.indexer.store.MongoPublicationWriter;
@@ -317,7 +320,30 @@ class FullIndexPublicationIT {
                                              IndexBuildService.CheckoutResolver checkoutResolver) {
         return new IndexBuildService(new FullIndexPlanner(), exporter, new MongoGenerationWriter(template),
                 new SourceIndexBatchDocumentMapper(template.getConverter()), new GenerationValidator(template),
-                new IndexJobWorker(store, new MongoPublicationWriter(template)), checkoutResolver);
+                new IndexJobWorker(store, new MongoPublicationWriter(template)), checkoutResolver, incrementalBuilder(template));
+    }
+
+    private static IncrementalGenerationBuilder incrementalBuilder(MongoTemplate template) {
+        ModuleLocator noModuleGraph = new ModuleLocator() {
+            @Override
+            public Optional<String> locate(String path) {
+                return Optional.empty();
+            }
+
+            @Override
+            public Optional<Set<String>> reverseDependencyClosure(String module) {
+                return Optional.empty();
+            }
+
+            @Override
+            public Optional<Set<String>> supportedSources(String module) {
+                return Optional.empty();
+            }
+        };
+        IncrementalIndexPlanner planner = new IncrementalIndexPlanner((parent, selected) -> List.of(),
+                (change, declarations) -> SourceContractChangeDetector.Impact.bodyOrPrivateChange(), noModuleGraph);
+        MongoGenerationWriter writer = new MongoGenerationWriter(template);
+        return new IncrementalGenerationBuilder(template, planner, new ParentGenerationCopier(template, writer));
     }
 
     private static RepositoryIndexExporter exporter(MongoTemplate template, Consumer<MongoTemplate> mutation) {

@@ -2,6 +2,7 @@ package com.java.semantic.indexer.job;
 
 import com.java.semantic.indexer.store.IndexSchemaBootstrap;
 import com.java.semantic.model.index.IndexCollections;
+import com.java.semantic.model.index.IndexSchemaContract;
 import com.java.semantic.model.index.ManifestDigest;
 import com.java.semantic.model.index.PublishGenerationCommand;
 import com.java.semantic.model.index.PublishedGenerationPointer;
@@ -100,6 +101,34 @@ class MongoIndexJobStoreIT {
                     .publishBuild(claimed, digest)).isTrue();
             assertThat(store.find(claimed.id()).orElseThrow().phase()).isEqualTo(IndexJobPhase.COMPLETE);
             assertThat(store.reconcileCommitted(repositoryId)).isEmpty();
+        }
+    }
+
+    @Test
+    void build_publication_keeps_the_parent_pointer_captured_at_claim_when_repository_current_changes() {
+        try (MongoDBContainer container = new MongoDBContainer("mongo:8.0.4")) {
+            container.start();
+            MongoTemplate template = new MongoTemplate(com.mongodb.client.MongoClients.create(container.getConnectionString()), "semantic");
+            new IndexSchemaBootstrap(template).bootstrap();
+            MongoIndexJobStore store = new MongoIndexJobStore(template);
+            PublishedGenerationPointer claimedParent = pointer("a", "g1", "job-g1");
+            seedPublished(template, "orders", claimedParent, true, 1);
+            IndexJob claimed = store.claim(store.admit(RepositoryId.of("orders"), new RepositoryRevision("b".repeat(40)), false).id(),
+                    "worker-a", Duration.ofSeconds(60)).orElseThrow();
+            ManifestDigest digest = new ManifestDigest("b".repeat(64));
+            template.getCollection(IndexCollections.GENERATION_MANIFESTS).insertOne(sealedManifest(claimed, digest));
+            PublishedGenerationPointer winner = pointer("c", "g-concurrent", "job-concurrent");
+            template.getCollection(IndexCollections.REPOSITORIES).updateOne(new org.bson.Document("repoId", "orders"), new org.bson.Document("$set",
+                    pointerDocument(winner)));
+
+            IndexPublicationIntent intent = store.prepareBuildPublication(claimed, digest).orElseThrow();
+
+            assertThat(intent.expectedParent()).contains(claimedParent);
+            assertThatThrownBy(() -> new com.java.semantic.indexer.store.MongoPublicationWriter(template).publish(buildCommand(claimed, intent)))
+                    .isInstanceOf(com.java.semantic.indexer.store.PublicationConflictException.class);
+            assertThat(store.find(claimed.id()).orElseThrow().phase()).isNotEqualTo(IndexJobPhase.COMPLETE);
+            assertThat(template.getCollection(IndexCollections.REPOSITORIES).find(new org.bson.Document("repoId", "orders")).first()
+                    .getString("generationId")).isEqualTo("g-concurrent");
         }
     }
 
@@ -316,12 +345,8 @@ class MongoIndexJobStoreIT {
                 .append("generationId", job.generationId().value()).append("ownerJobId", job.id().value())
                 .append("ownerWorkerId", job.workerId().orElseThrow()).append("fence", job.fence().orElseThrow().value())
                 .append("sealUntil", Date.from(job.claimUntil().orElseThrow())).append("writeState", "SEALED_VALID")
-                .append("writeEpoch", 1L).append("schemaVersion", 1)
-                .append("projectionVersions", List.of(new org.bson.Document("name", "SOURCES").append("version", 1),
-                        new org.bson.Document("name", "SYMBOLS").append("version", 2),
-                        new org.bson.Document("name", "RELATIONS").append("version", 1),
-                        new org.bson.Document("name", "ENTRY_POINTS").append("version", 2),
-                        new org.bson.Document("name", "SEARCH").append("version", 2)))
+                .append("writeEpoch", 1L).append("schemaVersion", IndexSchemaContract.SCHEMA_VERSION)
+                .append("projectionVersions", projectionVersions())
                 .append("sealedCollectionCounts", new org.bson.Document("symbols", 1L)).append("identityDigest", digest.value())
                 .append("validationResult", "VALID").append("validatedAt", new java.util.Date());
     }
@@ -382,11 +407,7 @@ class MongoIndexJobStoreIT {
     private static org.bson.Document manifestForPointer(String repositoryId, PublishedGenerationPointer pointer, String workerId,
                                                          long fence, boolean requiredProjections, int schemaVersion) {
         List<org.bson.Document> projections = requiredProjections
-                ? List.of(new org.bson.Document("name", "SOURCES").append("version", 1),
-                        new org.bson.Document("name", "SYMBOLS").append("version", 2),
-                        new org.bson.Document("name", "RELATIONS").append("version", 1),
-                        new org.bson.Document("name", "ENTRY_POINTS").append("version", 2),
-                        new org.bson.Document("name", "SEARCH").append("version", 2))
+                ? projectionVersions()
                 : List.of(new org.bson.Document("name", "SOURCES").append("version", 0));
         return new org.bson.Document("repoId", repositoryId).append("sourceRevision", pointer.revision().value())
                 .append("generationId", pointer.generationId().value()).append("ownerJobId", pointer.committedJobId())
@@ -395,5 +416,10 @@ class MongoIndexJobStoreIT {
                 .append("projectionVersions", projections).append("sealedCollectionCounts", new org.bson.Document("symbols", 1L))
                 .append("identityDigest", pointer.manifestDigest().value()).append("validationResult", "VALID")
                 .append("validatedAt", new Date());
+    }
+
+    private static List<org.bson.Document> projectionVersions() {
+        return IndexSchemaContract.requiredProjectionVersions().entrySet().stream().sorted(java.util.Map.Entry.comparingByKey())
+                .map(entry -> new org.bson.Document("name", entry.getKey()).append("version", entry.getValue())).toList();
     }
 }

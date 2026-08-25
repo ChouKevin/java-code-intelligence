@@ -23,11 +23,13 @@ public final class IndexBuildService {
     private final GenerationValidator validator;
     private final IndexJobWorker worker;
     private final CheckoutResolver checkedOutRepository;
+    private final IncrementalGenerationBuilder incrementalBuilder;
 
+    /** Adds Task-13 incremental assembly while preserving the existing full-build construction seam. */
     public IndexBuildService(FullIndexPlanner planner, RepositoryIndexExporter exporter,
                              MongoGenerationWriter generationWriter, SourceIndexBatchDocumentMapper documentMapper,
-                             GenerationValidator validator, IndexJobWorker worker,
-                             CheckoutResolver checkedOutRepository) {
+                             GenerationValidator validator, IndexJobWorker worker, CheckoutResolver checkedOutRepository,
+                             IncrementalGenerationBuilder incrementalBuilder) {
         this.planner = Objects.requireNonNull(planner, "planner is required");
         this.exporter = Objects.requireNonNull(exporter, "exporter is required");
         this.generationWriter = Objects.requireNonNull(generationWriter, "generation writer is required");
@@ -35,6 +37,7 @@ public final class IndexBuildService {
         this.validator = Objects.requireNonNull(validator, "validator is required");
         this.worker = Objects.requireNonNull(worker, "worker is required");
         this.checkedOutRepository = Objects.requireNonNull(checkedOutRepository, "checked-out repository is required");
+        this.incrementalBuilder = Objects.requireNonNull(incrementalBuilder, "incremental builder is required");
     }
 
     /** Executes checkout, plan, export, fenced writes, validation, sealing, publication and idempotent reconciliation. */
@@ -58,7 +61,8 @@ public final class IndexBuildService {
             guard.requireHeld();
             insertWritingManifest(job, lease);
             guard.requireHeld();
-            List<SourceIndexBatch> batches = exporter.export(job.repositoryId(), job.revision(), job.generationId(), plan);
+            FullIndexPlan exportPlan = incrementalBuilder.assemble(job, lease, plan).exportPlan();
+            List<SourceIndexBatch> batches = exporter.export(job.repositoryId(), job.revision(), job.generationId(), exportPlan);
             MongoIndexBatchWriter writer = new MongoIndexBatchWriter(generationWriter, lease, documentMapper);
             for (SourceIndexBatch batch : batches) {
                 guard.requireHeld();

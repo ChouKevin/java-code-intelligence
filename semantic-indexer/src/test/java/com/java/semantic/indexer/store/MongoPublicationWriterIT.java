@@ -2,6 +2,7 @@ package com.java.semantic.indexer.store;
 
 import com.java.semantic.model.index.IndexCollections;
 import com.java.semantic.model.index.GenerationId;
+import com.java.semantic.model.index.IndexSchemaContract;
 import com.java.semantic.model.index.ManifestDigest;
 import com.java.semantic.model.index.PublishGenerationCommand;
 import com.java.semantic.model.index.PublishedGenerationPointer;
@@ -214,7 +215,7 @@ class MongoPublicationWriterIT {
                 .append("sealUntil", activeUntil())
                 .append("writeState", "SEALED_VALID")
                 .append("writeEpoch", 1L)
-                .append("schemaVersion", 1)
+                .append("schemaVersion", IndexSchemaContract.SCHEMA_VERSION)
                 .append("projectionVersions", projectionVersions())
                 .append("sealedCollectionCounts", new Document("symbols", 1L))
                 .append("identityDigest", digest)
@@ -223,12 +224,9 @@ class MongoPublicationWriterIT {
     }
 
     private static java.util.List<Document> projectionVersions() {
-        return java.util.List.of(
-                new Document("name", "SOURCES").append("version", 1),
-                new Document("name", "SYMBOLS").append("version", 2),
-                new Document("name", "RELATIONS").append("version", 1),
-                new Document("name", "ENTRY_POINTS").append("version", 2),
-                new Document("name", "SEARCH").append("version", 2));
+        return IndexSchemaContract.requiredProjectionVersions().entrySet().stream()
+                .map(entry -> new Document("name", entry.getKey()).append("version", entry.getValue()))
+                .toList();
     }
 
     private static String digest(String digit) {

@@ -182,8 +182,13 @@ public final class MongoIndexJobStore implements IndexJobStore {
         }
         if (Objects.isNull(claimed)) {
             releaseExactRepositoryClaim(job, workerId, fenceValue.longValue());
+            return Optional.empty();
         }
-        return Optional.ofNullable(claimed).map(MongoIndexJobStore::from);
+        if (!captureBuildParent(job, workerId, fenceValue.longValue(), repository)) {
+            releaseExactRepositoryClaim(job, workerId, fenceValue.longValue());
+            return Optional.empty();
+        }
+        return Optional.of(claimed).map(MongoIndexJobStore::from);
     }
 
     @Override
@@ -336,7 +341,13 @@ public final class MongoIndexJobStore implements IndexJobStore {
         if (Objects.isNull(repository)) {
             return Optional.empty();
         }
-        Optional<PublishedGenerationPointer> parent = pointerFromRepository(repository);
+        Document claimedJob = template.getCollection(IndexCollections.INDEX_JOBS).find(jobOwnership(job,
+                job.workerId().orElseThrow(), job.fence().orElseThrow().value()).append("buildParentCaptured", true)).first();
+        if (Objects.isNull(claimedJob)) {
+            return Optional.empty();
+        }
+        Optional<PublishedGenerationPointer> parent = Optional.ofNullable(claimedJob.get("buildParent", Document.class))
+                .map(MongoIndexJobStore::pointerFrom);
         IndexPublicationIntent intent = new IndexPublicationIntent(job.id(), IndexJobOperation.BUILD, job.repositoryId(), job.revision(),
                 job.generationId(), sealedManifestDigest, parent, Optional.empty(), Optional.empty());
         UpdateResult saved = template.updateFirst(new BasicQuery(jobOwnership(job, job.workerId().orElseThrow(),
@@ -586,6 +597,15 @@ public final class MongoIndexJobStore implements IndexJobStore {
                 new Update().set("workerId", workerId).set("fence", fence).set("claimUntil", claimUntil)
                         .set("phase", IndexJobPhase.CHECKOUT.name()), FindAndModifyOptions.options().returnNew(true),
                 Document.class, IndexCollections.INDEX_JOBS);
+    }
+
+    /** The parent pointer is frozen immediately after the repository claim and reused as publication's CAS predicate. */
+    private boolean captureBuildParent(IndexJob job, String workerId, long fence, Document repository) {
+        Update update = new Update().set("buildParentCaptured", true);
+        pointerFromRepository(repository).ifPresent(pointer -> update.set("buildParent", pointerDocument(pointer)));
+        UpdateResult captured = template.updateFirst(new BasicQuery(jobOwnership(job, workerId, fence)
+                        .append("buildParentCaptured", new Document("$exists", false))), update, IndexCollections.INDEX_JOBS);
+        return captured.getModifiedCount() == 1L;
     }
 
     private void releaseExactRepositoryClaim(IndexJob job, String workerId, long fence) {
