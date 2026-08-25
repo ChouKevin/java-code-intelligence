@@ -36,10 +36,6 @@ import org.springframework.data.mongodb.core.MongoTemplate;
 
 /** Validates one unpublished generation without ever returning stored source content. */
 public final class GenerationValidator {
-    private static final List<String> GENERATION_COLLECTIONS = List.of(
-            IndexCollections.GENERATION_FILES, IndexCollections.SYMBOLS, IndexCollections.RELATIONS,
-            IndexCollections.ENTRY_POINTS, IndexCollections.SEARCH);
-
     private final MongoTemplate template;
     private final SourceIndexBatchDocumentMapper projectionMapper;
 
@@ -487,23 +483,23 @@ public final class GenerationValidator {
     private static Map<String, Long> collectionCounts(List<Document> files, Map<String, Document> artifacts, List<Document> symbols,
                                                        List<Document> relations, List<Document> entryPoints, List<Document> search) {
         Map<String, Long> counts = new LinkedHashMap<>();
-        counts.put(IndexCollections.GENERATION_FILES, (long) files.size());
+        counts.put(IndexSchemaContract.projectionCollection(ProjectionName.SOURCES), (long) files.size());
         counts.put(IndexCollections.SOURCE_ARTIFACTS, (long) new LinkedHashSet<>(artifacts.values()).size());
-        counts.put(IndexCollections.SYMBOLS, (long) symbols.size());
-        counts.put(IndexCollections.RELATIONS, (long) relations.size());
-        counts.put(IndexCollections.ENTRY_POINTS, (long) entryPoints.size());
-        counts.put(IndexCollections.SEARCH, (long) search.size());
+        counts.put(IndexSchemaContract.projectionCollection(ProjectionName.SYMBOLS), (long) symbols.size());
+        counts.put(IndexSchemaContract.projectionCollection(ProjectionName.RELATIONS), (long) relations.size());
+        counts.put(IndexSchemaContract.projectionCollection(ProjectionName.ENTRY_POINTS), (long) entryPoints.size());
+        counts.put(IndexSchemaContract.projectionCollection(ProjectionName.SEARCH), (long) search.size());
         return Map.copyOf(counts);
     }
 
     private static ManifestDigest digest(List<Document> files, List<Document> symbols, List<Document> relations,
                                          List<Document> entryPoints, List<Document> search) {
         List<String> identities = new ArrayList<>();
-        addIdentities(identities, IndexCollections.GENERATION_FILES, files, "sourcePath");
-        addIdentities(identities, IndexCollections.SYMBOLS, symbols, "canonical");
-        addIdentities(identities, IndexCollections.RELATIONS, relations, "relationId");
-        addIdentities(identities, IndexCollections.ENTRY_POINTS, entryPoints, "entryPointId");
-        addIdentities(identities, IndexCollections.SEARCH, search, "factId");
+        addIdentities(identities, IndexSchemaContract.projectionCollection(ProjectionName.SOURCES), files, "sourcePath");
+        addIdentities(identities, IndexSchemaContract.projectionCollection(ProjectionName.SYMBOLS), symbols, "canonical");
+        addIdentities(identities, IndexSchemaContract.projectionCollection(ProjectionName.RELATIONS), relations, "relationId");
+        addIdentities(identities, IndexSchemaContract.projectionCollection(ProjectionName.ENTRY_POINTS), entryPoints, "entryPointId");
+        addIdentities(identities, IndexSchemaContract.projectionCollection(ProjectionName.SEARCH), search, "factId");
         identities.sort(Comparator.naturalOrder());
         try {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");

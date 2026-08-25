@@ -3,7 +3,9 @@ package com.java.semantic.query.application;
 import com.java.semantic.model.codefact.CodeFactIdentity;
 import com.java.semantic.model.codefact.CodeFactKind;
 import com.java.semantic.model.codefact.CodeFactSearchQuery;
+import com.java.semantic.model.codefact.CodeFactScope;
 import com.java.semantic.model.index.ProjectionName;
+import com.java.semantic.model.index.GenerationId;
 import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.model.repository.RepositoryRevision;
 import com.mongodb.client.MongoClients;
@@ -38,14 +40,18 @@ class ToolProjectionEvolutionIT extends PublishedMongoITSupport {
             assertThatThrownBy(() -> search.search(query)).isInstanceOf(IndexContractMismatchException.class)
                     .hasMessage("INDEX_CONTRACT_MISMATCH");
 
-            template.getCollection("repositories").updateOne(new Document("repoId", "orders"), new Document("$set",
-                    new Document("generationId", "g2").append("manifestDigest", "3".repeat(64))));
+            CodeFactIdentity identity = methodIdentity("example.payment", "PaymentService", "findPayment",
+                    "src/main/java/example/payment/PaymentService.java");
+            seedG2SearchAndAuthoritativeMethod(template, identity);
             template.getCollection("generation_manifests").insertOne(new Document("repoId", "orders").append("sourceRevision", REVISION)
                     .append("generationId", "g2").append("identityDigest", "3".repeat(64)).append("writeState", "SEALED_VALID")
                     .append("schemaVersion", 1).append("projectionVersions", currentVersions()));
+            template.getCollection("repositories").updateOne(new Document("repoId", "orders"), new Document("$set",
+                    new Document("generationId", "g2").append("manifestDigest", "3".repeat(64))));
 
-            CodeFactIdentity identity = methodIdentity("example.payment", "PaymentService", "findPayment",
-                    "src/main/java/example/payment/PaymentService.java");
+            assertThat(search.search(query).generation().generationId().value()).isEqualTo("g2");
+            assertThat(search.search(query).facts()).extracting(summary -> summary.fact().identity().canonicalForm())
+                    .contains(identity.canonicalForm());
             assertThat(selector(template, policy()).selectCodeFact("orders", REVISION, identity,
                     CurrentGenerationSelector.SEARCH).generationId().value()).isEqualTo("g2");
             assertThat(selector(template, policy()).currentRepository("orders").revision().value()).isEqualTo(REVISION);
@@ -63,5 +69,33 @@ class ToolProjectionEvolutionIT extends PublishedMongoITSupport {
     private static List<Document> currentVersions() {
         return com.java.semantic.model.index.IndexSchemaContract.requiredProjectionVersions().entrySet().stream()
                 .map(entry -> new Document("name", entry.getKey()).append("version", entry.getValue())).toList();
+    }
+
+    private static void seedG2SearchAndAuthoritativeMethod(MongoTemplate template, CodeFactIdentity identity) {
+        com.java.semantic.model.index.SymbolDocument g1Method = seedMethod(template, identity, List.of());
+        com.java.semantic.model.codefact.MethodTarget target = (com.java.semantic.model.codefact.MethodTarget) identity.canonicalIdentity();
+        Document g1Document = new Document();
+        template.getConverter().write(g1Method, g1Document);
+        g1Document.put("repoId", "orders");
+        g1Document.put("generationId", "g2");
+        g1Document.put("symbolId", g1Method.fact().id().value());
+        g1Document.put("canonical", identity.canonicalForm());
+        g1Document.put("sourcePath", target.sourceFile());
+        CodeFactScope scope = CodeFactScope.from(identity);
+        g1Document.put("scopePackage", scope.packageName());
+        g1Document.put("scopeClass", scope.className());
+        g1Document.put("scopeMethod", scope.methodName().orElse(""));
+        g1Document.put("scopeParameters", scope.parameterTypes());
+        g1Document.put("scopePath", scope.sourcePath().orElse(""));
+        template.getCollection("symbols").insertOne(g1Document);
+
+        Document searchDocument = new Document("repoId", "orders").append("generationId", "g2")
+                .append("factId", g1Method.fact().id().value()).append("kind", CodeFactKind.METHOD.name())
+                .append("tokens", List.of("payment")).append("package", "example.payment")
+                .append("authority", ProjectionName.SYMBOLS.name()).append("canonical", identity.canonicalForm())
+                .append("scopePackage", scope.packageName()).append("scopeClass", scope.className())
+                .append("scopeMethod", scope.methodName().orElse("")).append("scopeParameters", scope.parameterTypes())
+                .append("scopePath", scope.sourcePath().orElse("")).append("sourcePath", target.sourceFile());
+        template.getCollection("search").insertOne(searchDocument);
     }
 }

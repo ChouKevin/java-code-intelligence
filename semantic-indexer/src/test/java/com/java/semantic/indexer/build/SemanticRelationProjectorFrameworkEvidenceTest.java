@@ -7,6 +7,7 @@ import com.java.semantic.model.codefact.RelationKind;
 import com.java.semantic.model.codefact.RelationTarget;
 import com.java.semantic.model.index.GenerationId;
 import com.java.semantic.model.index.RelationDocument;
+import com.java.semantic.model.index.SymbolDocument;
 import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.model.repository.RepositoryRevision;
 import java.io.IOException;
@@ -131,6 +132,73 @@ class SemanticRelationProjectorFrameworkEvidenceTest {
         assertThat(endpoint.range().range().start().character()).isEqualTo(8);
     }
 
+    @Test
+    void projects_an_internal_call_to_the_persisted_declaration_identity() throws IOException {
+        write("src/main/java/com/example/LocalService.java", """
+                package com.example;
+
+                final class LocalService {
+                    LocalService() { }
+
+                    void accept(String id) { }
+                }
+                """);
+        write("src/main/java/com/example/Caller.java", """
+                package com.example;
+
+                final class Caller {
+                    void call() {
+                        new LocalService().accept("id");
+                    }
+                }
+                """);
+
+        List<SourceIndexBatch> batches = exportBatches();
+        SymbolDocument accept = batches.stream().flatMap(batch -> batch.symbols().stream())
+                .filter(symbol -> symbol.signature().equals("com.example.LocalService#accept(java.lang.String)"))
+                .findFirst().orElseThrow();
+        RelationDocument call = batches.stream().flatMap(batch -> batch.relations().stream())
+                .filter(relation -> relation.kind() == RelationKind.CALLS)
+                .filter(relation -> relation.range().sourceFile().equals("src/main/java/com/example/Caller.java"))
+                .filter(relation -> relation.target() instanceof RelationTarget.Internal)
+                .filter(relation -> relation.target().canonicalForm().contains("#accept("))
+                .findFirst().orElseThrow();
+
+        RelationTarget.Internal target = (RelationTarget.Internal) call.target();
+        assertThat(target.identity()).isEqualTo(accept.fact().identity());
+    }
+
+    @Test
+    void projects_an_internal_override_to_the_persisted_parent_declaration_identity() throws IOException {
+        write("src/main/java/com/example/LocalContract.java", """
+                package com.example;
+
+                interface LocalContract {
+                    void accept(String id);
+                }
+                """);
+        write("src/main/java/com/example/LocalImplementation.java", """
+                package com.example;
+
+                final class LocalImplementation implements LocalContract {
+                    @Override
+                    public void accept(String id) { }
+                }
+                """);
+
+        List<SourceIndexBatch> batches = exportBatches();
+        SymbolDocument parent = batches.stream().flatMap(batch -> batch.symbols().stream())
+                .filter(symbol -> symbol.signature().equals("com.example.LocalContract#accept(java.lang.String)"))
+                .findFirst().orElseThrow();
+        RelationDocument override = batches.stream().flatMap(batch -> batch.relations().stream())
+                .filter(relation -> relation.kind() == RelationKind.OVERRIDES)
+                .filter(relation -> relation.range().sourceFile().equals("src/main/java/com/example/LocalImplementation.java"))
+                .findFirst().orElseThrow();
+
+        RelationTarget.Internal target = (RelationTarget.Internal) override.target();
+        assertThat(target.identity()).isEqualTo(parent.fact().identity());
+    }
+
     private void writeFrameworkContractStubs() throws IOException {
         write("src/main/java/org/springframework/kafka/core/KafkaTemplate.java", """
                 package org.springframework.kafka.core;
@@ -152,9 +220,13 @@ class SemanticRelationProjectorFrameworkEvidenceTest {
     }
 
     private List<RelationDocument> exportRelations() {
+        return exportBatches().stream().flatMap(batch -> batch.relations().stream()).toList();
+    }
+
+    private List<SourceIndexBatch> exportBatches() {
         return new JdtLsRepositoryIndexExporter().export(new RepositoryId("framework-evidence"),
                 new RepositoryRevision("a".repeat(40)), new GenerationId("framework-generation"),
-                new FullIndexPlanner().plan(repository)).stream().flatMap(batch -> batch.relations().stream()).toList();
+                new FullIndexPlanner().plan(repository));
     }
 
     private void write(String relativePath, String source) throws IOException {

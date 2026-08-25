@@ -9,6 +9,8 @@ import com.java.semantic.model.codefact.SourceRange;
 import com.java.semantic.model.index.GenerationFileDocument;
 import com.java.semantic.model.index.GenerationId;
 import com.java.semantic.model.index.IndexCollections;
+import com.java.semantic.model.index.IndexSchemaContract;
+import com.java.semantic.model.index.ProjectionName;
 import com.java.semantic.model.index.RelationDocument;
 import com.java.semantic.model.index.persistence.EntryPointPersistence;
 import com.java.semantic.model.index.SourceArtifactId;
@@ -48,7 +50,7 @@ public final class SourceIndexBatchDocumentMapper {
             GenerationFileDocument generationFile = new GenerationFileDocument(batch.repositoryId(), batch.generationId(), batch.sourcePath(),
                     batch.sourceArtifact().id(), batch.sourceArtifact().contentHash(),
                     batch.extractionIssue().map(com.java.semantic.model.index.SourceIndexIssue::code).orElse(""), batch.sourceScope());
-            documents.add(stored(IndexCollections.GENERATION_FILES, generationFile, document -> {
+            documents.add(stored(IndexSchemaContract.projectionCollection(ProjectionName.SOURCES), generationFile, document -> {
                 document.put("sourcePath", batch.sourcePath());
                 document.put("extractionIssueCode", batch.extractionIssue().map(com.java.semantic.model.index.SourceIndexIssue::code).orElse(""));
                 document.put("scopeUsable", batch.sourceScope().usableScopes());
@@ -57,7 +59,7 @@ public final class SourceIndexBatchDocumentMapper {
                 document.put("scopeMethodKeys", batch.sourceScope().methodKeys());
             }));
         }
-        batch.symbols().forEach(symbol -> documents.add(stored(IndexCollections.SYMBOLS, symbol, document -> {
+        batch.symbols().forEach(symbol -> documents.add(stored(IndexSchemaContract.projectionCollection(ProjectionName.SYMBOLS), symbol, document -> {
             CodeFactScope scope = CodeFactScope.from(symbol.fact().identity());
             document.put("symbolId", symbol.fact().id().value());
             document.put("canonical", symbol.fact().identity().canonicalForm());
@@ -68,14 +70,14 @@ public final class SourceIndexBatchDocumentMapper {
             document.put("scopeParameters", scope.parameterTypes());
             document.put("scopePath", scope.sourcePath().orElse(""));
         })));
-        batch.relations().forEach(relation -> documents.add(stored(IndexCollections.RELATIONS, relation, document -> {
+        batch.relations().forEach(relation -> documents.add(stored(IndexSchemaContract.projectionCollection(ProjectionName.RELATIONS), relation, document -> {
             document.put("relationId", relation.fact().id().value());
             document.put("canonical", relation.fact().identity().canonicalForm());
             document.put("from", relation.from().canonicalForm());
             document.put("target", relation.target().canonicalForm());
             document.put("sourcePath", batch.sourcePath());
         })));
-        batch.entryPoints().forEach(entryPoint -> documents.add(stored(IndexCollections.ENTRY_POINTS,
+        batch.entryPoints().forEach(entryPoint -> documents.add(stored(IndexSchemaContract.projectionCollection(ProjectionName.ENTRY_POINTS),
                 EntryPointPersistence.from(entryPoint), document -> {
             CodeFactScope scope = CodeFactScope.from(entryPoint.fact().identity());
             document.put("entryPointId", entryPoint.fact().id().value());
@@ -90,7 +92,7 @@ public final class SourceIndexBatchDocumentMapper {
             document.put("scopeParameters", scope.parameterTypes());
             document.put("scopePath", scope.sourcePath().orElse(""));
         })));
-        batch.search().forEach(search -> documents.add(stored(IndexCollections.SEARCH,
+        batch.search().forEach(search -> documents.add(stored(IndexSchemaContract.projectionCollection(ProjectionName.SEARCH),
                 IndexProjectionPersistence.SearchPersistence.from(search), document -> {
             document.put("factId", search.factId().value());
             document.put("kind", search.kind().name());

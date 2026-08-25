@@ -244,7 +244,9 @@ public final class MongoGenerationWriter {
     private static boolean sameDocument(Document existing, Document expected) {
         Document actualWithoutId = new Document(existing);
         actualWithoutId.remove("_id");
-        return actualWithoutId.equals(expected);
+        Document expectedWithoutId = new Document(expected);
+        expectedWithoutId.remove("_id");
+        return actualWithoutId.equals(expectedWithoutId);
     }
 
     private static Document scopedDocument(ImmutablePayloadCollectionSpec collection, Document source, GenerationLease lease) {

@@ -12,6 +12,8 @@ import com.java.semantic.model.index.EntryPointDocument;
 import com.java.semantic.model.index.SearchDocument;
 import com.java.semantic.model.index.SymbolDocument;
 import com.java.semantic.model.codefact.CodeFactKind;
+import com.java.semantic.model.codefact.CodeFactSearchQuery;
+import com.java.semantic.model.codefact.CodeFactSearchResult;
 import com.java.semantic.model.codefact.EntryPointKind;
 import com.java.semantic.model.codefact.MethodTarget;
 import com.java.semantic.model.codefact.SourceTypeIdentity;
@@ -20,6 +22,9 @@ import com.java.semantic.model.codefact.RelationKind;
 import com.java.semantic.model.codefact.RelationTarget;
 import com.java.semantic.indexer.store.IndexSchemaBootstrap;
 import com.java.semantic.indexer.store.MongoGenerationWriter;
+import com.java.semantic.indexer.store.MongoPublicationWriter;
+import com.java.semantic.model.index.ManifestDigest;
+import com.java.semantic.model.index.PublishGenerationCommand;
 import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.model.repository.RepositoryRevision;
 import com.java.semantic.repository.domain.RepositorySnapshot;
@@ -48,7 +53,6 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
-import java.util.Date;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -153,17 +157,21 @@ class FixtureFullIndexJdtLsIT {
 
     private static void publish(org.springframework.data.mongodb.core.MongoTemplate template, String repositoryId,
                                 String revision, String generationId) {
-        String digest = revision.substring(0, 1).repeat(64);
-        template.getCollection(IndexCollections.GENERATION_MANIFESTS).updateOne(
-                new Document("repoId", repositoryId).append("generationId", generationId), new Document("$set",
-                        new Document("sourceRevision", revision).append("identityDigest", digest)
-                                .append("schemaVersion", com.java.semantic.model.index.IndexSchemaContract.SCHEMA_VERSION)
-                                .append("writeState", GenerationWriteState.SEALED_VALID.name())
-                                .append("projectionVersions", com.java.semantic.model.index.IndexSchemaContract.requiredProjectionVersions().entrySet().stream()
-                                        .map(entry -> new Document("name", entry.getKey()).append("version", entry.getValue())).toList())));
-        template.getCollection(IndexCollections.REPOSITORIES).updateOne(new Document("repoId", repositoryId), new Document("$set",
-                new Document("revision", revision).append("generationId", generationId).append("manifestDigest", digest)
-                        .append("committedJobId", generationId + "-job").append("publishedAt", new Date())));
+        RepositoryId id = new RepositoryId(repositoryId);
+        GenerationId generation = new GenerationId(generationId);
+        MongoGenerationWriter.GenerationLease lease = new MongoGenerationWriter.GenerationLease(id, generation,
+                generationId + "-job", "fixture-worker", 1L);
+        GenerationValidator.ValidationResult result = new GenerationValidator(template).validate(lease,
+                new RepositoryRevision(revision), new RepositoryRevision(revision));
+
+        assertThat(result.valid()).as("validation issues: %s", result.issues()).isTrue();
+        new GenerationValidator(template).recordValid(lease, result);
+        MongoGenerationWriter writer = new MongoGenerationWriter(template);
+        writer.mirrorSealUntil(lease, writer.currentClaimUntil(lease));
+        writer.seal(lease, result.identityDigest().value());
+        new MongoPublicationWriter(template).publish(new PublishGenerationCommand(id, new RepositoryRevision(revision), generation,
+                generationId + "-job", "fixture-worker", new com.java.semantic.model.index.RepositoryFence(1L),
+                java.util.Optional.empty(), new ManifestDigest(result.identityDigest().value())));
     }
 
     private static void executes_every_registered_query_case_against_the_exact_published_fixture_generations(
@@ -185,6 +193,13 @@ class FixtureFullIndexJdtLsIT {
         SourceTypeIdentity paymentType = paymentMethod.sourceType();
         SearchDocument paymentSearch = search(payment);
         EntryPointDocument videoRoute = httpRoute(video);
+
+        CodeFactSearchResult paymentConstants = search.search(new CodeFactSearchQuery(new RepositoryId("payment-service"),
+                new RepositoryRevision("a".repeat(40)), "CREDIT_CARD", java.util.Set.of(CodeFactKind.ENUM_CONSTANT),
+                java.util.Optional.empty(), 0, 20));
+        assertThat(paymentConstants.generation().generationId().value()).isEqualTo("payment-generation");
+        assertThat(paymentConstants.facts()).extracting(summary -> summary.fact().identity().canonicalForm())
+                .anyMatch(canonical -> canonical.contains("CREDIT_CARD"));
 
         assertThat(repositories.listRepositories()).extracting(current -> current.repositoryId().value())
                 .containsExactlyInAnyOrder("payment-service", "video-service", "order-service");
@@ -271,7 +286,7 @@ class FixtureFullIndexJdtLsIT {
         manager.getOrStart(new RepositorySnapshot(repositoryId, repositoryRoot, revision));
         List<SourceIndexBatch> batches = new JdtLsRepositoryIndexExporter(new Lsp4jJavaSemanticService(manager)).export(repositoryId, revision, generationId,
                 new FullIndexPlanner().plan(repositoryRoot));
-        seedWritableGeneration(template, repositoryId, generationId);
+        seedWritableGeneration(template, repositoryId, revision, generationId);
         MongoGenerationWriter.GenerationLease lease = new MongoGenerationWriter.GenerationLease(repositoryId, generationId,
                 generationValue + "-job", "fixture-worker", 1L);
         MongoIndexBatchWriter writer = new MongoIndexBatchWriter(new MongoGenerationWriter(template), lease,
@@ -281,17 +296,25 @@ class FixtureFullIndexJdtLsIT {
     }
 
     private static void seedWritableGeneration(org.springframework.data.mongodb.core.MongoTemplate template,
-                                               RepositoryId repositoryId, GenerationId generationId) {
+                                               RepositoryId repositoryId, RepositoryRevision revision, GenerationId generationId) {
         java.util.Date expiry = java.util.Date.from(java.time.Instant.now().plus(Duration.ofMinutes(5)));
         String jobId = generationId.value() + "-job";
         template.getCollection(IndexCollections.REPOSITORIES).insertOne(new Document("repoId", repositoryId.value())
                 .append("activeJobId", jobId).append("activeWorkerId", "fixture-worker")
                 .append("activeGenerationId", generationId.value()).append("fence", 1L).append("claimUntil", expiry));
         template.getCollection(IndexCollections.INDEX_JOBS).insertOne(new Document("jobId", jobId)
-                .append("repoId", repositoryId.value()).append("active", true));
+                .append("repoId", repositoryId.value()).append("active", true).append("workerId", "fixture-worker")
+                .append("fence", 1L).append("outstandingBatches", List.of()).append("acknowledgedBatches", List.of())
+                .append("failedOrAmbiguousBatches", List.of()));
         new MongoGenerationWriter(template).insertManifest(new Document("repoId", repositoryId.value())
                 .append("generationId", generationId.value()).append("ownerJobId", jobId).append("ownerWorkerId", "fixture-worker")
-                .append("fence", 1L).append("writeState", GenerationWriteState.WRITING.name()).append("sealUntil", expiry));
+                .append("fence", 1L).append("sourceRevision", revision.value()).append("writeState", GenerationWriteState.WRITING.name())
+                .append("sealUntil", expiry).append("writeEpoch", 0L)
+                .append("schemaVersion", com.java.semantic.model.index.IndexSchemaContract.SCHEMA_VERSION)
+                .append("projectionVersions", com.java.semantic.model.index.IndexSchemaContract.requiredProjectionVersions().entrySet().stream()
+                        .map(entry -> new Document("name", entry.getKey()).append("version", entry.getValue())).toList())
+                .append("identityDigest", "0".repeat(64)).append("outstandingBatches", List.of())
+                .append("acknowledgedBatches", List.of()).append("failedOrAmbiguousBatches", List.of()));
     }
 
     private Path requiredJdtLsHome() {

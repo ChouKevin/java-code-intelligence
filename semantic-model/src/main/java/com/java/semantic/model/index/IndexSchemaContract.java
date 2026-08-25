@@ -7,14 +7,23 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.TreeMap;
+import java.util.stream.Collectors;
 
 /** Framework-neutral Mongo collection and index contract. */
 public final class IndexSchemaContract {
 
     public static final int SCHEMA_VERSION = 1;
-    private static final Map<String, Integer> REQUIRED_PROJECTION_VERSIONS = Map.of(
-            "SOURCES", 2, "SYMBOLS", 2, "RELATIONS", 2, "ENTRY_POINTS", 2, "SEARCH", 2);
+    /** Typed projection contract consumed by exporters, validators, and Query release checks. */
+    private static final List<ProjectionSpec> PROJECTIONS = List.of(
+            projection(ProjectionName.SOURCES, 2, IndexCollections.GENERATION_FILES),
+            projection(ProjectionName.SYMBOLS, 2, IndexCollections.SYMBOLS),
+            projection(ProjectionName.RELATIONS, 2, IndexCollections.RELATIONS),
+            projection(ProjectionName.ENTRY_POINTS, 2, IndexCollections.ENTRY_POINTS),
+            projection(ProjectionName.SEARCH, 2, IndexCollections.SEARCH));
+    private static final Map<String, Integer> REQUIRED_PROJECTION_VERSIONS = PROJECTIONS.stream()
+            .collect(Collectors.toUnmodifiableMap(specification -> specification.name().name(), ProjectionSpec::version));
     private static final List<ImmutablePayloadCollectionSpec> IMMUTABLE_PAYLOAD_COLLECTIONS = List.of(
             payload(IndexCollections.GENERATION_FILES, PayloadScope.GENERATION, "repoId", "generationId", "sourcePath"),
             payload(IndexCollections.SOURCE_ARTIFACTS, PayloadScope.GLOBAL, "sourceArtifactId"),
@@ -56,6 +65,22 @@ public final class IndexSchemaContract {
 
     public static Map<String, Integer> requiredProjectionVersions() { return REQUIRED_PROJECTION_VERSIONS; }
 
+    /** Actual persisted projection producers; exporters use each specification's collection rather than an enum-only list. */
+    public static Set<ProjectionName> producedProjections() {
+        return PROJECTIONS.stream().map(ProjectionSpec::name).collect(Collectors.toUnmodifiableSet());
+    }
+
+    /** Validation and sealing count the same persisted projection contract that exporters write. */
+    public static Set<ProjectionName> validatorAndCountedProjections() {
+        return PROJECTIONS.stream().map(ProjectionSpec::name).collect(Collectors.toUnmodifiableSet());
+    }
+
+    public static String projectionCollection(ProjectionName projection) {
+        return PROJECTIONS.stream().filter(specification -> specification.name().equals(projection))
+                .map(ProjectionSpec::collection).findFirst()
+                .orElseThrow(() -> new IllegalArgumentException("unsupported projection " + projection));
+    }
+
     /** Canonical payload identity and scope for documents written into immutable generations. */
     public static ImmutablePayloadCollectionSpec immutablePayloadCollection(String collectionName) {
         return IMMUTABLE_PAYLOAD_COLLECTIONS.stream().filter(collection -> collection.name().equals(collectionName)).findFirst()
@@ -83,6 +108,9 @@ public final class IndexSchemaContract {
     private static ImmutablePayloadCollectionSpec payload(String name, PayloadScope scope, String... identityFields) {
         return new ImmutablePayloadCollectionSpec(name, scope, List.of(identityFields));
     }
+    private static ProjectionSpec projection(ProjectionName name, int version, String collection) {
+        return new ProjectionSpec(name, version, collection);
+    }
     private static IndexSpec index(String name, LinkedHashMap<String, Integer> keys, boolean unique, Map<String, Object> filter) {
         return new IndexSpec(name, keys, unique, filter);
     }
@@ -104,6 +132,12 @@ public final class IndexSchemaContract {
             name = Objects.requireNonNull(name, "collection name is required");
             scope = Objects.requireNonNull(scope, "payload scope is required");
             identityFields = List.copyOf(identityFields);
+        }
+    }
+    public record ProjectionSpec(ProjectionName name, int version, String collection) {
+        public ProjectionSpec {
+            name = Objects.requireNonNull(name, "projection name is required");
+            collection = Objects.requireNonNull(collection, "projection collection is required");
         }
     }
     public enum PayloadScope { GENERATION, GLOBAL }

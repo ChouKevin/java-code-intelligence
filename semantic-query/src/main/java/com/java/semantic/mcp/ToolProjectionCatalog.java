@@ -34,8 +34,8 @@ public final class ToolProjectionCatalog {
     }
 
     static {
-        validate(REQUIREMENTS, java.util.EnumSet.allOf(ProjectionName.class), IndexSchemaContract.requiredProjectionVersions().keySet().stream()
-                .map(ProjectionName::valueOf).collect(java.util.stream.Collectors.toUnmodifiableSet()), toolNames(), toolNames());
+        validate(REQUIREMENTS, IndexSchemaContract.producedProjections(), IndexSchemaContract.validatorAndCountedProjections(),
+                toolNames(), toolNames());
     }
 
     public static List<ToolProjectionRequirement> requirements() {

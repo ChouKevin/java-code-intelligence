@@ -5,6 +5,7 @@ import com.java.semantic.model.codefact.CodeFactIdentity;
 import com.java.semantic.model.codefact.CodeFactKind;
 import com.java.semantic.model.codefact.DeclaredType;
 import com.java.semantic.model.codefact.ExternalTarget;
+import com.java.semantic.model.codefact.JavaIdentityNormalizer;
 import com.java.semantic.model.codefact.MethodTarget;
 import com.java.semantic.model.codefact.MemberIdentity;
 import com.java.semantic.model.codefact.MapperStatementIdentity;
@@ -132,7 +133,7 @@ public final class SemanticRelationProjector {
                     Optional<InvocationTarget> resolvedTarget = semanticCallTargetResolver.resolve(snapshot, method, invocation);
                     if (resolvedTarget.isPresent()) {
                         InvocationTarget target = resolvedTarget.orElseThrow();
-                        addCall(from, target, invocationLocation, repositoryId, revision, generationId, owned, artifact, documents);
+                        addCall(from, target, invocationLocation, repositoryId, revision, generationId, typesByName, artifact, documents);
                     } else {
                         addUnresolvedCall(from, invocation, invocationLocation, repositoryId, revision, generationId, artifact, documents);
                     }
@@ -255,16 +256,20 @@ public final class SemanticRelationProjector {
         for (com.java.semantic.syntax.domain.NominalTypeReference parent : parents) {
             parent.resolvedNamedType().ifPresent(parentIdentity -> {
                 SourceTypeMetadata parentMetadata = typesByName.get(parentIdentity.fullyQualifiedName());
-                boolean declaredByParent = Optional.ofNullable(parentMetadata).stream().flatMap(value -> value.members().methods().stream())
-                        .anyMatch(candidate -> candidate.name().equals(method.name()) && candidate.paramTypes().equals(method.paramTypes()));
-                if (!declaredByParent) {
+                Optional<MethodTarget> parentMethod = Optional.ofNullable(parentMetadata).stream()
+                        .flatMap(value -> value.members().methods().stream())
+                        .filter(candidate -> candidate.name().equals(method.name()))
+                        .filter(candidate -> candidate.paramTypes().equals(method.paramTypes()))
+                        .map(candidate -> declaredMethodTarget(parentMetadata, candidate))
+                        .findFirst();
+                if (parentMethod.isEmpty()) {
                     return;
                 }
                 SourceTypeIdentity parentType = owned.get(parentIdentity.fullyQualifiedName());
                 RelationTarget target = targetFor(parentType, () -> new RelationTarget.External(
                         new ExternalTarget.NominalType(new DeclaredType(parentIdentity.fullyQualifiedName()))), targetType ->
                         new RelationTarget.Internal(SyntaxSymbolProjector.fact(repositoryId, revision, CodeFactKind.METHOD,
-                                new MethodTarget(targetType, method.name(), method.paramTypes())).identity()));
+                                parentMethod.orElseThrow()).identity()));
                 add(from, RelationKind.OVERRIDES, target, method.declarationLocation(), CodeFactKind.TYPE_USAGE,
                         repositoryId, revision, generationId, artifact, documents);
             });
@@ -424,14 +429,33 @@ public final class SemanticRelationProjector {
     }
 
     private static void addCall(CodeFactIdentity from, InvocationTarget target, SourceRange occurrence, RepositoryId repositoryId,
-                                RepositoryRevision revision, GenerationId generationId, Map<String, SourceTypeIdentity> owned,
+                                RepositoryRevision revision, GenerationId generationId, Map<String, SourceTypeMetadata> typesByName,
                                 com.java.semantic.model.index.SourceArtifactDocument artifact, ArrayList<RelationDocument> documents) {
         String qualifiedName = qualifiedName(target);
-        RelationTarget relationTarget = targetFor(owned.get(qualifiedName), () -> new RelationTarget.External(
-                new ExternalTarget.NominalType(new DeclaredType(qualifiedName))), targetType -> new RelationTarget.Internal(
-                SyntaxSymbolProjector.fact(repositoryId, revision, CodeFactKind.METHOD,
-                        new MethodTarget(targetType, target.methodName(), target.parameterTypes())).identity()));
+        RelationTarget relationTarget = declaredCallTarget(target, typesByName).<RelationTarget>map(declaredTarget ->
+                new RelationTarget.Internal(SyntaxSymbolProjector.fact(repositoryId, revision, CodeFactKind.METHOD,
+                        declaredTarget).identity())).orElseGet(() -> new RelationTarget.External(
+                new ExternalTarget.NominalType(new DeclaredType(qualifiedName))));
         add(from, RelationKind.CALLS, relationTarget, occurrence, CodeFactKind.TYPE_USAGE, repositoryId, revision, generationId, artifact, documents);
+    }
+
+    private static Optional<MethodTarget> declaredCallTarget(InvocationTarget target,
+                                                              Map<String, SourceTypeMetadata> typesByName) {
+        SourceTypeMetadata owner = typesByName.get(qualifiedName(target));
+        if (owner == null) { // cs-allow
+            return Optional.empty();
+        }
+        List<MethodTarget> candidates = owner.members().methods().stream()
+                .map(method -> declaredMethodTarget(owner, method))
+                .filter(method -> method.methodName().equals(target.methodName()))
+                .filter(method -> JavaIdentityNormalizer.parameterTypes(method.parameterTypes()).equals(target.parameterTypes()))
+                .toList();
+        return candidates.size() == 1 ? Optional.of(candidates.getFirst()) : Optional.empty();
+    }
+
+    private static MethodTarget declaredMethodTarget(SourceTypeMetadata owner, SourceMethodMetadata method) {
+        return method.analysisTarget().target().orElseGet(() -> new MethodTarget(
+                owner.declaration().identity(), method.name(), method.paramTypes()));
     }
 
     private static void relationForThrownType(com.java.semantic.syntax.domain.SourceThrownTypeMetadata thrown,

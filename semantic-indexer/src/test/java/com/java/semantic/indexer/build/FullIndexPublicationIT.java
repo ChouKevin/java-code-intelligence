@@ -316,8 +316,8 @@ class FullIndexPublicationIT {
         return service(template, store, exporter, ignored -> checkout);
     }
 
-    private static IndexBuildService service(MongoTemplate template, MongoIndexJobStore store, RepositoryIndexExporter exporter,
-                                             IndexBuildService.CheckoutResolver checkoutResolver) {
+    static IndexBuildService service(MongoTemplate template, MongoIndexJobStore store, RepositoryIndexExporter exporter,
+                                     IndexBuildService.CheckoutResolver checkoutResolver) {
         return new IndexBuildService(new FullIndexPlanner(), exporter, new MongoGenerationWriter(template),
                 new SourceIndexBatchDocumentMapper(template.getConverter()), new GenerationValidator(template),
                 new IndexJobWorker(store, new MongoPublicationWriter(template)), checkoutResolver, incrementalBuilder(template));
