@@ -40,23 +40,35 @@ public final class MongoIndexJobStore implements IndexJobStore {
     private final MongoTemplate template;
     private final ClaimJobDocumentTransition claimJobDocumentTransition;
     private final CaptureBuildParentTransition captureBuildParentTransition;
+    private final ReleaseRepositoryClaimTransition releaseRepositoryClaimTransition;
 
     @Autowired
     public MongoIndexJobStore(MongoTemplate template) {
-        this(template, MongoIndexJobStore::claimJobDocument, MongoIndexJobStore::captureBuildParent);
+        this(template, MongoIndexJobStore::claimJobDocument, MongoIndexJobStore::captureBuildParent,
+                MongoIndexJobStore::releaseExactRepositoryClaim);
     }
 
     MongoIndexJobStore(MongoTemplate template, ClaimJobDocumentTransition claimJobDocumentTransition) {
-        this(template, claimJobDocumentTransition, MongoIndexJobStore::captureBuildParent);
+        this(template, claimJobDocumentTransition, MongoIndexJobStore::captureBuildParent,
+                MongoIndexJobStore::releaseExactRepositoryClaim);
     }
 
     MongoIndexJobStore(MongoTemplate template, ClaimJobDocumentTransition claimJobDocumentTransition,
                        CaptureBuildParentTransition captureBuildParentTransition) {
+        this(template, claimJobDocumentTransition, captureBuildParentTransition,
+                MongoIndexJobStore::releaseExactRepositoryClaim);
+    }
+
+    MongoIndexJobStore(MongoTemplate template, ClaimJobDocumentTransition claimJobDocumentTransition,
+                       CaptureBuildParentTransition captureBuildParentTransition,
+                       ReleaseRepositoryClaimTransition releaseRepositoryClaimTransition) {
         this.template = Objects.requireNonNull(template, "mongo template is required");
         this.claimJobDocumentTransition = Objects.requireNonNull(claimJobDocumentTransition,
                 "claim job document transition is required");
         this.captureBuildParentTransition = Objects.requireNonNull(captureBuildParentTransition,
                 "capture build parent transition is required");
+        this.releaseRepositoryClaimTransition = Objects.requireNonNull(releaseRepositoryClaimTransition,
+                "release repository claim transition is required");
     }
 
     @Override
@@ -626,16 +638,20 @@ public final class MongoIndexJobStore implements IndexJobStore {
     }
 
     private void releaseExactRepositoryClaim(IndexJob job, String workerId, long fence) {
+        releaseExactRepositoryClaim(template, job, workerId, fence);
+    }
+
+    private static void releaseExactRepositoryClaim(MongoTemplate template, IndexJob job, String workerId, long fence) {
         template.updateFirst(new BasicQuery(repositoryClaim(job, workerId, fence)), new Update().unset("activeJobId")
                 .unset("activeWorkerId").unset("activeGenerationId").unset("claimUntil"), IndexCollections.REPOSITORIES);
     }
 
-    /** Reverts a partially claimed job before releasing its matching repository authority for an immediate retry. */
+    /** Releases repository authority before making a partially claimed job immediately retryable. */
     private void compensateClaim(IndexJob job, String workerId, long fence) {
+        releaseRepositoryClaimTransition.release(template, job, workerId, fence);
         template.updateFirst(new BasicQuery(jobOwnership(job, workerId, fence)), new Update().set("phase", IndexJobPhase.ACCEPTED.name())
                 .unset("workerId").unset("fence").unset("claimUntil").unset("buildParentCaptured").unset("buildParent"),
                 IndexCollections.INDEX_JOBS);
-        releaseExactRepositoryClaim(job, workerId, fence);
     }
 
     private boolean mirrorManifestExpiry(IndexJob job, String workerId, long fence, Date claimUntil) {
@@ -679,5 +695,10 @@ public final class MongoIndexJobStore implements IndexJobStore {
     @FunctionalInterface
     interface CaptureBuildParentTransition {
         boolean capture(MongoTemplate template, IndexJob job, String workerId, long fence, Document repository);
+    }
+
+    @FunctionalInterface
+    interface ReleaseRepositoryClaimTransition {
+        void release(MongoTemplate template, IndexJob job, String workerId, long fence);
     }
 }

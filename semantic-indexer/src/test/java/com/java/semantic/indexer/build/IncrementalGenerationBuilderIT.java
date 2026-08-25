@@ -174,6 +174,31 @@ class IncrementalGenerationBuilderIT {
     }
 
     @Test
+    void source_changed_after_planning_is_not_copied_from_the_parent() throws Exception {
+        try (MongoDBContainer container = new MongoDBContainer("mongo:8.0.4")) {
+            container.start();
+            MongoTemplate template = new MongoTemplate(MongoClients.create(container.getConnectionString()), "semantic");
+            new IndexSchemaBootstrap(template).bootstrap();
+            preparePublishedParent(template);
+            MongoGenerationWriter.GenerationLease childLease = childLease(template);
+            insertChildManifest(template, childLease);
+            com.java.semantic.model.index.SourceArtifactDocument parentArtifact = FullIndexPublicationIT.validBatch(RepositoryId.of("orders"),
+                    GenerationValidatorIT.revision(), GenerationValidatorIT.lease().generationId()).sourceArtifact();
+            Path source = Files.writeString(temporaryDirectory.resolve("Order.java"), parentArtifact.utf8Content());
+            FullIndexPlan selected = new FullIndexPlan(temporaryDirectory, List.of(new FullIndexPlan.SourceInput("src/Order.java", source,
+                    parentArtifact)));
+            Files.writeString(source, "class Order { changedAfterPlanning(); }");
+
+            IncrementalGenerationBuilder.BuildSelection selection = new IncrementalGenerationBuilder(template, emptyDiffPlanner(),
+                    new ParentGenerationCopier(template, new MongoGenerationWriter(template))).assemble(childJob(), childLease, selected);
+
+            assertThat(selection.plan().copyPaths()).isEmpty();
+            assertThat(selection.exportPaths()).containsExactly("src/Order.java");
+            assertThat(template.getCollection(IndexCollections.GENERATION_FILES).countDocuments(new Document("generationId", "g2"))).isZero();
+        }
+    }
+
+    @Test
     void selected_source_missing_from_parent_inventory_is_reanalyzed_when_the_diff_is_empty() throws Exception {
         try (MongoDBContainer container = new MongoDBContainer("mongo:8.0.4")) {
             container.start();

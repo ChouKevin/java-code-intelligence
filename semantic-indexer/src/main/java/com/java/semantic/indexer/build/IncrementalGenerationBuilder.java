@@ -10,6 +10,8 @@ import com.java.semantic.model.index.IndexCollections;
 import com.java.semantic.model.index.IndexSchemaContract;
 import com.java.semantic.model.index.SymbolDocument;
 import com.java.semantic.model.repository.RepositoryRevision;
+import java.io.IOException;
+import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -90,6 +92,9 @@ public final class IncrementalGenerationBuilder {
     }
 
     private boolean matchesParentArtifact(IndexJob job, Parent parent, String path, FullIndexPlan.SourceInput selected) {
+        if (!matchesSelectedSource(selected)) {
+            return false;
+        }
         Document scope = new Document("repoId", job.repositoryId().value()).append("generationId", parent.generationId().value())
                 .append("sourcePath", path);
         Document document = template.getCollection(IndexCollections.GENERATION_FILES).find(scope).first();
@@ -99,6 +104,14 @@ public final class IncrementalGenerationBuilder {
         GenerationFileDocument parentFile = template.getConverter().read(GenerationFileDocument.class, document);
         return parentFile.sourceArtifactId().equals(selected.contentArtifact().id())
                 && parentFile.contentHash().equals(selected.contentArtifact().contentHash());
+    }
+
+    private static boolean matchesSelectedSource(FullIndexPlan.SourceInput selected) {
+        try {
+            return selected.contentArtifact().utf8Content().equals(Files.readString(selected.path()));
+        } catch (IOException exception) {
+            return false;
+        }
     }
 
     private Optional<Parent> compatibleParent(IndexJob job) {

@@ -111,6 +111,42 @@ class MongoIndexJobStoreIT {
     }
 
     @Test
+    void failed_repository_release_keeps_the_claim_recoverable_instead_of_resetting_only_the_job() {
+        try (MongoDBContainer container = new MongoDBContainer("mongo:8.0.4")) {
+            container.start();
+            MongoTemplate template = new MongoTemplate(com.mongodb.client.MongoClients.create(container.getConnectionString()), "semantic");
+            new IndexSchemaBootstrap(template).bootstrap();
+            MongoIndexJobStore failingStore = new MongoIndexJobStore(template, MongoIndexJobStore::claimJobDocument,
+                    (mongo, job, worker, fence, expiry) -> {
+                        throw new IllegalStateException("capture parent failed");
+                    }, (mongo, job, worker, fence) -> {
+                        throw new IllegalStateException("repository release failed");
+                    });
+            IndexJob accepted = failingStore.admit(RepositoryId.of("orders"), new RepositoryRevision("d".repeat(40)), false);
+
+            assertThatThrownBy(() -> failingStore.claim(accepted.id(), "worker-a", Duration.ofSeconds(30)))
+                    .isInstanceOf(IllegalStateException.class).hasMessage("capture parent failed")
+                    .satisfies(exception -> assertThat(exception.getSuppressed()).singleElement()
+                            .extracting(Throwable::getMessage).isEqualTo("repository release failed"));
+
+            org.bson.Document repository = template.getCollection(IndexCollections.REPOSITORIES)
+                    .find(new org.bson.Document("repoId", "orders")).first();
+            IndexJob stillClaimed = failingStore.find(accepted.id()).orElseThrow();
+            assertThat(repository.getString("activeJobId")).isEqualTo(accepted.id().value());
+            assertThat(stillClaimed.phase()).isEqualTo(IndexJobPhase.CHECKOUT);
+            assertThat(stillClaimed.workerId()).contains("worker-a");
+
+            template.getCollection(IndexCollections.REPOSITORIES).updateOne(new org.bson.Document("repoId", "orders"),
+                    new org.bson.Document("$set", new org.bson.Document("claimUntil", Date.from(Instant.now().minusSeconds(1)))));
+            MongoIndexJobStore recoveringStore = new MongoIndexJobStore(template);
+            recoveringStore.failExpiredClaims();
+            assertThat(recoveringStore.find(accepted.id()).orElseThrow().phase()).isEqualTo(IndexJobPhase.FAILED);
+            IndexJob retry = recoveringStore.admit(RepositoryId.of("orders"), new RepositoryRevision("d".repeat(40)), false);
+            assertThat(recoveringStore.claim(retry.id(), "worker-b", Duration.ofSeconds(30))).isPresent();
+        }
+    }
+
+    @Test
     void build_publication_reconciles_only_when_its_persisted_intent_and_sealed_owner_match() {
         try (MongoDBContainer container = new MongoDBContainer("mongo:8.0.4")) {
             container.start();
