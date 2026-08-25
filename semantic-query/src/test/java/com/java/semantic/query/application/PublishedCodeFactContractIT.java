@@ -102,7 +102,9 @@ class PublishedCodeFactContractIT extends PublishedMongoITSupport {
             Document stored = new Document();
             template.getConverter().write(relation, stored);
             stored.put("repoId", "orders"); stored.put("generationId", "g1"); stored.put("relationId", relation.fact().id().value());
-            stored.put("canonical", identity.canonicalForm()); stored.put("sourcePath", range.sourceFile());
+            stored.put("canonical", identity.canonicalForm()); stored.put("from", from.canonicalForm());
+            stored.put("target", target.canonicalForm()); stored.put("kind", RelationKind.CALLS_OUTBOUND_API.name());
+            stored.put("sourcePath", range.sourceFile());
             template.getCollection("relations").insertOne(stored);
             seedSearch(template, identity, "RELATIONS", List.of("charge", "payment"));
             CodeFactSearchService service = new CodeFactSearchService(template, selector(template, policy()), Duration.ofSeconds(2));

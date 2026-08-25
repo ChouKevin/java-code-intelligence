@@ -152,6 +152,19 @@ class IndexDocumentContractTest {
     }
 
     @Test
+    void schema_exposes_the_target_relation_lookup_in_deterministic_order() {
+        IndexSchemaContract.IndexSpec index = IndexSchemaContract.collections().stream()
+                .filter(collection -> collection.name().equals("relations"))
+                .flatMap(collection -> collection.indexes().stream())
+                .filter(candidate -> candidate.name().equals("relation_target_kind_source"))
+                .findFirst()
+                .orElseThrow();
+
+        assertEquals(List.of("repoId", "generationId", "target", "kind", "from", "sourcePath", "relationId"),
+                List.copyOf(index.keys().keySet()));
+    }
+
+    @Test
     void rejects_search_documents_with_mismatched_repository_kind_fact_id_or_projection() {
         CodeFactIdentity identity = symbolIdentity("orders", "a", CodeFactKind.TYPE);
         CodeFactId factId = CodeFactId.from(identity);

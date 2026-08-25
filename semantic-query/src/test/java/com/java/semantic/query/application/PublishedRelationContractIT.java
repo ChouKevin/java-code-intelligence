@@ -1,16 +1,19 @@
 package com.java.semantic.query.application;
 
 import com.java.semantic.model.codefact.CodeFactIdentity;
+import com.java.semantic.model.codefact.RelationIdentity;
 import com.java.semantic.model.codefact.RelationKind;
 import com.java.semantic.model.codefact.RelationTarget;
 import com.java.semantic.model.codefact.SourceRange;
 import com.java.semantic.model.codefact.SyntaxPosition;
 import com.java.semantic.model.codefact.SyntaxRange;
+import com.java.semantic.model.query.CurrentGeneration;
 import com.java.semantic.model.query.PublishedRelationQuery;
 import com.java.semantic.model.query.PublishedRelationResult;
 import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.model.repository.RepositoryRevision;
 import com.mongodb.client.MongoClients;
+import org.bson.Document;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.data.mongodb.core.MongoTemplate;
@@ -19,6 +22,7 @@ import java.time.Duration;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 @Tag("mongo-it")
 class PublishedRelationContractIT extends PublishedMongoITSupport {
@@ -84,6 +88,62 @@ class PublishedRelationContractIT extends PublishedMongoITSupport {
             assertThat(result.page().totalCount()).isZero();
             assertThat(result.page().hasMore()).isFalse();
         }
+    }
+
+    @Test
+    void fails_closed_before_disclosing_a_relation_with_inconsistent_flattened_fields() {
+        try (org.testcontainers.mongodb.MongoDBContainer container = new org.testcontainers.mongodb.MongoDBContainer(
+                org.testcontainers.utility.DockerImageName.parse("mongo:8.0.4"))) {
+            container.start();
+            MongoTemplate template = new MongoTemplate(MongoClients.create(container.getConnectionString()), "published_relation_contract");
+            seedCurrent(template, "orders");
+            CodeFactIdentity declaration = methodIdentity("example.api", "Port", "handle", "src/main/java/example/api/Port.java");
+            CodeFactIdentity source = methodIdentity("example.service", "Service", "handle", "src/main/java/example/service/Service.java");
+            seedMethod(template, declaration, List.of());
+            seedMethod(template, source, List.of());
+            seedRelation(template, source, RelationKind.REFERENCES, new RelationTarget.Internal(declaration), range(source, 4));
+            template.getCollection("relations").updateOne(new Document("from", source.canonicalForm()),
+                    new Document("$set", new Document("canonical", "forged-canonical")));
+            PublishedRelationQueryService service = new PublishedRelationQueryService(template, selector(template, policy()), Duration.ofSeconds(2));
+
+            assertThatThrownBy(() -> service.findReferences(new PublishedRelationQuery(new RepositoryId("orders"),
+                    new RepositoryRevision(REVISION), declaration, 0, 20)))
+                    .isInstanceOf(IndexContractMismatchException.class)
+                    .hasMessage("INDEX_CONTRACT_MISMATCH");
+            template.getCollection("relations").updateOne(new Document("from", source.canonicalForm()),
+                    new Document("$set", new Document("canonical", seedRelationCanonical(source, declaration))));
+            Document stored = template.getCollection("relations").find().first();
+            CurrentGeneration current = selector(template, policy()).selectCodeFact("orders", REVISION, declaration,
+                    CurrentGenerationSelector.RELATIONS);
+
+            for (Document mutation : List.of(
+                    new Document("repoId", "billing"),
+                    new Document("generationId", "g2"),
+                    new Document("relationId", "forged-relation-id"),
+                    new Document("canonical", "forged-canonical"),
+                    new Document("from", "forged-from"),
+                    new Document("target", "forged-target"),
+                    new Document("kind", RelationKind.CALLS.name()),
+                    new Document("sourcePath", "forged-source-path"))) {
+                template.getCollection("relations").updateOne(new Document("_id", stored.get("_id")),
+                        new Document("$set", mutation));
+                Document mutated = template.getCollection("relations").find().first();
+
+                assertThatThrownBy(() -> service.decode(mutated, current))
+                        .isInstanceOf(IndexContractMismatchException.class)
+                        .hasMessage("INDEX_CONTRACT_MISMATCH");
+
+                String field = mutation.keySet().iterator().next();
+                template.getCollection("relations").updateOne(new Document("_id", stored.get("_id")),
+                        new Document("$set", new Document(field, stored.get(field))));
+            }
+        }
+    }
+
+    private static String seedRelationCanonical(CodeFactIdentity source, CodeFactIdentity declaration) {
+        SourceRange range = range(source, 4);
+        return new RelationIdentity(source, RelationKind.REFERENCES,
+                new RelationTarget.Internal(declaration), range).canonicalForm();
     }
 
     private static SourceRange range(CodeFactIdentity identity, int line) {

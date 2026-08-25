@@ -91,10 +91,10 @@ class PublishedCallGraphContractIT extends PublishedMongoITSupport {
             PublishedCallGraphQuery query = new PublishedCallGraphQuery(new RepositoryId("orders"), new RepositoryRevision(REVISION),
                     (com.java.semantic.model.codefact.MethodTarget) root.canonicalIdentity(), 1, 0);
 
-            assertThatThrownBy(() -> service.outgoing(query)).isInstanceOf(PublishedRelationIntegrityException.class)
-                    .hasMessage("stored internal relation target has no generation symbol");
-            assertThatThrownBy(() -> service.incoming(query)).isInstanceOf(PublishedRelationIntegrityException.class)
-                    .hasMessage("stored internal relation target has no generation symbol");
+            assertThatThrownBy(() -> service.outgoing(query)).isInstanceOf(IndexContractMismatchException.class)
+                    .hasMessage("INDEX_CONTRACT_MISMATCH");
+            assertThatThrownBy(() -> service.incoming(query)).isInstanceOf(IndexContractMismatchException.class)
+                    .hasMessage("INDEX_CONTRACT_MISMATCH");
         }
     }
 

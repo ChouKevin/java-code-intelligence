@@ -7,13 +7,18 @@ import com.java.semantic.model.codefact.CodeFactIdentity;
 import com.java.semantic.model.codefact.CodeFactKind;
 import com.java.semantic.model.codefact.CodeFactReadQuery;
 import com.java.semantic.model.codefact.CodeFactScope;
+import com.java.semantic.model.codefact.RelationIdentity;
+import com.java.semantic.model.codefact.SourceRange;
 import com.java.semantic.model.index.EntryPointDocument;
+import com.java.semantic.model.index.GenerationId;
 import com.java.semantic.model.index.IndexCollections;
 import com.java.semantic.model.index.ProjectionName;
 import com.java.semantic.model.index.RelationDocument;
+import com.java.semantic.model.index.SourceArtifactId;
 import com.java.semantic.model.index.SymbolDocument;
 import com.java.semantic.model.index.persistence.EntryPointPersistence;
 import com.java.semantic.model.query.CurrentGeneration;
+import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.query.config.SearchAccessPlan;
 import com.mongodb.MongoException;
 import com.mongodb.client.model.Filters;
@@ -182,14 +187,21 @@ public final class CodeFactReadService {
 
     static RelationDocument decodeRelation(Document stored, CurrentGeneration current, MongoTemplate template) {
         try {
-            Document converted = new Document(stored);
-            converted.put("generationId", new Document("value", current.generationId().value()));
-            RelationDocument relation = template.getConverter().read(RelationDocument.class, converted);
-            CodeFact fact = relation.fact();
+            CodeFact fact = template.getConverter().read(CodeFact.class, stored.get("fact", Document.class));
+            SourceArtifactId artifactId = template.getConverter().read(SourceArtifactId.class, stored.get("sourceArtifactId", Document.class));
+            SourceRange range = template.getConverter().read(SourceRange.class, stored.get("range", Document.class));
+            if (!(fact.identity().canonicalIdentity() instanceof RelationIdentity identity)) { throw new IndexContractMismatchException(); }
+            RelationDocument relation = new RelationDocument(new RepositoryId(requiredText(stored, "repoId")),
+                    new GenerationId(requiredText(stored, "generationId")), fact, identity.relationKind(), identity.from(), identity.target(), artifactId, range);
             if (!current.repositoryId().equals(relation.repositoryId()) || !current.generationId().equals(relation.generationId())
+                    || !current.repositoryId().value().equals(requiredText(stored, "repoId"))
+                    || !current.generationId().value().equals(requiredText(stored, "generationId"))
                     || !current.repositoryId().equals(fact.identity().repositoryId()) || !current.revision().equals(fact.identity().repositoryRevision())
                     || !fact.id().equals(CodeFactId.from(fact.identity())) || !fact.id().value().equals(requiredText(stored, "relationId"))
                     || !fact.identity().canonicalForm().equals(requiredText(stored, "canonical"))
+                    || !relation.from().canonicalForm().equals(requiredText(stored, "from"))
+                    || !relation.target().canonicalForm().equals(requiredText(stored, "target"))
+                    || !relation.kind().name().equals(requiredText(stored, "kind"))
                     || !relation.range().sourceFile().equals(requiredText(stored, "sourcePath"))) { throw new IndexContractMismatchException(); }
             return relation;
         } catch (IndexContractMismatchException exception) {

@@ -1,20 +1,14 @@
 package com.java.semantic.query.application;
 
 import com.java.semantic.model.codefact.CodeFactIdentity;
-import com.java.semantic.model.codefact.CodeFact;
-import com.java.semantic.model.codefact.RelationIdentity;
 import com.java.semantic.model.codefact.RelationKind;
 import com.java.semantic.model.codefact.RelationTarget;
-import com.java.semantic.model.codefact.SourceRange;
-import com.java.semantic.model.index.GenerationId;
 import com.java.semantic.model.index.IndexCollections;
 import com.java.semantic.model.index.RelationDocument;
-import com.java.semantic.model.index.SourceArtifactId;
 import com.java.semantic.model.query.CurrentGeneration;
 import com.java.semantic.model.query.PublishedRelationPage;
 import com.java.semantic.model.query.PublishedRelationQuery;
 import com.java.semantic.model.query.PublishedRelationResult;
-import com.java.semantic.model.repository.RepositoryId;
 import com.mongodb.MongoException;
 import com.mongodb.client.FindIterable;
 import com.mongodb.client.model.Filters;
@@ -77,11 +71,11 @@ public final class PublishedRelationQueryService {
                     Filters.eq("target", new RelationTarget.Internal(target).canonicalForm()),
                     Filters.in("kind", kinds.stream().map(Enum::name).toList()));
             FindIterable<Document> rows = template.getCollection(IndexCollections.RELATIONS).find(filter)
-                    .sort(Sorts.ascending("from", "target", "kind", "sourcePath", "relationId"))
+                    .sort(Sorts.ascending("kind", "from", "sourcePath", "relationId"))
                     .maxTime(storageTimeout.toMillis(), TimeUnit.MILLISECONDS);
             List<RelationDocument> relations = new ArrayList<>();
             for (Document row : rows) {
-                RelationDocument relation = decode(row);
+                RelationDocument relation = decode(row, current);
                 if (isVisible(current, relation)) {
                     relations.add(relation);
                 }
@@ -101,21 +95,8 @@ public final class PublishedRelationQueryService {
             .thenComparingInt(relation -> relation.range().range().start().character())
             .thenComparing(relation -> relation.fact().id().value());
 
-    RelationDocument decode(Document row) {
-        try {
-            CodeFact fact = template.getConverter().read(CodeFact.class, row.get("fact", Document.class));
-            SourceArtifactId artifactId = template.getConverter().read(SourceArtifactId.class, row.get("sourceArtifactId", Document.class));
-            SourceRange range = template.getConverter().read(SourceRange.class, row.get("range", Document.class));
-            if (!(fact.identity().canonicalIdentity() instanceof RelationIdentity identity)) {
-                throw new PublishedRelationIntegrityException("stored relation fact has no relation identity");
-            }
-            return new RelationDocument(new RepositoryId(row.getString("repoId")), new GenerationId(row.getString("generationId")), fact,
-                    RelationKind.valueOf(row.getString("kind")), identity.from(), identity.target(), artifactId, range);
-        } catch (PublishedRelationIntegrityException exception) {
-            throw exception;
-        } catch (RuntimeException exception) {
-            throw new PublishedRelationIntegrityException("stored relation cannot be decoded: " + exception.getClass().getSimpleName());
-        }
+    RelationDocument decode(Document row, CurrentGeneration current) {
+        return CodeFactReadService.decodeRelation(row, current, template);
     }
 
     void ensureSymbol(CurrentGeneration current, CodeFactIdentity identity) {
@@ -126,7 +107,7 @@ public final class PublishedRelationQueryService {
                             Filters.eq("canonical", identity.canonicalForm())))
                     .maxTime(storageTimeout.toMillis(), TimeUnit.MILLISECONDS).first();
             if (Objects.isNull(symbol)) {
-                throw new PublishedRelationIntegrityException("stored internal relation target has no generation symbol");
+                throw new IndexContractMismatchException();
             }
         } catch (MongoException | DataAccessException exception) {
             throw new SemanticIndexUnavailableException(exception);

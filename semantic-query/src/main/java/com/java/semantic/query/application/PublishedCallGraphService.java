@@ -80,12 +80,15 @@ public final class PublishedCallGraphService {
             Bson filter = Filters.and(Filters.eq("repoId", current.repositoryId().value()),
                     Filters.eq("generationId", current.generationId().value()), Filters.eq(field, value),
                     Filters.eq("kind", RelationKind.CALLS.name()));
+            Bson sort = PublishedGraphDirection.OUTGOING.equals(direction)
+                    ? Sorts.ascending("target", "sourcePath", "relationId")
+                    : Sorts.ascending("from", "sourcePath", "relationId");
             FindIterable<Document> rows = template.getCollection(IndexCollections.RELATIONS).find(filter)
-                    .sort(Sorts.ascending("from", "target", "sourcePath", "relationId"))
+                    .sort(sort)
                     .maxTime(storageTimeout.toMillis(), TimeUnit.MILLISECONDS);
             List<RelationDocument> calls = new ArrayList<>();
             for (Document row : rows) {
-                RelationDocument relation = relations.decode(row);
+                RelationDocument relation = relations.decode(row, current);
                 if (relations.isVisible(current, relation)) {
                     calls.add(relation);
                 }

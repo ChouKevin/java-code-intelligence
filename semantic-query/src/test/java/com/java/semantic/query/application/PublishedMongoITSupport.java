@@ -97,6 +97,7 @@ abstract class PublishedMongoITSupport {
         stored.put("repoId", "orders");
         stored.put("generationId", "g1");
         stored.put("relationId", fact.id().value());
+        stored.put("canonical", fact.identity().canonicalForm());
         stored.put("from", from.canonicalForm());
         stored.put("target", target.canonicalForm());
         stored.put("sourcePath", range.sourceFile());

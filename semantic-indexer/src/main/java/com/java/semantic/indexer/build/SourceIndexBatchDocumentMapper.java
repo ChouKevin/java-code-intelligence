@@ -70,6 +70,7 @@ public final class SourceIndexBatchDocumentMapper {
         })));
         batch.relations().forEach(relation -> documents.add(stored(IndexCollections.RELATIONS, relation, document -> {
             document.put("relationId", relation.fact().id().value());
+            document.put("canonical", relation.fact().identity().canonicalForm());
             document.put("from", relation.from().canonicalForm());
             document.put("target", relation.target().canonicalForm());
             document.put("sourcePath", batch.sourcePath());
