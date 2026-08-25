@@ -3,8 +3,8 @@ package com.java.semantic.indexer.repository;
 import java.nio.file.Path;
 import java.util.Set;
 
-/** Shared planner input selector for local fixtures. */
-public final class FixtureInputSelector {
+/** Selects repository source inputs while excluding VCS metadata and generated output. */
+public final class RepositoryInputSelector {
     private static final Set<String> SOURCE_ROOTS = Set.of("java", "kotlin", "groovy", "resources");
     private static final Set<String> BUILD_OUTPUT_DIRECTORIES = Set.of("target", "build", "out", "generated");
 

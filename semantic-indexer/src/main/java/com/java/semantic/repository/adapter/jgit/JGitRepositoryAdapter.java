@@ -4,12 +4,9 @@ import com.java.semantic.repository.application.RepositoryMutationException;
 import com.java.semantic.repository.config.RepositoryProperties;
 import com.java.semantic.model.repository.RepositoryRevision;
 import com.java.semantic.repository.port.GitRepositoryPort;
-import org.eclipse.jgit.api.CheckoutCommand;
 import org.eclipse.jgit.api.CloneCommand;
-import org.eclipse.jgit.api.CreateBranchCommand;
 import org.eclipse.jgit.api.FetchCommand;
 import org.eclipse.jgit.api.Git;
-import org.eclipse.jgit.api.ResetCommand;
 import org.eclipse.jgit.api.LsRemoteCommand;
 import org.eclipse.jgit.api.errors.GitAPIException;
 import org.eclipse.jgit.internal.storage.dfs.DfsRepositoryDescription;
@@ -48,16 +45,15 @@ public class JGitRepositoryAdapter implements GitRepositoryPort {
     }
 
     @Override
-    public RepositoryRevision clone(Path workingTree, String url, String branch) {
+    public RepositoryRevision clone(Path workingTree, String remoteUrl) {
         try {
             Path parent = workingTree.getParent();
             if (Objects.nonNull(parent)) {
                 Files.createDirectories(parent);
             }
             CloneCommand command = Git.cloneRepository()
-                    .setURI(url)
-                    .setDirectory(workingTree.toFile())
-                    .setBranch(branch);
+                    .setURI(remoteUrl)
+                    .setDirectory(workingTree.toFile());
             credentialsProvider().ifPresent(command::setCredentialsProvider);
             try (Git git = command.call()) {
                 return resolveHead(git);
@@ -70,33 +66,20 @@ public class JGitRepositoryAdapter implements GitRepositoryPort {
     }
 
     @Override
-    public RepositoryRevision fetchAndReset(Path workingTree, String branch) {
+    public void fetch(Path workingTree) {
         try (Git git = Git.open(workingTree.toFile())) {
-            FetchCommand fetch = git.fetch();
-            credentialsProvider().ifPresent(fetch::setCredentialsProvider);
-            fetch.call();
-            ObjectId target = git.getRepository().resolve("refs/remotes/origin/" + branch);
-            if (Objects.isNull(target)) {
-                throw new RepositoryMutationException("remote branch was not found");
-            }
-            checkoutRevision(git, branch);
-            git.reset()
-                    .setMode(ResetCommand.ResetType.HARD)
-                    .setRef(target.getName())
-                    .call();
-            return resolveHead(git);
+            fetchRemote(git);
         } catch (RepositoryMutationException exception) {
             throw exception;
         } catch (IOException | GitAPIException | RuntimeException exception) {
-            throw new RepositoryMutationException("sync failed", exception);
+            throw new RepositoryMutationException("fetch failed", exception);
         }
     }
 
     @Override
-    public RepositoryRevision checkout(Path workingTree, String revision) {
+    public void checkoutDetached(Path workingTree, RepositoryRevision revision) {
         try (Git git = Git.open(workingTree.toFile())) {
-            checkoutRevision(git, revision);
-            return resolveHead(git);
+            git.checkout().setName(revision.value()).setForced(true).call();
         } catch (RepositoryMutationException exception) {
             throw exception;
         } catch (IOException | GitAPIException | RuntimeException exception) {
@@ -112,15 +95,6 @@ public class JGitRepositoryAdapter implements GitRepositoryPort {
             throw exception;
         } catch (IOException | RuntimeException exception) {
             throw new RepositoryMutationException("cannot read HEAD", exception);
-        }
-    }
-
-    @Override
-    public String currentBranch(Path workingTree) {
-        try (Git git = Git.open(workingTree.toFile())) {
-            return git.getRepository().getBranch();
-        } catch (IOException | RuntimeException exception) {
-            throw new RepositoryMutationException("cannot read current branch", exception);
         }
     }
 
@@ -173,26 +147,17 @@ public class JGitRepositoryAdapter implements GitRepositoryPort {
         }
     }
 
+    private void fetchRemote(Git git) throws GitAPIException {
+        FetchCommand fetch = git.fetch().setRefSpecs(
+                new RefSpec("+refs/heads/*:refs/remotes/origin/*"),
+                new RefSpec("+refs/tags/*:refs/tags/*"));
+        credentialsProvider().ifPresent(fetch::setCredentialsProvider);
+        fetch.call();
+    }
+
     private static boolean matchesAdvertisedRef(Ref reference, String ref) {
         return ref.equals(reference.getName()) || ("refs/heads/" + ref).equals(reference.getName())
                 || ("refs/tags/" + ref).equals(reference.getName());
-    }
-
-    private boolean remoteBranchExists(Git git, String branch) throws IOException {
-        return Objects.nonNull(git.getRepository().findRef("refs/remotes/origin/" + branch));
-    }
-
-    private void checkoutRevision(Git git, String revision)
-            throws IOException, GitAPIException {
-        boolean localBranchExists = Objects.nonNull(
-                git.getRepository().findRef("refs/heads/" + revision));
-        CheckoutCommand checkout = git.checkout().setName(revision);
-        if (!localBranchExists && remoteBranchExists(git, revision)) {
-            checkout.setCreateBranch(true)
-                    .setStartPoint("origin/" + revision)
-                    .setUpstreamMode(CreateBranchCommand.SetupUpstreamMode.TRACK);
-        }
-        checkout.call();
     }
 
     private RepositoryRevision resolveHead(Git git) throws IOException {

@@ -1,11 +1,11 @@
 package com.java.semantic.repository.adapter.jgit;
 
+import com.java.semantic.model.repository.RepositoryRevision;
 import com.java.semantic.repository.application.RepositoryMutationException;
 import com.java.semantic.repository.config.RepositoryProperties;
-import com.java.semantic.model.repository.RepositoryRevision;
 import org.eclipse.jgit.api.Git;
 import org.eclipse.jgit.api.errors.JGitInternalException;
-import org.eclipse.jgit.lib.StoredConfig;
+import org.eclipse.jgit.lib.Ref;
 import org.eclipse.jgit.transport.RefSpec;
 import org.eclipse.jgit.transport.URIish;
 import org.junit.jupiter.api.Test;
@@ -23,93 +23,47 @@ class JGitRepositoryAdapterTest {
     private Path tempDirectory;
 
     @Test
-    void should_clone_sync_and_checkout_revisions_when_local_remote_is_used() throws Exception {
+    void should_fetch_and_checkout_an_exact_revision_after_main_moves() throws Exception {
         try (RemoteFixture fixture = createRemote()) {
             JGitRepositoryAdapter adapter = new JGitRepositoryAdapter(new RepositoryProperties());
             Path clone = tempDirectory.resolve("clone");
+            RepositoryRevision admittedRevision = RepositoryRevision.ofSha(
+                    fixture.seed().getRepository().resolve("refs/heads/main").getName());
 
-            RepositoryRevision initial = adapter.clone(
-                    clone, fixture.remote().toUri().toString(), "main");
-            assertThat(initial.value()).hasSize(40);
-            assertThat(adapter.currentBranch(clone)).isEqualTo("main");
-
-            String taggedSha = commit(fixture.seed(), fixture.seedRoot(), "second");
+            RepositoryRevision clonedRevision = adapter.clone(clone, fixture.remote().toUri().toString());
+            assertThat(clonedRevision).isEqualTo(admittedRevision);
+            String movedBranchRevision = commit(fixture.seed(), fixture.seedRoot(), "new-main-tip");
             pushBranch(fixture.seed(), "main");
-            fixture.seed().tag().setName("v1").call();
-            fixture.seed().push().setRemote("origin").setPushTags().call();
+            adapter.fetch(clone);
+            adapter.checkoutDetached(clone, admittedRevision);
 
-            fixture.seed().checkout().setCreateBranch(true).setName("feature").call();
-            String featureSha = commit(fixture.seed(), fixture.seedRoot(), "feature");
-            pushBranch(fixture.seed(), "feature");
-
-            RepositoryRevision synced = adapter.fetchAndReset(clone, "main");
-            assertThat(synced.value()).isEqualTo(taggedSha);
-
-            RepositoryRevision feature = adapter.checkout(clone, "feature");
-            assertThat(feature.value()).isEqualTo(featureSha);
-            try (Git clonedGit = Git.open(clone.toFile())) {
-                StoredConfig config = clonedGit.getRepository().getConfig();
-                assertThat(config.getString("branch", "feature", "remote")).isEqualTo("origin");
-                assertThat(config.getString("branch", "feature", "merge"))
-                        .isEqualTo("refs/heads/feature");
-            }
-
-            assertThat(adapter.checkout(clone, "v1").value()).isEqualTo(taggedSha);
-            assertThat(adapter.checkout(clone, featureSha).value()).isEqualTo(featureSha);
-        }
-    }
-
-    @Test
-    void should_sync_the_requested_branch_when_current_branch_is_a_distinct_feature() throws Exception {
-        try (RemoteFixture fixture = createRemote()) {
-            String mainSha = commit(fixture.seed(), fixture.seedRoot(), "main");
-            pushBranch(fixture.seed(), "main");
-            fixture.seed().checkout().setCreateBranch(true).setName("feature").call();
-            String featureSha = commit(fixture.seed(), fixture.seedRoot(), "feature");
-            pushBranch(fixture.seed(), "feature");
-            assertThat(featureSha).isNotEqualTo(mainSha);
-
-            JGitRepositoryAdapter adapter = new JGitRepositoryAdapter(new RepositoryProperties());
-            Path clone = tempDirectory.resolve("cross-branch-clone");
-            adapter.clone(clone, fixture.remote().toUri().toString(), "main");
-            adapter.checkout(clone, "feature");
-
-            try (Git clonedGit = Git.open(clone.toFile())) {
-                StoredConfig config = clonedGit.getRepository().getConfig();
-                assertThat(config.getString("branch", "feature", "remote")).isEqualTo("origin");
-                assertThat(config.getString("branch", "feature", "merge"))
-                        .isEqualTo("refs/heads/feature");
-            }
-
-            RepositoryRevision synced = adapter.fetchAndReset(clone, "main");
-
-            assertThat(synced.value()).isEqualTo(mainSha);
-            assertThat(adapter.currentBranch(clone)).isEqualTo("main");
-            try (Git clonedGit = Git.open(clone.toFile())) {
-                assertThat(clonedGit.getRepository().resolve("refs/heads/main").getName())
-                        .isEqualTo(mainSha);
-                assertThat(clonedGit.getRepository().resolve("refs/heads/feature").getName())
-                        .isEqualTo(featureSha);
+            assertThat(adapter.currentRevision(clone)).isEqualTo(admittedRevision);
+            try (Git checkedOut = Git.open(clone.toFile())) {
+                Ref head = checkedOut.getRepository().exactRef("HEAD");
+                assertThat(head.isSymbolic()).isFalse();
+                assertThat(checkedOut.getRepository().resolve("refs/remotes/origin/main").getName())
+                        .isEqualTo(movedBranchRevision);
             }
         }
     }
 
     @Test
-    void should_wrap_as_repository_mutation_exception_when_jgit_throws_an_unchecked_failure()
+    void should_wrap_as_repository_mutation_exception_when_jgit_clone_fails()
             throws Exception {
         JGitRepositoryAdapter adapter = new JGitRepositoryAdapter(new RepositoryProperties());
         Path occupied = tempDirectory.resolve("occupied");
         Files.createDirectories(occupied);
         Files.writeString(occupied.resolve("existing.txt"), "keep-me");
 
-        assertThatThrownBy(() -> adapter.clone(occupied, "https://example.invalid/repo.git", "main"))
+        assertThatThrownBy(() -> adapter.clone(occupied, "https://example.invalid/repo.git"))
                 .isInstanceOf(RepositoryMutationException.class)
                 .cause()
                 .isInstanceOf(JGitInternalException.class);
     }
 
     @Test
-    void should_resolve_remote_branch_and_existing_exact_revision_without_a_worktree_checkout() throws Exception {
+    void should_resolve_remote_branch_and_reachable_exact_revision_without_a_worktree_checkout()
+            throws Exception {
         try (RemoteFixture fixture = createRemote()) {
             JGitRepositoryAdapter adapter = new JGitRepositoryAdapter(new RepositoryProperties());
             String historicalRevision = fixture.seed().getRepository().resolve("refs/heads/main").getName();
@@ -159,6 +113,9 @@ class JGitRepositoryAdapterTest {
                 .setUri(new URIish(remote.toUri().toString()))
                 .call();
         pushBranch(seed, "main");
+        try (Git bare = Git.open(remote.toFile())) {
+            bare.getRepository().updateRef("HEAD", true).link("refs/heads/main");
+        }
         return new RemoteFixture(remote, seedRoot, seed);
     }
 
@@ -177,8 +134,7 @@ class JGitRepositoryAdapterTest {
     private void pushBranch(Git git, String branch) throws Exception {
         git.push()
                 .setRemote("origin")
-                .setRefSpecs(new RefSpec(
-                        "refs/heads/" + branch + ":refs/heads/" + branch))
+                .setRefSpecs(new RefSpec("refs/heads/" + branch + ":refs/heads/" + branch))
                 .call();
     }
 

@@ -121,7 +121,6 @@ public class DefaultRepositoryApplicationService implements RepositoryApplicatio
 
     private boolean isExpectedSnapshotFailure(RuntimeException exception) {
         return exception instanceof ExpectedFailure
-                || exception instanceof ImmutableFixtureException
                 || exception instanceof InvalidRepositoryIdException
                 || exception instanceof RepositoryBusyException
                 || exception instanceof RepositoryMutationException

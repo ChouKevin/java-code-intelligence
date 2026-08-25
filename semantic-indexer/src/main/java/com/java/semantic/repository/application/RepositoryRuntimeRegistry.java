@@ -1,13 +1,10 @@
 package com.java.semantic.repository.application;
-import com.java.semantic.model.repository.InvalidRepositoryIdException;
 
-import com.java.semantic.repository.config.RepositoryProperties;
 import com.java.semantic.model.repository.InvalidRepositoryIdException;
 import com.java.semantic.model.repository.RepositoryId;
-import com.java.semantic.repository.domain.RepositoryMode;
 import com.java.semantic.repository.domain.RepositoryRuntime;
+import com.java.semantic.repository.config.RepositoryProperties;
 import org.springframework.stereotype.Component;
-import org.springframework.util.Assert;
 import org.springframework.util.StringUtils;
 
 import java.nio.file.Path;
@@ -50,17 +47,15 @@ public class RepositoryRuntimeRegistry {
             RepositoryId repositoryId,
             RepositoryProperties.RepositoryConfig config,
             Path dataRoot) {
-        RepositoryMode mode = Objects.requireNonNull(config.getMode(), "repository mode is required");
         String displayName = StringUtils.hasText(config.getDisplayName())
                 ? config.getDisplayName()
                 : repositoryId.value();
         String defaultBranch = StringUtils.hasText(config.getDefaultBranch())
                 ? config.getDefaultBranch()
                 : "main";
-        Path workingTree = resolveWorkingTree(repositoryId, mode, config, dataRoot);
+        Path workingTree = resolveWorkingTree(repositoryId, dataRoot);
         return new RepositoryRuntime(
                 repositoryId,
-                mode,
                 displayName,
                 workingTree,
                 config.getUrl(),
@@ -69,13 +64,7 @@ public class RepositoryRuntimeRegistry {
 
     private Path resolveWorkingTree(
             RepositoryId repositoryId,
-            RepositoryMode mode,
-            RepositoryProperties.RepositoryConfig config,
             Path dataRoot) {
-        if (RepositoryMode.LOCAL_FIXTURE == mode) {
-            Assert.hasText(config.getPath(), "fixture path is required");
-            return Path.of(config.getPath()).toAbsolutePath().normalize();
-        }
         Path workingTree = dataRoot.resolve(repositoryId.value()).normalize();
         if (!workingTree.startsWith(dataRoot)) {
             throw new InvalidRepositoryIdException(repositoryId.value());

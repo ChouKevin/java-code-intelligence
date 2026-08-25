@@ -1,6 +1,5 @@
 package com.java.semantic.repository.config;
 
-import com.java.semantic.repository.domain.RepositoryMode;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.util.StringUtils;
 
@@ -68,19 +67,9 @@ public class RepositoryProperties {
     }
 
     public static class RepositoryConfig {
-        private RepositoryMode mode = RepositoryMode.REMOTE;
         private String displayName = "";
         private String url = "";
         private String defaultBranch = "main";
-        private String path = "";
-
-        public RepositoryMode getMode() {
-            return mode;
-        }
-
-        public void setMode(RepositoryMode mode) {
-            this.mode = mode;
-        }
 
         public String getDisplayName() {
             return displayName;
@@ -106,12 +95,5 @@ public class RepositoryProperties {
             this.defaultBranch = defaultBranch;
         }
 
-        public String getPath() {
-            return path;
-        }
-
-        public void setPath(String path) {
-            this.path = path;
-        }
     }
 }

@@ -56,7 +56,7 @@ class RepositoryConcurrencyTest {
     void releases_the_read_lock_after_a_snapshot_operation_fails() throws Exception {
         DefaultRepositoryApplicationService service = service(Duration.ofMillis(100));
         RepositoryRuntime runtime = service.registry().get(RepositoryId.of("orders"));
-        runtime.publish(new RepositoryRevision("a".repeat(40)), "");
+        runtime.publish(new RepositoryRevision("a".repeat(40)));
 
         assertThatThrownBy(() -> service.withSnapshot(RepositoryId.of("orders"), Optional.empty(), snapshot -> {
             throw new IllegalStateException("planned read failure");

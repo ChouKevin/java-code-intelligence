@@ -3,7 +3,6 @@ package com.java.semantic.indexer.repository;
 import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.model.repository.RepositoryRevision;
 import com.java.semantic.repository.application.RepositoryRuntimeRegistry;
-import com.java.semantic.repository.domain.RepositoryMode;
 import com.java.semantic.repository.domain.RepositoryRuntime;
 import com.java.semantic.repository.port.GitRepositoryPort;
 import org.springframework.stereotype.Component;
@@ -15,13 +14,10 @@ import java.util.Optional;
 final class RepositorySourceAdapter implements RepositorySourcePort {
     private final RepositoryRuntimeRegistry registry;
     private final GitRepositoryPort git;
-    private final FixtureRevisionResolver fixtures;
 
-    RepositorySourceAdapter(RepositoryRuntimeRegistry registry,
-                            GitRepositoryPort git, FixtureRevisionResolver fixtures) {
+    RepositorySourceAdapter(RepositoryRuntimeRegistry registry, GitRepositoryPort git) {
         this.registry = Objects.requireNonNull(registry, "registry is required");
         this.git = Objects.requireNonNull(git, "git is required");
-        this.fixtures = Objects.requireNonNull(fixtures, "fixtures is required");
     }
 
     @Override
@@ -36,21 +32,13 @@ final class RepositorySourceAdapter implements RepositorySourcePort {
 
     @Override
     public RepositoryRevision checkout(RepositoryId repositoryId, String revision) {
-        if (!revision.matches("[0-9a-f]{40}")) {
-            throw new IllegalArgumentException("checkout revision must be a lowercase SHA-1");
-        }
+        RepositoryRevision exactRevision = RepositoryRevision.ofSha(revision);
         RepositoryRuntime runtime = registry.get(repositoryId);
-        if (runtime.mode() == RepositoryMode.LOCAL_FIXTURE) {
-            throw new IllegalArgumentException("local fixtures do not support checkout by revision");
-        }
-        return git.resolveRemoteRef(runtime.remoteUrl(), revision);
+        return git.resolveRemoteRef(runtime.remoteUrl(), exactRevision.value());
     }
 
     private RepositoryRevision resolve(RepositoryId repositoryId, Optional<String> branch) {
         RepositoryRuntime runtime = registry.get(repositoryId);
-        if (runtime.mode() == RepositoryMode.LOCAL_FIXTURE) {
-            return fixtures.resolve(runtime.workingTree());
-        }
         String target = branch.filter(org.springframework.util.StringUtils::hasText).orElse(runtime.defaultBranch());
         return git.resolveRemoteRef(runtime.remoteUrl(), target);
     }

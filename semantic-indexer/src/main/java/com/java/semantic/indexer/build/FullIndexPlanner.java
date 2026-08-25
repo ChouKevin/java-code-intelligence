@@ -1,6 +1,6 @@
 package com.java.semantic.indexer.build;
 
-import com.java.semantic.indexer.repository.FixtureInputSelector;
+import com.java.semantic.indexer.repository.RepositoryInputSelector;
 import com.java.semantic.model.index.SourceArtifactDocument;
 import java.io.IOException;
 import java.io.StringReader;
@@ -19,13 +19,13 @@ import javax.xml.stream.XMLStreamReader;
 
 /** Selects Java and MyBatis mapper XML inputs without depending on host path ordering. */
 public final class FullIndexPlanner {
-    private final FixtureInputSelector inputSelector;
+    private final RepositoryInputSelector inputSelector;
 
     public FullIndexPlanner() {
-        this(new FixtureInputSelector());
+        this(new RepositoryInputSelector());
     }
 
-    public FullIndexPlanner(FixtureInputSelector inputSelector) {
+    public FullIndexPlanner(RepositoryInputSelector inputSelector) {
         this.inputSelector = Objects.requireNonNull(inputSelector, "input selector is required");
     }
 

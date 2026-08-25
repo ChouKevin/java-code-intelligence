@@ -1,6 +1,5 @@
 package com.java.semantic.repository.config;
 
-import com.java.semantic.repository.domain.RepositoryMode;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.context.properties.bind.Bindable;
 import org.springframework.boot.context.properties.bind.Binder;
@@ -22,18 +21,12 @@ class RepositoryPropertiesTest {
     }
 
     @Test
-    void should_default_to_remote_mode_when_mode_is_absent() {
-        assertThat(new RepositoryProperties.RepositoryConfig().getMode())
-                .isEqualTo(RepositoryMode.REMOTE);
-    }
-
-    @Test
-    void should_bind_repository_configuration_when_properties_are_present() {
+    void should_bind_git_url_and_default_branch_without_fixture_source_properties() {
         MockEnvironment environment = new MockEnvironment()
                 .withProperty("semantic.data-root", "/tmp/repos")
                 .withProperty("semantic.repository-lock-timeout", "250ms")
-                .withProperty("semantic.repositories.test-repo.mode", "LOCAL_FIXTURE")
-                .withProperty("semantic.repositories.test-repo.path", "/tmp/fixture");
+                .withProperty("semantic.repositories.test-repo.url", "https://example.test/test-repo.git")
+                .withProperty("semantic.repositories.test-repo.default-branch", "release");
 
         RepositoryProperties properties = Binder.get(environment)
                 .bind("semantic", Bindable.of(RepositoryProperties.class))
@@ -41,9 +34,11 @@ class RepositoryPropertiesTest {
 
         assertThat(properties.getDataRoot()).isEqualTo("/tmp/repos");
         assertThat(properties.getRepositoryLockTimeout()).isEqualTo(Duration.ofMillis(250));
-        assertThat(properties.getRepositories().get("test-repo").getMode())
-                .isEqualTo(RepositoryMode.LOCAL_FIXTURE);
-        assertThat(properties.getRepositories().get("test-repo").getPath())
-                .isEqualTo("/tmp/fixture");
+        RepositoryProperties.RepositoryConfig config = properties.getRepositories().get("test-repo");
+        assertThat(config.getUrl()).isEqualTo("https://example.test/test-repo.git");
+        assertThat(config.getDefaultBranch()).isEqualTo("release");
+        assertThat(RepositoryProperties.RepositoryConfig.class.getDeclaredFields())
+                .extracting(java.lang.reflect.Field::getName)
+                .doesNotContain("mode", "path");
     }
 }

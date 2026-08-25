@@ -9,17 +9,13 @@ public interface GitRepositoryPort {
 
     boolean isCloned(Path workingTree);
 
-    RepositoryRevision clone(Path workingTree, String url, String branch);
+    RepositoryRevision clone(Path workingTree, String remoteUrl);
 
-    RepositoryRevision fetchAndReset(Path workingTree, String branch);
+    void fetch(Path workingTree);
 
-    RepositoryRevision checkout(Path workingTree, String revision);
+    void checkoutDetached(Path workingTree, RepositoryRevision revision);
 
     RepositoryRevision currentRevision(Path workingTree);
 
-    String currentBranch(Path workingTree);
-
-    default RepositoryRevision resolveRemoteRef(String remoteUrl, String ref) {
-        throw new UnsupportedOperationException("remote revision selection is not available");
-    }
+    RepositoryRevision resolveRemoteRef(String remoteUrl, String ref);
 }
