@@ -1,10 +1,11 @@
 package com.java.semantic.indexer.job;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import lombok.extern.slf4j.Slf4j;
@@ -20,21 +21,27 @@ public final class IndexJobDispatcher implements ApplicationListener<Application
     private final IndexJobStore jobs;
     private final IndexJobExecutor executor;
     private final IndexJobProperties properties;
-    private final ScheduledExecutorService dispatcher;
+    private final ScheduledThreadPoolExecutor dispatcher;
     private final AtomicBoolean applicationReady = new AtomicBoolean(false);
-    private final AtomicBoolean stopping = new AtomicBoolean(false);
     private final Object lifecycleMonitor = new Object();
+    private final List<Runnable> stopCallbacks = new ArrayList<>();
+    private boolean stopping;
     private ScheduledFuture<?> pollFuture;
 
     public IndexJobDispatcher(IndexJobStore jobs, IndexJobExecutor executor, IndexJobProperties properties) {
         this.jobs = Objects.requireNonNull(jobs, "jobs is required");
         this.executor = Objects.requireNonNull(executor, "executor is required");
         this.properties = Objects.requireNonNull(properties, "properties are required");
-        this.dispatcher = Executors.newSingleThreadScheduledExecutor(runnable -> {
+        this.dispatcher = new ScheduledThreadPoolExecutor(1, runnable -> {
             Thread thread = new Thread(runnable, "index-job-dispatcher");
             thread.setDaemon(false);
             return thread;
-        });
+        }) {
+            @Override
+            protected void terminated() {
+                completeStopCallbacks();
+            }
+        };
     }
 
     @Override
@@ -46,11 +53,8 @@ public final class IndexJobDispatcher implements ApplicationListener<Application
 
     @Override
     public void start() {
-        if (!applicationReady.get() || stopping.get()) {
-            return;
-        }
         synchronized (lifecycleMonitor) {
-            if (Objects.nonNull(pollFuture) || stopping.get()) {
+            if (!applicationReady.get() || Objects.nonNull(pollFuture) || stopping) {
                 return;
             }
             pollFuture = dispatcher.scheduleWithFixedDelay(this::dispatchScheduled, 0L,
@@ -59,10 +63,13 @@ public final class IndexJobDispatcher implements ApplicationListener<Application
     }
 
     public void dispatchOnce() {
-        if (stopping.get()) {
-            return;
+        Optional<IndexJob> running;
+        synchronized (lifecycleMonitor) {
+            if (stopping) {
+                return;
+            }
+            running = jobs.startNextAccepted();
         }
-        Optional<IndexJob> running = jobs.startNextAccepted();
         running.ifPresent(this::execute);
     }
 
@@ -95,31 +102,64 @@ public final class IndexJobDispatcher implements ApplicationListener<Application
 
     @Override
     public void stop() {
-        stopping.set(true);
         synchronized (lifecycleMonitor) {
-            if (Objects.nonNull(pollFuture)) {
-                pollFuture.cancel(false);
-            }
-            dispatcher.shutdownNow();
+            beginStop();
         }
     }
 
     @Override
     public void stop(Runnable callback) {
-        try {
-            stop();
-        } finally {
-            callback.run();
+        Objects.requireNonNull(callback, "stop callback is required");
+        boolean runCallbackImmediately = false;
+        synchronized (lifecycleMonitor) {
+            if (dispatcher.isTerminated()) {
+                runCallbackImmediately = true;
+            } else {
+                stopCallbacks.add(callback);
+                beginStop();
+            }
+        }
+        if (runCallbackImmediately) {
+            runStopCallback(callback);
         }
     }
 
     @Override
     public boolean isRunning() {
-        return !dispatcher.isShutdown() && Objects.nonNull(pollFuture);
+        synchronized (lifecycleMonitor) {
+            return !stopping && !dispatcher.isShutdown() && Objects.nonNull(pollFuture);
+        }
     }
 
     @Override
     public boolean isAutoStartup() {
         return false;
+    }
+
+    private void beginStop() {
+        stopping = true;
+        if (Objects.nonNull(pollFuture)) {
+            pollFuture.cancel(false);
+        }
+        dispatcher.shutdownNow();
+    }
+
+    private void completeStopCallbacks() {
+        List<Runnable> callbacks;
+        synchronized (lifecycleMonitor) {
+            callbacks = List.copyOf(stopCallbacks);
+            stopCallbacks.clear();
+        }
+        for (Runnable callback : callbacks) {
+            runStopCallback(callback);
+        }
+    }
+
+    private void runStopCallback(Runnable callback) {
+        try {
+            callback.run();
+        } catch (RuntimeException exception) {
+            log.warn("Index job dispatcher stop callback failed", exception);
+        }
     }
 }
