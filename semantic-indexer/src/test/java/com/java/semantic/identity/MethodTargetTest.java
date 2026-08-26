@@ -1,4 +1,4 @@
-package com.java.semantic.syntax.domain;
+package com.java.semantic.identity;
 
 import java.lang.reflect.Constructor;
 import java.lang.reflect.InvocationTargetException;
