@@ -11,7 +11,12 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import org.junit.jupiter.api.Test;
+import org.slf4j.LoggerFactory;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -36,9 +41,20 @@ class IndexJobDispatcherTest {
         doReturn(Optional.of(first)).doReturn(Optional.of(second)).when(jobs).startNextAccepted();
         doThrow(failure).when(executor).execute(first);
         IndexJobDispatcher dispatcher = dispatcher(jobs, executor);
+        Logger logger = (Logger) LoggerFactory.getLogger(IndexJobDispatcher.class);
+        ListAppender<ILoggingEvent> logs = new ListAppender<>();
+        logs.start();
+        logger.addAppender(logs);
 
         try {
             assertThatThrownBy(dispatcher::dispatchOnce).isSameAs(failure);
+
+            assertThat(logs.list).anySatisfy(event -> {
+                assertThat(event.getLevel()).isEqualTo(Level.WARN);
+                assertThat(event.getFormattedMessage()).contains("repositoryId=orders", "jobId=job-1", "operation=BUILD");
+                assertThat(event.getThrowableProxy()).isNotNull();
+                assertThat(event.getThrowableProxy().getClassName()).isEqualTo(RuntimeException.class.getName());
+            });
 
             dispatcher.dispatchOnce();
 
@@ -47,6 +63,8 @@ class IndexJobDispatcherTest {
             order.verify(executor).execute(second);
             verify(jobs, times(2)).startNextAccepted();
         } finally {
+            logger.detachAppender(logs);
+            logs.stop();
             dispatcher.stop();
         }
     }

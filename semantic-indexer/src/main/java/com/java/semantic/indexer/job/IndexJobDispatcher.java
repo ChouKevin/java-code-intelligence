@@ -85,6 +85,10 @@ public final class IndexJobDispatcher implements ApplicationListener<Application
     private void execute(IndexJob job) {
         try {
             executor.execute(job);
+        } catch (RuntimeException exception) {
+            log.warn("index-job-execution-failed repositoryId={} jobId={} operation={}", job.repositoryId().value(),
+                    job.id().value(), job.operation(), exception);
+            throw exception;
         } finally {
             logTerminal(job);
         }
