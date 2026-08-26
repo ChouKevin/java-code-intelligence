@@ -1,29 +1,57 @@
 # Offline Index Operations
 
-## Roles, credentials, and TLS
+## Service boundary
 
-Run Indexer and Query with different service identities. The Indexer administrator token is accepted only by `/index/**`; the Query API token is accepted only by Query HTTP/MCP. Indexer receives a read-only Git credential and JDT-LS workspace storage. Query receives neither. Use separate Mongo roles: Indexer needs generation/job/pointer writes; Query needs read access to sealed generations and pointer documents only; schema maintenance has a third identity with index-management rights. Use TLS for MongoDB, validate the server CA, and keep credentials in the deployment secret store.
+Run Indexer and Query as separate applications with separate credentials. Indexer gets the admin token, read-only Git access, JDT LS workspace storage, and Mongo generation/job/pointer writes. Query gets only the query token and Mongo read access to repository pointers and sealed generations. It must not mount repositories or JDT workspaces.
 
-## Job behavior and recovery
+Use TLS for a non-UAT MongoDB deployment, validate the server CA, and keep credentials in the deployment secret store. The publication path uses standalone MongoDB compare-and-set writes; it does not need transactions or a replica set.
 
-Admin commands enqueue an asynchronous job for `ensure`, `sync`, `checkout`, `rebuild`, or `rollback`; no request performs inline indexing. A worker claims a job with a fence and periodically renews the claim. If renewal fails, it must stop before any further publication attempt. The build writes immutable generation documents, validates them, seals the manifest, and then performs the fenced single-document repository-pointer update. This publication model is safe on standalone MongoDB and does not require transactions or a replica set.
+## Jobs and the single dispatcher
 
-Retry a failed build by creating a **new job**. Do not revive or extend an expired claim. A rebuild of the same revision creates a new generation and moves the pointer only after the new generation is sealed. Rollback repoints to an existing sealed generation; it never edits generation documents.
+`ensure`, `sync`, `checkout`, `rebuild`, and `rollback` only store an asynchronous job. Admission resolves the requested Git ref to an exact reachable SHA, but checkout and JDT LS start only when the job runs.
 
-## Release and schema procedure
+One Indexer process contains one `index-job-dispatcher` thread. It polls with `semantic.index-jobs.poll-delay` (default `1s`), starts the oldest `ACCEPTED` job, and runs it synchronously. There is no distributed-ownership protocol or automatic retry.
 
-1. Deploy additive schema/index maintenance with the schema-maintenance identity.
-2. Deploy Indexer and rebuild affected repositories until their new generations are sealed.
-3. Deploy Query only after the required projection version is present in current sealed generations.
+The dispatcher writes one of these stable failure categories:
 
-Schema maintenance is non-destructive: add new fields or named indexes, and retain prior fields and indexes until no running Query release needs them. For rollback, repoint a repository to a sealed generation compatible with the previous Query, then roll back Query; reverse only additive schema changes in a separately reviewed maintenance operation. Do not use handwritten migration registries or multi-version decoders.
+- `SOURCE_UNAVAILABLE`: Git resolution, fetch, or exact checkout failed.
+- `SCHEMA_REBUILD_REQUIRED`: the stored schema/index contract is incompatible.
+- `PUBLICATION_CONFLICT`: the expected repository pointer changed before publication.
+- `VALIDATION_FAILED`: the generated data did not pass validation.
+- `WORKER_INTERRUPTED`: an unexpected failure, shutdown interruption, or incomplete prior run.
 
-Back up MongoDB pointer, job, manifest, and generation collections together and periodically verify a restore into an isolated environment. There is currently **no automatic generation garbage collection**. Rebuilds accumulate immutable generations; operators must provision storage and use a separate, approved retention procedure before deleting any generation.
+Submit a new job after correcting a failure. Do not edit a terminal job. Rebuilding the same revision creates and validates a new immutable generation before changing the pointer. Rollback points to an existing sealed generation and does not edit it.
 
-## Operational verification
+## Startup and shutdown
 
-Run the unit suite without Docker or JDT-LS, Mongo integration separately, then fixture/JDT-LS and real Indexer-to-Query contract checks. Build both images and run the image isolation scripts shown in the repository README. Query image checks reject JGit, JDT, LSP4J, JDT-LS, repository worktree paths, and AI model/chat/embedding artifacts.
+Startup recovery runs before normal polling. It marks a leftover `RUNNING` job `COMPLETE` when the exact target was already published; every other leftover `RUNNING` job becomes `FAILED/WORKER_INTERRUPTED`. It does not retry either case.
 
-## Legacy cutover record
+Normal shutdown stops new polls and interrupts dispatcher work. If interruption occurs before publication, startup closes the job as interrupted. If publication completed before the process stopped, startup reconciles the stored publication intent to `COMPLETE`.
 
-The only supported reproduction point for the pre-split single application is pinned revision `9ff90b7e51eafbb6ef954e4ae0cc8a6a22173f9c`, immediately before split revision `2f1d0e8deadbd552b6ef2b5253a4252debe9631f`. Current CI and deployment never build or pull a legacy image and do not depend on a compatibility file.
+## Schema version 2
+
+Schema bootstrap is a separate maintenance action. Indexer does not create or repair named indexes while running a job. Schema version 2 removed the old distributed ownership fields and has no backward reader. Rebuild a pre-version-2 UAT database; do not add compatibility codecs or handwritten migrations.
+
+For a projection change:
+
+1. Deploy and verify the schema bootstrap with the maintenance identity.
+2. Deploy Indexer.
+3. Rebuild each affected repository and verify its sealed manifest.
+4. Deploy Query only after all required current generations use the new projection.
+
+Back up pointer, job, manifest, and generation collections together. There is no automatic generation garbage collection; deletion needs a separate approved retention procedure.
+
+## Query operation
+
+Query reads MongoDB only. It must continue serving the repository catalog, search, source, type/member, route, reference, implementation, and call-graph tool families while Indexer is stopped. It never starts JDT LS or repairs missing data online. A stale requested revision returns `REVISION_OUTDATED` with the current revision so the caller can decide whether to query again.
+
+## UAT-only controls
+
+The `uat` Spring profile adds:
+
+- a one-cycle pre-publication gate at `/index/uat/publication/{arm,await,release}`;
+- a repository reset admission endpoint at `/index/uat/repositories/{repoId}/reset`.
+
+Both use the Indexer admin token. The gate is in-memory and only pauses the final pointer change. Reset is an ordinary durable job in the same dispatcher lane. Reset checks that the repository is configured, the database is exactly `semantic_uat`, and repository/workspace paths stay under their configured roots. It removes that repository's previous jobs, generations, pointer, checkout, and JDT workspace state but preserves the active reset job, other repositories, and shared content-addressed `source_artifacts`.
+
+Never enable the UAT profile against production data.
