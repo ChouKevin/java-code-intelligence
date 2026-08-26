@@ -13,6 +13,7 @@ import com.java.semantic.indexer.job.IndexJobStore;
 import com.java.semantic.indexer.job.IndexJobTarget;
 import com.java.semantic.indexer.repository.ExactRepositoryCheckout;
 import com.java.semantic.indexer.store.PublicationPort;
+import com.java.semantic.indexer.uat.NoOpPublicationGate;
 import com.java.semantic.model.index.GenerationId;
 import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.model.repository.RepositoryRevision;
@@ -62,7 +63,8 @@ class RepositoryBuildRunnerSpringWiringTest {
         when(git.getRepository()).thenReturn(mock(Repository.class));
         JdtWorkspaceManager workspaces = mock(JdtWorkspaceManager.class);
         RepositoryBuildScopeFactory factory = new RepositoryBuildScopeFactory(checkout, template,
-                mock(IndexJobStore.class), mock(PublicationPort.class), mock(JavaSemanticService.class), workspaces,
+                mock(IndexJobStore.class), mock(PublicationPort.class), new NoOpPublicationGate(),
+                mock(JavaSemanticService.class), workspaces,
                 root -> git);
 
         RepositoryBuildRunner.BuildScope scope = factory.open(job());
@@ -80,7 +82,8 @@ class RepositoryBuildRunnerSpringWiringTest {
         when(git.getRepository()).thenReturn(mock(Repository.class));
         JdtWorkspaceManager workspaces = mock(JdtWorkspaceManager.class);
         RepositoryBuildScopeFactory factory = new RepositoryBuildScopeFactory(checkout, mongoTemplate(),
-                mock(IndexJobStore.class), mock(PublicationPort.class), mock(JavaSemanticService.class), workspaces,
+                mock(IndexJobStore.class), mock(PublicationPort.class), new NoOpPublicationGate(),
+                mock(JavaSemanticService.class), workspaces,
                 root -> git);
 
         assertThatThrownBy(() -> new RepositoryBuildRunner(factory).run(job()))

@@ -12,6 +12,7 @@ import com.java.semantic.indexer.incremental.SourceContractChangeDetector;
 import com.java.semantic.indexer.store.IndexSchemaBootstrap;
 import com.java.semantic.indexer.store.MongoGenerationWriter;
 import com.java.semantic.indexer.store.MongoPublicationWriter;
+import com.java.semantic.indexer.uat.PublicationGate;
 import com.java.semantic.model.codefact.CodeFact;
 import com.java.semantic.model.codefact.CodeFactId;
 import com.java.semantic.model.codefact.CodeFactIdentity;
@@ -49,6 +50,9 @@ import java.util.Date;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 import java.util.stream.Stream;
 import org.bson.Document;
@@ -179,6 +183,57 @@ class FullIndexPublicationIT {
         }
     }
 
+    @Test
+    void sealed_generation_keeps_the_old_pointer_until_the_publication_gate_opens() throws Exception {
+        try (MongoDBContainer container = new MongoDBContainer("mongo:8.0.4")) {
+            container.start();
+            MongoTemplate template = template(container);
+            seedPreviousPointer(template);
+            MongoIndexJobStore store = new MongoIndexJobStore(template);
+            IndexJob job = claimedJob(store);
+            IndexBuildService.CheckedOutRepository checkout = checkout("publication-gate", revision());
+            CountDownLatch reached = new CountDownLatch(1);
+            CountDownLatch released = new CountDownLatch(1);
+            PublicationGate gate = blockingGate(reached, released);
+            IndexBuildService service = service(template, store, exporter(template, ignored -> { }), ignored -> checkout, gate);
+
+            CompletableFuture<Void> build = CompletableFuture.runAsync(() -> service.build(job));
+
+            assertThat(reached.await(10L, TimeUnit.SECONDS)).isTrue();
+            assertPreviousPointer(template);
+            assertThat(manifest(template, target(job)).getString("writeState"))
+                    .isEqualTo(GenerationWriteState.SEALED_VALID.name());
+            released.countDown();
+            build.get(10L, TimeUnit.SECONDS);
+            Document current = template.getCollection(IndexCollections.REPOSITORIES)
+                    .find(new Document("repoId", "orders")).first();
+            assertThat(current.get("currentPointer", Document.class).getString("generationId"))
+                    .isEqualTo(target(job).value());
+        }
+    }
+
+    private static PublicationGate blockingGate(CountDownLatch reached, CountDownLatch released) {
+        return new PublicationGate() {
+            @Override
+            public void awaitPublication() {
+                reached.countDown();
+                try {
+                    if (!released.await(10L, TimeUnit.SECONDS)) {
+                        throw new IllegalStateException("test publication gate timed out");
+                    }
+                } catch (InterruptedException exception) {
+                    Thread.currentThread().interrupt();
+                    throw new IllegalStateException("test publication gate was interrupted", exception);
+                }
+            }
+
+            @Override
+            public void abortPublication() {
+                released.countDown();
+            }
+        };
+    }
+
     private static Stream<Arguments> invalidScenarios() {
         return Stream.of(
                 scenario("missing artifact", template -> template.getCollection(IndexCollections.GENERATION_FILES)
@@ -252,9 +307,14 @@ class FullIndexPublicationIT {
 
     static IndexBuildService service(MongoTemplate template, MongoIndexJobStore store, RepositoryIndexExporter exporter,
                                      IndexBuildService.CheckoutResolver checkoutResolver) {
+        return service(template, store, exporter, checkoutResolver, new com.java.semantic.indexer.uat.NoOpPublicationGate());
+    }
+
+    private static IndexBuildService service(MongoTemplate template, MongoIndexJobStore store, RepositoryIndexExporter exporter,
+                                             IndexBuildService.CheckoutResolver checkoutResolver, PublicationGate publicationGate) {
         return new IndexBuildService(new FullIndexPlanner(), exporter, new MongoGenerationWriter(template),
                 new SourceIndexBatchDocumentMapper(template.getConverter()), new GenerationValidator(template),
-                checkoutResolver, incrementalBuilder(template), store, new MongoPublicationWriter(template));
+                checkoutResolver, incrementalBuilder(template), store, new MongoPublicationWriter(template), publicationGate);
     }
 
     private static IncrementalGenerationBuilder incrementalBuilder(MongoTemplate template) {

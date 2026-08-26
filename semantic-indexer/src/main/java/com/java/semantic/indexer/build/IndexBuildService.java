@@ -7,6 +7,7 @@ import com.java.semantic.indexer.job.IndexPublicationIntent;
 import com.java.semantic.indexer.store.GenerationWriteContext;
 import com.java.semantic.indexer.store.MongoGenerationWriter;
 import com.java.semantic.indexer.store.PublicationPort;
+import com.java.semantic.indexer.uat.PublicationGate;
 import com.java.semantic.model.index.PublishGenerationCommand;
 import com.java.semantic.model.index.GenerationWriteState;
 import com.java.semantic.model.index.IndexSchemaContract;
@@ -26,14 +27,16 @@ public final class IndexBuildService {
     private final GenerationValidator validator;
     private final IndexJobStore jobs;
     private final PublicationPort publication;
+    private final PublicationGate publicationGate;
     private final CheckoutResolver checkedOutRepository;
     private final IncrementalGenerationBuilder incrementalBuilder;
 
-    /** Adds Task-13 incremental assembly while preserving the existing full-build construction seam. */
+    /** Adds incremental assembly and a bounded publication boundary to the full-build path. */
     public IndexBuildService(FullIndexPlanner planner, RepositoryIndexExporter exporter,
                              MongoGenerationWriter generationWriter, SourceIndexBatchDocumentMapper documentMapper,
                              GenerationValidator validator, CheckoutResolver checkedOutRepository,
-                             IncrementalGenerationBuilder incrementalBuilder, IndexJobStore jobs, PublicationPort publication) {
+                             IncrementalGenerationBuilder incrementalBuilder, IndexJobStore jobs, PublicationPort publication,
+                             PublicationGate publicationGate) {
         this.planner = Objects.requireNonNull(planner, "planner is required");
         this.exporter = Objects.requireNonNull(exporter, "exporter is required");
         this.generationWriter = Objects.requireNonNull(generationWriter, "generation writer is required");
@@ -43,11 +46,25 @@ public final class IndexBuildService {
         this.incrementalBuilder = Objects.requireNonNull(incrementalBuilder, "incremental builder is required");
         this.jobs = Objects.requireNonNull(jobs, "jobs is required");
         this.publication = Objects.requireNonNull(publication, "publication is required");
+        this.publicationGate = Objects.requireNonNull(publicationGate, "publication gate is required");
     }
 
     /** Executes checkout, planning, export, validation, sealing, and pointer publication. */
     public void build(IndexJob job) {
         Objects.requireNonNull(job, "job is required");
+        IndexPublicationIntent intent;
+        try {
+            intent = buildSealedGeneration(job);
+        } catch (RuntimeException exception) {
+            publicationGate.abortPublication();
+            throw exception;
+        }
+        publicationGate.awaitPublication();
+        publication.publish(new PublishGenerationCommand(job.repositoryId(), intent.targetRevision(), intent.targetGenerationId(),
+                job.id().value(), intent.expectedParent(), intent.targetManifestDigest()));
+    }
+
+    private IndexPublicationIntent buildSealedGeneration(IndexJob job) {
         IndexJobTarget target = job.target().orElseThrow(() -> new IllegalArgumentException("BUILD requires a target"));
         GenerationWriteContext context = new GenerationWriteContext(job.repositoryId(), target.generationId(), job.id().value());
         generationWriter.verifySchemaBeforeGeneration();
@@ -73,10 +90,8 @@ public final class IndexBuildService {
         }
         validator.recordValid(context, result);
         generationWriter.seal(context, result.identityDigest().value());
-        IndexPublicationIntent intent = jobs.prepareBuildPublication(job, result.identityDigest())
+        return jobs.prepareBuildPublication(job, result.identityDigest())
                 .orElseThrow(() -> new IllegalStateException("publication precondition failed"));
-        publication.publish(new PublishGenerationCommand(job.repositoryId(), intent.targetRevision(), intent.targetGenerationId(),
-                job.id().value(), intent.expectedParent(), intent.targetManifestDigest()));
     }
 
     private void insertWritingManifest(IndexJob job, GenerationWriteContext context) {

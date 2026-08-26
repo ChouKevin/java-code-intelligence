@@ -84,7 +84,7 @@ public final class IndexRepositoryController {
 
     public record IndexJobResponse(String jobId, String repositoryId, IndexJobTargetResponse target, String phase,
                                    String failureCategory) {
-        static IndexJobResponse from(IndexJob job) {
+        public static IndexJobResponse from(IndexJob job) {
             return new IndexJobResponse(job.id().value(), job.repositoryId().value(), job.target().map(IndexJobTargetResponse::from).orElse(null), // cs-allow
                     job.phase().name(), job.failureCategory().map(Enum::name).orElse(null)); // cs-allow
         }

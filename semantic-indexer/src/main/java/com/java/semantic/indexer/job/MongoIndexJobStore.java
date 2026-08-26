@@ -97,6 +97,17 @@ public final class MongoIndexJobStore implements IndexJobStore {
     }
 
     @Override
+    public IndexJob admitReset(RepositoryId repositoryId) {
+        Objects.requireNonNull(repositoryId, "repository id is required");
+        IndexJobId jobId = IndexJobId.create();
+        Document job = new Document(JOB_ID, jobId.value()).append(REPOSITORY_ID, repositoryId.value()).append(ACTIVE, true)
+                .append("phase", IndexJobPhase.ACCEPTED.name()).append("operation", IndexJobOperation.RESET.name())
+                .append("rebuild", false).append("createdAt", new Date());
+        insert(job, repositoryId);
+        return from(job);
+    }
+
+    @Override
     public Optional<IndexJob> find(IndexJobId jobId) {
         return Optional.ofNullable(template.getCollection(IndexCollections.INDEX_JOBS).find(new Document(JOB_ID, jobId.value())).first())
                 .map(MongoIndexJobStore::from);

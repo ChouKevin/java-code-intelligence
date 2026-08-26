@@ -21,7 +21,8 @@ class IndexAdminSecurityTest {
 
         String[] paths = {"/index/repositories/orders/ensure", "/index/repositories/orders/sync",
                 "/index/repositories/orders/checkout", "/index/repositories/orders/rebuild",
-                "/index/repositories/orders/rollback", "/index/repositories/orders/publication"};
+                "/index/repositories/orders/rollback", "/index/repositories/orders/publication",
+                "/index/uat/publication/arm", "/index/uat/publication/release", "/index/uat/repositories/orders/reset"};
         for (String path : paths) {
             MockHttpServletRequest absentTokenRequest = new MockHttpServletRequest(methodFor(path), path);
             MockHttpServletResponse absentTokenResponse = new MockHttpServletResponse();

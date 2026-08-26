@@ -36,7 +36,9 @@ class IndexerOpenApiContractTest {
         assertThat(target).contains("revision: { type: string, pattern: '^[0-9a-f]{40}$' }");
         assertThat(target).contains("generationId: { type: string }");
         assertThat(target).contains("generation: { type: integer, format: int64, minimum: 1 }");
-        assertThat(document).doesNotContain("worker" + "Id", "claim" + "Until", "heart" + "beat", "fen" + "ce", "lea" + "se");
+        assertThat(withoutUatPaths(document)).doesNotContain("worker" + "Id", "claim" + "Until", "heart" + "beat", "fen" + "ce", "lea" + "se");
+        assertThat(document).contains("/index/uat/publication/arm:", "/index/uat/publication/release:",
+                "/index/uat/repositories/{repoId}/reset:", "operationId: resetUatRepositoryIndex");
 
         assertThat(recordComponentNames(IndexRepositoryController.IndexJobResponse.class))
                 .containsExactly("jobId", "repositoryId", "target", "phase", "failureCategory");
@@ -58,6 +60,10 @@ class IndexerOpenApiContractTest {
         Matcher matcher = pattern.matcher(document);
         assertThat(matcher.find()).as("schema %s", name).isTrue();
         return matcher.group(1);
+    }
+
+    private static String withoutUatPaths(String document) {
+        return document.replaceAll("(?ms)^  /index/uat/.*?(?=^  /index/repositories/)", "");
     }
 
     private static List<String> recordComponentNames(Class<?> recordType) {

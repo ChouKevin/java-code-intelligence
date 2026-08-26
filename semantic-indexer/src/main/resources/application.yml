@@ -27,3 +27,13 @@ semantic:
 logging:
   level:
     org.springframework.web.servlet.mvc.method.annotation.ExceptionHandlerExceptionResolver: INFO
+
+---
+spring:
+  config:
+    activate:
+      on-profile: uat
+
+semantic:
+  uat:
+    publication-timeout: ${SEMANTIC_UAT_PUBLICATION_TIMEOUT:30s}

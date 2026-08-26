@@ -15,6 +15,7 @@ public interface IndexJobStore {
     IndexJob admitEnsure(RepositoryId repositoryId, RepositoryRevision revision);
     IndexJob admitRollback(RepositoryId repositoryId, PublishedGenerationPointer expectedCurrent,
                            PublishedGenerationPointer expectedRollback);
+    IndexJob admitReset(RepositoryId repositoryId);
     Optional<IndexJob> find(IndexJobId jobId);
     Optional<IndexJob> startNextAccepted();
     boolean complete(IndexJobId jobId);

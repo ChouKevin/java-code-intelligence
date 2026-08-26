@@ -8,6 +8,36 @@ info:
 security:
   - indexerAdminToken: []
 paths:
+  /index/uat/publication/arm:
+    post:
+      operationId: armUatPublication
+      responses:
+        '200':
+          description: A new in-memory publication cycle was armed.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PublicationCycle' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/IndexConflict' }
+  /index/uat/publication/release:
+    post:
+      operationId: releaseUatPublication
+      responses:
+        '200': { description: The current in-memory publication cycle is opened. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /index/uat/repositories/{repoId}/reset:
+    post:
+      operationId: resetUatRepositoryIndex
+      parameters: [ { $ref: '#/components/parameters/RepositoryId' } ]
+      responses:
+        '202': { $ref: '#/components/responses/IndexJobAccepted' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/RepositoryNotFound' }
+        '409': { $ref: '#/components/responses/IndexConflict' }
   /index/repositories/{repoId}/publication:
     get:
       operationId: getRepositoryPublication
@@ -186,6 +216,12 @@ components:
           type: string
           nullable: true
           enum: [WORKER_INTERRUPTED, SOURCE_UNAVAILABLE, SCHEMA_REBUILD_REQUIRED, PUBLICATION_CONFLICT, VALIDATION_FAILED]
+    PublicationCycle:
+      type: object
+      additionalProperties: false
+      required: [cycleId]
+      properties:
+        cycleId: { type: integer, format: int64, minimum: 1 }
     IndexJobStatusResponse:
       type: object
       additionalProperties: false
