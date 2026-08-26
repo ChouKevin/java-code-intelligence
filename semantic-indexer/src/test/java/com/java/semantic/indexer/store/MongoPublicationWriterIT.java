@@ -1,12 +1,11 @@
 package com.java.semantic.indexer.store;
 
-import com.java.semantic.model.index.IndexCollections;
 import com.java.semantic.model.index.GenerationId;
+import com.java.semantic.model.index.IndexCollections;
 import com.java.semantic.model.index.IndexSchemaContract;
 import com.java.semantic.model.index.ManifestDigest;
 import com.java.semantic.model.index.PublishGenerationCommand;
 import com.java.semantic.model.index.PublishedGenerationPointer;
-import com.java.semantic.model.index.RepositoryFence;
 import com.java.semantic.model.index.RollbackGenerationCommand;
 import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.model.repository.RepositoryRevision;
@@ -18,7 +17,6 @@ import org.testcontainers.mongodb.MongoDBContainer;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.time.Duration;
 import java.time.Instant;
 import java.util.Date;
 import java.util.Objects;
@@ -29,253 +27,133 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 @Tag("mongo-it")
 class MongoPublicationWriterIT {
-    private static final long ACTIVE_UNTIL_MILLIS = System.currentTimeMillis() + Duration.ofHours(1).toMillis();
 
     @Test
-    void publishes_only_a_valid_sealed_generation_and_keeps_one_bounded_rollback_pointer() {
+    void publishes_the_first_generation_for_its_running_build_job_and_keeps_the_repository_pointer_only() {
         try (MongoDBContainer container = MongoSchemaTestSupport.container()) {
-            MongoTemplate template = MongoSchemaTestSupport.template(container);
-            new IndexSchemaBootstrap(template).bootstrap();
-            Instant r1PublishedAt = Instant.parse("2026-08-22T00:00:00Z");
-            PublishedGenerationPointer r1 = pointer("a", "g1", "1", "job-1", r1PublishedAt);
-            template.getCollection(IndexCollections.REPOSITORIES).insertOne(repository("orders", r1, "job-2", "worker-2", "g2", 2L));
-            template.getCollection(IndexCollections.GENERATION_MANIFESTS).insertMany(java.util.List.of(
-                    sealedManifest("orders", "a", "g1", digest("1"), "job-1", "worker-1", 1L),
-                    sealedManifest("orders", "b", "g2", digest("2"), "job-2", "worker-2", 2L),
-                    sealedManifest("orders", "b", "g3", digest("3"), "job-3", "worker-3", 3L)));
+            MongoTemplate template = bootstrappedTemplate(container);
+            insertJob(template, "job-1", "orders", "a", "g1", "BUILD", "RUNNING", true, Optional.empty(), Optional.empty());
+            template.getCollection(IndexCollections.GENERATION_MANIFESTS).insertOne(sealedManifest("orders", "a", "g1", digest("1"), "job-1"));
 
-            MongoPublicationWriter writer = new MongoPublicationWriter(template);
-            PublishGenerationCommand wrongParent = command("orders", "b", "g2", "2", "job-2", "worker-2", 2L,
-                    Optional.of(pointer("c", "g9", "9", "job-9", r1PublishedAt)));
-            assertThatThrownBy(() -> writer.publish(wrongParent)).isInstanceOf(PublicationConflictException.class);
+            PublishedGenerationPointer published = new MongoPublicationWriter(template).publish(command("orders", "a", "g1", "1", "job-1", Optional.empty()));
+
+            assertThat(published.generationId()).isEqualTo(new GenerationId("g1"));
+            Document repository = repository(template);
             assertThat(current(template).getString("generationId")).isEqualTo("g1");
-
-            PublishGenerationCommand publishG2 = command("orders", "b", "g2", "2", "job-2", "worker-2", 2L, Optional.of(r1));
-            PublishedGenerationPointer r2 = writer.publish(publishG2);
-
-            Document repository = current(template);
-            assertThat(repository.getString("revision")).isEqualTo("b".repeat(40));
-            assertThat(repository.getString("generationId")).isEqualTo("g2");
-            assertThat(repository.getString("manifestDigest")).isEqualTo(digest("2"));
-            assertThat(repository.containsKey("current")).isFalse();
-            Document rollback = repository.get("rollbackPointer", Document.class);
-            assertThat(Objects.requireNonNull(rollback, "rollback pointer should exist").getString("generationId")).isEqualTo("g1");
-            assertThat(repository.containsKey("activeJobId")).isFalse();
-
-            claim(template, "orders", "job-3", "worker-3", "g3", 3L);
-            PublishedGenerationPointer sameRevisionRebuild = writer.publish(command("orders", "b", "g3", "3", "job-3", "worker-3", 3L, Optional.of(r2)));
-            assertThat(sameRevisionRebuild.revision()).isEqualTo(new RepositoryRevision("b".repeat(40)));
-            assertThat(sameRevisionRebuild.generationId()).isEqualTo(new GenerationId("g3"));
-            Document rebuiltRollback = current(template).get("rollbackPointer", Document.class);
-            assertThat(Objects.requireNonNull(rebuiltRollback, "rollback pointer should exist").getString("generationId")).isEqualTo("g2");
+            assertThat(repository.containsKey("rollbackPointer")).isFalse();
+            assertThat(repository.keySet()).containsOnly("_id", "repoId", "currentPointer");
         }
     }
 
     @Test
-    void rolls_back_only_the_exact_sealed_bounded_pointer() {
+    void rejects_missing_or_nonmatching_build_job_identity_and_another_manifest_owner() {
         try (MongoDBContainer container = MongoSchemaTestSupport.container()) {
-            MongoTemplate template = MongoSchemaTestSupport.template(container);
-            new IndexSchemaBootstrap(template).bootstrap();
+            MongoTemplate template = bootstrappedTemplate(container);
+            PublishedGenerationPointer parent = pointer("a", "g1", "1", "job-parent", Instant.parse("2026-08-22T00:00:00Z"));
+            template.getCollection(IndexCollections.REPOSITORIES).insertOne(repository("orders", parent));
+            template.getCollection(IndexCollections.GENERATION_MANIFESTS).insertOne(sealedManifest("orders", "b", "g2", digest("2"), "job-2"));
+            MongoPublicationWriter writer = new MongoPublicationWriter(template);
+            PublishGenerationCommand command = command("orders", "b", "g2", "2", "job-2", Optional.of(parent));
+
+            assertRejectedWithoutChangingCurrent(writer, command, template, "g1");
+            insertJob(template, "job-2", "orders", "b", "g2", "BUILD", "ACCEPTED", true, Optional.empty(), Optional.empty());
+            assertRejectedWithoutChangingCurrent(writer, command, template, "g1");
+            template.getCollection(IndexCollections.INDEX_JOBS).updateOne(new Document("jobId", "job-2"), new Document("$set", new Document("active", false).append("phase", "COMPLETE")));
+            assertRejectedWithoutChangingCurrent(writer, command, template, "g1");
+            template.getCollection(IndexCollections.INDEX_JOBS).updateOne(new Document("jobId", "job-2"), new Document("$set", new Document("active", true).append("phase", "RUNNING").append("operation", "ROLLBACK")));
+            assertRejectedWithoutChangingCurrent(writer, command, template, "g1");
+            template.getCollection(IndexCollections.INDEX_JOBS).updateOne(new Document("jobId", "job-2"), new Document("$set", new Document("operation", "BUILD").append("repoId", "other")));
+            assertRejectedWithoutChangingCurrent(writer, command, template, "g1");
+            template.getCollection(IndexCollections.INDEX_JOBS).updateOne(new Document("jobId", "job-2"), new Document("$set", new Document("repoId", "orders").append("target.generationId", "other-generation")));
+            assertRejectedWithoutChangingCurrent(writer, command, template, "g1");
+            template.getCollection(IndexCollections.INDEX_JOBS).updateOne(new Document("jobId", "job-2"), new Document("$set", new Document("target.generationId", "g2")));
+            template.getCollection(IndexCollections.GENERATION_MANIFESTS).updateOne(new Document("generationId", "g2"), new Document("$set", new Document("ownerJobId", "other-job")));
+            assertRejectedWithoutChangingCurrent(writer, command, template, "g1");
+        }
+    }
+
+    @Test
+    void rejects_unsealed_invalid_or_wrong_digest_manifests_without_moving_the_pointer() {
+        try (MongoDBContainer container = MongoSchemaTestSupport.container()) {
+            MongoTemplate template = bootstrappedTemplate(container);
+            PublishedGenerationPointer parent = pointer("a", "g1", "1", "job-parent", Instant.parse("2026-08-22T00:00:00Z"));
+            template.getCollection(IndexCollections.REPOSITORIES).insertOne(repository("orders", parent));
+            insertJob(template, "job-2", "orders", "b", "g2", "BUILD", "RUNNING", true, Optional.empty(), Optional.empty());
+            template.getCollection(IndexCollections.GENERATION_MANIFESTS).insertOne(sealedManifest("orders", "b", "g2", digest("2"), "job-2"));
+            MongoPublicationWriter writer = new MongoPublicationWriter(template);
+            PublishGenerationCommand command = command("orders", "b", "g2", "2", "job-2", Optional.of(parent));
+
+            template.getCollection(IndexCollections.GENERATION_MANIFESTS).updateOne(new Document("generationId", "g2"), new Document("$set", new Document("writeState", "WRITING")));
+            assertRejectedWithoutChangingCurrent(writer, command, template, "g1");
+            template.getCollection(IndexCollections.GENERATION_MANIFESTS).updateOne(new Document("generationId", "g2"), new Document("$set", new Document("writeState", "SEALED_VALID").append("validationResult", "FAILED")));
+            assertRejectedWithoutChangingCurrent(writer, command, template, "g1");
+            template.getCollection(IndexCollections.GENERATION_MANIFESTS).updateOne(new Document("generationId", "g2"), new Document("$set", new Document("validationResult", "VALID").append("identityDigest", digest("9"))));
+            assertRejectedWithoutChangingCurrent(writer, command, template, "g1");
+        }
+    }
+
+    @Test
+    void preserves_expected_parent_cas_and_bounded_rollback_through_a_same_revision_rebuild() {
+        try (MongoDBContainer container = MongoSchemaTestSupport.container()) {
+            MongoTemplate template = bootstrappedTemplate(container);
+            Instant publishedAt = Instant.parse("2026-08-22T00:00:00Z");
+            PublishedGenerationPointer r1 = pointer("a", "g1", "1", "job-1", publishedAt);
+            template.getCollection(IndexCollections.REPOSITORIES).insertOne(repository("orders", r1));
+            insertJob(template, "job-2", "orders", "b", "g2", "BUILD", "RUNNING", true, Optional.empty(), Optional.empty());
+            template.getCollection(IndexCollections.GENERATION_MANIFESTS).insertMany(java.util.List.of(sealedManifest("orders", "b", "g2", digest("2"), "job-2"), sealedManifest("orders", "b", "g3", digest("3"), "job-3")));
+            MongoPublicationWriter writer = new MongoPublicationWriter(template);
+
+            assertRejectedWithoutChangingCurrent(writer, command("orders", "b", "g2", "2", "job-2", Optional.of(pointer("c", "g9", "9", "job-9", publishedAt))), template, "g1");
+            PublishedGenerationPointer r2 = writer.publish(command("orders", "b", "g2", "2", "job-2", Optional.of(r1)));
+            assertThat(repository(template).get("rollbackPointer", Document.class).getString("generationId")).isEqualTo("g1");
+
+            template.getCollection(IndexCollections.INDEX_JOBS).updateOne(new Document("jobId", "job-2"), new Document("$set", new Document("active", false).append("phase", "COMPLETE")));
+            insertJob(template, "job-3", "orders", "b", "g3", "BUILD", "RUNNING", true, Optional.empty(), Optional.empty());
+            PublishedGenerationPointer r3 = writer.publish(command("orders", "b", "g3", "3", "job-3", Optional.of(r2)));
+            assertThat(r3.revision()).isEqualTo(new RepositoryRevision("b".repeat(40)));
+            assertThat(repository(template).get("rollbackPointer", Document.class).getString("generationId")).isEqualTo("g2");
+        }
+    }
+
+    @Test
+    void rolls_back_only_the_exact_bounded_pointer_for_its_running_rollback_job() {
+        try (MongoDBContainer container = MongoSchemaTestSupport.container()) {
+            MongoTemplate template = bootstrappedTemplate(container);
             Instant r1PublishedAt = Instant.parse("2026-08-22T00:00:00Z");
             Instant r2PublishedAt = Instant.parse("2026-08-22T00:01:00Z");
             PublishedGenerationPointer r1 = pointer("a", "g1", "1", "job-1", r1PublishedAt);
             PublishedGenerationPointer r2 = pointer("b", "g2", "2", "job-2", r2PublishedAt);
-            template.getCollection(IndexCollections.REPOSITORIES).insertOne(repositoryWithRollback("orders", r2, r1, "rollback-job", "rollback-worker", "g1", 3L));
-            template.getCollection(IndexCollections.GENERATION_MANIFESTS).insertMany(java.util.List.of(
-                    sealedManifest("orders", "a", "g1", digest("1"), "job-1", "worker-1", 1L),
-                    sealedManifest("orders", "b", "g2", digest("2"), "job-2", "worker-2", 2L),
-                    sealedManifest("orders", "b", "g3", digest("3"), "job-3", "worker-3", 3L)));
+            PublishedGenerationPointer arbitrary = pointer("b", "g3", "3", "job-3", r2PublishedAt);
+            template.getCollection(IndexCollections.REPOSITORIES).insertOne(repositoryWithRollback("orders", r2, r1));
+            template.getCollection(IndexCollections.GENERATION_MANIFESTS).insertMany(java.util.List.of(sealedManifest("orders", "a", "g1", digest("1"), "job-1"), sealedManifest("orders", "b", "g2", digest("2"), "job-2"), sealedManifest("orders", "b", "g3", digest("3"), "job-3")));
+            insertJob(template, "rollback-job", "orders", "a", "g1", "ROLLBACK", "RUNNING", true, Optional.of(r2), Optional.of(r1));
             MongoPublicationWriter writer = new MongoPublicationWriter(template);
-            RollbackGenerationCommand rollback = new RollbackGenerationCommand(new RepositoryId("orders"), r2, r1,
-                    "rollback-job", "rollback-worker", new RepositoryFence(3L));
-            RollbackGenerationCommand arbitraryGeneration = new RollbackGenerationCommand(new RepositoryId("orders"), r2,
-                    pointer("b", "g3", "3", "job-3", r2PublishedAt), "rollback-job", "rollback-worker", new RepositoryFence(3L));
-            assertThatThrownBy(() -> writer.rollback(arbitraryGeneration)).isInstanceOf(PublicationConflictException.class);
 
-            PublishedGenerationPointer rolledBack = writer.rollback(rollback);
+            assertThatThrownBy(() -> writer.rollback(new RollbackGenerationCommand(new RepositoryId("orders"), r2, arbitrary, "rollback-job"))).isInstanceOf(PublicationConflictException.class);
+            assertThat(current(template).getString("generationId")).isEqualTo("g2");
+            PublishedGenerationPointer rolledBack = writer.rollback(new RollbackGenerationCommand(new RepositoryId("orders"), r2, r1, "rollback-job"));
             assertThat(rolledBack.generationId()).isEqualTo(new GenerationId("g1"));
-            Document rollbackPointer = current(template).get("rollbackPointer", Document.class);
-            assertThat(Objects.requireNonNull(rollbackPointer, "rollback pointer should exist").getString("generationId")).isEqualTo("g2");
-        }
-    }
-
-    @Test
-    void publishes_the_first_generation_from_an_exact_repository_claim_without_an_index_job_row() {
-        try (MongoDBContainer container = MongoSchemaTestSupport.container()) {
-            MongoTemplate template = MongoSchemaTestSupport.template(container);
-            new IndexSchemaBootstrap(template).bootstrap();
-            template.getCollection(IndexCollections.REPOSITORIES).insertOne(new Document("repoId", "orders")
-                    .append("fence", 1L).append("activeJobId", "job-1").append("activeWorkerId", "worker-1")
-                    .append("activeGenerationId", "g1").append("claimUntil", activeUntil()));
-            template.getCollection(IndexCollections.GENERATION_MANIFESTS).insertOne(
-                    sealedManifest("orders", "a", "g1", digest("1"), "job-1", "worker-1", 1L));
-            assertThat(template.getCollection(IndexCollections.INDEX_JOBS).countDocuments()).isZero();
-
-            PublishedGenerationPointer published = new MongoPublicationWriter(template).publish(
-                    command("orders", "a", "g1", "1", "job-1", "worker-1", 1L, Optional.empty()));
-
-            assertThat(published.generationId()).isEqualTo(new GenerationId("g1"));
-            assertThat(current(template).containsKey("rollbackPointer")).isFalse();
-        }
-    }
-
-    @Test
-    void rejects_a_sealed_manifest_whose_expiry_is_stale_after_repository_renewal() {
-        try (MongoDBContainer container = MongoSchemaTestSupport.container()) {
-            MongoTemplate template = MongoSchemaTestSupport.template(container);
-            new IndexSchemaBootstrap(template).bootstrap();
-            Document manifest = sealedManifest("orders", "a", "g1", digest("1"), "job-1", "worker-1", 1L);
-            Date sealedUntil = manifest.getDate("sealUntil");
-            template.getCollection(IndexCollections.REPOSITORIES).insertOne(new Document("repoId", "orders")
-                    .append("fence", 1L).append("activeJobId", "job-1").append("activeWorkerId", "worker-1")
-                    .append("activeGenerationId", "g1").append("claimUntil", new Date(sealedUntil.getTime() + 60_000L)));
-            template.getCollection(IndexCollections.GENERATION_MANIFESTS).insertOne(manifest);
-
-            assertThatThrownBy(() -> new MongoPublicationWriter(template).publish(
-                    command("orders", "a", "g1", "1", "job-1", "worker-1", 1L, Optional.empty())))
-                    .isInstanceOf(PublicationConflictException.class);
-            assertThat(current(template).containsKey("generationId")).isFalse();
-            assertThat(current(template).getString("activeJobId")).isEqualTo("job-1");
-        }
-    }
-
-    @Test
-    void rejects_invalid_manifests_and_a_delayed_owner_after_a_higher_fence_claim() {
-        try (MongoDBContainer container = MongoSchemaTestSupport.container()) {
-            MongoTemplate template = MongoSchemaTestSupport.template(container);
-            new IndexSchemaBootstrap(template).bootstrap();
-            Instant r1PublishedAt = Instant.parse("2026-08-22T00:00:00Z");
-            PublishedGenerationPointer r1 = pointer("a", "g1", "1", "job-1", r1PublishedAt);
-            template.getCollection(IndexCollections.REPOSITORIES).insertOne(repository("orders", r1, "job-2", "worker-1", "g2", 2L));
-            template.getCollection(IndexCollections.GENERATION_MANIFESTS).insertMany(java.util.List.of(
-                    sealedManifest("orders", "a", "g1", digest("1"), "job-1", "worker-1", 1L),
-                    withoutValidatedAt(sealedManifest("orders", "b", "g2", digest("2"), "job-2", "worker-1", 2L)),
-                    sealedManifest("orders", "b", "g3", digest("3"), "job-3", "worker-2", 3L)));
-            job(template, "job-2", "orders", "ACTIVE");
-            MongoPublicationWriter writer = new MongoPublicationWriter(template);
-            PublishGenerationCommand invalidManifest = command("orders", "b", "g2", "2", "job-2", "worker-1", 2L, Optional.of(r1));
-            assertThatThrownBy(() -> writer.publish(invalidManifest)).isInstanceOf(PublicationConflictException.class);
-            assertThat(current(template).getString("generationId")).isEqualTo("g1");
-
-            template.getCollection(IndexCollections.GENERATION_MANIFESTS).updateOne(new Document("generationId", "g2"),
-                    new Document("$set", new Document("validatedAt", new Date())));
-            template.getCollection(IndexCollections.GENERATION_MANIFESTS).updateOne(new Document("generationId", "g2"),
-                    new Document("$set", new Document("validationResult", "FAILED")));
-            assertThatThrownBy(() -> writer.publish(invalidManifest)).isInstanceOf(PublicationConflictException.class);
-            assertThat(current(template).getString("generationId")).isEqualTo("g1");
-
-            template.getCollection(IndexCollections.GENERATION_MANIFESTS).updateOne(new Document("generationId", "g2"),
-                    new Document("$set", new Document("validationResult", "VALID")));
-            claim(template, "orders", "job-3", "worker-2", "g3", 3L);
-            Document activeJob = Objects.requireNonNull(template.getCollection(IndexCollections.INDEX_JOBS)
-                    .find(new Document("jobId", "job-2")).first(), "workflow job should exist");
-            assertThat(activeJob.getBoolean("active")).isTrue();
-            assertThatThrownBy(() -> writer.publish(invalidManifest)).isInstanceOf(PublicationConflictException.class);
-            assertThat(current(template).getString("generationId")).isEqualTo("g1");
-            assertThat(template.getCollection(IndexCollections.GENERATION_MANIFESTS)
-                    .find(new Document("generationId", "g2")).first().getString("writeState")).isEqualTo("SEALED_VALID");
+            assertThat(repository(template).get("rollbackPointer", Document.class).getString("generationId")).isEqualTo("g2");
         }
     }
 
     @Test
     void uses_no_transaction_or_replica_set_publication_mechanism() throws Exception {
         String source = Files.readString(Path.of("src/main/java/com/java/semantic/indexer/store/MongoPublicationWriter.java"));
-        assertThat(source).doesNotContain("MongoTransactionManager", "@Transactional", "ClientSession", "replicaSet");
+        assertThat(source).doesNotContain("MongoTransactionManager", "@Transactional", "ClientSession", "replica" + "Set");
     }
 
-    private static Document repository(String repositoryId, PublishedGenerationPointer current, String jobId, String workerId,
-                                       String generationId, long fence) {
-        return new Document("repoId", repositoryId)
-                .append("fence", fence)
-                .append("activeJobId", jobId)
-                .append("activeWorkerId", workerId)
-                .append("activeGenerationId", generationId)
-                .append("claimUntil", activeUntil())
-                .append("revision", current.revision().value())
-                .append("generationId", current.generationId().value())
-                .append("manifestDigest", current.manifestDigest().value())
-                .append("committedJobId", current.committedJobId())
-                .append("publishedAt", Date.from(current.publishedAt()));
-    }
-
-    private static Document repositoryWithRollback(String repositoryId, PublishedGenerationPointer current, PublishedGenerationPointer rollback,
-                                                   String jobId, String workerId, String generationId, long fence) {
-        Document repository = repository(repositoryId, current, jobId, workerId, generationId, fence);
-        return repository.append("rollbackPointer", pointerDocument(rollback));
-    }
-
-    private static Document sealedManifest(String repositoryId, String revision, String generationId, String digest,
-                                           String ownerJobId, String ownerWorkerId, long fence) {
-        return new Document("repoId", repositoryId)
-                .append("sourceRevision", revision.repeat(40))
-                .append("generationId", generationId)
-                .append("ownerJobId", ownerJobId)
-                .append("ownerWorkerId", ownerWorkerId)
-                .append("fence", fence)
-                .append("sealUntil", activeUntil())
-                .append("writeState", "SEALED_VALID")
-                .append("writeEpoch", 1L)
-                .append("schemaVersion", IndexSchemaContract.SCHEMA_VERSION)
-                .append("projectionVersions", projectionVersions())
-                .append("sealedCollectionCounts", new Document("symbols", 1L))
-                .append("identityDigest", digest)
-                .append("validationResult", "VALID")
-                .append("validatedAt", new Date());
-    }
-
-    private static java.util.List<Document> projectionVersions() {
-        return IndexSchemaContract.requiredProjectionVersions().entrySet().stream()
-                .map(entry -> new Document("name", entry.getKey()).append("version", entry.getValue()))
-                .toList();
-    }
-
-    private static String digest(String digit) {
-        return digit.repeat(64);
-    }
-
-    private static PublishedGenerationPointer pointer(String revision, String generation, String digest, String jobId, Instant publishedAt) {
-        return new PublishedGenerationPointer(new RepositoryRevision(revision.repeat(40)), new GenerationId(generation),
-                new ManifestDigest(digest(digest)), jobId, publishedAt);
-    }
-
-    private static PublishGenerationCommand command(String repositoryId, String revision, String generation, String digest,
-                                                     String jobId, String workerId, long fence,
-                                                     Optional<PublishedGenerationPointer> parent) {
-        return new PublishGenerationCommand(new RepositoryId(repositoryId), new RepositoryRevision(revision.repeat(40)),
-                new GenerationId(generation), jobId, workerId, new RepositoryFence(fence), parent, new ManifestDigest(digest(digest)));
-    }
-
-    private static Document pointerDocument(PublishedGenerationPointer pointer) {
-        return new Document("revision", pointer.revision().value())
-                .append("generationId", pointer.generationId().value())
-                .append("manifestDigest", pointer.manifestDigest().value())
-                .append("committedJobId", pointer.committedJobId())
-                .append("publishedAt", Date.from(pointer.publishedAt()));
-    }
-
-    private static Document current(MongoTemplate template) {
-        return Objects.requireNonNull(template.getCollection(IndexCollections.REPOSITORIES).find(new Document("repoId", "orders")).first(),
-                "repository should exist");
-    }
-
-    private static void claim(MongoTemplate template, String repositoryId, String jobId, String workerId, String generationId, long fence) {
-        template.getCollection(IndexCollections.REPOSITORIES).updateOne(new Document("repoId", repositoryId), new Document("$set",
-                new Document("activeJobId", jobId).append("activeWorkerId", workerId).append("activeGenerationId", generationId)
-                        .append("fence", fence).append("claimUntil", activeUntil())));
-    }
-
-    private static Date activeUntil() {
-        return new Date(ACTIVE_UNTIL_MILLIS);
-    }
-
-    private static void job(MongoTemplate template, String jobId, String repositoryId, String state) {
-        template.getCollection(IndexCollections.INDEX_JOBS).insertOne(new Document("jobId", jobId)
-                .append("repoId", repositoryId).append("active", "ACTIVE".equals(state)));
-    }
-
-    private static Document withoutValidatedAt(Document manifest) {
-        Document invalid = new Document(manifest);
-        invalid.remove("validatedAt");
-        return invalid;
-    }
+    private static MongoTemplate bootstrappedTemplate(MongoDBContainer container) { MongoTemplate template = MongoSchemaTestSupport.template(container); new IndexSchemaBootstrap(template).bootstrap(); return template; }
+    private static void assertRejectedWithoutChangingCurrent(MongoPublicationWriter writer, PublishGenerationCommand command, MongoTemplate template, String expectedGenerationId) { assertThatThrownBy(() -> writer.publish(command)).isInstanceOf(PublicationConflictException.class); assertThat(current(template).getString("generationId")).isEqualTo(expectedGenerationId); }
+    private static void insertJob(MongoTemplate template, String jobId, String repositoryId, String revision, String generationId, String operation, String phase, boolean active, Optional<PublishedGenerationPointer> expectedCurrent, Optional<PublishedGenerationPointer> expectedRollback) { Document job = new Document("jobId", jobId).append("repoId", repositoryId).append("active", active).append("phase", phase).append("operation", operation).append("target", new Document("revision", revision.repeat(40)).append("generationId", generationId).append("generation", 1L)); expectedCurrent.ifPresent(pointer -> job.append("expectedCurrent", pointerDocument(pointer))); expectedRollback.ifPresent(pointer -> job.append("expectedRollback", pointerDocument(pointer))); template.getCollection(IndexCollections.INDEX_JOBS).insertOne(job); }
+    private static Document repository(String repositoryId, PublishedGenerationPointer current) { return new Document("repoId", repositoryId).append("currentPointer", pointerDocument(current)); }
+    private static Document repositoryWithRollback(String repositoryId, PublishedGenerationPointer current, PublishedGenerationPointer rollback) { return repository(repositoryId, current).append("rollbackPointer", pointerDocument(rollback)); }
+    private static Document sealedManifest(String repositoryId, String revision, String generationId, String digest, String ownerJobId) { return new Document("repoId", repositoryId).append("sourceRevision", revision.repeat(40)).append("generationId", generationId).append("ownerJobId", ownerJobId).append("writeState", "SEALED_VALID").append("writeEpoch", 1L).append("schemaVersion", IndexSchemaContract.SCHEMA_VERSION).append("projectionVersions", projectionVersions()).append("sealedCollectionCounts", new Document("symbols", 1L)).append("identityDigest", digest).append("validationResult", "VALID").append("validatedAt", new Date()); }
+    private static java.util.List<Document> projectionVersions() { return IndexSchemaContract.requiredProjectionVersions().entrySet().stream().map(entry -> new Document("name", entry.getKey()).append("version", entry.getValue())).toList(); }
+    private static String digest(String digit) { return digit.repeat(64); }
+    private static PublishedGenerationPointer pointer(String revision, String generation, String digest, String jobId, Instant publishedAt) { return new PublishedGenerationPointer(new RepositoryRevision(revision.repeat(40)), new GenerationId(generation), new ManifestDigest(digest(digest)), jobId, publishedAt); }
+    private static PublishGenerationCommand command(String repositoryId, String revision, String generation, String digest, String jobId, Optional<PublishedGenerationPointer> parent) { return new PublishGenerationCommand(new RepositoryId(repositoryId), new RepositoryRevision(revision.repeat(40)), new GenerationId(generation), jobId, parent, new ManifestDigest(digest(digest))); }
+    private static Document pointerDocument(PublishedGenerationPointer pointer) { return new Document("revision", pointer.revision().value()).append("generationId", pointer.generationId().value()).append("manifestDigest", pointer.manifestDigest().value()).append("committedJobId", pointer.committedJobId()).append("publishedAt", Date.from(pointer.publishedAt())); }
+    private static Document repository(MongoTemplate template) { return Objects.requireNonNull(template.getCollection(IndexCollections.REPOSITORIES).find(new Document("repoId", "orders")).first(), "repository should exist"); }
+    private static Document current(MongoTemplate template) { return Objects.requireNonNull(repository(template).get("currentPointer", Document.class), "current pointer should exist"); }
 }

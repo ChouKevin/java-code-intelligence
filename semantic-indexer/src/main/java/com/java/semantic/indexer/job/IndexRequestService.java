@@ -23,7 +23,6 @@ public final class IndexRequestService {
 
     public IndexJob ensure(RepositoryId repositoryId) {
         jobs.reconcileCommitted(repositoryId);
-        jobs.recoverRevokedClaims(repositoryId);
         return jobs.admitEnsure(repositoryId, source.ensure(repositoryId));
     }
 
@@ -44,7 +43,6 @@ public final class IndexRequestService {
         RepositoryRevision revision = jobs.currentRevision(repositoryId)
                 .orElseThrow(() -> new RepositoryNotFoundException(repositoryId));
         jobs.reconcileCommitted(repositoryId);
-        jobs.recoverRevokedClaims(repositoryId);
         return jobs.admitRebuild(repositoryId, revision, expectedCurrent);
     }
 
@@ -63,13 +61,11 @@ public final class IndexRequestService {
     public IndexJob rollback(RepositoryId repositoryId, PublishedGenerationPointer expectedCurrent,
                              PublishedGenerationPointer expectedRollback) {
         jobs.reconcileCommitted(repositoryId);
-        jobs.recoverRevokedClaims(repositoryId);
         return jobs.admitRollback(repositoryId, expectedCurrent, expectedRollback);
     }
 
     private IndexJob admit(RepositoryId repositoryId, RepositoryRevision revision, boolean rebuild) {
         jobs.reconcileCommitted(repositoryId);
-        jobs.recoverRevokedClaims(repositoryId);
         return jobs.admit(repositoryId, revision, rebuild);
     }
 }

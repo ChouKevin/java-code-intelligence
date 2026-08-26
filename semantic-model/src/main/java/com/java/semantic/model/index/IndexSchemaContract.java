@@ -14,7 +14,7 @@ import java.util.stream.Collectors;
 /** Framework-neutral Mongo collection and index contract. */
 public final class IndexSchemaContract {
 
-    public static final int SCHEMA_VERSION = 1;
+    public static final int SCHEMA_VERSION = 2;
     /** Typed projection contract consumed by exporters, validators, and Query release checks. */
     private static final List<ProjectionSpec> PROJECTIONS = List.of(
             projection(ProjectionName.SOURCES, 2, IndexCollections.GENERATION_FILES),
@@ -36,7 +36,9 @@ public final class IndexSchemaContract {
             collection(IndexCollections.REPOSITORIES, index("repository_id_unique", keys("repoId", 1), true, Map.of())),
             collection(IndexCollections.GENERATION_MANIFESTS, index("repository_generation_unique", keys("repoId", 1, "generationId", 1), true, Map.of())),
             collection(IndexCollections.INDEX_JOBS, index("job_id_unique", keys("jobId", 1), true, Map.of()),
-                    index("one_active_job_per_repository", keys("repoId", 1), true, Map.of("active", true))),
+                    index("one_active_job_per_repository", keys("repoId", 1), true, Map.of("active", true)),
+                    index("accepted_job_queue", keys("active", 1, "phase", 1, "createdAt", 1, "jobId", 1), false,
+                            Map.of("active", true, "phase", "ACCEPTED"))),
             collection(IndexCollections.GENERATION_FILES, index("generation_file_unique", keys("repoId", 1, "generationId", 1, "sourcePath", 1), true, Map.of())),
             collection(IndexCollections.SOURCE_ARTIFACTS, index("source_artifact_id_unique", keys("sourceArtifactId", 1), true, Map.of()),
                     index("content_hash_unique", keys("contentHash", 1), true, Map.of())),

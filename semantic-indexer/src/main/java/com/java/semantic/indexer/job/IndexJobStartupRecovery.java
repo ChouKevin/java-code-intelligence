@@ -7,7 +7,7 @@ import org.springframework.stereotype.Component;
 
 import java.util.Objects;
 
-/** Performs idempotent claim expiry, committed-pointer reconciliation, and revoked-claim recovery before serving work. */
+/** Reconciles committed targets, then closes interrupted running jobs before serving work. */
 @Component
 @ConditionalOnProperty(
         prefix = "semantic.index-jobs.startup-recovery",
@@ -15,18 +15,15 @@ import java.util.Objects;
         havingValue = "true",
         matchIfMissing = true)
 public final class IndexJobStartupRecovery implements ApplicationRunner {
-    private final IndexJobWorker worker;
     private final IndexJobStore jobs;
 
-    public IndexJobStartupRecovery(IndexJobWorker worker, IndexJobStore jobs) {
-        this.worker = Objects.requireNonNull(worker, "worker is required");
+    public IndexJobStartupRecovery(IndexJobStore jobs) {
         this.jobs = Objects.requireNonNull(jobs, "jobs is required");
     }
 
     @Override
     public void run(ApplicationArguments arguments) {
-        worker.expireClaims();
         jobs.reconcileCommittedJobs();
-        jobs.recoverRevokedClaims();
+        jobs.failUnreconciledRunningJobs();
     }
 }

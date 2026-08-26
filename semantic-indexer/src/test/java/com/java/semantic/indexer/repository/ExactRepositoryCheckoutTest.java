@@ -95,8 +95,8 @@ class ExactRepositoryCheckoutTest {
     }
 
     private static IndexJob job(RepositoryId repositoryId, RepositoryRevision revision) {
-        return new IndexJob(new IndexJobId("job-1"), repositoryId, revision, new GenerationId("generation-1"), 1,
-                IndexJobPhase.CHECKOUT, true, Optional.of("worker-1"), Optional.empty(), Optional.empty(),
-                Optional.empty());
+        return new IndexJob(new IndexJobId("job-1"), repositoryId,
+                Optional.of(new com.java.semantic.indexer.job.IndexJobTarget(revision, new GenerationId("generation-1"), 1L)),
+                IndexJobPhase.RUNNING, true, Optional.empty(), false, com.java.semantic.indexer.job.IndexJobOperation.BUILD);
     }
 }

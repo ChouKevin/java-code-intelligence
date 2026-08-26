@@ -22,11 +22,10 @@ class MongoGenerationSealIT {
         try (MongoDBContainer container = MongoSchemaTestSupport.container()) {
             org.springframework.data.mongodb.core.MongoTemplate template = MongoSchemaTestSupport.template(container);
             new IndexSchemaBootstrap(template).bootstrap();
-            template.getCollection("repositories").insertOne(new Document("repoId", "orders").append("activeJobId", "job-1").append("activeWorkerId", "worker-1").append("activeGenerationId", "g1").append("fence", 1L).append("claimUntil", new java.util.Date(System.currentTimeMillis() + 60_000L)));
-            template.getCollection("index_jobs").insertOne(new Document("jobId", "job-1").append("repoId", "orders").append("active", true).append("outstandingBatches", List.of()).append("failedOrAmbiguousBatches", List.of()));
-            template.getCollection("generation_manifests").insertOne(new Document("repoId", "orders").append("generationId", "g1").append("ownerJobId", "job-1").append("ownerWorkerId", "worker-1").append("fence", 1L).append("identityDigest", "digest").append("writeState", "WRITING").append("sealUntil", new java.util.Date(System.currentTimeMillis() + 60_000L)));
+            template.getCollection("index_jobs").insertOne(runningJob());
+            template.getCollection("generation_manifests").insertOne(writingManifest());
             MongoGenerationWriter writer = new MongoGenerationWriter(template);
-            MongoGenerationWriter.GenerationLease lease = new MongoGenerationWriter.GenerationLease(new RepositoryId("orders"), new GenerationId("g1"), "job-1", "worker-1", 1L);
+            GenerationWriteContext lease = context();
             writer.writeBatch(lease, "acknowledged", List.of());
             assertThat(template.getCollection("index_jobs").find(new Document("jobId", "job-1")).first().getList("outstandingBatches", String.class)).isEmpty();
             assertThat(template.getCollection("index_jobs").find(new Document("jobId", "job-1")).first().getList("acknowledgedBatches", String.class)).containsExactly("acknowledged");
@@ -44,21 +43,15 @@ class MongoGenerationSealIT {
         try (MongoDBContainer container = MongoSchemaTestSupport.container()) {
             org.springframework.data.mongodb.core.MongoTemplate template = MongoSchemaTestSupport.template(container);
             new IndexSchemaBootstrap(template).bootstrap();
-            java.util.Date leaseUntil = new java.util.Date(System.currentTimeMillis() + 60_000L);
-            template.getCollection("repositories").insertOne(new Document("repoId", "orders").append("activeJobId", "job-1")
-                    .append("activeWorkerId", "worker-1").append("activeGenerationId", "g1").append("fence", 1L).append("claimUntil", leaseUntil));
-            template.getCollection("index_jobs").insertOne(new Document("jobId", "job-1").append("repoId", "orders").append("active", true)
-                    .append("outstandingBatches", List.of()).append("failedOrAmbiguousBatches", List.of()));
-            template.getCollection("generation_manifests").insertOne(new Document("repoId", "orders").append("generationId", "g1")
-                    .append("ownerJobId", "job-1").append("ownerWorkerId", "worker-1").append("fence", 1L).append("identityDigest", "digest")
-                    .append("writeState", "WRITING").append("sealUntil", leaseUntil));
+            template.getCollection("index_jobs").insertOne(runningJob());
+            template.getCollection("generation_manifests").insertOne(writingManifest());
             CountDownLatch registrationReached = new CountDownLatch(1);
             CountDownLatch permitRegistration = new CountDownLatch(1);
             MongoGenerationWriter writer = new MongoGenerationWriter(template, () -> {
                 registrationReached.countDown();
                 await(permitRegistration);
             });
-            MongoGenerationWriter.GenerationLease lease = new MongoGenerationWriter.GenerationLease(new RepositoryId("orders"), new GenerationId("g1"), "job-1", "worker-1", 1L);
+            GenerationWriteContext lease = context();
             AtomicReference<Throwable> batchFailure = new AtomicReference<>();
             Thread batch = new Thread(() -> {
                 try {
@@ -81,55 +74,6 @@ class MongoGenerationSealIT {
                     .isEqualTo("SEALED_VALID");
             assertThat(template.getCollection("symbols").countDocuments()).isZero();
             assertThat(template.getCollection("index_jobs").find(new Document("jobId", "job-1")).first().getList("outstandingBatches", String.class)).isEmpty();
-        }
-    }
-
-    @Test
-    void refuses_expired_lease_before_any_batch_is_marked_or_written() {
-        try (MongoDBContainer container = MongoSchemaTestSupport.container()) {
-            org.springframework.data.mongodb.core.MongoTemplate template = MongoSchemaTestSupport.template(container);
-            new IndexSchemaBootstrap(template).bootstrap();
-            template.getCollection("repositories").insertOne(new Document("repoId", "orders").append("activeJobId", "job-1").append("activeWorkerId", "worker-1").append("activeGenerationId", "g1").append("fence", 1L).append("claimUntil", new java.util.Date(System.currentTimeMillis() - 1_000L)));
-            template.getCollection("index_jobs").insertOne(new Document("jobId", "job-1").append("repoId", "orders").append("active", true).append("outstandingBatches", List.of()).append("failedOrAmbiguousBatches", List.of()));
-            template.getCollection("generation_manifests").insertOne(new Document("repoId", "orders").append("generationId", "g1").append("ownerJobId", "job-1").append("ownerWorkerId", "worker-1").append("fence", 1L).append("writeState", "WRITING").append("sealUntil", new java.util.Date(System.currentTimeMillis() + 60_000L)));
-            MongoGenerationWriter.GenerationLease lease = new MongoGenerationWriter.GenerationLease(new RepositoryId("orders"), new GenerationId("g1"), "job-1", "worker-1", 1L);
-            assertThatThrownBy(() -> new MongoGenerationWriter(template).writeBatch(lease, "expired", List.of())).isInstanceOf(IllegalStateException.class);
-            assertThat(template.getCollection("index_jobs").find(new Document("jobId", "job-1")).first().getList("outstandingBatches", String.class)).isEmpty();
-        }
-    }
-
-    @Test
-    void old_worker_cannot_mirror_or_seal_after_higher_fence_renewal() {
-        try (MongoDBContainer container = MongoSchemaTestSupport.container()) {
-            org.springframework.data.mongodb.core.MongoTemplate template = MongoSchemaTestSupport.template(container);
-            new IndexSchemaBootstrap(template).bootstrap();
-            java.util.Date priorExpiry = new java.util.Date(System.currentTimeMillis() + 20_000L);
-            java.util.Date replacementExpiry = new java.util.Date(System.currentTimeMillis() + 60_000L);
-            template.getCollection("repositories").insertOne(new Document("repoId", "orders").append("activeJobId", "job-1").append("activeWorkerId", "worker-1").append("activeGenerationId", "g1").append("fence", 1L).append("claimUntil", replacementExpiry));
-            template.getCollection("index_jobs").insertOne(new Document("jobId", "job-1").append("repoId", "orders").append("active", true).append("outstandingBatches", List.of()).append("failedOrAmbiguousBatches", List.of()));
-            template.getCollection("generation_manifests").insertOne(new Document("repoId", "orders").append("generationId", "g1").append("ownerJobId", "job-1").append("ownerWorkerId", "worker-1").append("fence", 1L).append("identityDigest", "digest").append("writeState", "WRITING").append("sealUntil", priorExpiry));
-            MongoGenerationWriter writer = new MongoGenerationWriter(template);
-            MongoGenerationWriter.GenerationLease oldLease = new MongoGenerationWriter.GenerationLease(new RepositoryId("orders"), new GenerationId("g1"), "job-1", "worker-1", 1L);
-            writer.mirrorSealUntil(oldLease, replacementExpiry);
-            assertThat(template.getCollection("generation_manifests").find(new Document("generationId", "g1")).first().getDate("sealUntil")).isEqualTo(replacementExpiry);
-            template.getCollection("repositories").updateOne(new Document("repoId", "orders"), new Document("$set", new Document("activeJobId", "job-2").append("activeWorkerId", "worker-2").append("activeGenerationId", "g2").append("fence", 2L).append("claimUntil", new java.util.Date(System.currentTimeMillis() + 90_000L))));
-            assertThatThrownBy(() -> writer.mirrorSealUntil(oldLease, replacementExpiry)).isInstanceOf(IllegalStateException.class);
-            assertThatThrownBy(() -> writer.seal(oldLease, "digest")).isInstanceOf(IllegalStateException.class);
-            assertThat(template.getCollection("generation_manifests").find(new Document("generationId", "g1")).first().getDate("sealUntil")).isEqualTo(replacementExpiry);
-        }
-    }
-
-    @Test
-    void refuses_to_seal_when_its_mirrored_expiry_has_elapsed_on_the_server() {
-        try (MongoDBContainer container = MongoSchemaTestSupport.container()) {
-            org.springframework.data.mongodb.core.MongoTemplate template = MongoSchemaTestSupport.template(container);
-            new IndexSchemaBootstrap(template).bootstrap();
-            template.getCollection("repositories").insertOne(new Document("repoId", "orders").append("activeJobId", "job-1").append("activeWorkerId", "worker-1").append("activeGenerationId", "g1").append("fence", 1L).append("claimUntil", new java.util.Date(System.currentTimeMillis() + 60_000L)));
-            template.getCollection("index_jobs").insertOne(new Document("jobId", "job-1").append("repoId", "orders").append("active", true).append("outstandingBatches", List.of()).append("failedOrAmbiguousBatches", List.of()));
-            template.getCollection("generation_manifests").insertOne(new Document("repoId", "orders").append("generationId", "g1").append("ownerJobId", "job-1").append("ownerWorkerId", "worker-1").append("fence", 1L).append("identityDigest", "digest").append("writeState", "WRITING").append("sealUntil", new java.util.Date(System.currentTimeMillis() - 1_000L)));
-            MongoGenerationWriter.GenerationLease lease = new MongoGenerationWriter.GenerationLease(new RepositoryId("orders"), new GenerationId("g1"), "job-1", "worker-1", 1L);
-            assertThatThrownBy(() -> new MongoGenerationWriter(template).seal(lease, "digest")).isInstanceOf(IllegalStateException.class);
-            assertThat(template.getCollection("generation_manifests").find(new Document("repoId", "orders")).first().getString("writeState")).isEqualTo("WRITING");
         }
     }
 
@@ -160,5 +104,26 @@ class MongoGenerationSealIT {
         template.getCollection("generation_manifests").updateOne(new Document("repoId", "orders"), new Document("$set",
                 new Document("validationResult", "VALID").append("validatedAt", new java.util.Date())
                         .append("sealedCollectionCounts", new Document("symbols", 0L))));
+    }
+
+    private static GenerationWriteContext context() {
+        return new GenerationWriteContext(new RepositoryId("orders"), new GenerationId("g1"), "job-1");
+    }
+
+    private static Document runningJob() {
+        return new Document("jobId", "job-1").append("repoId", "orders").append("target", target())
+                .append("operation", "BUILD").append("phase", "RUNNING").append("active", true)
+                .append("outstandingBatches", List.of()).append("failedOrAmbiguousBatches", List.of());
+    }
+
+    private static Document target() {
+        return new Document("revision", "a".repeat(40)).append("generationId", "g1").append("generation", 1L);
+    }
+
+    private static Document writingManifest() {
+        return new Document("repoId", "orders").append("generationId", "g1").append("ownerJobId", "job-1")
+                .append("identityDigest", "digest").append("writeState", "WRITING")
+                .append("outstandingBatches", List.of()).append("acknowledgedBatches", List.of())
+                .append("failedOrAmbiguousBatches", List.of());
     }
 }

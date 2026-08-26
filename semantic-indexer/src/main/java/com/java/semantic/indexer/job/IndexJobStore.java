@@ -6,7 +6,6 @@ import com.java.semantic.model.index.RollbackGenerationCommand;
 import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.model.repository.RepositoryRevision;
 
-import java.time.Duration;
 import java.util.Optional;
 
 public interface IndexJobStore {
@@ -17,18 +16,14 @@ public interface IndexJobStore {
     IndexJob admitRollback(RepositoryId repositoryId, PublishedGenerationPointer expectedCurrent,
                            PublishedGenerationPointer expectedRollback);
     Optional<IndexJob> find(IndexJobId jobId);
-    Optional<IndexJob> claim(IndexJobId jobId, String workerId, Duration claimLifetime);
-    boolean renew(IndexJob claimedJob, Duration claimLifetime);
-    boolean revoke(IndexJob claimedJob);
-    boolean failAfterRevocation(IndexJob claimedJob, IndexFailureCategory category);
-    void failExpiredClaims();
+    Optional<IndexJob> start(IndexJobId jobId);
+    boolean complete(IndexJobId jobId);
+    boolean fail(IndexJobId jobId, IndexFailureCategory category);
     void reconcileCommittedJobs();
-    void recoverRevokedClaims();
-    void recoverRevokedClaims(RepositoryId repositoryId);
+    void failUnreconciledRunningJobs();
     Optional<IndexJob> reconcileCommitted(RepositoryId repositoryId);
     Optional<RepositoryRevision> currentRevision(RepositoryId repositoryId);
     Optional<IndexPublicationState> publicationState(RepositoryId repositoryId);
     Optional<RollbackGenerationCommand> rollbackCommand(IndexJob job);
     Optional<IndexPublicationIntent> prepareBuildPublication(IndexJob job, ManifestDigest sealedManifestDigest);
-    Optional<IndexPublicationIntent> publicationIntent(IndexJobId jobId);
 }

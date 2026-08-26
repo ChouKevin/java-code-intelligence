@@ -6,6 +6,7 @@ import com.java.semantic.indexer.incremental.IncrementalIndexPlan;
 import com.java.semantic.indexer.incremental.IncrementalIndexPlanner;
 import com.java.semantic.indexer.incremental.ModuleLocator;
 import com.java.semantic.indexer.store.IndexSchemaBootstrap;
+import com.java.semantic.indexer.store.GenerationWriteContext;
 import com.java.semantic.indexer.store.MongoGenerationWriter;
 import com.java.semantic.model.index.GenerationId;
 import com.java.semantic.model.index.GenerationWriteState;
@@ -16,7 +17,6 @@ import com.java.semantic.model.repository.RepositoryRevision;
 import com.mongodb.client.MongoClients;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.time.Duration;
 import java.util.Date;
 import java.util.List;
 import java.util.Optional;
@@ -57,14 +57,13 @@ class IncrementalGenerationBuilderIT {
             GenerationValidator.ValidationResult parentResult = validator.validate(GenerationValidatorIT.lease(), GenerationValidatorIT.revision(),
                     GenerationValidatorIT.revision());
             validator.recordValid(GenerationValidatorIT.lease(), parentResult);
-            writer.mirrorSealUntil(GenerationValidatorIT.lease(), writer.currentClaimUntil(GenerationValidatorIT.lease()));
             writer.seal(GenerationValidatorIT.lease(), parentResult.identityDigest().value());
             publishParent(template, parentResult.identityDigest().value());
-            MongoGenerationWriter.GenerationLease childLease = childLease(template);
+            GenerationWriteContext childLease = childLease(template);
             insertChildManifest(template, childLease);
             template.getCollection(IndexCollections.REPOSITORIES).updateOne(new Document("repoId", "orders"), new Document("$set",
-                    new Document("revision", "c".repeat(40)).append("generationId", "concurrent-generation")
-                            .append("manifestDigest", "d".repeat(64))));
+                    new Document("currentPointer", new Document("revision", "c".repeat(40)).append("generationId", "concurrent-generation")
+                            .append("manifestDigest", "d".repeat(64)))));
             com.java.semantic.model.index.SourceArtifactDocument parentArtifact = FullIndexPublicationIT.validBatch(RepositoryId.of("orders"),
                     GenerationValidatorIT.revision(), GenerationValidatorIT.lease().generationId()).sourceArtifact();
             Path source = Files.writeString(temporaryDirectory.resolve("Order.java"), parentArtifact.utf8Content());
@@ -102,10 +101,9 @@ class IncrementalGenerationBuilderIT {
             GenerationValidator.ValidationResult parentResult = validator.validate(GenerationValidatorIT.lease(), GenerationValidatorIT.revision(),
                     GenerationValidatorIT.revision());
             validator.recordValid(GenerationValidatorIT.lease(), parentResult);
-            writer.mirrorSealUntil(GenerationValidatorIT.lease(), writer.currentClaimUntil(GenerationValidatorIT.lease()));
             writer.seal(GenerationValidatorIT.lease(), parentResult.identityDigest().value());
             publishParent(template, parentResult.identityDigest().value());
-            MongoGenerationWriter.GenerationLease childLease = childLease(template);
+            GenerationWriteContext childLease = childLease(template);
             insertChildManifest(template, childLease);
             template.getCollection(IndexCollections.GENERATION_MANIFESTS).updateOne(new Document("generationId", "g1"), new Document("$set",
                     new Document("projectionVersions", List.of(new Document("name", "SEARCH").append("version", 1)))));
@@ -130,7 +128,7 @@ class IncrementalGenerationBuilderIT {
             MongoTemplate template = new MongoTemplate(MongoClients.create(container.getConnectionString()), "semantic");
             new IndexSchemaBootstrap(template).bootstrap();
             preparePublishedParent(template);
-            MongoGenerationWriter.GenerationLease childLease = childLease(template);
+            GenerationWriteContext childLease = childLease(template);
             insertChildManifest(template, childLease);
             com.java.semantic.model.index.SourceArtifactDocument parentArtifact = FullIndexPublicationIT.validBatch(RepositoryId.of("orders"),
                     GenerationValidatorIT.revision(), GenerationValidatorIT.lease().generationId()).sourceArtifact();
@@ -157,7 +155,7 @@ class IncrementalGenerationBuilderIT {
             MongoTemplate template = new MongoTemplate(MongoClients.create(container.getConnectionString()), "semantic");
             new IndexSchemaBootstrap(template).bootstrap();
             preparePublishedParent(template);
-            MongoGenerationWriter.GenerationLease childLease = childLease(template);
+            GenerationWriteContext childLease = childLease(template);
             insertChildManifest(template, childLease);
             Path source = Files.writeString(temporaryDirectory.resolve("Order.java"), "class Order { changed(); }");
             FullIndexPlan selected = new FullIndexPlan(temporaryDirectory, List.of(new FullIndexPlan.SourceInput("src/Order.java", source,
@@ -180,7 +178,7 @@ class IncrementalGenerationBuilderIT {
             MongoTemplate template = new MongoTemplate(MongoClients.create(container.getConnectionString()), "semantic");
             new IndexSchemaBootstrap(template).bootstrap();
             preparePublishedParent(template);
-            MongoGenerationWriter.GenerationLease childLease = childLease(template);
+            GenerationWriteContext childLease = childLease(template);
             insertChildManifest(template, childLease);
             com.java.semantic.model.index.SourceArtifactDocument parentArtifact = FullIndexPublicationIT.validBatch(RepositoryId.of("orders"),
                     GenerationValidatorIT.revision(), GenerationValidatorIT.lease().generationId()).sourceArtifact();
@@ -205,7 +203,7 @@ class IncrementalGenerationBuilderIT {
             MongoTemplate template = new MongoTemplate(MongoClients.create(container.getConnectionString()), "semantic");
             new IndexSchemaBootstrap(template).bootstrap();
             preparePublishedParent(template);
-            MongoGenerationWriter.GenerationLease childLease = childLease(template);
+            GenerationWriteContext childLease = childLease(template);
             insertChildManifest(template, childLease);
             com.java.semantic.model.index.SourceArtifactDocument parentArtifact = FullIndexPublicationIT.validBatch(RepositoryId.of("orders"),
                     GenerationValidatorIT.revision(), GenerationValidatorIT.lease().generationId()).sourceArtifact();
@@ -232,39 +230,33 @@ class IncrementalGenerationBuilderIT {
         GenerationValidator.ValidationResult parentResult = validator.validate(GenerationValidatorIT.lease(), GenerationValidatorIT.revision(),
                 GenerationValidatorIT.revision());
         validator.recordValid(GenerationValidatorIT.lease(), parentResult);
-        writer.mirrorSealUntil(GenerationValidatorIT.lease(), writer.currentClaimUntil(GenerationValidatorIT.lease()));
         writer.seal(GenerationValidatorIT.lease(), parentResult.identityDigest().value());
         publishParent(template, parentResult.identityDigest().value());
     }
 
     private static void publishParent(MongoTemplate template, String digest) {
         template.getCollection(IndexCollections.REPOSITORIES).updateOne(new Document("repoId", "orders"), new Document("$set",
-                new Document("revision", "a".repeat(40)).append("generationId", "g1").append("manifestDigest", digest)
-                        .append("committedJobId", "job-1").append("publishedAt", new Date())).append("$unset",
-                new Document("activeJobId", "").append("activeWorkerId", "").append("activeGenerationId", "").append("claimUntil", "")));
+                new Document("currentPointer", new Document("revision", "a".repeat(40)).append("generationId", "g1")
+                        .append("manifestDigest", digest).append("committedJobId", "job-1").append("publishedAt", new Date()))));
         template.getCollection(IndexCollections.INDEX_JOBS).updateOne(new Document("jobId", "job-1"), new Document("$set", new Document("active", false)));
     }
 
-    private static MongoGenerationWriter.GenerationLease childLease(MongoTemplate template) {
-        Date until = new Date(System.currentTimeMillis() + Duration.ofMinutes(5).toMillis());
-        template.getCollection(IndexCollections.REPOSITORIES).updateOne(new Document("repoId", "orders"), new Document("$set",
-                new Document("activeJobId", "job-2").append("activeWorkerId", "worker-2").append("activeGenerationId", "g2")
-                        .append("fence", 2L).append("claimUntil", until)));
+    private static GenerationWriteContext childLease(MongoTemplate template) {
         template.getCollection(IndexCollections.INDEX_JOBS).insertOne(new Document("jobId", "job-2").append("repoId", "orders")
-                .append("active", true).append("workerId", "worker-2").append("fence", 2L).append("outstandingBatches", List.of())
+                .append("target", new Document("revision", "b".repeat(40)).append("generationId", "g2").append("generation", 2L))
+                .append("operation", "BUILD").append("phase", "RUNNING").append("active", true).append("outstandingBatches", List.of())
                 .append("acknowledgedBatches", List.of()).append("failedOrAmbiguousBatches", List.of())
-                .append("buildParentCaptured", true).append("buildParent", new Document("revision", "a".repeat(40))
+                .append("expectedParent", new Document("revision", "a".repeat(40))
                         .append("generationId", "g1").append("manifestDigest", template.getCollection(IndexCollections.GENERATION_MANIFESTS)
                                 .find(new Document("generationId", "g1")).first().getString("identityDigest"))
                         .append("committedJobId", "job-1").append("publishedAt", new Date())));
-        return new MongoGenerationWriter.GenerationLease(RepositoryId.of("orders"), new GenerationId("g2"), "job-2", "worker-2", 2L);
+        return new GenerationWriteContext(RepositoryId.of("orders"), new GenerationId("g2"), "job-2");
     }
 
-    private static void insertChildManifest(MongoTemplate template, MongoGenerationWriter.GenerationLease lease) {
+    private static void insertChildManifest(MongoTemplate template, GenerationWriteContext lease) {
         template.getCollection(IndexCollections.GENERATION_MANIFESTS).insertOne(new Document("repoId", "orders").append("generationId", "g2")
-                .append("sourceRevision", "b".repeat(40)).append("ownerJobId", lease.jobId()).append("ownerWorkerId", lease.workerId())
-                .append("fence", lease.fence()).append("writeState", GenerationWriteState.WRITING.name()).append("sealUntil",
-                        new Date(System.currentTimeMillis() + Duration.ofMinutes(5).toMillis())).append("writeEpoch", 0L)
+                .append("sourceRevision", "b".repeat(40)).append("ownerJobId", lease.jobId())
+                .append("writeState", GenerationWriteState.WRITING.name()).append("writeEpoch", 0L)
                 .append("schemaVersion", IndexSchemaContract.SCHEMA_VERSION).append("projectionVersions", projectionVersions())
                 .append("identityDigest", "0".repeat(64)).append("outstandingBatches", List.of()).append("acknowledgedBatches", List.of())
                 .append("failedOrAmbiguousBatches", List.of()));
@@ -299,9 +291,8 @@ class IncrementalGenerationBuilderIT {
 
     private static com.java.semantic.indexer.job.IndexJob childJob(boolean rebuild) {
         return new com.java.semantic.indexer.job.IndexJob(new com.java.semantic.indexer.job.IndexJobId("job-2"), RepositoryId.of("orders"),
-                new RepositoryRevision("b".repeat(40)), new GenerationId("g2"), 2L,
-                com.java.semantic.indexer.job.IndexJobPhase.CHECKOUT, true, Optional.of("worker-2"),
-                Optional.of(new com.java.semantic.model.index.RepositoryFence(2L)), Optional.of(java.time.Instant.now().plusSeconds(300)),
-                Optional.empty(), rebuild);
+                Optional.of(new com.java.semantic.indexer.job.IndexJobTarget(new RepositoryRevision("b".repeat(40)), new GenerationId("g2"), 2L)),
+                com.java.semantic.indexer.job.IndexJobPhase.RUNNING, true, Optional.empty(), rebuild,
+                com.java.semantic.indexer.job.IndexJobOperation.BUILD);
     }
 }

@@ -15,9 +15,6 @@ public record GenerationManifestDocument(
         RepositoryRevision sourceRevision,
         GenerationId generationId,
         String ownerJobId,
-        String ownerWorkerId,
-        RepositoryFence fence,
-        Instant sealExpiresAt,
         GenerationWriteState writeState,
         long writeEpoch,
         IndexSchemaVersion schemaVersion,
@@ -32,9 +29,6 @@ public record GenerationManifestDocument(
         sourceRevision = Objects.requireNonNull(sourceRevision, "source revision is required");
         generationId = Objects.requireNonNull(generationId, "generation id is required");
         ownerJobId = ModelValidation.requiredText(ownerJobId, "owner job id");
-        ownerWorkerId = ModelValidation.requiredText(ownerWorkerId, "owner worker id");
-        fence = Objects.requireNonNull(fence, "repository fence is required");
-        sealExpiresAt = Objects.requireNonNull(sealExpiresAt, "seal expiry is required");
         writeState = Objects.requireNonNull(writeState, "write state is required");
         ModelValidation.require(writeEpoch >= 0, "write epoch must not be negative");
         schemaVersion = Objects.requireNonNull(schemaVersion, "schema version is required");

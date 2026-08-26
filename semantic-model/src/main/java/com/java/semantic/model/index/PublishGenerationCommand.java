@@ -12,9 +12,7 @@ public record PublishGenerationCommand(
         RepositoryId repositoryId,
         RepositoryRevision targetRevision,
         GenerationId targetGenerationId,
-        String activeJobId,
-        String activeWorkerId,
-        RepositoryFence activeFence,
+        String jobId,
         Optional<PublishedGenerationPointer> expectedParent,
         ManifestDigest sealedManifestDigest) {
 
@@ -22,9 +20,7 @@ public record PublishGenerationCommand(
         repositoryId = Objects.requireNonNull(repositoryId, "repository id is required");
         targetRevision = Objects.requireNonNull(targetRevision, "target revision is required");
         targetGenerationId = Objects.requireNonNull(targetGenerationId, "target generation id is required");
-        activeJobId = ModelValidation.requiredText(activeJobId, "active job id");
-        activeWorkerId = ModelValidation.requiredText(activeWorkerId, "active worker id");
-        activeFence = Objects.requireNonNull(activeFence, "active fence is required");
+        jobId = ModelValidation.requiredText(jobId, "job id");
         expectedParent = Objects.requireNonNull(expectedParent, "expected parent is required");
         sealedManifestDigest = Objects.requireNonNull(sealedManifestDigest, "sealed manifest digest is required");
     }

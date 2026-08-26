@@ -8,7 +8,6 @@ import com.java.semantic.model.index.IndexSchemaContract;
 import com.mongodb.client.MongoClients;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.time.Duration;
 import java.util.List;
 import org.bson.Document;
 import org.junit.jupiter.api.Tag;
@@ -50,27 +49,29 @@ class SameRevisionRebuildIT {
                     ignored -> new IndexBuildService.CheckedOutRepository(checkout,
                             new com.java.semantic.model.repository.RepositoryRevision(revision)));
 
-            IndexJob first = claim(store.admit(com.java.semantic.model.repository.RepositoryId.of("orders"),
+            IndexJob first = start(store.admit(com.java.semantic.model.repository.RepositoryId.of("orders"),
                     new com.java.semantic.model.repository.RepositoryRevision(revision), false), store);
             service.build(first);
-            String g1 = first.generationId().value();
+            assertThat(store.complete(first.id())).isTrue();
+            String g1 = first.target().orElseThrow().generationId().value();
             Document original = template.getCollection(IndexCollections.SYMBOLS)
                     .find(new Document("repoId", "orders").append("generationId", g1)).first();
 
-            IndexJob rebuilt = claim(store.admit(com.java.semantic.model.repository.RepositoryId.of("orders"),
+            IndexJob rebuilt = start(store.admit(com.java.semantic.model.repository.RepositoryId.of("orders"),
                     new com.java.semantic.model.repository.RepositoryRevision(revision), true), store);
             service.build(rebuilt);
 
             assertThat(template.getCollection(IndexCollections.SYMBOLS).find(new Document("repoId", "orders").append("generationId", g1))
                     .first().getString("symbolId")).isEqualTo(original.getString("symbolId"));
             Document current = template.getCollection(IndexCollections.REPOSITORIES).find(new Document("repoId", "orders")).first();
-            assertThat(current.getString("revision")).isEqualTo(revision);
-            assertThat(current.getString("generationId")).isEqualTo(rebuilt.generationId().value());
-            assertThat(current.getString("generationId")).isNotEqualTo(g1);
+            Document pointer = current.get("currentPointer", Document.class);
+            assertThat(pointer.getString("revision")).isEqualTo(revision);
+            assertThat(pointer.getString("generationId")).isEqualTo(rebuilt.target().orElseThrow().generationId().value());
+            assertThat(pointer.getString("generationId")).isNotEqualTo(g1);
         }
     }
 
-    private static IndexJob claim(IndexJob accepted, MongoIndexJobStore store) {
-        return store.claim(accepted.id(), "worker-1", Duration.ofMinutes(5)).orElseThrow();
+    private static IndexJob start(IndexJob accepted, MongoIndexJobStore store) {
+        return store.start(accepted.id()).orElseThrow();
     }
 }

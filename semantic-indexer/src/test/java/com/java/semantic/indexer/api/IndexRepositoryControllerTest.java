@@ -3,6 +3,8 @@ package com.java.semantic.indexer.api;
 import com.java.semantic.indexer.job.IndexJob;
 import com.java.semantic.indexer.job.IndexJobId;
 import com.java.semantic.indexer.job.IndexJobPhase;
+import com.java.semantic.indexer.job.IndexJobOperation;
+import com.java.semantic.indexer.job.IndexJobTarget;
 import com.java.semantic.indexer.job.IndexPublicationState;
 import com.java.semantic.indexer.job.IndexRequestService;
 import com.java.semantic.model.index.GenerationId;
@@ -27,14 +29,14 @@ class IndexRepositoryControllerTest {
     void ensure_returns_accepted_job_with_the_resolved_revision() {
         IndexRequestService service = mock(IndexRequestService.class);
         RepositoryRevision revision = new RepositoryRevision("b".repeat(40));
-        IndexJob job = new IndexJob(IndexJobId.create(), RepositoryId.of("orders"), revision, new GenerationId("g-orders"), 1,
-                IndexJobPhase.ACCEPTED, true, Optional.empty(), Optional.empty(), Optional.empty(), Optional.empty());
+        IndexJob job = new IndexJob(IndexJobId.create(), RepositoryId.of("orders"), Optional.of(new IndexJobTarget(revision, new GenerationId("g-orders"), 1L)),
+                IndexJobPhase.ACCEPTED, true, Optional.empty(), false, IndexJobOperation.BUILD);
         when(service.ensure(RepositoryId.of("orders"))).thenReturn(job);
 
         ResponseEntity<IndexRepositoryController.IndexJobResponse> response = new IndexRepositoryController(service).ensure("orders");
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.ACCEPTED);
-        assertThat(response.getBody().revision()).isEqualTo(revision.value());
+        assertThat(response.getBody().target().revision()).isEqualTo(revision.value());
         assertThat(response.getBody().jobId()).isEqualTo(job.id().value());
     }
 
@@ -117,7 +119,8 @@ class IndexRepositoryControllerTest {
     }
 
     private static IndexJob job(String revision) {
-        return new IndexJob(IndexJobId.create(), RepositoryId.of("orders"), new RepositoryRevision(revision.repeat(40)), new GenerationId("g-orders"), 1,
-                IndexJobPhase.ACCEPTED, true, Optional.empty(), Optional.empty(), Optional.empty(), Optional.empty());
+        return new IndexJob(IndexJobId.create(), RepositoryId.of("orders"),
+                Optional.of(new IndexJobTarget(new RepositoryRevision(revision.repeat(40)), new GenerationId("g-orders"), 1L)),
+                IndexJobPhase.ACCEPTED, true, Optional.empty(), false, IndexJobOperation.BUILD);
     }
 }

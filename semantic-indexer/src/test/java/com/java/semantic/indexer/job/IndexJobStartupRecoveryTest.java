@@ -8,15 +8,13 @@ import static org.mockito.Mockito.verify;
 
 class IndexJobStartupRecoveryTest {
     @Test
-    void startup_expires_claims_then_reconciles_commits_before_recovering_revoked_claims() throws Exception {
-        IndexJobWorker worker = mock(IndexJobWorker.class);
+    void startup_reconciles_commits_then_fails_unreconciled_running_jobs() throws Exception {
         IndexJobStore jobs = mock(IndexJobStore.class);
 
-        new IndexJobStartupRecovery(worker, jobs).run(new DefaultApplicationArguments());
+        new IndexJobStartupRecovery(jobs).run(new DefaultApplicationArguments());
 
-        org.mockito.InOrder order = org.mockito.Mockito.inOrder(worker, jobs);
-        order.verify(worker).expireClaims();
+        org.mockito.InOrder order = org.mockito.Mockito.inOrder(jobs);
         order.verify(jobs).reconcileCommittedJobs();
-        order.verify(jobs).recoverRevokedClaims();
+        order.verify(jobs).failUnreconciledRunningJobs();
     }
 }

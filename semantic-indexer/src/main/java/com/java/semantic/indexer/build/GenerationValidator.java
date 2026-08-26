@@ -1,6 +1,6 @@
 package com.java.semantic.indexer.build;
 
-import com.java.semantic.indexer.store.MongoGenerationWriter;
+import com.java.semantic.indexer.store.GenerationWriteContext;
 import com.java.semantic.indexer.store.MongoIndexDefinitionMatcher;
 import com.java.semantic.model.codefact.CodeFactKind;
 import com.java.semantic.model.index.EntryPointDocument;
@@ -51,22 +51,22 @@ public final class GenerationValidator {
         projectionMapper = new SourceIndexBatchDocumentMapper(template.getConverter());
     }
 
-    public ValidationResult validate(MongoGenerationWriter.GenerationLease lease, RepositoryRevision requestedRevision,
+    public ValidationResult validate(GenerationWriteContext context, RepositoryRevision requestedRevision,
                                      RepositoryRevision checkedOutRevision) {
-        Objects.requireNonNull(lease, "generation lease is required");
+        Objects.requireNonNull(context, "generation write context is required");
         Objects.requireNonNull(requestedRevision, "requested revision is required");
         Objects.requireNonNull(checkedOutRevision, "checked out revision is required");
         List<GenerationValidationIssue> issues = new ArrayList<>();
-        Document manifest = template.getCollection(IndexCollections.GENERATION_MANIFESTS).find(manifestFilter(lease)).first();
+        Document manifest = template.getCollection(IndexCollections.GENERATION_MANIFESTS).find(manifestFilter(context)).first();
         if (Objects.isNull(manifest)) {
-            issues.add(issue("MISSING_MANIFEST", "generation manifest is not owned by this claim"));
+            issues.add(issue("MISSING_MANIFEST", "generation manifest is not owned by this job"));
             return new ValidationResult(new ManifestDigest("0".repeat(64)), Map.of(), issues);
         }
-        if (!claimActive(lease)) {
-            issues.add(issue("CLAIM_LOST", "repository claim is no longer active for this worker and fence"));
+        if (!runningBuildOwns(context)) {
+            issues.add(issue("JOB_NOT_RUNNING", "generation job is not the active running build owner"));
             return new ValidationResult(new ManifestDigest("0".repeat(64)), Map.of(), issues);
         }
-        manifest = freezeForValidation(lease);
+        manifest = freezeForValidation(context);
         if (Objects.isNull(manifest)) {
             issues.add(issue("VALIDATION_FREEZE_FAILED", "generation changed or has unfinished batches before validation"));
             return new ValidationResult(new ManifestDigest("0".repeat(64)), Map.of(), issues);
@@ -75,10 +75,10 @@ public final class GenerationValidator {
         if (!requestedRevision.equals(checkedOutRevision)) {
             issues.add(issue("CHECKOUT_CHANGED", "checked-out revision no longer matches the requested revision"));
         }
-        validateClaim(lease, issues);
+        validateOwnership(context, issues);
         validateRequiredIndexes(issues);
 
-        Map<ProjectionName, List<Document>> persistedProjections = projectionDocuments(lease);
+        Map<ProjectionName, List<Document>> persistedProjections = projectionDocuments(context);
         List<Document> files = persistedProjections.get(ProjectionName.SOURCES);
         List<Document> symbols = persistedProjections.get(ProjectionName.SYMBOLS);
         List<Document> relations = persistedProjections.get(ProjectionName.RELATIONS);
@@ -89,11 +89,11 @@ public final class GenerationValidator {
         validateRelations(symbols, relations, issues);
         validateEntryPoints(symbols, entryPoints, issues);
         validateRanges(symbols, relations, entryPoints, files, artifacts, issues);
-        ProjectionDocuments projections = validateProjectionDocuments(lease, requestedRevision, symbols, relations, entryPoints, search,
+        ProjectionDocuments projections = validateProjectionDocuments(context, requestedRevision, symbols, relations, entryPoints, search,
                 issues);
         validateProjectionArtifacts(files, projections.symbols(), projections.relations(), issues);
         validateSearchCoverage(projections, search, issues);
-        validateClaim(lease, issues);
+        validateOwnership(context, issues);
         Map<String, Long> counts = collectionCounts(persistedProjections, artifacts);
         ManifestDigest digest = digest(persistedProjections);
         return new ValidationResult(digest, counts, issues);
@@ -106,8 +106,8 @@ public final class GenerationValidator {
     }
 
     /** Records the exact values that publication re-checks before the manifest is sealed. */
-    public void recordValid(MongoGenerationWriter.GenerationLease lease, ValidationResult result) {
-        Objects.requireNonNull(lease, "generation lease is required");
+    public void recordValid(GenerationWriteContext context, ValidationResult result) {
+        Objects.requireNonNull(context, "generation write context is required");
         Objects.requireNonNull(result, "validation result is required");
         if (!result.valid()) {
             throw new IllegalArgumentException("cannot record an invalid generation");
@@ -115,11 +115,13 @@ public final class GenerationValidator {
         Document update = new Document("$set", new Document("identityDigest", result.identityDigest().value())
                 .append("sealedCollectionCounts", new Document(result.collectionCounts()))
                 .append("validationResult", "VALID").append("validatedAt", Date.from(Instant.now())));
-        Document filter = manifestFilter(lease).append("validationResult", "VALIDATING")
-                .append("$expr", new Document("$gt", List.of("$sealUntil", "$$NOW")));
+        if (!runningBuildOwns(context)) {
+            throw new IllegalStateException("generation validation record job is not running");
+        }
+        Document filter = manifestFilter(context).append("validationResult", "VALIDATING");
         long changed = template.getCollection(IndexCollections.GENERATION_MANIFESTS).updateOne(filter, update).getModifiedCount();
         if (changed != 1L) {
-            throw new IllegalStateException("generation validation record lost its claim");
+            throw new IllegalStateException("generation validation record lost its job ownership");
         }
     }
 
@@ -136,24 +138,22 @@ public final class GenerationValidator {
         }
     }
 
-    private void validateClaim(MongoGenerationWriter.GenerationLease lease, List<GenerationValidationIssue> issues) {
-        if (!claimActive(lease)) {
-            issues.add(issue("CLAIM_LOST", "repository claim is no longer active for this worker and fence"));
+    private void validateOwnership(GenerationWriteContext context, List<GenerationValidationIssue> issues) {
+        if (!runningBuildOwns(context)) {
+            issues.add(issue("JOB_NOT_RUNNING", "generation job is not the active running build owner"));
         }
     }
 
-    private boolean claimActive(MongoGenerationWriter.GenerationLease lease) {
-        Document repositoryFilter = new Document("repoId", lease.repositoryId().value()).append("activeJobId", lease.jobId())
-                .append("activeWorkerId", lease.workerId()).append("activeGenerationId", lease.generationId().value())
-                .append("fence", lease.fence()).append("$expr", new Document("$gt", List.of("$claimUntil", "$$NOW")));
-        return Objects.nonNull(template.getCollection(IndexCollections.REPOSITORIES).find(repositoryFilter).first());
+    private boolean runningBuildOwns(GenerationWriteContext context) {
+        Document jobFilter = new Document("jobId", context.jobId()).append("repoId", context.repositoryId().value())
+                .append("operation", "BUILD").append("phase", "RUNNING").append("active", true)
+                .append("target.generationId", context.generationId().value());
+        return Objects.nonNull(template.getCollection(IndexCollections.INDEX_JOBS).find(jobFilter).first());
     }
 
-    private Document freezeForValidation(MongoGenerationWriter.GenerationLease lease) {
-        Document filter = manifestFilter(lease).append("validationResult", new Document("$exists", false))
-                .append("$expr", new Document("$and", List.of(
-                        new Document("$gt", List.of("$sealUntil", "$$NOW")),
-                        noBatches("outstandingBatches"), noBatches("failedOrAmbiguousBatches"))));
+    private Document freezeForValidation(GenerationWriteContext context) {
+        Document filter = manifestFilter(context).append("validationResult", new Document("$exists", false))
+                .append("$expr", new Document("$and", List.of(noBatches("outstandingBatches"), noBatches("failedOrAmbiguousBatches"))));
         return template.getCollection(IndexCollections.GENERATION_MANIFESTS).findOneAndUpdate(filter,
                 new Document("$set", new Document("validationResult", "VALIDATING")),
                 new FindOneAndUpdateOptions().returnDocument(ReturnDocument.AFTER));
@@ -341,7 +341,7 @@ public final class GenerationValidator {
         return end - start;
     }
 
-    private ProjectionDocuments validateProjectionDocuments(MongoGenerationWriter.GenerationLease lease,
+    private ProjectionDocuments validateProjectionDocuments(GenerationWriteContext context,
                                                               RepositoryRevision requestedRevision,
                                                               List<Document> symbolDocuments,
                                                               List<Document> relationDocuments,
@@ -352,7 +352,7 @@ public final class GenerationValidator {
         for (Document document : symbolDocuments) {
             try {
                 SymbolDocument symbol = template.getConverter().read(SymbolDocument.class, document);
-                validateScope(lease, requestedRevision, symbol.repositoryId().value(), symbol.generationId().value(),
+                validateScope(context, requestedRevision, symbol.repositoryId().value(), symbol.generationId().value(),
                         symbol.fact().identity().repositoryRevision(), issues);
                 if (!symbol.fact().id().value().equals(document.getString("symbolId"))
                         || !symbol.fact().identity().canonicalForm().equals(document.getString("canonical"))) {
@@ -367,7 +367,7 @@ public final class GenerationValidator {
         for (Document document : relationDocuments) {
             try {
                 RelationDocument relation = projectionMapper.reconstructRelation(document);
-                validateScope(lease, requestedRevision, relation.repositoryId().value(), relation.generationId().value(),
+                validateScope(context, requestedRevision, relation.repositoryId().value(), relation.generationId().value(),
                         relation.fact().identity().repositoryRevision(), issues);
                 if (!relation.fact().id().value().equals(document.getString("relationId"))
                         || !relation.from().canonicalForm().equals(document.getString("from"))
@@ -383,7 +383,7 @@ public final class GenerationValidator {
         for (Document document : entryPointDocuments) {
             try {
                 EntryPointDocument entryPoint = projectionMapper.reconstructEntryPoint(document);
-                validateScope(lease, requestedRevision, entryPoint.repositoryId().value(), entryPoint.generationId().value(),
+                validateScope(context, requestedRevision, entryPoint.repositoryId().value(), entryPoint.generationId().value(),
                         entryPoint.fact().identity().repositoryRevision(), issues);
                 if (!entryPoint.fact().id().value().equals(document.getString("entryPointId"))
                         || !entryPoint.fact().identity().canonicalForm().equals(document.getString("canonical"))
@@ -400,7 +400,7 @@ public final class GenerationValidator {
         for (Document document : searchDocuments) {
             try {
                 SearchDocument searchDocument = projectionMapper.reconstructSearch(document);
-                validateScope(lease, requestedRevision, searchDocument.repositoryId().value(), searchDocument.generationId().value(),
+                validateScope(context, requestedRevision, searchDocument.repositoryId().value(), searchDocument.generationId().value(),
                         searchDocument.authoritativeIdentity().repositoryRevision(), issues);
                 search.add(new StoredSearch(document, searchDocument));
             } catch (RuntimeException exception) {
@@ -410,10 +410,10 @@ public final class GenerationValidator {
         return new ProjectionDocuments(symbols, relations, entryPoints, search);
     }
 
-    private static void validateScope(MongoGenerationWriter.GenerationLease lease, RepositoryRevision requestedRevision,
+    private static void validateScope(GenerationWriteContext context, RepositoryRevision requestedRevision,
                                       String repositoryId, String generationId, RepositoryRevision projectionRevision,
                                       List<GenerationValidationIssue> issues) {
-        if (!lease.repositoryId().value().equals(repositoryId) || !lease.generationId().value().equals(generationId)) {
+        if (!context.repositoryId().value().equals(repositoryId) || !context.generationId().value().equals(generationId)) {
             issues.add(issue("PROJECTION_SCOPE_MISMATCH", "projection repository or generation differs from the build"));
         }
         if (!requestedRevision.equals(projectionRevision)) {
@@ -529,15 +529,15 @@ public final class GenerationValidator {
         }
     }
 
-    private List<Document> documents(String collection, MongoGenerationWriter.GenerationLease lease) {
-        return template.getCollection(collection).find(Filters.and(Filters.eq("repoId", lease.repositoryId().value()),
-                Filters.eq("generationId", lease.generationId().value()))).into(new ArrayList<>());
+    private List<Document> documents(String collection, GenerationWriteContext context) {
+        return template.getCollection(collection).find(Filters.and(Filters.eq("repoId", context.repositoryId().value()),
+                Filters.eq("generationId", context.generationId().value()))).into(new ArrayList<>());
     }
 
-    private Map<ProjectionName, List<Document>> projectionDocuments(MongoGenerationWriter.GenerationLease lease) {
+    private Map<ProjectionName, List<Document>> projectionDocuments(GenerationWriteContext context) {
         Map<ProjectionName, List<Document>> projections = new LinkedHashMap<>();
         for (ValidatedProjection projection : VALIDATION_DISPATCH) {
-            projections.put(projection.name(), documents(IndexSchemaContract.projectionCollection(projection.name()), lease));
+            projections.put(projection.name(), documents(IndexSchemaContract.projectionCollection(projection.name()), context));
         }
         return Map.copyOf(projections);
     }
@@ -587,9 +587,9 @@ public final class GenerationValidator {
         return Objects.nonNull(target) && (target.startsWith("internal[") || target.startsWith("external-"));
     }
 
-    private static Document manifestFilter(MongoGenerationWriter.GenerationLease lease) {
-        return new Document("repoId", lease.repositoryId().value()).append("generationId", lease.generationId().value())
-                .append("ownerJobId", lease.jobId()).append("ownerWorkerId", lease.workerId()).append("fence", lease.fence())
+    private static Document manifestFilter(GenerationWriteContext context) {
+        return new Document("repoId", context.repositoryId().value()).append("generationId", context.generationId().value())
+                .append("ownerJobId", context.jobId())
                 .append("writeState", "WRITING");
     }
 

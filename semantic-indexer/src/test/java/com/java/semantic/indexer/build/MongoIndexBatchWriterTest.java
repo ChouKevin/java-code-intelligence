@@ -9,6 +9,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verifyNoInteractions;
 
 import com.java.semantic.indexer.store.MongoGenerationWriter;
+import com.java.semantic.indexer.store.GenerationWriteContext;
 import com.java.semantic.indexer.store.MongoGenerationWriter.StoredDocument;
 import com.java.semantic.model.index.GenerationId;
 import com.java.semantic.model.index.IndexCollections;
@@ -29,16 +30,15 @@ class MongoIndexBatchWriterTest {
         RepositoryId repositoryId = new RepositoryId("orders");
         GenerationId generationId = new GenerationId("orders-generation");
         MongoGenerationWriter generationWriter = mock(MongoGenerationWriter.class);
-        MongoIndexBatchWriter writer = new MongoIndexBatchWriter(generationWriter,
-                new MongoGenerationWriter.GenerationLease(repositoryId, generationId, "job", "worker", 1L), mapper());
+        GenerationWriteContext context = new GenerationWriteContext(repositoryId, generationId, "job");
+        MongoIndexBatchWriter writer = new MongoIndexBatchWriter(generationWriter, context, mapper());
         List<String> batchIds = new CopyOnWriteArrayList<>();
         List<List<StoredDocument>> documents = new CopyOnWriteArrayList<>();
         doAnswer(invocation -> {
             batchIds.add(invocation.getArgument(1, String.class));
             documents.add(invocation.getArgument(2));
             return null;
-        }).when(generationWriter).writeBatch(eq(new MongoGenerationWriter.GenerationLease(
-                repositoryId, generationId, "job", "worker", 1L)), anyString(),
+        }).when(generationWriter).writeBatch(eq(context), anyString(),
                 org.mockito.ArgumentMatchers.<List<StoredDocument>>any());
 
         writer.write(batch(repositoryId, generationId, 1));
@@ -55,8 +55,7 @@ class MongoIndexBatchWriterTest {
     void rejects_a_batch_from_another_repository_or_generation_before_writing() {
         MongoGenerationWriter generationWriter = mock(MongoGenerationWriter.class);
         MongoIndexBatchWriter writer = new MongoIndexBatchWriter(generationWriter,
-                new MongoGenerationWriter.GenerationLease(new RepositoryId("orders"), new GenerationId("orders-generation"),
-                        "job", "worker", 1L), mapper());
+                new GenerationWriteContext(new RepositoryId("orders"), new GenerationId("orders-generation"), "job"), mapper());
 
         assertThrows(IllegalArgumentException.class,
                 () -> writer.write(batch(new RepositoryId("payments"), new GenerationId("orders-generation"), 0)));

@@ -4,6 +4,7 @@ import com.java.semantic.indexer.incremental.IncrementalIndexPlan;
 import com.java.semantic.indexer.incremental.IncrementalIndexPlanner;
 import com.java.semantic.indexer.job.IndexJob;
 import com.java.semantic.indexer.store.MongoGenerationWriter;
+import com.java.semantic.indexer.store.GenerationWriteContext;
 import com.java.semantic.model.index.GenerationFileDocument;
 import com.java.semantic.model.index.GenerationId;
 import com.java.semantic.model.index.IndexCollections;
@@ -38,7 +39,7 @@ public final class IncrementalGenerationBuilder {
     }
 
     /** Uses the selected checkout inventory as the sole source set for planning and full-fallback selection. */
-    public BuildSelection assemble(IndexJob job, MongoGenerationWriter.GenerationLease lease, FullIndexPlan selectedRevisionPlan) {
+    public BuildSelection assemble(IndexJob job, GenerationWriteContext lease, FullIndexPlan selectedRevisionPlan) {
         Objects.requireNonNull(job, "job is required");
         Objects.requireNonNull(lease, "generation lease is required");
         FullIndexPlan completePlan = Objects.requireNonNull(selectedRevisionPlan, "selected revision plan is required");
@@ -51,12 +52,13 @@ public final class IncrementalGenerationBuilder {
             return BuildSelection.full(fullPlan(selectedPaths, "PARENT_CONTRACT_MISMATCH"), completePlan);
         }
         Parent current = parent.orElseThrow();
-        IncrementalIndexPlan plan = planner.plan(readPublishedIndex(job, current), current.revision().value(), job.revision().value(), selectedPaths);
+        com.java.semantic.model.repository.RepositoryRevision targetRevision = job.target().orElseThrow().revision();
+        IncrementalIndexPlan plan = planner.plan(readPublishedIndex(job, current), current.revision().value(), targetRevision.value(), selectedPaths);
         if (plan.fullRepository()) {
             return BuildSelection.full(plan, completePlan);
         }
         IncrementalIndexPlan adjusted = safePlan(plan, completePlan, job, current);
-        copier.copy(lease, current.generationId(), current.revision(), job.revision(), adjusted.copyPaths());
+        copier.copy(lease, current.generationId(), current.revision(), targetRevision, adjusted.copyPaths());
         return new BuildSelection(true, adjusted, subset(completePlan, adjusted.reanalyzePaths()));
     }
 
@@ -116,12 +118,11 @@ public final class IncrementalGenerationBuilder {
 
     private Optional<Parent> compatibleParent(IndexJob job) {
         Document claimedJob = template.getCollection(IndexCollections.INDEX_JOBS).find(new Document("jobId", job.id().value())
-                .append("repoId", job.repositoryId().value()).append("active", true).append("workerId", job.workerId().orElseThrow())
-                .append("fence", job.fence().orElseThrow().value()).append("buildParentCaptured", true)).first();
+                .append("repoId", job.repositoryId().value()).append("active", true).append("phase", "RUNNING")).first();
         if (Objects.isNull(claimedJob)) {
             return Optional.empty();
         }
-        Document parentPointer = claimedJob.get("buildParent", Document.class);
+        Document parentPointer = claimedJob.get("expectedParent", Document.class);
         if (Objects.isNull(parentPointer)) {
             return Optional.empty();
         }

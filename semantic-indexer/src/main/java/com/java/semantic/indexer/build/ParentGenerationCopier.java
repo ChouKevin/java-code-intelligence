@@ -1,6 +1,7 @@
 package com.java.semantic.indexer.build;
 
 import com.java.semantic.indexer.store.MongoGenerationWriter;
+import com.java.semantic.indexer.store.GenerationWriteContext;
 import com.java.semantic.model.codefact.CodeFact;
 import com.java.semantic.model.codefact.CodeFactId;
 import com.java.semantic.model.codefact.CodeFactIdentity;
@@ -34,7 +35,7 @@ public final class ParentGenerationCopier {
     }
 
     /** Re-materializes generation-scoped records and revision-scoped fact IDs; global source artifacts are only referenced. */
-    public void copy(MongoGenerationWriter.GenerationLease lease, GenerationId parentGeneration,
+    public void copy(GenerationWriteContext lease, GenerationId parentGeneration,
                      RepositoryRevision parentRevision, RepositoryRevision targetRevision, List<String> copyPaths) {
         Objects.requireNonNull(lease, "generation lease is required");
         Objects.requireNonNull(parentGeneration, "parent generation is required");
@@ -45,7 +46,7 @@ public final class ParentGenerationCopier {
         }
     }
 
-    private void copyPath(MongoGenerationWriter.GenerationLease lease, GenerationId parentGeneration,
+    private void copyPath(GenerationWriteContext lease, GenerationId parentGeneration,
                           RepositoryRevision targetRevision, String path) {
         Document scope = new Document("repoId", lease.repositoryId().value()).append("generationId", parentGeneration.value())
                 .append("sourcePath", path);
@@ -77,13 +78,13 @@ public final class ParentGenerationCopier {
         }
     }
 
-    private static SymbolDocument copy(SymbolDocument parent, MongoGenerationWriter.GenerationLease lease, RepositoryRevision targetRevision) {
+    private static SymbolDocument copy(SymbolDocument parent, GenerationWriteContext lease, RepositoryRevision targetRevision) {
         return new SymbolDocument(lease.repositoryId(), lease.generationId(), copy(parent.fact(), lease, targetRevision), parent.kind(),
                 parent.owner(), parent.name(), parent.signature(), parent.declaredType(), parent.modifiers(), parent.annotations(),
                 parent.sourceArtifactId(), parent.range());
     }
 
-    private static RelationDocument copy(RelationDocument parent, MongoGenerationWriter.GenerationLease lease, RepositoryRevision targetRevision) {
+    private static RelationDocument copy(RelationDocument parent, GenerationWriteContext lease, RepositoryRevision targetRevision) {
         CodeFactIdentity from = copy(parent.from(), lease, targetRevision);
         com.java.semantic.model.codefact.RelationTarget target = copy(parent.target(), lease, targetRevision);
         com.java.semantic.model.codefact.RelationIdentity canonical = new com.java.semantic.model.codefact.RelationIdentity(from, parent.kind(),
@@ -93,23 +94,23 @@ public final class ParentGenerationCopier {
         return new RelationDocument(lease.repositoryId(), lease.generationId(), fact, parent.kind(), from, target, parent.sourceArtifactId(), parent.range());
     }
 
-    private static EntryPointDocument copy(EntryPointDocument parent, MongoGenerationWriter.GenerationLease lease, RepositoryRevision targetRevision) {
+    private static EntryPointDocument copy(EntryPointDocument parent, GenerationWriteContext lease, RepositoryRevision targetRevision) {
         return new EntryPointDocument(lease.repositoryId(), lease.generationId(), copy(parent.fact(), lease, targetRevision), parent.kind(),
                 parent.method(), parent.trigger(), parent.range());
     }
 
-    private static SearchDocument copy(SearchDocument parent, MongoGenerationWriter.GenerationLease lease, RepositoryRevision targetRevision) {
+    private static SearchDocument copy(SearchDocument parent, GenerationWriteContext lease, RepositoryRevision targetRevision) {
         CodeFactIdentity authority = copy(parent.authoritativeIdentity(), lease, targetRevision);
         return new SearchDocument(lease.repositoryId(), lease.generationId(), CodeFactId.from(authority), parent.kind(), parent.normalizedTokens(),
                 parent.packageName(), parent.authoritativeProjection(), authority, parent.scope());
     }
 
-    private static CodeFact copy(CodeFact parent, MongoGenerationWriter.GenerationLease lease, RepositoryRevision targetRevision) {
+    private static CodeFact copy(CodeFact parent, GenerationWriteContext lease, RepositoryRevision targetRevision) {
         CodeFactIdentity identity = copy(parent.identity(), lease, targetRevision);
         return new CodeFact(CodeFactId.from(identity), identity);
     }
 
-    private static CodeFactIdentity copy(CodeFactIdentity parent, MongoGenerationWriter.GenerationLease lease,
+    private static CodeFactIdentity copy(CodeFactIdentity parent, GenerationWriteContext lease,
                                          RepositoryRevision targetRevision) {
         com.java.semantic.model.codefact.CanonicalIdentity canonical = parent.canonicalIdentity();
         if (canonical instanceof com.java.semantic.model.codefact.RelationIdentity relation) {
@@ -120,7 +121,7 @@ public final class ParentGenerationCopier {
     }
 
     private static com.java.semantic.model.codefact.RelationTarget copy(com.java.semantic.model.codefact.RelationTarget target,
-                                                                          MongoGenerationWriter.GenerationLease lease,
+                                                                          GenerationWriteContext lease,
                                                                           RepositoryRevision targetRevision) {
         if (target instanceof com.java.semantic.model.codefact.RelationTarget.Internal internal) {
             return new com.java.semantic.model.codefact.RelationTarget.Internal(copy(internal.identity(), lease, targetRevision));

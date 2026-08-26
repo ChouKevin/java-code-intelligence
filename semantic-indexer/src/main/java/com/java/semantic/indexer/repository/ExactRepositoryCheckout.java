@@ -37,9 +37,10 @@ public final class ExactRepositoryCheckout implements IndexBuildService.Checkout
             } else {
                 git.clone(root, runtime.remoteUrl());
             }
-            git.checkoutDetached(root, job.revision());
+            RepositoryRevision requested = job.target().orElseThrow(() -> new IllegalArgumentException("build requires a target")).revision();
+            git.checkoutDetached(root, requested);
             RepositoryRevision actualRevision = git.currentRevision(root);
-            if (!job.revision().equals(actualRevision)) {
+            if (!requested.equals(actualRevision)) {
                 throw new RepositoryMutationException("checked out revision differs from admitted revision");
             }
             runtime.publish(actualRevision);

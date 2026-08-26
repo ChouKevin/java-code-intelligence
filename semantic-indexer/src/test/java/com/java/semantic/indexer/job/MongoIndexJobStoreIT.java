@@ -1,6 +1,8 @@
 package com.java.semantic.indexer.job;
 
 import com.java.semantic.indexer.store.IndexSchemaBootstrap;
+import com.java.semantic.indexer.store.MongoPublicationWriter;
+import com.java.semantic.indexer.store.PublicationConflictException;
 import com.java.semantic.model.index.IndexCollections;
 import com.java.semantic.model.index.IndexSchemaContract;
 import com.java.semantic.model.index.ManifestDigest;
@@ -8,20 +10,15 @@ import com.java.semantic.model.index.PublishGenerationCommand;
 import com.java.semantic.model.index.PublishedGenerationPointer;
 import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.model.repository.RepositoryRevision;
+import org.bson.Document;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.testcontainers.mongodb.MongoDBContainer;
 
-import java.time.Duration;
 import java.time.Instant;
 import java.util.Date;
 import java.util.List;
-import java.util.Optional;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -29,501 +26,234 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 @Tag("mongo-it")
 class MongoIndexJobStoreIT {
     @Test
-    void two_workers_racing_for_one_accepted_job_leave_exactly_one_repository_and_job_claim() throws Exception {
-        try (MongoDBContainer container = new MongoDBContainer("mongo:8.0.4")) {
-            container.start();
-            MongoTemplate template = new MongoTemplate(com.mongodb.client.MongoClients.create(container.getConnectionString()), "semantic");
-            new IndexSchemaBootstrap(template).bootstrap();
-            MongoIndexJobStore store = new MongoIndexJobStore(template);
-            IndexJob job = store.admit(RepositoryId.of("orders"), new RepositoryRevision("c".repeat(40)), false);
-            CountDownLatch start = new CountDownLatch(1);
-            ExecutorService workers = Executors.newFixedThreadPool(2);
-            try {
-                Future<Optional<IndexJob>> first = workers.submit(() -> {
-                    start.await();
-                    return store.claim(job.id(), "worker-a", Duration.ofSeconds(30));
-                });
-                Future<Optional<IndexJob>> second = workers.submit(() -> {
-                    start.await();
-                    return store.claim(job.id(), "worker-b", Duration.ofSeconds(30));
-                });
-                start.countDown();
-                List<Optional<IndexJob>> outcomes = List.of(first.get(), second.get());
-
-                assertThat(outcomes.stream().filter(Optional::isPresent)).hasSize(1);
-                assertThat(outcomes.stream().filter(Optional::isEmpty)).hasSize(1);
-                IndexJob winner = outcomes.stream().flatMap(Optional::stream).findFirst().orElseThrow();
-                org.bson.Document repository = template.getCollection(IndexCollections.REPOSITORIES)
-                        .find(new org.bson.Document("repoId", "orders")).first();
-                assertThat(repository.getString("activeJobId")).isEqualTo(job.id().value());
-                assertThat(repository.getString("activeWorkerId")).isEqualTo(winner.workerId().orElseThrow());
-                assertThat(store.find(job.id()).orElseThrow().workerId()).contains(winner.workerId().orElseThrow());
-            } finally {
-                workers.shutdownNow();
-            }
-        }
-    }
-
-    @Test
-    void losing_job_document_claim_step_compensates_only_the_repository_authority_it_created() {
-        try (MongoDBContainer container = new MongoDBContainer("mongo:8.0.4")) {
-            container.start();
-            MongoTemplate template = new MongoTemplate(com.mongodb.client.MongoClients.create(container.getConnectionString()), "semantic");
-            new IndexSchemaBootstrap(template).bootstrap();
-            MongoIndexJobStore store = new MongoIndexJobStore(template, (mongo, job, worker, fence, expiry) -> null); // cs-allow
-            IndexJob accepted = store.admit(RepositoryId.of("orders"), new RepositoryRevision("d".repeat(40)), false);
-
-            assertThat(store.claim(accepted.id(), "worker-a", Duration.ofSeconds(30))).isEmpty();
-
-            org.bson.Document repository = template.getCollection(IndexCollections.REPOSITORIES)
-                    .find(new org.bson.Document("repoId", "orders")).first();
-            assertThat(repository.containsKey("activeJobId")).isFalse();
-            assertThat(repository.containsKey("activeWorkerId")).isFalse();
-            assertThat(repository.containsKey("activeGenerationId")).isFalse();
-            assertThat(store.find(accepted.id()).orElseThrow().phase()).isEqualTo(IndexJobPhase.ACCEPTED);
-        }
-    }
-
-    @Test
-    void capture_parent_failure_releases_both_claims_so_the_job_can_retry_immediately() {
-        try (MongoDBContainer container = new MongoDBContainer("mongo:8.0.4")) {
-            container.start();
-            MongoTemplate template = new MongoTemplate(com.mongodb.client.MongoClients.create(container.getConnectionString()), "semantic");
-            new IndexSchemaBootstrap(template).bootstrap();
-            MongoIndexJobStore failingStore = new MongoIndexJobStore(template, MongoIndexJobStore::claimJobDocument,
-                    (mongo, job, worker, fence, expiry) -> {
-                        throw new IllegalStateException("capture parent failed");
-                    });
-            IndexJob accepted = failingStore.admit(RepositoryId.of("orders"), new RepositoryRevision("d".repeat(40)), false);
-
-            assertThatThrownBy(() -> failingStore.claim(accepted.id(), "worker-a", Duration.ofSeconds(30)))
-                    .isInstanceOf(IllegalStateException.class).hasMessage("capture parent failed");
-
-            org.bson.Document repository = template.getCollection(IndexCollections.REPOSITORIES)
-                    .find(new org.bson.Document("repoId", "orders")).first();
-            IndexJob reset = failingStore.find(accepted.id()).orElseThrow();
-            assertThat(repository.containsKey("activeJobId")).isFalse();
-            assertThat(reset.phase()).isEqualTo(IndexJobPhase.ACCEPTED);
-            assertThat(reset.workerId()).isEmpty();
-            assertThat(reset.fence()).isEmpty();
-            assertThat(new MongoIndexJobStore(template).claim(accepted.id(), "worker-b", Duration.ofSeconds(30))).isPresent();
-        }
-    }
-
-    @Test
-    void failed_repository_release_keeps_the_claim_recoverable_instead_of_resetting_only_the_job() {
-        try (MongoDBContainer container = new MongoDBContainer("mongo:8.0.4")) {
-            container.start();
-            MongoTemplate template = new MongoTemplate(com.mongodb.client.MongoClients.create(container.getConnectionString()), "semantic");
-            new IndexSchemaBootstrap(template).bootstrap();
-            MongoIndexJobStore failingStore = new MongoIndexJobStore(template, MongoIndexJobStore::claimJobDocument,
-                    (mongo, job, worker, fence, expiry) -> {
-                        throw new IllegalStateException("capture parent failed");
-                    }, (mongo, job, worker, fence) -> {
-                        throw new IllegalStateException("repository release failed");
-                    });
-            IndexJob accepted = failingStore.admit(RepositoryId.of("orders"), new RepositoryRevision("d".repeat(40)), false);
-
-            assertThatThrownBy(() -> failingStore.claim(accepted.id(), "worker-a", Duration.ofSeconds(30)))
-                    .isInstanceOf(IllegalStateException.class).hasMessage("capture parent failed")
-                    .satisfies(exception -> assertThat(exception.getSuppressed()).singleElement()
-                            .extracting(Throwable::getMessage).isEqualTo("repository release failed"));
-
-            org.bson.Document repository = template.getCollection(IndexCollections.REPOSITORIES)
-                    .find(new org.bson.Document("repoId", "orders")).first();
-            IndexJob stillClaimed = failingStore.find(accepted.id()).orElseThrow();
-            assertThat(repository.getString("activeJobId")).isEqualTo(accepted.id().value());
-            assertThat(stillClaimed.phase()).isEqualTo(IndexJobPhase.CHECKOUT);
-            assertThat(stillClaimed.workerId()).contains("worker-a");
-
-            template.getCollection(IndexCollections.REPOSITORIES).updateOne(new org.bson.Document("repoId", "orders"),
-                    new org.bson.Document("$set", new org.bson.Document("claimUntil", Date.from(Instant.now().minusSeconds(1)))));
-            MongoIndexJobStore recoveringStore = new MongoIndexJobStore(template);
-            recoveringStore.failExpiredClaims();
-            assertThat(recoveringStore.find(accepted.id()).orElseThrow().phase()).isEqualTo(IndexJobPhase.FAILED);
-            IndexJob retry = recoveringStore.admit(RepositoryId.of("orders"), new RepositoryRevision("d".repeat(40)), false);
-            assertThat(recoveringStore.claim(retry.id(), "worker-b", Duration.ofSeconds(30))).isPresent();
-        }
-    }
-
-    @Test
-    void build_publication_reconciles_only_when_its_persisted_intent_and_sealed_owner_match() {
-        try (MongoDBContainer container = new MongoDBContainer("mongo:8.0.4")) {
-            container.start();
-            MongoTemplate template = new MongoTemplate(com.mongodb.client.MongoClients.create(container.getConnectionString()), "semantic");
-            new IndexSchemaBootstrap(template).bootstrap();
-            MongoIndexJobStore store = new MongoIndexJobStore(template);
-            RepositoryId repositoryId = RepositoryId.of("orders");
-            IndexJob accepted = store.admit(repositoryId, new RepositoryRevision("e".repeat(40)), false);
-            IndexJob claimed = store.claim(accepted.id(), "worker-a", Duration.ofSeconds(60)).orElseThrow();
-            ManifestDigest digest = new ManifestDigest("e".repeat(64));
-            template.getCollection(IndexCollections.GENERATION_MANIFESTS).insertOne(sealedManifest(claimed, digest));
-
-            assertThat(new IndexJobWorker(store, new com.java.semantic.indexer.store.MongoPublicationWriter(template))
-                    .publishBuild(claimed, digest)).isTrue();
-            assertThat(store.find(claimed.id()).orElseThrow().phase()).isEqualTo(IndexJobPhase.COMPLETE);
-            assertThat(store.reconcileCommitted(repositoryId)).isEmpty();
-        }
-    }
-
-    @Test
-    void build_publication_keeps_the_parent_pointer_captured_at_claim_when_repository_current_changes() {
-        try (MongoDBContainer container = new MongoDBContainer("mongo:8.0.4")) {
-            container.start();
-            MongoTemplate template = new MongoTemplate(com.mongodb.client.MongoClients.create(container.getConnectionString()), "semantic");
-            new IndexSchemaBootstrap(template).bootstrap();
-            MongoIndexJobStore store = new MongoIndexJobStore(template);
-            PublishedGenerationPointer claimedParent = pointer("a", "g1", "job-g1");
-            seedPublished(template, "orders", claimedParent, true, 1);
-            IndexJob claimed = store.claim(store.admit(RepositoryId.of("orders"), new RepositoryRevision("b".repeat(40)), false).id(),
-                    "worker-a", Duration.ofSeconds(60)).orElseThrow();
-            ManifestDigest digest = new ManifestDigest("b".repeat(64));
-            template.getCollection(IndexCollections.GENERATION_MANIFESTS).insertOne(sealedManifest(claimed, digest));
-            PublishedGenerationPointer winner = pointer("c", "g-concurrent", "job-concurrent");
-            template.getCollection(IndexCollections.REPOSITORIES).updateOne(new org.bson.Document("repoId", "orders"), new org.bson.Document("$set",
-                    pointerDocument(winner)));
-
-            IndexPublicationIntent intent = store.prepareBuildPublication(claimed, digest).orElseThrow();
-
-            assertThat(intent.expectedParent()).contains(claimedParent);
-            assertThatThrownBy(() -> new com.java.semantic.indexer.store.MongoPublicationWriter(template).publish(buildCommand(claimed, intent)))
-                    .isInstanceOf(com.java.semantic.indexer.store.PublicationConflictException.class);
-            assertThat(store.find(claimed.id()).orElseThrow().phase()).isNotEqualTo(IndexJobPhase.COMPLETE);
-            assertThat(template.getCollection(IndexCollections.REPOSITORIES).find(new org.bson.Document("repoId", "orders")).first()
-                    .getString("generationId")).isEqualTo("g-concurrent");
-        }
-    }
-
-    @Test
-    void ensure_decision_matrix_returns_no_work_only_for_exact_current_contract() {
-        try (MongoDBContainer container = new MongoDBContainer("mongo:8.0.4")) {
-            container.start();
-            MongoTemplate template = new MongoTemplate(com.mongodb.client.MongoClients.create(container.getConnectionString()), "semantic");
-            new IndexSchemaBootstrap(template).bootstrap();
-            MongoIndexJobStore store = new MongoIndexJobStore(template);
-            RepositoryRevision revision = new RepositoryRevision("f".repeat(40));
-            seedPublished(template, "exact", pointer("f", "g-exact", "job-exact"), true, 1);
-            seedPublished(template, "stale", pointer("f", "g-stale", "job-stale"), false, 1);
-            seedPublished(template, "incompatible", pointer("f", "g-incompatible", "job-incompatible"), true, 99);
-            seedPublished(template, "changed", pointer("f", "g-changed", "job-changed"), true, 1);
-
-            IndexJob noWork = store.admitEnsure(RepositoryId.of("exact"), revision);
-            IndexJob stale = store.admitEnsure(RepositoryId.of("stale"), revision);
-            assertThat(noWork.operation()).isEqualTo(IndexJobOperation.NO_WORK);
-            assertThat(noWork.active()).isFalse();
-            assertThat(stale.operation()).isEqualTo(IndexJobOperation.BUILD);
-            assertThat(stale.active()).isTrue();
-            assertThat(stale.rebuild()).isTrue();
-            assertThat(template.getCollection(IndexCollections.INDEX_JOBS).find(new org.bson.Document("jobId", stale.id().value()))
-                    .first().getBoolean("rebuild")).isTrue();
-            assertThatThrownBy(() -> store.admitEnsure(RepositoryId.of("incompatible"), revision))
-                    .isInstanceOf(IndexSchemaRebuildRequiredException.class);
-            assertThatThrownBy(() -> store.admitEnsure(RepositoryId.of("incompatible"), new RepositoryRevision("a".repeat(40))))
-                    .isInstanceOf(IndexSchemaRebuildRequiredException.class);
-            assertThat(store.admitEnsure(RepositoryId.of("missing"), revision).active()).isTrue();
-            assertThat(store.admitEnsure(RepositoryId.of("changed"), new RepositoryRevision("a".repeat(40))).active()).isTrue();
-        }
-    }
-
-    @Test
-    void rollback_pointer_swap_survives_a_crash_before_terminal_job_and_reconciles_exactly_once() {
-        try (MongoDBContainer container = new MongoDBContainer("mongo:8.0.4")) {
-            container.start();
-            MongoTemplate template = new MongoTemplate(com.mongodb.client.MongoClients.create(container.getConnectionString()), "semantic");
-            new IndexSchemaBootstrap(template).bootstrap();
-            MongoIndexJobStore store = new MongoIndexJobStore(template);
-            PublishedGenerationPointer previous = pointer("a", "g-previous", "job-previous");
-            PublishedGenerationPointer current = pointer("b", "g-current", "job-current");
-            seedRepositoryWithRollback(template, "orders", current, previous);
-            seedManifest(template, "orders", previous, "worker-previous", 1L, true, 1);
-            IndexJob accepted = store.admitRollback(RepositoryId.of("orders"), current, previous);
-            IndexJob claimed = store.claim(accepted.id(), "worker-rollback", Duration.ofSeconds(60)).orElseThrow();
-
-            new com.java.semantic.indexer.store.MongoPublicationWriter(template).rollback(store.rollbackCommand(claimed).orElseThrow());
-
-            assertThat(store.find(claimed.id()).orElseThrow().active()).isTrue();
-            assertThat(store.reconcileCommitted(RepositoryId.of("orders"))).isPresent();
-            assertThat(store.find(claimed.id()).orElseThrow().phase()).isEqualTo(IndexJobPhase.COMPLETE);
-            assertThat(store.reconcileCommitted(RepositoryId.of("orders"))).isEmpty();
-        }
-    }
-
-    @Test
-    void revoke_win_blocks_delayed_publish_while_publish_win_reconciles_instead_of_failing() {
-        try (MongoDBContainer container = new MongoDBContainer("mongo:8.0.4")) {
-            container.start();
-            MongoTemplate template = new MongoTemplate(com.mongodb.client.MongoClients.create(container.getConnectionString()), "semantic");
-            new IndexSchemaBootstrap(template).bootstrap();
-            MongoIndexJobStore store = new MongoIndexJobStore(template);
-            IndexJob revokeAccepted = store.admit(RepositoryId.of("revoke-win"), new RepositoryRevision("a".repeat(40)), false);
-            IndexJob revokeClaimed = store.claim(revokeAccepted.id(), "worker-a", Duration.ofSeconds(60)).orElseThrow();
-            ManifestDigest revokeDigest = new ManifestDigest("a".repeat(64));
-            template.getCollection(IndexCollections.GENERATION_MANIFESTS).insertOne(sealedManifest(revokeClaimed, revokeDigest));
-            IndexPublicationIntent revokeIntent = store.prepareBuildPublication(revokeClaimed, revokeDigest).orElseThrow();
-            assertThat(store.revoke(revokeClaimed)).isTrue();
-            assertThatThrownBy(() -> new com.java.semantic.indexer.store.MongoGenerationWriter(template).writeBatch(
-                    new com.java.semantic.indexer.store.MongoGenerationWriter.GenerationLease(revokeClaimed.repositoryId(),
-                            revokeClaimed.generationId(), revokeClaimed.id().value(), revokeClaimed.workerId().orElseThrow(),
-                            revokeClaimed.fence().orElseThrow().value()), "late-write", List.of()))
-                    .isInstanceOf(IllegalStateException.class);
-            assertThatThrownBy(() -> new com.java.semantic.indexer.store.MongoPublicationWriter(template).publish(buildCommand(revokeClaimed, revokeIntent)))
-                    .isInstanceOf(com.java.semantic.indexer.store.PublicationConflictException.class);
-            assertThat(store.find(revokeClaimed.id()).orElseThrow().active()).isTrue();
-            assertThat(store.failAfterRevocation(revokeClaimed, IndexFailureCategory.WORKER_INTERRUPTED)).isTrue();
-
-            IndexJob publishAccepted = store.admit(RepositoryId.of("publish-win"), new RepositoryRevision("b".repeat(40)), false);
-            IndexJob publishClaimed = store.claim(publishAccepted.id(), "worker-b", Duration.ofSeconds(60)).orElseThrow();
-            ManifestDigest publishDigest = new ManifestDigest("b".repeat(64));
-            template.getCollection(IndexCollections.GENERATION_MANIFESTS).insertOne(sealedManifest(publishClaimed, publishDigest));
-            IndexPublicationIntent publishIntent = store.prepareBuildPublication(publishClaimed, publishDigest).orElseThrow();
-            new com.java.semantic.indexer.store.MongoPublicationWriter(template).publish(buildCommand(publishClaimed, publishIntent));
-            assertThat(new IndexJobWorker(store, new com.java.semantic.indexer.store.MongoPublicationWriter(template)).failOrCancel(publishClaimed)).isFalse();
-            assertThat(store.find(publishClaimed.id()).orElseThrow().phase()).isEqualTo(IndexJobPhase.COMPLETE);
-        }
-    }
-
-    @Test
-    void reconciliation_rejects_mismatched_intent_unsealed_manifest_and_wrong_rollback_pointer() {
-        try (MongoDBContainer container = new MongoDBContainer("mongo:8.0.4")) {
-            container.start();
-            MongoTemplate template = new MongoTemplate(com.mongodb.client.MongoClients.create(container.getConnectionString()), "semantic");
-            new IndexSchemaBootstrap(template).bootstrap();
-            MongoIndexJobStore store = new MongoIndexJobStore(template);
-            com.java.semantic.indexer.store.MongoPublicationWriter writer = new com.java.semantic.indexer.store.MongoPublicationWriter(template);
-
-            IndexJob mismatched = claimBuild(store, template, "mismatched-intent", "c");
-            IndexPublicationIntent mismatchedIntent = store.prepareBuildPublication(mismatched, new ManifestDigest("c".repeat(64))).orElseThrow();
-            writer.publish(buildCommand(mismatched, mismatchedIntent));
-            template.getCollection(IndexCollections.INDEX_JOBS).updateOne(new org.bson.Document("jobId", mismatched.id().value()),
-                    new org.bson.Document("$set", new org.bson.Document("publicationIntent.targetManifestDigest", "d".repeat(64))));
-            assertThat(store.reconcileCommitted(mismatched.repositoryId())).isEmpty();
-            assertThat(store.find(mismatched.id()).orElseThrow().active()).isTrue();
-
-            IndexJob unsealed = claimBuild(store, template, "unsealed-manifest", "e");
-            IndexPublicationIntent unsealedIntent = store.prepareBuildPublication(unsealed, new ManifestDigest("e".repeat(64))).orElseThrow();
-            writer.publish(buildCommand(unsealed, unsealedIntent));
-            template.getCollection(IndexCollections.GENERATION_MANIFESTS).updateOne(new org.bson.Document("ownerJobId", unsealed.id().value()),
-                    new org.bson.Document("$set", new org.bson.Document("writeState", "WRITING")));
-            assertThat(store.reconcileCommitted(unsealed.repositoryId())).isEmpty();
-
-            PublishedGenerationPointer previous = pointer("a", "g-reconcile-previous", "job-reconcile-previous");
-            PublishedGenerationPointer current = pointer("b", "g-reconcile-current", "job-reconcile-current");
-            seedRepositoryWithRollback(template, "wrong-rollback-pointer", current, previous);
-            seedManifest(template, "wrong-rollback-pointer", previous, "worker-previous", 1L, true, 1);
-            IndexJob rollback = store.claim(store.admitRollback(RepositoryId.of("wrong-rollback-pointer"), current, previous).id(),
-                    "worker-rollback", Duration.ofSeconds(60)).orElseThrow();
-            writer.rollback(store.rollbackCommand(rollback).orElseThrow());
-            template.getCollection(IndexCollections.REPOSITORIES).updateOne(new org.bson.Document("repoId", "wrong-rollback-pointer"),
-                    new org.bson.Document("$set", new org.bson.Document("rollbackPointer.manifestDigest", "c".repeat(64))));
-            assertThat(store.reconcileCommitted(rollback.repositoryId())).isEmpty();
-            assertThat(store.find(rollback.id()).orElseThrow().active()).isTrue();
-        }
-    }
-
-    @Test
-    void admits_one_active_job_per_repository_but_allows_independent_repositories_and_allocates_fences() {
-        try (MongoDBContainer container = new MongoDBContainer("mongo:8.0.4")) {
-            container.start();
-            MongoTemplate template = new MongoTemplate(com.mongodb.client.MongoClients.create(container.getConnectionString()), "semantic");
-            new IndexSchemaBootstrap(template).bootstrap();
-            MongoIndexJobStore store = new MongoIndexJobStore(template);
-            RepositoryRevision revision = new RepositoryRevision("a".repeat(40));
+    void admits_one_active_job_per_repository_and_independent_repositories() {
+        try (MongoDBContainer container = container()) {
+            MongoIndexJobStore store = store(container);
+            RepositoryRevision revision = revision("a");
             IndexJob orders = store.admit(RepositoryId.of("orders"), revision, false);
 
             assertThatThrownBy(() -> store.admit(RepositoryId.of("orders"), revision, false))
                     .isInstanceOf(IndexJobAlreadyActiveException.class);
             IndexJob payments = store.admit(RepositoryId.of("payments"), revision, false);
-            IndexJob claimedOrders = store.claim(orders.id(), "worker-a", Duration.ofSeconds(60)).orElseThrow();
-            IndexJob claimedPayments = store.claim(payments.id(), "worker-b", Duration.ofSeconds(60)).orElseThrow();
 
-            assertThat(claimedOrders.fence().orElseThrow().value()).isPositive();
-            assertThat(claimedPayments.fence().orElseThrow().value()).isPositive();
+            assertThat(orders.active()).isTrue();
+            assertThat(payments.active()).isTrue();
         }
     }
 
     @Test
-    void publication_state_returns_current_and_bounded_rollback_together() {
-        try (MongoDBContainer container = new MongoDBContainer("mongo:8.0.4")) {
-            container.start();
-            MongoTemplate template = new MongoTemplate(com.mongodb.client.MongoClients.create(container.getConnectionString()), "semantic");
-            new IndexSchemaBootstrap(template).bootstrap();
-            MongoIndexJobStore store = new MongoIndexJobStore(template);
+    void starts_only_accepted_jobs_and_terminal_transitions_require_running_jobs() {
+        try (MongoDBContainer container = container()) {
+            MongoIndexJobStore store = store(container);
+            IndexJob accepted = store.admit(RepositoryId.of("orders"), revision("a"), false);
+
+            assertThat(store.complete(accepted.id())).isFalse();
+            assertThat(store.fail(accepted.id(), IndexFailureCategory.WORKER_INTERRUPTED)).isFalse();
+            assertThat(store.start(accepted.id())).hasValueSatisfying(job -> assertThat(job.phase()).isEqualTo(IndexJobPhase.RUNNING));
+            assertThat(store.start(accepted.id())).isEmpty();
+            assertThat(store.complete(accepted.id())).isTrue();
+            assertThat(store.complete(accepted.id())).isFalse();
+            assertThat(store.fail(accepted.id(), IndexFailureCategory.WORKER_INTERRUPTED)).isFalse();
+        }
+    }
+
+    @Test
+    void build_target_round_trips_as_a_nested_document() {
+        try (MongoDBContainer container = container()) {
+            MongoTemplate template = template(container);
+            MongoIndexJobStore store = store(template);
+            IndexJob admitted = store.admit(RepositoryId.of("orders"), revision("a"), false);
+
+            Document document = template.getCollection(IndexCollections.INDEX_JOBS)
+                    .find(new Document("jobId", admitted.id().value())).first();
+
+            assertThat(document.get("target", Document.class)).isNotNull();
+            assertThat(document.containsKey("revision")).isFalse();
+            assertThat(document.containsKey("generationId")).isFalse();
+            assertThat(admitted.target()).contains(new IndexJobTarget(revision("a"), admitted.target().orElseThrow().generationId(), 1L));
+            assertThat(store.find(admitted.id()).orElseThrow()).isEqualTo(admitted);
+        }
+    }
+
+    @Test
+    void ensure_returns_inactive_targetless_no_work_only_for_an_exact_current_generation() {
+        try (MongoDBContainer container = container()) {
+            MongoTemplate template = template(container);
+            MongoIndexJobStore store = store(template);
+            RepositoryRevision revision = revision("f");
+            seedPublished(template, "exact", pointer("f", "g-exact", "job-exact"), true, IndexSchemaContract.SCHEMA_VERSION);
+            seedPublished(template, "stale", pointer("f", "g-stale", "job-stale"), false, IndexSchemaContract.SCHEMA_VERSION);
+            seedPublished(template, "incompatible", pointer("f", "g-incompatible", "job-incompatible"), true, 99);
+
+            IndexJob noWork = store.admitEnsure(RepositoryId.of("exact"), revision);
+            IndexJob rebuild = store.admitEnsure(RepositoryId.of("stale"), revision);
+
+            assertThat(noWork.operation()).isEqualTo(IndexJobOperation.NO_WORK);
+            assertThat(noWork.active()).isFalse();
+            assertThat(noWork.phase()).isEqualTo(IndexJobPhase.COMPLETE);
+            assertThat(noWork.target()).isEmpty();
+            assertThat(rebuild.operation()).isEqualTo(IndexJobOperation.BUILD);
+            assertThat(rebuild.rebuild()).isTrue();
+            assertThatThrownBy(() -> store.admitEnsure(RepositoryId.of("incompatible"), revision))
+                    .isInstanceOf(IndexSchemaRebuildRequiredException.class);
+        }
+    }
+
+    @Test
+    void rejects_stale_rollback_admission_and_generates_running_rollback_command() {
+        try (MongoDBContainer container = container()) {
+            MongoTemplate template = template(container);
+            MongoIndexJobStore store = store(template);
             PublishedGenerationPointer previous = pointer("a", "g-previous", "job-previous");
             PublishedGenerationPointer current = pointer("b", "g-current", "job-current");
             seedRepositoryWithRollback(template, "orders", current, previous);
+            seedManifest(template, "orders", previous, true, IndexSchemaContract.SCHEMA_VERSION);
 
-            IndexPublicationState state = store.publicationState(RepositoryId.of("orders")).orElseThrow();
+            assertThatThrownBy(() -> store.admitRollback(RepositoryId.of("orders"), previous, current))
+                    .isInstanceOf(PublicationConflictException.class);
+            IndexJob accepted = store.admitRollback(RepositoryId.of("orders"), current, previous);
+            assertThat(store.rollbackCommand(accepted)).isEmpty();
+            IndexJob running = store.start(accepted.id()).orElseThrow();
 
-            assertThat(state.currentPointer()).contains(current);
-            assertThat(state.rollbackPointer()).contains(previous);
-            assertThat(store.publicationState(RepositoryId.of("missing"))).isEmpty();
+            assertThat(store.rollbackCommand(running)).hasValueSatisfying(command -> {
+                assertThat(command.expectedCurrent()).isEqualTo(current);
+                assertThat(command.expectedRollback()).isEqualTo(previous);
+                assertThat(command.jobId()).isEqualTo(running.id().value());
+            });
+            new MongoPublicationWriter(template).rollback(store.rollbackCommand(running).orElseThrow());
+
+            assertThat(store.reconcileCommitted(RepositoryId.of("orders"))).hasValueSatisfying(job -> assertThat(job.phase()).isEqualTo(IndexJobPhase.COMPLETE));
+            assertThat(store.reconcileCommitted(RepositoryId.of("orders"))).isEmpty();
         }
     }
 
     @Test
-    void rebuild_claim_fails_terminally_when_the_recorded_parent_changed_after_admission() {
-        try (MongoDBContainer container = new MongoDBContainer("mongo:8.0.4")) {
-            container.start();
-            MongoTemplate template = new MongoTemplate(com.mongodb.client.MongoClients.create(container.getConnectionString()), "semantic");
-            new IndexSchemaBootstrap(template).bootstrap();
-            MongoIndexJobStore store = new MongoIndexJobStore(template);
-            PublishedGenerationPointer recorded = pointer("a", "g-recorded", "job-recorded");
-            PublishedGenerationPointer changed = pointer("b", "g-changed", "job-changed");
-            seedPublished(template, "orders", recorded, true, IndexSchemaContract.SCHEMA_VERSION);
-            IndexJob rebuild = store.admitRebuild(RepositoryId.of("orders"), recorded.revision(), recorded);
-            template.getCollection(IndexCollections.REPOSITORIES).updateOne(new org.bson.Document("repoId", "orders"),
-                    new org.bson.Document("$set", pointerDocument(changed)));
+    void reconciliation_completes_committed_running_jobs_and_fails_only_other_running_jobs() {
+        try (MongoDBContainer container = container()) {
+            MongoTemplate template = template(container);
+            MongoIndexJobStore store = store(template);
+            IndexJob committed = store.start(store.admit(RepositoryId.of("committed"), revision("c"), false).id()).orElseThrow();
+            ManifestDigest digest = new ManifestDigest("c".repeat(64));
+            template.getCollection(IndexCollections.GENERATION_MANIFESTS).insertOne(sealedManifest(committed, digest));
+            IndexPublicationIntent intent = store.prepareBuildPublication(committed, digest).orElseThrow();
+            new MongoPublicationWriter(template).publish(buildCommand(committed, intent));
+            IndexJob uncommitted = store.start(store.admit(RepositoryId.of("uncommitted"), revision("d"), false).id()).orElseThrow();
+            IndexJob accepted = store.admit(RepositoryId.of("accepted"), revision("e"), false);
 
-            assertThat(store.claim(rebuild.id(), "worker-rebuild", Duration.ofSeconds(60))).isEmpty();
-            IndexJob failed = store.find(rebuild.id()).orElseThrow();
-            assertThat(failed.active()).isFalse();
-            assertThat(failed.phase()).isEqualTo(IndexJobPhase.FAILED);
-            assertThat(failed.failureCategory()).contains(IndexFailureCategory.PUBLICATION_CONFLICT);
+            store.reconcileCommittedJobs();
+            store.failUnreconciledRunningJobs();
+
+            assertThat(store.find(committed.id()).orElseThrow().phase()).isEqualTo(IndexJobPhase.COMPLETE);
+            assertThat(store.reconcileCommitted(RepositoryId.of("committed"))).isEmpty();
+            assertThat(store.find(uncommitted.id()).orElseThrow().phase()).isEqualTo(IndexJobPhase.FAILED);
+            assertThat(store.find(uncommitted.id()).orElseThrow().failureCategory()).contains(IndexFailureCategory.WORKER_INTERRUPTED);
+            assertThat(store.find(accepted.id()).orElseThrow().phase()).isEqualTo(IndexJobPhase.ACCEPTED);
+            assertThat(store.find(accepted.id()).orElseThrow().active()).isTrue();
         }
     }
 
     @Test
-    void renews_the_exact_repository_claim_then_expires_and_retries_with_a_higher_fence() {
-        try (MongoDBContainer container = new MongoDBContainer("mongo:8.0.4")) {
-            container.start();
-            MongoTemplate template = new MongoTemplate(com.mongodb.client.MongoClients.create(container.getConnectionString()), "semantic");
-            new IndexSchemaBootstrap(template).bootstrap();
-            MongoIndexJobStore store = new MongoIndexJobStore(template);
-            RepositoryId repositoryId = RepositoryId.of("orders");
-            RepositoryRevision revision = new RepositoryRevision("b".repeat(40));
-            IndexJob initial = store.admit(repositoryId, revision, false);
-            IndexJob claimed = store.claim(initial.id(), "worker-a", Duration.ofSeconds(60)).orElseThrow();
+    void build_publication_requires_running_job_and_preserves_rebuild_parent_precondition() {
+        try (MongoDBContainer container = container()) {
+            MongoTemplate template = template(container);
+            MongoIndexJobStore store = store(template);
+            PublishedGenerationPointer parent = pointer("a", "g-parent", "job-parent");
+            seedPublished(template, "orders", parent, true, IndexSchemaContract.SCHEMA_VERSION);
+            IndexJob accepted = store.admitRebuild(RepositoryId.of("orders"), revision("b"), parent);
+            ManifestDigest digest = new ManifestDigest("b".repeat(64));
 
-            assertThat(store.renew(claimed, Duration.ofSeconds(120))).isTrue();
-            store.failExpiredClaims();
-            assertThat(store.find(claimed.id()).orElseThrow().active()).isTrue();
+            assertThat(store.prepareBuildPublication(accepted, digest)).isEmpty();
+            IndexJob running = store.start(accepted.id()).orElseThrow();
+            template.getCollection(IndexCollections.GENERATION_MANIFESTS).insertOne(sealedManifest(running, digest));
+            IndexPublicationIntent intent = store.prepareBuildPublication(running, digest).orElseThrow();
+            PublishedGenerationPointer winner = pointer("c", "g-winner", "job-winner");
+            template.getCollection(IndexCollections.REPOSITORIES).updateOne(new Document("repoId", "orders"), new Document("$set",
+                    new Document("currentPointer", pointerDocument(winner))));
 
-            template.getCollection("repositories").updateOne(new org.bson.Document("repoId", "orders"),
-                    new org.bson.Document("$set", new org.bson.Document("claimUntil", java.util.Date.from(java.time.Instant.now().minusSeconds(5)))));
-            store.failExpiredClaims();
-            assertThat(store.find(claimed.id()).orElseThrow().phase()).isEqualTo(IndexJobPhase.FAILED);
-
-            IndexJob retry = store.admit(repositoryId, revision, false);
-            IndexJob retriedClaim = store.claim(retry.id(), "worker-b", Duration.ofSeconds(60)).orElseThrow();
-            assertThat(retriedClaim.fence().orElseThrow().value()).isGreaterThan(claimed.fence().orElseThrow().value());
+            assertThat(intent.expectedParent()).contains(parent);
+            assertThatThrownBy(() -> new MongoPublicationWriter(template).publish(buildCommand(running, intent)))
+                    .isInstanceOf(PublicationConflictException.class);
         }
     }
 
-    @Test
-    void recovery_fails_only_revoked_claims_then_allows_a_new_job() {
-        try (MongoDBContainer container = new MongoDBContainer("mongo:8.0.4")) {
-            container.start();
-            MongoTemplate template = new MongoTemplate(com.mongodb.client.MongoClients.create(container.getConnectionString()), "semantic");
-            new IndexSchemaBootstrap(template).bootstrap();
-            MongoIndexJobStore store = new MongoIndexJobStore(template);
-            RepositoryRevision revision = new RepositoryRevision("d".repeat(40));
-
-            IndexJob revoked = store.claim(store.admit(RepositoryId.of("revoked"), revision, false).id(), "worker-revoked",
-                    Duration.ofSeconds(60)).orElseThrow();
-            assertThat(store.revoke(revoked)).isTrue();
-
-            IndexJob unclaimed = store.admit(RepositoryId.of("unclaimed"), revision, false);
-            IndexJob current = store.claim(store.admit(RepositoryId.of("current"), revision, false).id(), "worker-current",
-                    Duration.ofSeconds(60)).orElseThrow();
-            IndexJob committed = claimBuild(store, template, "committed", "e");
-            IndexPublicationIntent committedIntent = store.prepareBuildPublication(committed,
-                    new ManifestDigest("e".repeat(64))).orElseThrow();
-            new com.java.semantic.indexer.store.MongoPublicationWriter(template).publish(buildCommand(committed, committedIntent));
-
-            store.recoverRevokedClaims();
-            store.recoverRevokedClaims();
-
-            IndexJob recovered = store.find(revoked.id()).orElseThrow();
-            assertThat(recovered.active()).isFalse();
-            assertThat(recovered.phase()).isEqualTo(IndexJobPhase.FAILED);
-            assertThat(recovered.failureCategory()).contains(IndexFailureCategory.WORKER_INTERRUPTED);
-            assertThat(store.find(unclaimed.id()).orElseThrow().phase()).isEqualTo(IndexJobPhase.ACCEPTED);
-            assertThat(store.find(current.id()).orElseThrow().active()).isTrue();
-            assertThat(store.find(committed.id()).orElseThrow().active()).isTrue();
-            assertThat(store.admit(RepositoryId.of("revoked"), revision, false).active()).isTrue();
-        }
+    private static MongoDBContainer container() {
+        MongoDBContainer container = new MongoDBContainer("mongo:8.0.4");
+        container.start();
+        return container;
     }
 
-    private static org.bson.Document sealedManifest(IndexJob job, ManifestDigest digest) {
-        return new org.bson.Document("repoId", job.repositoryId().value()).append("sourceRevision", job.revision().value())
-                .append("generationId", job.generationId().value()).append("ownerJobId", job.id().value())
-                .append("ownerWorkerId", job.workerId().orElseThrow()).append("fence", job.fence().orElseThrow().value())
-                .append("sealUntil", Date.from(job.claimUntil().orElseThrow())).append("writeState", "SEALED_VALID")
-                .append("writeEpoch", 1L).append("schemaVersion", IndexSchemaContract.SCHEMA_VERSION)
-                .append("projectionVersions", projectionVersions())
-                .append("sealedCollectionCounts", new org.bson.Document("symbols", 1L)).append("identityDigest", digest.value())
-                .append("validationResult", "VALID").append("validatedAt", new java.util.Date());
+    private static MongoIndexJobStore store(MongoDBContainer container) {
+        return store(template(container));
     }
 
-    private static IndexJob claimBuild(MongoIndexJobStore store, MongoTemplate template, String repositoryId,
-                                       String revisionCharacter) {
-        IndexJob accepted = store.admit(RepositoryId.of(repositoryId), new RepositoryRevision(revisionCharacter.repeat(40)), false);
-        IndexJob claimed = store.claim(accepted.id(), "worker-" + revisionCharacter, Duration.ofSeconds(60)).orElseThrow();
-        template.getCollection(IndexCollections.GENERATION_MANIFESTS).insertOne(sealedManifest(claimed,
-                new ManifestDigest(revisionCharacter.repeat(64))));
-        return claimed;
+    private static MongoIndexJobStore store(MongoTemplate template) {
+        new IndexSchemaBootstrap(template).bootstrap();
+        return new MongoIndexJobStore(template);
+    }
+
+    private static MongoTemplate template(MongoDBContainer container) {
+        return new MongoTemplate(com.mongodb.client.MongoClients.create(container.getConnectionString()), "semantic");
+    }
+
+    private static RepositoryRevision revision(String character) {
+        return new RepositoryRevision(character.repeat(40));
+    }
+
+    private static Document sealedManifest(IndexJob job, ManifestDigest digest) {
+        IndexJobTarget target = job.target().orElseThrow();
+        return new Document("repoId", job.repositoryId().value()).append("sourceRevision", target.revision().value())
+                .append("generationId", target.generationId().value()).append("ownerJobId", job.id().value())
+                .append("writeState", "SEALED_VALID").append("writeEpoch", 1L).append("schemaVersion", IndexSchemaContract.SCHEMA_VERSION)
+                .append("projectionVersions", projectionVersions()).append("sealedCollectionCounts", new Document("symbols", 1L))
+                .append("identityDigest", digest.value()).append("validationResult", "VALID").append("validatedAt", new Date());
     }
 
     private static PublishedGenerationPointer pointer(String revisionCharacter, String generationId, String committedJobId) {
-        return new PublishedGenerationPointer(new RepositoryRevision(revisionCharacter.repeat(40)),
-                new com.java.semantic.model.index.GenerationId(generationId), new ManifestDigest(revisionCharacter.repeat(64)),
-                committedJobId, Instant.parse("2026-08-22T00:00:00Z"));
+        return new PublishedGenerationPointer(revision(revisionCharacter), new com.java.semantic.model.index.GenerationId(generationId),
+                new ManifestDigest(revisionCharacter.repeat(64)), committedJobId, Instant.parse("2026-08-22T00:00:00Z"));
     }
 
     private static void seedPublished(MongoTemplate template, String repositoryId, PublishedGenerationPointer pointer,
                                       boolean requiredProjections, int schemaVersion) {
         template.getCollection(IndexCollections.REPOSITORIES).insertOne(repositoryDocument(repositoryId, pointer));
-        template.getCollection(IndexCollections.GENERATION_MANIFESTS).insertOne(manifestForPointer(repositoryId, pointer,
-                "seed-worker", 1L, requiredProjections, schemaVersion));
+        seedManifest(template, repositoryId, pointer, requiredProjections, schemaVersion);
     }
 
     private static void seedRepositoryWithRollback(MongoTemplate template, String repositoryId,
                                                    PublishedGenerationPointer current, PublishedGenerationPointer rollback) {
-        org.bson.Document repository = repositoryDocument(repositoryId, current);
+        Document repository = repositoryDocument(repositoryId, current);
         repository.append("rollbackPointer", pointerDocument(rollback));
         template.getCollection(IndexCollections.REPOSITORIES).insertOne(repository);
     }
 
     private static void seedManifest(MongoTemplate template, String repositoryId, PublishedGenerationPointer pointer,
-                                     String workerId, long fence, boolean requiredProjections, int schemaVersion) {
-        template.getCollection(IndexCollections.GENERATION_MANIFESTS).insertOne(manifestForPointer(repositoryId, pointer,
-                workerId, fence, requiredProjections, schemaVersion));
+                                     boolean requiredProjections, int schemaVersion) {
+        List<Document> projections = requiredProjections ? projectionVersions() : List.of(new Document("name", "SOURCES").append("version", 0));
+        template.getCollection(IndexCollections.GENERATION_MANIFESTS).insertOne(new Document("repoId", repositoryId)
+                .append("sourceRevision", pointer.revision().value()).append("generationId", pointer.generationId().value())
+                .append("ownerJobId", pointer.committedJobId()).append("writeState", "SEALED_VALID").append("writeEpoch", 1L)
+                .append("schemaVersion", schemaVersion).append("projectionVersions", projections)
+                .append("sealedCollectionCounts", new Document("symbols", 1L)).append("identityDigest", pointer.manifestDigest().value())
+                .append("validationResult", "VALID").append("validatedAt", new Date()));
     }
 
     private static PublishGenerationCommand buildCommand(IndexJob job, IndexPublicationIntent intent) {
         return new PublishGenerationCommand(job.repositoryId(), intent.targetRevision(), intent.targetGenerationId(), job.id().value(),
-                job.workerId().orElseThrow(), job.fence().orElseThrow(), intent.expectedParent(), intent.targetManifestDigest());
+                intent.expectedParent(), intent.targetManifestDigest());
     }
 
-    private static org.bson.Document repositoryDocument(String repositoryId, PublishedGenerationPointer pointer) {
-        return new org.bson.Document("repoId", repositoryId).append("revision", pointer.revision().value())
-                .append("generationId", pointer.generationId().value()).append("manifestDigest", pointer.manifestDigest().value())
-                .append("committedJobId", pointer.committedJobId()).append("publishedAt", Date.from(pointer.publishedAt()))
-                .append("nextJobGeneration", 0L);
+    private static Document repositoryDocument(String repositoryId, PublishedGenerationPointer pointer) {
+        return new Document("repoId", repositoryId).append("currentPointer", pointerDocument(pointer));
     }
 
-    private static org.bson.Document pointerDocument(PublishedGenerationPointer pointer) {
-        return new org.bson.Document("revision", pointer.revision().value()).append("generationId", pointer.generationId().value())
+    private static Document pointerDocument(PublishedGenerationPointer pointer) {
+        return new Document("revision", pointer.revision().value()).append("generationId", pointer.generationId().value())
                 .append("manifestDigest", pointer.manifestDigest().value()).append("committedJobId", pointer.committedJobId())
                 .append("publishedAt", Date.from(pointer.publishedAt()));
     }
 
-    private static org.bson.Document manifestForPointer(String repositoryId, PublishedGenerationPointer pointer, String workerId,
-                                                         long fence, boolean requiredProjections, int schemaVersion) {
-        List<org.bson.Document> projections = requiredProjections
-                ? projectionVersions()
-                : List.of(new org.bson.Document("name", "SOURCES").append("version", 0));
-        return new org.bson.Document("repoId", repositoryId).append("sourceRevision", pointer.revision().value())
-                .append("generationId", pointer.generationId().value()).append("ownerJobId", pointer.committedJobId())
-                .append("ownerWorkerId", workerId).append("fence", fence).append("sealUntil", Date.from(Instant.now().plusSeconds(60)))
-                .append("writeState", "SEALED_VALID").append("writeEpoch", 1L).append("schemaVersion", schemaVersion)
-                .append("projectionVersions", projections).append("sealedCollectionCounts", new org.bson.Document("symbols", 1L))
-                .append("identityDigest", pointer.manifestDigest().value()).append("validationResult", "VALID")
-                .append("validatedAt", new Date());
-    }
-
-    private static List<org.bson.Document> projectionVersions() {
+    private static List<Document> projectionVersions() {
         return IndexSchemaContract.requiredProjectionVersions().entrySet().stream().sorted(java.util.Map.Entry.comparingByKey())
-                .map(entry -> new org.bson.Document("name", entry.getKey()).append("version", entry.getValue())).toList();
+                .map(entry -> new Document("name", entry.getKey()).append("version", entry.getValue())).toList();
     }
 }

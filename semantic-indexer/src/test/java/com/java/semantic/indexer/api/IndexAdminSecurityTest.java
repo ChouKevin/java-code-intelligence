@@ -54,9 +54,8 @@ class IndexAdminSecurityTest {
         filter.doFilter(request, response, (servletRequest, servletResponse) ->
                 ((jakarta.servlet.http.HttpServletResponse) servletResponse).setStatus(204));
         IndexJob job = new IndexJob(IndexJobId.create(), RepositoryId.of("orders"),
-                new RepositoryRevision("a".repeat(40)), new GenerationId("g-orders"), 1,
-                IndexJobPhase.ACCEPTED, true, java.util.Optional.empty(), java.util.Optional.empty(),
-                java.util.Optional.empty(), java.util.Optional.empty());
+                java.util.Optional.of(new com.java.semantic.indexer.job.IndexJobTarget(new RepositoryRevision("a".repeat(40)), new GenerationId("g-orders"), 1L)),
+                IndexJobPhase.ACCEPTED, true, java.util.Optional.empty(), false, com.java.semantic.indexer.job.IndexJobOperation.BUILD);
 
         assertThat(response.getContentAsString()).doesNotContain("admin-token");
         assertThat(properties.toString()).doesNotContain("admin-token");

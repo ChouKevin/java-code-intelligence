@@ -1,649 +1,410 @@
 package com.java.semantic.indexer.job;
 
+import com.java.semantic.indexer.store.PublicationConflictException;
 import com.java.semantic.model.index.GenerationId;
 import com.java.semantic.model.index.IndexCollections;
-import com.java.semantic.model.index.RepositoryFence;
 import com.java.semantic.model.index.IndexSchemaContract;
 import com.java.semantic.model.index.ManifestDigest;
 import com.java.semantic.model.index.PublishedGenerationPointer;
 import com.java.semantic.model.index.RollbackGenerationCommand;
-import com.java.semantic.indexer.store.PublicationConflictException;
 import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.model.repository.RepositoryRevision;
 import com.mongodb.DuplicateKeyException;
 import com.mongodb.ErrorCategory;
 import com.mongodb.MongoWriteException;
-import com.mongodb.client.result.UpdateResult;
+import com.mongodb.client.model.FindOneAndUpdateOptions;
+import com.mongodb.client.model.ReturnDocument;
+import com.mongodb.client.model.Updates;
 import org.bson.Document;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.data.mongodb.core.FindAndModifyOptions;
 import org.springframework.data.mongodb.core.MongoTemplate;
-import org.springframework.data.mongodb.core.aggregation.AggregationUpdate;
-import org.springframework.data.mongodb.core.query.BasicQuery;
-import org.springframework.data.mongodb.core.query.Criteria;
-import org.springframework.data.mongodb.core.query.Query;
-import org.springframework.data.mongodb.core.query.Update;
 import org.springframework.stereotype.Component;
 
-import java.time.Duration;
 import java.util.Date;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 
-/** Mongo coordination without transactions: repository fencing is always claimed before a worker proceeds. */
+/** Durable single-process job queue. Repository documents contain pointers only. */
 @Component
 public final class MongoIndexJobStore implements IndexJobStore {
-
     private static final String JOB_ID = "jobId";
-    private static final String REPO_ID = "repoId";
+    private static final String REPOSITORY_ID = "repoId";
     private static final String ACTIVE = "active";
     private final MongoTemplate template;
-    private final ClaimJobDocumentTransition claimJobDocumentTransition;
-    private final CaptureBuildParentTransition captureBuildParentTransition;
-    private final ReleaseRepositoryClaimTransition releaseRepositoryClaimTransition;
 
-    @Autowired
     public MongoIndexJobStore(MongoTemplate template) {
-        this(template, MongoIndexJobStore::claimJobDocument, MongoIndexJobStore::captureBuildParent,
-                MongoIndexJobStore::releaseExactRepositoryClaim);
-    }
-
-    MongoIndexJobStore(MongoTemplate template, ClaimJobDocumentTransition claimJobDocumentTransition) {
-        this(template, claimJobDocumentTransition, MongoIndexJobStore::captureBuildParent,
-                MongoIndexJobStore::releaseExactRepositoryClaim);
-    }
-
-    MongoIndexJobStore(MongoTemplate template, ClaimJobDocumentTransition claimJobDocumentTransition,
-                       CaptureBuildParentTransition captureBuildParentTransition) {
-        this(template, claimJobDocumentTransition, captureBuildParentTransition,
-                MongoIndexJobStore::releaseExactRepositoryClaim);
-    }
-
-    MongoIndexJobStore(MongoTemplate template, ClaimJobDocumentTransition claimJobDocumentTransition,
-                       CaptureBuildParentTransition captureBuildParentTransition,
-                       ReleaseRepositoryClaimTransition releaseRepositoryClaimTransition) {
         this.template = Objects.requireNonNull(template, "mongo template is required");
-        this.claimJobDocumentTransition = Objects.requireNonNull(claimJobDocumentTransition,
-                "claim job document transition is required");
-        this.captureBuildParentTransition = Objects.requireNonNull(captureBuildParentTransition,
-                "capture build parent transition is required");
-        this.releaseRepositoryClaimTransition = Objects.requireNonNull(releaseRepositoryClaimTransition,
-                "release repository claim transition is required");
     }
 
     @Override
     public IndexJob admit(RepositoryId repositoryId, RepositoryRevision revision, boolean rebuild) {
-        return admitBuild(repositoryId, revision, rebuild, Optional.empty());
+        Optional<PublishedGenerationPointer> expectedParent = publicationState(repositoryId)
+                .flatMap(IndexPublicationState::currentPointer);
+        return insertBuild(repositoryId, revision, rebuild, expectedParent);
     }
 
     @Override
-    public IndexJob admitRebuild(RepositoryId repositoryId, RepositoryRevision revision,
-                                 PublishedGenerationPointer expectedCurrent) {
+    public IndexJob admitRebuild(RepositoryId repositoryId, RepositoryRevision revision, PublishedGenerationPointer expectedCurrent) {
         Objects.requireNonNull(expectedCurrent, "expected current pointer is required");
-        Document current = template.getCollection(IndexCollections.REPOSITORIES)
-                .find(currentPointerFilter(repositoryId, expectedCurrent)).first();
-        if (Objects.isNull(current)) {
+        if (findRepository(repositoryId, expectedCurrent, Optional.empty()).isEmpty()) {
             throw new PublicationConflictException();
         }
-        return admitBuild(repositoryId, revision, true, Optional.of(expectedCurrent));
-    }
-
-    private IndexJob admitBuild(RepositoryId repositoryId, RepositoryRevision revision, boolean rebuild,
-                                Optional<PublishedGenerationPointer> expectedCurrent) {
-        IndexJobId jobId = IndexJobId.create();
-        long generation = nextGeneration(repositoryId);
-        GenerationId generationId = new GenerationId("g-" + jobId.value().replace("-", ""));
-        Document document = new Document(JOB_ID, jobId.value())
-                .append(REPO_ID, repositoryId.value())
-                .append("revision", revision.value())
-                .append("generationId", generationId.value())
-                .append("generation", generation)
-                .append("phase", IndexJobPhase.ACCEPTED.name())
-                .append(ACTIVE, true)
-                .append("rebuild", rebuild)
-                .append("operation", IndexJobOperation.BUILD.name())
-                .append("createdAt", new Date());
-        expectedCurrent.ifPresent(pointer -> document.append("expectedParent", pointerDocument(pointer)));
-        try {
-            template.getCollection(IndexCollections.INDEX_JOBS).insertOne(document);
-        } catch (DuplicateKeyException exception) {
-            throw new IndexJobAlreadyActiveException(repositoryId);
-        } catch (MongoWriteException exception) {
-            throwAdmissionFailure(repositoryId, exception);
-        }
-        return from(document);
+        return insertBuild(repositoryId, revision, true, Optional.of(expectedCurrent));
     }
 
     @Override
     public IndexJob admitEnsure(RepositoryId repositoryId, RepositoryRevision revision) {
-        Document repository = template.getCollection(IndexCollections.REPOSITORIES)
-                .find(new Document(REPO_ID, repositoryId.value())).first();
-        if (Objects.isNull(repository)) {
+        Optional<PublishedGenerationPointer> current = publicationState(repositoryId).flatMap(IndexPublicationState::currentPointer);
+        if (current.isEmpty()) {
             return admit(repositoryId, revision, false);
         }
-        Document manifest = template.getCollection(IndexCollections.GENERATION_MANIFESTS).find(new Document(REPO_ID, repositoryId.value())
-                .append("sourceRevision", repository.getString("revision")).append("generationId", repository.getString("generationId"))
-                .append("identityDigest", repository.getString("manifestDigest")).append("writeState", "SEALED_VALID")).first();
-        if (Objects.isNull(manifest)) {
+        PublishedGenerationPointer pointer = current.orElseThrow();
+        Document manifest = template.getCollection(IndexCollections.GENERATION_MANIFESTS).find(new Document(REPOSITORY_ID, repositoryId.value())
+                .append("generationId", pointer.generationId().value()).append("sourceRevision", pointer.revision().value())
+                .append("identityDigest", pointer.manifestDigest().value()).append("writeState", "SEALED_VALID")).first();
+        if (Objects.isNull(manifest) || !revision.equals(pointer.revision())) {
             return admit(repositoryId, revision, false);
         }
         Number schemaVersion = manifest.get("schemaVersion", Number.class);
         if (Objects.isNull(schemaVersion) || schemaVersion.intValue() != IndexSchemaContract.SCHEMA_VERSION) {
             throw new IndexSchemaRebuildRequiredException();
         }
-        if (!revision.value().equals(repository.getString("revision"))) {
-            return admit(repositoryId, revision, false);
-        }
         if (!hasRequiredProjections(manifest)) {
             return admit(repositoryId, revision, true);
         }
-        return insertNoWork(repositoryId, revision, repository.getString("generationId"));
+        return insertNoWork(repositoryId);
     }
 
     @Override
     public IndexJob admitRollback(RepositoryId repositoryId, PublishedGenerationPointer expectedCurrent,
                                   PublishedGenerationPointer expectedRollback) {
-        Document repository = template.getCollection(IndexCollections.REPOSITORIES).find(repositoryPointerFilter(
-                repositoryId, expectedCurrent, expectedRollback)).first();
-        if (Objects.isNull(repository) || !sealed(repositoryId, expectedRollback)) {
+        Objects.requireNonNull(expectedCurrent, "expected current pointer is required");
+        Objects.requireNonNull(expectedRollback, "expected rollback pointer is required");
+        if (findRepository(repositoryId, expectedCurrent, Optional.of(expectedRollback)).isEmpty() || !sealed(repositoryId, expectedRollback)) {
             throw new PublicationConflictException();
         }
         IndexJobId jobId = IndexJobId.create();
-        Document document = new Document(JOB_ID, jobId.value()).append(REPO_ID, repositoryId.value())
-                .append("revision", expectedRollback.revision().value()).append("generationId", expectedRollback.generationId().value())
-                .append("generation", nextGeneration(repositoryId)).append("phase", IndexJobPhase.ACCEPTED.name())
-                .append(ACTIVE, true).append("operation", IndexJobOperation.ROLLBACK.name())
-                .append("expectedCurrent", pointerDocument(expectedCurrent)).append("expectedRollback", pointerDocument(expectedRollback))
-                .append("publicationIntent", rollbackIntentDocument(jobId, repositoryId, expectedCurrent, expectedRollback))
-                .append("createdAt", new Date());
-        try {
-            template.getCollection(IndexCollections.INDEX_JOBS).insertOne(document);
-        } catch (DuplicateKeyException exception) {
-            throw new IndexJobAlreadyActiveException(repositoryId);
-        } catch (MongoWriteException exception) {
-            throwAdmissionFailure(repositoryId, exception);
-        }
-        return from(document);
+        IndexJobTarget target = new IndexJobTarget(expectedRollback.revision(), expectedRollback.generationId(), nextGeneration(repositoryId));
+        Document job = targetDocument(jobId, repositoryId, target, IndexJobOperation.ROLLBACK, false)
+                .append("expectedCurrent", pointerDocument(expectedCurrent)).append("expectedRollback", pointerDocument(expectedRollback));
+        job.append("publicationIntent", intentDocument(new IndexPublicationIntent(jobId, IndexJobOperation.ROLLBACK, repositoryId,
+                expectedRollback.revision(), expectedRollback.generationId(), expectedRollback.manifestDigest(), Optional.empty(),
+                Optional.of(expectedCurrent), Optional.of(expectedRollback))));
+        insert(job, repositoryId);
+        return from(job);
     }
 
     @Override
     public Optional<IndexJob> find(IndexJobId jobId) {
-        Document document = findDocument(jobId);
-        return Optional.ofNullable(document).map(MongoIndexJobStore::from);
+        return Optional.ofNullable(template.getCollection(IndexCollections.INDEX_JOBS).find(new Document(JOB_ID, jobId.value())).first())
+                .map(MongoIndexJobStore::from);
     }
 
     @Override
-    public Optional<IndexJob> claim(IndexJobId jobId, String workerId, Duration claimLifetime) {
-        Objects.requireNonNull(jobId, "job id is required");
-        Objects.requireNonNull(workerId, "worker id is required");
-        requirePositive(claimLifetime, "claim lifetime");
-        Document jobDocument = findDocument(jobId);
-        IndexJob job = Optional.ofNullable(jobDocument).map(MongoIndexJobStore::from).orElse(null); // cs-allow
-        if (Objects.isNull(job) || !job.active()) {
+    public Optional<IndexJob> start(IndexJobId jobId) {
+        Document started = template.getCollection(IndexCollections.INDEX_JOBS).findOneAndUpdate(
+                new Document(JOB_ID, jobId.value()).append(ACTIVE, true).append("phase", IndexJobPhase.ACCEPTED.name()),
+                Updates.set("phase", IndexJobPhase.RUNNING.name()));
+        if (Objects.isNull(started)) {
             return Optional.empty();
         }
-        Optional<PublishedGenerationPointer> expectedParent = Optional.ofNullable(
-                Objects.requireNonNull(jobDocument, "active job document is required").get("expectedParent", Document.class))
-                .map(MongoIndexJobStore::pointerFrom);
-        AggregationUpdate claimUpdate = AggregationUpdate.update()
-                .set("fence").toValue(new Document("$add", java.util.List.of(
-                        new Document("$ifNull", java.util.List.of("$fence", 0)), 1)))
-                .set("activeJobId").toValue(job.id().value())
-                .set("activeWorkerId").toValue(workerId)
-                .set("activeGenerationId").toValue(job.generationId().value())
-                .set("claimUntil").toValue(serverExpiry(claimLifetime));
-        Document repository;
-        try {
-            repository = template.findAndModify(
-                    new BasicQuery(repositoryAdmissionFilter(job, expectedParent)),
-                    claimUpdate, FindAndModifyOptions.options().upsert(true).returnNew(true), Document.class, IndexCollections.REPOSITORIES);
-        } catch (DuplicateKeyException | MongoWriteException | org.springframework.dao.DuplicateKeyException exception) {
-            repository = null; // cs-allow
-        }
-        if (Objects.isNull(repository)) {
-            if (expectedParent.isPresent() && Objects.isNull(template.getCollection(IndexCollections.REPOSITORIES)
-                    .find(currentPointerFilter(job.repositoryId(), expectedParent.orElseThrow())).first())) {
-                failAcceptedJob(job, IndexFailureCategory.PUBLICATION_CONFLICT);
-            }
-            return Optional.empty();
-        }
-        Number fenceValue = repository.get("fence", Number.class);
-        if (Objects.isNull(fenceValue)) {
-            releaseRepositoryClaimWithoutFence(job, workerId);
-            return Optional.empty();
-        }
-        Date serverClaimUntil = repository.getDate("claimUntil");
-        if (Objects.isNull(serverClaimUntil)) {
-            releaseExactRepositoryClaim(job, workerId, fenceValue.longValue());
-            return Optional.empty();
-        }
-        Document claimed;
-        try {
-            claimed = claimJobDocumentTransition.claim(template, job, workerId, fenceValue.longValue(), serverClaimUntil);
-        } catch (RuntimeException exception) {
-            releaseExactRepositoryClaim(job, workerId, fenceValue.longValue());
-            throw exception;
-        }
-        if (Objects.isNull(claimed)) {
-            releaseExactRepositoryClaim(job, workerId, fenceValue.longValue());
-            return Optional.empty();
-        }
-        try {
-            if (!captureBuildParentTransition.capture(template, job, workerId, fenceValue.longValue(), repository)) {
-                compensateClaim(job, workerId, fenceValue.longValue());
-                return Optional.empty();
-            }
-        } catch (RuntimeException exception) {
-            try {
-                compensateClaim(job, workerId, fenceValue.longValue());
-            } catch (RuntimeException cleanupException) {
-                exception.addSuppressed(cleanupException);
-            }
-            throw exception;
-        }
-        return Optional.of(claimed).map(MongoIndexJobStore::from);
+        return find(jobId);
     }
 
     @Override
-    public boolean renew(IndexJob job, Duration claimLifetime) {
-        Objects.requireNonNull(job, "job is required");
-        requirePositive(claimLifetime, "claim lifetime");
-        String workerId = job.workerId().orElseThrow();
-        long fence = job.fence().orElseThrow().value();
-        Document result = template.findAndModify(new BasicQuery(repositoryClaim(job, workerId, fence)
-                        .append("$expr", new Document("$gt", java.util.List.of("$claimUntil", "$$NOW")))),
-                AggregationUpdate.update().set("claimUntil").toValue(serverExpiry(claimLifetime)),
-                FindAndModifyOptions.options().returnNew(true),
-                Document.class, IndexCollections.REPOSITORIES);
-        if (Objects.isNull(result)) {
-            return false;
-        }
-        Date serverClaimUntil = result.getDate("claimUntil");
-        UpdateResult jobUpdate = template.updateFirst(
-                new BasicQuery(jobOwnership(job, workerId, fence)), new Update().set("claimUntil", serverClaimUntil),
-                IndexCollections.INDEX_JOBS);
-        if (jobUpdate.getModifiedCount() == 1 && mirrorManifestExpiry(job, workerId, fence, serverClaimUntil)) {
-            return true;
-        }
-        if (revoke(job)) {
-            failAfterRevocation(job, IndexFailureCategory.WORKER_INTERRUPTED);
-        } else {
-            reconcileCommitted(job.repositoryId());
-        }
-        return false;
-    }
+    public boolean complete(IndexJobId jobId) { return terminal(jobId, IndexJobPhase.COMPLETE, Optional.empty()); }
 
     @Override
-    public boolean revoke(IndexJob job) {
-        String workerId = job.workerId().orElseThrow();
-        long fence = job.fence().orElseThrow().value();
-        Document result = template.findAndModify(new BasicQuery(repositoryClaim(job, workerId, fence)),
-                new Update().unset("activeJobId").unset("activeWorkerId").unset("activeGenerationId").unset("claimUntil"),
-                FindAndModifyOptions.options().returnNew(true), Document.class, IndexCollections.REPOSITORIES);
-        return Objects.nonNull(result);
+    public boolean fail(IndexJobId jobId, IndexFailureCategory category) {
+        return terminal(jobId, IndexJobPhase.FAILED, Optional.of(Objects.requireNonNull(category, "failure category is required")));
     }
 
-    @Override
-    public boolean failAfterRevocation(IndexJob job, IndexFailureCategory category) {
-        Objects.requireNonNull(category, "failure category is required");
-        String workerId = job.workerId().orElseThrow();
-        long fence = job.fence().orElseThrow().value();
-        UpdateResult updated = template.updateFirst(new BasicQuery(jobOwnership(job, workerId, fence).append("operation", job.operation().name())),
-                new Update().set(ACTIVE, false).set("phase", IndexJobPhase.FAILED.name())
-                        .set("failureCategory", category.name()), IndexCollections.INDEX_JOBS);
-        return updated.getModifiedCount() == 1;
-    }
-
-    @Override
-    public void failExpiredClaims() {
-        Query query = new BasicQuery(new Document("activeJobId", new Document("$exists", true))
-                .append("$expr", new Document("$lte", java.util.List.of("$claimUntil", "$$NOW"))));
-        java.util.List<Document> expiredClaims = template.find(query, Document.class, IndexCollections.REPOSITORIES);
-        java.util.List<IndexJob> expired = expiredClaims.stream().map(this::jobForClaim).flatMap(Optional::stream).toList();
-        for (IndexJob job : expired) {
-            if (revoke(job)) {
-                failAfterRevocation(job, IndexFailureCategory.WORKER_INTERRUPTED);
-            }
-        }
+    private boolean terminal(IndexJobId jobId, IndexJobPhase phase, Optional<IndexFailureCategory> category) {
+        Document update = new Document("$set", new Document(ACTIVE, false).append("phase", phase.name()));
+        category.ifPresent(value -> update.get("$set", Document.class).append("failureCategory", value.name()));
+        return template.getCollection(IndexCollections.INDEX_JOBS).updateOne(new Document(JOB_ID, jobId.value()).append(ACTIVE, true)
+                .append("phase", IndexJobPhase.RUNNING.name()), update).getModifiedCount() == 1L;
     }
 
     @Override
     public void reconcileCommittedJobs() {
-        Query query = new BasicQuery(new Document("committedJobId", new Document("$exists", true))
-                .append("activeJobId", new Document("$exists", false)));
-        java.util.List<Document> repositories = template.find(query, Document.class, IndexCollections.REPOSITORIES);
-        for (Document repository : repositories) {
-            String repositoryId = repository.getString(REPO_ID);
-            if (Objects.nonNull(repositoryId)) {
-                reconcileCommitted(RepositoryId.of(repositoryId));
-            }
+        for (Document repository : template.getCollection(IndexCollections.REPOSITORIES).find()) {
+            reconcileCommitted(RepositoryId.of(repository.getString(REPOSITORY_ID)));
         }
     }
 
     @Override
-    public void recoverRevokedClaims() {
-        recoverRevokedClaims(claimedJobFilter());
-    }
-
-    @Override
-    public void recoverRevokedClaims(RepositoryId repositoryId) {
-        Objects.requireNonNull(repositoryId, "repository id is required");
-        Document filter = claimedJobFilter();
-        filter.append(REPO_ID, repositoryId.value());
-        recoverRevokedClaims(filter);
+    public void failUnreconciledRunningJobs() {
+        template.getCollection(IndexCollections.INDEX_JOBS).updateMany(new Document(ACTIVE, true).append("phase", IndexJobPhase.RUNNING.name()),
+                new Document("$set", new Document(ACTIVE, false).append("phase", IndexJobPhase.FAILED.name())
+                        .append("failureCategory", IndexFailureCategory.WORKER_INTERRUPTED.name())));
     }
 
     @Override
     public Optional<IndexJob> reconcileCommitted(RepositoryId repositoryId) {
-        Document repository = template.getCollection(IndexCollections.REPOSITORIES).find(new Document(REPO_ID, repositoryId.value())
-                .append("committedJobId", new Document("$exists", true)).append("activeJobId", new Document("$exists", false))).first();
+        Document repository = template.getCollection(IndexCollections.REPOSITORIES)
+                .find(new Document(REPOSITORY_ID, repositoryId.value()).append("currentPointer.committedJobId", new Document("$exists", true))).first();
         if (Objects.isNull(repository)) {
             return Optional.empty();
         }
-        String committedJobId = repository.getString("committedJobId");
-        Document candidate = template.getCollection(IndexCollections.INDEX_JOBS).find(new Document(JOB_ID, committedJobId)
-                .append(REPO_ID, repositoryId.value()).append(ACTIVE, true)).first();
+        Document currentPointer = Objects.requireNonNull(repository.get("currentPointer", Document.class), "current pointer is required");
+        String committedJobId = currentPointer.getString("committedJobId");
+        Document candidate = activeRunningJob(repositoryId, committedJobId);
         if (Objects.isNull(candidate) || !matchesCommittedResult(repository, candidate)) {
             return Optional.empty();
         }
-        Document job = template.findAndModify(new BasicQuery(new Document(JOB_ID, committedJobId).append(REPO_ID, repositoryId.value())
-                        .append(ACTIVE, true)), new Update().set(ACTIVE, false).set("phase", IndexJobPhase.COMPLETE.name()),
-                FindAndModifyOptions.options().returnNew(true), Document.class, IndexCollections.INDEX_JOBS);
-        return Optional.ofNullable(job).map(MongoIndexJobStore::from);
+        Document completed = template.getCollection(IndexCollections.INDEX_JOBS).findOneAndUpdate(activeRunningFilter(repositoryId, committedJobId),
+                new Document("$set", new Document(ACTIVE, false).append("phase", IndexJobPhase.COMPLETE.name())),
+                new FindOneAndUpdateOptions().returnDocument(ReturnDocument.AFTER));
+        return Optional.ofNullable(completed).map(MongoIndexJobStore::from);
     }
 
     @Override
     public Optional<RepositoryRevision> currentRevision(RepositoryId repositoryId) {
-        Document document = template.getCollection(IndexCollections.REPOSITORIES).find(new Document(REPO_ID, repositoryId.value())
-                .append("revision", new Document("$exists", true))).first();
-        return Optional.ofNullable(document).map(value -> new RepositoryRevision(value.getString("revision")));
+        return publicationState(repositoryId).flatMap(IndexPublicationState::currentPointer).map(PublishedGenerationPointer::revision);
     }
 
     @Override
     public Optional<IndexPublicationState> publicationState(RepositoryId repositoryId) {
-        Objects.requireNonNull(repositoryId, "repository id is required");
-        Document repository = template.getCollection(IndexCollections.REPOSITORIES)
-                .find(new Document(REPO_ID, repositoryId.value())).first();
-        return Optional.ofNullable(repository).map(value -> new IndexPublicationState(pointerFromRepository(value),
-                Optional.ofNullable(value.get("rollbackPointer", Document.class)).map(MongoIndexJobStore::pointerFrom)));
+        Document repository = template.getCollection(IndexCollections.REPOSITORIES).find(new Document(REPOSITORY_ID, repositoryId.value())).first();
+        if (Objects.isNull(repository)) {
+            return Optional.empty();
+        }
+        return Optional.of(new IndexPublicationState(pointerFromRepository(repository), Optional.ofNullable(repository.get("rollbackPointer", Document.class))
+                .map(MongoIndexJobStore::pointerFrom)));
     }
 
     @Override
     public Optional<RollbackGenerationCommand> rollbackCommand(IndexJob job) {
-        Objects.requireNonNull(job, "job is required");
-        if (job.operation() != IndexJobOperation.ROLLBACK || job.workerId().isEmpty() || job.fence().isEmpty()) {
+        if (job.operation() != IndexJobOperation.ROLLBACK || job.target().isEmpty()) {
             return Optional.empty();
         }
-        IndexPublicationIntent intent = publicationIntent(job.id()).orElse(null); // cs-allow
-        if (Objects.isNull(intent) || intent.operation() != IndexJobOperation.ROLLBACK) {
+        Document document = activeRunning(job);
+        if (Objects.isNull(document)) {
             return Optional.empty();
         }
-        Document owned = template.getCollection(IndexCollections.INDEX_JOBS).find(jobOwnership(job,
-                job.workerId().orElseThrow(), job.fence().orElseThrow().value())).first();
-        if (Objects.isNull(owned)) {
+        Document current = document.get("expectedCurrent", Document.class);
+        Document rollback = document.get("expectedRollback", Document.class);
+        if (Objects.isNull(current) || Objects.isNull(rollback)) {
             return Optional.empty();
         }
-        return Optional.of(new RollbackGenerationCommand(job.repositoryId(), intent.expectedCurrent().orElseThrow(),
-                intent.expectedRollback().orElseThrow(), job.id().value(), job.workerId().orElseThrow(), job.fence().orElseThrow()));
+        return Optional.of(new RollbackGenerationCommand(job.repositoryId(), pointerFrom(current), pointerFrom(rollback), job.id().value()));
     }
 
     @Override
     public Optional<IndexPublicationIntent> prepareBuildPublication(IndexJob job, ManifestDigest sealedManifestDigest) {
-        Objects.requireNonNull(job, "job is required");
-        Objects.requireNonNull(sealedManifestDigest, "sealed manifest digest is required");
-        if (job.operation() != IndexJobOperation.BUILD || job.workerId().isEmpty() || job.fence().isEmpty()) {
+        if (job.operation() != IndexJobOperation.BUILD || job.target().isEmpty() || Objects.isNull(activeRunning(job))) {
             return Optional.empty();
         }
-        Optional<IndexPublicationIntent> existing = publicationIntent(job.id());
-        if (existing.isPresent()) {
-            return existing;
+        IndexJobTarget target = job.target().orElseThrow();
+        Document stored = activeRunning(job);
+        Document persisted = stored.get("publicationIntent", Document.class);
+        if (Objects.nonNull(persisted)) {
+            return Optional.of(intentFrom(persisted));
         }
-        Document repository = template.getCollection(IndexCollections.REPOSITORIES).find(repositoryClaim(job,
-                job.workerId().orElseThrow(), job.fence().orElseThrow().value())).first();
-        if (Objects.isNull(repository)) {
-            return Optional.empty();
-        }
-        Document claimedJob = template.getCollection(IndexCollections.INDEX_JOBS).find(jobOwnership(job,
-                job.workerId().orElseThrow(), job.fence().orElseThrow().value()).append("buildParentCaptured", true)).first();
-        if (Objects.isNull(claimedJob)) {
-            return Optional.empty();
-        }
-        Optional<PublishedGenerationPointer> parent = Optional.ofNullable(claimedJob.get("buildParent", Document.class))
-                .map(MongoIndexJobStore::pointerFrom);
-        IndexPublicationIntent intent = new IndexPublicationIntent(job.id(), IndexJobOperation.BUILD, job.repositoryId(), job.revision(),
-                job.generationId(), sealedManifestDigest, parent, Optional.empty(), Optional.empty());
-        UpdateResult saved = template.updateFirst(new BasicQuery(jobOwnership(job, job.workerId().orElseThrow(),
-                        job.fence().orElseThrow().value()).append("publicationIntent", new Document("$exists", false))),
-                new Update().set("publicationIntent", intentDocument(intent)), IndexCollections.INDEX_JOBS);
-        if (saved.getModifiedCount() == 1) {
+        Optional<PublishedGenerationPointer> parent = Optional.ofNullable(stored.get("expectedParent", Document.class)).map(MongoIndexJobStore::pointerFrom);
+        IndexPublicationIntent intent = new IndexPublicationIntent(job.id(), IndexJobOperation.BUILD, job.repositoryId(), target.revision(),
+                target.generationId(), sealedManifestDigest, parent, Optional.empty(), Optional.empty());
+        long updated = template.getCollection(IndexCollections.INDEX_JOBS).updateOne(activeRunningFilter(job.repositoryId(), job.id().value())
+                .append("publicationIntent", new Document("$exists", false)), new Document("$set", new Document("publicationIntent", intentDocument(intent)))).getModifiedCount();
+        if (updated == 1L) {
             return Optional.of(intent);
         }
-        return publicationIntent(job.id());
-    }
-
-    @Override
-    public Optional<IndexPublicationIntent> publicationIntent(IndexJobId jobId) {
-        Objects.requireNonNull(jobId, "job id is required");
-        Document job = template.getCollection(IndexCollections.INDEX_JOBS).find(new Document(JOB_ID, jobId.value())
-                .append("publicationIntent", new Document("$exists", true))).first();
-        if (Objects.isNull(job)) {
+        Document refreshed = activeRunning(job);
+        if (Objects.isNull(refreshed)) {
             return Optional.empty();
         }
-        return Optional.of(intentFrom(job.get("publicationIntent", Document.class)));
+        return Optional.ofNullable(refreshed.get("publicationIntent", Document.class)).map(MongoIndexJobStore::intentFrom);
+    }
+
+    private IndexJob insertBuild(RepositoryId repositoryId, RepositoryRevision revision, boolean rebuild,
+                                 Optional<PublishedGenerationPointer> expectedParent) {
+        IndexJobId jobId = IndexJobId.create();
+        IndexJobTarget target = new IndexJobTarget(revision, new GenerationId("g-" + jobId.value().replace("-", "")), nextGeneration(repositoryId));
+        Document job = targetDocument(jobId, repositoryId, target, IndexJobOperation.BUILD, rebuild);
+        expectedParent.ifPresent(pointer -> job.append("expectedParent", pointerDocument(pointer)));
+        insert(job, repositoryId);
+        return from(job);
+    }
+
+    private IndexJob insertNoWork(RepositoryId repositoryId) {
+        IndexJobId jobId = IndexJobId.create();
+        Document job = new Document(JOB_ID, jobId.value()).append(REPOSITORY_ID, repositoryId.value()).append(ACTIVE, false)
+                .append("phase", IndexJobPhase.COMPLETE.name()).append("operation", IndexJobOperation.NO_WORK.name()).append("createdAt", new Date());
+        template.getCollection(IndexCollections.INDEX_JOBS).insertOne(job);
+        return from(job);
+    }
+
+    private static Document targetDocument(IndexJobId jobId, RepositoryId repositoryId, IndexJobTarget target,
+                                           IndexJobOperation operation, boolean rebuild) {
+        return new Document(JOB_ID, jobId.value()).append(REPOSITORY_ID, repositoryId.value()).append("target", targetDocument(target)).append(ACTIVE, true)
+                .append("phase", IndexJobPhase.ACCEPTED.name()).append("operation", operation.name()).append("rebuild", rebuild).append("createdAt", new Date());
+    }
+
+    private static Document targetDocument(IndexJobTarget target) {
+        return new Document("revision", target.revision().value()).append("generationId", target.generationId().value())
+                .append("generation", target.generation());
+    }
+
+    private void insert(Document job, RepositoryId repositoryId) {
+        try {
+            template.getCollection(IndexCollections.INDEX_JOBS).insertOne(job);
+        } catch (DuplicateKeyException exception) {
+            throw new IndexJobAlreadyActiveException(repositoryId);
+        } catch (MongoWriteException exception) {
+            if (exception.getError().getCategory() == ErrorCategory.DUPLICATE_KEY) {
+                throw new IndexJobAlreadyActiveException(repositoryId);
+            }
+            throw exception;
+        }
     }
 
     private long nextGeneration(RepositoryId repositoryId) {
-        Document document = template.findAndModify(new BasicQuery(new Document(REPO_ID, repositoryId.value())),
-                new Update().inc("nextJobGeneration", 1), FindAndModifyOptions.options().upsert(true).returnNew(true),
-                Document.class, IndexCollections.REPOSITORIES);
-        Number value = document.get("nextJobGeneration", Number.class);
-        return value.longValue();
-    }
-
-    private static void throwAdmissionFailure(RepositoryId repositoryId, MongoWriteException exception) {
-        if (exception.getError().getCategory() == ErrorCategory.DUPLICATE_KEY) {
-            throw new IndexJobAlreadyActiveException(repositoryId);
+        Document maximum = template.getCollection(IndexCollections.INDEX_JOBS).find(new Document(REPOSITORY_ID, repositoryId.value()))
+                .sort(new Document("target.generation", -1)).limit(1).first();
+        if (Objects.isNull(maximum)) {
+            return 1L;
         }
-        throw exception;
-    }
-
-    private IndexJob insertNoWork(RepositoryId repositoryId, RepositoryRevision revision, String generationId) {
-        IndexJobId id = IndexJobId.create();
-        Document document = new Document(JOB_ID, id.value()).append(REPO_ID, repositoryId.value()).append("revision", revision.value())
-                .append("generationId", generationId).append("generation", nextGeneration(repositoryId)).append("phase", IndexJobPhase.COMPLETE.name())
-                .append(ACTIVE, false).append("operation", IndexJobOperation.NO_WORK.name()).append("createdAt", new Date());
-        template.getCollection(IndexCollections.INDEX_JOBS).insertOne(document);
-        return from(document);
+        Document target = maximum.get("target", Document.class);
+        if (Objects.isNull(target)) {
+            return 1L;
+        }
+        Number generation = target.get("generation", Number.class);
+        return Objects.isNull(generation) ? 1L : generation.longValue() + 1L;
     }
 
     private static boolean hasRequiredProjections(Document manifest) {
-        java.util.List<Document> versions = manifest.getList("projectionVersions", Document.class);
-        if (Objects.isNull(versions)) {
+        Object values = manifest.get("projectionVersions");
+        if (!(values instanceof List<?> list)) {
             return false;
         }
-        java.util.Map<String, Integer> actual = new java.util.LinkedHashMap<>();
-        for (Document version : versions) {
-            String name = version.getString("name");
-            Number value = version.get("version", Number.class);
-            if (Objects.isNull(name) || Objects.isNull(value)) {
+        Map<String, Integer> actual = new HashMap<>();
+        for (Object value : list) {
+            if (!(value instanceof Document document)) {
                 return false;
             }
-            actual.put(name, value.intValue());
-        }
-        return actual.equals(IndexSchemaContract.requiredProjectionVersions());
-    }
-
-    private static Document repositoryClaim(IndexJob job, String workerId, long fence) {
-        return new Document(REPO_ID, job.repositoryId().value()).append("activeJobId", job.id().value())
-                .append("activeWorkerId", workerId).append("activeGenerationId", job.generationId().value()).append("fence", fence);
-    }
-
-    private static Document repositoryAdmissionFilter(IndexJob job,
-                                                      Optional<PublishedGenerationPointer> expectedParent) {
-        Document filter = new Document(REPO_ID, job.repositoryId().value())
-                .append("activeJobId", new Document("$exists", false));
-        expectedParent.ifPresent(pointer -> pointerDocument(pointer).forEach(filter::append));
-        return filter;
-    }
-
-    private static Document currentPointerFilter(RepositoryId repositoryId, PublishedGenerationPointer pointer) {
-        Document filter = pointerDocument(pointer);
-        filter.put(REPO_ID, repositoryId.value());
-        return filter;
-    }
-
-    private Document findDocument(IndexJobId jobId) {
-        return template.getCollection(IndexCollections.INDEX_JOBS)
-                .find(new Document(JOB_ID, jobId.value())).first();
-    }
-
-    private void failAcceptedJob(IndexJob job, IndexFailureCategory category) {
-        template.updateFirst(new BasicQuery(new Document(JOB_ID, job.id().value()).append(ACTIVE, true)
-                        .append("phase", IndexJobPhase.ACCEPTED.name())),
-                new Update().set(ACTIVE, false).set("phase", IndexJobPhase.FAILED.name())
-                        .set("failureCategory", category.name()), IndexCollections.INDEX_JOBS);
-    }
-
-    private static Document repositoryWithoutAuthorityForUncommittedJob(IndexJob job) {
-        return new Document(REPO_ID, job.repositoryId().value()).append("activeJobId", new Document("$exists", false))
-                .append("committedJobId", new Document("$ne", job.id().value()));
-    }
-
-    private static Document claimedJobFilter() {
-        return new Document(ACTIVE, true).append("workerId", new Document("$exists", true))
-                .append("fence", new Document("$exists", true)).append("claimUntil", new Document("$exists", true))
-                .append("phase", new Document("$ne", IndexJobPhase.ACCEPTED.name()));
-    }
-
-    private void recoverRevokedClaims(Document queryFilter) {
-        Query query = new BasicQuery(queryFilter);
-        java.util.List<IndexJob> claimedJobs = template.find(query, Document.class, IndexCollections.INDEX_JOBS).stream()
-                .map(MongoIndexJobStore::from).toList();
-        for (IndexJob job : claimedJobs) {
-            Document repository = template.getCollection(IndexCollections.REPOSITORIES)
-                    .find(repositoryWithoutAuthorityForUncommittedJob(job)).first();
-            if (Objects.nonNull(repository)) {
-                failAfterRevocation(job, IndexFailureCategory.WORKER_INTERRUPTED);
+            String name = document.getString("name");
+            Integer version = document.getInteger("version");
+            if (Objects.isNull(name) || Objects.isNull(version)) {
+                return false;
             }
+            actual.put(name, version);
         }
-    }
-
-    private void releaseRepositoryClaimWithoutFence(IndexJob job, String workerId) {
-        template.updateFirst(new BasicQuery(new Document(REPO_ID, job.repositoryId().value())
-                        .append("activeJobId", job.id().value()).append("activeWorkerId", workerId)
-                        .append("activeGenerationId", job.generationId().value())),
-                new Update().unset("activeJobId").unset("activeWorkerId").unset("activeGenerationId").unset("claimUntil"),
-                IndexCollections.REPOSITORIES);
-    }
-
-    private Optional<IndexJob> jobForClaim(Document claim) {
-        Number fence = claim.get("fence", Number.class);
-        if (Objects.isNull(fence)) {
-            return Optional.empty();
-        }
-        Document job = template.getCollection(IndexCollections.INDEX_JOBS).find(new Document(JOB_ID, claim.getString("activeJobId"))
-                .append(REPO_ID, claim.getString(REPO_ID)).append(ACTIVE, true)
-                .append("workerId", claim.getString("activeWorkerId")).append("fence", fence.longValue())).first();
-        return Optional.ofNullable(job).map(MongoIndexJobStore::from);
-    }
-
-    private static Document jobOwnership(IndexJob job, String workerId, long fence) {
-        return new Document(JOB_ID, job.id().value()).append(REPO_ID, job.repositoryId().value()).append(ACTIVE, true)
-                .append("workerId", workerId).append("fence", fence);
-    }
-
-    private static Document repositoryPointerFilter(RepositoryId repositoryId, PublishedGenerationPointer current,
-                                                    PublishedGenerationPointer rollback) {
-        Document filter = pointerDocument(current);
-        filter.put(REPO_ID, repositoryId.value());
-        for (java.util.Map.Entry<String, Object> entry : pointerDocument(rollback).entrySet()) {
-            filter.put("rollbackPointer." + entry.getKey(), entry.getValue());
-        }
-        return filter;
+        return IndexSchemaContract.requiredProjectionVersions().equals(Map.copyOf(actual));
     }
 
     private boolean sealed(RepositoryId repositoryId, PublishedGenerationPointer pointer) {
-        Document manifest = template.getCollection(IndexCollections.GENERATION_MANIFESTS).find(new Document(REPO_ID, repositoryId.value())
-                .append("sourceRevision", pointer.revision().value()).append("generationId", pointer.generationId().value())
+        Document manifest = template.getCollection(IndexCollections.GENERATION_MANIFESTS).find(new Document(REPOSITORY_ID, repositoryId.value())
+                .append("generationId", pointer.generationId().value()).append("sourceRevision", pointer.revision().value())
                 .append("identityDigest", pointer.manifestDigest().value()).append("writeState", "SEALED_VALID")).first();
         return Objects.nonNull(manifest);
     }
 
-    private boolean matchesCommittedResult(Document repository, Document job) {
-        Document intentDocument = job.get("publicationIntent", Document.class);
-        if (Objects.isNull(intentDocument)) {
-            return false;
-        }
-        IndexPublicationIntent intent = intentFrom(intentDocument);
-        IndexJobOperation operation = intent.operation();
-        if (operation == IndexJobOperation.ROLLBACK) {
-            return pointerMatches(repository, intent.expectedRollback().orElseThrow(), job.getString(JOB_ID))
-                    && rollbackPointerMatches(repository, intent.expectedCurrent().orElseThrow());
-        }
-        return pointerMatches(repository, new PublishedGenerationPointer(intent.targetRevision(), intent.targetGenerationId(),
-                intent.targetManifestDigest(), job.getString(JOB_ID), repository.getDate("publishedAt").toInstant()), job.getString(JOB_ID))
-                && sealedManifestOwnedBy(repository.getString(REPO_ID), intent, job)
-                && expectedParentBecameRollback(repository, intent.expectedParent());
+    private Document activeRunning(IndexJob job) {
+        return template.getCollection(IndexCollections.INDEX_JOBS).find(new Document(JOB_ID, job.id().value()).append(REPOSITORY_ID, job.repositoryId().value())
+                .append(ACTIVE, true).append("phase", IndexJobPhase.RUNNING.name())).first();
     }
 
-    private static boolean pointerMatches(Document actual, PublishedGenerationPointer expected, String committedJobId) {
-        return expected.revision().value().equals(actual.getString("revision"))
-                && expected.generationId().value().equals(actual.getString("generationId"))
-                && expected.manifestDigest().value().equals(actual.getString("manifestDigest"))
-                && committedJobId.equals(actual.getString("committedJobId"));
+    private Optional<Document> findRepository(RepositoryId repositoryId, PublishedGenerationPointer current, Optional<PublishedGenerationPointer> rollback) {
+        Document filter = pointerMatch(new Document(REPOSITORY_ID, repositoryId.value()), "currentPointer.", current);
+        rollback.ifPresent(pointer -> pointerMatch(filter, "rollbackPointer.", pointer));
+        return Optional.ofNullable(template.getCollection(IndexCollections.REPOSITORIES).find(filter).first());
     }
 
-    private static boolean rollbackPointerMatches(Document repository, PublishedGenerationPointer expected) {
-        Document rollback = repository.get("rollbackPointer", Document.class);
-        return Objects.nonNull(rollback) && expected.revision().value().equals(rollback.getString("revision"))
-                && expected.generationId().value().equals(rollback.getString("generationId"))
-                && expected.manifestDigest().value().equals(rollback.getString("manifestDigest"))
-                && expected.committedJobId().equals(rollback.getString("committedJobId"))
-                && expected.publishedAt().equals(rollback.getDate("publishedAt").toInstant());
-    }
-
-    private boolean sealedManifestOwnedBy(String repositoryId, IndexPublicationIntent intent, Document job) {
-        Number fence = job.get("fence", Number.class);
-        if (Objects.isNull(fence)) {
-            return false;
-        }
-        Document manifest = template.getCollection(IndexCollections.GENERATION_MANIFESTS).find(new Document(REPO_ID, repositoryId)
-                .append("sourceRevision", intent.targetRevision().value()).append("generationId", intent.targetGenerationId().value())
-                .append("identityDigest", intent.targetManifestDigest().value()).append("ownerJobId", intent.jobId().value())
-                .append("ownerWorkerId", job.getString("workerId")).append("fence", fence.longValue())
-                .append("writeState", "SEALED_VALID")).first();
-        return Objects.nonNull(manifest);
-    }
-
-    private static boolean expectedParentBecameRollback(Document repository, Optional<PublishedGenerationPointer> expectedParent) {
-        if (expectedParent.isPresent()) {
-            return rollbackPointerMatches(repository, expectedParent.orElseThrow());
-        }
-        return !repository.containsKey("rollbackPointer");
+    private static Document pointerMatch(Document filter, String prefix, PublishedGenerationPointer pointer) {
+        return filter.append(prefix + "revision", pointer.revision().value()).append(prefix + "generationId", pointer.generationId().value())
+                .append(prefix + "manifestDigest", pointer.manifestDigest().value()).append(prefix + "committedJobId", pointer.committedJobId())
+                .append(prefix + "publishedAt", Date.from(pointer.publishedAt()));
     }
 
     private static Document pointerDocument(PublishedGenerationPointer pointer) {
         return new Document("revision", pointer.revision().value()).append("generationId", pointer.generationId().value())
-                .append("manifestDigest", pointer.manifestDigest().value()).append("committedJobId", pointer.committedJobId())
-                .append("publishedAt", Date.from(pointer.publishedAt()));
+                .append("manifestDigest", pointer.manifestDigest().value()).append("committedJobId", pointer.committedJobId()).append("publishedAt", Date.from(pointer.publishedAt()));
     }
 
-    private static Document rollbackIntentDocument(IndexJobId jobId, RepositoryId repositoryId,
-                                                   PublishedGenerationPointer expectedCurrent,
-                                                   PublishedGenerationPointer expectedRollback) {
-        return new Document("operation", IndexJobOperation.ROLLBACK.name()).append("jobId", jobId.value())
-                .append(REPO_ID, repositoryId.value()).append("targetRevision", expectedRollback.revision().value())
-                .append("targetGenerationId", expectedRollback.generationId().value())
-                .append("targetManifestDigest", expectedRollback.manifestDigest().value())
-                .append("expectedCurrent", pointerDocument(expectedCurrent))
-                .append("expectedRollback", pointerDocument(expectedRollback));
+    private static Optional<PublishedGenerationPointer> pointerFromRepository(Document document) {
+        return Optional.ofNullable(document.get("currentPointer", Document.class)).map(MongoIndexJobStore::pointerFrom);
+    }
+
+    private static PublishedGenerationPointer pointerFrom(Document document) {
+        return new PublishedGenerationPointer(new RepositoryRevision(document.getString("revision")), new GenerationId(document.getString("generationId")),
+                new ManifestDigest(document.getString("manifestDigest")), document.getString("committedJobId"), document.getDate("publishedAt").toInstant());
+    }
+
+    private Document activeRunningJob(RepositoryId repositoryId, String jobId) {
+        return template.getCollection(IndexCollections.INDEX_JOBS).find(activeRunningFilter(repositoryId, jobId)).first();
+    }
+
+    private static Document activeRunningFilter(RepositoryId repositoryId, String jobId) {
+        return new Document(JOB_ID, jobId).append(REPOSITORY_ID, repositoryId.value()).append(ACTIVE, true)
+                .append("phase", IndexJobPhase.RUNNING.name()).append("operation", new Document("$in", List.of(IndexJobOperation.BUILD.name(), IndexJobOperation.ROLLBACK.name())));
+    }
+
+    private boolean matchesCommittedResult(Document repository, Document job) {
+        Document document = job.get("publicationIntent", Document.class);
+        if (Objects.isNull(document)) {
+            return false;
+        }
+        IndexPublicationIntent intent = intentFrom(document);
+        if (intent.operation() == IndexJobOperation.ROLLBACK) {
+            return currentPointerMatches(repository, intent.targetRevision(), intent.targetGenerationId(), intent.targetManifestDigest(), intent.jobId().value())
+                    && rollbackPointerMatches(repository, intent.expectedCurrent().orElseThrow());
+        }
+        if (intent.operation() == IndexJobOperation.BUILD) {
+            return currentPointerMatches(repository, intent.targetRevision(), intent.targetGenerationId(), intent.targetManifestDigest(), intent.jobId().value())
+                    && sealedManifestOwnedBy(intent) && expectedParentBecameRollback(repository, intent.expectedParent());
+        }
+        return false;
+    }
+
+    private boolean sealedManifestOwnedBy(IndexPublicationIntent intent) {
+        Document manifest = template.getCollection(IndexCollections.GENERATION_MANIFESTS).find(new Document(REPOSITORY_ID, intent.repositoryId().value())
+                .append("sourceRevision", intent.targetRevision().value()).append("generationId", intent.targetGenerationId().value())
+                .append("identityDigest", intent.targetManifestDigest().value()).append("ownerJobId", intent.jobId().value())
+                .append("writeState", "SEALED_VALID")).first();
+        return Objects.nonNull(manifest);
+    }
+
+    private static boolean pointerMatches(Document document, RepositoryRevision revision, GenerationId generationId,
+                                          ManifestDigest digest, String committedJobId) {
+        return revision.value().equals(document.getString("revision")) && generationId.value().equals(document.getString("generationId"))
+                && digest.value().equals(document.getString("manifestDigest")) && committedJobId.equals(document.getString("committedJobId"));
+    }
+
+    private static boolean currentPointerMatches(Document repository, RepositoryRevision revision, GenerationId generationId,
+                                                 ManifestDigest digest, String committedJobId) {
+        Document current = repository.get("currentPointer", Document.class);
+        return Objects.nonNull(current) && pointerMatches(current, revision, generationId, digest, committedJobId);
+    }
+
+    private static boolean expectedParentBecameRollback(Document repository, Optional<PublishedGenerationPointer> expectedParent) {
+        if (expectedParent.isEmpty()) {
+            return !repository.containsKey("rollbackPointer");
+        }
+        Document rollback = repository.get("rollbackPointer", Document.class);
+        if (Objects.isNull(rollback)) {
+            return false;
+        }
+        PublishedGenerationPointer pointer = expectedParent.orElseThrow();
+        return pointerMatches(rollback, pointer.revision(), pointer.generationId(), pointer.manifestDigest(), pointer.committedJobId())
+                && pointer.publishedAt().equals(rollback.getDate("publishedAt").toInstant());
+    }
+
+    private static boolean rollbackPointerMatches(Document repository, PublishedGenerationPointer pointer) {
+        Document rollback = repository.get("rollbackPointer", Document.class);
+        if (Objects.isNull(rollback)) {
+            return false;
+        }
+        return pointerMatches(rollback, pointer.revision(), pointer.generationId(), pointer.manifestDigest(), pointer.committedJobId())
+                && pointer.publishedAt().equals(rollback.getDate("publishedAt").toInstant());
     }
 
     private static Document intentDocument(IndexPublicationIntent intent) {
-        Document document = new Document("operation", intent.operation().name()).append("jobId", intent.jobId().value())
-                .append(REPO_ID, intent.repositoryId().value()).append("targetRevision", intent.targetRevision().value())
-                .append("targetGenerationId", intent.targetGenerationId().value())
-                .append("targetManifestDigest", intent.targetManifestDigest().value());
+        Document document = new Document("jobId", intent.jobId().value()).append("operation", intent.operation().name())
+                .append(REPOSITORY_ID, intent.repositoryId().value()).append("targetRevision", intent.targetRevision().value())
+                .append("targetGenerationId", intent.targetGenerationId().value()).append("targetManifestDigest", intent.targetManifestDigest().value());
         intent.expectedParent().ifPresent(pointer -> document.append("expectedParent", pointerDocument(pointer)));
         intent.expectedCurrent().ifPresent(pointer -> document.append("expectedCurrent", pointerDocument(pointer)));
         intent.expectedRollback().ifPresent(pointer -> document.append("expectedRollback", pointerDocument(pointer)));
@@ -651,113 +412,28 @@ public final class MongoIndexJobStore implements IndexJobStore {
     }
 
     private static IndexPublicationIntent intentFrom(Document document) {
-        Optional<Document> parent = Optional.ofNullable(document.get("expectedParent", Document.class));
-        Optional<Document> current = Optional.ofNullable(document.get("expectedCurrent", Document.class));
-        Optional<Document> rollback = Optional.ofNullable(document.get("expectedRollback", Document.class));
-        return new IndexPublicationIntent(new IndexJobId(document.getString("jobId")),
-                IndexJobOperation.valueOf(document.getString("operation")), RepositoryId.of(document.getString(REPO_ID)),
-                new RepositoryRevision(document.getString("targetRevision")), new GenerationId(document.getString("targetGenerationId")),
-                new ManifestDigest(document.getString("targetManifestDigest")), parent.map(MongoIndexJobStore::pointerFrom),
-                current.map(MongoIndexJobStore::pointerFrom), rollback.map(MongoIndexJobStore::pointerFrom));
-    }
-
-    private static Optional<PublishedGenerationPointer> pointerFromRepository(Document repository) {
-        if (!repository.containsKey("revision")) {
-            return Optional.empty();
-        }
-        return Optional.of(pointerFrom(repository));
-    }
-
-    private static Document serverExpiry(Duration claimLifetime) {
-        return new Document("$dateAdd", new Document("startDate", "$$NOW").append("unit", "millisecond")
-                .append("amount", claimLifetime.toMillis()));
-    }
-
-    private static void requirePositive(Duration duration, String name) {
-        if (duration.isNegative() || duration.isZero()) {
-            throw new IllegalArgumentException(name + " must be positive");
-        }
-    }
-
-    static Document claimJobDocument(MongoTemplate template, IndexJob job, String workerId, long fence, Date claimUntil) {
-        return template.findAndModify(new BasicQuery(new Document(JOB_ID, job.id().value()).append(ACTIVE, true)
-                        .append("phase", IndexJobPhase.ACCEPTED.name())),
-                new Update().set("workerId", workerId).set("fence", fence).set("claimUntil", claimUntil)
-                        .set("phase", IndexJobPhase.CHECKOUT.name()), FindAndModifyOptions.options().returnNew(true),
-                Document.class, IndexCollections.INDEX_JOBS);
-    }
-
-    /** The parent pointer is frozen immediately after the repository claim and reused as publication's CAS predicate. */
-    private static boolean captureBuildParent(MongoTemplate template, IndexJob job, String workerId, long fence, Document repository) {
-        Update update = new Update().set("buildParentCaptured", true);
-        pointerFromRepository(repository).ifPresent(pointer -> update.set("buildParent", pointerDocument(pointer)));
-        UpdateResult captured = template.updateFirst(new BasicQuery(jobOwnership(job, workerId, fence)
-                        .append("buildParentCaptured", new Document("$exists", false))), update, IndexCollections.INDEX_JOBS);
-        return captured.getModifiedCount() == 1L;
-    }
-
-    private void releaseExactRepositoryClaim(IndexJob job, String workerId, long fence) {
-        releaseExactRepositoryClaim(template, job, workerId, fence);
-    }
-
-    private static void releaseExactRepositoryClaim(MongoTemplate template, IndexJob job, String workerId, long fence) {
-        template.updateFirst(new BasicQuery(repositoryClaim(job, workerId, fence)), new Update().unset("activeJobId")
-                .unset("activeWorkerId").unset("activeGenerationId").unset("claimUntil"), IndexCollections.REPOSITORIES);
-    }
-
-    /** Releases repository authority before making a partially claimed job immediately retryable. */
-    private void compensateClaim(IndexJob job, String workerId, long fence) {
-        releaseRepositoryClaimTransition.release(template, job, workerId, fence);
-        template.updateFirst(new BasicQuery(jobOwnership(job, workerId, fence)), new Update().set("phase", IndexJobPhase.ACCEPTED.name())
-                .unset("workerId").unset("fence").unset("claimUntil").unset("buildParentCaptured").unset("buildParent"),
-                IndexCollections.INDEX_JOBS);
-    }
-
-    private boolean mirrorManifestExpiry(IndexJob job, String workerId, long fence, Date claimUntil) {
-        Document manifestFilter = new Document(REPO_ID, job.repositoryId().value()).append("generationId", job.generationId().value())
-                .append("ownerJobId", job.id().value()).append("ownerWorkerId", workerId).append("fence", fence)
-                .append("writeState", "WRITING");
-        Document existing = template.getCollection(IndexCollections.GENERATION_MANIFESTS).find(manifestFilter).first();
-        if (Objects.isNull(existing)) {
-            return true;
-        }
-        UpdateResult updated = template.updateFirst(new BasicQuery(manifestFilter), new Update().set("sealUntil", claimUntil),
-                IndexCollections.GENERATION_MANIFESTS);
-        return updated.getModifiedCount() == 1;
-    }
-
-    private static PublishedGenerationPointer pointerFrom(Document document) {
-        return new PublishedGenerationPointer(new RepositoryRevision(document.getString("revision")),
-                new GenerationId(document.getString("generationId")), new ManifestDigest(document.getString("manifestDigest")),
-                document.getString("committedJobId"), document.getDate("publishedAt").toInstant());
+        Optional<PublishedGenerationPointer> parent = Optional.ofNullable(document.get("expectedParent", Document.class)).map(MongoIndexJobStore::pointerFrom);
+        Optional<PublishedGenerationPointer> current = Optional.ofNullable(document.get("expectedCurrent", Document.class)).map(MongoIndexJobStore::pointerFrom);
+        Optional<PublishedGenerationPointer> rollback = Optional.ofNullable(document.get("expectedRollback", Document.class)).map(MongoIndexJobStore::pointerFrom);
+        return new IndexPublicationIntent(new IndexJobId(document.getString("jobId")), IndexJobOperation.valueOf(document.getString("operation")),
+                RepositoryId.of(document.getString(REPOSITORY_ID)), new RepositoryRevision(document.getString("targetRevision")),
+                new GenerationId(document.getString("targetGenerationId")), new ManifestDigest(document.getString("targetManifestDigest")),
+                parent, current, rollback);
     }
 
     private static IndexJob from(Document document) {
-        String workerId = document.getString("workerId");
-        Number fence = document.get("fence", Number.class);
-        Date until = document.getDate("claimUntil");
-        String category = document.getString("failureCategory");
-        return new IndexJob(new IndexJobId(document.getString(JOB_ID)), RepositoryId.of(document.getString(REPO_ID)),
-                new RepositoryRevision(document.getString("revision")), new GenerationId(document.getString("generationId")),
-                document.getLong("generation"), IndexJobPhase.valueOf(document.getString("phase")), Boolean.TRUE.equals(document.getBoolean(ACTIVE)),
-                Optional.ofNullable(workerId), Optional.ofNullable(fence).map(value -> new RepositoryFence(value.longValue())),
-                Optional.ofNullable(until).map(Date::toInstant), Optional.ofNullable(category).map(IndexFailureCategory::valueOf),
-                Boolean.TRUE.equals(document.getBoolean("rebuild")),
-                Optional.ofNullable(document.getString("operation")).map(IndexJobOperation::valueOf).orElse(IndexJobOperation.BUILD));
+        IndexJobOperation operation = IndexJobOperation.valueOf(document.getString("operation"));
+        Optional<IndexJobTarget> target = Optional.empty();
+        if (operation == IndexJobOperation.BUILD || operation == IndexJobOperation.ROLLBACK) {
+            target = Optional.of(targetFrom(Objects.requireNonNull(document.get("target", Document.class), "target document is required")));
+        }
+        return new IndexJob(new IndexJobId(document.getString(JOB_ID)), RepositoryId.of(document.getString(REPOSITORY_ID)), target,
+                IndexJobPhase.valueOf(document.getString("phase")), Boolean.TRUE.equals(document.getBoolean(ACTIVE)),
+                Optional.ofNullable(document.getString("failureCategory")).map(IndexFailureCategory::valueOf), Boolean.TRUE.equals(document.getBoolean("rebuild")), operation);
     }
 
-    @FunctionalInterface
-    interface ClaimJobDocumentTransition {
-        Document claim(MongoTemplate template, IndexJob job, String workerId, long fence, Date claimUntil);
-    }
-
-    @FunctionalInterface
-    interface CaptureBuildParentTransition {
-        boolean capture(MongoTemplate template, IndexJob job, String workerId, long fence, Document repository);
-    }
-
-    @FunctionalInterface
-    interface ReleaseRepositoryClaimTransition {
-        void release(MongoTemplate template, IndexJob job, String workerId, long fence);
+    private static IndexJobTarget targetFrom(Document document) {
+        return new IndexJobTarget(new RepositoryRevision(document.getString("revision")), new GenerationId(document.getString("generationId")),
+                Objects.requireNonNull(document.get("generation", Number.class), "target generation is required").longValue());
     }
 }

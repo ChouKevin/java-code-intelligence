@@ -3,10 +3,8 @@ package com.java.semantic.indexer.build;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import com.java.semantic.indexer.job.IndexFailureCategory;
 import com.java.semantic.indexer.job.IndexJob;
 import com.java.semantic.indexer.job.IndexJobPhase;
-import com.java.semantic.indexer.job.IndexJobWorker;
 import com.java.semantic.indexer.job.MongoIndexJobStore;
 import com.java.semantic.indexer.incremental.IncrementalIndexPlanner;
 import com.java.semantic.indexer.incremental.ModuleLocator;
@@ -46,14 +44,11 @@ import com.java.semantic.model.repository.RepositoryRevision;
 import com.mongodb.client.MongoClients;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.time.Duration;
 import java.time.Instant;
 import java.util.Date;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
 import java.util.function.Consumer;
 import java.util.stream.Stream;
 import org.bson.Document;
@@ -94,11 +89,9 @@ class FullIndexPublicationIT {
                     .satisfies(FullIndexPublicationIT::assertSafeMessage);
 
             assertPreviousPointer(template);
-            Document manifest = manifest(template, job.generationId());
+            Document manifest = manifest(template, target(job));
             assertThat(manifest.getString("writeState")).isEqualTo(GenerationWriteState.WRITING.name());
-            IndexJob failed = store.find(job.id()).orElseThrow();
-            assertThat(failed.phase()).isEqualTo(IndexJobPhase.FAILED);
-            assertThat(failed.failureCategory()).contains(IndexFailureCategory.VALIDATION_FAILED);
+            assertThat(store.find(job.id()).orElseThrow().phase()).isEqualTo(IndexJobPhase.RUNNING);
         }
     }
 
@@ -122,34 +115,9 @@ class FullIndexPublicationIT {
                     .satisfies(FullIndexPublicationIT::assertSafeMessage);
 
             assertPreviousPointer(template);
-            assertThat(manifest(template, job.generationId()).getString("writeState"))
+            assertThat(manifest(template, target(job)).getString("writeState"))
                     .isEqualTo(GenerationWriteState.WRITING.name());
-            assertThat(store.find(job.id()).orElseThrow().failureCategory()).contains(IndexFailureCategory.VALIDATION_FAILED);
-        }
-    }
-
-    @Test
-    void claim_loss_after_planning_prevents_manifest_insertion() throws Exception {
-        try (MongoDBContainer container = new MongoDBContainer("mongo:8.0.4")) {
-            container.start();
-            MongoTemplate template = template(container);
-            seedPreviousPointer(template);
-            MongoIndexJobStore store = new MongoIndexJobStore(template);
-            IndexJob job = claimedJob(store);
-            IndexBuildService service = service(template, store, exporter(template, ignored -> { }),
-                    checkout("planner-claim-loss", revision()));
-            java.util.concurrent.atomic.AtomicInteger guardChecks = new java.util.concurrent.atomic.AtomicInteger();
-
-            assertThatThrownBy(() -> service.build(job, () -> {
-                if (guardChecks.incrementAndGet() == 3) {
-                    throw new IllegalStateException("claim lost after planning");
-                }
-            })).isInstanceOf(IllegalStateException.class).hasMessage("claim lost after planning");
-
-            assertThat(template.getCollection(IndexCollections.GENERATION_MANIFESTS)
-                    .countDocuments(new Document("repoId", "orders").append("generationId", job.generationId().value())))
-                    .isZero();
-            assertPreviousPointer(template);
+            assertThat(store.find(job.id()).orElseThrow().phase()).isEqualTo(IndexJobPhase.RUNNING);
         }
     }
 
@@ -170,78 +138,44 @@ class FullIndexPublicationIT {
                     .satisfies(FullIndexPublicationIT::assertSafeMessage);
 
             assertPreviousPointer(template);
-            assertThat(manifest(template, job.generationId()).getString("writeState")).isEqualTo(GenerationWriteState.WRITING.name());
-            assertThat(store.find(job.id()).orElseThrow().failureCategory()).contains(IndexFailureCategory.VALIDATION_FAILED);
+            assertThat(manifest(template, target(job)).getString("writeState")).isEqualTo(GenerationWriteState.WRITING.name());
+            assertThat(store.find(job.id()).orElseThrow().phase()).isEqualTo(IndexJobPhase.RUNNING);
         }
     }
 
     @Test
-    void lost_claim_stops_the_writer_before_the_bad_generation_is_published() throws Exception {
+    void successful_running_build_maps_a_real_batch_and_publishes_its_sealed_generation() throws Exception {
         try (MongoDBContainer container = new MongoDBContainer("mongo:8.0.4")) {
             container.start();
             MongoTemplate template = template(container);
             seedPreviousPointer(template);
             MongoIndexJobStore store = new MongoIndexJobStore(template);
             IndexJob job = claimedJob(store);
-            Consumer<MongoTemplate> loseClaim = current -> current.getCollection(IndexCollections.REPOSITORIES).updateOne(
-                    new Document("repoId", "orders"), new Document("$unset", new Document("activeJobId", "")
-                            .append("activeWorkerId", "").append("activeGenerationId", "").append("claimUntil", "")));
-            IndexBuildService service = service(template, store, exporter(template, loseClaim), checkout("lost-claim", revision()));
-
-            assertThatThrownBy(() -> service.build(job)).isInstanceOf(RuntimeException.class)
-                    .hasMessageContaining("generation lease is not active")
-                    .satisfies(FullIndexPublicationIT::assertSafeMessage);
-
-            assertPreviousPointer(template);
-            assertThat(manifest(template, job.generationId()).getString("writeState")).isEqualTo(GenerationWriteState.WRITING.name());
-        }
-    }
-
-    @Test
-    void successful_heartbeat_build_maps_a_real_batch_and_uses_the_current_renewed_claim_expiry() throws Exception {
-        try (MongoDBContainer container = new MongoDBContainer("mongo:8.0.4")) {
-            container.start();
-            MongoTemplate template = template(container);
-            seedPreviousPointer(template);
-            MongoIndexJobStore store = new MongoIndexJobStore(template);
-            IndexJob job = claimedJob(store);
-            Instant initialExpiry = job.claimUntil().orElseThrow();
             RepositoryIndexExporter exporter = (repositoryId, requestedRevision, generationId, plan) -> {
-                assertThat(store.renew(job, Duration.ofMinutes(10))).isTrue();
                 return List.of(validBatch(repositoryId, requestedRevision, generationId));
             };
             IndexBuildService.CheckedOutRepository checkout = checkout("success", revision());
             IndexBuildService service = service(template, store, exporter, ignored -> checkout);
-            ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
-            try {
-                new IndexJobWorker(store, new MongoPublicationWriter(template)).buildWithHeartbeat(job, service,
-                        Duration.ofSeconds(10), Duration.ofMinutes(20), scheduler);
-            } finally {
-                scheduler.shutdownNow();
-            }
+            service.build(job);
 
             Document repository = template.getCollection(IndexCollections.REPOSITORIES).find(new Document("repoId", "orders")).first();
-            Document manifest = manifest(template, job.generationId());
+            Document manifest = manifest(template, target(job));
             Document counts = manifest.get("sealedCollectionCounts", Document.class);
-            Date renewedExpiry = Date.from(store.find(job.id()).orElseThrow().claimUntil().orElseThrow());
 
             assertThat(template.getCollection(IndexCollections.SOURCE_ARTIFACTS).countDocuments(new Document())).isEqualTo(1L);
             assertThat(template.getCollection(IndexCollections.GENERATION_FILES).countDocuments(new Document("repoId", "orders")
-                    .append("generationId", job.generationId().value()))).isEqualTo(1L);
+                    .append("generationId", target(job).value()))).isEqualTo(1L);
             assertThat(counts).containsEntry(IndexCollections.SOURCE_ARTIFACTS, 1L).containsEntry(IndexCollections.GENERATION_FILES, 1L)
                     .containsEntry(IndexCollections.SYMBOLS, 1L).containsEntry(IndexCollections.RELATIONS, 1L)
                     .containsEntry(IndexCollections.ENTRY_POINTS, 1L).containsEntry(IndexCollections.SEARCH, 3L);
             assertThat(manifest.getString("validationResult")).isEqualTo("VALID");
-            assertThat(manifest.getString("identityDigest")).isEqualTo(repository.getString("manifestDigest"))
+            assertThat(manifest.getString("identityDigest")).isEqualTo(repository.get("currentPointer", Document.class).getString("manifestDigest"))
                     .isNotEqualTo("0".repeat(64));
-            assertThat(manifest.getDate("sealUntil")).isEqualTo(renewedExpiry);
-            assertThat(manifest.getDate("sealUntil").toInstant()).isAfter(initialExpiry);
             assertThat(manifest.getString("writeState")).isEqualTo(GenerationWriteState.SEALED_VALID.name());
-            assertThat(repository.getString("generationId")).isEqualTo(job.generationId().value());
+            assertThat(repository.get("currentPointer", Document.class).getString("generationId")).isEqualTo(target(job).value());
             assertThat(repository.get("rollbackPointer", Document.class)).containsEntry("generationId", "old-generation")
                     .containsEntry("committedJobId", "old-job");
-            assertThat(repository.containsKey("activeJobId")).isFalse();
-            assertThat(store.find(job.id()).orElseThrow().phase()).isEqualTo(IndexJobPhase.COMPLETE);
+            assertThat(store.find(job.id()).orElseThrow().phase()).isEqualTo(IndexJobPhase.RUNNING);
         }
     }
 
@@ -320,7 +254,7 @@ class FullIndexPublicationIT {
                                      IndexBuildService.CheckoutResolver checkoutResolver) {
         return new IndexBuildService(new FullIndexPlanner(), exporter, new MongoGenerationWriter(template),
                 new SourceIndexBatchDocumentMapper(template.getConverter()), new GenerationValidator(template),
-                new IndexJobWorker(store, new MongoPublicationWriter(template)), checkoutResolver, incrementalBuilder(template));
+                checkoutResolver, incrementalBuilder(template), store, new MongoPublicationWriter(template));
     }
 
     private static IncrementalGenerationBuilder incrementalBuilder(MongoTemplate template) {
@@ -355,7 +289,11 @@ class FullIndexPublicationIT {
 
     private static IndexJob claimedJob(MongoIndexJobStore store) {
         IndexJob accepted = store.admit(RepositoryId.of("orders"), revision(), false);
-        return store.claim(accepted.id(), "worker-1", Duration.ofMinutes(5)).orElseThrow();
+        return store.start(accepted.id()).orElseThrow();
+    }
+
+    private static GenerationId target(IndexJob job) {
+        return job.target().orElseThrow().generationId();
     }
 
     static SourceIndexBatch validBatch(RepositoryId repositoryId, RepositoryRevision requestedRevision, GenerationId generationId) {
@@ -455,10 +393,11 @@ class FullIndexPublicationIT {
 
     private static void assertPreviousPointer(MongoTemplate template) {
         Document repository = template.getCollection(IndexCollections.REPOSITORIES).find(new Document("repoId", "orders")).first();
-        assertThat(repository.getString("revision")).isEqualTo("b".repeat(40));
-        assertThat(repository.getString("generationId")).isEqualTo("old-generation");
-        assertThat(repository.getString("manifestDigest")).isEqualTo("c".repeat(64));
-        assertThat(repository.getString("committedJobId")).isEqualTo("old-job");
+        Document current = repository.get("currentPointer", Document.class);
+        assertThat(current.getString("revision")).isEqualTo("b".repeat(40));
+        assertThat(current.getString("generationId")).isEqualTo("old-generation");
+        assertThat(current.getString("manifestDigest")).isEqualTo("c".repeat(64));
+        assertThat(current.getString("committedJobId")).isEqualTo("old-job");
     }
 
     private static void assertSafeMessage(Throwable exception) {
@@ -474,8 +413,8 @@ class FullIndexPublicationIT {
     }
 
     private static void seedPreviousPointer(MongoTemplate template) {
-        template.getCollection(IndexCollections.REPOSITORIES).insertOne(new Document("repoId", "orders").append("revision", "b".repeat(40))
-                .append("generationId", "old-generation").append("manifestDigest", "c".repeat(64)).append("committedJobId", "old-job")
-                .append("publishedAt", Date.from(Instant.parse("2026-08-22T00:00:00Z"))));
+        template.getCollection(IndexCollections.REPOSITORIES).insertOne(new Document("repoId", "orders").append("currentPointer",
+                new Document("revision", "b".repeat(40)).append("generationId", "old-generation").append("manifestDigest", "c".repeat(64))
+                        .append("committedJobId", "old-job").append("publishedAt", Date.from(Instant.parse("2026-08-22T00:00:00Z")))));
     }
 }

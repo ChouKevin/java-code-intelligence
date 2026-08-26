@@ -82,22 +82,28 @@ public final class IndexRepositoryController {
         return ResponseEntity.status(HttpStatus.ACCEPTED).body(IndexJobResponse.from(job));
     }
 
-    public record IndexJobResponse(String jobId, String repositoryId, String revision, String generationId, String phase,
+    public record IndexJobResponse(String jobId, String repositoryId, IndexJobTargetResponse target, String phase,
                                    String failureCategory) {
         static IndexJobResponse from(IndexJob job) {
-            return new IndexJobResponse(job.id().value(), job.repositoryId().value(), job.revision().value(), job.generationId().value(),
+            return new IndexJobResponse(job.id().value(), job.repositoryId().value(), job.target().map(IndexJobTargetResponse::from).orElse(null), // cs-allow
                     job.phase().name(), job.failureCategory().map(Enum::name).orElse(null)); // cs-allow
         }
     }
 
-    public record IndexJobStatusResponse(String jobId, String repositoryId, String revision, String generationId,
+    public record IndexJobStatusResponse(String jobId, String repositoryId, IndexJobTargetResponse target,
                                          String operation, String phase, boolean active, String failureCategory,
                                          GenerationPointerResponse currentPointer) {
         static IndexJobStatusResponse from(IndexJob job, Optional<PublishedGenerationPointer> currentPointer) {
-            return new IndexJobStatusResponse(job.id().value(), job.repositoryId().value(), job.revision().value(),
-                    job.generationId().value(), job.operation().name(), job.phase().name(), job.active(),
+            return new IndexJobStatusResponse(job.id().value(), job.repositoryId().value(), job.target().map(IndexJobTargetResponse::from).orElse(null), // cs-allow
+                    job.operation().name(), job.phase().name(), job.active(),
                     job.failureCategory().map(Enum::name).orElse(null), // cs-allow
                     currentPointer.map(GenerationPointerResponse::from).orElse(null)); // cs-allow
+        }
+    }
+
+    public record IndexJobTargetResponse(String revision, String generationId, long generation) {
+        static IndexJobTargetResponse from(com.java.semantic.indexer.job.IndexJobTarget target) {
+            return new IndexJobTargetResponse(target.revision().value(), target.generationId().value(), target.generation());
         }
     }
 

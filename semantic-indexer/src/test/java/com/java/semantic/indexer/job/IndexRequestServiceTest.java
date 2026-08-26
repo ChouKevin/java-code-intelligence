@@ -22,8 +22,7 @@ class IndexRequestServiceTest {
         IndexJobStore store = mock(IndexJobStore.class);
         RepositoryId repositoryId = RepositoryId.of("payments");
         RepositoryRevision revision = new RepositoryRevision("a".repeat(40));
-        IndexJob job = new IndexJob(IndexJobId.create(), repositoryId, revision, new GenerationId("g-test"), 1,
-                IndexJobPhase.ACCEPTED, true, Optional.empty(), Optional.empty(), Optional.empty(), Optional.empty());
+        IndexJob job = job(repositoryId, revision);
         when(source.ensure(repositoryId)).thenReturn(revision);
         when(store.admitEnsure(repositoryId, revision)).thenReturn(job);
 
@@ -32,7 +31,6 @@ class IndexRequestServiceTest {
         assertThat(result).isEqualTo(job);
         org.mockito.InOrder order = org.mockito.Mockito.inOrder(store);
         order.verify(store).reconcileCommitted(repositoryId);
-        order.verify(store).recoverRevokedClaims(repositoryId);
         order.verify(store).admitEnsure(repositoryId, revision);
     }
 
@@ -42,8 +40,7 @@ class IndexRequestServiceTest {
         IndexJobStore store = mock(IndexJobStore.class);
         RepositoryId repositoryId = RepositoryId.of("payments");
         RepositoryRevision revision = new RepositoryRevision("b".repeat(40));
-        IndexJob job = new IndexJob(IndexJobId.create(), repositoryId, revision, new GenerationId("g-test"), 1,
-                IndexJobPhase.ACCEPTED, true, Optional.empty(), Optional.empty(), Optional.empty(), Optional.empty());
+        IndexJob job = job(repositoryId, revision);
         PublishedGenerationPointer current = pointer(revision, "g-current", "job-current");
         PublishedGenerationPointer rollback = pointer(revision, "g-rollback", "job-rollback");
         when(source.sync(repositoryId, Optional.of("main"))).thenReturn(revision);
@@ -65,5 +62,10 @@ class IndexRequestServiceTest {
     private static PublishedGenerationPointer pointer(RepositoryRevision revision, String generationId, String jobId) {
         return new PublishedGenerationPointer(revision, new GenerationId(generationId), new ManifestDigest("a".repeat(64)), jobId,
                 java.time.Instant.parse("2026-08-22T00:00:00Z"));
+    }
+
+    private static IndexJob job(RepositoryId repositoryId, RepositoryRevision revision) {
+        return new IndexJob(IndexJobId.create(), repositoryId, Optional.of(new IndexJobTarget(revision, new GenerationId("g-test"), 1L)),
+                IndexJobPhase.ACCEPTED, true, Optional.empty(), false, IndexJobOperation.BUILD);
     }
 }

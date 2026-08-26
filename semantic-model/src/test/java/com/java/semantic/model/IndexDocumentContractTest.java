@@ -36,7 +36,6 @@ import com.java.semantic.model.index.ProjectionName;
 import com.java.semantic.model.index.ProjectionRequirements;
 import com.java.semantic.model.index.ProjectionVersion;
 import com.java.semantic.model.index.RelationDocument;
-import com.java.semantic.model.index.RepositoryFence;
 import com.java.semantic.model.index.SearchDocument;
 import com.java.semantic.model.index.SourceArtifactDocument;
 import com.java.semantic.model.index.SourceArtifactId;
@@ -73,6 +72,19 @@ class IndexDocumentContractTest {
         }
     }
 
+    @Test
+    void generation_and_repository_documents_expose_no_distributed_ownership_fields() {
+        Set<String> manifestFields = java.util.Arrays.stream(GenerationManifestDocument.class.getRecordComponents())
+                .map(java.lang.reflect.RecordComponent::getName).collect(java.util.stream.Collectors.toUnmodifiableSet());
+        Set<String> repositoryFields = java.util.Arrays.stream(com.java.semantic.model.index.RepositoryIndexDocument.class.getRecordComponents())
+                .map(java.lang.reflect.RecordComponent::getName).collect(java.util.stream.Collectors.toUnmodifiableSet());
+
+        assertTrue(java.util.Collections.disjoint(manifestFields,
+                Set.of("ownerWorkerId", "fence", "sealUntil", "heartbeatAt")));
+        assertTrue(java.util.Collections.disjoint(repositoryFields,
+                Set.of("activeJobId", "activeWorkerId", "activeGenerationId", "claimUntil", "fence")));
+    }
+
     @ParameterizedTest
     @MethodSource("invalidContractValues")
     void rejects_invalid_public_contract_values(String kind, Runnable construction) {
@@ -90,7 +102,6 @@ class IndexDocumentContractTest {
                 Arguments.of("reverse source range", (Runnable) () -> new SyntaxRange(
                         new SyntaxPosition(2, 0), new SyntaxPosition(1, 0))),
                 Arguments.of("empty projection requirements", (Runnable) () -> new ProjectionRequirements(Set.of())),
-                Arguments.of("negative fence", (Runnable) () -> new RepositoryFence(-1)),
                 Arguments.of("negative collection count", (Runnable) () -> manifest(Map.of("symbols", -1L))));
     }
 
@@ -405,9 +416,6 @@ class IndexDocumentContractTest {
                 new RepositoryRevision("a".repeat(40)),
                 new GenerationId("generation-1"),
                 "job-1",
-                "worker-1",
-                new RepositoryFence(1),
-                Instant.parse("2026-08-23T00:00:00Z"),
                 GenerationWriteState.SEALED_VALID,
                 1,
                 new IndexSchemaVersion(1),

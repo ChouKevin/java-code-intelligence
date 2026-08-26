@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.java.semantic.indexer.store.IndexSchemaBootstrap;
+import com.java.semantic.indexer.store.GenerationWriteContext;
 import com.java.semantic.indexer.store.MongoGenerationWriter;
 import com.java.semantic.model.index.GenerationId;
 import com.java.semantic.model.index.IndexCollections;
@@ -11,7 +12,6 @@ import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.model.repository.RepositoryRevision;
 import com.mongodb.client.MongoClients;
 import com.mongodb.client.model.IndexOptions;
-import java.time.Duration;
 import java.util.Date;
 import java.util.List;
 import java.util.stream.Stream;
@@ -46,7 +46,7 @@ class GenerationValidatorIT {
             assertThat(result.issues()).extracting(GenerationValidationIssue::code).contains(expectedCode);
             assertThat(result.issues().toString()).doesNotContain("class Secret", "https://user:token@", "token-123");
             assertThat(template.getCollection(IndexCollections.REPOSITORIES).find(new Document("repoId", "orders")).first()
-                    .getString("generationId")).isEqualTo("old-generation");
+                    .get("currentPointer", Document.class).getString("generationId")).isEqualTo("old-generation");
         }
     }
 
@@ -156,19 +156,18 @@ class GenerationValidatorIT {
     }
 
     static void seedValidWritingGeneration(MongoTemplate template) {
-        Date until = new Date(System.currentTimeMillis() + Duration.ofMinutes(5).toMillis());
-        template.getCollection(IndexCollections.REPOSITORIES).insertOne(new Document("repoId", "orders").append("activeJobId", "job-1")
-                .append("activeWorkerId", "worker-1").append("activeGenerationId", "g1").append("fence", 1L).append("claimUntil", until)
-                .append("revision", "b".repeat(40)).append("generationId", "old-generation").append("manifestDigest", "c".repeat(64))
-                .append("committedJobId", "old-job").append("publishedAt", new Date(0L)));
+        template.getCollection(IndexCollections.REPOSITORIES).insertOne(new Document("repoId", "orders").append("currentPointer",
+                new Document("revision", "b".repeat(40)).append("generationId", "old-generation").append("manifestDigest", "c".repeat(64))
+                        .append("committedJobId", "old-job").append("publishedAt", new Date(0L))));
         template.getCollection(IndexCollections.INDEX_JOBS).insertOne(new Document("jobId", "job-1").append("repoId", "orders")
-                .append("active", true).append("workerId", "worker-1").append("fence", 1L)
+                .append("target", new Document("revision", revision().value()).append("generationId", "g1").append("generation", 1L))
+                .append("operation", "BUILD").append("phase", "RUNNING").append("active", true)
                 .append("outstandingBatches", List.of()).append("acknowledgedBatches", List.of())
                 .append("failedOrAmbiguousBatches", List.of()));
         template.getCollection(IndexCollections.GENERATION_MANIFESTS).insertOne(new Document("repoId", "orders").append("generationId", "g1")
-                .append("sourceRevision", revision().value()).append("ownerJobId", "job-1").append("ownerWorkerId", "worker-1")
-                .append("fence", 1L).append("writeState", "WRITING").append("sealUntil", until).append("writeEpoch", 0L)
-                .append("schemaVersion", 1).append("projectionVersions", projectionVersions()).append("identityDigest", "0".repeat(64))
+                .append("sourceRevision", revision().value()).append("ownerJobId", "job-1")
+                .append("writeState", "WRITING").append("writeEpoch", 0L)
+                .append("schemaVersion", 2).append("projectionVersions", projectionVersions()).append("identityDigest", "0".repeat(64))
                 .append("outstandingBatches", List.of()).append("acknowledgedBatches", List.of())
                 .append("failedOrAmbiguousBatches", List.of()));
         SourceIndexBatch batch = FullIndexPublicationIT.validBatch(RepositoryId.of("orders"), revision(), new GenerationId("g1"));
@@ -199,8 +198,8 @@ class GenerationValidatorIT {
                 .append("end", new Document("line", endLine).append("character", endCharacter));
     }
 
-    static MongoGenerationWriter.GenerationLease lease() {
-        return new MongoGenerationWriter.GenerationLease(RepositoryId.of("orders"), new GenerationId("g1"), "job-1", "worker-1", 1L);
+    static GenerationWriteContext lease() {
+        return new GenerationWriteContext(RepositoryId.of("orders"), new GenerationId("g1"), "job-1");
     }
 
     static RepositoryRevision revision() {

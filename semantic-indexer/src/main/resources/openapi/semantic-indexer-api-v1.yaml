@@ -174,15 +174,14 @@ components:
     IndexJobResponse:
       type: object
       additionalProperties: false
-      required: [jobId, repositoryId, revision, generationId, phase]
+      required: [jobId, repositoryId, phase]
       properties:
         jobId: { type: string }
         repositoryId: { type: string }
-        revision: { type: string, pattern: '^[0-9a-f]{40}$' }
-        generationId: { type: string }
+        target: { $ref: '#/components/schemas/IndexJobTarget', nullable: true }
         phase:
           type: string
-          enum: [ACCEPTED, CHECKOUT, PLAN, EXTRACT, WRITE, VALIDATE, PUBLISH, COMPLETE, FAILED]
+          enum: [ACCEPTED, RUNNING, COMPLETE, FAILED]
         failureCategory:
           type: string
           nullable: true
@@ -190,14 +189,13 @@ components:
     IndexJobStatusResponse:
       type: object
       additionalProperties: false
-      required: [jobId, repositoryId, revision, generationId, operation, phase, active]
+      required: [jobId, repositoryId, operation, phase, active]
       properties:
         jobId: { type: string }
         repositoryId: { type: string }
-        revision: { type: string, pattern: '^[0-9a-f]{40}$' }
-        generationId: { type: string }
-        operation: { type: string, enum: [BUILD, ROLLBACK, NO_WORK] }
-        phase: { type: string, enum: [ACCEPTED, CHECKOUT, PLAN, EXTRACT, WRITE, VALIDATE, PUBLISH, COMPLETE, FAILED] }
+        target: { $ref: '#/components/schemas/IndexJobTarget', nullable: true }
+        operation: { type: string, enum: [BUILD, ROLLBACK, RESET, NO_WORK] }
+        phase: { type: string, enum: [ACCEPTED, RUNNING, COMPLETE, FAILED] }
         active: { type: boolean }
         failureCategory:
           type: string
@@ -256,6 +254,14 @@ components:
         manifestDigest: { type: string, pattern: '^[0-9a-f]{64}$' }
         committedJobId: { type: string }
         publishedAt: { type: string, format: date-time }
+    IndexJobTarget:
+      type: object
+      additionalProperties: false
+      required: [revision, generationId, generation]
+      properties:
+        revision: { type: string, pattern: '^[0-9a-f]{40}$' }
+        generationId: { type: string }
+        generation: { type: integer, format: int64, minimum: 1 }
     RollbackRequest:
       type: object
       additionalProperties: false

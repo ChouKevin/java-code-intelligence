@@ -1,11 +1,9 @@
 package com.java.semantic.indexer.store;
 
-import com.java.semantic.model.index.GenerationId;
 import com.java.semantic.model.index.GenerationWriteState;
 import com.java.semantic.model.index.IndexSchemaContract;
 import com.java.semantic.model.index.IndexSchemaContract.ImmutablePayloadCollectionSpec;
 import com.java.semantic.model.index.IndexSchemaContract.PayloadScope;
-import com.java.semantic.model.repository.RepositoryId;
 import com.mongodb.MongoException;
 import com.mongodb.MongoWriteException;
 import com.mongodb.client.model.Filters;
@@ -35,9 +33,13 @@ public final class MongoGenerationWriter {
         new MongoIndexSchemaReadinessVerifier(template).verify();
     }
 
-    public void insertManifest(Document manifest) {
+    public void insertManifest(GenerationWriteContext context, Document manifest) {
+        Objects.requireNonNull(context, "generation write context is required");
+        verifyRunningBuild(context);
         try {
-            insertImmutable("generation_manifests", manifest, List.of("repoId", "generationId"));
+            Document owned = new Document(manifest).append("repoId", context.repositoryId().value())
+                    .append("generationId", context.generationId().value()).append("ownerJobId", context.jobId());
+            insertImmutable("generation_manifests", owned, List.of("repoId", "generationId"));
         } catch (MongoException exception) {
             throw new SemanticIndexUnavailableException("SEMANTIC_INDEX_UNAVAILABLE", exception);
         } catch (DataAccessResourceFailureException exception) {
@@ -45,47 +47,45 @@ public final class MongoGenerationWriter {
         }
     }
 
-    public void writeBatch(GenerationLease lease, String batchId, List<StoredDocument> documents) {
-        Objects.requireNonNull(lease, "generation lease is required");
+    public void writeBatch(GenerationWriteContext context, String batchId, List<StoredDocument> documents) {
+        Objects.requireNonNull(context, "generation write context is required");
         Objects.requireNonNull(batchId, "batch id is required");
         List<StoredDocument> immutableDocuments = List.copyOf(documents);
-        verifyLease(lease);
+        verifyRunningBuild(context);
         batchRegistrationGate.beforeManifestRegistration();
         try {
-            registerOutstandingOnManifest(lease, batchId);
+            registerOutstandingOnManifest(context, batchId);
         } catch (SemanticIndexUnavailableException exception) {
-            failGeneration(lease, batchId);
+            failGeneration(context, batchId);
             throw exception;
         }
         batchRegistrationGate.afterManifestRegistration();
         try {
-            markOutstanding(lease, batchId);
+            markOutstanding(context, batchId);
             for (StoredDocument stored : immutableDocuments) {
                 ImmutablePayloadCollectionSpec collection = IndexSchemaContract.immutablePayloadCollection(stored.collection());
-                insertImmutable(collection.name(), scopedDocument(collection, stored.document(), lease), collection.identityFields());
+                insertImmutable(collection.name(), scopedDocument(collection, stored.document(), context), collection.identityFields());
             }
-            acknowledgeBatch(lease, batchId);
+            acknowledgeBatch(context, batchId);
         } catch (MongoException exception) {
-            failGeneration(lease, batchId);
+            failGeneration(context, batchId);
             throw new SemanticIndexUnavailableException("SEMANTIC_INDEX_UNAVAILABLE", exception);
         } catch (DataAccessResourceFailureException exception) {
-            failGeneration(lease, batchId);
+            failGeneration(context, batchId);
             throw new SemanticIndexUnavailableException("SEMANTIC_INDEX_UNAVAILABLE", exception);
         } catch (RuntimeException exception) {
-            failGeneration(lease, batchId);
+            failGeneration(context, batchId);
             throw exception;
         }
     }
 
-    public void seal(GenerationLease lease, String digest) {
+    public void seal(GenerationWriteContext context, String digest) {
         try {
-            verifyLease(lease);
-            Document query = ownedWritingManifest(lease).append("identityDigest", digest)
+            verifyRunningBuild(context);
+            Document query = ownedWritingManifest(context).append("identityDigest", digest)
                     .append("validationResult", "VALID").append("validatedAt", new Document("$exists", true))
                     .append("sealedCollectionCounts", new Document("$exists", true))
-                    .append("$expr", new Document("$and", List.of(
-                            new Document("$gt", List.of("$sealUntil", "$$NOW")),
-                            noBatches("outstandingBatches"),
+                    .append("$expr", new Document("$and", List.of(noBatches("outstandingBatches"),
                             noBatches("failedOrAmbiguousBatches"))));
             long changed = template.getCollection("generation_manifests").updateOne(query,
                     Updates.set("writeState", GenerationWriteState.SEALED_VALID.name())).getModifiedCount();
@@ -97,59 +97,13 @@ public final class MongoGenerationWriter {
         }
     }
 
-    /** Mirrors the exact coordinator expiry into the owned WRITING manifest, or fails closed. */
-    public java.util.Date currentClaimUntil(GenerationLease lease) {
-        Objects.requireNonNull(lease, "generation lease is required");
-        Document repository = new Document("repoId", lease.repositoryId().value()).append("activeJobId", lease.jobId())
-                .append("activeWorkerId", lease.workerId()).append("activeGenerationId", lease.generationId().value())
-                .append("fence", lease.fence()).append("$expr", new Document("$gt", List.of("$claimUntil", "$$NOW")));
+    private void verifyRunningBuild(GenerationWriteContext context) {
+        Document query = new Document("jobId", context.jobId()).append("repoId", context.repositoryId().value())
+                .append("target.generationId", context.generationId().value()).append("operation", "BUILD")
+                .append("phase", "RUNNING").append("active", true);
         try {
-            Document current = template.getCollection("repositories").find(repository).first();
-            if (Objects.isNull(current) || Objects.isNull(current.getDate("claimUntil"))) {
-                throw new IllegalStateException("generation lease is not active");
-            }
-            return current.getDate("claimUntil");
-        } catch (MongoException exception) {
-            throw new SemanticIndexUnavailableException("SEMANTIC_INDEX_UNAVAILABLE", exception);
-        } catch (DataAccessResourceFailureException exception) {
-            throw new SemanticIndexUnavailableException("SEMANTIC_INDEX_UNAVAILABLE", exception);
-        }
-    }
-
-    /** Mirrors the exact coordinator expiry into the owned WRITING manifest, or fails closed. */
-    public void mirrorSealUntil(GenerationLease lease, java.util.Date successfulClaimUntil) {
-        Objects.requireNonNull(successfulClaimUntil, "claim expiry is required");
-        Document repository = new Document("repoId", lease.repositoryId().value()).append("activeJobId", lease.jobId())
-                .append("activeWorkerId", lease.workerId()).append("activeGenerationId", lease.generationId().value())
-                .append("fence", lease.fence()).append("claimUntil", successfulClaimUntil)
-                .append("$expr", new Document("$gt", List.of("$claimUntil", "$$NOW")));
-        try {
-            if (Optional.ofNullable(template.getCollection("repositories").find(repository).first()).isEmpty()) {
-                throw new IllegalStateException("successful lease expiry no longer belongs to generation");
-            }
-            Document manifest = new Document("repoId", lease.repositoryId().value()).append("generationId", lease.generationId().value())
-                    .append("ownerJobId", lease.jobId()).append("ownerWorkerId", lease.workerId()).append("fence", lease.fence())
-                    .append("writeState", GenerationWriteState.WRITING.name());
-            long matched = template.getCollection("generation_manifests").updateOne(manifest, Updates.set("sealUntil", successfulClaimUntil)).getMatchedCount();
-            if (matched != 1L) { throw new IllegalStateException("manifest lease mirror failed closed"); }
-        } catch (MongoException exception) {
-            throw new SemanticIndexUnavailableException("SEMANTIC_INDEX_UNAVAILABLE", exception);
-        } catch (DataAccessResourceFailureException exception) {
-            throw new SemanticIndexUnavailableException("SEMANTIC_INDEX_UNAVAILABLE", exception);
-        }
-    }
-
-    private void verifyLease(GenerationLease lease) {
-        Document query = new Document("repoId", lease.repositoryId().value()).append("activeJobId", lease.jobId())
-                .append("activeWorkerId", lease.workerId()).append("activeGenerationId", lease.generationId().value())
-                .append("fence", lease.fence()).append("$expr", new Document("$gt", List.of("$claimUntil", "$$NOW")));
-        try {
-            if (Optional.ofNullable(template.getCollection("repositories").find(query).first()).isEmpty()) {
-                throw new IllegalStateException("generation lease is not active");
-            }
-            if (Optional.ofNullable(template.getCollection("index_jobs").find(Filters.and(Filters.eq("jobId", lease.jobId()),
-                    Filters.eq("repoId", lease.repositoryId().value()), Filters.eq("active", true))).first()).isEmpty()) {
-                throw new IllegalStateException("index job is not active");
+            if (Optional.ofNullable(template.getCollection("index_jobs").find(query).first()).isEmpty()) {
+                throw new IllegalStateException("index job is not an active running build");
             }
         } catch (DataAccessResourceFailureException exception) {
             throw new SemanticIndexUnavailableException("SEMANTIC_INDEX_UNAVAILABLE", exception);
@@ -158,10 +112,11 @@ public final class MongoGenerationWriter {
         }
     }
 
-    private void markOutstanding(GenerationLease lease, String batchId) {
+    private void markOutstanding(GenerationWriteContext context, String batchId) {
         try {
-            long matched = template.getCollection("index_jobs").updateOne(Filters.and(Filters.eq("jobId", lease.jobId()),
-                            Filters.eq("repoId", lease.repositoryId().value()), Filters.eq("active", true),
+            long matched = template.getCollection("index_jobs").updateOne(Filters.and(Filters.eq("jobId", context.jobId()),
+                            Filters.eq("repoId", context.repositoryId().value()), Filters.eq("target.generationId", context.generationId().value()),
+                            Filters.eq("operation", "BUILD"), Filters.eq("phase", "RUNNING"), Filters.eq("active", true),
                             Filters.ne("outstandingBatches", batchId), Filters.ne("acknowledgedBatches", batchId)),
                     Updates.addToSet("outstandingBatches", batchId)).getModifiedCount();
             if (matched != 1L) { throw new IllegalStateException("index job batch registration failed closed"); }
@@ -172,16 +127,15 @@ public final class MongoGenerationWriter {
         }
     }
 
-    private void registerOutstandingOnManifest(GenerationLease lease, String batchId) {
-        Document query = ownedWritingManifest(lease).append("outstandingBatches", new Document("$ne", batchId))
+    private void registerOutstandingOnManifest(GenerationWriteContext context, String batchId) {
+        Document query = ownedWritingManifest(context).append("outstandingBatches", new Document("$ne", batchId))
                 .append("acknowledgedBatches", new Document("$ne", batchId))
-                .append("validationResult", new Document("$exists", false))
-                .append("$expr", new Document("$gt", List.of("$sealUntil", "$$NOW")));
+                .append("validationResult", new Document("$exists", false));
         try {
             long changed = template.getCollection("generation_manifests").updateOne(query,
                     Updates.addToSet("outstandingBatches", batchId)).getModifiedCount();
             if (changed != 1L) {
-                abandonGenerationAfterAmbiguousBatchRegistration(lease, batchId);
+                abandonGenerationAfterAmbiguousBatchRegistration(context, batchId);
                 throw new IllegalStateException("generation batch registration failed closed");
             }
         } catch (MongoException exception) {
@@ -191,34 +145,36 @@ public final class MongoGenerationWriter {
         }
     }
 
-    private void abandonGenerationAfterAmbiguousBatchRegistration(GenerationLease lease, String batchId) {
-        Document ambiguousRegistration = ownedWritingManifest(lease).append("$or", List.of(
+    private void abandonGenerationAfterAmbiguousBatchRegistration(GenerationWriteContext context, String batchId) {
+        Document ambiguousRegistration = ownedWritingManifest(context).append("$or", List.of(
                 new Document("outstandingBatches", batchId), new Document("acknowledgedBatches", batchId)));
         Optional<Document> manifest = Optional.ofNullable(template.getCollection("generation_manifests")
                 .find(ambiguousRegistration).first());
         if (manifest.isPresent()) {
-            failGeneration(lease, batchId);
+            failGeneration(context, batchId);
         }
     }
 
-    private void acknowledgeBatch(GenerationLease lease, String batchId) {
-        long jobChanged = template.getCollection("index_jobs").updateOne(Filters.and(Filters.eq("jobId", lease.jobId()),
-                        Filters.eq("repoId", lease.repositoryId().value()), Filters.eq("active", true),
+    private void acknowledgeBatch(GenerationWriteContext context, String batchId) {
+        long jobChanged = template.getCollection("index_jobs").updateOne(Filters.and(Filters.eq("jobId", context.jobId()),
+                        Filters.eq("repoId", context.repositoryId().value()), Filters.eq("target.generationId", context.generationId().value()),
+                        Filters.eq("operation", "BUILD"), Filters.eq("phase", "RUNNING"), Filters.eq("active", true),
                         Filters.eq("outstandingBatches", batchId)),
                 Updates.combine(Updates.pull("outstandingBatches", batchId), Updates.addToSet("acknowledgedBatches", batchId))).getModifiedCount();
         if (jobChanged != 1L) { throw new IllegalStateException("index job batch acknowledgement failed closed"); }
-        long manifestChanged = template.getCollection("generation_manifests").updateOne(ownedWritingManifest(lease)
+        long manifestChanged = template.getCollection("generation_manifests").updateOne(ownedWritingManifest(context)
                         .append("outstandingBatches", batchId),
                 Updates.combine(Updates.pull("outstandingBatches", batchId), Updates.addToSet("acknowledgedBatches", batchId))).getModifiedCount();
         if (manifestChanged != 1L) { throw new IllegalStateException("generation batch acknowledgement failed closed"); }
     }
 
-    private void failGeneration(GenerationLease lease, String batchId) {
+    private void failGeneration(GenerationWriteContext context, String batchId) {
         try {
-            long jobChanged = template.getCollection("index_jobs").updateOne(Filters.and(Filters.eq("jobId", lease.jobId()),
-                            Filters.eq("repoId", lease.repositoryId().value()), Filters.eq("active", true)),
+            long jobChanged = template.getCollection("index_jobs").updateOne(Filters.and(Filters.eq("jobId", context.jobId()),
+                            Filters.eq("repoId", context.repositoryId().value()), Filters.eq("target.generationId", context.generationId().value()),
+                            Filters.eq("operation", "BUILD"), Filters.eq("phase", "RUNNING"), Filters.eq("active", true)),
                     Updates.addToSet("failedOrAmbiguousBatches", batchId)).getModifiedCount();
-            long manifestChanged = template.getCollection("generation_manifests").updateOne(ownedWritingManifest(lease),
+            long manifestChanged = template.getCollection("generation_manifests").updateOne(ownedWritingManifest(context),
                     Updates.combine(Updates.addToSet("failedOrAmbiguousBatches", batchId), Updates.set("writeState", GenerationWriteState.FAILED.name()))).getModifiedCount();
             if (jobChanged != 1L || manifestChanged != 1L) { throw new IllegalStateException("generation failure recording failed closed"); }
         } catch (MongoException exception) {
@@ -249,11 +205,11 @@ public final class MongoGenerationWriter {
         return actualWithoutId.equals(expectedWithoutId);
     }
 
-    private static Document scopedDocument(ImmutablePayloadCollectionSpec collection, Document source, GenerationLease lease) {
+    private static Document scopedDocument(ImmutablePayloadCollectionSpec collection, Document source, GenerationWriteContext context) {
         Document document = new Document(source);
         if (collection.scope() == PayloadScope.GENERATION) {
-            document.put("repoId", lease.repositoryId().value());
-            document.put("generationId", lease.generationId().value());
+            document.put("repoId", context.repositoryId().value());
+            document.put("generationId", context.generationId().value());
         } else {
             document.remove("repoId");
             document.remove("generationId");
@@ -261,9 +217,9 @@ public final class MongoGenerationWriter {
         return document;
     }
 
-    private static Document ownedWritingManifest(GenerationLease lease) {
-        return new Document("repoId", lease.repositoryId().value()).append("generationId", lease.generationId().value())
-                .append("ownerJobId", lease.jobId()).append("ownerWorkerId", lease.workerId()).append("fence", lease.fence())
+    private static Document ownedWritingManifest(GenerationWriteContext context) {
+        return new Document("repoId", context.repositoryId().value()).append("generationId", context.generationId().value())
+                .append("ownerJobId", context.jobId())
                 .append("writeState", GenerationWriteState.WRITING.name());
     }
 
@@ -271,9 +227,6 @@ public final class MongoGenerationWriter {
         return new Document("$eq", List.of(new Document("$size", new Document("$ifNull", List.of("$" + field, List.of()))), 0));
     }
 
-    public record GenerationLease(RepositoryId repositoryId, GenerationId generationId, String jobId, String workerId, long fence) {
-        public GenerationLease { repositoryId = Objects.requireNonNull(repositoryId, "repository id is required"); generationId = Objects.requireNonNull(generationId, "generation id is required"); jobId = Objects.requireNonNull(jobId, "job id is required"); workerId = Objects.requireNonNull(workerId, "worker id is required"); }
-    }
     public record StoredDocument(String collection, Document document) {
         public StoredDocument { collection = Objects.requireNonNull(collection, "collection is required"); document = new Document(Objects.requireNonNull(document, "document is required")); }
     }

@@ -35,16 +35,13 @@ class MongoGenerationStoreIT {
         try (MongoDBContainer container = MongoSchemaTestSupport.container()) {
             org.springframework.data.mongodb.core.MongoTemplate template = MongoSchemaTestSupport.template(container);
             new IndexSchemaBootstrap(template).bootstrap();
-            template.getCollection("repositories").insertOne(new Document("repoId", "orders").append("activeJobId", "job-1")
-                    .append("activeWorkerId", "worker-1").append("activeGenerationId", "g1").append("fence", 1L)
-                    .append("claimUntil", new java.util.Date(System.currentTimeMillis() + 60_000L)));
             template.getCollection("generation_manifests").insertOne(new Document("repoId", "orders").append("generationId", "g1")
-                    .append("ownerJobId", "job-1").append("ownerWorkerId", "worker-1").append("fence", 1L)
-                    .append("writeState", "WRITING").append("sealUntil", new java.util.Date(System.currentTimeMillis() + 60_000L)));
+                    .append("ownerJobId", "job-1").append("writeState", "WRITING"));
             template.getCollection("index_jobs").insertOne(new Document("jobId", "job-1").append("repoId", "orders").append("active", true)
+                    .append("target", target("g1")).append("operation", "BUILD").append("phase", "RUNNING")
                     .append("outstandingBatches", List.of()).append("failedOrAmbiguousBatches", List.of()));
             MongoGenerationWriter writer = new MongoGenerationWriter(template);
-            MongoGenerationWriter.GenerationLease lease = new MongoGenerationWriter.GenerationLease(new RepositoryId("orders"), new GenerationId("g1"), "job-1", "worker-1", 1L);
+            GenerationWriteContext lease = new GenerationWriteContext(new RepositoryId("orders"), new GenerationId("g1"), "job-1");
             MongoGenerationWriter.StoredDocument first = new MongoGenerationWriter.StoredDocument("symbols", new Document("symbolId", "s1").append("name", "first"));
             MongoGenerationWriter.StoredDocument conflicting = new MongoGenerationWriter.StoredDocument("symbols", new Document("symbolId", "s1").append("name", "second"));
             writer.writeBatch(lease, "b1", List.of(first));
@@ -63,8 +60,8 @@ class MongoGenerationStoreIT {
         try (MongoDBContainer container = MongoSchemaTestSupport.container()) {
             org.springframework.data.mongodb.core.MongoTemplate template = MongoSchemaTestSupport.template(container);
             new IndexSchemaBootstrap(template).bootstrap();
-            MongoGenerationWriter.GenerationLease firstLease = writableLease(template, "orders", "g1", "job-1", "worker-1", 1L);
-            MongoGenerationWriter.GenerationLease secondLease = writableLease(template, "billing", "g2", "job-2", "worker-2", 2L);
+            GenerationWriteContext firstLease = writableLease(template, "orders", "g1", "job-1");
+            GenerationWriteContext secondLease = writableLease(template, "billing", "g2", "job-2");
             MongoGenerationWriter writer = new MongoGenerationWriter(template);
             MongoGenerationWriter.StoredDocument artifact = new MongoGenerationWriter.StoredDocument(IndexCollections.SOURCE_ARTIFACTS,
                     new Document("sourceArtifactId", "artifact-1").append("contentHash", "hash-1").append("utf8Content", "class Example {}"));
@@ -86,7 +83,7 @@ class MongoGenerationStoreIT {
         try (MongoDBContainer container = MongoSchemaTestSupport.container()) {
             org.springframework.data.mongodb.core.MongoTemplate template = MongoSchemaTestSupport.template(container);
             new IndexSchemaBootstrap(template).bootstrap();
-            MongoGenerationWriter.GenerationLease lease = writableLease(template, "orders", "g1", "job-1", "worker-1", 1L);
+            GenerationWriteContext lease = writableLease(template, "orders", "g1", "job-1");
             MongoGenerationWriter interruptedWriter = new MongoGenerationWriter(template, new MongoGenerationWriter.BatchRegistrationGate() {
                 @Override
                 public void beforeManifestRegistration() { }
@@ -117,7 +114,7 @@ class MongoGenerationStoreIT {
 
     static Stream<Arguments> uniqueCollisions() {
         return Stream.of(
-                Arguments.of("repositories", new Document("repoId", "orders"), new Document("repoId", "orders").append("fence", 2L)),
+                Arguments.of("repositories", new Document("repoId", "orders"), new Document("repoId", "orders").append("currentGenerationId", "g2")),
                 Arguments.of("generation_manifests", generation("g1"), generation("g1").append("digest", "changed")),
                 Arguments.of("index_jobs", new Document("jobId", "job-1"), new Document("jobId", "job-1").append("repoId", "other")),
                 Arguments.of("index_jobs", new Document("jobId", "a").append("repoId", "orders").append("active", true), new Document("jobId", "b").append("repoId", "orders").append("active", true)),
@@ -133,16 +130,18 @@ class MongoGenerationStoreIT {
     private static Document generation(String generationId) { return new Document("repoId", "orders").append("generationId", generationId); }
     private static Document scoped(String key, String value) { return new Document("repoId", "orders").append("generationId", "g1").append(key, value); }
 
-    private static MongoGenerationWriter.GenerationLease writableLease(org.springframework.data.mongodb.core.MongoTemplate template,
-                                                                         String repositoryId, String generationId, String jobId, String workerId, long fence) {
-        java.util.Date leaseUntil = new java.util.Date(System.currentTimeMillis() + 60_000L);
-        template.getCollection(IndexCollections.REPOSITORIES).insertOne(new Document("repoId", repositoryId).append("activeJobId", jobId)
-                .append("activeWorkerId", workerId).append("activeGenerationId", generationId).append("fence", fence).append("claimUntil", leaseUntil));
+    private static GenerationWriteContext writableLease(org.springframework.data.mongodb.core.MongoTemplate template,
+                                                         String repositoryId, String generationId, String jobId) {
         template.getCollection(IndexCollections.GENERATION_MANIFESTS).insertOne(new Document("repoId", repositoryId).append("generationId", generationId)
-                .append("ownerJobId", jobId).append("ownerWorkerId", workerId).append("fence", fence).append("writeState", "WRITING").append("sealUntil", leaseUntil));
+                .append("ownerJobId", jobId).append("writeState", "WRITING"));
         template.getCollection(IndexCollections.INDEX_JOBS).insertOne(new Document("jobId", jobId).append("repoId", repositoryId).append("active", true)
+                .append("target", target(generationId)).append("operation", "BUILD").append("phase", "RUNNING")
                 .append("outstandingBatches", List.of()).append("failedOrAmbiguousBatches", List.of()));
-        return new MongoGenerationWriter.GenerationLease(new RepositoryId(repositoryId), new GenerationId(generationId), jobId, workerId, fence);
+        return new GenerationWriteContext(new RepositoryId(repositoryId), new GenerationId(generationId), jobId);
+    }
+
+    private static Document target(String generationId) {
+        return new Document("revision", "a".repeat(40)).append("generationId", generationId).append("generation", 1L);
     }
 
     private static final class SimulatedProcessLoss extends Error { }
