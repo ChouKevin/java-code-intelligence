@@ -26,6 +26,7 @@ public final class IndexJobDispatcher implements ApplicationListener<Application
     private final Object lifecycleMonitor = new Object();
     private final List<Runnable> stopCallbacks = new ArrayList<>();
     private boolean stopping;
+    private boolean workTerminated;
     private ScheduledFuture<?> pollFuture;
 
     public IndexJobDispatcher(IndexJobStore jobs, IndexJobExecutor executor, IndexJobProperties properties) {
@@ -103,8 +104,9 @@ public final class IndexJobDispatcher implements ApplicationListener<Application
     @Override
     public void stop() {
         synchronized (lifecycleMonitor) {
-            beginStop();
+            markStopping();
         }
+        dispatcher.shutdownNow();
     }
 
     @Override
@@ -112,15 +114,17 @@ public final class IndexJobDispatcher implements ApplicationListener<Application
         Objects.requireNonNull(callback, "stop callback is required");
         boolean runCallbackImmediately = false;
         synchronized (lifecycleMonitor) {
-            if (dispatcher.isTerminated()) {
+            if (workTerminated) {
                 runCallbackImmediately = true;
             } else {
                 stopCallbacks.add(callback);
-                beginStop();
+                markStopping();
             }
         }
         if (runCallbackImmediately) {
             runStopCallback(callback);
+        } else {
+            dispatcher.shutdownNow();
         }
     }
 
@@ -136,17 +140,17 @@ public final class IndexJobDispatcher implements ApplicationListener<Application
         return false;
     }
 
-    private void beginStop() {
+    private void markStopping() {
         stopping = true;
         if (Objects.nonNull(pollFuture)) {
             pollFuture.cancel(false);
         }
-        dispatcher.shutdownNow();
     }
 
     private void completeStopCallbacks() {
         List<Runnable> callbacks;
         synchronized (lifecycleMonitor) {
+            workTerminated = true;
             callbacks = List.copyOf(stopCallbacks);
             stopCallbacks.clear();
         }

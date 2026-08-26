@@ -205,6 +205,23 @@ class IndexJobDispatcherTest {
         assertThat(callbackCalls).hasValue(1);
     }
 
+    @Test
+    void stop_callback_registered_during_termination_also_completes_once() {
+        IndexJobStore jobs = mock(IndexJobStore.class);
+        IndexJobExecutor executor = mock(IndexJobExecutor.class);
+        AtomicInteger firstCallbackCalls = new AtomicInteger();
+        AtomicInteger secondCallbackCalls = new AtomicInteger();
+        IndexJobDispatcher dispatcher = dispatcher(jobs, executor);
+
+        dispatcher.stop(() -> {
+            firstCallbackCalls.incrementAndGet();
+            dispatcher.stop(secondCallbackCalls::incrementAndGet);
+        });
+
+        assertThat(firstCallbackCalls).hasValue(1);
+        assertThat(secondCallbackCalls).hasValue(1);
+    }
+
     private static IndexJobDispatcher dispatcher(IndexJobStore jobs, IndexJobExecutor executor) {
         return new IndexJobDispatcher(jobs, executor, new IndexJobProperties(Duration.ofSeconds(1L)));
     }
