@@ -20,6 +20,20 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '409': { $ref: '#/components/responses/IndexConflict' }
+  /index/uat/publication/await:
+    get:
+      operationId: awaitUatPublication
+      responses:
+        '200':
+          description: The active in-memory publication cycle has reached the pre-publication boundary.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PublicationCycle' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '408': { description: The active publication cycle did not reach the boundary before the UAT timeout. }
+        '409': { $ref: '#/components/responses/IndexConflict' }
+        '503': { description: Publication observation was interrupted. }
   /index/uat/publication/release:
     post:
       operationId: releaseUatPublication

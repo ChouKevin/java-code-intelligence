@@ -2,8 +2,11 @@ package com.java.semantic.indexer.uat;
 
 import java.time.Duration;
 import java.util.Objects;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 /** One bounded, in-memory UAT pause cycle. Cycle identifiers are evidence, never client tokens. */
 public final class UatPublicationGate implements PublicationGate {
@@ -23,7 +26,7 @@ public final class UatPublicationGate implements PublicationGate {
             throw new IllegalStateException("publication gate already has an active cycle");
         }
         lastCycleId++;
-        current = new Cycle(lastCycleId, new CountDownLatch(1));
+        current = new Cycle(lastCycleId, new CountDownLatch(1), new CompletableFuture<>());
         return lastCycleId;
     }
 
@@ -31,7 +34,7 @@ public final class UatPublicationGate implements PublicationGate {
         Cycle released = current;
         current = null; // cs-allow: field assignment is not a null comparison
         if (Objects.nonNull(released)) {
-            released.latch().countDown();
+            released.release();
         }
     }
 
@@ -46,8 +49,9 @@ public final class UatPublicationGate implements PublicationGate {
         if (Objects.isNull(cycle)) {
             return;
         }
+        cycle.signalReached();
         try {
-            if (!cycle.latch().await(timeout.toNanos(), TimeUnit.NANOSECONDS)) {
+            if (!cycle.releaseLatch().await(timeout.toNanos(), TimeUnit.NANOSECONDS)) {
                 throw new PublicationGateTimeoutException();
             }
         } catch (InterruptedException exception) {
@@ -55,6 +59,28 @@ public final class UatPublicationGate implements PublicationGate {
             throw new PublicationGateInterruptedException(exception);
         } finally {
             clear(cycle);
+        }
+    }
+
+    /** Waits for the active build to enter the publication boundary without changing the cycle. */
+    public long awaitReachedPublication() {
+        Cycle cycle = currentCycle();
+        if (Objects.isNull(cycle)) {
+            throw new PublicationObservationUnavailableException();
+        }
+        try {
+            return cycle.reached().get(timeout.toNanos(), TimeUnit.NANOSECONDS);
+        } catch (TimeoutException exception) {
+            throw new PublicationObservationTimeoutException(exception);
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            throw new PublicationObservationInterruptedException(exception);
+        } catch (ExecutionException exception) {
+            Throwable cause = exception.getCause();
+            if (cause instanceof PublicationObservationUnavailableException unavailable) {
+                throw unavailable;
+            }
+            throw new IllegalStateException("UAT publication observation failed", cause);
         }
     }
 
@@ -68,9 +94,19 @@ public final class UatPublicationGate implements PublicationGate {
         }
     }
 
-    private record Cycle(long cycleId, CountDownLatch latch) {
+    private record Cycle(long cycleId, CountDownLatch releaseLatch, CompletableFuture<Long> reached) {
         private Cycle {
-            latch = Objects.requireNonNull(latch, "publication latch is required");
+            releaseLatch = Objects.requireNonNull(releaseLatch, "publication release latch is required");
+            reached = Objects.requireNonNull(reached, "publication reached signal is required");
+        }
+
+        private void signalReached() {
+            reached.complete(cycleId);
+        }
+
+        private void release() {
+            releaseLatch.countDown();
+            reached.completeExceptionally(new PublicationObservationUnavailableException());
         }
     }
 
@@ -83,6 +119,24 @@ public final class UatPublicationGate implements PublicationGate {
     public static final class PublicationGateInterruptedException extends RuntimeException {
         public PublicationGateInterruptedException(InterruptedException cause) {
             super("UAT publication gate was interrupted", cause);
+        }
+    }
+
+    public static final class PublicationObservationUnavailableException extends IllegalStateException {
+        public PublicationObservationUnavailableException() {
+            super("UAT publication gate has no active unreached cycle");
+        }
+    }
+
+    public static final class PublicationObservationTimeoutException extends RuntimeException {
+        public PublicationObservationTimeoutException(TimeoutException cause) {
+            super("UAT publication observation timed out", cause);
+        }
+    }
+
+    public static final class PublicationObservationInterruptedException extends RuntimeException {
+        public PublicationObservationInterruptedException(InterruptedException cause) {
+            super("UAT publication observation was interrupted", cause);
         }
     }
 }

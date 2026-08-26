@@ -20,6 +20,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -86,5 +87,22 @@ class UatIndexControllerTest {
                 .extracting("statusCode")
                 .isEqualTo(HttpStatus.CONFLICT);
         gate.release();
+    }
+
+    @Test
+    void publication_await_returns_the_armed_cycle_after_the_build_reaches_the_gate() throws Exception {
+        UatRepositoryResetService resets = mock(UatRepositoryResetService.class);
+        UatPublicationGate gate = new UatPublicationGate(Duration.ofSeconds(2));
+        MockMvc mvc = MockMvcBuilders.standaloneSetup(new UatIndexController(gate, resets)).build();
+        long armedCycle = gate.arm();
+        java.util.concurrent.CompletableFuture<Void> building = java.util.concurrent.CompletableFuture.runAsync(gate::awaitPublication);
+
+        mvc.perform(get("/index/uat/publication/await"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.cycleId").value(armedCycle));
+        assertThat(building.isDone()).isFalse();
+
+        gate.release();
+        building.get(1, java.util.concurrent.TimeUnit.SECONDS);
     }
 }

@@ -37,8 +37,9 @@ class IndexerOpenApiContractTest {
         assertThat(target).contains("generationId: { type: string }");
         assertThat(target).contains("generation: { type: integer, format: int64, minimum: 1 }");
         assertThat(withoutUatPaths(document)).doesNotContain("worker" + "Id", "claim" + "Until", "heart" + "beat", "fen" + "ce", "lea" + "se");
-        assertThat(document).contains("/index/uat/publication/arm:", "/index/uat/publication/release:",
-                "/index/uat/repositories/{repoId}/reset:", "operationId: resetUatRepositoryIndex");
+        assertThat(document).contains("/index/uat/publication/arm:", "/index/uat/publication/await:",
+                "/index/uat/publication/release:", "/index/uat/repositories/{repoId}/reset:",
+                "operationId: awaitUatPublication", "operationId: resetUatRepositoryIndex");
 
         assertThat(recordComponentNames(IndexRepositoryController.IndexJobResponse.class))
                 .containsExactly("jobId", "repositoryId", "target", "phase", "failureCategory");

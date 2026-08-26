@@ -7,6 +7,7 @@ import java.util.Objects;
 import org.springframework.context.annotation.Profile;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -38,6 +39,19 @@ public final class UatIndexController {
     @PostMapping("/publication/release")
     public void releasePublication() {
         publicationGate.release();
+    }
+
+    @GetMapping("/publication/await")
+    public PublicationCycleResponse awaitPublication() {
+        try {
+            return new PublicationCycleResponse(publicationGate.awaitReachedPublication());
+        } catch (UatPublicationGate.PublicationObservationUnavailableException exception) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "publication gate has no active unreached cycle", exception);
+        } catch (UatPublicationGate.PublicationObservationTimeoutException exception) {
+            throw new ResponseStatusException(HttpStatus.REQUEST_TIMEOUT, "publication gate was not reached before timeout", exception);
+        } catch (UatPublicationGate.PublicationObservationInterruptedException exception) {
+            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "publication observation was interrupted", exception);
+        }
     }
 
     @PostMapping("/repositories/{repoId}/reset")
