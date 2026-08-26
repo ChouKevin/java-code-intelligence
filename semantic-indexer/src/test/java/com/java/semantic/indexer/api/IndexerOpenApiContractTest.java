@@ -40,6 +40,7 @@ class IndexerOpenApiContractTest {
         assertThat(document).contains("/index/uat/publication/arm:", "/index/uat/publication/await:",
                 "/index/uat/publication/release:", "/index/uat/repositories/{repoId}/reset:",
                 "operationId: awaitUatPublication", "operationId: resetUatRepositoryIndex");
+        assertThat(document).contains("'409': { description: No active publication cycle is available to observe. }");
 
         assertThat(recordComponentNames(IndexRepositoryController.IndexJobResponse.class))
                 .containsExactly("jobId", "repositoryId", "target", "phase", "failureCategory");

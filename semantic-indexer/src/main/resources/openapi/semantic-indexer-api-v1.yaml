@@ -32,7 +32,7 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '408': { description: The active publication cycle did not reach the boundary before the UAT timeout. }
-        '409': { $ref: '#/components/responses/IndexConflict' }
+        '409': { description: No active publication cycle is available to observe. }
         '503': { description: Publication observation was interrupted. }
   /index/uat/publication/release:
     post:
