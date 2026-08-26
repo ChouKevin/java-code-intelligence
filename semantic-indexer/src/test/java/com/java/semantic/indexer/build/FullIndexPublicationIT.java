@@ -288,8 +288,8 @@ class FullIndexPublicationIT {
     }
 
     private static IndexJob claimedJob(MongoIndexJobStore store) {
-        IndexJob accepted = store.admit(RepositoryId.of("orders"), revision(), false);
-        return store.start(accepted.id()).orElseThrow();
+        store.admit(RepositoryId.of("orders"), revision(), false);
+        return store.startNextAccepted().orElseThrow();
     }
 
     private static GenerationId target(IndexJob job) {

@@ -3,6 +3,9 @@ spring:
     uri: ${SEMANTIC_MONGODB_URI:mongodb://localhost:27017/semantic?serverSelectionTimeoutMS=2000&connectTimeoutMS=2000&socketTimeoutMS=2000}
 
 semantic:
+  index-jobs:
+    # semantic.index-jobs.poll-delay controls serialized dispatcher polling.
+    poll-delay: 1s
   indexer:
     admin-token: ${SEMANTIC_INDEXER_ADMIN_TOKEN:}
   jdtls:

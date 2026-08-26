@@ -103,14 +103,13 @@ public final class MongoIndexJobStore implements IndexJobStore {
     }
 
     @Override
-    public Optional<IndexJob> start(IndexJobId jobId) {
+    public Optional<IndexJob> startNextAccepted() {
         Document started = template.getCollection(IndexCollections.INDEX_JOBS).findOneAndUpdate(
-                new Document(JOB_ID, jobId.value()).append(ACTIVE, true).append("phase", IndexJobPhase.ACCEPTED.name()),
-                Updates.set("phase", IndexJobPhase.RUNNING.name()));
-        if (Objects.isNull(started)) {
-            return Optional.empty();
-        }
-        return find(jobId);
+                new Document(ACTIVE, true).append("phase", IndexJobPhase.ACCEPTED.name()),
+                Updates.set("phase", IndexJobPhase.RUNNING.name()),
+                new FindOneAndUpdateOptions().sort(new Document("createdAt", 1).append(JOB_ID, 1))
+                        .returnDocument(ReturnDocument.AFTER));
+        return Optional.ofNullable(started).map(MongoIndexJobStore::from);
     }
 
     @Override

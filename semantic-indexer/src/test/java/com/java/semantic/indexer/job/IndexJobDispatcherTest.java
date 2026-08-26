@@ -1,0 +1,116 @@
+package com.java.semantic.indexer.job;
+
+import com.java.semantic.indexer.build.RepositoryBuildRunner;
+import com.java.semantic.indexer.store.PublicationPort;
+import com.java.semantic.model.index.GenerationId;
+import com.java.semantic.model.repository.RepositoryId;
+import com.java.semantic.model.repository.RepositoryRevision;
+import java.time.Duration;
+import java.util.Optional;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import org.junit.jupiter.api.Test;
+import org.springframework.boot.context.event.ApplicationReadyEvent;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.inOrder;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+
+class IndexJobDispatcherTest {
+    @Test
+    void dispatcher_type_is_available_for_durable_job_dispatching() {
+        assertThat(IndexJobDispatcher.class).isNotNull();
+    }
+
+    @Test
+    void dispatches_one_claimed_job_synchronously_and_allows_the_next_poll_after_failure() {
+        IndexJobStore jobs = mock(IndexJobStore.class);
+        IndexJobExecutor executor = mock(IndexJobExecutor.class);
+        IndexJob first = runningJob("job-1", "orders");
+        IndexJob second = runningJob("job-2", "payments");
+        RuntimeException failure = new RuntimeException("first job failed");
+        doReturn(Optional.of(first)).doReturn(Optional.of(second)).when(jobs).startNextAccepted();
+        doThrow(failure).when(executor).execute(first);
+        IndexJobDispatcher dispatcher = dispatcher(jobs, executor);
+
+        try {
+            assertThatThrownBy(dispatcher::dispatchOnce).isSameAs(failure);
+
+            dispatcher.dispatchOnce();
+
+            org.mockito.InOrder order = inOrder(executor);
+            order.verify(executor).execute(first);
+            order.verify(executor).execute(second);
+            verify(jobs, times(2)).startNextAccepted();
+        } finally {
+            dispatcher.stop();
+        }
+    }
+
+    @Test
+    void shutdown_interrupts_the_active_dispatcher_thread_and_prevents_another_poll() throws Exception {
+        IndexJobStore jobs = mock(IndexJobStore.class);
+        RepositoryBuildRunner runner = mock(RepositoryBuildRunner.class);
+        PublicationPort publication = mock(PublicationPort.class);
+        IndexJob job = runningJob("job-1", "orders");
+        CountDownLatch started = new CountDownLatch(1);
+        CountDownLatch failed = new CountDownLatch(1);
+        CountDownLatch terminalObserved = new CountDownLatch(1);
+        AtomicBoolean interrupted = new AtomicBoolean(false);
+        doReturn(Optional.of(job)).doReturn(Optional.empty()).when(jobs).startNextAccepted();
+        when(jobs.reconcileCommitted(job.repositoryId())).thenReturn(Optional.empty());
+        when(jobs.fail(job.id(), IndexFailureCategory.WORKER_INTERRUPTED)).thenAnswer(invocation -> {
+            failed.countDown();
+            return true;
+        });
+        when(jobs.find(job.id())).thenAnswer(invocation -> {
+            terminalObserved.countDown();
+            return Optional.empty();
+        });
+        doAnswer(invocation -> {
+            started.countDown();
+            try {
+                new CountDownLatch(1).await();
+            } catch (InterruptedException exception) {
+                interrupted.set(true);
+                Thread.currentThread().interrupt();
+                throw new RuntimeException("dispatcher thread interrupted", exception);
+            }
+            return null;
+        }).when(runner).run(job);
+        IndexJobExecutor executor = new IndexJobExecutor(jobs, runner, publication, Optional.empty());
+        IndexJobDispatcher dispatcher = dispatcher(jobs, executor);
+
+        try {
+            dispatcher.onApplicationEvent(mock(ApplicationReadyEvent.class));
+
+            assertThat(started.await(2L, TimeUnit.SECONDS)).isTrue();
+            dispatcher.stop();
+
+            assertThat(failed.await(2L, TimeUnit.SECONDS)).isTrue();
+            assertThat(interrupted.get()).isTrue();
+            assertThat(terminalObserved.await(2L, TimeUnit.SECONDS)).isTrue();
+            verify(jobs, times(1)).startNextAccepted();
+        } finally {
+            dispatcher.stop();
+        }
+    }
+
+    private static IndexJobDispatcher dispatcher(IndexJobStore jobs, IndexJobExecutor executor) {
+        return new IndexJobDispatcher(jobs, executor, new IndexJobProperties(Duration.ofSeconds(1L)));
+    }
+
+    private static IndexJob runningJob(String jobId, String repositoryId) {
+        return new IndexJob(new IndexJobId(jobId), RepositoryId.of(repositoryId), Optional.of(new IndexJobTarget(
+                new RepositoryRevision("a".repeat(40)), new GenerationId("g-" + jobId), 1L)), IndexJobPhase.RUNNING,
+                true, Optional.empty(), false, IndexJobOperation.BUILD);
+    }
+}

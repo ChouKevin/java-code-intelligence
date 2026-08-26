@@ -33,7 +33,7 @@ class IndexJobExecutorTest {
 
         verify(runner).run(job);
         verify(jobs).complete(job.id());
-        verify(jobs, never()).start(any());
+        verify(jobs, never()).startNextAccepted();
     }
 
     @Test

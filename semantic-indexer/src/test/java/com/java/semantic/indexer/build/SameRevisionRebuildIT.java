@@ -72,6 +72,6 @@ class SameRevisionRebuildIT {
     }
 
     private static IndexJob start(IndexJob accepted, MongoIndexJobStore store) {
-        return store.start(accepted.id()).orElseThrow();
+        return store.startNextAccepted().orElseThrow();
     }
 }

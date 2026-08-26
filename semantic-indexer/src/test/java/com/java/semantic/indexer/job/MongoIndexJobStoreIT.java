@@ -19,6 +19,12 @@ import org.testcontainers.mongodb.MongoDBContainer;
 import java.time.Instant;
 import java.util.Date;
 import java.util.List;
+import java.util.Optional;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -49,11 +55,56 @@ class MongoIndexJobStoreIT {
 
             assertThat(store.complete(accepted.id())).isFalse();
             assertThat(store.fail(accepted.id(), IndexFailureCategory.WORKER_INTERRUPTED)).isFalse();
-            assertThat(store.start(accepted.id())).hasValueSatisfying(job -> assertThat(job.phase()).isEqualTo(IndexJobPhase.RUNNING));
-            assertThat(store.start(accepted.id())).isEmpty();
+            assertThat(store.startNextAccepted()).hasValueSatisfying(job -> assertThat(job.phase()).isEqualTo(IndexJobPhase.RUNNING));
+            assertThat(store.startNextAccepted()).isEmpty();
             assertThat(store.complete(accepted.id())).isTrue();
             assertThat(store.complete(accepted.id())).isFalse();
             assertThat(store.fail(accepted.id(), IndexFailureCategory.WORKER_INTERRUPTED)).isFalse();
+        }
+    }
+
+    @Test
+    void start_next_accepted_claims_the_oldest_job_across_repositories_with_a_job_id_tie_break() {
+        try (MongoDBContainer container = container()) {
+            MongoTemplate template = template(container);
+            MongoIndexJobStore store = store(template);
+            IndexJob orders = store.admit(RepositoryId.of("orders"), revision("a"), false);
+            IndexJob payments = store.admit(RepositoryId.of("payments"), revision("b"), false);
+            Date createdAt = Date.from(Instant.parse("2026-08-26T00:00:00Z"));
+            template.getCollection(IndexCollections.INDEX_JOBS).updateOne(new Document("jobId", orders.id().value()),
+                    new Document("$set", new Document("createdAt", createdAt)));
+            template.getCollection(IndexCollections.INDEX_JOBS).updateOne(new Document("jobId", payments.id().value()),
+                    new Document("$set", new Document("createdAt", createdAt)));
+            IndexJob expected = orders.id().value().compareTo(payments.id().value()) < 0 ? orders : payments;
+            IndexJob other = expected.equals(orders) ? payments : orders;
+
+            assertThat(store.startNextAccepted()).hasValueSatisfying(job -> {
+                assertThat(job.id()).isEqualTo(expected.id());
+                assertThat(job.phase()).isEqualTo(IndexJobPhase.RUNNING);
+            });
+            assertThat(store.find(other.id()).orElseThrow().phase()).isEqualTo(IndexJobPhase.ACCEPTED);
+        }
+    }
+
+    @Test
+    void start_next_accepted_claims_one_job_at_most_once_when_two_callers_race() throws Exception {
+        try (MongoDBContainer container = container(); ExecutorService callers = Executors.newFixedThreadPool(2)) {
+            MongoIndexJobStore store = store(container);
+            IndexJob accepted = store.admit(RepositoryId.of("orders"), revision("a"), false);
+            CountDownLatch ready = new CountDownLatch(2);
+            CountDownLatch release = new CountDownLatch(1);
+            Future<Optional<IndexJob>> first = callers.submit(() -> claimAfterBarrier(store, ready, release));
+            Future<Optional<IndexJob>> second = callers.submit(() -> claimAfterBarrier(store, ready, release));
+
+            assertThat(ready.await(2L, TimeUnit.SECONDS)).isTrue();
+            release.countDown();
+            List<IndexJob> started = List.of(first.get(2L, TimeUnit.SECONDS), second.get(2L, TimeUnit.SECONDS)).stream()
+                    .flatMap(Optional::stream).toList();
+
+            assertThat(started).hasSize(1);
+            assertThat(started.getFirst().id()).isEqualTo(accepted.id());
+            assertThat(started.getFirst().phase()).isEqualTo(IndexJobPhase.RUNNING);
+            assertThat(store.find(accepted.id()).orElseThrow().phase()).isEqualTo(IndexJobPhase.RUNNING);
         }
     }
 
@@ -113,7 +164,7 @@ class MongoIndexJobStoreIT {
                     .isInstanceOf(PublicationConflictException.class);
             IndexJob accepted = store.admitRollback(RepositoryId.of("orders"), current, previous);
             assertThat(store.rollbackCommand(accepted)).isEmpty();
-            IndexJob running = store.start(accepted.id()).orElseThrow();
+            IndexJob running = store.startNextAccepted().orElseThrow();
 
             assertThat(store.rollbackCommand(running)).hasValueSatisfying(command -> {
                 assertThat(command.expectedCurrent()).isEqualTo(current);
@@ -132,12 +183,14 @@ class MongoIndexJobStoreIT {
         try (MongoDBContainer container = container()) {
             MongoTemplate template = template(container);
             MongoIndexJobStore store = store(template);
-            IndexJob committed = store.start(store.admit(RepositoryId.of("committed"), revision("c"), false).id()).orElseThrow();
+            store.admit(RepositoryId.of("committed"), revision("c"), false);
+            IndexJob committed = store.startNextAccepted().orElseThrow();
             ManifestDigest digest = new ManifestDigest("c".repeat(64));
             template.getCollection(IndexCollections.GENERATION_MANIFESTS).insertOne(sealedManifest(committed, digest));
             IndexPublicationIntent intent = store.prepareBuildPublication(committed, digest).orElseThrow();
             new MongoPublicationWriter(template).publish(buildCommand(committed, intent));
-            IndexJob uncommitted = store.start(store.admit(RepositoryId.of("uncommitted"), revision("d"), false).id()).orElseThrow();
+            store.admit(RepositoryId.of("uncommitted"), revision("d"), false);
+            IndexJob uncommitted = store.startNextAccepted().orElseThrow();
             IndexJob accepted = store.admit(RepositoryId.of("accepted"), revision("e"), false);
 
             store.reconcileCommittedJobs();
@@ -163,7 +216,7 @@ class MongoIndexJobStoreIT {
             ManifestDigest digest = new ManifestDigest("b".repeat(64));
 
             assertThat(store.prepareBuildPublication(accepted, digest)).isEmpty();
-            IndexJob running = store.start(accepted.id()).orElseThrow();
+            IndexJob running = store.startNextAccepted().orElseThrow();
             template.getCollection(IndexCollections.GENERATION_MANIFESTS).insertOne(sealedManifest(running, digest));
             IndexPublicationIntent intent = store.prepareBuildPublication(running, digest).orElseThrow();
             PublishedGenerationPointer winner = pointer("c", "g-winner", "job-winner");
@@ -189,6 +242,13 @@ class MongoIndexJobStoreIT {
     private static MongoIndexJobStore store(MongoTemplate template) {
         new IndexSchemaBootstrap(template).bootstrap();
         return new MongoIndexJobStore(template);
+    }
+
+    private static Optional<IndexJob> claimAfterBarrier(MongoIndexJobStore store, CountDownLatch ready, CountDownLatch release)
+            throws InterruptedException {
+        ready.countDown();
+        release.await();
+        return store.startNextAccepted();
     }
 
     private static MongoTemplate template(MongoDBContainer container) {
