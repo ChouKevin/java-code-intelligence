@@ -5,6 +5,7 @@ import com.java.semantic.model.codefact.CodeFactKind;
 import com.java.semantic.model.codefact.CodeFactSearchQuery;
 import com.java.semantic.model.codefact.CodeFactScope;
 import com.java.semantic.model.index.ProjectionName;
+import com.java.semantic.model.index.IndexSchemaContract;
 import com.java.semantic.model.index.GenerationId;
 import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.model.repository.RepositoryRevision;
@@ -45,9 +46,10 @@ class ToolProjectionEvolutionIT extends PublishedMongoITSupport {
             seedG2SearchAndAuthoritativeMethod(template, identity);
             template.getCollection("generation_manifests").insertOne(new Document("repoId", "orders").append("sourceRevision", REVISION)
                     .append("generationId", "g2").append("identityDigest", "3".repeat(64)).append("writeState", "SEALED_VALID")
-                    .append("schemaVersion", 1).append("projectionVersions", currentVersions()));
+                    .append("schemaVersion", IndexSchemaContract.SCHEMA_VERSION).append("projectionVersions", currentVersions()));
             template.getCollection("repositories").updateOne(new Document("repoId", "orders"), new Document("$set",
-                    new Document("generationId", "g2").append("manifestDigest", "3".repeat(64))));
+                    new Document("currentPointer.generationId", "g2").append("currentPointer.manifestDigest", "3".repeat(64))
+                            .append("currentPointer.committedJobId", "job-g2").append("currentPointer.publishedAt", new java.util.Date())));
 
             assertThat(search.search(query).generation().generationId().value()).isEqualTo("g2");
             assertThat(search.search(query).facts()).extracting(summary -> summary.fact().identity().canonicalForm())

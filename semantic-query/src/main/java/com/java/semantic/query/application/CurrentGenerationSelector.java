@@ -181,11 +181,12 @@ public final class CurrentGenerationSelector {
 
     private CurrentGeneration pointer(RepositoryId repositoryId, Document repository) {
         try {
-            String revision = requiredPointerText(repository, "revision");
-            String generation = requiredPointerText(repository, "generationId");
-            String digest = requiredPointerText(repository, "manifestDigest");
-            requiredPointerText(repository, "committedJobId");
-            Date publishedAt = requiredPointerDate(repository, "publishedAt");
+            Document currentPointer = requiredCurrentPointer(repository);
+            String revision = requiredPointerText(currentPointer, "revision");
+            String generation = requiredPointerText(currentPointer, "generationId");
+            String digest = requiredPointerText(currentPointer, "manifestDigest");
+            requiredPointerText(currentPointer, "committedJobId");
+            Date publishedAt = requiredPointerDate(currentPointer, "publishedAt");
             return new CurrentGeneration(repositoryId, new RepositoryRevision(revision), new GenerationId(generation),
                     new ManifestDigest(digest), Instant.ofEpochMilli(publishedAt.getTime()));
         } catch (IndexNotReadyException | IndexContractMismatchException exception) {
@@ -235,6 +236,13 @@ public final class CurrentGenerationSelector {
         Object value = document.get(field);
         if (!(value instanceof String text) || !StringUtils.hasText(text)) { throw new IndexContractMismatchException(); }
         return text;
+    }
+
+    private static Document requiredCurrentPointer(Document repository) {
+        if (!repository.containsKey("currentPointer")) { throw new IndexNotReadyException(); }
+        Object value = repository.get("currentPointer");
+        if (!(value instanceof Document pointer)) { throw new IndexContractMismatchException(); }
+        return pointer;
     }
 
     private static Date requiredPointerDate(Document document, String field) {

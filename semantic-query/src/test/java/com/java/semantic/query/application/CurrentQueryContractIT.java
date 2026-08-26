@@ -12,6 +12,7 @@ import com.java.semantic.model.codefact.SourceTypeIdentity;
 import com.java.semantic.model.codefact.SyntaxPosition;
 import com.java.semantic.model.codefact.SyntaxRange;
 import com.java.semantic.model.index.GenerationFileDocument;
+import com.java.semantic.model.index.IndexSchemaContract;
 import com.java.semantic.model.index.SourceIndexScope;
 import com.java.semantic.model.index.GenerationId;
 import com.java.semantic.model.index.SourceArtifactDocument;
@@ -317,10 +318,11 @@ class CurrentQueryContractIT {
     }
 
     private void seedCurrent(String repositoryId, String revision, String generationId, String digest) {
-        Document pointer = new Document("repoId", repositoryId).append("revision", revision)
+        Document currentPointer = new Document("revision", revision)
                 .append("generationId", generationId).append("manifestDigest", digest).append("committedJobId", "job-" + generationId)
                 .append("publishedAt", new java.util.Date());
-        template.getCollection("repositories").replaceOne(new Document("repoId", repositoryId), pointer,
+        Document repository = new Document("repoId", repositoryId).append("currentPointer", currentPointer);
+        template.getCollection("repositories").replaceOne(new Document("repoId", repositoryId), repository,
                 new ReplaceOptions().upsert(true));
     }
 
@@ -335,7 +337,7 @@ class CurrentQueryContractIT {
                 : List.of(new Document("name", "SOURCES").append("version", 0));
         template.getCollection("generation_manifests").insertOne(new Document("repoId", repositoryId).append("sourceRevision", revision)
                 .append("generationId", generationId).append("identityDigest", digest).append("writeState", "SEALED_VALID")
-                .append("schemaVersion", 1).append("projectionVersions", projections));
+                .append("schemaVersion", IndexSchemaContract.SCHEMA_VERSION).append("projectionVersions", projections));
     }
 
     private static SourceTypeIdentity sourceType() {

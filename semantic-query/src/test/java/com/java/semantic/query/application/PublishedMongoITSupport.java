@@ -12,6 +12,7 @@ import com.java.semantic.model.codefact.SourceTypeIdentity;
 import com.java.semantic.model.codefact.SyntaxPosition;
 import com.java.semantic.model.codefact.SyntaxRange;
 import com.java.semantic.model.index.GenerationId;
+import com.java.semantic.model.index.IndexSchemaContract;
 import com.java.semantic.model.index.SymbolDocument;
 import com.java.semantic.model.index.SourceArtifactDocument;
 import com.java.semantic.model.index.GenerationFileDocument;
@@ -44,12 +45,14 @@ abstract class PublishedMongoITSupport {
     }
 
     static void seedCurrent(MongoTemplate template, String repositoryId) {
+        Document currentPointer = new Document("revision", REVISION).append("generationId", "g1")
+                .append("manifestDigest", DIGEST).append("committedJobId", "job-g1").append("publishedAt", new java.util.Date());
         template.getCollection("repositories").replaceOne(new Document("repoId", repositoryId),
-                new Document("repoId", repositoryId).append("revision", REVISION).append("generationId", "g1")
-                        .append("manifestDigest", DIGEST).append("committedJobId", "job-g1").append("publishedAt", new java.util.Date()),
+                new Document("repoId", repositoryId).append("currentPointer", currentPointer),
                 new ReplaceOptions().upsert(true));
         template.getCollection("generation_manifests").insertOne(new Document("repoId", repositoryId).append("sourceRevision", REVISION)
-                .append("generationId", "g1").append("identityDigest", DIGEST).append("writeState", "SEALED_VALID").append("schemaVersion", 1)
+                .append("generationId", "g1").append("identityDigest", DIGEST).append("writeState", "SEALED_VALID")
+                .append("schemaVersion", IndexSchemaContract.SCHEMA_VERSION)
                 .append("projectionVersions", List.of(new Document("name", "SOURCES").append("version", 2),
                         new Document("name", "SYMBOLS").append("version", 2), new Document("name", "RELATIONS").append("version", 2),
                         new Document("name", "ENTRY_POINTS").append("version", 2), new Document("name", "SEARCH").append("version", 2))));
