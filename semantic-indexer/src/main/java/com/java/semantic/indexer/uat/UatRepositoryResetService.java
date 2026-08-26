@@ -11,6 +11,7 @@ import com.java.semantic.repository.config.RepositoryProperties;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.util.Comparator;
 import java.util.List;
@@ -103,7 +104,7 @@ public final class UatRepositoryResetService {
     }
 
     private static void deleteContained(Path target) {
-        if (!Files.exists(target)) {
+        if (!Files.exists(target, LinkOption.NOFOLLOW_LINKS)) {
             return;
         }
         try (Stream<Path> paths = Files.walk(target)) {

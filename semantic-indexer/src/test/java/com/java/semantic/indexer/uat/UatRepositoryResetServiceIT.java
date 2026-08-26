@@ -13,6 +13,7 @@ import com.java.semantic.repository.config.RepositoryProperties;
 import com.mongodb.client.MongoClient;
 import com.mongodb.client.MongoClients;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.LinkedHashMap;
@@ -59,6 +60,9 @@ class UatRepositoryResetServiceIT {
                 simulateInterruptedCleanup(template, repositories, workspaces);
                 resets.reset(running);
                 resets.reset(running);
+                Files.createSymbolicLink(repositories.resolve("payment"), repositories.resolve("missing-payment-target"));
+                Files.createSymbolicLink(workspaces.resolve("payment"), workspaces.resolve("missing-payment-workspace"));
+                resets.reset(running);
 
                 assertThat(accepted.operation()).isEqualTo(IndexJobOperation.RESET);
                 assertThat(accepted.phase()).isEqualTo(IndexJobPhase.ACCEPTED);
@@ -72,6 +76,8 @@ class UatRepositoryResetServiceIT {
                 assertThat(workspaces.resolve("payment")).doesNotExist();
                 assertThat(repositories.resolve("order")).exists();
                 assertThat(workspaces.resolve("order")).exists();
+                assertThat(Files.notExists(repositories.resolve("payment"), LinkOption.NOFOLLOW_LINKS)).isTrue();
+                assertThat(Files.notExists(workspaces.resolve("payment"), LinkOption.NOFOLLOW_LINKS)).isTrue();
                 for (String collection : repositoryCollections()) {
                     assertThat(template.getCollection(collection).countDocuments(new Document("repoId", "payment"))).isZero();
                     assertThat(template.getCollection(collection).countDocuments(new Document("repoId", "order"))).isOne();
