@@ -1,0 +1,24 @@
+diff --git a/src/main/java/com/example/payment/PaymentMethod.java b/src/main/java/com/example/payment/PaymentMethod.java
+index 5a64676..1570072 100644
+--- a/src/main/java/com/example/payment/PaymentMethod.java
++++ b/src/main/java/com/example/payment/PaymentMethod.java
+@@ -2,5 +2,6 @@ package com.example.payment;
+ public enum PaymentMethod {
+     CREDIT_CARD,
+     BANK_TRANSFER,
+-    WALLET
++    WALLET,
++    MOBILE_PAYMENT
+ }
+diff --git a/src/main/java/com/example/payment/PaymentQueryController.java b/src/main/java/com/example/payment/PaymentQueryController.java
+index b1ea62a..b39da18 100644
+--- a/src/main/java/com/example/payment/PaymentQueryController.java
++++ b/src/main/java/com/example/payment/PaymentQueryController.java
+@@ -13,5 +13,6 @@ public final class PaymentQueryController {
+     @GetMapping
+     public List<PaymentMethod> paymentMethods() {
+-        return List.of(PaymentMethod.values());
++        return List.of(PaymentMethod.CREDIT_CARD, PaymentMethod.BANK_TRANSFER, PaymentMethod.WALLET,
++                PaymentMethod.MOBILE_PAYMENT);
+     }
+ }

@@ -1,6 +1,7 @@
 package com.java.semantic.indexer.build;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import com.java.semantic.config.JdtLsProperties;
@@ -78,6 +79,22 @@ class FixtureFullIndexJdtLsIT {
     Path temporaryDirectory;
 
     @Test
+    void applies_the_reviewed_payment_v2_patch_once_to_the_semantic_owned_v1_fixture() throws IOException, InterruptedException {
+        Path paymentRoot = copyFixture(PAYMENT_FIXTURE, temporaryDirectory.resolve("payment-v1"));
+        Path patch = Path.of("fixtures/uat/versions/payment-service-v2.patch").toAbsolutePath();
+
+        applyPatch(paymentRoot, patch);
+
+        assertThat(Files.readString(paymentRoot.resolve("src/main/java/com/example/payment/PaymentMethod.java")))
+                .contains("MOBILE_PAYMENT");
+        assertThat(Files.readString(paymentRoot.resolve("src/main/java/com/example/payment/PaymentQueryController.java")))
+                .contains("PaymentMethod.MOBILE_PAYMENT");
+        assertThatThrownBy(() -> applyPatch(paymentRoot, patch))
+                .isInstanceOf(AssertionError.class)
+                .hasMessageContaining("payment-service-v2.patch");
+    }
+
+    @Test
     void exports_framework_api_contract_stub_fixture_with_complete_isolated_generations_after_starting_a_real_jdt_language_server()
             throws IOException {
         Path jdtLsHome = requiredJdtLsHome();
@@ -97,7 +114,10 @@ class FixtureFullIndexJdtLsIT {
             assertThat(video).flatMap(SourceIndexBatch::symbols).extracting(document -> document.name())
                     .contains("VideoFormat", "MP4", "WEBM", "MOV", "upload");
             assertThat(payment).flatMap(SourceIndexBatch::symbols).extracting(document -> document.name())
-                    .contains("CREDIT_CARD", "BANK_TRANSFER", "WALLET", "calculate", "paymentMethods");
+                    .contains("CREDIT_CARD", "BANK_TRANSFER", "WALLET", "calculate", "paymentMethods",
+                            "FeeFormulaUnavailableException");
+            assertThat(order).flatMap(SourceIndexBatch::symbols).extracting(document -> document.name())
+                    .contains("Order", "PENDING", "CONFIRMED", "SHIPPED", "CANCELLED", "cancel");
             assertThat(payment).flatMap(SourceIndexBatch::entryPoints).extracting(document -> document.trigger().httpPath().orElseThrow())
                     .contains("/payment-methods");
             assertThat(template.getCollection(IndexCollections.ENTRY_POINTS).countDocuments(new Document("repoId", "video-service")
@@ -331,7 +351,11 @@ class FixtureFullIndexJdtLsIT {
     private static Path copyFixture(Path source, Path target) throws IOException {
         try (Stream<Path> paths = Files.walk(source)) {
             for (Path path : paths.toList()) {
-                Path destination = target.resolve(source.relativize(path).toString());
+                Path relativePath = source.relativize(path);
+                if (relativePath.startsWith(Path.of("target"))) {
+                    continue;
+                }
+                Path destination = target.resolve(relativePath.toString());
                 if (Files.isDirectory(path)) {
                     Files.createDirectories(destination);
                 } else {
@@ -341,5 +365,26 @@ class FixtureFullIndexJdtLsIT {
             }
         }
         return target;
+    }
+
+    private static void applyPatch(Path fixtureRoot, Path patch) throws IOException, InterruptedException {
+        Process process = new ProcessBuilder("git", "apply", "--check", patch.toString())
+                .directory(fixtureRoot.toFile())
+                .redirectErrorStream(true)
+                .start();
+        String checkOutput = new String(process.getInputStream().readAllBytes());
+        int checkExit = process.waitFor();
+        if (checkExit != 0) {
+            throw new AssertionError("payment-service-v2.patch cannot be applied: " + checkOutput);
+        }
+        Process apply = new ProcessBuilder("git", "apply", patch.toString())
+                .directory(fixtureRoot.toFile())
+                .redirectErrorStream(true)
+                .start();
+        String applyOutput = new String(apply.getInputStream().readAllBytes());
+        int applyExit = apply.waitFor();
+        if (applyExit != 0) {
+            throw new AssertionError("payment-service-v2.patch cannot be applied: " + applyOutput);
+        }
     }
 }
