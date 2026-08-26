@@ -71,6 +71,37 @@ class JGitRepositoryAdapterTest {
     }
 
     @Test
+    void should_remove_untracked_and_ignored_source_artifacts_when_checking_out_an_exact_revision()
+            throws Exception {
+        try (RemoteFixture fixture = createRemote()) {
+            Files.writeString(fixture.seedRoot().resolve(".gitignore"), "ignored/\n");
+            fixture.seed().add().addFilepattern(".gitignore").call();
+            fixture.seed().commit()
+                    .setMessage("ignore generated sources")
+                    .setAuthor("Test", "test@example.com")
+                    .setCommitter("Test", "test@example.com")
+                    .call();
+            pushBranch(fixture.seed(), "main");
+
+            JGitRepositoryAdapter adapter = new JGitRepositoryAdapter(new RepositoryProperties());
+            Path clone = tempDirectory.resolve("clone-with-contaminants");
+            RepositoryRevision revision = RepositoryRevision.ofSha(
+                    fixture.seed().getRepository().resolve("refs/heads/main").getName());
+            adapter.clone(clone, fixture.remote().toUri().toString());
+            Files.writeString(clone.resolve("untracked.java"), "class Untracked {}\n");
+            Path ignoredDirectory = clone.resolve("ignored");
+            Files.createDirectories(ignoredDirectory);
+            Files.writeString(ignoredDirectory.resolve("Ignored.java"), "class Ignored {}\n");
+
+            adapter.checkoutDetached(clone, revision);
+
+            assertThat(Files.exists(clone.resolve("untracked.java"))).isFalse();
+            assertThat(Files.exists(ignoredDirectory.resolve("Ignored.java"))).isFalse();
+            assertThat(Files.readString(clone.resolve("sample.txt"))).isEqualTo("initial");
+        }
+    }
+
+    @Test
     void should_wrap_as_repository_mutation_exception_when_jgit_clone_fails()
             throws Exception {
         JGitRepositoryAdapter adapter = new JGitRepositoryAdapter(new RepositoryProperties());

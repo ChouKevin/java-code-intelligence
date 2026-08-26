@@ -81,6 +81,7 @@ public class JGitRepositoryAdapter implements GitRepositoryPort {
     public void checkoutDetached(Path workingTree, RepositoryRevision revision) {
         try (Git git = Git.open(workingTree.toFile())) {
             git.checkout().setName(revision.value()).setForced(true).call();
+            git.clean().setForce(true).setCleanDirectories(true).setIgnore(false).call();
             detachHead(git, revision);
         } catch (RepositoryMutationException exception) {
             throw exception;
