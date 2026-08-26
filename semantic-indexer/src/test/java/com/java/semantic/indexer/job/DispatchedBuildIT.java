@@ -40,6 +40,8 @@ import org.eclipse.jgit.treewalk.TreeWalk;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.util.StringUtils;
 import org.testcontainers.mongodb.MongoDBContainer;
@@ -61,8 +63,9 @@ class DispatchedBuildIT {
         }
     }
 
-    @Test
-    void publishes_the_admitted_revision_from_a_moving_remote_and_falls_back_to_a_full_build_for_an_uncertain_pom_change()
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void publishes_the_admitted_revision_from_a_moving_remote_for_incremental_and_full_fallback_builds(boolean modifyPom)
             throws Exception {
         Path jdtLsHome = requiredJdtLsHome();
         try (MongoDBContainer mongo = mongo(); RemoteFixture remote = RemoteFixture.create(temporaryDirectory);
@@ -75,7 +78,7 @@ class DispatchedBuildIT {
                 RepositoryBuildRunner runner = build.runner();
 
                 IndexJob admittedR1 = jobs.admit(repositoryId, remote.r1(), false);
-                remote.moveMainToR2();
+                remote.moveMainToR2(modifyPom);
                 IndexJob runningR1 = jobs.startNextAccepted().orElseThrow();
                 assertThat(runningR1.id()).isEqualTo(admittedR1.id());
 
@@ -219,10 +222,12 @@ class DispatchedBuildIT {
             return List.copyOf(paths);
         }
 
-        void moveMainToR2() throws Exception {
+        void moveMainToR2(boolean modifyPom) throws Exception {
             applyPatch(root, PAYMENT_V2_PATCH.toAbsolutePath());
-            Path pom = root.resolve("pom.xml");
-            Files.writeString(pom, Files.readString(pom) + "\n<!-- payment v2 build input -->\n");
+            if (modifyPom) {
+                Path pom = root.resolve("pom.xml");
+                Files.writeString(pom, Files.readString(pom) + "\n<!-- payment v2 build input -->\n");
+            }
             seed.add().addFilepattern(".").call();
             seed.commit().setMessage("payment v2").setAuthor("UAT", "uat@example.test").setCommitter("UAT", "uat@example.test").call();
             seed.push().setRemote("origin").setRefSpecs(new RefSpec("refs/heads/main:refs/heads/main")).call();

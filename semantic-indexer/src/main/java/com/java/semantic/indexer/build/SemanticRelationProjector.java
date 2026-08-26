@@ -130,7 +130,8 @@ public final class SemanticRelationProjector {
                 overrideRelations(metadata, method, from, typesByName, owned, repositoryId, revision, generationId, artifact, documents);
                 method.invocations().forEach(invocation -> {
                     SourceRange invocationLocation = new SourceRange(method.declarationLocation().sourceFile(), invocation.range());
-                    Optional<InvocationTarget> resolvedTarget = semanticCallTargetResolver.resolve(snapshot, method, invocation);
+                    Optional<InvocationTarget> resolvedTarget = semanticCallTargetResolver.resolve(snapshot, method, invocation,
+                            localTargetExpected(typesByName, invocation));
                     if (resolvedTarget.isPresent()) {
                         InvocationTarget target = resolvedTarget.orElseThrow();
                         addCall(from, target, invocationLocation, repositoryId, revision, generationId, typesByName, artifact, documents);
@@ -145,6 +146,14 @@ public final class SemanticRelationProjector {
         Optional.ofNullable(repositoryRoot).ifPresent(ignored -> addStructuralEvidence(repositoryId, revision, generationId, syntax,
                 sourcePath, artifact, owned, documents));
         return documents.stream().sorted(java.util.Comparator.comparing(document -> document.fact().id().value())).toList();
+    }
+
+    private static boolean localTargetExpected(Map<String, SourceTypeMetadata> typesByName, SyntaxInvocation invocation) {
+        return invocation.resolvedTarget().map(target -> {
+            String qualifiedName = target.packageName().isBlank()
+                    ? target.className() : target.packageName() + "." + target.className();
+            return typesByName.containsKey(qualifiedName);
+        }).orElse(false);
     }
 
     private static void addStructuralEvidence(RepositoryId repositoryId, RepositoryRevision revision, GenerationId generationId,

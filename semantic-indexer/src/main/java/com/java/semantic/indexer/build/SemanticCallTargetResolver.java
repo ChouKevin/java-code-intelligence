@@ -20,6 +20,12 @@ public interface SemanticCallTargetResolver {
 
     Optional<InvocationTarget> resolve(RepositorySnapshot snapshot, SourceMethodMetadata caller, SyntaxInvocation invocation);
 
+    /** Resolves a call while identifying whether syntax already proves that its target belongs to this repository. */
+    default Optional<InvocationTarget> resolve(RepositorySnapshot snapshot, SourceMethodMetadata caller,
+                                               SyntaxInvocation invocation, boolean localTargetExpected) {
+        return resolve(snapshot, caller, invocation);
+    }
+
     default void requireSemanticResolution() {
         // Syntax-only projection tests deliberately use the no-op resolver.
     }

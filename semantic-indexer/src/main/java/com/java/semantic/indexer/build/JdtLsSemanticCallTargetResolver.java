@@ -43,7 +43,15 @@ public final class JdtLsSemanticCallTargetResolver implements SemanticCallTarget
 
     @Override
     public Optional<InvocationTarget> resolve(RepositorySnapshot snapshot, SourceMethodMetadata caller, SyntaxInvocation invocation) {
-        accounting.get().attempted++;
+        return resolve(snapshot, caller, invocation, false);
+    }
+
+    @Override
+    public Optional<InvocationTarget> resolve(RepositorySnapshot snapshot, SourceMethodMetadata caller,
+                                              SyntaxInvocation invocation, boolean localTargetExpected) {
+        if (localTargetExpected) {
+            accounting.get().expectedLocal++;
+        }
         SemanticCallResolution resolution = semanticService.resolveCallResolutionAt(snapshot, semanticMethod(snapshot, caller),
                 new SemanticCallSite(range(invocation.range()), position(invocation.resolutionAnchor())));
         if (resolution.status() != SemanticCallResolutionStatus.RESOLVED) {
@@ -53,7 +61,9 @@ public final class JdtLsSemanticCallTargetResolver implements SemanticCallTarget
         Optional<InvocationTarget> resolved = call.target().map(target -> new InvocationTarget(target.packageName(),
                 target.className(), target.methodName(), target.parameterTypes()));
         if (resolved.isPresent()) {
-            accounting.get().resolved++;
+            if (localTargetExpected) {
+                accounting.get().resolvedLocal++;
+            }
             return resolved;
         }
         return invocation.resolvedTarget();
@@ -62,7 +72,7 @@ public final class JdtLsSemanticCallTargetResolver implements SemanticCallTarget
     @Override
     public void requireSemanticResolution() {
         ResolutionAccounting exportAccounting = accounting.get();
-        if (exportAccounting.attempted > 0 && exportAccounting.resolved == 0) {
+        if (exportAccounting.expectedLocal > 0 && exportAccounting.resolvedLocal == 0) {
             throw new IllegalStateException("JDT LS did not resolve any export call site");
         }
     }
@@ -92,7 +102,7 @@ public final class JdtLsSemanticCallTargetResolver implements SemanticCallTarget
     }
 
     private static final class ResolutionAccounting {
-        private int attempted;
-        private int resolved;
+        private int expectedLocal;
+        private int resolvedLocal;
     }
 }
