@@ -16,7 +16,7 @@ public final class PaymentFeeCalculator {
     public BigDecimal calculate(PaymentMethod paymentMethod, BigDecimal amount) {
         Objects.requireNonNull(paymentMethod);
         Objects.requireNonNull(amount);
-        String formulaJson = settings.loadFeeFormulaJson(paymentMethod)
+        String formulaJson = settings.loadRuntimeFeeFormulaJson(paymentMethod)
                 .orElseThrow(() -> new FeeFormulaUnavailableException(paymentMethod));
         return feeFormulaEvaluator.evaluate(formulaJson, amount);
     }

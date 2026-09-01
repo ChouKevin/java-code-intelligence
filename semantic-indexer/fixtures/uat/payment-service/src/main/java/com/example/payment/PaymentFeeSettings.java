@@ -4,5 +4,6 @@ import java.util.Optional;
 
 public interface PaymentFeeSettings {
 
-    Optional<String> loadFeeFormulaJson(PaymentMethod paymentMethod);
+    /** Loads deployment-specific fee formula JSON from runtime storage. */
+    Optional<String> loadRuntimeFeeFormulaJson(PaymentMethod paymentMethod);
 }
