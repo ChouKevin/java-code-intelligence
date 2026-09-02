@@ -108,14 +108,16 @@ class SemanticQueryFacadeRelationTest {
         when(facts.get(new CodeFactReadQuery(new RepositoryId(REPOSITORY), new RepositoryRevision(REVISION), CodeFactId.from(container))))
                 .thenReturn(details(container));
         when(relations.findReferences(any(PublishedRelationQuery.class))).thenReturn(result(target, List.of(relation)));
-        when(source.factSource(any(CodeFactReadQuery.class), anyInt())).thenReturn(slice());
+        when(source.factSource(any(CodeFactReadQuery.class), anyInt())).thenReturn(declarationSlice());
+        when(source.factSource(new CodeFactReadQuery(new RepositoryId(REPOSITORY), new RepositoryRevision(REVISION), relation.fact().id()), 0))
+                .thenReturn(occurrenceSlice());
 
         SemanticQueryContract.CollectionResult result = facade(facts, source, relations).findReferences(new RelationRequest(REPOSITORY,
                 REVISION, CodeFactId.from(target).value(), 0, 20));
 
         SemanticQueryContract.ReferenceItem reference = (SemanticQueryContract.ReferenceItem) result.items().getFirst();
         assertEquals(relation.fact().id().value(), reference.referenceSite().factId());
-        assertEquals("service.charge(request)", reference.referenceSite().source().code());
+        assertEquals("relation.occurrence(sou", reference.referenceSite().source().code());
     }
 
     @Test
@@ -129,7 +131,9 @@ class SemanticQueryFacadeRelationTest {
         when(facts.get(new CodeFactReadQuery(new RepositoryId(REPOSITORY), new RepositoryRevision(REVISION), CodeFactId.from(target))))
                 .thenReturn(details(target));
         when(relations.findCallees(any(PublishedRelationQuery.class))).thenReturn(result(target, List.of(relation)));
-        when(source.factSource(any(CodeFactReadQuery.class), anyInt())).thenReturn(slice());
+        when(source.factSource(any(CodeFactReadQuery.class), anyInt())).thenReturn(declarationSlice());
+        when(source.factSource(new CodeFactReadQuery(new RepositoryId(REPOSITORY), new RepositoryRevision(REVISION), relation.fact().id()), 0))
+                .thenReturn(occurrenceSlice());
 
         SemanticQueryContract.CollectionResult result = facade(facts, source, relations).findCallees(new RelationRequest(REPOSITORY,
                 REVISION, CodeFactId.from(target).value(), 0, 20));
@@ -138,7 +142,7 @@ class SemanticQueryFacadeRelationTest {
         assertEquals("client.charge(request)|client|charge|1", callee.callee().displayName());
         assertTrue(Objects.isNull(callee.callee().factId()));
         assertEquals(relation.fact().id().value(), callee.callSite().factId());
-        assertEquals("service.charge(request)", callee.callSite().source().code());
+        assertEquals("relation.occurrence(sou", callee.callSite().source().code());
     }
 
     @Test
@@ -206,6 +210,14 @@ class SemanticQueryFacadeRelationTest {
 
     private static FactSourceSlice slice() {
         return new FactSourceSlice(generation(), range(), range(), "service.charge(request)");
+    }
+
+    private static FactSourceSlice declarationSlice() {
+        return new FactSourceSlice(generation(), range(), range(), "declaration.source(content)");
+    }
+
+    private static FactSourceSlice occurrenceSlice() {
+        return new FactSourceSlice(generation(), range(), range(), "relation.occurrence(source)");
     }
 
     private static CodeFactIdentity occurrenceIdentity() {
