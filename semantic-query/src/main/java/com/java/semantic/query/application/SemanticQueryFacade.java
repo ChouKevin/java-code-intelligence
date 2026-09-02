@@ -252,10 +252,11 @@ public final class SemanticQueryFacade {
         throw new IndexContractMismatchException();
     }
 
-    private SemanticQueryContract.SourceSnippet callSite(CurrentGeneration generation,
-                                                         com.java.semantic.model.index.RelationDocument relation) {
+    private SemanticQueryContract.RelationSite callSite(CurrentGeneration generation,
+                                                        com.java.semantic.model.index.RelationDocument relation) {
         FactSourceSlice source = sourceToolService.factSource(readQuery(generation, relation.fact().id().value()), 0);
-        return SourceSnippetMapper.toSnippet(source.sourceRange(), source.fileContent());
+        return new SemanticQueryContract.RelationSite(relation.fact().id().value(),
+                SourceSnippetMapper.toSnippet(source.sourceRange(), source.fileContent()));
     }
 
     private static SemanticQueryContract.CollectionResult relationCollection(PublishedRelationResult result,

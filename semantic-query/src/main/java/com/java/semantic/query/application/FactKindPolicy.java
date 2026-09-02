@@ -22,7 +22,7 @@ public final class FactKindPolicy {
 
     public static CodeFactDetails require(CodeFactDetails fact, Set<CodeFactKind> acceptedKinds) {
         CodeFactDetails requiredFact = Objects.requireNonNull(fact, "code fact is required");
-        Set<CodeFactKind> requiredKinds = Set.copyOf(Objects.requireNonNull(acceptedKinds, "accepted kinds are required"));
+        Set<CodeFactKind> requiredKinds = Objects.requireNonNull(acceptedKinds, "accepted kinds are required");
         CodeFactKind kind = requiredFact.fact().identity().kind();
         if (!requiredKinds.contains(kind)) {
             throw new CodeFactKindUnsupportedException(kind);

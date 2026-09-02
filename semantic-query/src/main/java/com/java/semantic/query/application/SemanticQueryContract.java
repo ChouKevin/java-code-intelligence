@@ -139,6 +139,9 @@ public final class SemanticQueryContract {
     public record SourceSnippet(String path, int startLine, int endLine, String code) {
     }
 
+    public record RelationSite(String factId, SourceSnippet source) {
+    }
+
     public record FactRange(int startLine, int endLine) {
     }
 
@@ -154,13 +157,13 @@ public final class SemanticQueryContract {
     public record EventListenerItem(String eventType, ProgramElement handler) {
     }
 
-    public record CallerItem(ProgramElement caller, SourceSnippet callSite) {
+    public record CallerItem(ProgramElement caller, RelationSite callSite) {
     }
 
-    public record CalleeItem(ProgramElement callee, SourceSnippet callSite) {
+    public record CalleeItem(ProgramElement callee, RelationSite callSite) {
     }
 
-    public record ReferenceItem(ProgramElement container, SourceSnippet referenceSite) {
+    public record ReferenceItem(ProgramElement container, RelationSite referenceSite) {
     }
 
     public record ImplementationItem(ProgramElement implementation, RelationKind relationKind) {

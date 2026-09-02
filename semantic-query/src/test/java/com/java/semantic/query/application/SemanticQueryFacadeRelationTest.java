@@ -69,7 +69,8 @@ class SemanticQueryFacadeRelationTest {
         assertEquals(1, result.items().size());
         SemanticQueryContract.CallerItem callerItem = (SemanticQueryContract.CallerItem) result.items().getFirst();
         assertEquals(CodeFactId.from(caller).value(), callerItem.caller().factId());
-        assertEquals("service.charge(request)", callerItem.callSite().code());
+        assertEquals(relation.fact().id().value(), callerItem.callSite().factId());
+        assertEquals("service.charge(request)", callerItem.callSite().source().code());
     }
 
     @Test
