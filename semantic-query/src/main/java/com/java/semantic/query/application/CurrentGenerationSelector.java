@@ -74,6 +74,12 @@ public final class CurrentGenerationSelector {
         if (!readPolicy.isCodeFactVisible(current.repositoryId(), identity)) { throw new RepositoryNotFoundException(); }
     }
 
+    void requireCompatible(CurrentGeneration current, ProjectionRequirements requirements) {
+        CurrentGeneration selected = Objects.requireNonNull(current, "current generation is required");
+        ProjectionRequirements requiredRequirements = Objects.requireNonNull(requirements, "projection requirements are required");
+        verifyManifest(selected, requiredRequirements);
+    }
+
     public CurrentGeneration selectCodeFact(String requestedRepositoryId, String requestedRevision, CodeFactIdentity codeFact) {
         Request request = request(requestedRepositoryId, requestedRevision);
         CodeFactIdentity identity = Objects.requireNonNull(codeFact, "code fact identity is required");

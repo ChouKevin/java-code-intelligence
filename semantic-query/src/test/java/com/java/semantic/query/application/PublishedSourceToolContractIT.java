@@ -70,6 +70,65 @@ class PublishedSourceToolContractIT extends PublishedMongoITSupport {
     }
 
     @Test
+    void rejects_fact_context_when_its_source_file_contains_a_forbidden_method() {
+        try (MongoDBContainer container = new MongoDBContainer(DockerImageName.parse("mongo:8.0.4"))) {
+            container.start();
+            MongoTemplate template = new MongoTemplate(MongoClients.create(container.getConnectionString()), "published_relation_source_authorization");
+            seedCurrent(template, "orders");
+            String path = "src/main/java/example/payment/PaymentClient.java";
+            SourceRange relationRange = new SourceRange(path,
+                    new SyntaxRange(new SyntaxPosition(0, 0), new SyntaxPosition(0, 10)));
+            seedSource(template, path, "visible();\nforbidden();\n");
+            CodeFactIdentity visibleMethod = methodIdentity("example.payment", "PaymentClient", "visible", path);
+            CodeFactIdentity forbiddenMethod = methodIdentity("example.payment", "PaymentClient", "forbidden", path);
+            seedMethod(template, visibleMethod, List.of());
+            seedMethod(template, forbiddenMethod, List.of());
+            CodeFactIdentity relation = seedRelation(template, visibleMethod, RelationKind.CALLS_OUTBOUND_API,
+                    new RelationTarget.External(new ExternalTarget.Endpoint("POST", "https://payments.example/charge")), relationRange)
+                    .fact().identity();
+            seedSearch(template, relation, "RELATIONS", List.of("visible"));
+            ConfiguredReadPolicy forbiddenMethodPolicy = new ConfiguredReadPolicy(new ReadPolicyProperties(List.of(), List.of(), List.of(),
+                    List.of(new ReadPolicyProperties.MethodRule("orders", "example.payment", "PaymentClient", "forbidden",
+                            List.of("example.events.VideoReady")))));
+            CurrentGenerationSelector currentGenerationSelector = selector(template, forbiddenMethodPolicy);
+            PublishedSourceToolService service = new PublishedSourceToolService(
+                    new CurrentSourceQueryService(template, currentGenerationSelector, Duration.ofSeconds(2)),
+                    new CodeFactReadService(template, currentGenerationSelector, Duration.ofSeconds(2)));
+            CodeFactReadQuery query = new CodeFactReadQuery(new RepositoryId("orders"), new RepositoryRevision(REVISION), CodeFactId.from(relation));
+
+            assertThatThrownBy(() -> service.factSource(query, 1)).isInstanceOf(RepositoryNotFoundException.class);
+        }
+    }
+
+    @Test
+    void rejects_fact_source_when_the_resolved_generation_lacks_a_compatible_sources_projection() {
+        try (MongoDBContainer container = new MongoDBContainer(DockerImageName.parse("mongo:8.0.4"))) {
+            container.start();
+            MongoTemplate template = new MongoTemplate(MongoClients.create(container.getConnectionString()), "published_fact_source_projection");
+            seedCurrent(template, "orders");
+            String path = "src/main/java/example/payment/PaymentService.java";
+            seedSource(template, path, "line zero\nmethod();\n");
+            CodeFactIdentity method = methodIdentity("example.payment", "PaymentService", "method", path);
+            seedMethod(template, method, List.of());
+            seedSearch(template, method, "SYMBOLS", List.of("method"));
+            template.getCollection("generation_manifests").updateOne(new Document("repoId", "orders"),
+                    new Document("$set", new Document("projectionVersions", List.of(
+                            new Document("name", "SOURCES").append("version", 1),
+                            new Document("name", "SYMBOLS").append("version", 2),
+                            new Document("name", "RELATIONS").append("version", 2),
+                            new Document("name", "ENTRY_POINTS").append("version", 2),
+                            new Document("name", "SEARCH").append("version", 2)))));
+            CurrentGenerationSelector currentGenerationSelector = selector(template, policy());
+            PublishedSourceToolService service = new PublishedSourceToolService(
+                    new CurrentSourceQueryService(template, currentGenerationSelector, Duration.ofSeconds(2)),
+                    new CodeFactReadService(template, currentGenerationSelector, Duration.ofSeconds(2)));
+            CodeFactReadQuery query = new CodeFactReadQuery(new RepositoryId("orders"), new RepositoryRevision(REVISION), CodeFactId.from(method));
+
+            assertThatThrownBy(() -> service.factSource(query, 0)).isInstanceOf(IndexContractMismatchException.class);
+        }
+    }
+
+    @Test
     void slices_only_selected_generation_stored_source_with_utf16_crlf_boundaries() {
         try (MongoDBContainer container = new MongoDBContainer(DockerImageName.parse("mongo:8.0.4"))) {
             container.start();

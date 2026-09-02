@@ -50,7 +50,7 @@ public final class PublishedSourceToolService {
             throw new IllegalArgumentException("context lines must be between 0 and " + SemanticQueryContract.MAX_CONTEXT_LINES);
         }
         CodeFactDetails fact = codeFactReadService.get(requiredQuery);
-        String content = sourceQueryService.getSource(fact.generation(), fact.location().sourceFile()).utf8Content();
+        String content = sourceQueryService.getSource(fact).utf8Content();
         SourceRange sourceRange = expandedRange(fact.location(), content, contextLines);
         return new FactSourceSlice(fact.generation(), sourceRange, fact.location(), content);
     }
