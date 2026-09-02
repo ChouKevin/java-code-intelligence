@@ -144,6 +144,16 @@ class PublishedRouteContractIT extends PublishedMongoITSupport {
 
     @Test
     void pages_exact_routes_and_applies_all_method_wildcard_semantics() {
+        assertThat(List.of(SemanticQueryContract.HttpMethod.values())).containsExactly(
+                SemanticQueryContract.HttpMethod.GET,
+                SemanticQueryContract.HttpMethod.HEAD,
+                SemanticQueryContract.HttpMethod.POST,
+                SemanticQueryContract.HttpMethod.PUT,
+                SemanticQueryContract.HttpMethod.PATCH,
+                SemanticQueryContract.HttpMethod.DELETE,
+                SemanticQueryContract.HttpMethod.OPTIONS,
+                SemanticQueryContract.HttpMethod.TRACE,
+                SemanticQueryContract.HttpMethod.ALL);
         try (MongoDBContainer container = new MongoDBContainer(DockerImageName.parse("mongo:8.0.4"))) {
             container.start();
             MongoTemplate template = new MongoTemplate(com.mongodb.client.MongoClients.create(container.getConnectionString()), "published_route_page");

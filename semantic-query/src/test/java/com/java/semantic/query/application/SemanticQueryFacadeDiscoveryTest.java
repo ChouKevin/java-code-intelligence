@@ -1,11 +1,13 @@
 package com.java.semantic.query.application;
 
+import com.java.semantic.model.codefact.CanonicalIdentity;
 import com.java.semantic.model.codefact.CodeFact;
 import com.java.semantic.model.codefact.CodeFactDetails;
 import com.java.semantic.model.codefact.CodeFactId;
 import com.java.semantic.model.codefact.CodeFactIdentity;
 import com.java.semantic.model.codefact.CodeFactKind;
 import com.java.semantic.model.codefact.CodeFactReadQuery;
+import com.java.semantic.model.codefact.CodeFactSummary;
 import com.java.semantic.model.codefact.EntryPointIdentity;
 import com.java.semantic.model.codefact.EntryPointKind;
 import com.java.semantic.model.codefact.EntryPointTrigger;
@@ -13,14 +15,18 @@ import com.java.semantic.model.codefact.EventListenerCandidate;
 import com.java.semantic.model.codefact.EventListenerQuery;
 import com.java.semantic.model.codefact.EventListenerResult;
 import com.java.semantic.model.codefact.JavaTypeIdentity;
+import com.java.semantic.model.codefact.MemberIdentity;
 import com.java.semantic.model.codefact.MethodTarget;
 import com.java.semantic.model.codefact.PublishedEntryPoint;
 import com.java.semantic.model.codefact.SourceRange;
 import com.java.semantic.model.codefact.SourceTypeIdentity;
 import com.java.semantic.model.codefact.SyntaxPosition;
 import com.java.semantic.model.codefact.SyntaxRange;
+import com.java.semantic.model.codefact.TypeMemberQuery;
+import com.java.semantic.model.codefact.TypeMemberResult;
 import com.java.semantic.model.index.GenerationId;
 import com.java.semantic.model.index.ManifestDigest;
+import com.java.semantic.model.index.SourceIndexCoverage;
 import com.java.semantic.model.query.CurrentGeneration;
 import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.model.repository.RepositoryRevision;
@@ -28,6 +34,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import static com.java.semantic.query.application.SemanticQueryContract.TypeMemberRequest;
 import static com.java.semantic.query.application.SemanticQueryContract.EntryPointRequest;
@@ -36,6 +43,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class SemanticQueryFacadeDiscoveryTest {
@@ -89,6 +97,39 @@ class SemanticQueryFacadeDiscoveryTest {
                 new TypeMemberRequest(REPOSITORY, REVISION, CodeFactId.from(methodIdentity).value(), Set.of(), 0, 20)));
 
         assertEquals("FACT_KIND_MISMATCH", exception.getMessage());
+    }
+
+    @Test
+    void omitted_member_kinds_expand_to_all_supported_kinds_in_one_public_result() {
+        CurrentGeneration generation = generation();
+        CodeFactIdentity typeIdentity = new CodeFactIdentity(new RepositoryId(REPOSITORY), new RepositoryRevision(REVISION),
+                CodeFactKind.TYPE, TYPE);
+        List<CodeFactSummary> members = List.of(
+                summary(CodeFactKind.METHOD, new MethodTarget(TYPE, "pay", List.of())),
+                summary(CodeFactKind.FIELD, new MemberIdentity(TYPE, "amount")),
+                summary(CodeFactKind.ENUM_CONSTANT, new MemberIdentity(TYPE, "PAID")),
+                summary(CodeFactKind.RECORD_COMPONENT, new MemberIdentity(TYPE, "receipt")));
+        CodeFactReadService facts = mock(CodeFactReadService.class);
+        when(facts.get(new CodeFactReadQuery(new RepositoryId(REPOSITORY), new RepositoryRevision(REVISION), CodeFactId.from(typeIdentity))))
+                .thenReturn(details(generation, typeIdentity));
+        PublishedDiscoveryQueryService discovery = mock(PublishedDiscoveryQueryService.class);
+        when(discovery.discoverTypeMembers(any())).thenAnswer(invocation -> {
+            TypeMemberQuery query = invocation.getArgument(0);
+            return new TypeMemberResult(generation, query, members, members.size(), false,
+                    new SourceIndexCoverage(0, List.of()));
+        });
+
+        SemanticQueryFacade facade = facade(facts, discovery);
+
+        SemanticQueryContract.CollectionResult result = facade.listTypeMembers(new TypeMemberRequest(REPOSITORY, REVISION,
+                CodeFactId.from(typeIdentity).value(), Set.of(), 0, 20));
+
+        ArgumentCaptor<TypeMemberQuery> queryCaptor = ArgumentCaptor.forClass(TypeMemberQuery.class);
+        verify(discovery).discoverTypeMembers(queryCaptor.capture());
+        assertEquals(TypeMemberQuery.MEMBER_KINDS, queryCaptor.getValue().kinds());
+        assertEquals(List.of(CodeFactKind.METHOD, CodeFactKind.FIELD, CodeFactKind.ENUM_CONSTANT, CodeFactKind.RECORD_COMPONENT),
+                result.items().stream().map(SemanticQueryContract.ProgramElement.class::cast)
+                        .map(SemanticQueryContract.ProgramElement::kind).toList());
     }
 
     @Test
@@ -163,6 +204,11 @@ class SemanticQueryFacadeDiscoveryTest {
 
     private static CodeFactDetails details(CurrentGeneration generation, CodeFactIdentity identity) {
         return new CodeFactDetails(generation, new CodeFact(CodeFactId.from(identity), identity), range(), List.of());
+    }
+
+    private static CodeFactSummary summary(CodeFactKind kind, CanonicalIdentity identity) {
+        CodeFactIdentity factIdentity = new CodeFactIdentity(new RepositoryId(REPOSITORY), new RepositoryRevision(REVISION), kind, identity);
+        return new CodeFactSummary(new CodeFact(CodeFactId.from(factIdentity), factIdentity), range());
     }
 
     private static CurrentGeneration generation() {
