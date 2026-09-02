@@ -8,10 +8,12 @@ import com.java.semantic.query.application.SemanticQueryFacade;
 import io.modelcontextprotocol.server.McpStatelessServerFeatures;
 import io.modelcontextprotocol.spec.McpSchema;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import tools.jackson.databind.ObjectMapper;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -125,6 +127,24 @@ class QueryMcpToolCatalogConfigurationTest {
         verify(facade).findReferences(any());
         verify(facade).findCallers(any());
         verify(facade).findCallees(any());
+
+        ArgumentCaptor<SemanticQueryContract.SearchCodeRequest> searchRequest = ArgumentCaptor.forClass(
+                SemanticQueryContract.SearchCodeRequest.class);
+        verify(facade).searchCode(searchRequest.capture());
+        assertEquals(0, searchRequest.getValue().offset());
+        assertEquals(SemanticQueryContract.DEFAULT_LIMIT, searchRequest.getValue().limit());
+        assertEquals(Set.of(), searchRequest.getValue().kinds());
+        assertEquals(Optional.empty(), searchRequest.getValue().packagePrefix());
+
+        ArgumentCaptor<SemanticQueryContract.EntryPointRequest> entryPointRequest = ArgumentCaptor.forClass(
+                SemanticQueryContract.EntryPointRequest.class);
+        verify(facade).listEntryPoints(entryPointRequest.capture());
+        assertEquals(Set.of(), entryPointRequest.getValue().kinds());
+
+        ArgumentCaptor<SemanticQueryContract.RelationRequest> callerRequest = ArgumentCaptor.forClass(
+                SemanticQueryContract.RelationRequest.class);
+        verify(facade).findCallers(callerRequest.capture());
+        assertEquals("b".repeat(64), callerRequest.getValue().factId());
     }
 
     private static void invoke(List<McpStatelessServerFeatures.SyncToolSpecification> specifications, String name,
