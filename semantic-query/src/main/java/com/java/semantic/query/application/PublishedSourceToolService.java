@@ -2,10 +2,12 @@ package com.java.semantic.query.application;
 
 import com.java.semantic.model.codefact.CodeFactDetails;
 import com.java.semantic.model.codefact.CodeFactIdentity;
+import com.java.semantic.model.codefact.CodeFactReadQuery;
 import com.java.semantic.model.codefact.MethodTarget;
 import com.java.semantic.model.codefact.PublishedSourceSegment;
 import com.java.semantic.model.codefact.SourceRange;
 import com.java.semantic.model.codefact.SyntaxPosition;
+import com.java.semantic.model.codefact.SyntaxRange;
 import com.java.semantic.model.codefact.SourceSegmentQuery;
 import com.java.semantic.model.query.CurrentGeneration;
 
@@ -42,14 +44,31 @@ public final class PublishedSourceToolService {
         return slice(fact.generation(), fact.location(), content, Optional.of(fact.fact().identity()), 0);
     }
 
-    public PublishedSourceSegment sourceSegment(String repositoryId, String revision, CodeFactIdentity identity, int contextLines) {
-        CodeFactDetails fact = codeFactReadService.get(repositoryId, revision, identity);
-        if (contextLines < 0 || contextLines > 20) { throw new IllegalArgumentException("context lines must be between 0 and 20"); }
-        Optional<MethodTarget> method = identity.canonicalIdentity() instanceof MethodTarget target
-                ? Optional.of(target) : Optional.empty();
-        if (method.isEmpty()) { throw new CodeFactKindUnsupportedException(identity.kind()); }
+    public FactSourceSlice factSource(CodeFactReadQuery query, int contextLines) {
+        CodeFactReadQuery requiredQuery = Objects.requireNonNull(query, "code fact read query is required");
+        if (contextLines < 0 || contextLines > SemanticQueryContract.MAX_CONTEXT_LINES) {
+            throw new IllegalArgumentException("context lines must be between 0 and " + SemanticQueryContract.MAX_CONTEXT_LINES);
+        }
+        CodeFactDetails fact = codeFactReadService.get(requiredQuery);
         String content = sourceQueryService.getSource(fact.generation(), fact.location().sourceFile()).utf8Content();
-        return slice(fact.generation(), fact.location(), content, Optional.empty(), contextLines);
+        SourceRange sourceRange = expandedRange(fact.location(), content, contextLines);
+        return new FactSourceSlice(fact.generation(), sourceRange, fact.location(), content);
+    }
+
+    private static SourceRange expandedRange(SourceRange factRange, String content, int contextLines) {
+        int start = offset(content, factRange.range().start());
+        int end = offset(content, factRange.range().end());
+        if (start >= end) { throw new IndexContractMismatchException(); }
+        if (contextLines == 0) {
+            return factRange;
+        }
+        int firstLine = Math.max(0, factRange.range().start().line() - contextLines);
+        int finalFactLine = factRange.range().end().character() == 0 && factRange.range().end().line() > factRange.range().start().line()
+                ? factRange.range().end().line() - 1 : factRange.range().end().line();
+        int finalLine = Math.min(lineCount(content) - 1, finalFactLine + contextLines);
+        SyntaxPosition endPosition = positionAfterLine(content, finalLine);
+        return new SourceRange(factRange.sourceFile(), new SyntaxRange(
+                new SyntaxPosition(firstLine, 0), endPosition));
     }
 
     private static PublishedSourceSegment slice(CurrentGeneration generation, SourceRange location, String content,
@@ -97,5 +116,33 @@ public final class PublishedSourceToolService {
             result = newline + 1;
         }
         return result;
+    }
+
+    private static int lineCount(String content) {
+        int result = 1;
+        for (int index = 0; index < content.length(); index++) {
+            if (content.charAt(index) == '\n') {
+                result++;
+            }
+        }
+        return result;
+    }
+
+    private static SyntaxPosition positionAfterLine(String content, int line) {
+        int totalLines = lineCount(content);
+        if (line < totalLines - 1) {
+            return new SyntaxPosition(line + 1, 0);
+        }
+        int start = 0;
+        for (int index = 0; index < line; index++) {
+            int newline = content.indexOf('\n', start);
+            if (newline < 0) { throw new IndexContractMismatchException(); }
+            start = newline + 1;
+        }
+        int end = content.length();
+        if (end > start && content.charAt(end - 1) == '\r') {
+            end--;
+        }
+        return new SyntaxPosition(line, end - start);
     }
 }

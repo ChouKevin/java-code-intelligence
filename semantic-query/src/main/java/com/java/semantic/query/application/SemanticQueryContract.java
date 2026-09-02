@@ -125,6 +125,13 @@ public final class SemanticQueryContract {
     public record RepositoryItem(String repositoryId, String revision) {
     }
 
+    public record RepositoryCollection(List<RepositoryItem> items, Page page) {
+        public RepositoryCollection {
+            items = List.copyOf(Objects.requireNonNull(items, "repository items are required"));
+            page = Objects.requireNonNull(page, "page is required");
+        }
+    }
+
     public record Page(int offset, int limit, int returned, long total, boolean hasMore) {
     }
 

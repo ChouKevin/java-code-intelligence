@@ -11,6 +11,7 @@ import com.java.semantic.query.application.PublishedDiscoveryQueryService;
 import com.java.semantic.query.application.PublishedEntryPointQueryService;
 import com.java.semantic.query.application.PublishedRelationQueryService;
 import com.java.semantic.query.application.PublishedSourceToolService;
+import com.java.semantic.query.application.SemanticQueryFacade;
 import com.java.semantic.query.config.ConfiguredReadPolicy;
 import com.java.semantic.query.config.ReadPolicyProperties;
 import com.java.semantic.query.config.SemanticQueryProperties;
@@ -96,6 +97,13 @@ public class SemanticQueryApplication {
     PublishedSourceToolService publishedSourceToolService(CurrentSourceQueryService sourceQueryService,
                                                           CodeFactReadService codeFactReadService) {
         return new PublishedSourceToolService(sourceQueryService, codeFactReadService);
+    }
+
+    @Bean
+    SemanticQueryFacade semanticQueryFacade(CurrentRepositoryQueryService repositoryQueryService,
+                                            CodeFactSearchService codeFactSearchService,
+                                            PublishedSourceToolService sourceToolService) {
+        return new SemanticQueryFacade(repositoryQueryService, codeFactSearchService, sourceToolService);
     }
 
     @Bean
