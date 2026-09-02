@@ -38,7 +38,8 @@ class OpenApiContractTest {
                 "/api/v1/callees");
         assertThat(schemas).containsKeys("SemanticQueryError", "RepositoryCollection", "RepositoryItem",
                 "FactSourceResult", "SearchCodeRequest", "FactSourceRequest", "EntryPointRequest", "ApiRouteRequest",
-                "EventListenerRequest", "TypeMemberRequest", "RelationRequest", "ProgramElement", "EntryPointItem",
+                "EventListenerRequest", "TypeMemberRequest", "RelationRequest", "InternalProgramElement", "ExternalCallee",
+                "EntryPointItem",
                 "Trigger", "EventListenerItem", "ImplementationItem", "CallerItem", "CalleeItem", "ReferenceItem", "RelationSite");
         assertThat(map(schemas.get("SemanticQueryError")).get("properties")).asInstanceOf(org.assertj.core.api.InstanceOfAssertFactories.MAP)
                 .containsOnlyKeys("code", "message", "retryable", "currentRevision");
@@ -83,11 +84,11 @@ class OpenApiContractTest {
                 "/api/v1/callers", "CallerCollectionResult",
                 "/api/v1/callees", "CalleeCollectionResult");
         Map<String, String> itemSchemas = Map.of(
-                "/api/v1/search-code", "ProgramElement",
+                "/api/v1/search-code", "InternalProgramElement",
                 "/api/v1/entry-points", "EntryPointItem",
                 "/api/v1/api-routes", "EntryPointItem",
                 "/api/v1/event-listeners", "EventListenerItem",
-                "/api/v1/type-members", "ProgramElement",
+                "/api/v1/type-members", "InternalProgramElement",
                 "/api/v1/method-implementations", "ImplementationItem",
                 "/api/v1/references", "ReferenceItem",
                 "/api/v1/callers", "CallerItem",
@@ -104,7 +105,8 @@ class OpenApiContractTest {
                     .containsEntry("$ref", "#/components/schemas/" + itemSchemas.get(operation.getKey()));
         }
 
-        assertRequired(schemas, "ProgramElement", List.of("displayName"));
+        assertRequired(schemas, "InternalProgramElement", List.of("factId", "kind", "displayName", "source"));
+        assertRequired(schemas, "ExternalCallee", List.of("displayName"));
         assertRequired(schemas, "EntryPointItem", List.of("factId", "handler", "trigger"));
         assertRequired(schemas, "Trigger", List.of("kind", "method", "value"));
         assertRequired(schemas, "EventListenerItem", List.of("eventType", "handler"));
@@ -113,11 +115,32 @@ class OpenApiContractTest {
         assertRequired(schemas, "CallerItem", List.of("caller", "callSite"));
         assertRequired(schemas, "CalleeItem", List.of("callee", "callSite"));
         assertRequired(schemas, "RelationSite", List.of("factId", "source"));
+
+        assertReference(schemas, "EntryPointItem", "handler", "InternalProgramElement");
+        assertReference(schemas, "EventListenerItem", "handler", "InternalProgramElement");
+        assertReference(schemas, "ImplementationItem", "implementation", "InternalProgramElement");
+        assertReference(schemas, "CallerItem", "caller", "InternalProgramElement");
+        assertReference(schemas, "ReferenceItem", "container", "InternalProgramElement");
+
+        Map<String, Object> implementationProperties = map(map(schemas.get("ImplementationItem")).get("properties"));
+        assertThat(map(implementationProperties.get("relationKind")).get("enum"))
+                .isEqualTo(List.of("IMPLEMENTS", "OVERRIDES"));
+        Map<String, Object> calleeProperties = map(map(schemas.get("CalleeItem")).get("properties"));
+        assertThat(calleeProperties.get("callee")).asInstanceOf(org.assertj.core.api.InstanceOfAssertFactories.MAP)
+                .containsOnlyKeys("oneOf");
+        assertThat(map(calleeProperties.get("callee")).get("oneOf")).asInstanceOf(org.assertj.core.api.InstanceOfAssertFactories.LIST)
+                .containsExactly(Map.of("$ref", "#/components/schemas/InternalProgramElement"),
+                        Map.of("$ref", "#/components/schemas/ExternalCallee"));
     }
 
     private static void assertRequired(Map<String, Object> schemas, String schemaName, List<String> required) {
         assertThat(map(schemas.get(schemaName)).get("required")).asInstanceOf(org.assertj.core.api.InstanceOfAssertFactories.LIST)
                 .containsAll(required);
+    }
+
+    private static void assertReference(Map<String, Object> schemas, String schemaName, String property, String target) {
+        Map<String, Object> properties = map(map(schemas.get(schemaName)).get("properties"));
+        assertThat(map(properties.get(property))).containsEntry("$ref", "#/components/schemas/" + target);
     }
 
     private static Map<String, Object> responseSchema(Map<String, Object> root, String path) {

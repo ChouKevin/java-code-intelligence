@@ -252,15 +252,21 @@ components:
       properties:
         startLine: {type: integer, minimum: 1}
         endLine: {type: integer, minimum: 1}
-    ProgramElement:
+    InternalProgramElement:
       type: object
       additionalProperties: false
-      required: [displayName]
+      required: [factId, kind, displayName, source]
       properties:
         factId: {$ref: '#/components/schemas/FactId'}
         kind: {type: string, enum: [TYPE, METHOD, FIELD, ENUM_CONSTANT, RECORD_COMPONENT, MAPPER_STATEMENT, ANNOTATION_USAGE, TYPE_USAGE, SQL_IDENTIFIER, CONFIGURATION_KEY, OUTBOUND_API, MQ_PUBLISHER, ERROR_CONTRACT, API_ROUTE, MQ_DESTINATION, SCHEDULE]}
         displayName: {type: string, minLength: 1}
         source: {$ref: '#/components/schemas/SourceSnippet'}
+    ExternalCallee:
+      type: object
+      additionalProperties: false
+      required: [displayName]
+      properties:
+        displayName: {type: string, minLength: 1}
     RelationSite:
       type: object
       additionalProperties: false
@@ -282,7 +288,7 @@ components:
       required: [factId, handler, trigger]
       properties:
         factId: {$ref: '#/components/schemas/FactId'}
-        handler: {$ref: '#/components/schemas/ProgramElement'}
+        handler: {$ref: '#/components/schemas/InternalProgramElement'}
         trigger: {$ref: '#/components/schemas/Trigger'}
     EventListenerItem:
       type: object
@@ -290,34 +296,37 @@ components:
       required: [eventType, handler]
       properties:
         eventType: {type: string, minLength: 1}
-        handler: {$ref: '#/components/schemas/ProgramElement'}
+        handler: {$ref: '#/components/schemas/InternalProgramElement'}
     ImplementationItem:
       type: object
       additionalProperties: false
       required: [implementation, relationKind]
       properties:
-        implementation: {$ref: '#/components/schemas/ProgramElement'}
-        relationKind: {type: string, enum: [REFERENCES, CALLS, IMPLEMENTS, OVERRIDES, EXTENDS, USES_TYPE, USES_ANNOTATION, READS_CONFIGURATION, USES_SQL_IDENTIFIER, CALLS_OUTBOUND_API, PUBLISHES_MESSAGE, DECLARES_ERROR_CONTRACT]}
+        implementation: {$ref: '#/components/schemas/InternalProgramElement'}
+        relationKind: {type: string, enum: [IMPLEMENTS, OVERRIDES]}
     CallerItem:
       type: object
       additionalProperties: false
       required: [caller, callSite]
       properties:
-        caller: {$ref: '#/components/schemas/ProgramElement'}
+        caller: {$ref: '#/components/schemas/InternalProgramElement'}
         callSite: {$ref: '#/components/schemas/RelationSite'}
     CalleeItem:
       type: object
       additionalProperties: false
       required: [callee, callSite]
       properties:
-        callee: {$ref: '#/components/schemas/ProgramElement'}
+        callee:
+          oneOf:
+            - {$ref: '#/components/schemas/InternalProgramElement'}
+            - {$ref: '#/components/schemas/ExternalCallee'}
         callSite: {$ref: '#/components/schemas/RelationSite'}
     ReferenceItem:
       type: object
       additionalProperties: false
       required: [container, referenceSite]
       properties:
-        container: {$ref: '#/components/schemas/ProgramElement'}
+        container: {$ref: '#/components/schemas/InternalProgramElement'}
         referenceSite: {$ref: '#/components/schemas/RelationSite'}
     SearchCodeResult:
       type: object
@@ -326,7 +335,7 @@ components:
       properties:
         repositoryId: {$ref: '#/components/schemas/RepositoryId'}
         revision: {$ref: '#/components/schemas/Revision'}
-        items: {type: array, items: {$ref: '#/components/schemas/ProgramElement'}}
+        items: {type: array, items: {$ref: '#/components/schemas/InternalProgramElement'}}
         page: {$ref: '#/components/schemas/Page'}
     EntryPointCollectionResult:
       type: object
@@ -353,7 +362,7 @@ components:
       properties:
         repositoryId: {$ref: '#/components/schemas/RepositoryId'}
         revision: {$ref: '#/components/schemas/Revision'}
-        items: {type: array, items: {$ref: '#/components/schemas/ProgramElement'}}
+        items: {type: array, items: {$ref: '#/components/schemas/InternalProgramElement'}}
         page: {$ref: '#/components/schemas/Page'}
     ImplementationCollectionResult:
       type: object
