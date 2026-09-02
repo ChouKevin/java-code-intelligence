@@ -38,7 +38,7 @@ public final class SemanticQueryContract {
             repositoryId = requireRepositoryId(repositoryId);
             revision = requireRevision(revision);
             query = ModelValidation.requiredText(query, "query");
-            kinds = Set.copyOf(Objects.requireNonNull(kinds, "kinds are required"));
+            kinds = requireKindSet(kinds);
             packagePrefix = Objects.requireNonNull(packagePrefix, "package prefix is required")
                     .map(value -> ModelValidation.requiredText(value, "package prefix"));
             offset = requireOffset(offset);
@@ -68,7 +68,7 @@ public final class SemanticQueryContract {
         public EntryPointRequest {
             repositoryId = requireRepositoryId(repositoryId);
             revision = requireRevision(revision);
-            kinds = Set.copyOf(Objects.requireNonNull(kinds, "kinds are required"));
+            kinds = requireKindSet(kinds);
             offset = requireOffset(offset);
             limit = requireLimit(limit);
         }
@@ -103,7 +103,7 @@ public final class SemanticQueryContract {
             repositoryId = requireRepositoryId(repositoryId);
             revision = requireRevision(revision);
             typeFactId = requireFactId(typeFactId);
-            kinds = Set.copyOf(Objects.requireNonNull(kinds, "kinds are required"));
+            kinds = requireKindSet(kinds);
             offset = requireOffset(offset);
             limit = requireLimit(limit);
         }
@@ -206,5 +206,13 @@ public final class SemanticQueryContract {
         ModelValidation.require(contextLines >= 0 && contextLines <= MAX_CONTEXT_LINES,
                 "context lines must be between 0 and " + MAX_CONTEXT_LINES);
         return contextLines;
+    }
+
+    private static <T> Set<T> requireKindSet(Set<T> kinds) {
+        Set<T> requiredKinds = Objects.requireNonNull(kinds, "kinds are required");
+        if (requiredKinds.stream().anyMatch(Objects::isNull)) {
+            throw new IllegalArgumentException("kinds must not contain null values");
+        }
+        return Set.copyOf(requiredKinds);
     }
 }

@@ -66,8 +66,8 @@ components:
       post:
         summary: Search exact indexed code. Copy repository ID and revision from Semantic results.
         requestBody: {$ref: '#/components/requestBodies/SearchCodeRequest'}
-        responses: &collectionResponses
-          '200': {description: Revision-pinned collection page., content: {application/json: {schema: {$ref: '#/components/schemas/CollectionResult'}}}}
+        responses:
+          '200': {description: Revision-pinned collection page., content: {application/json: {schema: {$ref: '#/components/schemas/SearchCodeResult'}}}}
           '400': {$ref: '#/components/responses/InvalidArgument'}
           '401': {$ref: '#/components/responses/AuthenticationRequired'}
           '403': {$ref: '#/components/responses/AccessForbidden'}
@@ -90,42 +90,98 @@ components:
       post:
         summary: List HTTP, messaging, and scheduled entry points.
         requestBody: {$ref: '#/components/requestBodies/EntryPointRequest'}
-        responses: *collectionResponses
+        responses:
+          '200': {description: Revision-pinned collection page., content: {application/json: {schema: {$ref: '#/components/schemas/EntryPointCollectionResult'}}}}
+          '400': {$ref: '#/components/responses/InvalidArgument'}
+          '401': {$ref: '#/components/responses/AuthenticationRequired'}
+          '403': {$ref: '#/components/responses/AccessForbidden'}
+          '404': {$ref: '#/components/responses/NotFound'}
+          '409': {$ref: '#/components/responses/RevisionOutdated'}
+          '503': {$ref: '#/components/responses/IndexUnavailable'}
     ApiRoutes:
       post:
         summary: Find routes for one exact method and path.
         requestBody: {$ref: '#/components/requestBodies/ApiRouteRequest'}
-        responses: *collectionResponses
+        responses:
+          '200': {description: Revision-pinned collection page., content: {application/json: {schema: {$ref: '#/components/schemas/EntryPointCollectionResult'}}}}
+          '400': {$ref: '#/components/responses/InvalidArgument'}
+          '401': {$ref: '#/components/responses/AuthenticationRequired'}
+          '403': {$ref: '#/components/responses/AccessForbidden'}
+          '404': {$ref: '#/components/responses/NotFound'}
+          '409': {$ref: '#/components/responses/RevisionOutdated'}
+          '503': {$ref: '#/components/responses/IndexUnavailable'}
     EventListeners:
       post:
         summary: Find listeners for one exact fully qualified event type.
         requestBody: {$ref: '#/components/requestBodies/EventListenerRequest'}
-        responses: *collectionResponses
+        responses:
+          '200': {description: Revision-pinned collection page., content: {application/json: {schema: {$ref: '#/components/schemas/EventListenerCollectionResult'}}}}
+          '400': {$ref: '#/components/responses/InvalidArgument'}
+          '401': {$ref: '#/components/responses/AuthenticationRequired'}
+          '403': {$ref: '#/components/responses/AccessForbidden'}
+          '404': {$ref: '#/components/responses/NotFound'}
+          '409': {$ref: '#/components/responses/RevisionOutdated'}
+          '503': {$ref: '#/components/responses/IndexUnavailable'}
     TypeMembers:
       post:
         summary: List members of one returned type fact ID.
         requestBody: {$ref: '#/components/requestBodies/TypeMemberRequest'}
-        responses: *collectionResponses
+        responses:
+          '200': {description: Revision-pinned collection page., content: {application/json: {schema: {$ref: '#/components/schemas/TypeMemberCollectionResult'}}}}
+          '400': {$ref: '#/components/responses/InvalidArgument'}
+          '401': {$ref: '#/components/responses/AuthenticationRequired'}
+          '403': {$ref: '#/components/responses/AccessForbidden'}
+          '404': {$ref: '#/components/responses/NotFound'}
+          '409': {$ref: '#/components/responses/RevisionOutdated'}
+          '503': {$ref: '#/components/responses/IndexUnavailable'}
     MethodImplementations:
       post:
         summary: Find direct implementations or overrides of one returned method fact ID.
         requestBody: {$ref: '#/components/requestBodies/MethodRelationRequest'}
-        responses: *collectionResponses
+        responses:
+          '200': {description: Revision-pinned collection page., content: {application/json: {schema: {$ref: '#/components/schemas/ImplementationCollectionResult'}}}}
+          '400': {$ref: '#/components/responses/InvalidArgument'}
+          '401': {$ref: '#/components/responses/AuthenticationRequired'}
+          '403': {$ref: '#/components/responses/AccessForbidden'}
+          '404': {$ref: '#/components/responses/NotFound'}
+          '409': {$ref: '#/components/responses/RevisionOutdated'}
+          '503': {$ref: '#/components/responses/IndexUnavailable'}
     References:
       post:
         summary: Find exact references to one returned declaration fact ID.
         requestBody: {$ref: '#/components/requestBodies/RelationRequest'}
-        responses: *collectionResponses
+        responses:
+          '200': {description: Revision-pinned collection page., content: {application/json: {schema: {$ref: '#/components/schemas/ReferenceCollectionResult'}}}}
+          '400': {$ref: '#/components/responses/InvalidArgument'}
+          '401': {$ref: '#/components/responses/AuthenticationRequired'}
+          '403': {$ref: '#/components/responses/AccessForbidden'}
+          '404': {$ref: '#/components/responses/NotFound'}
+          '409': {$ref: '#/components/responses/RevisionOutdated'}
+          '503': {$ref: '#/components/responses/IndexUnavailable'}
     Callers:
       post:
         summary: Find direct callers of one returned method fact ID.
         requestBody: {$ref: '#/components/requestBodies/MethodRelationRequest'}
-        responses: *collectionResponses
+        responses:
+          '200': {description: Revision-pinned collection page., content: {application/json: {schema: {$ref: '#/components/schemas/CallerCollectionResult'}}}}
+          '400': {$ref: '#/components/responses/InvalidArgument'}
+          '401': {$ref: '#/components/responses/AuthenticationRequired'}
+          '403': {$ref: '#/components/responses/AccessForbidden'}
+          '404': {$ref: '#/components/responses/NotFound'}
+          '409': {$ref: '#/components/responses/RevisionOutdated'}
+          '503': {$ref: '#/components/responses/IndexUnavailable'}
     Callees:
       post:
         summary: Find direct callees of one returned method fact ID.
         requestBody: {$ref: '#/components/requestBodies/MethodRelationRequest'}
-        responses: *collectionResponses
+        responses:
+          '200': {description: Revision-pinned collection page., content: {application/json: {schema: {$ref: '#/components/schemas/CalleeCollectionResult'}}}}
+          '400': {$ref: '#/components/responses/InvalidArgument'}
+          '401': {$ref: '#/components/responses/AuthenticationRequired'}
+          '403': {$ref: '#/components/responses/AccessForbidden'}
+          '404': {$ref: '#/components/responses/NotFound'}
+          '409': {$ref: '#/components/responses/RevisionOutdated'}
+          '503': {$ref: '#/components/responses/IndexUnavailable'}
   requestBodies:
     SearchCodeRequest: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/SearchCodeRequest'}}}}
     FactSourceRequest: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/FactSourceRequest'}}}}
@@ -199,19 +255,141 @@ components:
     ProgramElement:
       type: object
       additionalProperties: false
+      required: [displayName]
       properties:
         factId: {$ref: '#/components/schemas/FactId'}
-        kind: {type: string}
-        displayName: {type: string}
+        kind: {type: string, enum: [TYPE, METHOD, FIELD, ENUM_CONSTANT, RECORD_COMPONENT, MAPPER_STATEMENT, ANNOTATION_USAGE, TYPE_USAGE, SQL_IDENTIFIER, CONFIGURATION_KEY, OUTBOUND_API, MQ_PUBLISHER, ERROR_CONTRACT, API_ROUTE, MQ_DESTINATION, SCHEDULE]}
+        displayName: {type: string, minLength: 1}
         source: {$ref: '#/components/schemas/SourceSnippet'}
-    CollectionResult:
+    RelationSite:
+      type: object
+      additionalProperties: false
+      required: [factId, source]
+      properties:
+        factId: {$ref: '#/components/schemas/FactId'}
+        source: {$ref: '#/components/schemas/SourceSnippet'}
+    Trigger:
+      type: object
+      additionalProperties: false
+      required: [kind, method, value]
+      properties:
+        kind: {type: string, minLength: 1}
+        method: {type: string}
+        value: {type: string, minLength: 1}
+    EntryPointItem:
+      type: object
+      additionalProperties: false
+      required: [factId, handler, trigger]
+      properties:
+        factId: {$ref: '#/components/schemas/FactId'}
+        handler: {$ref: '#/components/schemas/ProgramElement'}
+        trigger: {$ref: '#/components/schemas/Trigger'}
+    EventListenerItem:
+      type: object
+      additionalProperties: false
+      required: [eventType, handler]
+      properties:
+        eventType: {type: string, minLength: 1}
+        handler: {$ref: '#/components/schemas/ProgramElement'}
+    ImplementationItem:
+      type: object
+      additionalProperties: false
+      required: [implementation, relationKind]
+      properties:
+        implementation: {$ref: '#/components/schemas/ProgramElement'}
+        relationKind: {type: string, enum: [REFERENCES, CALLS, IMPLEMENTS, OVERRIDES, EXTENDS, USES_TYPE, USES_ANNOTATION, READS_CONFIGURATION, USES_SQL_IDENTIFIER, CALLS_OUTBOUND_API, PUBLISHES_MESSAGE, DECLARES_ERROR_CONTRACT]}
+    CallerItem:
+      type: object
+      additionalProperties: false
+      required: [caller, callSite]
+      properties:
+        caller: {$ref: '#/components/schemas/ProgramElement'}
+        callSite: {$ref: '#/components/schemas/RelationSite'}
+    CalleeItem:
+      type: object
+      additionalProperties: false
+      required: [callee, callSite]
+      properties:
+        callee: {$ref: '#/components/schemas/ProgramElement'}
+        callSite: {$ref: '#/components/schemas/RelationSite'}
+    ReferenceItem:
+      type: object
+      additionalProperties: false
+      required: [container, referenceSite]
+      properties:
+        container: {$ref: '#/components/schemas/ProgramElement'}
+        referenceSite: {$ref: '#/components/schemas/RelationSite'}
+    SearchCodeResult:
       type: object
       additionalProperties: false
       required: [repositoryId, revision, items, page]
       properties:
         repositoryId: {$ref: '#/components/schemas/RepositoryId'}
         revision: {$ref: '#/components/schemas/Revision'}
-        items: {type: array, items: {}}
+        items: {type: array, items: {$ref: '#/components/schemas/ProgramElement'}}
+        page: {$ref: '#/components/schemas/Page'}
+    EntryPointCollectionResult:
+      type: object
+      additionalProperties: false
+      required: [repositoryId, revision, items, page]
+      properties:
+        repositoryId: {$ref: '#/components/schemas/RepositoryId'}
+        revision: {$ref: '#/components/schemas/Revision'}
+        items: {type: array, items: {$ref: '#/components/schemas/EntryPointItem'}}
+        page: {$ref: '#/components/schemas/Page'}
+    EventListenerCollectionResult:
+      type: object
+      additionalProperties: false
+      required: [repositoryId, revision, items, page]
+      properties:
+        repositoryId: {$ref: '#/components/schemas/RepositoryId'}
+        revision: {$ref: '#/components/schemas/Revision'}
+        items: {type: array, items: {$ref: '#/components/schemas/EventListenerItem'}}
+        page: {$ref: '#/components/schemas/Page'}
+    TypeMemberCollectionResult:
+      type: object
+      additionalProperties: false
+      required: [repositoryId, revision, items, page]
+      properties:
+        repositoryId: {$ref: '#/components/schemas/RepositoryId'}
+        revision: {$ref: '#/components/schemas/Revision'}
+        items: {type: array, items: {$ref: '#/components/schemas/ProgramElement'}}
+        page: {$ref: '#/components/schemas/Page'}
+    ImplementationCollectionResult:
+      type: object
+      additionalProperties: false
+      required: [repositoryId, revision, items, page]
+      properties:
+        repositoryId: {$ref: '#/components/schemas/RepositoryId'}
+        revision: {$ref: '#/components/schemas/Revision'}
+        items: {type: array, items: {$ref: '#/components/schemas/ImplementationItem'}}
+        page: {$ref: '#/components/schemas/Page'}
+    ReferenceCollectionResult:
+      type: object
+      additionalProperties: false
+      required: [repositoryId, revision, items, page]
+      properties:
+        repositoryId: {$ref: '#/components/schemas/RepositoryId'}
+        revision: {$ref: '#/components/schemas/Revision'}
+        items: {type: array, items: {$ref: '#/components/schemas/ReferenceItem'}}
+        page: {$ref: '#/components/schemas/Page'}
+    CallerCollectionResult:
+      type: object
+      additionalProperties: false
+      required: [repositoryId, revision, items, page]
+      properties:
+        repositoryId: {$ref: '#/components/schemas/RepositoryId'}
+        revision: {$ref: '#/components/schemas/Revision'}
+        items: {type: array, items: {$ref: '#/components/schemas/CallerItem'}}
+        page: {$ref: '#/components/schemas/Page'}
+    CalleeCollectionResult:
+      type: object
+      additionalProperties: false
+      required: [repositoryId, revision, items, page]
+      properties:
+        repositoryId: {$ref: '#/components/schemas/RepositoryId'}
+        revision: {$ref: '#/components/schemas/Revision'}
+        items: {type: array, items: {$ref: '#/components/schemas/CalleeItem'}}
         page: {$ref: '#/components/schemas/Page'}
     FactSourceResult:
       type: object
@@ -239,9 +417,9 @@ components:
       properties:
         repositoryId: {$ref: '#/components/schemas/RepositoryId'}
         revision: {$ref: '#/components/schemas/Revision'}
-        query: {type: string, minLength: 1}
-        kinds: {type: array, items: {type: string, enum: [TYPE, METHOD, FIELD, ENUM_CONSTANT, RECORD_COMPONENT, MAPPER_STATEMENT, RELATION_OCCURRENCE, ENTRY_POINT]}}
-        packagePrefix: {type: string, minLength: 1}
+        query: {type: string, minLength: 2, maxLength: 256}
+        kinds: {type: array, items: {type: string, enum: [TYPE, METHOD, FIELD, ENUM_CONSTANT, RECORD_COMPONENT, MAPPER_STATEMENT, ANNOTATION_USAGE, TYPE_USAGE, SQL_IDENTIFIER, CONFIGURATION_KEY, OUTBOUND_API, MQ_PUBLISHER, ERROR_CONTRACT, API_ROUTE, MQ_DESTINATION, SCHEDULE]}}
+        packagePrefix: {type: string, minLength: 1, pattern: '^[A-Za-z_$][A-Za-z0-9_$]*(?:\.[A-Za-z_$][A-Za-z0-9_$]*)*$'}
         offset: {type: integer, minimum: 0, default: 0}
         limit: {type: integer, minimum: 1, maximum: 100, default: 20}
     FactSourceRequest:

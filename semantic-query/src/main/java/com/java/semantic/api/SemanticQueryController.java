@@ -125,7 +125,7 @@ public final class SemanticQueryController {
     }
 
     private static Optional<String> optionalText(String value) {
-        return Optional.ofNullable(value).filter(StringUtils::hasText);
+        return Optional.ofNullable(value);
     }
 
     private static int offset(Integer offset) {

@@ -47,6 +47,7 @@ import io.modelcontextprotocol.spec.McpSchema;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.util.StringUtils;
+import tools.jackson.databind.DatabindException;
 import tools.jackson.databind.ObjectMapper;
 
 import java.util.LinkedHashMap;
@@ -161,7 +162,11 @@ public class QueryMcpToolCatalogConfiguration {
     }
 
     private static <T> T convert(Map<String, Object> arguments, Class<T> targetType, ObjectMapper objectMapper) {
-        return objectMapper.convertValue(arguments, targetType);
+        try {
+            return objectMapper.convertValue(arguments, targetType);
+        } catch (DatabindException exception) {
+            throw new IllegalArgumentException("request does not satisfy the operation contract", exception);
+        }
     }
 
     private static McpSchema.CallToolResult applicationFailure(SemanticQueryError error) {
