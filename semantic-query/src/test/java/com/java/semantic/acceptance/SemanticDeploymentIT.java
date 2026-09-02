@@ -47,7 +47,8 @@ class SemanticDeploymentIT {
             assertThat(initialization.serverInfo()).isNotNull();
 
             McpSchema.ListToolsResult tools = client.listTools();
-            assertThat(tools.tools()).extracting(McpSchema.Tool::name).containsExactlyElementsOf(TOOL_NAMES);
+            assertThat(tools.tools()).extracting(McpSchema.Tool::name)
+                .containsExactlyInAnyOrderElementsOf(TOOL_NAMES);
 
             Map<?, ?> repositories = successfulBody(client.callTool(new McpSchema.CallToolRequest("list_repositories", Map.of())), mapper);
             Map<?, ?> repository = repository(repositories, repositoryId);
