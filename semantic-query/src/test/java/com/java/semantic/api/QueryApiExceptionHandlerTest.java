@@ -2,53 +2,37 @@ package com.java.semantic.api;
 
 import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.model.repository.RepositoryRevision;
-import com.java.semantic.query.application.RevisionOutdatedException;
 import com.java.semantic.query.application.CodeFactNotFoundException;
-import com.java.semantic.query.application.IndexContractMismatchException;
-import com.java.semantic.query.application.IndexNotReadyException;
-import com.java.semantic.query.application.RepositoryNotFoundException;
-import com.java.semantic.query.application.SemanticIndexUnavailableException;
+import com.java.semantic.query.application.RevisionOutdatedException;
+import com.java.semantic.query.application.SemanticQueryError;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+
+import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 class QueryApiExceptionHandlerTest {
 
     @Test
-    void pointer_switch_returns_the_stable_requested_and_current_revision_failure() {
+    void maps_revision_outdated_to_the_shared_safe_application_error() {
         RevisionOutdatedException exception = new RevisionOutdatedException(RepositoryId.of("orders"),
                 new RepositoryRevision("a".repeat(40)), new RepositoryRevision("b".repeat(40)));
 
-        ResponseEntity<QueryApiExceptionHandler.RevisionOutdatedResponse> response =
-                new QueryApiExceptionHandler().revisionOutdated(exception);
+        ResponseEntity<?> response = new QueryApiExceptionHandler().failure(exception);
 
         assertEquals(HttpStatus.CONFLICT, response.getStatusCode());
-        assertEquals("REVISION_OUTDATED", response.getBody().code());
-        assertEquals("orders", response.getBody().repositoryId());
-        assertEquals("a".repeat(40), response.getBody().requestedRevision());
-        assertEquals("b".repeat(40), response.getBody().currentRevision());
-        assertEquals("Retry with currentRevision.", response.getBody().retryGuidance());
+        assertEquals(new SemanticQueryError("REVISION_OUTDATED", "The requested revision is no longer current.", false,
+                Optional.of("b".repeat(40))), response.getBody());
     }
 
     @Test
-    void typed_query_failures_keep_their_stable_code_and_storage_is_retryable() {
-        QueryApiExceptionHandler handler = new QueryApiExceptionHandler();
-        assertFailure(handler, new RepositoryNotFoundException(), HttpStatus.NOT_FOUND, "REPOSITORY_NOT_FOUND", false);
-        assertFailure(handler, new CodeFactNotFoundException(), HttpStatus.NOT_FOUND, "CODE_FACT_NOT_FOUND", false);
-        assertFailure(handler, new IndexNotReadyException(), HttpStatus.SERVICE_UNAVAILABLE, "INDEX_NOT_READY", true);
-        assertFailure(handler, new IndexContractMismatchException(), HttpStatus.SERVICE_UNAVAILABLE, "INDEX_CONTRACT_MISMATCH", true);
-        assertFailure(handler, new SemanticIndexUnavailableException(new IllegalStateException("database hostname")),
-                HttpStatus.SERVICE_UNAVAILABLE, "SEMANTIC_INDEX_UNAVAILABLE", true);
-    }
+    void maps_fact_not_found_without_transport_owned_fields() {
+        ResponseEntity<?> response = new QueryApiExceptionHandler().failure(new CodeFactNotFoundException());
 
-    private static void assertFailure(QueryApiExceptionHandler handler, RuntimeException exception, HttpStatus status,
-                                      String code, boolean retryable) {
-        ResponseEntity<QueryApiExceptionHandler.QueryFailureResponse> response = handler.failure(exception);
-        assertEquals(status, response.getStatusCode());
-        assertEquals(code, response.getBody().code());
-        assertEquals(retryable, response.getBody().retryable());
-        org.junit.jupiter.api.Assertions.assertNull(response.getBody().message());
+        assertEquals(HttpStatus.NOT_FOUND, response.getStatusCode());
+        assertEquals(new SemanticQueryError("FACT_NOT_FOUND", "The requested fact was not found.", false, Optional.empty()),
+                response.getBody());
     }
 }

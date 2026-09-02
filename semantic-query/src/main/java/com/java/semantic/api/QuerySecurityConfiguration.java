@@ -13,7 +13,7 @@ public class QuerySecurityConfiguration {
     @Bean
     public FilterRegistrationBean<QueryRequestMonitoringFilter> queryRequestMonitoringFilter() {
         FilterRegistrationBean<QueryRequestMonitoringFilter> registration = new FilterRegistrationBean<>(new QueryRequestMonitoringFilter());
-        registration.addUrlPatterns("/v1/*", "/mcp");
+        registration.addUrlPatterns("/api/v1/*", "/mcp");
         registration.setOrder(Ordered.HIGHEST_PRECEDENCE);
         return registration;
     }
@@ -21,7 +21,7 @@ public class QuerySecurityConfiguration {
     @Bean
     public FilterRegistrationBean<QueryTokenFilter> queryTokenFilter(QuerySecurityProperties properties) {
         FilterRegistrationBean<QueryTokenFilter> registration = new FilterRegistrationBean<>(new QueryTokenFilter(properties));
-        registration.addUrlPatterns("/v1/*", "/mcp");
+        registration.addUrlPatterns("/api/v1/*", "/mcp");
         registration.setOrder(Ordered.HIGHEST_PRECEDENCE + 1);
         return registration;
     }

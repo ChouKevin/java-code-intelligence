@@ -22,7 +22,7 @@ public final class QueryTokenFilter extends OncePerRequestFilter {
     @Override
     protected boolean shouldNotFilter(HttpServletRequest request) {
         String requestPath = applicationRelativePath(request);
-        return !requestPath.startsWith("/v1/") && !requestPath.equals("/mcp");
+        return !requestPath.startsWith("/api/v1/") && !requestPath.equals("/mcp");
     }
 
     private static String applicationRelativePath(HttpServletRequest request) {
