@@ -15,4 +15,10 @@ class QueryArchitectureTest {
             .dependOnClassesThat().resideInAnyPackage(
                     "com.java.semantic.indexer..", "com.java.semantic.semantic..", "com.java.semantic.syntax..",
                     "org.eclipse.jgit..", "org.eclipse.lsp4j..", "org.eclipse.jdt..", "com.github.benmanes.caffeine..");
+
+    @ArchTest
+    static final ArchRule application_does_not_depend_on_transport = noClasses()
+            .that().resideInAnyPackage("com.java.semantic.query.application..")
+            .should().dependOnClassesThat().resideInAnyPackage(
+                    "com.java.semantic.api..", "com.java.semantic.mcp..", "io.modelcontextprotocol..", "org.springframework.ai..");
 }

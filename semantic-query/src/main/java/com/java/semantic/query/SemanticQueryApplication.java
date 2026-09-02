@@ -6,7 +6,6 @@ import com.java.semantic.query.application.CurrentSourceQueryService;
 import com.java.semantic.query.application.CurrentSymbolQueryService;
 import com.java.semantic.query.application.CodeFactReadService;
 import com.java.semantic.query.application.CodeFactSearchService;
-import com.java.semantic.query.application.PublishedCallGraphService;
 import com.java.semantic.query.application.PublishedDiscoveryQueryService;
 import com.java.semantic.query.application.PublishedEntryPointQueryService;
 import com.java.semantic.query.application.PublishedRelationQueryService;
@@ -85,12 +84,6 @@ public class SemanticQueryApplication {
     PublishedRelationQueryService publishedRelationQueryService(MongoTemplate template, CurrentGenerationSelector selector,
                                                                 SemanticQueryProperties properties) {
         return new PublishedRelationQueryService(template, selector, properties.storageTimeout());
-    }
-
-    @Bean
-    PublishedCallGraphService publishedCallGraphService(MongoTemplate template, CurrentGenerationSelector selector,
-                                                        SemanticQueryProperties properties) {
-        return new PublishedCallGraphService(template, selector, properties.storageTimeout());
     }
 
     @Bean
