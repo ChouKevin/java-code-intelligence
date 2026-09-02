@@ -1,5 +1,6 @@
 package com.java.semantic.query.application;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
 import com.java.semantic.model.codefact.CodeFactId;
 import com.java.semantic.model.codefact.CodeFactKind;
 import com.java.semantic.model.codefact.EntryPointKind;
@@ -145,6 +146,7 @@ public final class SemanticQueryContract {
     public record FactRange(int startLine, int endLine) {
     }
 
+    @JsonInclude(JsonInclude.Include.NON_NULL)
     public record ProgramElement(String factId, CodeFactKind kind, String displayName, SourceSnippet source) {
     }
 

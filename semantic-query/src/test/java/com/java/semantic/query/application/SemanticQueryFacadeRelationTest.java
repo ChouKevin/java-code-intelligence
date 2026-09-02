@@ -87,7 +87,7 @@ class SemanticQueryFacadeRelationTest {
         when(relations.findReferences(any(PublishedRelationQuery.class))).thenReturn(result(field, List.of()));
         SemanticQueryFacade facade = facade(facts, mock(PublishedSourceToolService.class), relations);
 
-        assertThrows(CodeFactKindUnsupportedException.class, () -> facade.findReferences(new RelationRequest(REPOSITORY, REVISION,
+        assertThrows(CodeFactKindMismatchException.class, () -> facade.findReferences(new RelationRequest(REPOSITORY, REVISION,
                 CodeFactId.from(occurrence).value(), 0, 20)));
         SemanticQueryContract.CollectionResult result = assertDoesNotThrow(() -> facade.findReferences(new RelationRequest(REPOSITORY,
                 REVISION, CodeFactId.from(field).value(), 0, 20)));
@@ -146,14 +146,29 @@ class SemanticQueryFacadeRelationTest {
     }
 
     @Test
-    void accepted_kind_sets_are_exact_and_reject_every_other_kind() {
+    void method_relation_operations_reject_existing_non_method_facts_with_kind_mismatch() {
+        CodeFactIdentity type = new CodeFactIdentity(new RepositoryId(REPOSITORY), new RepositoryRevision(REVISION), CodeFactKind.TYPE,
+                type());
+        CodeFactReadService facts = mock(CodeFactReadService.class);
+        when(facts.get(new CodeFactReadQuery(new RepositoryId(REPOSITORY), new RepositoryRevision(REVISION), CodeFactId.from(type))))
+                .thenReturn(details(type));
+        SemanticQueryFacade facade = facade(facts, mock(PublishedSourceToolService.class), mock(PublishedRelationQueryService.class));
+        RelationRequest request = new RelationRequest(REPOSITORY, REVISION, CodeFactId.from(type).value(), 0, 20);
+
+        assertThrows(CodeFactKindMismatchException.class, () -> facade.findMethodImplementations(request));
+        assertThrows(CodeFactKindMismatchException.class, () -> facade.findCallers(request));
+        assertThrows(CodeFactKindMismatchException.class, () -> facade.findCallees(request));
+    }
+
+    @Test
+    void accepted_kind_sets_are_exact_and_report_mismatch_for_every_other_kind() {
         assertEquals(Set.of(CodeFactKind.METHOD), FactKindPolicy.METHOD_IMPLEMENTATIONS);
         assertEquals(Set.of(CodeFactKind.TYPE), FactKindPolicy.TYPE_MEMBERS);
         assertEquals(Set.of(CodeFactKind.METHOD), FactKindPolicy.CALLERS);
         assertEquals(Set.of(CodeFactKind.METHOD), FactKindPolicy.CALLEES);
         assertEquals(Set.of(CodeFactKind.TYPE, CodeFactKind.METHOD, CodeFactKind.FIELD, CodeFactKind.ENUM_CONSTANT,
                 CodeFactKind.RECORD_COMPONENT, CodeFactKind.MAPPER_STATEMENT), FactKindPolicy.REFERENCE_TARGETS);
-        assertThrows(CodeFactKindUnsupportedException.class, () -> FactKindPolicy.require(details(occurrenceIdentity()),
+        assertThrows(CodeFactKindMismatchException.class, () -> FactKindPolicy.require(details(occurrenceIdentity()),
                 FactKindPolicy.REFERENCE_TARGETS));
     }
 

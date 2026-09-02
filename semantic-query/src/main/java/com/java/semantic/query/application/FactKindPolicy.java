@@ -25,7 +25,7 @@ public final class FactKindPolicy {
         Set<CodeFactKind> requiredKinds = Objects.requireNonNull(acceptedKinds, "accepted kinds are required");
         CodeFactKind kind = requiredFact.fact().identity().kind();
         if (!requiredKinds.contains(kind)) {
-            throw new CodeFactKindUnsupportedException(kind);
+            throw new CodeFactKindMismatchException();
         }
         return requiredFact;
     }

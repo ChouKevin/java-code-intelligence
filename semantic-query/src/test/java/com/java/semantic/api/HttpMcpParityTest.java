@@ -3,6 +3,7 @@ package com.java.semantic.api;
 import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.model.repository.RepositoryRevision;
 import com.java.semantic.mcp.QueryMcpToolCatalogConfiguration;
+import com.java.semantic.query.application.CodeFactKindMismatchException;
 import com.java.semantic.query.application.RevisionOutdatedException;
 import com.java.semantic.query.application.SemanticQueryContract;
 import com.java.semantic.query.application.SemanticQueryFacade;
@@ -104,6 +105,26 @@ class HttpMcpParityTest {
                 "repositoryId", REPOSITORY_ID, "revision", REVISION, "query", "payment", "packagePrefix", " "));
 
         assertThat(mapper.readTree(httpFailure)).isEqualTo(mapper.readTree(mapper.writeValueAsString(mcpFailure.structuredContent())));
+    }
+
+    @Test
+    void authenticated_http_and_mcp_report_fact_kind_mismatch_for_known_wrong_kind_method_fact_ids() throws Exception {
+        SemanticQueryFacade facade = mock(SemanticQueryFacade.class);
+        when(facade.findCallers(any())).thenThrow(new CodeFactKindMismatchException());
+
+        String httpFailure = authenticatedHttp(facade).perform(post("/api/v1/callers")
+                        .header(QueryTokenFilter.TOKEN_HEADER, "query-token").contentType("application/json").content("""
+                                {"repositoryId":"orders","revision":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","methodFactId":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}
+                                """))
+                .andExpect(status().isBadRequest()).andReturn().getResponse().getContentAsString();
+        ObjectMapper mapper = applicationJsonMapper();
+        List<McpStatelessServerFeatures.SyncToolSpecification> specifications = new QueryMcpToolCatalogConfiguration()
+                .mcpQueryToolSpecifications(facade, mapper);
+        McpSchema.CallToolResult mcpFailure = call(specifications, "find_callers", Map.of(
+                "repositoryId", REPOSITORY_ID, "revision", REVISION, "methodFactId", FACT_ID));
+
+        assertThat(mapper.readTree(httpFailure)).isEqualTo(mapper.readTree(mapper.writeValueAsString(mcpFailure.structuredContent())));
+        assertThat(httpFailure).contains("\"code\":\"FACT_KIND_MISMATCH\"");
     }
 
     @ParameterizedTest
