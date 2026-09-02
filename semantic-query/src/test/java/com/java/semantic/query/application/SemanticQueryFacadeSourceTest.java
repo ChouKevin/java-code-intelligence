@@ -73,7 +73,7 @@ class SemanticQueryFacadeSourceTest {
         discoveryQueryService = mock(PublishedDiscoveryQueryService.class);
         entryPointQueryService = mock(PublishedEntryPointQueryService.class);
         facade = new SemanticQueryFacade(repositoryService, searchService, sourceToolService, codeFactReadService,
-                discoveryQueryService, entryPointQueryService);
+                discoveryQueryService, entryPointQueryService, mock(PublishedRelationQueryService.class));
         generation = generation(REPOSITORY_ID, REVISION, "g-payment");
         relationIdentity = relationIdentity();
     }

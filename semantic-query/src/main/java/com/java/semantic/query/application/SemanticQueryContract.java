@@ -3,6 +3,7 @@ package com.java.semantic.query.application;
 import com.java.semantic.model.codefact.CodeFactId;
 import com.java.semantic.model.codefact.CodeFactKind;
 import com.java.semantic.model.codefact.EntryPointKind;
+import com.java.semantic.model.codefact.RelationKind;
 import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.model.repository.RepositoryRevision;
 import com.java.semantic.model.support.ModelValidation;
@@ -151,6 +152,18 @@ public final class SemanticQueryContract {
     }
 
     public record EventListenerItem(String eventType, ProgramElement handler) {
+    }
+
+    public record CallerItem(ProgramElement caller, SourceSnippet callSite) {
+    }
+
+    public record CalleeItem(ProgramElement callee, SourceSnippet callSite) {
+    }
+
+    public record ReferenceItem(ProgramElement container, SourceSnippet referenceSite) {
+    }
+
+    public record ImplementationItem(ProgramElement implementation, RelationKind relationKind) {
     }
 
     public record CollectionResult(String repositoryId, String revision, List<?> items, Page page) {

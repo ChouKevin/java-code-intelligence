@@ -200,7 +200,7 @@ class SemanticQueryFacadeDiscoveryTest {
         PublishedSourceToolService source = mock(PublishedSourceToolService.class);
         when(source.factSource(any(CodeFactReadQuery.class), any(Integer.class))).thenReturn(new FactSourceSlice(generation(), range(), range(), "x"));
         return new SemanticQueryFacade(mock(CurrentRepositoryQueryService.class), mock(CodeFactSearchService.class), source, facts,
-                discovery, entryPoints);
+                discovery, entryPoints, mock(PublishedRelationQueryService.class));
     }
 
     private static CodeFactDetails details(CurrentGeneration generation, CodeFactIdentity identity) {

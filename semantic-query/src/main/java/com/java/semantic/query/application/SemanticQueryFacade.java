@@ -16,12 +16,15 @@ import com.java.semantic.model.codefact.EventListenerQuery;
 import com.java.semantic.model.codefact.EventListenerResult;
 import com.java.semantic.model.codefact.MethodTarget;
 import com.java.semantic.model.codefact.PublishedEntryPoint;
+import com.java.semantic.model.codefact.RelationTarget;
 import com.java.semantic.model.codefact.SourceTypeIdentity;
 import com.java.semantic.model.codefact.TypeMemberQuery;
 import com.java.semantic.model.codefact.TypeMemberResult;
 import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.model.repository.RepositoryRevision;
 import com.java.semantic.model.query.CurrentGeneration;
+import com.java.semantic.model.query.PublishedRelationQuery;
+import com.java.semantic.model.query.PublishedRelationResult;
 
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -38,17 +41,20 @@ public final class SemanticQueryFacade {
     private final CodeFactReadService codeFactReadService;
     private final PublishedDiscoveryQueryService discoveryQueryService;
     private final PublishedEntryPointQueryService entryPointQueryService;
+    private final PublishedRelationQueryService relationQueryService;
 
     public SemanticQueryFacade(CurrentRepositoryQueryService repositoryQueryService, CodeFactSearchService codeFactSearchService,
                                PublishedSourceToolService sourceToolService, CodeFactReadService codeFactReadService,
                                PublishedDiscoveryQueryService discoveryQueryService,
-                               PublishedEntryPointQueryService entryPointQueryService) {
+                               PublishedEntryPointQueryService entryPointQueryService,
+                               PublishedRelationQueryService relationQueryService) {
         this.repositoryQueryService = Objects.requireNonNull(repositoryQueryService, "repository query service is required");
         this.codeFactSearchService = Objects.requireNonNull(codeFactSearchService, "code fact search service is required");
         this.sourceToolService = Objects.requireNonNull(sourceToolService, "source tool service is required");
         this.codeFactReadService = Objects.requireNonNull(codeFactReadService, "code fact read service is required");
         this.discoveryQueryService = Objects.requireNonNull(discoveryQueryService, "discovery query service is required");
         this.entryPointQueryService = Objects.requireNonNull(entryPointQueryService, "entry point query service is required");
+        this.relationQueryService = Objects.requireNonNull(relationQueryService, "relation query service is required");
     }
 
     public SemanticQueryContract.RepositoryCollection listRepositories(SemanticQueryContract.PageRequest request) {
@@ -137,8 +143,9 @@ public final class SemanticQueryFacade {
 
     public SemanticQueryContract.CollectionResult listTypeMembers(SemanticQueryContract.TypeMemberRequest request) {
         SemanticQueryContract.TypeMemberRequest requiredRequest = Objects.requireNonNull(request, "type member request is required");
-        CodeFactDetails type = codeFactReadService.get(readQuery(requiredRequest.repositoryId(), requiredRequest.revision(), requiredRequest.typeFactId()));
-        if (type.fact().identity().kind() != CodeFactKind.TYPE) {
+        CodeFactDetails type = codeFactReadService.get(readQuery(requiredRequest.repositoryId(), requiredRequest.revision(),
+                requiredRequest.typeFactId()));
+        if (!FactKindPolicy.TYPE_MEMBERS.contains(type.fact().identity().kind())) {
             throw new CodeFactKindMismatchException();
         }
         if (!(type.fact().identity().canonicalIdentity() instanceof SourceTypeIdentity sourceType)) {
@@ -154,6 +161,50 @@ public final class SemanticQueryFacade {
         }
         return SemanticResultMapper.toCollectionResult(result.generation(), requiredRequest.offset(), requiredRequest.limit(), items,
                 result.totalCount(), result.hasMore());
+    }
+
+    public SemanticQueryContract.CollectionResult findMethodImplementations(SemanticQueryContract.RelationRequest request) {
+        SemanticQueryContract.RelationRequest requiredRequest = Objects.requireNonNull(request, "relation request is required");
+        CodeFactDetails target = requireRelationTarget(requiredRequest, FactKindPolicy.METHOD_IMPLEMENTATIONS);
+        PublishedRelationResult result = relationQueryService.findImplementations(relationQuery(requiredRequest, target));
+        List<SemanticQueryContract.ImplementationItem> items = new ArrayList<>();
+        for (com.java.semantic.model.index.RelationDocument relation : result.relations()) {
+            items.add(new SemanticQueryContract.ImplementationItem(programElement(result.generation(), relation.from()), relation.kind()));
+        }
+        return relationCollection(result, requiredRequest, items);
+    }
+
+    public SemanticQueryContract.CollectionResult findReferences(SemanticQueryContract.RelationRequest request) {
+        SemanticQueryContract.RelationRequest requiredRequest = Objects.requireNonNull(request, "relation request is required");
+        CodeFactDetails target = requireRelationTarget(requiredRequest, FactKindPolicy.REFERENCE_TARGETS);
+        PublishedRelationResult result = relationQueryService.findReferences(relationQuery(requiredRequest, target));
+        List<SemanticQueryContract.ReferenceItem> items = new ArrayList<>();
+        for (com.java.semantic.model.index.RelationDocument relation : result.relations()) {
+            items.add(new SemanticQueryContract.ReferenceItem(programElement(result.generation(), relation.from()), callSite(result.generation(), relation)));
+        }
+        return relationCollection(result, requiredRequest, items);
+    }
+
+    public SemanticQueryContract.CollectionResult findCallers(SemanticQueryContract.RelationRequest request) {
+        SemanticQueryContract.RelationRequest requiredRequest = Objects.requireNonNull(request, "relation request is required");
+        CodeFactDetails target = requireRelationTarget(requiredRequest, FactKindPolicy.CALLERS);
+        PublishedRelationResult result = relationQueryService.findCallers(relationQuery(requiredRequest, target));
+        List<SemanticQueryContract.CallerItem> items = new ArrayList<>();
+        for (com.java.semantic.model.index.RelationDocument relation : result.relations()) {
+            items.add(new SemanticQueryContract.CallerItem(programElement(result.generation(), relation.from()), callSite(result.generation(), relation)));
+        }
+        return relationCollection(result, requiredRequest, items);
+    }
+
+    public SemanticQueryContract.CollectionResult findCallees(SemanticQueryContract.RelationRequest request) {
+        SemanticQueryContract.RelationRequest requiredRequest = Objects.requireNonNull(request, "relation request is required");
+        CodeFactDetails target = requireRelationTarget(requiredRequest, FactKindPolicy.CALLEES);
+        PublishedRelationResult result = relationQueryService.findCallees(relationQuery(requiredRequest, target));
+        List<SemanticQueryContract.CalleeItem> items = new ArrayList<>();
+        for (com.java.semantic.model.index.RelationDocument relation : result.relations()) {
+            items.add(new SemanticQueryContract.CalleeItem(callee(result.generation(), relation.target()), callSite(result.generation(), relation)));
+        }
+        return relationCollection(result, requiredRequest, items);
     }
 
     private SemanticQueryContract.EntryPointItem toEntryPointItem(CurrentGeneration generation, String entryPointFactId) {
@@ -174,6 +225,44 @@ public final class SemanticQueryFacade {
             throw new IndexContractMismatchException();
         }
         return details;
+    }
+
+    private CodeFactDetails requireRelationTarget(SemanticQueryContract.RelationRequest request, Set<CodeFactKind> acceptedKinds) {
+        return FactKindPolicy.require(codeFactReadService.get(readQuery(request.repositoryId(), request.revision(), request.factId())), acceptedKinds);
+    }
+
+    private static PublishedRelationQuery relationQuery(SemanticQueryContract.RelationRequest request, CodeFactDetails target) {
+        return new PublishedRelationQuery(new RepositoryId(request.repositoryId()), new RepositoryRevision(request.revision()),
+                target.fact().identity(), request.offset(), request.limit());
+    }
+
+    private SemanticQueryContract.ProgramElement programElement(CurrentGeneration generation, CodeFactIdentity identity) {
+        CodeFactDetails details = codeFactReadService.get(readQuery(generation, CodeFactId.from(identity).value()));
+        FactSourceSlice source = sourceToolService.factSource(readQuery(generation, details.fact().id().value()), 0);
+        return SemanticResultMapper.toProgramElement(details, source);
+    }
+
+    private SemanticQueryContract.ProgramElement callee(CurrentGeneration generation, RelationTarget target) {
+        if (target instanceof RelationTarget.Internal internalTarget) {
+            return programElement(generation, internalTarget.identity());
+        }
+        if (target instanceof RelationTarget.External externalTarget) {
+            return new SemanticQueryContract.ProgramElement(null, null, externalTarget.target().canonicalForm(), null);
+        }
+        throw new IndexContractMismatchException();
+    }
+
+    private SemanticQueryContract.SourceSnippet callSite(CurrentGeneration generation,
+                                                         com.java.semantic.model.index.RelationDocument relation) {
+        FactSourceSlice source = sourceToolService.factSource(readQuery(generation, relation.fact().id().value()), 0);
+        return SourceSnippetMapper.toSnippet(source.sourceRange(), source.fileContent());
+    }
+
+    private static SemanticQueryContract.CollectionResult relationCollection(PublishedRelationResult result,
+                                                                              SemanticQueryContract.RelationRequest request,
+                                                                              List<?> items) {
+        return SemanticResultMapper.toCollectionResult(result.generation(), request.offset(), request.limit(), items,
+                result.page().totalCount(), result.page().hasMore());
     }
 
     private static SemanticQueryContract.Trigger toTrigger(EntryPointKind kind, EntryPointTrigger trigger) {
