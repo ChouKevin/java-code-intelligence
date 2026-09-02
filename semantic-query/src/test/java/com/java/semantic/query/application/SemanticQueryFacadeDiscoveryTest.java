@@ -126,7 +126,8 @@ class SemanticQueryFacadeDiscoveryTest {
 
         ArgumentCaptor<TypeMemberQuery> queryCaptor = ArgumentCaptor.forClass(TypeMemberQuery.class);
         verify(discovery).discoverTypeMembers(queryCaptor.capture());
-        assertEquals(TypeMemberQuery.MEMBER_KINDS, queryCaptor.getValue().kinds());
+        assertEquals(Set.of(CodeFactKind.METHOD, CodeFactKind.FIELD, CodeFactKind.ENUM_CONSTANT, CodeFactKind.RECORD_COMPONENT),
+                queryCaptor.getValue().kinds());
         assertEquals(List.of(CodeFactKind.METHOD, CodeFactKind.FIELD, CodeFactKind.ENUM_CONSTANT, CodeFactKind.RECORD_COMPONENT),
                 result.items().stream().map(SemanticQueryContract.ProgramElement.class::cast)
                         .map(SemanticQueryContract.ProgramElement::kind).toList());
