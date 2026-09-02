@@ -21,21 +21,33 @@ import com.java.semantic.model.query.PublishedRelationQuery;
 import com.java.semantic.model.query.ToolProjectionRequirement;
 import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.model.repository.RepositoryRevision;
+import com.java.semantic.query.application.CodeFactKindMismatchException;
+import com.java.semantic.query.application.CodeFactKindUnsupportedException;
+import com.java.semantic.query.application.CodeFactNotFoundException;
 import com.java.semantic.query.application.CodeFactReadService;
 import com.java.semantic.query.application.CodeFactSearchService;
 import com.java.semantic.query.application.CurrentRepositoryQueryService;
+import com.java.semantic.query.application.IndexContractMismatchException;
+import com.java.semantic.query.application.IndexNotReadyException;
+import com.java.semantic.query.application.InvalidCodeFactQueryException;
 import com.java.semantic.query.application.PublishedCallGraphService;
 import com.java.semantic.query.application.PublishedDiscoveryQueryService;
 import com.java.semantic.query.application.PublishedEntryPointQueryService;
 import com.java.semantic.query.application.PublishedRelationQueryService;
 import com.java.semantic.query.application.PublishedSourceToolService;
+import com.java.semantic.query.application.RepositoryNotFoundException;
 import com.java.semantic.query.application.RevisionOutdatedException;
-import com.java.semantic.api.QueryApiExceptionHandler;
+import com.java.semantic.query.application.SemanticIndexUnavailableException;
+import com.java.semantic.query.application.SemanticQueryContract;
+import com.java.semantic.query.application.SemanticQueryError;
+import com.java.semantic.query.application.SemanticQueryErrorMapper;
+import com.java.semantic.query.application.SemanticQueryFacade;
 import io.modelcontextprotocol.server.McpStatelessServerFeatures;
 import io.modelcontextprotocol.spec.McpSchema;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.util.StringUtils;
+import tools.jackson.databind.ObjectMapper;
 
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -49,36 +61,23 @@ import java.util.Set;
 @Configuration
 public class QueryMcpToolCatalogConfiguration {
 
+    private static final SemanticQueryErrorMapper ERROR_MAPPER = new SemanticQueryErrorMapper();
+
     @Bean
     public List<McpStatelessServerFeatures.SyncToolSpecification> mcpQueryToolSpecifications(
-            CurrentRepositoryQueryService repositories,
-            CodeFactSearchService codeFactSearchService,
-            CodeFactReadService codeFactReadService,
-            PublishedCallGraphService callGraphs,
-            PublishedDiscoveryQueryService discovery,
-            PublishedEntryPointQueryService entryPoints,
-            PublishedRelationQueryService relations,
-            PublishedSourceToolService sourceTools) {
-        return ToolProjectionCatalog.requirements().stream()
-                .map(requirement -> specification(requirement, repositories, codeFactSearchService, codeFactReadService,
-                        callGraphs, discovery, entryPoints, relations, sourceTools))
+            SemanticQueryFacade facade, ObjectMapper objectMapper) {
+        return SemanticMcpToolCatalog.tools().stream()
+                .map(tool -> specification(tool, facade, objectMapper))
                 .toList();
     }
 
-    private static McpStatelessServerFeatures.SyncToolSpecification specification(
-            ToolProjectionRequirement requirement,
-            CurrentRepositoryQueryService repositories,
-            CodeFactSearchService codeFactSearchService,
-            CodeFactReadService codeFactReadService,
-            PublishedCallGraphService callGraphs,
-            PublishedDiscoveryQueryService discovery,
-            PublishedEntryPointQueryService entryPoints,
-            PublishedRelationQueryService relations,
-            PublishedSourceToolService sourceTools) {
-        McpSchema.Tool tool = McpSchema.Tool.builder(requirement.toolName())
-                .description("Read persisted semantic index facts only")
-                .inputSchema(inputSchema(requirement))
-                .outputSchema(outputSchema(requirement))
+    private static McpStatelessServerFeatures.SyncToolSpecification specification(SemanticMcpToolCatalog.ToolDefinition definition,
+                                                                                    SemanticQueryFacade facade,
+                                                                                    ObjectMapper objectMapper) {
+        McpSchema.Tool tool = McpSchema.Tool.builder(definition.name())
+                .description(definition.description())
+                .inputSchema(SemanticMcpSchemaCatalog.inputSchema(definition.name()))
+                .outputSchema(Map.of())
                 .annotations(McpSchema.ToolAnnotations.builder()
                         .readOnlyHint(true)
                         .destructiveHint(false)
@@ -87,96 +86,86 @@ public class QueryMcpToolCatalogConfiguration {
                 .build();
         return McpStatelessServerFeatures.SyncToolSpecification.builder()
                 .tool(tool)
-                .callHandler((context, request) -> invoke(requirement, request.arguments(), repositories,
-                        codeFactSearchService, codeFactReadService, callGraphs, discovery, entryPoints, relations, sourceTools))
+                .callHandler((context, request) -> invokeFacade(definition.name(), request.arguments(), facade, objectMapper))
                 .build();
     }
 
-    private static Map<String, Object> inputSchema(ToolProjectionRequirement requirement) {
-        Map<String, Object> allProperties = new LinkedHashMap<>();
-        Map<String, Object> properties = new LinkedHashMap<>();
-        allProperties.put("repositoryId", Map.of("type", "string", "minLength", RepositoryId.MIN_LENGTH,
-                "maxLength", RepositoryId.MAX_LENGTH, "pattern", RepositoryId.PATTERN, "description", "Exact repository identifier."));
-        if (requirement.projections().isPresent()) {
-            allProperties.put("revision", Map.of("type", "string", "minLength", RepositoryRevision.LENGTH,
-                    "maxLength", RepositoryRevision.LENGTH, "pattern", RepositoryRevision.PATTERN,
-                    "description", "Exact published revision; never omit or substitute it."));
+    private static McpSchema.CallToolResult invokeFacade(String toolName, Map<String, Object> arguments, SemanticQueryFacade facade,
+                                                         ObjectMapper objectMapper) {
+        try {
+            Object response = dispatch(toolName, normalizedArguments(toolName, arguments), facade, objectMapper);
+            return McpSchema.CallToolResult.builder().addTextContent("Query completed")
+                    .structuredContent(response).isError(false).build();
+        } catch (RevisionOutdatedException | RepositoryNotFoundException | CodeFactNotFoundException
+                | CodeFactKindMismatchException | IndexNotReadyException | IndexContractMismatchException
+                | SemanticIndexUnavailableException | InvalidCodeFactQueryException | CodeFactKindUnsupportedException
+                | IllegalArgumentException exception) {
+            return applicationFailure(ERROR_MAPPER.map(exception));
         }
-        allProperties.put("query", Map.of("type", "string", "minLength", CodeFactSearchQuery.MIN_QUERY_LENGTH,
-                "maxLength", CodeFactSearchQuery.MAX_QUERY_LENGTH));
-        allProperties.put("factId", Map.of("type", "string", "minLength", CodeFactId.LENGTH, "maxLength", CodeFactId.LENGTH,
-                "pattern", CodeFactId.PATTERN, "description", "Opaque factId returned by semantic_search_code_facts."));
-        allProperties.put("packageName", Map.of("type", "string"));
-        allProperties.put("className", Map.of("type", "string"));
-        allProperties.put("sourceFile", Map.of("type", "string"));
-        allProperties.put("methodName", Map.of("type", "string"));
-        allProperties.put("parameterTypes", Map.of("type", "array", "items", Map.of("type", "string")));
-        allProperties.put("kinds", kindsSchema(requirement.toolName()));
-        allProperties.put("packagePrefix", Map.of("type", "string", "description", "Optional Java package prefix. Omit it when unknown."));
-        allProperties.put("eventType", Map.of("type", "string"));
-        allProperties.put("symbol", Map.of("type", "string"));
-        allProperties.put("httpMethod", Map.of("type", "string"));
-        allProperties.put("path", Map.of("type", "string"));
-        allProperties.put("offset", Map.of("type", "integer", "minimum", 0));
-        allProperties.put("limit", Map.of("type", "integer", "minimum", 1, "maximum", 100));
-        allProperties.put("depth", Map.of("type", "integer", "minimum", 1, "maximum", 2));
-        allProperties.put("depthTwoNodeBudget", Map.of("type", "integer", "minimum", 0));
-        allProperties.put("line", Map.of("type", "integer", "minimum", 0));
-        allProperties.put("character", Map.of("type", "integer", "minimum", 0));
-        allProperties.put("startLine", Map.of("type", "integer", "minimum", 0));
-        allProperties.put("startCharacter", Map.of("type", "integer", "minimum", 0));
-        allProperties.put("endLine", Map.of("type", "integer", "minimum", 0));
-        allProperties.put("endCharacter", Map.of("type", "integer", "minimum", 0));
-        for (String field : allowedFields(requirement.toolName(), requirement.projections().isPresent())) {
-            properties.put(field, allProperties.get(field));
+    }
+
+    private static Object dispatch(String toolName, Map<String, Object> arguments, SemanticQueryFacade facade, ObjectMapper objectMapper) {
+        return switch (toolName) {
+            case "list_repositories" -> facade.listRepositories(convert(arguments, SemanticQueryContract.PageRequest.class, objectMapper));
+            case "get_repository" -> facade.getRepository(convert(arguments, SemanticQueryContract.RepositoryRequest.class, objectMapper));
+            case "search_code" -> facade.searchCode(convert(arguments, SemanticQueryContract.SearchCodeRequest.class, objectMapper));
+            case "get_fact_source" -> facade.getFactSource(convert(arguments, SemanticQueryContract.FactSourceRequest.class, objectMapper));
+            case "list_entry_points" -> facade.listEntryPoints(convert(arguments, SemanticQueryContract.EntryPointRequest.class, objectMapper));
+            case "find_api_routes" -> facade.findApiRoutes(convert(arguments, SemanticQueryContract.ApiRouteRequest.class, objectMapper));
+            case "find_event_listeners" -> facade.findEventListeners(convert(arguments, SemanticQueryContract.EventListenerRequest.class, objectMapper));
+            case "list_type_members" -> facade.listTypeMembers(convert(arguments, SemanticQueryContract.TypeMemberRequest.class, objectMapper));
+            case "find_method_implementations", "find_callers", "find_callees", "find_references" ->
+                    relation(toolName, arguments, facade, objectMapper);
+            default -> throw new IllegalArgumentException("unknown Semantic MCP tool");
+        };
+    }
+
+    private static Object relation(String toolName, Map<String, Object> arguments, SemanticQueryFacade facade, ObjectMapper objectMapper) {
+        SemanticQueryContract.RelationRequest request = convert(arguments, SemanticQueryContract.RelationRequest.class, objectMapper);
+        return switch (toolName) {
+            case "find_method_implementations" -> facade.findMethodImplementations(request);
+            case "find_references" -> facade.findReferences(request);
+            case "find_callers" -> facade.findCallers(request);
+            case "find_callees" -> facade.findCallees(request);
+            default -> throw new IllegalArgumentException("unknown Semantic MCP relation tool");
+        };
+    }
+
+    private static Map<String, Object> normalizedArguments(String toolName, Map<String, Object> arguments) {
+        Map<String, Object> normalized = new LinkedHashMap<>(Objects.requireNonNull(arguments, "MCP arguments are required"));
+        if (!SemanticMcpSchemaCatalog.allowedFields(toolName).containsAll(normalized.keySet())) {
+            throw new IllegalArgumentException("request contains an unknown field");
         }
-        List<String> required = requiredFields(requirement.toolName(), requirement.projections().isPresent());
-        return Map.of("type", "object", "properties", properties, "required", required, "additionalProperties", false);
-    }
-
-    private static Map<String, Object> outputSchema(ToolProjectionRequirement requirement) {
-        if (requirement.projections().isEmpty()) {
-            Map<String, Object> success = "semantic_list_repositories".equals(requirement.toolName())
-                    ? Map.of("type", "array", "items", repositoryMetadataSchema()) : repositoryMetadataSchema();
-            return Map.of("oneOf", List.of(success, queryFailureSchema()));
+        for (String requiredField : SemanticMcpSchemaCatalog.requiredFields(toolName)) {
+            requiredText(normalized, requiredField);
         }
-        Map<String, Object> success = Map.of("type", "object", "required", List.of("repositoryId", "revision", "result"),
-                "properties", Map.of("repositoryId", Map.of("type", "string"), "revision", Map.of("type", "string"),
-                        "result", Map.of()), "additionalProperties", false);
-        return Map.of("oneOf", List.of(success, revisionOutdatedSchema(), queryFailureSchema()));
+        if (SemanticMcpSchemaCatalog.allowedFields(toolName).contains("offset")) {
+            normalized.putIfAbsent("offset", 0);
+            normalized.putIfAbsent("limit", SemanticQueryContract.DEFAULT_LIMIT);
+        }
+        if (SemanticMcpSchemaCatalog.allowedFields(toolName).contains("contextLines")) {
+            normalized.putIfAbsent("contextLines", 0);
+        }
+        if (toolName.equals("search_code")) {
+            normalized.putIfAbsent("kinds", Set.of());
+            normalized.putIfAbsent("packagePrefix", Optional.empty());
+        }
+        if (toolName.equals("list_entry_points") || toolName.equals("list_type_members")) {
+            normalized.putIfAbsent("kinds", Set.of());
+        }
+        if (normalized.containsKey("methodFactId")) {
+            normalized.put("factId", requiredText(normalized, "methodFactId"));
+            normalized.remove("methodFactId");
+        }
+        return Map.copyOf(normalized);
     }
 
-    private static Map<String, Object> kindsSchema(String toolName) {
-        Set<CodeFactKind> kinds = "semantic_discover_type_members".equals(toolName)
-                ? TypeMemberQuery.MEMBER_KINDS : Set.of(CodeFactKind.values());
-        List<String> names = kinds.stream().map(Enum::name).sorted().toList();
-        return Map.of("type", "array", "items", Map.of("type", "string", "enum", names),
-                "description", "Optional exact CodeFactKind filters. Omit unknown filters rather than guessing.");
+    private static <T> T convert(Map<String, Object> arguments, Class<T> targetType, ObjectMapper objectMapper) {
+        return objectMapper.convertValue(arguments, targetType);
     }
 
-    private static Map<String, Object> repositoryMetadataSchema() {
-        return Map.of("type", "object", "required", List.of("repositoryId", "revision", "generationId", "manifestDigest", "publishedAt"),
-                "properties", Map.of("repositoryId", valueObjectSchema(), "revision", valueObjectSchema(),
-                        "generationId", valueObjectSchema(), "manifestDigest", valueObjectSchema(),
-                        "publishedAt", Map.of("type", "string", "format", "date-time")), "additionalProperties", false);
-    }
-
-    private static Map<String, Object> valueObjectSchema() {
-        return Map.of("type", "object", "required", List.of("value"), "properties", Map.of("value", Map.of("type", "string")),
-                "additionalProperties", false);
-    }
-
-    private static Map<String, Object> revisionOutdatedSchema() {
-        return Map.of("type", "object", "required", List.of("code", "repositoryId", "requestedRevision", "currentRevision", "retryGuidance"),
-                "properties", Map.of("code", Map.of("const", "REVISION_OUTDATED"), "repositoryId", Map.of("type", "string"),
-                        "requestedRevision", Map.of("type", "string"), "currentRevision", Map.of("type", "string"),
-                        "retryGuidance", Map.of("type", "string")), "additionalProperties", false);
-    }
-
-    private static Map<String, Object> queryFailureSchema() {
-        return Map.of("type", "object", "required", List.of("code", "retryable"),
-                "properties", Map.of("code", Map.of("type", "string"), "retryable", Map.of("type", "boolean")),
-                "additionalProperties", false);
+    private static McpSchema.CallToolResult applicationFailure(SemanticQueryError error) {
+        return McpSchema.CallToolResult.builder().addTextContent(error.message()).structuredContent(error).isError(true).build();
     }
 
     private static Set<String> allowedFields(String toolName, boolean generationBacked) {
@@ -226,34 +215,6 @@ public class QueryMcpToolCatalogConfiguration {
         List<String> result = new java.util.ArrayList<>(fields);
         result.addAll(List.of(additions));
         return List.copyOf(result);
-    }
-
-    private static McpSchema.CallToolResult invoke(
-            ToolProjectionRequirement requirement,
-            Map<String, Object> arguments,
-            CurrentRepositoryQueryService repositories,
-            CodeFactSearchService codeFactSearchService,
-            CodeFactReadService codeFactReadService,
-            PublishedCallGraphService callGraphs,
-            PublishedDiscoveryQueryService discovery,
-            PublishedEntryPointQueryService entryPoints,
-            PublishedRelationQueryService relations,
-            PublishedSourceToolService sourceTools) {
-        try {
-            Object response = execute(requirement, arguments, repositories, codeFactSearchService, codeFactReadService,
-                    callGraphs, discovery, entryPoints, relations, sourceTools);
-            return McpSchema.CallToolResult.builder().addTextContent("Query completed")
-                    .structuredContent(response).isError(false).build();
-        } catch (RevisionOutdatedException exception) {
-            return failure(Map.of(
-                    "code", "REVISION_OUTDATED",
-                    "repositoryId", exception.repositoryId().value(),
-                    "requestedRevision", exception.requestedRevision().value(),
-                    "currentRevision", exception.currentRevision().value(),
-                    "retryGuidance", "Retry with currentRevision."));
-        } catch (RuntimeException exception) {
-            return failure(QueryApiExceptionHandler.failureBody(exception));
-        }
     }
 
     /** Shared HTTP/MCP execution path: all results originate in published Query readers. */
@@ -446,7 +407,4 @@ public class QueryMcpToolCatalogConfiguration {
     public record GenerationBackedResponse(String repositoryId, String revision, Object result) {
     }
 
-    static McpSchema.CallToolResult failure(Map<String, Object> body) {
-        return McpSchema.CallToolResult.builder().addTextContent(body.toString()).structuredContent(body).isError(true).build();
-    }
 }
