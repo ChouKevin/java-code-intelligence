@@ -4,3 +4,4 @@ target/
 /jdtls/
 *.log
 .idea/
+.worktrees/
