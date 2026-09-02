@@ -35,6 +35,8 @@ import org.testcontainers.mongodb.MongoDBContainer;
 import org.testcontainers.utility.DockerImageName;
 
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -140,11 +142,44 @@ class PublishedRouteContractIT extends PublishedMongoITSupport {
         }
     }
 
+    @Test
+    void pages_exact_routes_and_applies_all_method_wildcard_semantics() {
+        try (MongoDBContainer container = new MongoDBContainer(DockerImageName.parse("mongo:8.0.4"))) {
+            container.start();
+            MongoTemplate template = new MongoTemplate(com.mongodb.client.MongoClients.create(container.getConnectionString()), "published_route_page");
+            seedCurrent(template, "orders");
+            List<EntryPointDocument> routes = new ArrayList<>();
+            for (SemanticQueryContract.HttpMethod method : SemanticQueryContract.HttpMethod.values()) {
+                EntryPointDocument route = entryPoint("example.api", "Payments", method.name().toLowerCase(), method.name(), "/payments");
+                routes.add(route);
+                storeEntryPoint(template, route, CodeFactScope.from(route.fact().identity()));
+            }
+            EntryPointDocument differentPath = entryPoint("example.api", "Payments", "other", "GET", "/other");
+            storeEntryPoint(template, differentPath, CodeFactScope.from(differentPath.fact().identity()));
+            PublishedEntryPointQueryService service = new PublishedEntryPointQueryService(template, selector(template, policy()), Duration.ofSeconds(2));
+
+            PublishedEntryPointResult get = service.findRoutes("orders", REVISION, "GET", "/payments", 0, 20);
+            PublishedEntryPointResult all = service.findRoutes("orders", REVISION, "ALL", "/payments", 0, 20);
+
+            assertThat(get.totalCount()).isEqualTo(2);
+            assertThat(get.entryPoints()).extracting(com.java.semantic.model.codefact.PublishedEntryPoint::factId)
+                    .containsExactlyInAnyOrder(routes.getFirst().fact().id().value(), routes.getLast().fact().id().value());
+            assertThat(all.totalCount()).isEqualTo(1);
+            assertThat(all.entryPoints()).extracting(com.java.semantic.model.codefact.PublishedEntryPoint::factId)
+                    .containsExactly(routes.getLast().fact().id().value());
+            assertThat(service.findRoutes("orders", REVISION, "POST", "/other", 0, 20).entryPoints()).isEmpty();
+        }
+    }
+
     private static EntryPointDocument entryPoint(String packageName, String className, String methodName, String path) {
+        return entryPoint(packageName, className, methodName, "GET", path);
+    }
+
+    private static EntryPointDocument entryPoint(String packageName, String className, String methodName, String httpMethod, String path) {
         SourceTypeIdentity type = new SourceTypeIdentity(new JavaTypeIdentity(packageName, className),
                 "src/main/java/" + className + ".java");
         MethodTarget method = new MethodTarget(type, methodName, java.util.List.of());
-        EntryPointTrigger trigger = new EntryPointTrigger(java.util.Optional.of("GET"), java.util.Optional.of(path),
+        EntryPointTrigger trigger = new EntryPointTrigger(java.util.Optional.of(httpMethod), java.util.Optional.of(path),
                 java.util.Optional.empty(), java.util.Optional.empty());
         CodeFactIdentity identity = new CodeFactIdentity(new RepositoryId("orders"), new RepositoryRevision(REVISION), CodeFactKind.API_ROUTE,
                 new EntryPointIdentity(EntryPointKind.HTTP, method, trigger));

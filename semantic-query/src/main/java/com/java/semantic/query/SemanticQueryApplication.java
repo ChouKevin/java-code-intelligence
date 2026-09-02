@@ -102,8 +102,12 @@ public class SemanticQueryApplication {
     @Bean
     SemanticQueryFacade semanticQueryFacade(CurrentRepositoryQueryService repositoryQueryService,
                                             CodeFactSearchService codeFactSearchService,
-                                            PublishedSourceToolService sourceToolService) {
-        return new SemanticQueryFacade(repositoryQueryService, codeFactSearchService, sourceToolService);
+                                            PublishedSourceToolService sourceToolService,
+                                            CodeFactReadService codeFactReadService,
+                                            PublishedDiscoveryQueryService discoveryQueryService,
+                                            PublishedEntryPointQueryService entryPointQueryService) {
+        return new SemanticQueryFacade(repositoryQueryService, codeFactSearchService, sourceToolService, codeFactReadService,
+                discoveryQueryService, entryPointQueryService);
     }
 
     @Bean

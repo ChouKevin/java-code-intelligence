@@ -20,9 +20,6 @@ public record TypeMemberQuery(RepositoryId repositoryId, RepositoryRevision revi
         if (kinds.isEmpty() || !MEMBER_KINDS.containsAll(kinds)) {
             throw new IllegalArgumentException("member kinds must be supported declarations");
         }
-        if (kinds.contains(CodeFactKind.ENUM_CONSTANT) && kinds.size() > 1) {
-            throw new IllegalArgumentException("enum constants must be queried separately from paged members");
-        }
         if (offset < 0 || limit < 1 || limit > 100) { throw new IllegalArgumentException("invalid page"); }
     }
 }

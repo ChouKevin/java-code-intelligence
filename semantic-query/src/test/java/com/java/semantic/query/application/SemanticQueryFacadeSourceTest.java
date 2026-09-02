@@ -57,6 +57,9 @@ class SemanticQueryFacadeSourceTest {
     private CurrentRepositoryQueryService repositoryService;
     private CodeFactSearchService searchService;
     private PublishedSourceToolService sourceToolService;
+    private CodeFactReadService codeFactReadService;
+    private PublishedDiscoveryQueryService discoveryQueryService;
+    private PublishedEntryPointQueryService entryPointQueryService;
     private SemanticQueryFacade facade;
     private CurrentGeneration generation;
     private CodeFactIdentity relationIdentity;
@@ -66,7 +69,11 @@ class SemanticQueryFacadeSourceTest {
         repositoryService = mock(CurrentRepositoryQueryService.class);
         searchService = mock(CodeFactSearchService.class);
         sourceToolService = mock(PublishedSourceToolService.class);
-        facade = new SemanticQueryFacade(repositoryService, searchService, sourceToolService);
+        codeFactReadService = mock(CodeFactReadService.class);
+        discoveryQueryService = mock(PublishedDiscoveryQueryService.class);
+        entryPointQueryService = mock(PublishedEntryPointQueryService.class);
+        facade = new SemanticQueryFacade(repositoryService, searchService, sourceToolService, codeFactReadService,
+                discoveryQueryService, entryPointQueryService);
         generation = generation(REPOSITORY_ID, REVISION, "g-payment");
         relationIdentity = relationIdentity();
     }

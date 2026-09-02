@@ -1,6 +1,6 @@
 package com.java.semantic.model.codefact;
 
-import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 
 import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.model.repository.RepositoryRevision;
@@ -9,9 +9,9 @@ import org.junit.jupiter.api.Test;
 
 class TypeMemberQueryTest {
     @Test
-    void rejects_mixed_enum_and_ordinary_member_paging_kinds() {
-        assertThrows(IllegalArgumentException.class, () -> new TypeMemberQuery(new RepositoryId("orders"),
+    void accepts_all_supported_member_kinds_in_one_paged_query() {
+        assertDoesNotThrow(() -> new TypeMemberQuery(new RepositoryId("orders"),
                 new RepositoryRevision("a".repeat(40)), new SourceTypeIdentity(new JavaTypeIdentity("example", "PaymentMethod"),
-                "src/main/java/example/PaymentMethod.java"), Set.of(CodeFactKind.ENUM_CONSTANT, CodeFactKind.METHOD), 0, 20));
+                "src/main/java/example/PaymentMethod.java"), TypeMemberQuery.MEMBER_KINDS, 0, 20));
     }
 }

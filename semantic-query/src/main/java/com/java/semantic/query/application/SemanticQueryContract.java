@@ -144,6 +144,15 @@ public final class SemanticQueryContract {
     public record ProgramElement(String factId, CodeFactKind kind, String displayName, SourceSnippet source) {
     }
 
+    public record Trigger(String kind, String method, String value) {
+    }
+
+    public record EntryPointItem(String factId, ProgramElement handler, Trigger trigger) {
+    }
+
+    public record EventListenerItem(String eventType, ProgramElement handler) {
+    }
+
     public record CollectionResult(String repositoryId, String revision, List<?> items, Page page) {
     }
 
