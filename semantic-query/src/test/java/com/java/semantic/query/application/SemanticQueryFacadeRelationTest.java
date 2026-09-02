@@ -96,6 +96,29 @@ class SemanticQueryFacadeRelationTest {
     }
 
     @Test
+    void references_report_the_occurrence_fact_id_and_exact_site_source() {
+        CodeFactIdentity target = methodIdentity();
+        CodeFactIdentity container = methodIdentity("ReferenceUser", "use");
+        RelationDocument relation = relation(container, RelationKind.REFERENCES, new RelationTarget.Internal(target));
+        CodeFactReadService facts = mock(CodeFactReadService.class);
+        PublishedRelationQueryService relations = mock(PublishedRelationQueryService.class);
+        PublishedSourceToolService source = mock(PublishedSourceToolService.class);
+        when(facts.get(new CodeFactReadQuery(new RepositoryId(REPOSITORY), new RepositoryRevision(REVISION), CodeFactId.from(target))))
+                .thenReturn(details(target));
+        when(facts.get(new CodeFactReadQuery(new RepositoryId(REPOSITORY), new RepositoryRevision(REVISION), CodeFactId.from(container))))
+                .thenReturn(details(container));
+        when(relations.findReferences(any(PublishedRelationQuery.class))).thenReturn(result(target, List.of(relation)));
+        when(source.factSource(any(CodeFactReadQuery.class), anyInt())).thenReturn(slice());
+
+        SemanticQueryContract.CollectionResult result = facade(facts, source, relations).findReferences(new RelationRequest(REPOSITORY,
+                REVISION, CodeFactId.from(target).value(), 0, 20));
+
+        SemanticQueryContract.ReferenceItem reference = (SemanticQueryContract.ReferenceItem) result.items().getFirst();
+        assertEquals(relation.fact().id().value(), reference.referenceSite().factId());
+        assertEquals("service.charge(request)", reference.referenceSite().source().code());
+    }
+
+    @Test
     void external_callees_expose_display_identity_without_a_fabricated_fact_id() {
         CodeFactIdentity target = methodIdentity();
         RelationTarget.External external = new RelationTarget.External(new ExternalTarget.UnresolvedCall("client.charge(request)", "client", "charge", 1));
@@ -114,6 +137,8 @@ class SemanticQueryFacadeRelationTest {
         SemanticQueryContract.CalleeItem callee = (SemanticQueryContract.CalleeItem) result.items().getFirst();
         assertEquals("client.charge(request)|client|charge|1", callee.callee().displayName());
         assertTrue(Objects.isNull(callee.callee().factId()));
+        assertEquals(relation.fact().id().value(), callee.callSite().factId());
+        assertEquals("service.charge(request)", callee.callSite().source().code());
     }
 
     @Test
