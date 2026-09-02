@@ -77,7 +77,6 @@ class McpWireSerializationContractTest {
     private static JsonMapper applicationMcpMapper() {
         AtomicReference<JsonMapper> mapper = new AtomicReference<>();
         new ApplicationContextRunner()
-                .withUserConfiguration(McpServerJsonMapperConfiguration.class)
                 .withConfiguration(AutoConfigurations.of(McpServerJsonMapperAutoConfiguration.class))
                 .run(context -> mapper.set(context.getBean("mcpServerJsonMapper", JsonMapper.class)));
         return Objects.requireNonNull(mapper.get(), "MCP server JSON mapper is required");
