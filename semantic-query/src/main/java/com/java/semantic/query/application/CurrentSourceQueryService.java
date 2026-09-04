@@ -2,6 +2,7 @@ package com.java.semantic.query.application;
 
 import com.java.semantic.model.codefact.SourceTypeIdentity;
 import com.java.semantic.model.codefact.CodeFact;
+import com.java.semantic.model.codefact.CodeFactDetails;
 import com.java.semantic.model.codefact.CodeFactId;
 import com.java.semantic.model.codefact.CodeFactIdentity;
 import com.java.semantic.model.codefact.CodeFactKind;
@@ -18,6 +19,8 @@ import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.util.StringUtils;
 
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.TimeUnit;
 
@@ -78,20 +81,47 @@ public final class CurrentSourceQueryService {
         }
     }
 
+    PublishedSource getSource(CodeFactDetails details) {
+        CodeFactDetails requiredDetails = Objects.requireNonNull(details, "code fact details are required");
+        CurrentGeneration current = requiredDetails.generation();
+        CodeFactIdentity identity = requiredDetails.fact().identity();
+        String sourcePath = requiredDetails.location().sourceFile();
+        if (!current.repositoryId().equals(identity.repositoryId()) || !current.revision().equals(identity.repositoryRevision())) {
+            throw new IndexContractMismatchException();
+        }
+        selector.requireCompatible(current, CurrentGenerationSelector.SOURCES);
+        selector.requireVisible(current, identity);
+        requireAllSourceSymbolsVisible(current, sourcePath);
+        return getSource(current, sourcePath);
+    }
+
     private void requireAuthorizedCurrentSource(CurrentGeneration current, SourceTypeIdentity identity) {
         CodeFactIdentity expectedIdentity = new CodeFactIdentity(current.repositoryId(), current.revision(), CodeFactKind.TYPE, identity);
         CodeFactId expectedId = CodeFactId.from(expectedIdentity);
         boolean foundRequestedType = false;
+        List<SymbolDocument> symbols = authorizedSourceSymbols(current, identity.sourceFile());
+        for (SymbolDocument symbol : symbols) {
+            if (expectedId.equals(symbol.fact().id()) && expectedIdentity.equals(symbol.fact().identity())
+                    && CodeFactKind.TYPE == symbol.kind()) {
+                foundRequestedType = true;
+            }
+        }
+        if (!foundRequestedType) { throw new IndexNotReadyException(); }
+    }
+
+    private void requireAllSourceSymbolsVisible(CurrentGeneration current, String sourcePath) {
+        authorizedSourceSymbols(current, sourcePath);
+    }
+
+    private List<SymbolDocument> authorizedSourceSymbols(CurrentGeneration current, String sourcePath) {
+        List<SymbolDocument> symbols = new ArrayList<>();
         try {
             for (Document stored : template.getCollection(IndexCollections.SYMBOLS).find(Filters.and(
                     Filters.eq("repoId", current.repositoryId().value()), Filters.eq("generationId", current.generationId().value()),
-                    Filters.eq("sourcePath", identity.sourceFile()))).maxTime(storageTimeout.toMillis(), TimeUnit.MILLISECONDS)) {
+                    Filters.eq("sourcePath", sourcePath))).maxTime(storageTimeout.toMillis(), TimeUnit.MILLISECONDS)) {
                 SymbolDocument symbol = decodeSymbol(stored, current);
-                if (expectedId.equals(symbol.fact().id()) && expectedIdentity.equals(symbol.fact().identity())
-                        && CodeFactKind.TYPE == symbol.kind() && expectedIdentity.canonicalForm().equals(requiredText(stored, "canonical"))) {
-                    foundRequestedType = true;
-                }
                 selector.requireVisible(current, symbol.fact().identity());
+                symbols.add(symbol);
             }
         } catch (MongoException | DataAccessException exception) {
             throw new SemanticIndexUnavailableException(exception);
@@ -100,7 +130,7 @@ public final class CurrentSourceQueryService {
         } catch (RuntimeException exception) {
             throw new IndexContractMismatchException();
         }
-        if (!foundRequestedType) { throw new IndexNotReadyException(); }
+        return List.copyOf(symbols);
     }
 
     private SymbolDocument decodeSymbol(Document stored, CurrentGeneration current) {

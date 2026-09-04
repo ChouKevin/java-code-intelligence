@@ -5,425 +5,503 @@ info:
 security:
   - ApiToken: []
 paths:
-  /v1/repositories:
+  /api/v1/repositories:
     get:
-      summary: List configured repository metadata; this is not generation-backed.
+      summary: List visible repositories and their current revisions.
+      parameters: [{$ref: '#/components/parameters/Offset'}, {$ref: '#/components/parameters/Limit'}]
       responses:
-        '200': {description: Repository metadata., content: {application/json: {schema: {$ref: '#/components/schemas/RepositoryMetadataList'}}}}
+        '200': {description: Repository page., content: {application/json: {schema: {$ref: '#/components/schemas/RepositoryCollection'}}}}
+        '400': {$ref: '#/components/responses/InvalidArgument'}
         '401': {$ref: '#/components/responses/AuthenticationRequired'}
         '403': {$ref: '#/components/responses/AccessForbidden'}
-        '503': {$ref: '#/components/responses/QueryUnavailable'}
-  /v1/repositories/{repositoryId}:
+        '503': {$ref: '#/components/responses/IndexUnavailable'}
+  /api/v1/repositories/{repositoryId}:
     get:
-      summary: Read configured repository metadata; this is not generation-backed.
+      summary: Read one visible repository and its current revision.
       parameters: [{$ref: '#/components/parameters/RepositoryId'}]
       responses:
-        '200': {description: Repository metadata., content: {application/json: {schema: {$ref: '#/components/schemas/RepositoryMetadata'}}}}
-        '400': {$ref: '#/components/responses/RequestInvalid'}
+        '200': {description: Repository metadata., content: {application/json: {schema: {$ref: '#/components/schemas/RepositoryItem'}}}}
+        '400': {$ref: '#/components/responses/InvalidArgument'}
         '401': {$ref: '#/components/responses/AuthenticationRequired'}
         '403': {$ref: '#/components/responses/AccessForbidden'}
-        '404': {$ref: '#/components/responses/QueryNotFound'}
-        '503': {$ref: '#/components/responses/QueryUnavailable'}
-  /v1/repositories/{repositoryId}/entry-points:
-    get:
-      summary: List entry points from one exact published repository revision.
-      parameters: [{$ref: '#/components/parameters/RepositoryId'}, {$ref: '#/components/parameters/Revision'}]
-      responses:
-        '200': {description: Revision-pinned entry points, including an empty list., content: {application/json: {schema: {$ref: '#/components/schemas/GenerationBackedResponse'}}}}
-        '400': {$ref: '#/components/responses/RequestInvalid'}
-        '404': {$ref: '#/components/responses/QueryNotFound'}
-        '409': {$ref: '#/components/responses/RevisionOutdated'}
-        '503': {$ref: '#/components/responses/QueryUnavailable'}
-  /v1/code-facts/search:
-    post:
-      summary: Search published code facts using a revision-pinned flat query
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/SearchCodeFactsRequest'
-      responses:
-        '200':
-          description: A bounded page; omit unknown kinds and package filters rather than guessing them.
-          content:
-            application/json:
-              schema: {$ref: '#/components/schemas/GenerationBackedResponse'}
-        '400': {$ref: '#/components/responses/RequestInvalid'}
-        '404': {$ref: '#/components/responses/QueryNotFound'}
-        '409': {$ref: '#/components/responses/RevisionOutdated'}
-        '503': {$ref: '#/components/responses/QueryUnavailable'}
-  /v1/code-facts/get:
-    post:
-      summary: Read one fact returned by code-fact search
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/GetCodeFactRequest'
-      responses:
-        '200':
-          description: The selected fact.
-          content:
-            application/json:
-              schema: {$ref: '#/components/schemas/GenerationBackedResponse'}
-        '400': {$ref: '#/components/responses/RequestInvalid'}
-        '404': {$ref: '#/components/responses/QueryNotFound'}
-        '409': {$ref: '#/components/responses/RevisionOutdated'}
-        '503': {$ref: '#/components/responses/QueryUnavailable'}
-  /v1/analyses/call-graphs/outgoing:
-    $ref: '#/components/pathItems/CallGraph'
-  /v1/analyses/call-graphs/incoming:
-    $ref: '#/components/pathItems/CallGraph'
-  /v1/api-routes/lookup:
-    $ref: '#/components/pathItems/RouteQuery'
-  /v1/api-routes/suggest:
-    $ref: '#/components/pathItems/RouteQuery'
-  /v1/discovery/event-listeners:
-    $ref: '#/components/pathItems/EventListenerQuery'
-  /v1/discovery/method-implementations:
-    $ref: '#/components/pathItems/MethodQuery'
-  /v1/discovery/type-members:
-    $ref: '#/components/pathItems/TypeMemberQuery'
-  /v1/discovery/internal-references:
-    $ref: '#/components/pathItems/RelationQuery'
-  /v1/discovery/source-symbols/resolve:
-    $ref: '#/components/pathItems/SourceSymbolQuery'
-  /v1/discovery/source-segment:
-    $ref: '#/components/pathItems/SourceSegmentQuery'
-  /v1/discovery/method-source:
-    $ref: '#/components/pathItems/MethodQuery'
-  /v1/discovery/evidence-source:
-    $ref: '#/components/pathItems/MethodQuery'
+        '404': {$ref: '#/components/responses/NotFound'}
+        '503': {$ref: '#/components/responses/IndexUnavailable'}
+  /api/v1/search-code:
+    $ref: '#/components/pathItems/SearchCode'
+  /api/v1/fact-source:
+    $ref: '#/components/pathItems/FactSource'
+  /api/v1/entry-points:
+    $ref: '#/components/pathItems/EntryPoints'
+  /api/v1/api-routes:
+    $ref: '#/components/pathItems/ApiRoutes'
+  /api/v1/event-listeners:
+    $ref: '#/components/pathItems/EventListeners'
+  /api/v1/type-members:
+    $ref: '#/components/pathItems/TypeMembers'
+  /api/v1/method-implementations:
+    $ref: '#/components/pathItems/MethodImplementations'
+  /api/v1/references:
+    $ref: '#/components/pathItems/References'
+  /api/v1/callers:
+    $ref: '#/components/pathItems/Callers'
+  /api/v1/callees:
+    $ref: '#/components/pathItems/Callees'
 components:
   parameters:
     RepositoryId:
       name: repositoryId
       in: path
       required: true
-      schema: {type: string, minLength: 1, maxLength: 64, pattern: '^[a-z0-9][a-z0-9._-]{0,63}$'}
-    Revision:
-      name: revision
+      schema: {$ref: '#/components/schemas/RepositoryId'}
+    Offset:
+      name: offset
       in: query
-      required: true
-      schema: {type: string, minLength: 40, maxLength: 40, pattern: '^[0-9a-f]{40}$'}
-  responses:
-    RevisionOutdated:
-      description: Requested revision is no longer current. Retry with the returned exact currentRevision.
-      content:
-        application/json:
-          schema: {$ref: '#/components/schemas/RevisionOutdatedError'}
-    RequestInvalid:
-      description: Request does not satisfy the exact endpoint contract.
-      content:
-        application/json:
-          schema: {$ref: '#/components/schemas/QueryFailure'}
-    AuthenticationRequired:
-      description: Query token is missing or invalid.
-      content:
-        application/json:
-          schema: {$ref: '#/components/schemas/QueryFailure'}
-    AccessForbidden:
-      description: Query transport access is disabled.
-      content:
-        application/json:
-          schema: {$ref: '#/components/schemas/QueryFailure'}
-    QueryNotFound:
-      description: Authorized repository or fact was not found.
-      content:
-        application/json:
-          schema: {$ref: '#/components/schemas/QueryFailure'}
-    QueryUnavailable:
-      description: Persisted index data is temporarily unavailable or incompatible; retry only when retryable is true.
-      content:
-        application/json:
-          schema: {$ref: '#/components/schemas/QueryFailure'}
+      schema: {type: integer, minimum: 0, default: 0}
+    Limit:
+      name: limit
+      in: query
+      schema: {type: integer, minimum: 1, maximum: 100, default: 20}
   pathItems:
-    EventListenerQuery:
+    SearchCode:
       post:
-        summary: Read only an exact stored generation; repository identity aliases repoId and expectedRevision are rejected.
-        requestBody:
-          required: true
-          content:
-            application/json:
-              schema: {$ref: '#/components/schemas/EventListenerRequest'}
+        summary: Search exact indexed code. Copy repository ID and revision from Semantic results.
+        requestBody: {$ref: '#/components/requestBodies/SearchCodeRequest'}
         responses:
-          '200': {description: A result echoing repositoryId and revision., content: {application/json: {schema: {$ref: '#/components/schemas/GenerationBackedResponse'}}}}
-          '400': {$ref: '#/components/responses/RequestInvalid'}
-          '404': {$ref: '#/components/responses/QueryNotFound'}
+          '200': {description: Revision-pinned collection page., content: {application/json: {schema: {$ref: '#/components/schemas/SearchCodeResult'}}}}
+          '400': {$ref: '#/components/responses/InvalidArgument'}
+          '401': {$ref: '#/components/responses/AuthenticationRequired'}
+          '403': {$ref: '#/components/responses/AccessForbidden'}
+          '404': {$ref: '#/components/responses/NotFound'}
           '409': {$ref: '#/components/responses/RevisionOutdated'}
-          '503': {$ref: '#/components/responses/QueryUnavailable'}
-    TypeMemberQuery:
+          '503': {$ref: '#/components/responses/IndexUnavailable'}
+    FactSource:
       post:
-        summary: Read type members from an exact stored generation.
-        requestBody:
-          required: true
-          content:
-            application/json:
-              schema: {$ref: '#/components/schemas/TypeMemberRequest'}
+        summary: Expand exact source for one returned fact ID.
+        requestBody: {$ref: '#/components/requestBodies/FactSourceRequest'}
         responses:
-          '200': {description: A result echoing repositoryId and revision., content: {application/json: {schema: {$ref: '#/components/schemas/GenerationBackedResponse'}}}}
-          '400': {$ref: '#/components/responses/RequestInvalid'}
-          '404': {$ref: '#/components/responses/QueryNotFound'}
+          '200': {description: Exact source and fact ranges., content: {application/json: {schema: {$ref: '#/components/schemas/FactSourceResult'}}}}
+          '400': {$ref: '#/components/responses/InvalidArgument'}
+          '401': {$ref: '#/components/responses/AuthenticationRequired'}
+          '403': {$ref: '#/components/responses/AccessForbidden'}
+          '404': {$ref: '#/components/responses/NotFound'}
           '409': {$ref: '#/components/responses/RevisionOutdated'}
-          '503': {$ref: '#/components/responses/QueryUnavailable'}
-    SourceSymbolQuery:
+          '503': {$ref: '#/components/responses/IndexUnavailable'}
+    EntryPoints:
       post:
-        summary: Resolve a source symbol from an exact stored generation.
-        requestBody:
-          required: true
-          content:
-            application/json:
-              schema: {$ref: '#/components/schemas/SourceSymbolRequest'}
+        summary: List HTTP, messaging, and scheduled entry points.
+        requestBody: {$ref: '#/components/requestBodies/EntryPointRequest'}
         responses:
-          '200': {description: A result echoing repositoryId and revision., content: {application/json: {schema: {$ref: '#/components/schemas/GenerationBackedResponse'}}}}
-          '400': {$ref: '#/components/responses/RequestInvalid'}
-          '404': {$ref: '#/components/responses/QueryNotFound'}
+          '200': {description: Revision-pinned collection page., content: {application/json: {schema: {$ref: '#/components/schemas/EntryPointCollectionResult'}}}}
+          '400': {$ref: '#/components/responses/InvalidArgument'}
+          '401': {$ref: '#/components/responses/AuthenticationRequired'}
+          '403': {$ref: '#/components/responses/AccessForbidden'}
+          '404': {$ref: '#/components/responses/NotFound'}
           '409': {$ref: '#/components/responses/RevisionOutdated'}
-          '503': {$ref: '#/components/responses/QueryUnavailable'}
-    SourceSegmentQuery:
+          '503': {$ref: '#/components/responses/IndexUnavailable'}
+    ApiRoutes:
       post:
-        summary: Read a bounded source segment from an exact stored generation.
-        requestBody:
-          required: true
-          content:
-            application/json:
-              schema: {$ref: '#/components/schemas/SourceSegmentRequest'}
+        summary: Find routes for one exact method and path.
+        requestBody: {$ref: '#/components/requestBodies/ApiRouteRequest'}
         responses:
-          '200': {description: A result echoing repositoryId and revision., content: {application/json: {schema: {$ref: '#/components/schemas/GenerationBackedResponse'}}}}
-          '400': {$ref: '#/components/responses/RequestInvalid'}
-          '404': {$ref: '#/components/responses/QueryNotFound'}
+          '200': {description: Revision-pinned collection page., content: {application/json: {schema: {$ref: '#/components/schemas/EntryPointCollectionResult'}}}}
+          '400': {$ref: '#/components/responses/InvalidArgument'}
+          '401': {$ref: '#/components/responses/AuthenticationRequired'}
+          '403': {$ref: '#/components/responses/AccessForbidden'}
+          '404': {$ref: '#/components/responses/NotFound'}
           '409': {$ref: '#/components/responses/RevisionOutdated'}
-          '503': {$ref: '#/components/responses/QueryUnavailable'}
-    RelationQuery:
+          '503': {$ref: '#/components/responses/IndexUnavailable'}
+    EventListeners:
       post:
-        summary: Read a method-scoped relation result from an exact stored generation.
-        requestBody:
-          required: true
-          content:
-            application/json:
-              schema: {$ref: '#/components/schemas/RelationRequest'}
+        summary: Find listeners for one exact fully qualified event type.
+        requestBody: {$ref: '#/components/requestBodies/EventListenerRequest'}
         responses:
-          '200': {description: A result echoing repositoryId and revision., content: {application/json: {schema: {$ref: '#/components/schemas/GenerationBackedResponse'}}}}
-          '400': {$ref: '#/components/responses/RequestInvalid'}
-          '404': {$ref: '#/components/responses/QueryNotFound'}
+          '200': {description: Revision-pinned collection page., content: {application/json: {schema: {$ref: '#/components/schemas/EventListenerCollectionResult'}}}}
+          '400': {$ref: '#/components/responses/InvalidArgument'}
+          '401': {$ref: '#/components/responses/AuthenticationRequired'}
+          '403': {$ref: '#/components/responses/AccessForbidden'}
+          '404': {$ref: '#/components/responses/NotFound'}
           '409': {$ref: '#/components/responses/RevisionOutdated'}
-          '503': {$ref: '#/components/responses/QueryUnavailable'}
-    MethodQuery:
+          '503': {$ref: '#/components/responses/IndexUnavailable'}
+    TypeMembers:
       post:
-        summary: Read a method-scoped stored generation result.
-        requestBody:
-          required: true
-          content:
-            application/json:
-              schema: {$ref: '#/components/schemas/MethodRequest'}
+        summary: List members of one returned type fact ID.
+        requestBody: {$ref: '#/components/requestBodies/TypeMemberRequest'}
         responses:
-          '200': {description: A result echoing repositoryId and revision., content: {application/json: {schema: {$ref: '#/components/schemas/GenerationBackedResponse'}}}}
-          '400': {$ref: '#/components/responses/RequestInvalid'}
-          '404': {$ref: '#/components/responses/QueryNotFound'}
+          '200': {description: Revision-pinned collection page., content: {application/json: {schema: {$ref: '#/components/schemas/TypeMemberCollectionResult'}}}}
+          '400': {$ref: '#/components/responses/InvalidArgument'}
+          '401': {$ref: '#/components/responses/AuthenticationRequired'}
+          '403': {$ref: '#/components/responses/AccessForbidden'}
+          '404': {$ref: '#/components/responses/NotFound'}
           '409': {$ref: '#/components/responses/RevisionOutdated'}
-          '503': {$ref: '#/components/responses/QueryUnavailable'}
-    CallGraph:
+          '503': {$ref: '#/components/responses/IndexUnavailable'}
+    MethodImplementations:
       post:
-        summary: Read a persisted incoming or outgoing call graph.
-        requestBody:
-          required: true
-          content:
-            application/json:
-              schema: {$ref: '#/components/schemas/CallGraphRequest'}
+        summary: Find direct implementations or overrides of one returned method fact ID.
+        requestBody: {$ref: '#/components/requestBodies/MethodRelationRequest'}
         responses:
-          '200': {description: A result echoing repositoryId and revision., content: {application/json: {schema: {$ref: '#/components/schemas/GenerationBackedResponse'}}}}
-          '400': {$ref: '#/components/responses/RequestInvalid'}
-          '404': {$ref: '#/components/responses/QueryNotFound'}
+          '200': {description: Revision-pinned collection page., content: {application/json: {schema: {$ref: '#/components/schemas/ImplementationCollectionResult'}}}}
+          '400': {$ref: '#/components/responses/InvalidArgument'}
+          '401': {$ref: '#/components/responses/AuthenticationRequired'}
+          '403': {$ref: '#/components/responses/AccessForbidden'}
+          '404': {$ref: '#/components/responses/NotFound'}
           '409': {$ref: '#/components/responses/RevisionOutdated'}
-          '503': {$ref: '#/components/responses/QueryUnavailable'}
-    RouteQuery:
+          '503': {$ref: '#/components/responses/IndexUnavailable'}
+    References:
       post:
-        summary: Lookup persisted API routes by method and path.
-        requestBody:
-          required: true
-          content:
-            application/json:
-              schema: {$ref: '#/components/schemas/RouteRequest'}
+        summary: Find exact references to one returned declaration fact ID.
+        requestBody: {$ref: '#/components/requestBodies/RelationRequest'}
         responses:
-          '200': {description: A result echoing repositoryId and revision., content: {application/json: {schema: {$ref: '#/components/schemas/GenerationBackedResponse'}}}}
-          '400': {$ref: '#/components/responses/RequestInvalid'}
-          '404': {$ref: '#/components/responses/QueryNotFound'}
+          '200': {description: Revision-pinned collection page., content: {application/json: {schema: {$ref: '#/components/schemas/ReferenceCollectionResult'}}}}
+          '400': {$ref: '#/components/responses/InvalidArgument'}
+          '401': {$ref: '#/components/responses/AuthenticationRequired'}
+          '403': {$ref: '#/components/responses/AccessForbidden'}
+          '404': {$ref: '#/components/responses/NotFound'}
           '409': {$ref: '#/components/responses/RevisionOutdated'}
-          '503': {$ref: '#/components/responses/QueryUnavailable'}
+          '503': {$ref: '#/components/responses/IndexUnavailable'}
+    Callers:
+      post:
+        summary: Find direct callers of one returned method fact ID.
+        requestBody: {$ref: '#/components/requestBodies/MethodRelationRequest'}
+        responses:
+          '200': {description: Revision-pinned collection page., content: {application/json: {schema: {$ref: '#/components/schemas/CallerCollectionResult'}}}}
+          '400': {$ref: '#/components/responses/InvalidArgument'}
+          '401': {$ref: '#/components/responses/AuthenticationRequired'}
+          '403': {$ref: '#/components/responses/AccessForbidden'}
+          '404': {$ref: '#/components/responses/NotFound'}
+          '409': {$ref: '#/components/responses/RevisionOutdated'}
+          '503': {$ref: '#/components/responses/IndexUnavailable'}
+    Callees:
+      post:
+        summary: Find direct callees of one returned method fact ID.
+        requestBody: {$ref: '#/components/requestBodies/MethodRelationRequest'}
+        responses:
+          '200': {description: Revision-pinned collection page., content: {application/json: {schema: {$ref: '#/components/schemas/CalleeCollectionResult'}}}}
+          '400': {$ref: '#/components/responses/InvalidArgument'}
+          '401': {$ref: '#/components/responses/AuthenticationRequired'}
+          '403': {$ref: '#/components/responses/AccessForbidden'}
+          '404': {$ref: '#/components/responses/NotFound'}
+          '409': {$ref: '#/components/responses/RevisionOutdated'}
+          '503': {$ref: '#/components/responses/IndexUnavailable'}
+  requestBodies:
+    SearchCodeRequest: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/SearchCodeRequest'}}}}
+    FactSourceRequest: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/FactSourceRequest'}}}}
+    EntryPointRequest: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/EntryPointRequest'}}}}
+    ApiRouteRequest: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ApiRouteRequest'}}}}
+    EventListenerRequest: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/EventListenerRequest'}}}}
+    TypeMemberRequest: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/TypeMemberRequest'}}}}
+    MethodRelationRequest: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/MethodRelationRequest'}}}}
+    RelationRequest: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/RelationRequest'}}}}
+  responses:
+    AuthenticationRequired:
+      description: X-Api-Token is required for HTTP query operations.
+    AccessForbidden:
+      description: Query access is disabled.
+    InvalidArgument:
+      description: Request does not satisfy the operation contract.
+      content: {application/json: {schema: {$ref: '#/components/schemas/SemanticQueryError'}}}
+    NotFound:
+      description: Repository or fact was not found.
+      content: {application/json: {schema: {$ref: '#/components/schemas/SemanticQueryError'}}}
+    RevisionOutdated:
+      description: Retry only after replacing revision with the returned exact currentRevision.
+      content: {application/json: {schema: {$ref: '#/components/schemas/SemanticQueryError'}}}
+    IndexUnavailable:
+      description: The semantic index is temporarily unavailable.
+      content: {application/json: {schema: {$ref: '#/components/schemas/SemanticQueryError'}}}
   schemas:
-    SearchCodeFactsRequest:
+    RepositoryId: {type: string, minLength: 1, maxLength: 64, pattern: '^[a-z0-9][a-z0-9._-]{0,63}$'}
+    Revision: {type: string, minLength: 40, maxLength: 40, pattern: '^[0-9a-f]{40}$'}
+    FactId: {type: string, pattern: '^[0-9a-f]{64}$'}
+    Page:
       type: object
       additionalProperties: false
-      required: [repositoryId, revision, query]
+      required: [offset, limit, returned, total, hasMore]
       properties:
-        repositoryId: {type: string, minLength: 1, maxLength: 64, pattern: '^[a-z0-9][a-z0-9._-]{0,63}$', description: Exact configured repository id; aliases are rejected.}
-        revision: {type: string, minLength: 40, maxLength: 40, pattern: '^[0-9a-f]{40}$', description: Exact published revision; aliases are rejected.}
-        query: {type: string, minLength: 2, maxLength: 256}
-        kinds:
-          type: array
-          description: Optional CodeFactKind values. Omit unknown filters rather than guessing them.
-          items:
-            type: string
-            enum: [TYPE, METHOD, FIELD, ENUM_CONSTANT, RECORD_COMPONENT, MAPPER_STATEMENT, ANNOTATION_USAGE, TYPE_USAGE, SQL_IDENTIFIER, CONFIGURATION_KEY, OUTBOUND_API, MQ_PUBLISHER, ERROR_CONTRACT, API_ROUTE, MQ_DESTINATION, SCHEDULE]
-        packagePrefix: {type: string}
-        offset: {type: integer, minimum: 0, default: 0}
-        limit: {type: integer, minimum: 1, maximum: 100, default: 20}
-    GetCodeFactRequest:
-      type: object
-      additionalProperties: false
-      required: [repositoryId, revision, factId]
-      properties:
-        repositoryId: {type: string, minLength: 1, maxLength: 64, pattern: '^[a-z0-9][a-z0-9._-]{0,63}$'}
-        revision: {type: string, minLength: 40, maxLength: 40, pattern: '^[0-9a-f]{40}$'}
-        factId: {type: string, minLength: 64, maxLength: 64, pattern: '^[0-9a-f]{64}$'}
-    GenerationRequest:
+        offset: {type: integer, minimum: 0}
+        limit: {type: integer, minimum: 1, maximum: 100}
+        returned: {type: integer, minimum: 0}
+        total: {type: integer, minimum: 0}
+        hasMore: {type: boolean}
+    RepositoryItem:
       type: object
       additionalProperties: false
       required: [repositoryId, revision]
       properties:
-        repositoryId: {type: string, minLength: 1, maxLength: 64, pattern: '^[a-z0-9][a-z0-9._-]{0,63}$', description: Exact configured repository id; aliases are rejected.}
-        revision: {type: string, minLength: 40, maxLength: 40, pattern: '^[0-9a-f]{40}$', description: Exact published revision; aliases are rejected.}
+        repositoryId: {$ref: '#/components/schemas/RepositoryId'}
+        revision: {$ref: '#/components/schemas/Revision'}
+    RepositoryCollection:
+      type: object
+      additionalProperties: false
+      required: [items, page]
+      properties:
+        items: {type: array, items: {$ref: '#/components/schemas/RepositoryItem'}}
+        page: {$ref: '#/components/schemas/Page'}
+    SourceSnippet:
+      type: object
+      additionalProperties: false
+      required: [path, startLine, endLine, code]
+      properties:
+        path: {type: string}
+        startLine: {type: integer, minimum: 1}
+        endLine: {type: integer, minimum: 1}
+        code: {type: string, minLength: 1}
+    FactRange:
+      type: object
+      additionalProperties: false
+      required: [startLine, endLine]
+      properties:
+        startLine: {type: integer, minimum: 1}
+        endLine: {type: integer, minimum: 1}
+    InternalProgramElement:
+      type: object
+      additionalProperties: false
+      required: [factId, kind, displayName, source]
+      properties:
+        factId: {$ref: '#/components/schemas/FactId'}
+        kind: {type: string, enum: [TYPE, METHOD, FIELD, ENUM_CONSTANT, RECORD_COMPONENT, MAPPER_STATEMENT, ANNOTATION_USAGE, TYPE_USAGE, SQL_IDENTIFIER, CONFIGURATION_KEY, OUTBOUND_API, MQ_PUBLISHER, ERROR_CONTRACT, API_ROUTE, MQ_DESTINATION, SCHEDULE]}
+        displayName: {type: string, minLength: 1}
+        source: {$ref: '#/components/schemas/SourceSnippet'}
+    ExternalCallee:
+      type: object
+      additionalProperties: false
+      required: [displayName]
+      properties:
+        displayName: {type: string, minLength: 1}
+    RelationSite:
+      type: object
+      additionalProperties: false
+      required: [factId, source]
+      properties:
+        factId: {$ref: '#/components/schemas/FactId'}
+        source: {$ref: '#/components/schemas/SourceSnippet'}
+    Trigger:
+      type: object
+      additionalProperties: false
+      required: [kind, method, value]
+      properties:
+        kind: {type: string, minLength: 1}
+        method: {type: string}
+        value: {type: string, minLength: 1}
+    EntryPointItem:
+      type: object
+      additionalProperties: false
+      required: [factId, handler, trigger]
+      properties:
+        factId: {$ref: '#/components/schemas/FactId'}
+        handler: {$ref: '#/components/schemas/InternalProgramElement'}
+        trigger: {$ref: '#/components/schemas/Trigger'}
+    EventListenerItem:
+      type: object
+      additionalProperties: false
+      required: [eventType, handler]
+      properties:
+        eventType: {type: string, minLength: 1}
+        handler: {$ref: '#/components/schemas/InternalProgramElement'}
+    ImplementationItem:
+      type: object
+      additionalProperties: false
+      required: [implementation, relationKind]
+      properties:
+        implementation: {$ref: '#/components/schemas/InternalProgramElement'}
+        relationKind: {type: string, enum: [IMPLEMENTS, OVERRIDES]}
+    CallerItem:
+      type: object
+      additionalProperties: false
+      required: [caller, callSite]
+      properties:
+        caller: {$ref: '#/components/schemas/InternalProgramElement'}
+        callSite: {$ref: '#/components/schemas/RelationSite'}
+    CalleeItem:
+      type: object
+      additionalProperties: false
+      required: [callee, callSite]
+      properties:
+        callee:
+          oneOf:
+            - {$ref: '#/components/schemas/InternalProgramElement'}
+            - {$ref: '#/components/schemas/ExternalCallee'}
+        callSite: {$ref: '#/components/schemas/RelationSite'}
+    ReferenceItem:
+      type: object
+      additionalProperties: false
+      required: [container, referenceSite]
+      properties:
+        container: {$ref: '#/components/schemas/InternalProgramElement'}
+        referenceSite: {$ref: '#/components/schemas/RelationSite'}
+    SearchCodeResult:
+      type: object
+      additionalProperties: false
+      required: [repositoryId, revision, items, page]
+      properties:
+        repositoryId: {$ref: '#/components/schemas/RepositoryId'}
+        revision: {$ref: '#/components/schemas/Revision'}
+        items: {type: array, items: {$ref: '#/components/schemas/InternalProgramElement'}}
+        page: {$ref: '#/components/schemas/Page'}
+    EntryPointCollectionResult:
+      type: object
+      additionalProperties: false
+      required: [repositoryId, revision, items, page]
+      properties:
+        repositoryId: {$ref: '#/components/schemas/RepositoryId'}
+        revision: {$ref: '#/components/schemas/Revision'}
+        items: {type: array, items: {$ref: '#/components/schemas/EntryPointItem'}}
+        page: {$ref: '#/components/schemas/Page'}
+    EventListenerCollectionResult:
+      type: object
+      additionalProperties: false
+      required: [repositoryId, revision, items, page]
+      properties:
+        repositoryId: {$ref: '#/components/schemas/RepositoryId'}
+        revision: {$ref: '#/components/schemas/Revision'}
+        items: {type: array, items: {$ref: '#/components/schemas/EventListenerItem'}}
+        page: {$ref: '#/components/schemas/Page'}
+    TypeMemberCollectionResult:
+      type: object
+      additionalProperties: false
+      required: [repositoryId, revision, items, page]
+      properties:
+        repositoryId: {$ref: '#/components/schemas/RepositoryId'}
+        revision: {$ref: '#/components/schemas/Revision'}
+        items: {type: array, items: {$ref: '#/components/schemas/InternalProgramElement'}}
+        page: {$ref: '#/components/schemas/Page'}
+    ImplementationCollectionResult:
+      type: object
+      additionalProperties: false
+      required: [repositoryId, revision, items, page]
+      properties:
+        repositoryId: {$ref: '#/components/schemas/RepositoryId'}
+        revision: {$ref: '#/components/schemas/Revision'}
+        items: {type: array, items: {$ref: '#/components/schemas/ImplementationItem'}}
+        page: {$ref: '#/components/schemas/Page'}
+    ReferenceCollectionResult:
+      type: object
+      additionalProperties: false
+      required: [repositoryId, revision, items, page]
+      properties:
+        repositoryId: {$ref: '#/components/schemas/RepositoryId'}
+        revision: {$ref: '#/components/schemas/Revision'}
+        items: {type: array, items: {$ref: '#/components/schemas/ReferenceItem'}}
+        page: {$ref: '#/components/schemas/Page'}
+    CallerCollectionResult:
+      type: object
+      additionalProperties: false
+      required: [repositoryId, revision, items, page]
+      properties:
+        repositoryId: {$ref: '#/components/schemas/RepositoryId'}
+        revision: {$ref: '#/components/schemas/Revision'}
+        items: {type: array, items: {$ref: '#/components/schemas/CallerItem'}}
+        page: {$ref: '#/components/schemas/Page'}
+    CalleeCollectionResult:
+      type: object
+      additionalProperties: false
+      required: [repositoryId, revision, items, page]
+      properties:
+        repositoryId: {$ref: '#/components/schemas/RepositoryId'}
+        revision: {$ref: '#/components/schemas/Revision'}
+        items: {type: array, items: {$ref: '#/components/schemas/CalleeItem'}}
+        page: {$ref: '#/components/schemas/Page'}
+    FactSourceResult:
+      type: object
+      additionalProperties: false
+      required: [repositoryId, revision, factId, source, factRange]
+      properties:
+        repositoryId: {$ref: '#/components/schemas/RepositoryId'}
+        revision: {$ref: '#/components/schemas/Revision'}
+        factId: {$ref: '#/components/schemas/FactId'}
+        source: {$ref: '#/components/schemas/SourceSnippet'}
+        factRange: {$ref: '#/components/schemas/FactRange'}
+    SemanticQueryError:
+      type: object
+      additionalProperties: false
+      required: [code, message, retryable]
+      properties:
+        code: {type: string, enum: [INVALID_ARGUMENT, REPOSITORY_NOT_FOUND, REVISION_OUTDATED, FACT_NOT_FOUND, FACT_KIND_MISMATCH, INDEX_UNAVAILABLE]}
+        message: {type: string}
+        retryable: {type: boolean}
+        currentRevision: {$ref: '#/components/schemas/Revision'}
+    SearchCodeRequest:
+      type: object
+      additionalProperties: false
+      required: [repositoryId, revision, query]
+      properties:
+        repositoryId: {$ref: '#/components/schemas/RepositoryId'}
+        revision: {$ref: '#/components/schemas/Revision'}
+        query: {type: string, minLength: 2, maxLength: 256}
+        kinds: {type: array, items: {type: string, enum: [TYPE, METHOD, FIELD, ENUM_CONSTANT, RECORD_COMPONENT, MAPPER_STATEMENT, ANNOTATION_USAGE, TYPE_USAGE, SQL_IDENTIFIER, CONFIGURATION_KEY, OUTBOUND_API, MQ_PUBLISHER, ERROR_CONTRACT, API_ROUTE, MQ_DESTINATION, SCHEDULE]}}
+        packagePrefix: {type: string, minLength: 1, pattern: '^[A-Za-z_$][A-Za-z0-9_$]*(?:\.[A-Za-z_$][A-Za-z0-9_$]*)*$'}
+        offset: {type: integer, minimum: 0, default: 0}
+        limit: {type: integer, minimum: 1, maximum: 100, default: 20}
+    FactSourceRequest:
+      type: object
+      additionalProperties: false
+      required: [repositoryId, revision, factId]
+      properties:
+        repositoryId: {$ref: '#/components/schemas/RepositoryId'}
+        revision: {$ref: '#/components/schemas/Revision'}
+        factId: {$ref: '#/components/schemas/FactId'}
+        contextLines: {type: integer, minimum: 0, maximum: 20, default: 0}
+    EntryPointRequest:
+      type: object
+      additionalProperties: false
+      required: [repositoryId, revision]
+      properties:
+        repositoryId: {$ref: '#/components/schemas/RepositoryId'}
+        revision: {$ref: '#/components/schemas/Revision'}
+        kinds: {type: array, items: {type: string, enum: [HTTP, MQ, SCHEDULE]}}
+        offset: {type: integer, minimum: 0, default: 0}
+        limit: {type: integer, minimum: 1, maximum: 100, default: 20}
+    ApiRouteRequest:
+      type: object
+      additionalProperties: false
+      required: [repositoryId, revision, httpMethod, path]
+      properties:
+        repositoryId: {$ref: '#/components/schemas/RepositoryId'}
+        revision: {$ref: '#/components/schemas/Revision'}
+        httpMethod: {type: string, enum: [GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS, TRACE, ALL]}
+        path: {type: string, minLength: 1}
+        offset: {type: integer, minimum: 0, default: 0}
+        limit: {type: integer, minimum: 1, maximum: 100, default: 20}
     EventListenerRequest:
       type: object
       additionalProperties: false
       required: [repositoryId, revision, eventType]
       properties:
-        repositoryId: {type: string, minLength: 1, maxLength: 64, pattern: '^[a-z0-9][a-z0-9._-]{0,63}$'}
-        revision: {type: string, minLength: 40, maxLength: 40, pattern: '^[0-9a-f]{40}$'}
+        repositoryId: {$ref: '#/components/schemas/RepositoryId'}
+        revision: {$ref: '#/components/schemas/Revision'}
         eventType: {type: string, minLength: 1}
-        offset: {type: integer, minimum: 0}
-        limit: {type: integer, minimum: 1, maximum: 100}
+        offset: {type: integer, minimum: 0, default: 0}
+        limit: {type: integer, minimum: 1, maximum: 100, default: 20}
     TypeMemberRequest:
       type: object
       additionalProperties: false
-      required: [repositoryId, revision, packageName, className, sourceFile, kinds]
+      required: [repositoryId, revision, typeFactId]
       properties:
-        repositoryId: {type: string, minLength: 1, maxLength: 64, pattern: '^[a-z0-9][a-z0-9._-]{0,63}$'}
-        revision: {type: string, minLength: 40, maxLength: 40, pattern: '^[0-9a-f]{40}$'}
-        packageName: {type: string, minLength: 1}
-        className: {type: string, minLength: 1}
-        sourceFile: {type: string, minLength: 1}
+        repositoryId: {$ref: '#/components/schemas/RepositoryId'}
+        revision: {$ref: '#/components/schemas/Revision'}
+        typeFactId: {$ref: '#/components/schemas/FactId'}
         kinds: {type: array, items: {type: string, enum: [METHOD, FIELD, ENUM_CONSTANT, RECORD_COMPONENT]}}
-        offset: {type: integer, minimum: 0}
-        limit: {type: integer, minimum: 1, maximum: 100}
-    SourceSymbolRequest:
+        offset: {type: integer, minimum: 0, default: 0}
+        limit: {type: integer, minimum: 1, maximum: 100, default: 20}
+    MethodRelationRequest:
       type: object
       additionalProperties: false
-      dependentRequired: {line: [character], character: [line]}
-      required: [repositoryId, revision, packageName, className, sourceFile, symbol]
+      required: [repositoryId, revision, methodFactId]
       properties:
-        repositoryId: {type: string, minLength: 1, maxLength: 64, pattern: '^[a-z0-9][a-z0-9._-]{0,63}$'}
-        revision: {type: string, minLength: 40, maxLength: 40, pattern: '^[0-9a-f]{40}$'}
-        packageName: {type: string, minLength: 1}
-        className: {type: string, minLength: 1}
-        sourceFile: {type: string, minLength: 1}
-        symbol: {type: string, minLength: 1}
-        line: {type: integer, minimum: 0}
-        character: {type: integer, minimum: 0}
-    SourceSegmentRequest:
-      type: object
-      additionalProperties: false
-      required: [repositoryId, revision, packageName, className, sourceFile, startLine, startCharacter, endLine, endCharacter]
-      properties:
-        repositoryId: {type: string, minLength: 1, maxLength: 64, pattern: '^[a-z0-9][a-z0-9._-]{0,63}$'}
-        revision: {type: string, minLength: 40, maxLength: 40, pattern: '^[0-9a-f]{40}$'}
-        packageName: {type: string, minLength: 1}
-        className: {type: string, minLength: 1}
-        sourceFile: {type: string, minLength: 1}
-        startLine: {type: integer, minimum: 0}
-        startCharacter: {type: integer, minimum: 0}
-        endLine: {type: integer, minimum: 0}
-        endCharacter: {type: integer, minimum: 0}
+        repositoryId: {$ref: '#/components/schemas/RepositoryId'}
+        revision: {$ref: '#/components/schemas/Revision'}
+        methodFactId: {$ref: '#/components/schemas/FactId'}
+        offset: {type: integer, minimum: 0, default: 0}
+        limit: {type: integer, minimum: 1, maximum: 100, default: 20}
     RelationRequest:
       type: object
       additionalProperties: false
-      required: [repositoryId, revision, packageName, className, sourceFile, methodName, parameterTypes]
+      required: [repositoryId, revision, factId]
       properties:
-        repositoryId: {type: string, minLength: 1, maxLength: 64, pattern: '^[a-z0-9][a-z0-9._-]{0,63}$'}
-        revision: {type: string, minLength: 40, maxLength: 40, pattern: '^[0-9a-f]{40}$'}
-        packageName: {type: string, minLength: 1}
-        className: {type: string, minLength: 1}
-        sourceFile: {type: string, minLength: 1}
-        methodName: {type: string, minLength: 1}
-        parameterTypes: {type: array, items: {type: string}}
-        offset: {type: integer, minimum: 0}
-        limit: {type: integer, minimum: 1, maximum: 100}
-    CallGraphRequest:
-      type: object
-      additionalProperties: false
-      required: [repositoryId, revision, packageName, className, sourceFile, methodName, parameterTypes]
-      properties:
-        repositoryId: {type: string, minLength: 1, maxLength: 64, pattern: '^[a-z0-9][a-z0-9._-]{0,63}$'}
-        revision: {type: string, minLength: 40, maxLength: 40, pattern: '^[0-9a-f]{40}$'}
-        packageName: {type: string, minLength: 1}
-        className: {type: string, minLength: 1}
-        sourceFile: {type: string, minLength: 1}
-        methodName: {type: string, minLength: 1}
-        parameterTypes: {type: array, items: {type: string}}
-        depth: {type: integer, minimum: 1, maximum: 2}
-        depthTwoNodeBudget: {type: integer, minimum: 0}
-    MethodRequest:
-      type: object
-      additionalProperties: false
-      required: [repositoryId, revision, packageName, className, sourceFile, methodName, parameterTypes]
-      properties:
-        repositoryId: {type: string, minLength: 1, maxLength: 64, pattern: '^[a-z0-9][a-z0-9._-]{0,63}$'}
-        revision: {type: string, minLength: 40, maxLength: 40, pattern: '^[0-9a-f]{40}$'}
-        packageName: {type: string}
-        className: {type: string}
-        sourceFile: {type: string}
-        methodName: {type: string}
-        parameterTypes: {type: array, items: {type: string}}
-    RouteRequest:
-      type: object
-      additionalProperties: false
-      required: [repositoryId, revision, httpMethod, path]
-      properties:
-        repositoryId: {type: string, minLength: 1, maxLength: 64, pattern: '^[a-z0-9][a-z0-9._-]{0,63}$'}
-        revision: {type: string, minLength: 40, maxLength: 40, pattern: '^[0-9a-f]{40}$'}
-        httpMethod: {type: string}
-        path: {type: string}
-    GenerationBackedResponse:
-      type: object
-      additionalProperties: false
-      required: [repositoryId, revision, result]
-      properties:
-        repositoryId: {type: string}
-        revision: {type: string}
-        result: {}
-    RepositoryMetadata:
-      type: object
-      additionalProperties: false
-      required: [repositoryId, revision, generationId, manifestDigest, publishedAt]
-      properties:
-        repositoryId: {type: object, required: [value], properties: {value: {type: string}}}
-        revision: {type: object, required: [value], properties: {value: {type: string}}}
-        generationId: {type: object, required: [value], properties: {value: {type: string}}}
-        manifestDigest: {type: object, required: [value], properties: {value: {type: string}}}
-        publishedAt: {type: string, format: date-time}
-    RepositoryMetadataList:
-      type: array
-      items: {$ref: '#/components/schemas/RepositoryMetadata'}
-    RevisionOutdatedError:
-      type: object
-      additionalProperties: false
-      required: [code, repositoryId, requestedRevision, currentRevision, retryGuidance]
-      properties:
-        code: {const: REVISION_OUTDATED}
-        repositoryId: {type: string}
-        requestedRevision: {type: string}
-        currentRevision: {type: string}
-        retryGuidance: {type: string}
-    QueryFailure:
-      type: object
-      additionalProperties: false
-      required: [code, retryable]
-      properties:
-        code: {type: string}
-        retryable: {type: boolean}
-        message: {type: string}
+        repositoryId: {$ref: '#/components/schemas/RepositoryId'}
+        revision: {$ref: '#/components/schemas/Revision'}
+        factId: {$ref: '#/components/schemas/FactId'}
+        offset: {type: integer, minimum: 0, default: 0}
+        limit: {type: integer, minimum: 1, maximum: 100, default: 20}
   securitySchemes:
     ApiToken:
       type: apiKey

@@ -43,7 +43,7 @@ Back up pointer, job, manifest, and generation collections together. There is no
 
 ## Query operation
 
-Query reads MongoDB only. It must continue serving the repository catalog, search, source, type/member, route, reference, implementation, and call-graph tool families while Indexer is stopped. It never starts JDT LS or repairs missing data online. A stale requested revision returns `REVISION_OUTDATED` with the current revision so the caller can decide whether to query again.
+Query reads MongoDB only. It must continue serving the repository catalog, search, source, type/member, route, reference, implementation, caller, and callee tool families while Indexer is stopped. It never starts JDT LS or repairs missing data online. A stale requested revision returns `REVISION_OUTDATED` with the current revision so the caller can retry with that revision.
 
 ## UAT-only controls
 

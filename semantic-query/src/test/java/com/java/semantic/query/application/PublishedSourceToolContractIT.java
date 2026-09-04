@@ -2,6 +2,11 @@ package com.java.semantic.query.application;
 
 import com.java.semantic.model.codefact.CodeFactIdentity;
 import com.java.semantic.model.codefact.CodeFactId;
+import com.java.semantic.model.codefact.CodeFactReadQuery;
+import com.java.semantic.model.codefact.CodeFactScope;
+import com.java.semantic.model.codefact.ExternalTarget;
+import com.java.semantic.model.codefact.RelationKind;
+import com.java.semantic.model.codefact.RelationTarget;
 import com.java.semantic.model.codefact.SourceRange;
 import com.java.semantic.model.codefact.SourceSegmentQuery;
 import com.java.semantic.model.codefact.SourceTypeIdentity;
@@ -33,6 +38,96 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 @Tag("mongo-it")
 class PublishedSourceToolContractIT extends PublishedMongoITSupport {
+    @Test
+    void resolves_relation_fact_source_by_opaque_id_and_keeps_fact_and_context_ranges_distinct() {
+        try (MongoDBContainer container = new MongoDBContainer(DockerImageName.parse("mongo:8.0.4"))) {
+            container.start();
+            MongoTemplate template = new MongoTemplate(MongoClients.create(container.getConnectionString()), "published_relation_source");
+            seedCurrent(template, "orders");
+            String path = "src/main/java/example/payment/PaymentClient.java";
+            SourceRange factRange = new SourceRange(path,
+                    new SyntaxRange(new SyntaxPosition(41, 4), new SyntaxPosition(41, 26)));
+            seedSource(template, path, relationSource());
+            CodeFactIdentity from = methodIdentity("example.payment", "PaymentClient", "charge", path);
+            CodeFactIdentity relation = seedRelation(template, from, RelationKind.CALLS_OUTBOUND_API,
+                    new RelationTarget.External(new ExternalTarget.Endpoint("POST", "https://payments.example/charge")), factRange)
+                    .fact().identity();
+            seedSearch(template, relation, "RELATIONS", List.of("charge", "payment"));
+            PublishedSourceToolService service = new PublishedSourceToolService(
+                    new CurrentSourceQueryService(template, selector(template, policy()), Duration.ofSeconds(2)),
+                    new CodeFactReadService(template, selector(template, policy()), Duration.ofSeconds(2)));
+            CodeFactReadQuery query = new CodeFactReadQuery(new RepositoryId("orders"), new RepositoryRevision(REVISION), CodeFactId.from(relation));
+
+            FactSourceSlice exact = service.factSource(query, 0);
+            FactSourceSlice expanded = service.factSource(query, 2);
+
+            assertThat(SourceSnippetMapper.toSnippet(exact.sourceRange(), exact.fileContent()).code()).isEqualTo("client.charge(request)");
+            assertThat(SourceSnippetMapper.toFactRange(exact.factRange())).isEqualTo(new SemanticQueryContract.FactRange(42, 42));
+            assertThat(SourceSnippetMapper.toSnippet(expanded.sourceRange(), expanded.fileContent()).startLine()).isEqualTo(40);
+            assertThat(SourceSnippetMapper.toSnippet(expanded.sourceRange(), expanded.fileContent()).endLine()).isEqualTo(44);
+            assertThat(SourceSnippetMapper.toFactRange(expanded.factRange())).isEqualTo(new SemanticQueryContract.FactRange(42, 42));
+        }
+    }
+
+    @Test
+    void rejects_fact_context_when_its_source_file_contains_a_forbidden_method() {
+        try (MongoDBContainer container = new MongoDBContainer(DockerImageName.parse("mongo:8.0.4"))) {
+            container.start();
+            MongoTemplate template = new MongoTemplate(MongoClients.create(container.getConnectionString()), "published_relation_source_authorization");
+            seedCurrent(template, "orders");
+            String path = "src/main/java/example/payment/PaymentClient.java";
+            SourceRange relationRange = new SourceRange(path,
+                    new SyntaxRange(new SyntaxPosition(0, 0), new SyntaxPosition(0, 10)));
+            seedSource(template, path, "visible();\nforbidden();\n");
+            CodeFactIdentity visibleMethod = methodIdentity("example.payment", "PaymentClient", "visible", path);
+            CodeFactIdentity forbiddenMethod = methodIdentity("example.payment", "PaymentClient", "forbidden", path);
+            seedMethod(template, visibleMethod, List.of());
+            seedMethod(template, forbiddenMethod, List.of());
+            CodeFactIdentity relation = seedRelation(template, visibleMethod, RelationKind.CALLS_OUTBOUND_API,
+                    new RelationTarget.External(new ExternalTarget.Endpoint("POST", "https://payments.example/charge")), relationRange)
+                    .fact().identity();
+            seedSearch(template, relation, "RELATIONS", List.of("visible"));
+            ConfiguredReadPolicy forbiddenMethodPolicy = new ConfiguredReadPolicy(new ReadPolicyProperties(List.of(), List.of(), List.of(),
+                    List.of(new ReadPolicyProperties.MethodRule("orders", "example.payment", "PaymentClient", "forbidden",
+                            List.of("example.events.VideoReady")))));
+            CurrentGenerationSelector currentGenerationSelector = selector(template, forbiddenMethodPolicy);
+            PublishedSourceToolService service = new PublishedSourceToolService(
+                    new CurrentSourceQueryService(template, currentGenerationSelector, Duration.ofSeconds(2)),
+                    new CodeFactReadService(template, currentGenerationSelector, Duration.ofSeconds(2)));
+            CodeFactReadQuery query = new CodeFactReadQuery(new RepositoryId("orders"), new RepositoryRevision(REVISION), CodeFactId.from(relation));
+
+            assertThatThrownBy(() -> service.factSource(query, 1)).isInstanceOf(RepositoryNotFoundException.class);
+        }
+    }
+
+    @Test
+    void rejects_fact_source_when_the_resolved_generation_lacks_a_compatible_sources_projection() {
+        try (MongoDBContainer container = new MongoDBContainer(DockerImageName.parse("mongo:8.0.4"))) {
+            container.start();
+            MongoTemplate template = new MongoTemplate(MongoClients.create(container.getConnectionString()), "published_fact_source_projection");
+            seedCurrent(template, "orders");
+            String path = "src/main/java/example/payment/PaymentService.java";
+            seedSource(template, path, "line zero\nmethod();\n");
+            CodeFactIdentity method = methodIdentity("example.payment", "PaymentService", "method", path);
+            seedMethod(template, method, List.of());
+            seedSearch(template, method, "SYMBOLS", List.of("method"));
+            template.getCollection("generation_manifests").updateOne(new Document("repoId", "orders"),
+                    new Document("$set", new Document("projectionVersions", List.of(
+                            new Document("name", "SOURCES").append("version", 1),
+                            new Document("name", "SYMBOLS").append("version", 2),
+                            new Document("name", "RELATIONS").append("version", 2),
+                            new Document("name", "ENTRY_POINTS").append("version", 2),
+                            new Document("name", "SEARCH").append("version", 2)))));
+            CurrentGenerationSelector currentGenerationSelector = selector(template, policy());
+            PublishedSourceToolService service = new PublishedSourceToolService(
+                    new CurrentSourceQueryService(template, currentGenerationSelector, Duration.ofSeconds(2)),
+                    new CodeFactReadService(template, currentGenerationSelector, Duration.ofSeconds(2)));
+            CodeFactReadQuery query = new CodeFactReadQuery(new RepositoryId("orders"), new RepositoryRevision(REVISION), CodeFactId.from(method));
+
+            assertThatThrownBy(() -> service.factSource(query, 0)).isInstanceOf(IndexContractMismatchException.class);
+        }
+    }
+
     @Test
     void slices_only_selected_generation_stored_source_with_utf16_crlf_boundaries() {
         try (MongoDBContainer container = new MongoDBContainer(DockerImageName.parse("mongo:8.0.4"))) {
@@ -119,5 +214,27 @@ class PublishedSourceToolContractIT extends PublishedMongoITSupport {
 
             assertThat(reads).doesNotContain("repositories", "generation_manifests", "symbols", "generation_files", "source_artifacts");
         }
+    }
+
+    private static void seedSearch(MongoTemplate template, CodeFactIdentity identity, String authority, List<String> tokens) {
+        CodeFactScope scope = CodeFactScope.from(identity);
+        template.getCollection("search").insertOne(new Document("repoId", "orders").append("generationId", "g1")
+                .append("factId", CodeFactId.from(identity).value()).append("kind", identity.kind().name())
+                .append("tokens", tokens).append("package", scope.packageName()).append("authority", authority)
+                .append("canonical", identity.canonicalForm()).append("scopePackage", scope.packageName())
+                .append("scopeClass", scope.className()).append("scopeMethod", scope.methodName().orElse(""))
+                .append("scopeParameters", scope.parameterTypes()).append("scopePath", scope.sourcePath().orElse("")));
+    }
+
+    private static String relationSource() {
+        StringBuilder content = new StringBuilder();
+        for (int line = 1; line <= 45; line++) {
+            if (line == 42) {
+                content.append("    client.charge(request);\n");
+            } else {
+                content.append("line ").append(line).append('\n');
+            }
+        }
+        return content.toString();
     }
 }

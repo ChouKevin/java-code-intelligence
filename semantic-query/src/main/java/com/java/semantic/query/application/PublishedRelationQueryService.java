@@ -39,17 +39,36 @@ public final class PublishedRelationQueryService {
     }
 
     public PublishedRelationResult findReferences(PublishedRelationQuery query) {
-        return find(query, EnumSet.of(RelationKind.REFERENCES));
+        return findByTarget(query, EnumSet.of(RelationKind.REFERENCES));
     }
 
     public PublishedRelationResult findImplementations(PublishedRelationQuery query) {
-        return find(query, EnumSet.of(RelationKind.IMPLEMENTS, RelationKind.OVERRIDES));
+        return findByTarget(query, EnumSet.of(RelationKind.IMPLEMENTS, RelationKind.OVERRIDES));
     }
 
-    private PublishedRelationResult find(PublishedRelationQuery query, EnumSet<RelationKind> kinds) {
+    public PublishedRelationResult findCallers(PublishedRelationQuery query) {
+        return findByTarget(query, EnumSet.of(RelationKind.CALLS));
+    }
+
+    public PublishedRelationResult findCallees(PublishedRelationQuery query) {
+        return findBySource(query, EnumSet.of(RelationKind.CALLS));
+    }
+
+    private PublishedRelationResult findByTarget(PublishedRelationQuery query, EnumSet<RelationKind> kinds) {
+        PublishedRelationQuery request = Objects.requireNonNull(query, "relation query is required");
+        return find(request, kinds, "target", new RelationTarget.Internal(request.target()).canonicalForm());
+    }
+
+    private PublishedRelationResult findBySource(PublishedRelationQuery query, EnumSet<RelationKind> kinds) {
+        PublishedRelationQuery request = Objects.requireNonNull(query, "relation query is required");
+        return find(request, kinds, "from", request.target().canonicalForm());
+    }
+
+    private PublishedRelationResult find(PublishedRelationQuery query, EnumSet<RelationKind> kinds, String endpointField,
+                                         String endpointValue) {
         PublishedRelationQuery request = Objects.requireNonNull(query, "relation query is required");
         CurrentGeneration current = selectAndValidateTarget(request);
-        List<RelationDocument> visible = readRelations(current, request.target(), kinds);
+        List<RelationDocument> visible = readRelations(current, kinds, endpointField, endpointValue);
         int start = Math.min(request.offset(), visible.size());
         int end = Math.min(start + request.limit(), visible.size());
         List<RelationDocument> page = visible.subList(start, end);
@@ -64,11 +83,12 @@ public final class PublishedRelationQueryService {
         return current;
     }
 
-    private List<RelationDocument> readRelations(CurrentGeneration current, CodeFactIdentity target, EnumSet<RelationKind> kinds) {
+    private List<RelationDocument> readRelations(CurrentGeneration current, EnumSet<RelationKind> kinds, String endpointField,
+                                                 String endpointValue) {
         try {
             Bson filter = Filters.and(Filters.eq("repoId", current.repositoryId().value()),
                     Filters.eq("generationId", current.generationId().value()),
-                    Filters.eq("target", new RelationTarget.Internal(target).canonicalForm()),
+                    Filters.eq(endpointField, endpointValue),
                     Filters.in("kind", kinds.stream().map(Enum::name).toList()));
             FindIterable<Document> rows = template.getCollection(IndexCollections.RELATIONS).find(filter)
                     .sort(Sorts.ascending("kind", "from", "sourcePath", "relationId"))

@@ -25,7 +25,7 @@ public final class QueryRequestMonitoringFilter extends OncePerRequestFilter {
     @Override
     protected boolean shouldNotFilter(HttpServletRequest request) {
         String path = applicationRelativePath(request);
-        return !path.startsWith("/v1/") && !path.equals("/mcp");
+        return !path.startsWith("/api/v1/") && !path.equals("/mcp");
     }
 
     @Override

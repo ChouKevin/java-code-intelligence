@@ -26,7 +26,7 @@
         <java.version>21</java.version>
         <archunit.version>1.3.0</archunit.version>
         <!-- Ordinary runs do not require Docker or a real JDT language server. -->
-        <test.excluded.groups>jdtls-it,mongo-it</test.excluded.groups>
+        <test.excluded.groups>jdtls-it,mongo-it,deployed-it</test.excluded.groups>
         <test.included.groups></test.included.groups>
     </properties>
 
@@ -35,7 +35,7 @@
             <dependency>
                 <groupId>org.springframework.ai</groupId>
                 <artifactId>spring-ai-bom</artifactId>
-                <version>2.0.0</version>
+                <version>2.0.1</version>
                 <type>pom</type>
                 <scope>import</scope>
             </dependency>
@@ -101,6 +101,13 @@
             <properties>
                 <test.included.groups>mongo-it</test.included.groups>
                 <test.excluded.groups>jdtls-it</test.excluded.groups>
+            </properties>
+        </profile>
+        <profile>
+            <id>deployed-it</id>
+            <properties>
+                <test.included.groups>deployed-it</test.included.groups>
+                <test.excluded.groups>jdtls-it,mongo-it</test.excluded.groups>
             </properties>
         </profile>
     </profiles>

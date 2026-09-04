@@ -60,12 +60,18 @@ class PublishedDiscoveryContractIT extends PublishedMongoITSupport {
             assertThat(methods.coverage().indexedSourceCount()).isEqualTo(1);
             assertThat(methods.coverage().issues()).containsExactly(new com.java.semantic.model.index.SourceIndexIssue(
                     type.sourceFile(), "JDT_SYNTAX_PROBLEM"));
-            seedEnumConstant(template, type, "READY", 2);
-            seedEnumConstant(template, type, "FAILED", 3);
-            assertThat(service.discoverTypeMembers(new TypeMemberQuery(new RepositoryId("orders"), new RepositoryRevision(REVISION), type,
-                    Set.of(CodeFactKind.ENUM_CONSTANT), 99, 1)).members()).extracting(member ->
-                    ((com.java.semantic.model.codefact.MemberIdentity) member.fact().identity().canonicalIdentity()).name())
-                    .containsExactly("FAILED", "READY");
+            seedMember(template, type, CodeFactKind.FIELD, "state", 2);
+            seedMember(template, type, CodeFactKind.ENUM_CONSTANT, "READY", 3);
+            seedMember(template, type, CodeFactKind.RECORD_COMPONENT, "id", 4);
+            com.java.semantic.model.codefact.TypeMemberResult allMembers = service.discoverTypeMembers(new TypeMemberQuery(
+                    new RepositoryId("orders"), new RepositoryRevision(REVISION), type, TypeMemberQuery.MEMBER_KINDS, 0, 20));
+            assertThat(allMembers.members()).extracting(member -> member.fact().identity().kind())
+                    .containsExactly(CodeFactKind.ENUM_CONSTANT, CodeFactKind.FIELD, CodeFactKind.METHOD, CodeFactKind.RECORD_COMPONENT);
+            com.java.semantic.model.codefact.TypeMemberResult page = service.discoverTypeMembers(new TypeMemberQuery(
+                    new RepositoryId("orders"), new RepositoryRevision(REVISION), type, TypeMemberQuery.MEMBER_KINDS, 1, 2));
+            assertThat(page.totalCount()).isEqualTo(4);
+            assertThat(page.hasMore()).isTrue();
+            assertThat(page.members()).hasSize(2);
         }
     }
 
@@ -143,14 +149,14 @@ class PublishedDiscoveryContractIT extends PublishedMongoITSupport {
         }
     }
 
-    private static void seedEnumConstant(MongoTemplate template, SourceTypeIdentity type, String name, int line) {
+    private static void seedMember(MongoTemplate template, SourceTypeIdentity type, CodeFactKind kind, String name, int line) {
         com.java.semantic.model.codefact.MemberIdentity member = new com.java.semantic.model.codefact.MemberIdentity(type, name);
         com.java.semantic.model.codefact.CodeFactIdentity identity = new com.java.semantic.model.codefact.CodeFactIdentity(
-                new RepositoryId("orders"), new RepositoryRevision(REVISION), CodeFactKind.ENUM_CONSTANT, member);
+                new RepositoryId("orders"), new RepositoryRevision(REVISION), kind, member);
         com.java.semantic.model.codefact.CodeFact fact = new com.java.semantic.model.codefact.CodeFact(
                 com.java.semantic.model.codefact.CodeFactId.from(identity), identity);
         com.java.semantic.model.index.SymbolDocument symbol = new com.java.semantic.model.index.SymbolDocument(new RepositoryId("orders"),
-                new com.java.semantic.model.index.GenerationId("g1"), fact, CodeFactKind.ENUM_CONSTANT, type.fullyQualifiedName(), name,
+                new com.java.semantic.model.index.GenerationId("g1"), fact, kind, type.fullyQualifiedName(), name,
                 member.canonicalForm(), new com.java.semantic.model.codefact.DeclaredType(type.fullyQualifiedName()), Set.of(), List.of(),
                 new com.java.semantic.model.index.SourceArtifactId("a".repeat(64)), new com.java.semantic.model.codefact.SourceRange(type.sourceFile(),
                 new com.java.semantic.model.codefact.SyntaxRange(new com.java.semantic.model.codefact.SyntaxPosition(line, 0),

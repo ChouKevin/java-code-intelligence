@@ -1,31 +1,49 @@
 package com.java.semantic.api;
 
 import org.junit.jupiter.api.Test;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestMapping;
 
+import java.lang.reflect.Method;
 import java.util.Arrays;
+import java.util.LinkedHashSet;
+import java.util.Optional;
 import java.util.Set;
-import java.util.stream.Collectors;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 
 class ReadOnlyQueryControllerContractTest {
 
     @Test
-    void publishes_all_read_only_families_but_no_removed_concept_route() {
-        Set<String> postPaths = Arrays.stream(ReadOnlyQueryController.class.getDeclaredMethods())
-                .map(method -> method.getAnnotation(PostMapping.class))
-                .filter(java.util.Objects::nonNull)
-                .flatMap(mapping -> Arrays.stream(mapping.value()))
-                .collect(Collectors.toUnmodifiableSet());
+    void publishes_exactly_the_twelve_approved_application_routes() throws Exception {
+        Class<?> controller = Class.forName("com.java.semantic.api.SemanticQueryController");
+        RequestMapping rootMapping = controller.getAnnotation(RequestMapping.class);
 
+        assertEquals(Set.of("/api/v1"), Set.copyOf(Arrays.asList(rootMapping.value())));
         assertEquals(Set.of(
-                "/analyses/call-graphs/outgoing", "/analyses/call-graphs/incoming",
-                "/api-routes/lookup", "/api-routes/suggest", "/discovery/event-listeners",
-                "/discovery/method-implementations", "/discovery/type-members", "/discovery/internal-references",
-                "/discovery/source-symbols/resolve", "/discovery/source-segment", "/discovery/method-source",
-                "/discovery/evidence-source"), postPaths);
-        assertFalse(postPaths.stream().anyMatch(path -> path.contains("concept")));
+                "GET /repositories",
+                "GET /repositories/{repositoryId}",
+                "POST /search-code",
+                "POST /fact-source",
+                "POST /entry-points",
+                "POST /api-routes",
+                "POST /event-listeners",
+                "POST /type-members",
+                "POST /method-implementations",
+                "POST /references",
+                "POST /callers",
+                "POST /callees"), operationRoutes(controller));
+    }
+
+    private static Set<String> operationRoutes(Class<?> controller) {
+        Set<String> routes = new LinkedHashSet<>();
+        for (Method method : controller.getDeclaredMethods()) {
+            Optional.ofNullable(method.getAnnotation(GetMapping.class))
+                    .ifPresent(mapping -> Arrays.stream(mapping.value()).map(path -> "GET " + path).forEach(routes::add));
+            Optional.ofNullable(method.getAnnotation(PostMapping.class))
+                    .ifPresent(mapping -> Arrays.stream(mapping.value()).map(path -> "POST " + path).forEach(routes::add));
+        }
+        return Set.copyOf(routes);
     }
 }

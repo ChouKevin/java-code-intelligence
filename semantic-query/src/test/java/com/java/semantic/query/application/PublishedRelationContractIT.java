@@ -91,6 +91,36 @@ class PublishedRelationContractIT extends PublishedMongoITSupport {
     }
 
     @Test
+    void reads_direct_callers_by_target_and_callees_by_source() {
+        try (org.testcontainers.mongodb.MongoDBContainer container = new org.testcontainers.mongodb.MongoDBContainer(
+                org.testcontainers.utility.DockerImageName.parse("mongo:8.0.4"))) {
+            container.start();
+            MongoTemplate template = new MongoTemplate(MongoClients.create(container.getConnectionString()), "published_direct_calls");
+            seedCurrent(template, "orders");
+            CodeFactIdentity method = methodIdentity("example.service", "OrderService", "charge",
+                    "src/main/java/example/service/OrderService.java");
+            CodeFactIdentity caller = methodIdentity("example.service", "CheckoutService", "checkout",
+                    "src/main/java/example/service/CheckoutService.java");
+            CodeFactIdentity callee = methodIdentity("example.gateway", "PaymentGateway", "charge",
+                    "src/main/java/example/gateway/PaymentGateway.java");
+            seedMethod(template, method, List.of());
+            seedMethod(template, caller, List.of());
+            seedMethod(template, callee, List.of());
+            seedRelation(template, caller, RelationKind.CALLS, new RelationTarget.Internal(method), range(caller, 4));
+            seedRelation(template, method, RelationKind.CALLS, new RelationTarget.Internal(callee), range(method, 8));
+            PublishedRelationQueryService service = new PublishedRelationQueryService(template, selector(template, policy()), Duration.ofSeconds(2));
+            PublishedRelationQuery query = new PublishedRelationQuery(new RepositoryId("orders"), new RepositoryRevision(REVISION), method, 0, 20);
+
+            PublishedRelationResult callers = service.findCallers(query);
+            PublishedRelationResult callees = service.findCallees(query);
+
+            assertThat(callers.relations()).extracting(relation -> relation.from().canonicalForm()).containsExactly(caller.canonicalForm());
+            assertThat(callees.relations()).extracting(relation -> relation.target().canonicalForm())
+                    .containsExactly(new RelationTarget.Internal(callee).canonicalForm());
+        }
+    }
+
+    @Test
     void fails_closed_before_disclosing_a_relation_with_inconsistent_flattened_fields() {
         try (org.testcontainers.mongodb.MongoDBContainer container = new org.testcontainers.mongodb.MongoDBContainer(
                 org.testcontainers.utility.DockerImageName.parse("mongo:8.0.4"))) {

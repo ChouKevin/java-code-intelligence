@@ -169,11 +169,9 @@ public final class PublishedDiscoveryQueryService {
                     Filters.in("kind", kinds)));
             long total = template.getCollection(IndexCollections.SYMBOLS).countDocuments(filter,
                     new com.mongodb.client.model.CountOptions().maxTime(storageTimeout.toMillis(), TimeUnit.MILLISECONDS));
-            FindIterable<Document> rows = template.getCollection(IndexCollections.SYMBOLS).find(filter).sort(Sorts.ascending("kind", "name", "canonical"));
-            if (!requiredQuery.kinds().contains(CodeFactKind.ENUM_CONSTANT)) {
-                rows.skip(requiredQuery.offset()).limit(requiredQuery.limit());
-            }
-            rows.maxTime(storageTimeout.toMillis(), TimeUnit.MILLISECONDS);
+            FindIterable<Document> rows = template.getCollection(IndexCollections.SYMBOLS).find(filter)
+                    .sort(Sorts.ascending("kind", "name", "canonical")).skip(requiredQuery.offset()).limit(requiredQuery.limit())
+                    .maxTime(storageTimeout.toMillis(), TimeUnit.MILLISECONDS);
             List<CodeFactSummary> members = new ArrayList<>();
             for (Document row : rows) {
                 SymbolDocument symbol = CodeFactReadService.decode(row, current, template);
@@ -183,8 +181,7 @@ public final class PublishedDiscoveryQueryService {
                 selector.requireVisible(current, symbol.fact().identity());
                 members.add(new CodeFactSummary(symbol.fact(), symbol.range()));
             }
-            boolean hasMore = !requiredQuery.kinds().contains(CodeFactKind.ENUM_CONSTANT)
-                    && requiredQuery.offset() + members.size() < total;
+            boolean hasMore = requiredQuery.offset() + members.size() < total;
             return new TypeMemberResult(current, requiredQuery, members, total, hasMore,
                     coverageReader.coverage(current, accessPlan, Optional.empty(), Optional.of(requiredQuery.sourceType().sourceFile())));
         } catch (MongoException | DataAccessException exception) {

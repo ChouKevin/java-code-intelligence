@@ -1,21 +1,16 @@
 {
   "tools": [
-    "semantic_analyze_incoming_call_graph",
-    "semantic_analyze_outgoing_call_graph",
-    "semantic_discover_event_listeners",
-    "semantic_discover_method_implementations",
-    "semantic_discover_type_members",
-    "semantic_find_internal_references",
-    "semantic_get_code_fact",
-    "semantic_get_evidence_source",
-    "semantic_get_method_source",
-    "semantic_get_repository",
-    "semantic_get_source_segment",
-    "semantic_list_entry_points",
-    "semantic_list_repositories",
-    "semantic_lookup_api_routes",
-    "semantic_resolve_source_symbol",
-    "semantic_search_code_facts",
-    "semantic_suggest_api_routes"
+    "list_repositories",
+    "get_repository",
+    "search_code",
+    "get_fact_source",
+    "list_entry_points",
+    "find_api_routes",
+    "find_event_listeners",
+    "list_type_members",
+    "find_method_implementations",
+    "find_references",
+    "find_callers",
+    "find_callees"
   ]
 }

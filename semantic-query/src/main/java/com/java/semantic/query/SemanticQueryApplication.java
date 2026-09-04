@@ -6,11 +6,11 @@ import com.java.semantic.query.application.CurrentSourceQueryService;
 import com.java.semantic.query.application.CurrentSymbolQueryService;
 import com.java.semantic.query.application.CodeFactReadService;
 import com.java.semantic.query.application.CodeFactSearchService;
-import com.java.semantic.query.application.PublishedCallGraphService;
 import com.java.semantic.query.application.PublishedDiscoveryQueryService;
 import com.java.semantic.query.application.PublishedEntryPointQueryService;
 import com.java.semantic.query.application.PublishedRelationQueryService;
 import com.java.semantic.query.application.PublishedSourceToolService;
+import com.java.semantic.query.application.SemanticQueryFacade;
 import com.java.semantic.query.config.ConfiguredReadPolicy;
 import com.java.semantic.query.config.ReadPolicyProperties;
 import com.java.semantic.query.config.SemanticQueryProperties;
@@ -87,15 +87,21 @@ public class SemanticQueryApplication {
     }
 
     @Bean
-    PublishedCallGraphService publishedCallGraphService(MongoTemplate template, CurrentGenerationSelector selector,
-                                                        SemanticQueryProperties properties) {
-        return new PublishedCallGraphService(template, selector, properties.storageTimeout());
-    }
-
-    @Bean
     PublishedSourceToolService publishedSourceToolService(CurrentSourceQueryService sourceQueryService,
                                                           CodeFactReadService codeFactReadService) {
         return new PublishedSourceToolService(sourceQueryService, codeFactReadService);
+    }
+
+    @Bean
+    SemanticQueryFacade semanticQueryFacade(CurrentRepositoryQueryService repositoryQueryService,
+                                            CodeFactSearchService codeFactSearchService,
+                                            PublishedSourceToolService sourceToolService,
+                                            CodeFactReadService codeFactReadService,
+                                            PublishedDiscoveryQueryService discoveryQueryService,
+                                            PublishedEntryPointQueryService entryPointQueryService,
+                                            PublishedRelationQueryService relationQueryService) {
+        return new SemanticQueryFacade(repositoryQueryService, codeFactSearchService, sourceToolService, codeFactReadService,
+                discoveryQueryService, entryPointQueryService, relationQueryService);
     }
 
     @Bean

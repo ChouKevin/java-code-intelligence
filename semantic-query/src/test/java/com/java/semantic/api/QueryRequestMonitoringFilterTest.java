@@ -11,7 +11,7 @@ class QueryRequestMonitoringFilterTest {
     @Test
     void returns_a_bounded_request_correlation_id_without_echoing_an_untrusted_value() throws Exception {
         QueryRequestMonitoringFilter filter = new QueryRequestMonitoringFilter();
-        MockHttpServletRequest request = new MockHttpServletRequest("POST", "/v1/code-facts/search");
+        MockHttpServletRequest request = new MockHttpServletRequest("POST", "/api/v1/search-code");
         request.addHeader(QueryRequestMonitoringFilter.REQUEST_ID_HEADER, "x".repeat(1025));
         MockHttpServletResponse response = new MockHttpServletResponse();
 
