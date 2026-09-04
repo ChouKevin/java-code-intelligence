@@ -7,6 +7,20 @@ Java Code Intelligence builds a semantic index before query traffic arrives. It 
 
 There is no LLM, chat, prompt, embedding, or vector model inside this service.
 
+## Where changes belong
+
+| Change | Location |
+| --- | --- |
+| Code-fact identities, relations, or persisted schema | `semantic-model/` |
+| Git checkout, JDT LS, extraction, indexing, or publication | `semantic-indexer/` |
+| Mongo reads, HTTP queries, MCP tools, or query security | `semantic-query/` |
+| Deterministic source used by UAT | `semantic-indexer/fixtures/uat/` |
+
+Keep Query independent from Git and JDT LS, and keep the shared model independent
+from Spring and storage libraries. HTTP and MCP operations must use the same Query
+application facade and response contract. Coding-agent guidance is in
+[AGENTS.md](AGENTS.md).
+
 ## Index flow
 
 An Indexer request resolves a branch, tag, or full SHA to a reachable lowercase 40-character commit and stores a job. The HTTP request never runs a build or reset inline. One `index-job-dispatcher` thread polls the oldest `ACCEPTED` job, marks it `RUNNING`, and executes one job at a time.

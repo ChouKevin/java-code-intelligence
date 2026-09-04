@@ -1,35 +1,98 @@
-# Repository Guidelines
+# Java Code Intelligence Repository Guide
 
-## Project Structure & Module Organization
+## Purpose
 
-`java-semantic-service` is a Java 21/Spring Boot Maven reactor. Its canonical repository is `git@github.com:ChouKevin/java-code-intelligence.git`; the current directory is the temporary source for a history-preserving extraction. Never maintain parallel service implementations in both repositories. The root POM owns dependency and plugin management and orders the modules as `semantic-model`, `semantic-indexer`, and `semantic-query`. `semantic-model` is the shared model boundary; `semantic-indexer` contains the current Spring Boot application and all production code; `semantic-query` is an empty query boundary that currently depends only on `semantic-model`. In `semantic-indexer`, production code lives under `src/main/java/com/java/semantic`. Packages separate HTTP contracts (`api`), graph construction (`callgraph`), repository lifecycle (`repository`), JDT LS integration (`semantic`), JDT syntax extraction (`syntax`), route matching (`trie`), and shared identity/diagnostics/configuration. Runtime configuration is in `semantic-indexer/src/main/resources/application.yml`; the versioned contract is `semantic-indexer/src/main/resources/openapi/semantic-api-v1.yaml`. Tests mirror production packages under `semantic-indexer/src/test/java`, with fixture repositories in `semantic-indexer/src/test/resources/fixtures`.
+This repository turns exact Java repository revisions into immutable, queryable
+code facts. It contains two independently deployable applications and one shared
+model module:
 
-Domain vocabulary is summarized in [`docs/domain-model.md`](docs/domain-model.md).
+- Indexer checks out Git, runs JDT LS and syntax extraction, and publishes sealed
+  MongoDB generations.
+- Query reads the current sealed generation and exposes read-only HTTP and MCP
+  operations.
+- Model defines the framework-neutral identities, facts, relations, repository
+  values, and persisted index contract shared by both applications.
 
-## Build, Test, and Development Commands
+Semantic reports code evidence. It does not contain a model, prompts, chat history,
+or business conclusions.
 
-Run commands from the reactor root:
+## Hard boundaries
+
+- `semantic-query` must remain Mongo-only. Do not add Git checkout, JGit, JDT, JDT
+  LS, source-workspace fallback, or model dependencies to Query.
+- `semantic-indexer` owns all repository mutation, JDT LS work, extraction,
+  validation, and generation publication. Query never starts or controls Indexer.
+- `semantic-model` stays framework-neutral. Do not depend on Spring, MongoDB, JGit,
+  JDT, MCP, or transport DTOs from this module.
+- Query serves only the current published revision. Repository-scoped requests must
+  carry `repositoryId` and the exact `revision`; do not silently replace either.
+- HTTP and MCP are two transports over the same application facade and result
+  contract. Do not implement separate query behavior or response shapes for MCP.
+- MCP tools return indexed facts and source evidence. They must not infer whether a
+  business feature is supported or fabricate facts for empty results.
+- Keep one Indexer process and one dispatcher thread. Multiple workers or
+  distributed job ownership require a new design.
+- Do not add compatibility decoders for removed pre-release index schemas. Follow
+  the documented rebuild and release order when persisted data changes.
+
+## Module map
+
+- `semantic-model/`: code facts, repository values, query values, projection names,
+  Mongo collection contracts, and schema versions.
+- `semantic-indexer/`: admin API, job dispatcher, Git checkout, incremental planning,
+  JDT/JDT-LS adapters, projection writers, validation, and UAT fixtures.
+- `semantic-query/`: current-generation selection, Mongo readers, application facade,
+  HTTP controllers, MCP catalog, security, and result mapping.
+- `semantic-indexer/fixtures/uat/`: deterministic payment, order, and video fixture
+  source owned by this repository.
+- `docs/operations/`: schema evolution, indexing, deployment, and recovery rules.
+- `scripts/`: image smoke tests and deployed Indexer/Query contract checks.
+
+## Change guide
+
+- New or changed code fact: update `semantic-model`, the Indexer projection, its
+  validation, Query decoding/mapping, and focused tests together.
+- New Query operation: add one application contract and facade path, then expose the
+  same behavior through HTTP and MCP with parity coverage.
+- New MCP tool: keep its name, description, input schema, facade dispatch, structured
+  result, and HTTP equivalent aligned. Tool errors must use the shared error mapper.
+- Persisted projection change: follow `docs/operations/tool-data-evolution.md`; update
+  the schema/projection version and verify the required rebuild and release order.
+- Extraction change: preserve exact source ranges, stable fact identities, and honest
+  handling of unresolved or unsupported source.
+- Repository lifecycle change: preserve asynchronous jobs, exact commits, one active
+  job per repository, explicit retries, and expected-parent publication.
+
+## Verification
+
+Use Java 21 and run commands from the reactor root. The ordinary suite requires
+neither Docker nor a real JDT LS:
 
 ```bash
-mvn clean test
-mvn -pl semantic-indexer -am package && java -jar semantic-indexer/target/semantic-indexer-0.0.1-SNAPSHOT.jar
-JDTLS_HOME=/opt/jdtls mvn -pl semantic-indexer -am -Pjdtls-it test
+mvn --batch-mode --no-transfer-progress test
 ```
 
-The first command runs the ordinary suite without Docker, Mongo, or a real JDT LS. The profile command includes only real-server JDT LS integration tests and requires a valid `JDTLS_HOME`. The `mongo-it` profile includes only Mongo/Testcontainers integration tests when they are added.
+Run Mongo integration tests for persisted schema or Query storage changes:
 
-## Coding Style & Naming Conventions
+```bash
+mvn --batch-mode --no-transfer-progress -Pmongo-it verify
+```
 
-Use four-space indentation and explicit Java types; never use `var`. Prefer records for immutable value objects. Packages are lowercase, classes use PascalCase, and methods/fields use camelCase. Avoid raw `== null`/`!= null`; use `Objects`, Spring assertions, or collection/string utilities. Use meaningful domain exceptions and `@Slf4j` parameterized logs. Do not log credentials, source bodies, or sensitive filesystem paths.
+Run real JDT LS and deployed checks only when their boundaries change:
 
-## Testing Guidelines
+```bash
+JDTLS_HOME=/opt/jdtls mvn --batch-mode --no-transfer-progress -Pjdtls-it test
+JDTLS_HOME=/opt/jdtls scripts/test-indexer-query-contract.sh
+```
 
-Use JUnit 5, Spring Boot Test, Mockito, and ArchUnit. Name unit tests `*Test`; reserve `*IT` plus the `jdtls-it` tag for tests requiring a real language server. Add focused functional coverage for behavior changes and run `ArchitectureTest` when package dependencies change. Before a PR, run the full ordinary suite; run the JDT LS profile for lifecycle or semantic-resolution changes.
+Also run the relevant fixture Maven tests when extraction behavior changes. Do not
+turn real JDT LS, Docker, or deployed tests into requirements for the ordinary unit
+suite.
 
-## Commit & Pull Request Guidelines
+## Security and data
 
-Follow the existing Conventional Commit style: `feat(semantic): ...`, `fix(semantic): ...`, `test(semantic): ...`, or `docs(semantic): ...`. Keep commits small and behavior-focused. PRs should explain the problem and observable behavior, link the issue when available, list verification commands, and call out API, OpenAPI, configuration, concurrency, or process-lifecycle effects.
-
-## Security & Configuration
-
-Copy values from `.env.example`; never commit tokens or credentials. Treat `SEMANTIC_API_TOKEN`, Git credentials, repository data, and JDT LS workspace data as sensitive. Preserve fail-closed authorization and read-policy behavior when changing endpoints.
+- Never commit Git credentials, API tokens, MongoDB credentials, indexed repository
+  contents, JDT LS workspaces, or generated evidence.
+- Keep Indexer admin and Query read credentials separate.
+- Preserve fail-closed repository visibility and Query authorization.
+- Do not log credentials, full source bodies, or sensitive local paths.
