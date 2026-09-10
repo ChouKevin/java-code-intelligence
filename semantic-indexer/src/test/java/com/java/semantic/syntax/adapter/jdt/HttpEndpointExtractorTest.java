@@ -14,7 +14,7 @@ import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** API 抽取規則，這些規則在舊分析器裡沒有任何測試 */
-class ApiExtractorTest {
+class HttpEndpointExtractorTest {
 
     private final RepositorySyntax syntax = SyntaxFixtures.extractSyntaxFixture();
 

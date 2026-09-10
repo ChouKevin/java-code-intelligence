@@ -18,7 +18,7 @@ import org.eclipse.jdt.core.dom.MethodDeclaration;
  * <p>
  * 支援範圍等同 call graph 分類器既有的集合：RabbitMQ 與 Kafka
  */
-final class MqExtractor {
+final class MessageListenerExtractor {
 
     private static final String DEPRECATED = "Deprecated";
 
@@ -34,7 +34,7 @@ final class MqExtractor {
     private record BrokerBinding(MqBroker broker, String annotation, String[] destinationAttributes) {
     }
 
-    private MqExtractor() {
+    private MessageListenerExtractor() {
     }
 
     static List<MqEntryPoint> extract(

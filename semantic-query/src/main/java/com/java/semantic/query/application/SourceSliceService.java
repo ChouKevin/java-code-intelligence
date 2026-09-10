@@ -15,11 +15,11 @@ import java.util.Objects;
 import java.util.Optional;
 
 /** Materializes only authorized slices from stored source artifacts. */
-public final class PublishedSourceToolService {
+public final class SourceSliceService {
     private final CurrentSourceQueryService sourceQueryService;
     private final CodeFactReadService codeFactReadService;
 
-    public PublishedSourceToolService(CurrentSourceQueryService sourceQueryService, CodeFactReadService codeFactReadService) {
+    public SourceSliceService(CurrentSourceQueryService sourceQueryService, CodeFactReadService codeFactReadService) {
         this.sourceQueryService = Objects.requireNonNull(sourceQueryService, "source query service is required");
         this.codeFactReadService = Objects.requireNonNull(codeFactReadService, "code fact read service is required");
     }

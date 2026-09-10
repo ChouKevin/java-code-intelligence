@@ -38,20 +38,20 @@ import java.util.Set;
 public final class SemanticQueryFacade {
     private final CurrentRepositoryQueryService repositoryQueryService;
     private final CodeFactSearchService codeFactSearchService;
-    private final PublishedSourceToolService sourceToolService;
+    private final SourceSliceService sourceSliceService;
     private final CodeFactReadService codeFactReadService;
     private final PublishedDiscoveryQueryService discoveryQueryService;
     private final PublishedEntryPointQueryService entryPointQueryService;
     private final PublishedRelationQueryService relationQueryService;
 
     public SemanticQueryFacade(CurrentRepositoryQueryService repositoryQueryService, CodeFactSearchService codeFactSearchService,
-                               PublishedSourceToolService sourceToolService, CodeFactReadService codeFactReadService,
+                               SourceSliceService sourceSliceService, CodeFactReadService codeFactReadService,
                                PublishedDiscoveryQueryService discoveryQueryService,
                                PublishedEntryPointQueryService entryPointQueryService,
                                PublishedRelationQueryService relationQueryService) {
         this.repositoryQueryService = Objects.requireNonNull(repositoryQueryService, "repository query service is required");
         this.codeFactSearchService = Objects.requireNonNull(codeFactSearchService, "code fact search service is required");
-        this.sourceToolService = Objects.requireNonNull(sourceToolService, "source tool service is required");
+        this.sourceSliceService = Objects.requireNonNull(sourceSliceService, "source slice service is required");
         this.codeFactReadService = Objects.requireNonNull(codeFactReadService, "code fact read service is required");
         this.discoveryQueryService = Objects.requireNonNull(discoveryQueryService, "discovery query service is required");
         this.entryPointQueryService = Objects.requireNonNull(entryPointQueryService, "entry point query service is required");
@@ -88,7 +88,7 @@ public final class SemanticQueryFacade {
         for (CodeFactSummary summary : result.facts()) {
             CodeFactReadQuery sourceQuery = new CodeFactReadQuery(result.generation().repositoryId(), result.generation().revision(),
                     summary.fact().id());
-            FactSourceSlice source = sourceToolService.factSource(sourceQuery, 0);
+            FactSourceSlice source = sourceSliceService.factSource(sourceQuery, 0);
             elements.add(SemanticResultMapper.toProgramElement(summary, source));
         }
         return SemanticResultMapper.toSearchCodeResult(result, elements);
@@ -98,7 +98,7 @@ public final class SemanticQueryFacade {
         SemanticQueryContract.FactSourceRequest requiredRequest = Objects.requireNonNull(request, "fact source request is required");
         CodeFactReadQuery query = new CodeFactReadQuery(new RepositoryId(requiredRequest.repositoryId()),
                 new RepositoryRevision(requiredRequest.revision()), new CodeFactId(requiredRequest.factId()));
-        FactSourceSlice source = sourceToolService.factSource(query, requiredRequest.contextLines());
+        FactSourceSlice source = sourceSliceService.factSource(query, requiredRequest.contextLines());
         return SemanticResultMapper.toFactSourceResult(requiredRequest.factId(), source);
     }
 
@@ -135,7 +135,7 @@ public final class SemanticQueryFacade {
         List<SemanticQueryContract.EventListenerItem> items = new ArrayList<>();
         for (EventListenerCandidate candidate : result.candidates()) {
             CodeFactDetails handler = readMethod(result.generation(), candidate.target());
-            FactSourceSlice source = sourceToolService.factSource(readQuery(result.generation(), handler.fact().id().value()), 0);
+            FactSourceSlice source = sourceSliceService.factSource(readQuery(result.generation(), handler.fact().id().value()), 0);
             items.add(new SemanticQueryContract.EventListenerItem(requiredRequest.eventType(), SemanticResultMapper.toProgramElement(handler, source)));
         }
         return SemanticResultMapper.toCollectionResult(result.generation(), requiredRequest.offset(), requiredRequest.limit(), items,
@@ -157,7 +157,7 @@ public final class SemanticQueryFacade {
                 new RepositoryRevision(requiredRequest.revision()), sourceType, kinds, requiredRequest.offset(), requiredRequest.limit()));
         List<SemanticQueryContract.ProgramElement> items = new ArrayList<>();
         for (CodeFactSummary member : result.members()) {
-            FactSourceSlice source = sourceToolService.factSource(readQuery(result.generation(), member.fact().id().value()), 0);
+            FactSourceSlice source = sourceSliceService.factSource(readQuery(result.generation(), member.fact().id().value()), 0);
             items.add(SemanticResultMapper.toProgramElement(member, source));
         }
         return SemanticResultMapper.toCollectionResult(result.generation(), requiredRequest.offset(), requiredRequest.limit(), items,
@@ -216,7 +216,7 @@ public final class SemanticQueryFacade {
             throw new IndexContractMismatchException();
         }
         CodeFactDetails handler = readMethod(generation, identity.method());
-        FactSourceSlice source = sourceToolService.factSource(readQuery(generation, handler.fact().id().value()), 0);
+        FactSourceSlice source = sourceSliceService.factSource(readQuery(generation, handler.fact().id().value()), 0);
         return new SemanticQueryContract.EntryPointItem(entryPointFactId, SemanticResultMapper.toProgramElement(handler, source),
                 toTrigger(identity.entryPointKind(), identity.trigger()));
     }
@@ -241,7 +241,7 @@ public final class SemanticQueryFacade {
 
     private SemanticQueryContract.ProgramElement programElement(CurrentGeneration generation, CodeFactIdentity identity) {
         CodeFactDetails details = codeFactReadService.get(readQuery(generation, CodeFactId.from(identity).value()));
-        FactSourceSlice source = sourceToolService.factSource(readQuery(generation, details.fact().id().value()), 0);
+        FactSourceSlice source = sourceSliceService.factSource(readQuery(generation, details.fact().id().value()), 0);
         return SemanticResultMapper.toProgramElement(details, source);
     }
 
@@ -270,7 +270,7 @@ public final class SemanticQueryFacade {
 
     private SemanticQueryContract.RelationSite callSite(CurrentGeneration generation,
                                                         com.java.semantic.model.index.RelationDocument relation) {
-        FactSourceSlice source = sourceToolService.factSource(readQuery(generation, relation.fact().id().value()), 0);
+        FactSourceSlice source = sourceSliceService.factSource(readQuery(generation, relation.fact().id().value()), 0);
         return new SemanticQueryContract.RelationSite(relation.fact().id().value(),
                 SourceSnippetMapper.toSnippet(source.sourceRange(), source.fileContent()));
     }

@@ -9,7 +9,7 @@ import com.java.semantic.query.application.CodeFactSearchService;
 import com.java.semantic.query.application.PublishedDiscoveryQueryService;
 import com.java.semantic.query.application.PublishedEntryPointQueryService;
 import com.java.semantic.query.application.PublishedRelationQueryService;
-import com.java.semantic.query.application.PublishedSourceToolService;
+import com.java.semantic.query.application.SourceSliceService;
 import com.java.semantic.query.application.SemanticQueryFacade;
 import com.java.semantic.query.config.ConfiguredReadPolicy;
 import com.java.semantic.query.config.ReadPolicyProperties;
@@ -87,20 +87,20 @@ public class SemanticQueryApplication {
     }
 
     @Bean
-    PublishedSourceToolService publishedSourceToolService(CurrentSourceQueryService sourceQueryService,
-                                                          CodeFactReadService codeFactReadService) {
-        return new PublishedSourceToolService(sourceQueryService, codeFactReadService);
+    SourceSliceService sourceSliceService(CurrentSourceQueryService sourceQueryService,
+                                          CodeFactReadService codeFactReadService) {
+        return new SourceSliceService(sourceQueryService, codeFactReadService);
     }
 
     @Bean
     SemanticQueryFacade semanticQueryFacade(CurrentRepositoryQueryService repositoryQueryService,
                                             CodeFactSearchService codeFactSearchService,
-                                            PublishedSourceToolService sourceToolService,
+                                            SourceSliceService sourceSliceService,
                                             CodeFactReadService codeFactReadService,
                                             PublishedDiscoveryQueryService discoveryQueryService,
                                             PublishedEntryPointQueryService entryPointQueryService,
                                             PublishedRelationQueryService relationQueryService) {
-        return new SemanticQueryFacade(repositoryQueryService, codeFactSearchService, sourceToolService, codeFactReadService,
+        return new SemanticQueryFacade(repositoryQueryService, codeFactSearchService, sourceSliceService, codeFactReadService,
                 discoveryQueryService, entryPointQueryService, relationQueryService);
     }
 

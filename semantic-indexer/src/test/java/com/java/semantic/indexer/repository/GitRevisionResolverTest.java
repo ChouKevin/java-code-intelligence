@@ -20,7 +20,7 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
-class RepositorySourceAdapterTest {
+class GitRevisionResolverTest {
     @TempDir
     Path temporaryDirectory;
 
@@ -33,10 +33,10 @@ class RepositorySourceAdapterTest {
         RepositoryRevision release = new RepositoryRevision("b".repeat(40));
         when(git.resolveRemoteRef("https://example.test/orders.git", "main")).thenReturn(main);
         when(git.resolveRemoteRef("https://example.test/orders.git", "release")).thenReturn(release);
-        RepositorySourceAdapter source = new RepositorySourceAdapter(registry, git);
+        GitRevisionResolver resolver = new GitRevisionResolver(registry, git);
 
-        assertThat(source.ensure(repositoryId)).isEqualTo(main);
-        assertThat(source.sync(repositoryId, Optional.of("release"))).isEqualTo(release);
+        assertThat(resolver.ensure(repositoryId)).isEqualTo(main);
+        assertThat(resolver.sync(repositoryId, Optional.of("release"))).isEqualTo(release);
         assertThat(registry.get(repositoryId).snapshot()).isEmpty();
         verify(git).resolveRemoteRef("https://example.test/orders.git", "main");
         verify(git).resolveRemoteRef("https://example.test/orders.git", "release");
@@ -50,9 +50,9 @@ class RepositorySourceAdapterTest {
         String missingRevision = "c".repeat(40);
         when(git.resolveRemoteRef("https://example.test/orders.git", missingRevision))
                 .thenThrow(new IllegalArgumentException("revision was not found"));
-        RepositorySourceAdapter source = new RepositorySourceAdapter(remoteRegistry(repositoryId), git);
+        GitRevisionResolver resolver = new GitRevisionResolver(remoteRegistry(repositoryId), git);
 
-        assertThatThrownBy(() -> source.checkout(repositoryId, missingRevision))
+        assertThatThrownBy(() -> resolver.checkout(repositoryId, missingRevision))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("revision was not found");
     }
@@ -61,12 +61,12 @@ class RepositorySourceAdapterTest {
     void rejects_uppercase_and_abbreviated_checkout_revisions_before_remote_resolution() {
         RepositoryId repositoryId = RepositoryId.of("orders");
         GitRepositoryPort git = mock(GitRepositoryPort.class);
-        RepositorySourceAdapter source = new RepositorySourceAdapter(remoteRegistry(repositoryId), git);
+        GitRevisionResolver resolver = new GitRevisionResolver(remoteRegistry(repositoryId), git);
 
-        assertThatThrownBy(() -> source.checkout(repositoryId, "A".repeat(40)))
+        assertThatThrownBy(() -> resolver.checkout(repositoryId, "A".repeat(40)))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("lowercase hexadecimal");
-        assertThatThrownBy(() -> source.checkout(repositoryId, "a".repeat(39)))
+        assertThatThrownBy(() -> resolver.checkout(repositoryId, "a".repeat(39)))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("40-character lowercase hexadecimal");
         verifyNoInteractions(git);

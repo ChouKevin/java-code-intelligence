@@ -37,7 +37,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 @Tag("mongo-it")
-class PublishedSourceToolContractIT extends PublishedMongoITSupport {
+class SourceSliceContractIT extends PublishedMongoITSupport {
     @Test
     void resolves_relation_fact_source_by_opaque_id_and_keeps_fact_and_context_ranges_distinct() {
         try (MongoDBContainer container = new MongoDBContainer(DockerImageName.parse("mongo:8.0.4"))) {
@@ -53,7 +53,7 @@ class PublishedSourceToolContractIT extends PublishedMongoITSupport {
                     new RelationTarget.External(new ExternalTarget.Endpoint("POST", "https://payments.example/charge")), factRange)
                     .fact().identity();
             seedSearch(template, relation, "RELATIONS", List.of("charge", "payment"));
-            PublishedSourceToolService service = new PublishedSourceToolService(
+            SourceSliceService service = new SourceSliceService(
                     new CurrentSourceQueryService(template, selector(template, policy()), Duration.ofSeconds(2)),
                     new CodeFactReadService(template, selector(template, policy()), Duration.ofSeconds(2)));
             CodeFactReadQuery query = new CodeFactReadQuery(new RepositoryId("orders"), new RepositoryRevision(REVISION), CodeFactId.from(relation));
@@ -91,7 +91,7 @@ class PublishedSourceToolContractIT extends PublishedMongoITSupport {
                     List.of(new ReadPolicyProperties.MethodRule("orders", "example.payment", "PaymentClient", "forbidden",
                             List.of("example.events.VideoReady")))));
             CurrentGenerationSelector currentGenerationSelector = selector(template, forbiddenMethodPolicy);
-            PublishedSourceToolService service = new PublishedSourceToolService(
+            SourceSliceService service = new SourceSliceService(
                     new CurrentSourceQueryService(template, currentGenerationSelector, Duration.ofSeconds(2)),
                     new CodeFactReadService(template, currentGenerationSelector, Duration.ofSeconds(2)));
             CodeFactReadQuery query = new CodeFactReadQuery(new RepositoryId("orders"), new RepositoryRevision(REVISION), CodeFactId.from(relation));
@@ -119,7 +119,7 @@ class PublishedSourceToolContractIT extends PublishedMongoITSupport {
                             new Document("name", "ENTRY_POINTS").append("version", 2),
                             new Document("name", "SEARCH").append("version", 2)))));
             CurrentGenerationSelector currentGenerationSelector = selector(template, policy());
-            PublishedSourceToolService service = new PublishedSourceToolService(
+            SourceSliceService service = new SourceSliceService(
                     new CurrentSourceQueryService(template, currentGenerationSelector, Duration.ofSeconds(2)),
                     new CodeFactReadService(template, currentGenerationSelector, Duration.ofSeconds(2)));
             CodeFactReadQuery query = new CodeFactReadQuery(new RepositoryId("orders"), new RepositoryRevision(REVISION), CodeFactId.from(method));
@@ -141,7 +141,7 @@ class PublishedSourceToolContractIT extends PublishedMongoITSupport {
             seedType(template, type, artifact.id());
             CodeFactIdentity method = methodIdentity("example.video", "VideoListener", "onReady", path);
             seedMethod(template, method, List.of());
-            PublishedSourceToolService service = new PublishedSourceToolService(new CurrentSourceQueryService(template, selector(template, policy()), Duration.ofSeconds(2)),
+            SourceSliceService service = new SourceSliceService(new CurrentSourceQueryService(template, selector(template, policy()), Duration.ofSeconds(2)),
                     new CodeFactReadService(template, selector(template, policy()), Duration.ofSeconds(2)));
 
             assertThat(service.methodSource("orders", REVISION, method).content()).isEqualTo("😀method");
@@ -199,7 +199,7 @@ class PublishedSourceToolContractIT extends PublishedMongoITSupport {
                 MongoTemplate observedTemplate = new MongoTemplate(observedClient, "published_source_denied");
                 ConfiguredReadPolicy deniedPolicy = policy(new ReadPolicyProperties.PackageRule("orders", "example.video"));
                 CurrentGenerationSelector deniedSelector = selector(observedTemplate, deniedPolicy);
-                PublishedSourceToolService service = new PublishedSourceToolService(
+                SourceSliceService service = new SourceSliceService(
                         new CurrentSourceQueryService(observedTemplate, deniedSelector, Duration.ofSeconds(2)),
                         new CodeFactReadService(observedTemplate, deniedSelector, Duration.ofSeconds(2)));
                 String path = "src/main/java/example/video/VideoListener.java";

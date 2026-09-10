@@ -78,7 +78,7 @@ public final class CodeFactReadService {
         }
     }
 
-    /** Internal exact-identity helper for source tools that have not yet been handed a search hit. */
+    /** Internal exact-identity helper for source slices that have not yet been handed a search hit. */
     CodeFactDetails get(String repositoryId, String revision, CodeFactIdentity identity) {
         CodeFactIdentity expectedIdentity = Objects.requireNonNull(identity, "code fact identity is required");
         CurrentGeneration current = selector.selectCodeFact(repositoryId, revision, expectedIdentity);

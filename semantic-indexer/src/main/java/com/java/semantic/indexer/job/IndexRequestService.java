@@ -1,6 +1,6 @@
 package com.java.semantic.indexer.job;
 
-import com.java.semantic.indexer.repository.RepositorySourcePort;
+import com.java.semantic.indexer.repository.RepositoryRevisionResolver;
 import com.java.semantic.repository.application.RepositoryNotFoundException;
 import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.model.repository.RepositoryRevision;
@@ -10,28 +10,28 @@ import org.springframework.stereotype.Service;
 import java.util.Objects;
 import java.util.Optional;
 
-/** Accepts administrative requests after resolving source; indexing itself is deliberately deferred to a worker. */
+/** Accepts administrative requests after resolving repository revisions; indexing itself is deliberately deferred to a worker. */
 @Service
 public final class IndexRequestService {
-    private final RepositorySourcePort source;
+    private final RepositoryRevisionResolver revisionResolver;
     private final IndexJobStore jobs;
 
-    public IndexRequestService(RepositorySourcePort source, IndexJobStore jobs) {
-        this.source = Objects.requireNonNull(source, "source is required");
+    public IndexRequestService(RepositoryRevisionResolver revisionResolver, IndexJobStore jobs) {
+        this.revisionResolver = Objects.requireNonNull(revisionResolver, "revision resolver is required");
         this.jobs = Objects.requireNonNull(jobs, "jobs is required");
     }
 
     public IndexJob ensure(RepositoryId repositoryId) {
         jobs.reconcileCommitted(repositoryId);
-        return jobs.admitEnsure(repositoryId, source.ensure(repositoryId));
+        return jobs.admitEnsure(repositoryId, revisionResolver.ensure(repositoryId));
     }
 
     public IndexJob sync(RepositoryId repositoryId, Optional<String> branch) {
-        return admit(repositoryId, source.sync(repositoryId, branch), false);
+        return admit(repositoryId, revisionResolver.sync(repositoryId, branch), false);
     }
 
     public IndexJob checkout(RepositoryId repositoryId, String revision) {
-        return admit(repositoryId, source.checkout(repositoryId, revision), false);
+        return admit(repositoryId, revisionResolver.checkout(repositoryId, revision), false);
     }
 
     public IndexJob rebuild(RepositoryId repositoryId, boolean authorizeIncompatibleSchema,

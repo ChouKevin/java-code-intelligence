@@ -55,7 +55,7 @@ class PublishedAuthorizationContractIT extends PublishedMongoITSupport {
                 CurrentGenerationSelector deniedSelector = selector(template, deniedPolicy);
                 CodeFactSearchService search = new CodeFactSearchService(template, deniedSelector, Duration.ofSeconds(2));
                 PublishedDiscoveryQueryService discovery = new PublishedDiscoveryQueryService(template, deniedSelector, Duration.ofSeconds(2));
-                PublishedSourceToolService source = new PublishedSourceToolService(
+                SourceSliceService source = new SourceSliceService(
                         new CurrentSourceQueryService(template, deniedSelector, Duration.ofSeconds(2)),
                         new CodeFactReadService(template, deniedSelector, Duration.ofSeconds(2)));
                 String path = "src/main/java/example/payment/PaymentService.java";

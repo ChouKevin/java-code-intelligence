@@ -1,6 +1,6 @@
 package com.java.semantic.indexer.job;
 
-import com.java.semantic.indexer.repository.RepositorySourcePort;
+import com.java.semantic.indexer.repository.RepositoryRevisionResolver;
 import com.java.semantic.model.index.GenerationId;
 import com.java.semantic.model.index.ManifestDigest;
 import com.java.semantic.model.index.PublishedGenerationPointer;
@@ -18,15 +18,15 @@ import static org.mockito.Mockito.when;
 class IndexRequestServiceTest {
     @Test
     void ensure_resolves_source_then_returns_an_accepted_job_without_waiting_for_work() {
-        RepositorySourcePort source = mock(RepositorySourcePort.class);
+        RepositoryRevisionResolver revisionResolver = mock(RepositoryRevisionResolver.class);
         IndexJobStore store = mock(IndexJobStore.class);
         RepositoryId repositoryId = RepositoryId.of("payments");
         RepositoryRevision revision = new RepositoryRevision("a".repeat(40));
         IndexJob job = job(repositoryId, revision);
-        when(source.ensure(repositoryId)).thenReturn(revision);
+        when(revisionResolver.ensure(repositoryId)).thenReturn(revision);
         when(store.admitEnsure(repositoryId, revision)).thenReturn(job);
 
-        IndexJob result = new IndexRequestService(source, store).ensure(repositoryId);
+        IndexJob result = new IndexRequestService(revisionResolver, store).ensure(repositoryId);
 
         assertThat(result).isEqualTo(job);
         org.mockito.InOrder order = org.mockito.Mockito.inOrder(store);
@@ -36,21 +36,21 @@ class IndexRequestServiceTest {
 
     @Test
     void accepts_sync_checkout_rebuild_and_rollback_as_deferred_jobs() {
-        RepositorySourcePort source = mock(RepositorySourcePort.class);
+        RepositoryRevisionResolver revisionResolver = mock(RepositoryRevisionResolver.class);
         IndexJobStore store = mock(IndexJobStore.class);
         RepositoryId repositoryId = RepositoryId.of("payments");
         RepositoryRevision revision = new RepositoryRevision("b".repeat(40));
         IndexJob job = job(repositoryId, revision);
         PublishedGenerationPointer current = pointer(revision, "g-current", "job-current");
         PublishedGenerationPointer rollback = pointer(revision, "g-rollback", "job-rollback");
-        when(source.sync(repositoryId, Optional.of("main"))).thenReturn(revision);
-        when(source.checkout(repositoryId, revision.value())).thenReturn(revision);
+        when(revisionResolver.sync(repositoryId, Optional.of("main"))).thenReturn(revision);
+        when(revisionResolver.checkout(repositoryId, revision.value())).thenReturn(revision);
         when(store.currentRevision(repositoryId)).thenReturn(Optional.of(revision));
         when(store.admit(repositoryId, revision, false)).thenReturn(job);
         when(store.admitRebuild(repositoryId, revision, current)).thenReturn(job);
         when(store.admitRollback(repositoryId, current, rollback)).thenReturn(job);
 
-        IndexRequestService service = new IndexRequestService(source, store);
+        IndexRequestService service = new IndexRequestService(revisionResolver, store);
         assertThat(service.sync(repositoryId, Optional.of("main"))).isEqualTo(job);
         assertThat(service.checkout(repositoryId, revision.value())).isEqualTo(job);
         assertThat(service.rebuild(repositoryId, true, current)).isEqualTo(job);

@@ -32,7 +32,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 /** 內部 reference 固定形狀效能事件測試 */
-class ApiMonitoringAspectTest {
+class InternalReferenceLoggingTest {
 
     private static final RepositoryId REPOSITORY_ID = RepositoryId.of("orders");
     private static final RepositoryRevision REVISION = RepositoryRevision.ofSha("a".repeat(40));

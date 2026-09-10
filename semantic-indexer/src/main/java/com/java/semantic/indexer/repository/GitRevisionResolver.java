@@ -11,11 +11,11 @@ import java.util.Objects;
 import java.util.Optional;
 
 @Component
-final class RepositorySourceAdapter implements RepositorySourcePort {
+final class GitRevisionResolver implements RepositoryRevisionResolver {
     private final RepositoryRuntimeRegistry registry;
     private final GitRepositoryPort git;
 
-    RepositorySourceAdapter(RepositoryRuntimeRegistry registry, GitRepositoryPort git) {
+    GitRevisionResolver(RepositoryRuntimeRegistry registry, GitRepositoryPort git) {
         this.registry = Objects.requireNonNull(registry, "registry is required");
         this.git = Objects.requireNonNull(git, "git is required");
     }

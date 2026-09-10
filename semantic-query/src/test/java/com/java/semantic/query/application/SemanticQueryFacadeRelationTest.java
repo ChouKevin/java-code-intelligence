@@ -53,7 +53,7 @@ class SemanticQueryFacadeRelationTest {
         RelationDocument relation = relation(caller, RelationKind.CALLS, new RelationTarget.Internal(target));
         CodeFactReadService facts = mock(CodeFactReadService.class);
         PublishedRelationQueryService relations = mock(PublishedRelationQueryService.class);
-        PublishedSourceToolService source = mock(PublishedSourceToolService.class);
+        SourceSliceService source = mock(SourceSliceService.class);
         when(facts.get(new CodeFactReadQuery(new RepositoryId(REPOSITORY), new RepositoryRevision(REVISION), CodeFactId.from(target))))
                 .thenReturn(details(target));
         when(facts.get(new CodeFactReadQuery(new RepositoryId(REPOSITORY), new RepositoryRevision(REVISION), CodeFactId.from(caller))))
@@ -85,7 +85,7 @@ class SemanticQueryFacadeRelationTest {
         when(facts.get(new CodeFactReadQuery(new RepositoryId(REPOSITORY), new RepositoryRevision(REVISION), CodeFactId.from(field))))
                 .thenReturn(details(field));
         when(relations.findReferences(any(PublishedRelationQuery.class))).thenReturn(result(field, List.of()));
-        SemanticQueryFacade facade = facade(facts, mock(PublishedSourceToolService.class), relations);
+        SemanticQueryFacade facade = facade(facts, mock(SourceSliceService.class), relations);
 
         assertThrows(CodeFactKindMismatchException.class, () -> facade.findReferences(new RelationRequest(REPOSITORY, REVISION,
                 CodeFactId.from(occurrence).value(), 0, 20)));
@@ -102,7 +102,7 @@ class SemanticQueryFacadeRelationTest {
         RelationDocument relation = relation(container, RelationKind.REFERENCES, new RelationTarget.Internal(target));
         CodeFactReadService facts = mock(CodeFactReadService.class);
         PublishedRelationQueryService relations = mock(PublishedRelationQueryService.class);
-        PublishedSourceToolService source = mock(PublishedSourceToolService.class);
+        SourceSliceService source = mock(SourceSliceService.class);
         when(facts.get(new CodeFactReadQuery(new RepositoryId(REPOSITORY), new RepositoryRevision(REVISION), CodeFactId.from(target))))
                 .thenReturn(details(target));
         when(facts.get(new CodeFactReadQuery(new RepositoryId(REPOSITORY), new RepositoryRevision(REVISION), CodeFactId.from(container))))
@@ -127,7 +127,7 @@ class SemanticQueryFacadeRelationTest {
         RelationDocument relation = relation(target, RelationKind.CALLS, external);
         CodeFactReadService facts = mock(CodeFactReadService.class);
         PublishedRelationQueryService relations = mock(PublishedRelationQueryService.class);
-        PublishedSourceToolService source = mock(PublishedSourceToolService.class);
+        SourceSliceService source = mock(SourceSliceService.class);
         when(facts.get(new CodeFactReadQuery(new RepositoryId(REPOSITORY), new RepositoryRevision(REVISION), CodeFactId.from(target))))
                 .thenReturn(details(target));
         when(relations.findCallees(any(PublishedRelationQuery.class))).thenReturn(result(target, List.of(relation)));
@@ -157,7 +157,7 @@ class SemanticQueryFacadeRelationTest {
                 new RelationTarget.External(new ExternalTarget.Endpoint("POST", "https://payments.example/charge")));
         CodeFactReadService facts = mock(CodeFactReadService.class);
         PublishedRelationQueryService relations = mock(PublishedRelationQueryService.class);
-        PublishedSourceToolService source = mock(PublishedSourceToolService.class);
+        SourceSliceService source = mock(SourceSliceService.class);
         when(facts.get(any(CodeFactReadQuery.class))).thenAnswer(invocation -> {
             CodeFactReadQuery query = invocation.getArgument(0);
             if (query.factId().value().equals(CodeFactId.from(internalTarget).value())) {
@@ -187,7 +187,7 @@ class SemanticQueryFacadeRelationTest {
         CodeFactReadService facts = mock(CodeFactReadService.class);
         when(facts.get(new CodeFactReadQuery(new RepositoryId(REPOSITORY), new RepositoryRevision(REVISION), CodeFactId.from(type))))
                 .thenReturn(details(type));
-        SemanticQueryFacade facade = facade(facts, mock(PublishedSourceToolService.class), mock(PublishedRelationQueryService.class));
+        SemanticQueryFacade facade = facade(facts, mock(SourceSliceService.class), mock(PublishedRelationQueryService.class));
         RelationRequest request = new RelationRequest(REPOSITORY, REVISION, CodeFactId.from(type).value(), 0, 20);
 
         assertThrows(CodeFactKindMismatchException.class, () -> facade.findMethodImplementations(request));
@@ -235,7 +235,7 @@ class SemanticQueryFacadeRelationTest {
                 new SyntaxRange(new SyntaxPosition(0, 0), new SyntaxPosition(0, 23)));
     }
 
-    private static SemanticQueryFacade facade(CodeFactReadService facts, PublishedSourceToolService source,
+    private static SemanticQueryFacade facade(CodeFactReadService facts, SourceSliceService source,
                                               PublishedRelationQueryService relations) {
         return new SemanticQueryFacade(mock(CurrentRepositoryQueryService.class), mock(CodeFactSearchService.class), source, facts,
                 mock(PublishedDiscoveryQueryService.class), mock(PublishedEntryPointQueryService.class), relations);

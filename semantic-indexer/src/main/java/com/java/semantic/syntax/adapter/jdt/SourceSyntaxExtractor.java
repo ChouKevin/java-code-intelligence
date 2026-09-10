@@ -40,7 +40,7 @@ class SourceSyntaxExtractor {
                         SourceTypes.nestedName(enclosingTypeOf(declaration)),
                         declaration));
         List<AbstractTypeDeclaration> types = SourceTypes.allTypesOf(parsed.unit());
-        boolean skipEntryPoints = types.stream().anyMatch(ApiExtractor::isControllerAdvice);
+        boolean skipEntryPoints = types.stream().anyMatch(HttpEndpointExtractor::isControllerAdvice);
 
         List<EntryPointClass> entryPoints = new ArrayList<>();
         List<SourceTypeMetadata> sourceTypes = new ArrayList<>();
@@ -64,8 +64,8 @@ class SourceSyntaxExtractor {
         }
 
         List<EntryPointMethod> methods = new ArrayList<>();
-        methods.addAll(ApiExtractor.extract(type, analysisTargetOf));
-        methods.addAll(MqExtractor.extract(type, analysisTargetOf));
+        methods.addAll(HttpEndpointExtractor.extract(type, analysisTargetOf));
+        methods.addAll(MessageListenerExtractor.extract(type, analysisTargetOf));
         methods.addAll(ScheduleExtractor.extract(type, analysisTargetOf));
 
         if (CollectionUtils.isEmpty(methods)) {
@@ -77,7 +77,7 @@ class SourceSyntaxExtractor {
                         new JavaTypeIdentity(PackageNames.of(parsed), SourceTypes.nestedName(type)),
                         parsed.source().repositoryRelativePath()),
                 JavadocReader.descriptionOf(type),
-                ApiExtractor.basePathsOf(type),
+                HttpEndpointExtractor.basePathsOf(type),
                 methods));
     }
 

@@ -17,7 +17,7 @@ import org.springframework.util.CollectionUtils;
 import org.springframework.util.StringUtils;
 
 /** 從型別宣告抽取 HTTP 端點 */
-final class ApiExtractor {
+final class HttpEndpointExtractor {
 
     /** 方法層映射註解的優先序 */
     private static final List<String> MAPPING_ANNOTATIONS = List.of(
@@ -45,7 +45,7 @@ final class ApiExtractor {
     private record SwaggerSource(String annotation, List<String> attributes) {
     }
 
-    private ApiExtractor() {
+    private HttpEndpointExtractor() {
     }
 
     /** 類別層 @RequestMapping 的路徑，沒有宣告時為空 */

@@ -197,7 +197,7 @@ class SemanticQueryFacadeDiscoveryTest {
 
     private static SemanticQueryFacade facade(CodeFactReadService facts, PublishedDiscoveryQueryService discovery,
                                               PublishedEntryPointQueryService entryPoints) {
-        PublishedSourceToolService source = mock(PublishedSourceToolService.class);
+        SourceSliceService source = mock(SourceSliceService.class);
         when(source.factSource(any(CodeFactReadQuery.class), any(Integer.class))).thenReturn(new FactSourceSlice(generation(), range(), range(), "x"));
         return new SemanticQueryFacade(mock(CurrentRepositoryQueryService.class), mock(CodeFactSearchService.class), source, facts,
                 discovery, entryPoints, mock(PublishedRelationQueryService.class));
