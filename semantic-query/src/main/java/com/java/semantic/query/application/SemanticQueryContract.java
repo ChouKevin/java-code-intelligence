@@ -162,7 +162,11 @@ public final class SemanticQueryContract {
     public record CallerItem(ProgramElement caller, RelationSite callSite) {
     }
 
-    public record CalleeItem(ProgramElement callee, RelationSite callSite) {
+    public enum CalleeResolutionStatus {
+        INDEXED, UNINDEXED_TARGET, UNRESOLVED
+    }
+
+    public record CalleeItem(ProgramElement callee, RelationSite callSite, CalleeResolutionStatus resolutionStatus) {
     }
 
     public record ReferenceItem(ProgramElement container, RelationSite referenceSite) {

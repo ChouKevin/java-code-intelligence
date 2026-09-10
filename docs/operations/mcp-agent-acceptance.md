@@ -34,6 +34,8 @@ fixture revision 是測試用的固定 identity，不是 Git admission、dispatc
 
 若回應 `REVISION_OUTDATED`，先採用 `currentRevision`。直接搜尋可用新 revision 重試；任何 fact-bound call 都必須重新搜尋或瀏覽以取得新 revision 的 fact ID，不能沿用舊 ID。
 
+`find_callees` 每個項目都包含 `resolutionStatus`：內部 relation target 為 `INDEXED`，`ExternalTarget.UnresolvedCall` 為 `UNRESOLVED`，其他具型別的 external target 為 `UNINDEXED_TARGET`。這只描述目前索引中可觀察到的 target 形態；`UNINDEXED_TARGET` 不代表已確認 target 存在於外部系統，也不表示語意完整。
+
 每個手動 Agent task 請保存以下無敏感內容的記錄：
 
 | Task | repositoryId / revision | tool calls | response UTF-8 bytes | elapsed ms | returned fact/source evidence |

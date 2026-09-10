@@ -42,6 +42,8 @@ class QueryMcpToolCatalogConfigurationTest {
             assertFalse((Boolean) specification.tool().inputSchema().get("additionalProperties"));
             assertFalse(specification.tool().description().toLowerCase().contains("first tool"));
         }
+        assertTrue(specification(specifications, "find_callees").tool().description()
+                .contains("UNINDEXED_TARGET"));
     }
 
     @Test
@@ -160,7 +162,7 @@ class QueryMcpToolCatalogConfigurationTest {
 
     private static void assertCalleeCollection(Map<String, Object> collection) {
         Map<String, Object> item = collectionItem(collection);
-        assertRequired(item, "callee", "callSite");
+        assertRequired(item, "callee", "callSite", "resolutionStatus");
         Map<String, Object> callee = property(properties(item), "callee");
         assertEquals(Set.of("oneOf"), callee.keySet());
         List<Map<String, Object>> alternatives = oneOf(callee);
@@ -168,6 +170,9 @@ class QueryMcpToolCatalogConfigurationTest {
         assertInternalProgramElement(alternatives.get(0));
         assertRequired(alternatives.get(1), "displayName");
         assertEquals(Set.of("displayName"), properties(alternatives.get(1)).keySet());
+        Map<String, Object> resolutionStatus = property(properties(item), "resolutionStatus");
+        assertEquals("string", resolutionStatus.get("type"));
+        assertEquals(List.of("INDEXED", "UNINDEXED_TARGET", "UNRESOLVED"), resolutionStatus.get("enum"));
         assertRelationSite(property(properties(item), "callSite"));
     }
 

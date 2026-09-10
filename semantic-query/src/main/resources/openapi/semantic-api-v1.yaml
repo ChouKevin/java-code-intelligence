@@ -314,13 +314,14 @@ components:
     CalleeItem:
       type: object
       additionalProperties: false
-      required: [callee, callSite]
+      required: [callee, callSite, resolutionStatus]
       properties:
         callee:
           oneOf:
             - {$ref: '#/components/schemas/InternalProgramElement'}
             - {$ref: '#/components/schemas/ExternalCallee'}
         callSite: {$ref: '#/components/schemas/RelationSite'}
+        resolutionStatus: {type: string, enum: [INDEXED, UNINDEXED_TARGET, UNRESOLVED]}
     ReferenceItem:
       type: object
       additionalProperties: false

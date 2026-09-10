@@ -140,8 +140,9 @@ public final class SemanticMcpSchemaCatalog {
     }
 
     private static Map<String, Object> calleeItem() {
-        return schema(Map.of("callee", Map.of("oneOf", List.of(internalProgramElement(), externalCallee())), "callSite", relationSite()),
-                List.of("callee", "callSite"));
+        return schema(Map.of("callee", Map.of("oneOf", List.of(internalProgramElement(), externalCallee())), "callSite", relationSite(),
+                        "resolutionStatus", enumValue(SemanticQueryContract.CalleeResolutionStatus.values())),
+                List.of("callee", "callSite", "resolutionStatus"));
     }
 
     private static Map<String, Object> relationSite() {

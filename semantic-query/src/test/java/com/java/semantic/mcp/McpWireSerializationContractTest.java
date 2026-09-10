@@ -74,14 +74,22 @@ class McpWireSerializationContractTest {
                 "client.charge(request)|client|charge|1", null);
         SemanticQueryContract.ProgramElement internalCallee = new SemanticQueryContract.ProgramElement("c".repeat(64), CodeFactKind.METHOD,
                 "Orders.complete()", new SemanticQueryContract.SourceSnippet("src/Orders.java", 7, 7, "complete();"));
+        SemanticQueryContract.ProgramElement namedExternalCallee = new SemanticQueryContract.ProgramElement(null, null,
+                "POST https://payments.example/charge", null);
         SemanticQueryContract.CollectionResult result = new SemanticQueryContract.CollectionResult(REPOSITORY_ID, REVISION,
                 List.of(new SemanticQueryContract.CalleeItem(externalCallee,
                         new SemanticQueryContract.RelationSite("b".repeat(64),
-                                new SemanticQueryContract.SourceSnippet("src/Orders.java", 3, 3, "client.charge(request)"))),
+                                new SemanticQueryContract.SourceSnippet("src/Orders.java", 3, 3, "client.charge(request)")),
+                        SemanticQueryContract.CalleeResolutionStatus.UNRESOLVED),
                         new SemanticQueryContract.CalleeItem(internalCallee,
                                 new SemanticQueryContract.RelationSite("d".repeat(64),
-                                        new SemanticQueryContract.SourceSnippet("src/Orders.java", 7, 7, "complete();")))),
-                new SemanticQueryContract.Page(0, 20, 2, 2, false));
+                                        new SemanticQueryContract.SourceSnippet("src/Orders.java", 7, 7, "complete();")),
+                                SemanticQueryContract.CalleeResolutionStatus.INDEXED),
+                        new SemanticQueryContract.CalleeItem(namedExternalCallee,
+                                new SemanticQueryContract.RelationSite("e".repeat(64),
+                                        new SemanticQueryContract.SourceSnippet("src/Orders.java", 11, 11, "payments.charge();")),
+                                SemanticQueryContract.CalleeResolutionStatus.UNINDEXED_TARGET)),
+                new SemanticQueryContract.Page(0, 20, 3, 3, false));
         when(facade.findCallees(any())).thenReturn(result);
 
         String httpPayload = authenticatedHttp(facade).perform(post("/api/v1/callees")
@@ -95,10 +103,18 @@ class McpWireSerializationContractTest {
 
         assertThat(httpPayload).contains("\"callee\":{\"displayName\":\"client.charge(request)|client|charge|1\"}")
                 .contains("\"callee\":{\"factId\":\"" + "c".repeat(64) + "\",\"kind\":\"METHOD\",\"displayName\":\"Orders.complete()\",\"source\"")
+                .contains("\"resolutionStatus\":\"UNRESOLVED\"")
+                .contains("\"resolutionStatus\":\"INDEXED\"")
+                .contains("\"resolutionStatus\":\"UNINDEXED_TARGET\"")
                 .doesNotContain("\"factId\":null", "\"kind\":null", "\"source\":null");
         assertThat(mcpPayload).contains("\"callee\":{\"displayName\":\"client.charge(request)|client|charge|1\"}")
                 .contains("\"callee\":{\"factId\":\"" + "c".repeat(64) + "\",\"kind\":\"METHOD\",\"displayName\":\"Orders.complete()\",\"source\"")
+                .contains("\"resolutionStatus\":\"UNRESOLVED\"")
+                .contains("\"resolutionStatus\":\"INDEXED\"")
+                .contains("\"resolutionStatus\":\"UNINDEXED_TARGET\"")
                 .doesNotContain("\"factId\":null", "\"kind\":null", "\"source\":null");
+        assertThat(mcpMapper.readTree(httpPayload))
+                .isEqualTo(mcpMapper.readTree(mcpPayload).get("result").get("structuredContent"));
     }
 
     @Test

@@ -14,6 +14,7 @@ import com.java.semantic.model.codefact.EntryPointTrigger;
 import com.java.semantic.model.codefact.EventListenerCandidate;
 import com.java.semantic.model.codefact.EventListenerQuery;
 import com.java.semantic.model.codefact.EventListenerResult;
+import com.java.semantic.model.codefact.ExternalTarget;
 import com.java.semantic.model.codefact.MethodTarget;
 import com.java.semantic.model.codefact.PublishedEntryPoint;
 import com.java.semantic.model.codefact.RelationTarget;
@@ -202,7 +203,9 @@ public final class SemanticQueryFacade {
         PublishedRelationResult result = relationQueryService.findCallees(relationQuery(requiredRequest, target));
         List<SemanticQueryContract.CalleeItem> items = new ArrayList<>();
         for (com.java.semantic.model.index.RelationDocument relation : result.relations()) {
-            items.add(new SemanticQueryContract.CalleeItem(callee(result.generation(), relation.target()), callSite(result.generation(), relation)));
+            SemanticQueryContract.CalleeResolutionStatus resolutionStatus = calleeResolutionStatus(relation.target());
+            items.add(new SemanticQueryContract.CalleeItem(callee(result.generation(), relation.target()),
+                    callSite(result.generation(), relation), resolutionStatus));
         }
         return relationCollection(result, requiredRequest, items);
     }
@@ -248,6 +251,19 @@ public final class SemanticQueryFacade {
         }
         if (target instanceof RelationTarget.External externalTarget) {
             return new SemanticQueryContract.ProgramElement(null, null, externalTarget.target().canonicalForm(), null);
+        }
+        throw new IndexContractMismatchException();
+    }
+
+    private static SemanticQueryContract.CalleeResolutionStatus calleeResolutionStatus(RelationTarget target) {
+        if (target instanceof RelationTarget.Internal) {
+            return SemanticQueryContract.CalleeResolutionStatus.INDEXED;
+        }
+        if (target instanceof RelationTarget.External externalTarget) {
+            if (externalTarget.target() instanceof ExternalTarget.UnresolvedCall) {
+                return SemanticQueryContract.CalleeResolutionStatus.UNRESOLVED;
+            }
+            return SemanticQueryContract.CalleeResolutionStatus.UNINDEXED_TARGET;
         }
         throw new IndexContractMismatchException();
     }

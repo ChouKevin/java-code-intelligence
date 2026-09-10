@@ -17,7 +17,7 @@ public final class SemanticMcpToolCatalog {
             tool("find_method_implementations", "Find indexed implementations or overrides of a returned method. Copy repositoryId, revision, and methodFactId exactly; page.hasMore means request another page."),
             tool("find_references", "Find exact indexed references to a returned declaration. Copy repositoryId, revision, and factId exactly; page.hasMore means request another page."),
             tool("find_callers", "Return direct one-hop callers of a returned method. Copy repositoryId, revision, and methodFactId exactly; page.hasMore means request another page."),
-            tool("find_callees", "Return direct one-hop callees of a returned method. Copy repositoryId, revision, and methodFactId exactly; page.hasMore means request another page."));
+            tool("find_callees", "Return direct one-hop callees of a returned method. resolutionStatus is INDEXED for internal targets, UNRESOLVED for unresolved calls, and UNINDEXED_TARGET for other typed external targets; it does not confirm external availability. Copy repositoryId, revision, and methodFactId exactly; page.hasMore means request another page."));
 
     private SemanticMcpToolCatalog() {
     }

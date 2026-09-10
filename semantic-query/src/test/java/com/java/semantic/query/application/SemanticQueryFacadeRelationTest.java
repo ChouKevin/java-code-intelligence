@@ -141,8 +141,43 @@ class SemanticQueryFacadeRelationTest {
         SemanticQueryContract.CalleeItem callee = (SemanticQueryContract.CalleeItem) result.items().getFirst();
         assertEquals("client.charge(request)|client|charge|1", callee.callee().displayName());
         assertTrue(Objects.isNull(callee.callee().factId()));
+        assertEquals(SemanticQueryContract.CalleeResolutionStatus.UNRESOLVED, callee.resolutionStatus());
         assertEquals(relation.fact().id().value(), callee.callSite().factId());
         assertEquals("relation.occurrence(sou", callee.callSite().source().code());
+    }
+
+    @Test
+    void callees_report_indexed_unindexed_and_unresolved_statuses_from_typed_targets() {
+        CodeFactIdentity target = methodIdentity();
+        CodeFactIdentity internalTarget = methodIdentity("InternalTarget", "run");
+        RelationDocument internalRelation = relation(target, RelationKind.CALLS, new RelationTarget.Internal(internalTarget));
+        RelationDocument unresolvedRelation = relation(target, RelationKind.CALLS,
+                new RelationTarget.External(new ExternalTarget.UnresolvedCall("client.charge(request)", "client", "charge", 1)));
+        RelationDocument namedExternalRelation = relation(target, RelationKind.CALLS,
+                new RelationTarget.External(new ExternalTarget.Endpoint("POST", "https://payments.example/charge")));
+        CodeFactReadService facts = mock(CodeFactReadService.class);
+        PublishedRelationQueryService relations = mock(PublishedRelationQueryService.class);
+        PublishedSourceToolService source = mock(PublishedSourceToolService.class);
+        when(facts.get(any(CodeFactReadQuery.class))).thenAnswer(invocation -> {
+            CodeFactReadQuery query = invocation.getArgument(0);
+            if (query.factId().value().equals(CodeFactId.from(internalTarget).value())) {
+                return details(internalTarget);
+            }
+            return details(target);
+        });
+        when(relations.findCallees(any(PublishedRelationQuery.class))).thenReturn(result(target,
+                List.of(internalRelation, unresolvedRelation, namedExternalRelation)));
+        when(source.factSource(any(CodeFactReadQuery.class), anyInt())).thenReturn(declarationSlice());
+
+        SemanticQueryContract.CollectionResult result = facade(facts, source, relations).findCallees(new RelationRequest(REPOSITORY,
+                REVISION, CodeFactId.from(target).value(), 0, 20));
+
+        assertEquals(SemanticQueryContract.CalleeResolutionStatus.INDEXED,
+                ((SemanticQueryContract.CalleeItem) result.items().get(0)).resolutionStatus());
+        assertEquals(SemanticQueryContract.CalleeResolutionStatus.UNRESOLVED,
+                ((SemanticQueryContract.CalleeItem) result.items().get(1)).resolutionStatus());
+        assertEquals(SemanticQueryContract.CalleeResolutionStatus.UNINDEXED_TARGET,
+                ((SemanticQueryContract.CalleeItem) result.items().get(2)).resolutionStatus());
     }
 
     @Test

@@ -113,7 +113,7 @@ class OpenApiContractTest {
         assertRequired(schemas, "ImplementationItem", List.of("implementation", "relationKind"));
         assertRequired(schemas, "ReferenceItem", List.of("container", "referenceSite"));
         assertRequired(schemas, "CallerItem", List.of("caller", "callSite"));
-        assertRequired(schemas, "CalleeItem", List.of("callee", "callSite"));
+        assertRequired(schemas, "CalleeItem", List.of("callee", "callSite", "resolutionStatus"));
         assertRequired(schemas, "RelationSite", List.of("factId", "source"));
 
         assertReference(schemas, "EntryPointItem", "handler", "InternalProgramElement");
@@ -131,6 +131,8 @@ class OpenApiContractTest {
         assertThat(map(calleeProperties.get("callee")).get("oneOf")).asInstanceOf(org.assertj.core.api.InstanceOfAssertFactories.LIST)
                 .containsExactly(Map.of("$ref", "#/components/schemas/InternalProgramElement"),
                         Map.of("$ref", "#/components/schemas/ExternalCallee"));
+        assertThat(map(calleeProperties.get("resolutionStatus")).get("enum"))
+                .isEqualTo(List.of("INDEXED", "UNINDEXED_TARGET", "UNRESOLVED"));
     }
 
     @Test
