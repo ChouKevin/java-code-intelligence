@@ -8,12 +8,13 @@ root_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${root_dir}"
 
 # The JDT-LS fixture test starts disposable MongoDB and produces payment, order, and video
-# generations using the production exporter; no Query documents or projection constants are seeded here.
+# generations using the production exporter. It then starts an ephemeral real Query HTTP/MCP server
+# against those published generations and follows fixture-returned IDs with the MCP SDK; no Query facts are seeded.
 mvn --batch-mode --no-transfer-progress -pl semantic-indexer -am -Pjdtls-it \
   -Dtest=FixtureFullIndexJdtLsIT \
   -Dsurefire.failIfNoSpecifiedTests=false test
 
-# The Query suite verifies the twelve-tool MCP catalog and the persisted projection contract.
+# The Mongo profile runs the persisted projection contract; the fixture run above verifies MCP discovery.
 mvn --batch-mode --no-transfer-progress -pl semantic-query -am -Pmongo-it \
-  -Dtest=ToolProjectionEvolutionIT,QueryMcpToolCatalogConfigurationTest \
+  -Dtest=ToolProjectionEvolutionIT \
   -Dsurefire.failIfNoSpecifiedTests=false test

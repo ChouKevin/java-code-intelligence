@@ -28,12 +28,20 @@ import com.java.semantic.semantic.adapter.jdtls.JdtLsProcessFactory;
 import com.java.semantic.semantic.adapter.jdtls.JdtLsReadinessProbe;
 import com.java.semantic.semantic.adapter.jdtls.JdtWorkspaceLifecycleMetrics;
 import com.java.semantic.semantic.adapter.jdtls.Lsp4jJavaSemanticService;
+import com.java.semantic.query.SemanticQueryApplication;
+import io.modelcontextprotocol.client.McpClient;
+import io.modelcontextprotocol.client.McpSyncClient;
+import io.modelcontextprotocol.client.transport.HttpClientStreamableHttpTransport;
+import io.modelcontextprotocol.json.jackson3.JacksonMcpJsonMapper;
+import io.modelcontextprotocol.spec.McpSchema;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Stream;
 import org.bson.Document;
 import org.testcontainers.containers.GenericContainer;
@@ -41,7 +49,12 @@ import org.testcontainers.utility.DockerImageName;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.springframework.boot.WebApplicationType;
+import org.springframework.boot.builder.SpringApplicationBuilder;
+import org.springframework.boot.web.server.context.WebServerApplicationContext;
+import org.springframework.context.ConfigurableApplicationContext;
 import org.springframework.util.StringUtils;
+import tools.jackson.databind.json.JsonMapper;
 
 /** Exercises a real JDT LS process before exporting fixture source through production projectors. */
 @Tag("jdtls-it")
@@ -50,6 +63,11 @@ class FixtureFullIndexJdtLsIT {
     private static final Path VIDEO_FIXTURE = Path.of("fixtures/uat/video-service");
     private static final Path PAYMENT_FIXTURE = Path.of("fixtures/uat/payment-service");
     private static final Path ORDER_FIXTURE = Path.of("fixtures/uat/order-service");
+    private static final String TOKEN_HEADER = "X-Api-Token";
+    private static final String QUERY_TOKEN = "fixture-query-token";
+    private static final List<String> TOOL_NAMES = List.of(
+            "list_repositories", "get_repository", "search_code", "get_fact_source", "list_entry_points", "find_api_routes",
+            "find_event_listeners", "list_type_members", "find_method_implementations", "find_references", "find_callers", "find_callees");
 
     @TempDir
     Path temporaryDirectory;
@@ -146,8 +164,240 @@ class FixtureFullIndexJdtLsIT {
                     });
             assertThat(template.getCollection(IndexCollections.SEARCH).find(new Document()).into(new java.util.ArrayList<>()))
                     .allSatisfy(document -> assertThat(document.getString("sourcePath")).isNotBlank());
+            manager.shutdownAll();
+            follows_real_mcp_fixture_journeys(mongo);
         } finally {
             manager.shutdownAll();
+        }
+    }
+
+    private static void follows_real_mcp_fixture_journeys(GenericContainer<?> mongo) {
+        Path queryConfiguration = Path.of("../semantic-query/src/main/resources/application.yml").toAbsolutePath();
+        assertThat(Files.isRegularFile(queryConfiguration)).isTrue();
+        String mongoUri = "mongodb://" + mongo.getHost() + ":" + mongo.getMappedPort(27017) + "/fixture_index";
+        try (ConfigurableApplicationContext query = new SpringApplicationBuilder(SemanticQueryApplication.class)
+                .web(WebApplicationType.SERVLET)
+                .run("--spring.config.location=" + queryConfiguration.toUri(), "--spring.mongodb.uri=" + mongoUri,
+                        "--semantic.query.api-token=" + QUERY_TOKEN, "--server.address=127.0.0.1", "--server.port=0")) {
+            int port = ((WebServerApplicationContext) query).getWebServer().getPort();
+            String baseUrl = "http://127.0.0.1:" + port;
+            JsonMapper mapper = JsonMapper.builder().build();
+            HttpClientStreamableHttpTransport transport = HttpClientStreamableHttpTransport.builder(baseUrl + "/mcp")
+                    .jsonMapper(new JacksonMcpJsonMapper(mapper))
+                    .httpRequestCustomizer((request, method, uri, body, context) -> request.header(TOKEN_HEADER, QUERY_TOKEN))
+                    .build();
+            try (McpSyncClient client = McpClient.sync(transport)
+                    .requestTimeout(Duration.ofSeconds(30))
+                    .initializationTimeout(Duration.ofSeconds(30))
+                    .build()) {
+                assertThat(client.initialize().serverInfo()).isNotNull();
+                McpSchema.ListToolsResult tools = client.listTools();
+                assertThat(tools.tools()).extracting(McpSchema.Tool::name).containsExactlyInAnyOrderElementsOf(TOOL_NAMES);
+                assertThat(tools.tools()).allSatisfy(tool -> {
+                    assertThat(tool.inputSchema()).isNotEmpty();
+                    assertThat(tool.outputSchema()).isNotEmpty();
+                    assertThat(schemaProperties(tool.outputSchema())).isNotEmpty();
+                });
+                McpSchema.Tool searchTool = tools.tools().stream().filter(tool -> tool.name().equals("search_code")).findFirst().orElseThrow();
+                assertThat(schemaProperties(searchTool.outputSchema()).containsKey("sourceCoverage")).isTrue();
+
+                JourneyRecorder discovery = new JourneyRecorder("fixture-discovery");
+                Map<?, ?> repositories = successfulBody(client, "list_repositories", Map.of(), mapper, discovery);
+                Map<?, ?> paymentRepository = repository(repositories, "payment-service");
+                Map<?, ?> videoRepository = repository(repositories, "video-service");
+                String paymentRevision = String.valueOf(paymentRepository.get("revision"));
+                String videoRevision = String.valueOf(videoRepository.get("revision"));
+                discovery.print();
+
+                JourneyRecorder paymentJourney = new JourneyRecorder("payment-search-source");
+                Map<?, ?> paymentSearch = successfulBody(client, "search_code", Map.of(
+                        "repositoryId", "payment-service", "revision", paymentRevision, "query", "paymentMethods",
+                        "kinds", List.of("METHOD")), mapper, paymentJourney);
+                assertCoverageWithoutIssues(paymentSearch);
+                Map<?, ?> paymentMethod = programElementAt(paymentSearch, "items", "src/main/java/com/example/payment/PaymentQueryController.java",
+                        "METHOD");
+                assertThat(paymentMethod.get("kind")).isEqualTo("METHOD");
+                assertThat(String.valueOf(paymentMethod.get("displayName"))).contains("PaymentQueryController", "paymentMethods");
+                assertSource(source(paymentMethod), "src/main/java/com/example/payment/PaymentQueryController.java", 13, 16, "paymentMethods");
+                String paymentFactId = String.valueOf(paymentMethod.get("factId"));
+                Map<?, ?> paymentSource = successfulBody(client, "get_fact_source", Map.of(
+                        "repositoryId", "payment-service", "revision", paymentRevision, "factId", paymentFactId), mapper, paymentJourney);
+                assertFactSource(paymentSource, paymentFactId, "src/main/java/com/example/payment/PaymentQueryController.java", 13, 16,
+                        "paymentMethods");
+                paymentJourney.print();
+
+                JourneyRecorder videoJourney = new JourneyRecorder("video-route-handler-callee-implementation-source");
+                Map<?, ?> routeResult = successfulBody(client, "find_api_routes", Map.of(
+                        "repositoryId", "video-service", "revision", videoRevision, "httpMethod", "POST", "path", "/videos"), mapper,
+                        videoJourney);
+                Map<?, ?> route = itemAt(routeResult, "items", "find_api_routes");
+                Map<?, ?> handler = mapValue(route, "handler");
+                assertThat(String.valueOf(handler.get("displayName"))).contains("VideoController", "upload");
+                assertSource(source(handler), "src/main/java/com/example/video/VideoController.java", 10, 13, "videoService.upload");
+                String handlerFactId = String.valueOf(handler.get("factId"));
+                Map<?, ?> callees = successfulBody(client, "find_callees", Map.of(
+                        "repositoryId", "video-service", "revision", videoRevision, "methodFactId", handlerFactId), mapper, videoJourney);
+                Map<?, ?> videoServiceCallee = relationItemAt(callees, "callee", "src/main/java/com/example/video/VideoService.java");
+                Map<?, ?> callee = mapValue(videoServiceCallee, "callee");
+                assertThat(String.valueOf(callee.get("displayName"))).contains("VideoService", "upload");
+                assertSource(source(callee), "src/main/java/com/example/video/VideoService.java", 4, 4, "upload");
+                String videoServiceFactId = String.valueOf(callee.get("factId"));
+                Map<?, ?> implementations = successfulBody(client, "find_method_implementations", Map.of(
+                        "repositoryId", "video-service", "revision", videoRevision, "methodFactId", videoServiceFactId), mapper, videoJourney);
+                Map<?, ?> implementationItem = relationItemAt(implementations, "implementation",
+                        "src/main/java/com/example/video/DefaultVideoService.java");
+                assertThat(implementationItem.get("relationKind")).isEqualTo("OVERRIDES");
+                Map<?, ?> implementation = mapValue(implementationItem, "implementation");
+                assertThat(String.valueOf(implementation.get("displayName"))).contains("DefaultVideoService", "upload");
+                assertSource(source(implementation), "src/main/java/com/example/video/DefaultVideoService.java", 7, 11,
+                        "catalog.createTranscodingJob");
+                String implementationFactId = String.valueOf(implementation.get("factId"));
+                Map<?, ?> implementationSource = successfulBody(client, "get_fact_source", Map.of(
+                        "repositoryId", "video-service", "revision", videoRevision, "factId", implementationFactId), mapper, videoJourney);
+                assertFactSource(implementationSource, implementationFactId, "src/main/java/com/example/video/DefaultVideoService.java", 7, 11,
+                        "catalog.createTranscodingJob");
+                videoJourney.print();
+
+                JourneyRecorder emptyAndRecovery = new JourneyRecorder("empty-search-and-revision-recovery");
+                Map<?, ?> emptySearch = successfulBody(client, "search_code", Map.of(
+                        "repositoryId", "payment-service", "revision", paymentRevision, "query", "unindexedFixtureToken"), mapper,
+                        emptyAndRecovery);
+                assertThat(items(emptySearch, "search_code")).isEmpty();
+                assertCoverageWithoutIssues(emptySearch);
+                McpSchema.CallToolResult outdatedResult = client.callTool(new McpSchema.CallToolRequest("search_code", Map.of(
+                        "repositoryId", "payment-service", "revision", "0".repeat(40), "query", "paymentMethods")));
+                assertThat(outdatedResult.isError()).isTrue();
+                Map<?, ?> outdated = mapper.convertValue(outdatedResult.structuredContent(), Map.class);
+                emptyAndRecovery.record(outdated, mapper);
+                assertThat(outdated.get("code")).isEqualTo("REVISION_OUTDATED");
+                String currentRevision = String.valueOf(outdated.get("currentRevision"));
+                assertThat(currentRevision).isEqualTo(paymentRevision);
+                Map<?, ?> recoveredSearch = successfulBody(client, "search_code", Map.of(
+                        "repositoryId", "payment-service", "revision", currentRevision, "query", "paymentMethods",
+                        "kinds", List.of("METHOD")), mapper, emptyAndRecovery);
+                Map<?, ?> recoveredPaymentMethod = programElementAt(recoveredSearch, "items",
+                        "src/main/java/com/example/payment/PaymentQueryController.java", "METHOD");
+                String recoveredFactId = String.valueOf(recoveredPaymentMethod.get("factId"));
+                Map<?, ?> recoveredSource = successfulBody(client, "get_fact_source", Map.of(
+                        "repositoryId", "payment-service", "revision", currentRevision, "factId", recoveredFactId), mapper,
+                        emptyAndRecovery);
+                assertFactSource(recoveredSource, recoveredFactId, "src/main/java/com/example/payment/PaymentQueryController.java", 13, 16,
+                        "paymentMethods");
+                emptyAndRecovery.print();
+            }
+        }
+    }
+
+    private static void assertCoverageWithoutIssues(Map<?, ?> result) {
+        Map<?, ?> coverage = mapValue(result, "sourceCoverage");
+        assertThat(coverage.get("indexedSourceCount")).isInstanceOf(Number.class);
+        assertThat(((Number) coverage.get("indexedSourceCount")).longValue()).isPositive();
+        assertThat(coverage.get("issueCount")).isEqualTo(0);
+        assertThat(coverage.get("issueCodes")).isEqualTo(List.of());
+    }
+
+    private static void assertFactSource(Map<?, ?> result, String factId, String path, int startLine, int endLine, String codeToken) {
+        assertThat(result.get("factId")).isEqualTo(factId);
+        assertSource(mapValue(result, "source"), path, startLine, endLine, codeToken);
+        Map<?, ?> factRange = mapValue(result, "factRange");
+        assertThat(factRange.get("startLine")).isEqualTo(startLine);
+        assertThat(factRange.get("endLine")).isEqualTo(endLine);
+    }
+
+    private static void assertSource(Map<?, ?> source, String path, int startLine, int endLine, String codeToken) {
+        assertThat(source.get("path")).isEqualTo(path);
+        assertThat(source.get("startLine")).isEqualTo(startLine);
+        assertThat(source.get("endLine")).isEqualTo(endLine);
+        assertThat(String.valueOf(source.get("code"))).contains(codeToken);
+    }
+
+    private static Map<?, ?> successfulBody(McpSyncClient client, String toolName, Map<String, Object> arguments, JsonMapper mapper,
+                                              JourneyRecorder journey) {
+        McpSchema.CallToolResult result = client.callTool(new McpSchema.CallToolRequest(toolName, arguments));
+        assertThat(result.isError()).as("%s must succeed", toolName).isFalse();
+        Map<?, ?> body = mapper.convertValue(result.structuredContent(), Map.class);
+        journey.record(body, mapper);
+        return body;
+    }
+
+    private static Map<?, ?> repository(Map<?, ?> repositories, String repositoryId) {
+        return items(repositories, "list_repositories").stream()
+                .filter(Map.class::isInstance)
+                .map(Map.class::cast)
+                .filter(item -> repositoryId.equals(item.get("repositoryId")))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("published fixture repository is not visible: " + repositoryId));
+    }
+
+    private static Map<?, ?> programElementAt(Map<?, ?> result, String itemKey, String sourcePath, String kind) {
+        return items(result, itemKey).stream()
+                .filter(Map.class::isInstance)
+                .map(Map.class::cast)
+                .filter(item -> sourcePath.equals(source(item).get("path")))
+                .filter(item -> kind.equals(item.get("kind")))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError(itemKey + " did not return " + kind + " at " + sourcePath));
+    }
+
+    private static Map<?, ?> relationItemAt(Map<?, ?> result, String programElementKey, String sourcePath) {
+        return items(result, programElementKey).stream()
+                .filter(Map.class::isInstance)
+                .map(Map.class::cast)
+                .filter(item -> sourcePath.equals(source(mapValue(item, programElementKey)).get("path")))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError(programElementKey + " did not return " + sourcePath));
+    }
+
+    private static Map<?, ?> itemAt(Map<?, ?> result, String itemKey, String toolName) {
+        return items(result, toolName).stream()
+                .filter(Map.class::isInstance)
+                .map(Map.class::cast)
+                .findFirst()
+                .orElseThrow(() -> new AssertionError(toolName + " returned no " + itemKey));
+    }
+
+    private static List<?> items(Map<?, ?> result, String toolName) {
+        Object value = result.get("items");
+        assertThat(value).as("%s items", toolName).isInstanceOf(List.class);
+        return (List<?>) value;
+    }
+
+    private static Map<?, ?> mapValue(Map<?, ?> value, String field) {
+        Object nested = value.get(field);
+        assertThat(nested).as("%s must be an object", field).isInstanceOf(Map.class);
+        return (Map<?, ?>) nested;
+    }
+
+    private static Map<?, ?> source(Map<?, ?> programElement) {
+        return mapValue(programElement, "source");
+    }
+
+    private static Map<?, ?> schemaProperties(Map<String, Object> schema) {
+        Object properties = schema.get("properties");
+        assertThat(properties).isInstanceOf(Map.class);
+        return (Map<?, ?>) properties;
+    }
+
+    private static final class JourneyRecorder {
+        private final String name;
+        private final long startedAtNanos;
+        private int toolCalls;
+        private long responseBytes;
+
+        private JourneyRecorder(String name) {
+            this.name = name;
+            this.startedAtNanos = System.nanoTime();
+        }
+
+        private void record(Map<?, ?> body, JsonMapper mapper) {
+            responseBytes += mapper.writeValueAsString(body).getBytes(StandardCharsets.UTF_8).length;
+            toolCalls++;
+        }
+
+        private void print() {
+            long elapsedMilliseconds = Duration.ofNanos(System.nanoTime() - startedAtNanos).toMillis();
+            System.out.printf("MCP fixture journey %s: toolCalls=%d structuredBodyUtf8Bytes=%d elapsedMillis=%d%n",
+                    name, toolCalls, responseBytes, elapsedMilliseconds);
         }
     }
 

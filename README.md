@@ -56,7 +56,7 @@ scripts/test-query-image.sh java-semantic-query:uat
 JDTLS_HOME=/opt/jdtls scripts/test-indexer-query-contract.sh
 ```
 
-See [Offline Index Operations](docs/operations/offline-index.md) for deployment and recovery details.
+See [Offline Index Operations](docs/operations/offline-index.md) for deployment and recovery details. For the opt-in JDT LS/Mongo fixture MCP journey and the limits of its Agent evidence, see [MCP Agent Acceptance](docs/operations/mcp-agent-acceptance.md).
 
 ## Credentials and endpoints
 
@@ -93,7 +93,7 @@ The matching HTTP routes are:
 - `POST /api/v1/search-code`, `/api/v1/fact-source`, `/api/v1/entry-points`, `/api/v1/api-routes`
 - `POST /api/v1/event-listeners`, `/api/v1/type-members`, `/api/v1/method-implementations`, `/api/v1/references`, `/api/v1/callers`, `/api/v1/callees`
 
-All repository-scoped calls must copy the current `repositoryId` and `revision` from `list_repositories` or `get_repository`. Query never substitutes a revision. On `REVISION_OUTDATED`, read the returned `currentRevision`, then retry the original request using that revision.
+All repository-scoped calls must copy the current `repositoryId` and `revision` from `list_repositories` or `get_repository`. Query never substitutes a revision. On `REVISION_OUTDATED`, read the returned `currentRevision`; retry a direct search with that revision, and rediscover revision-scoped fact IDs before retrying a fact-bound request.
 
 ## Schema and UAT controls
 
