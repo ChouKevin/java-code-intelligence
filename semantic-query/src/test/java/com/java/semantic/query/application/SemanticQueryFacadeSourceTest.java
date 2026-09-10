@@ -20,11 +20,13 @@ import com.java.semantic.model.codefact.SyntaxRange;
 import com.java.semantic.model.index.GenerationId;
 import com.java.semantic.model.index.ManifestDigest;
 import com.java.semantic.model.index.SourceIndexCoverage;
+import com.java.semantic.model.index.SourceIndexIssue;
 import com.java.semantic.model.query.CurrentGeneration;
 import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.model.repository.RepositoryRevision;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import tools.jackson.databind.ObjectMapper;
 
 import java.time.Instant;
 import java.util.List;
@@ -111,8 +113,8 @@ class SemanticQueryFacadeSourceTest {
         when(searchService.search(any(CodeFactSearchQuery.class))).thenReturn(result);
         when(sourceToolService.factSource(any(), any(Integer.class))).thenReturn(slice);
 
-        SemanticQueryContract.CollectionResult first = facade.searchCode(searchRequest());
-        SemanticQueryContract.CollectionResult second = facade.searchCode(searchRequest());
+        SemanticQueryContract.SearchCodeResult first = facade.searchCode(searchRequest());
+        SemanticQueryContract.SearchCodeResult second = facade.searchCode(searchRequest());
 
         SemanticQueryContract.ProgramElement firstElement = (SemanticQueryContract.ProgramElement) first.items().getFirst();
         SemanticQueryContract.ProgramElement secondElement = (SemanticQueryContract.ProgramElement) second.items().getFirst();
@@ -120,6 +122,23 @@ class SemanticQueryFacadeSourceTest {
         assertEquals(firstElement.factId(), secondElement.factId());
         assertEquals("client.charge(request)", firstElement.source().code());
         assertFalse(firstElement.source().code().isBlank());
+    }
+
+    @Test
+    void search_exposes_only_the_compact_authorized_source_coverage_summary() throws Exception {
+        CodeFactSearchResult result = new CodeFactSearchResult(generation,
+                new CodeFactSearchQuery(new RepositoryId(REPOSITORY_ID), new RepositoryRevision(REVISION), "charge", Set.of(),
+                        Optional.empty(), 0, 20),
+                List.of(), 0, false, new SourceIndexCoverage(3, List.of(
+                new SourceIndexIssue("internal/hidden/Payment.java", "PARSE_ERROR"),
+                new SourceIndexIssue("src/Orders.java", "UNRESOLVED_TYPE"),
+                new SourceIndexIssue("src/Orders.java", "PARSE_ERROR"))));
+        when(searchService.search(any(CodeFactSearchQuery.class))).thenReturn(result);
+
+        String response = new ObjectMapper().writeValueAsString(facade.searchCode(searchRequest()));
+
+        assertTrue(response.contains("\"sourceCoverage\":{\"indexedSourceCount\":3,\"issueCount\":3,\"issueCodes\":[\"PARSE_ERROR\",\"UNRESOLVED_TYPE\"]}"));
+        assertFalse(response.contains("internal/hidden/Payment.java"));
     }
 
     @Test

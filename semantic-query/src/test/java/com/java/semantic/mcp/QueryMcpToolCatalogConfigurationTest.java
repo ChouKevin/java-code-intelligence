@@ -79,6 +79,128 @@ class QueryMcpToolCatalogConfigurationTest {
     }
 
     @Test
+    void tools_publish_concrete_success_schemas_with_compact_search_coverage_and_operation_specific_nested_items() {
+        QueryMcpToolCatalogConfiguration configuration = new QueryMcpToolCatalogConfiguration();
+        List<McpStatelessServerFeatures.SyncToolSpecification> specifications = configuration.mcpQueryToolSpecifications(
+                mock(SemanticQueryFacade.class), new ObjectMapper());
+
+        for (McpStatelessServerFeatures.SyncToolSpecification specification : specifications) {
+            Map<String, Object> outputSchema = specification.tool().outputSchema();
+            assertEquals("object", outputSchema.get("type"));
+            assertFalse((Boolean) outputSchema.get("additionalProperties"));
+            assertFalse(properties(outputSchema).isEmpty());
+        }
+        Map<String, Object> repositoryCollection = specification(specifications, "list_repositories").tool().outputSchema();
+        assertEquals(Set.of("items", "page"), Set.copyOf(required(repositoryCollection)));
+        assertRequired(property(property(properties(repositoryCollection), "items"), "items"), "repositoryId", "revision");
+        assertPage(property(properties(repositoryCollection), "page"));
+
+        Map<String, Object> repositoryItem = specification(specifications, "get_repository").tool().outputSchema();
+        assertRequired(repositoryItem, "repositoryId", "revision");
+
+        Map<String, Object> searchSchema = specification(specifications, "search_code").tool().outputSchema();
+        Map<String, Object> searchProperties = properties(searchSchema);
+        assertEquals(Set.of("repositoryId", "revision", "items", "page", "sourceCoverage"), Set.copyOf(required(searchSchema)));
+        Map<String, Object> coverageProperties = properties(property(searchProperties, "sourceCoverage"));
+        assertRequired(property(searchProperties, "sourceCoverage"), "indexedSourceCount", "issueCount", "issueCodes");
+        assertEquals(Set.of("indexedSourceCount", "issueCount", "issueCodes"), coverageProperties.keySet());
+        Map<String, Object> programElementSchema = property(property(searchProperties, "items"), "items");
+        assertInternalProgramElement(programElementSchema);
+        assertPage(property(searchProperties, "page"));
+
+        Map<String, Object> factSource = specification(specifications, "get_fact_source").tool().outputSchema();
+        assertRequired(factSource, "repositoryId", "revision", "factId", "source", "factRange");
+
+        assertEntryPointCollection(specification(specifications, "list_entry_points").tool().outputSchema());
+        assertEntryPointCollection(specification(specifications, "find_api_routes").tool().outputSchema());
+        assertEventListenerCollection(specification(specifications, "find_event_listeners").tool().outputSchema());
+        assertInternalProgramElementCollection(specification(specifications, "list_type_members").tool().outputSchema());
+        assertImplementationCollection(specification(specifications, "find_method_implementations").tool().outputSchema());
+        assertReferenceCollection(specification(specifications, "find_references").tool().outputSchema());
+        assertCallerCollection(specification(specifications, "find_callers").tool().outputSchema());
+        assertCalleeCollection(specification(specifications, "find_callees").tool().outputSchema());
+    }
+
+    private static void assertEntryPointCollection(Map<String, Object> collection) {
+        Map<String, Object> item = collectionItem(collection);
+        assertRequired(item, "factId", "handler", "trigger");
+        assertInternalProgramElement(property(properties(item), "handler"));
+        assertEquals(Set.of("kind"), Set.copyOf(required(property(properties(item), "trigger"))));
+    }
+
+    private static void assertEventListenerCollection(Map<String, Object> collection) {
+        Map<String, Object> item = collectionItem(collection);
+        assertRequired(item, "eventType", "handler");
+        assertInternalProgramElement(property(properties(item), "handler"));
+    }
+
+    private static void assertInternalProgramElementCollection(Map<String, Object> collection) {
+        assertInternalProgramElement(collectionItem(collection));
+    }
+
+    private static void assertImplementationCollection(Map<String, Object> collection) {
+        Map<String, Object> item = collectionItem(collection);
+        assertRequired(item, "implementation", "relationKind");
+        assertInternalProgramElement(property(properties(item), "implementation"));
+    }
+
+    private static void assertReferenceCollection(Map<String, Object> collection) {
+        Map<String, Object> item = collectionItem(collection);
+        assertRequired(item, "container", "referenceSite");
+        assertInternalProgramElement(property(properties(item), "container"));
+        assertRelationSite(property(properties(item), "referenceSite"));
+    }
+
+    private static void assertCallerCollection(Map<String, Object> collection) {
+        Map<String, Object> item = collectionItem(collection);
+        assertRequired(item, "caller", "callSite");
+        assertInternalProgramElement(property(properties(item), "caller"));
+        assertRelationSite(property(properties(item), "callSite"));
+    }
+
+    private static void assertCalleeCollection(Map<String, Object> collection) {
+        Map<String, Object> item = collectionItem(collection);
+        assertRequired(item, "callee", "callSite");
+        Map<String, Object> callee = property(properties(item), "callee");
+        assertEquals(Set.of("oneOf"), callee.keySet());
+        List<Map<String, Object>> alternatives = oneOf(callee);
+        assertEquals(2, alternatives.size());
+        assertInternalProgramElement(alternatives.get(0));
+        assertRequired(alternatives.get(1), "displayName");
+        assertEquals(Set.of("displayName"), properties(alternatives.get(1)).keySet());
+        assertRelationSite(property(properties(item), "callSite"));
+    }
+
+    private static Map<String, Object> collectionItem(Map<String, Object> collection) {
+        assertRequired(collection, "repositoryId", "revision", "items", "page");
+        Map<String, Object> collectionProperties = properties(collection);
+        assertPage(property(collectionProperties, "page"));
+        return property(property(collectionProperties, "items"), "items");
+    }
+
+    private static void assertInternalProgramElement(Map<String, Object> programElement) {
+        assertRequired(programElement, "factId", "kind", "displayName", "source");
+        assertEquals(Set.of("factId", "kind", "displayName", "source"), properties(programElement).keySet());
+    }
+
+    private static void assertRelationSite(Map<String, Object> relationSite) {
+        assertRequired(relationSite, "factId", "source");
+    }
+
+    private static void assertPage(Map<String, Object> page) {
+        assertRequired(page, "offset", "limit", "returned", "total", "hasMore");
+    }
+
+    private static void assertRequired(Map<String, Object> schema, String... fields) {
+        assertEquals(Set.of(fields), Set.copyOf(required(schema)));
+    }
+
+    @SuppressWarnings("unchecked")
+    private static List<Map<String, Object>> oneOf(Map<String, Object> schema) {
+        return (List<Map<String, Object>>) schema.get("oneOf");
+    }
+
+    @Test
     void application_failures_are_returned_as_the_shared_error_with_mcp_error_flag() {
         SemanticQueryFacade facade = mock(SemanticQueryFacade.class);
         SemanticQueryError expected = new SemanticQueryError("FACT_NOT_FOUND", "The requested fact was not found.", false,

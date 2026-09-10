@@ -77,7 +77,7 @@ public final class SemanticQueryFacade {
         return SemanticResultMapper.toRepositoryItem(generation);
     }
 
-    public SemanticQueryContract.CollectionResult searchCode(SemanticQueryContract.SearchCodeRequest request) {
+    public SemanticQueryContract.SearchCodeResult searchCode(SemanticQueryContract.SearchCodeRequest request) {
         SemanticQueryContract.SearchCodeRequest requiredRequest = Objects.requireNonNull(request, "search code request is required");
         CodeFactSearchQuery query = new CodeFactSearchQuery(new RepositoryId(requiredRequest.repositoryId()),
                 new RepositoryRevision(requiredRequest.revision()), requiredRequest.query(), requiredRequest.kinds(),
@@ -90,7 +90,7 @@ public final class SemanticQueryFacade {
             FactSourceSlice source = sourceToolService.factSource(sourceQuery, 0);
             elements.add(SemanticResultMapper.toProgramElement(summary, source));
         }
-        return SemanticResultMapper.toCollectionResult(result, elements);
+        return SemanticResultMapper.toSearchCodeResult(result, elements);
     }
 
     public SemanticQueryContract.FactSourceResult getFactSource(SemanticQueryContract.FactSourceRequest request) {

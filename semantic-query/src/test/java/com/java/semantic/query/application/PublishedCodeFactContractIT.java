@@ -262,6 +262,12 @@ class PublishedCodeFactContractIT extends PublishedMongoITSupport {
                 assertThat(result.coverage().indexedSourceCount()).isEqualTo(1);
                 assertThat(result.coverage().issues()).containsExactly(new com.java.semantic.model.index.SourceIndexIssue(
                     "src/main/java/example/payment/PaymentService.java", "JDT_SYNTAX_PROBLEM"));
+                SemanticQueryContract.SearchCodeResult publicResult = SemanticResultMapper.toSearchCodeResult(result,
+                        List.of(new SemanticQueryContract.ProgramElement(CodeFactId.from(identity).value(), CodeFactKind.METHOD,
+                                identity.canonicalIdentity().canonicalForm(), new SemanticQueryContract.SourceSnippet(
+                                "src/main/java/example/payment/PaymentService.java", 1, 1, "findPayment"))));
+                assertThat(publicResult.sourceCoverage()).isEqualTo(new SemanticQueryContract.SourceCoverage(1, 1,
+                        List.of("JDT_SYNTAX_PROBLEM")));
             }
             assertThat(generationFileFilters).hasSize(2).allSatisfy(filter -> {
                 assertThat(filter.toJson()).contains("scopeUsable", "scopeClassKeys", "InternalPaymentService");

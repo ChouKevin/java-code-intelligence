@@ -101,6 +101,22 @@ class McpWireSerializationContractTest {
                 .doesNotContain("\"factId\":null", "\"kind\":null", "\"source\":null");
     }
 
+    @Test
+    void tools_list_serializes_the_concrete_search_success_schema() throws Exception {
+        JsonMapper mapper = applicationMcpMapper();
+
+        String payload = listTools(mapper, mock(SemanticQueryFacade.class));
+        int searchToolStart = payload.indexOf("\"name\":\"search_code\"");
+        int nextToolStart = payload.indexOf("\"name\":\"get_fact_source\"", searchToolStart);
+        assertThat(searchToolStart).isGreaterThanOrEqualTo(0);
+        assertThat(nextToolStart).isGreaterThan(searchToolStart);
+        String searchTool = payload.substring(searchToolStart, nextToolStart);
+
+        assertThat(searchTool).contains("\"outputSchema\":{")
+                .contains("\"sourceCoverage\":{", "\"indexedSourceCount\"", "\"issueCount\"", "\"issueCodes\"")
+                .doesNotContain("\"outputSchema\":{}");
+    }
+
     private static String invoke(JsonMapper mapper, SemanticQueryFacade facade, Map<String, Object> arguments) throws Exception {
         return invoke(mapper, facade, "search_code", arguments);
     }
@@ -111,6 +127,24 @@ class McpWireSerializationContractTest {
         McpServer.sync(transport).tools(new QueryMcpToolCatalogConfiguration().mcpQueryToolSpecifications(facade, mapper)).build();
         String requestBody = mapper.writeValueAsString(Map.of("jsonrpc", "2.0", "id", 1, "method", "tools/call",
                 "params", Map.of("name", toolName, "arguments", arguments)));
+        MockHttpServletRequest servletRequest = new MockHttpServletRequest("POST", "/mcp");
+        servletRequest.setContentType(MediaType.APPLICATION_JSON_VALUE);
+        servletRequest.addHeader("Accept", "application/json, text/event-stream");
+        servletRequest.setContent(requestBody.getBytes(StandardCharsets.UTF_8));
+        List<HttpMessageConverter<?>> converters = List.of(new StringHttpMessageConverter());
+        ServerRequest request = ServerRequest.create(servletRequest, converters);
+        HandlerFunction<ServerResponse> handler = transport.getRouterFunction().route(request).orElseThrow();
+        ServerResponse response = handler.handle(request);
+        MockHttpServletResponse servletResponse = new MockHttpServletResponse();
+        response.writeTo(servletRequest, servletResponse, () -> converters);
+        return servletResponse.getContentAsString();
+    }
+
+    private static String listTools(JsonMapper mapper, SemanticQueryFacade facade) throws Exception {
+        WebMvcStatelessServerTransport transport = WebMvcStatelessServerTransport.builder()
+                .jsonMapper(new JacksonMcpJsonMapper(mapper)).messageEndpoint("/mcp").build();
+        McpServer.sync(transport).tools(new QueryMcpToolCatalogConfiguration().mcpQueryToolSpecifications(facade, mapper)).build();
+        String requestBody = mapper.writeValueAsString(Map.of("jsonrpc", "2.0", "id", 1, "method", "tools/list", "params", Map.of()));
         MockHttpServletRequest servletRequest = new MockHttpServletRequest("POST", "/mcp");
         servletRequest.setContentType(MediaType.APPLICATION_JSON_VALUE);
         servletRequest.addHeader("Accept", "application/json, text/event-stream");

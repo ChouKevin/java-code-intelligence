@@ -39,7 +39,7 @@ class OpenApiContractTest {
         assertThat(schemas).containsKeys("SemanticQueryError", "RepositoryCollection", "RepositoryItem",
                 "FactSourceResult", "SearchCodeRequest", "FactSourceRequest", "EntryPointRequest", "ApiRouteRequest",
                 "EventListenerRequest", "TypeMemberRequest", "RelationRequest", "InternalProgramElement", "ExternalCallee",
-                "EntryPointItem",
+                "EntryPointItem", "SourceCoverage",
                 "Trigger", "EventListenerItem", "ImplementationItem", "CallerItem", "CalleeItem", "ReferenceItem", "RelationSite");
         assertThat(map(schemas.get("SemanticQueryError")).get("properties")).asInstanceOf(org.assertj.core.api.InstanceOfAssertFactories.MAP)
                 .containsOnlyKeys("code", "message", "retryable", "currentRevision");
@@ -131,6 +131,28 @@ class OpenApiContractTest {
         assertThat(map(calleeProperties.get("callee")).get("oneOf")).asInstanceOf(org.assertj.core.api.InstanceOfAssertFactories.LIST)
                 .containsExactly(Map.of("$ref", "#/components/schemas/InternalProgramElement"),
                         Map.of("$ref", "#/components/schemas/ExternalCallee"));
+    }
+
+    @Test
+    void search_code_http_response_requires_compact_source_coverage() throws Exception {
+        Map<String, Object> root = openApi();
+        Map<String, Object> schemas = map(map(root.get("components")).get("schemas"));
+        Map<String, Object> responseSchema = responseSchema(root, "/api/v1/search-code");
+        assertThat(responseSchema).containsEntry("$ref", "#/components/schemas/SearchCodeResult");
+
+        Map<String, Object> searchResult = map(schemas.get("SearchCodeResult"));
+        assertThat(searchResult).containsEntry("additionalProperties", false);
+        assertThat(searchResult.get("required")).asInstanceOf(org.assertj.core.api.InstanceOfAssertFactories.LIST)
+                .containsExactly("repositoryId", "revision", "items", "page", "sourceCoverage");
+        Map<String, Object> searchProperties = map(searchResult.get("properties"));
+        assertThat(map(searchProperties.get("sourceCoverage")))
+                .containsEntry("$ref", "#/components/schemas/SourceCoverage");
+
+        Map<String, Object> sourceCoverage = map(schemas.get("SourceCoverage"));
+        assertThat(sourceCoverage).containsEntry("additionalProperties", false);
+        assertThat(sourceCoverage.get("required")).asInstanceOf(org.assertj.core.api.InstanceOfAssertFactories.LIST)
+                .containsExactly("indexedSourceCount", "issueCount", "issueCodes");
+        assertThat(map(sourceCoverage.get("properties"))).containsOnlyKeys("indexedSourceCount", "issueCount", "issueCodes");
     }
 
     private static void assertRequired(Map<String, Object> schemas, String schemaName, List<String> required) {

@@ -331,12 +331,21 @@ components:
     SearchCodeResult:
       type: object
       additionalProperties: false
-      required: [repositoryId, revision, items, page]
+      required: [repositoryId, revision, items, page, sourceCoverage]
       properties:
         repositoryId: {$ref: '#/components/schemas/RepositoryId'}
         revision: {$ref: '#/components/schemas/Revision'}
         items: {type: array, items: {$ref: '#/components/schemas/InternalProgramElement'}}
         page: {$ref: '#/components/schemas/Page'}
+        sourceCoverage: {$ref: '#/components/schemas/SourceCoverage'}
+    SourceCoverage:
+      type: object
+      additionalProperties: false
+      required: [indexedSourceCount, issueCount, issueCodes]
+      properties:
+        indexedSourceCount: {type: integer, minimum: 0}
+        issueCount: {type: integer, minimum: 0}
+        issueCodes: {type: array, items: {type: string}}
     EntryPointCollectionResult:
       type: object
       additionalProperties: false

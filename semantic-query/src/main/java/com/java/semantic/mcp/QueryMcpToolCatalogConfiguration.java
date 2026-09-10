@@ -48,7 +48,7 @@ public class QueryMcpToolCatalogConfiguration {
         McpSchema.Tool tool = McpSchema.Tool.builder(definition.name())
                 .description(definition.description())
                 .inputSchema(SemanticMcpSchemaCatalog.inputSchema(definition.name()))
-                .outputSchema(Map.of())
+                .outputSchema(SemanticMcpSchemaCatalog.outputSchema(definition.name()))
                 .annotations(McpSchema.ToolAnnotations.builder()
                         .readOnlyHint(true)
                         .destructiveHint(false)

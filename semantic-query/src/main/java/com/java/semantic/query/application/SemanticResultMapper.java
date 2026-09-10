@@ -3,6 +3,7 @@ package com.java.semantic.query.application;
 import com.java.semantic.model.codefact.CodeFactSummary;
 import com.java.semantic.model.codefact.CodeFactDetails;
 import com.java.semantic.model.codefact.CodeFactSearchResult;
+import com.java.semantic.model.index.SourceIndexCoverage;
 import com.java.semantic.model.query.CurrentGeneration;
 
 import java.util.List;
@@ -32,14 +33,15 @@ public final class SemanticResultMapper {
         return toProgramElement(new CodeFactSummary(requiredDetails.fact(), requiredDetails.location()), slice);
     }
 
-    public static SemanticQueryContract.CollectionResult toCollectionResult(CodeFactSearchResult result,
+    public static SemanticQueryContract.SearchCodeResult toSearchCodeResult(CodeFactSearchResult result,
                                                                               List<SemanticQueryContract.ProgramElement> elements) {
         CodeFactSearchResult requiredResult = Objects.requireNonNull(result, "code fact search result is required");
         List<SemanticQueryContract.ProgramElement> requiredElements = List.copyOf(Objects.requireNonNull(elements, "program elements are required"));
         CurrentGeneration generation = requiredResult.generation();
         SemanticQueryContract.Page page = new SemanticQueryContract.Page(requiredResult.query().offset(), requiredResult.query().limit(),
                 requiredElements.size(), requiredResult.totalCount(), requiredResult.hasMore());
-        return new SemanticQueryContract.CollectionResult(generation.repositoryId().value(), generation.revision().value(), requiredElements, page);
+        return new SemanticQueryContract.SearchCodeResult(generation.repositoryId().value(), generation.revision().value(), requiredElements, page,
+                toSourceCoverage(requiredResult.coverage()));
     }
 
     public static SemanticQueryContract.CollectionResult toCollectionResult(CurrentGeneration generation, int offset, int limit,
@@ -58,5 +60,11 @@ public final class SemanticResultMapper {
         return new SemanticQueryContract.FactSourceResult(generation.repositoryId().value(), generation.revision().value(), requiredFactId,
                 SourceSnippetMapper.toSnippet(requiredSlice.sourceRange(), requiredSlice.fileContent()),
                 SourceSnippetMapper.toFactRange(requiredSlice.factRange()));
+    }
+
+    private static SemanticQueryContract.SourceCoverage toSourceCoverage(SourceIndexCoverage coverage) {
+        SourceIndexCoverage requiredCoverage = Objects.requireNonNull(coverage, "source index coverage is required");
+        List<String> issueCodes = requiredCoverage.issues().stream().map(issue -> issue.code()).distinct().sorted().toList();
+        return new SemanticQueryContract.SourceCoverage(requiredCoverage.indexedSourceCount(), requiredCoverage.issues().size(), issueCodes);
     }
 }

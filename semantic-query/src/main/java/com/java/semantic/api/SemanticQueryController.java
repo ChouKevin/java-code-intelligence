@@ -40,7 +40,7 @@ public final class SemanticQueryController {
     }
 
     @PostMapping("/search-code")
-    public SemanticQueryContract.CollectionResult searchCode(@RequestBody SearchCodeHttpRequest request) {
+    public SemanticQueryContract.SearchCodeResult searchCode(@RequestBody SearchCodeHttpRequest request) {
         return facade.searchCode(new SemanticQueryContract.SearchCodeRequest(requiredText(request.repositoryId(), "repositoryId"),
                 requiredText(request.revision(), "revision"), requiredText(request.query(), "query"),
                 Objects.requireNonNullElse(request.kinds(), Set.of()), optionalText(request.packagePrefix()),

@@ -20,12 +20,18 @@ import java.util.Set;
 public final class SemanticMcpSchemaCatalog {
 
     private static final Map<String, Map<String, Object>> INPUT_SCHEMAS = inputSchemas();
+    private static final Map<String, Map<String, Object>> OUTPUT_SCHEMAS = outputSchemas();
 
     private SemanticMcpSchemaCatalog() {
     }
 
     public static Map<String, Object> inputSchema(String toolName) {
         return Optional.ofNullable(INPUT_SCHEMAS.get(toolName))
+                .orElseThrow(() -> new IllegalArgumentException("unknown Semantic MCP tool"));
+    }
+
+    public static Map<String, Object> outputSchema(String toolName) {
+        return Optional.ofNullable(OUTPUT_SCHEMAS.get(toolName))
                 .orElseThrow(() -> new IllegalArgumentException("unknown Semantic MCP tool"));
     }
 
@@ -36,6 +42,130 @@ public final class SemanticMcpSchemaCatalog {
     @SuppressWarnings("unchecked")
     public static List<String> requiredFields(String toolName) {
         return (List<String>) inputSchema(toolName).get("required");
+    }
+
+    private static Map<String, Map<String, Object>> outputSchemas() {
+        Map<String, Map<String, Object>> schemas = new LinkedHashMap<>();
+        schemas.put("list_repositories", repositoryCollection());
+        schemas.put("get_repository", repositoryItem());
+        schemas.put("search_code", searchCodeResult());
+        schemas.put("get_fact_source", factSourceResult());
+        schemas.put("list_entry_points", collection(entryPointItem()));
+        schemas.put("find_api_routes", collection(entryPointItem()));
+        schemas.put("find_event_listeners", collection(eventListenerItem()));
+        schemas.put("list_type_members", collection(internalProgramElement()));
+        schemas.put("find_method_implementations", collection(implementationItem()));
+        schemas.put("find_references", collection(referenceItem()));
+        schemas.put("find_callers", collection(callerItem()));
+        schemas.put("find_callees", collection(calleeItem()));
+        return Map.copyOf(schemas);
+    }
+
+    private static Map<String, Object> repositoryCollection() {
+        return schema(Map.of("items", items(repositoryItem()), "page", page()), List.of("items", "page"));
+    }
+
+    private static Map<String, Object> repositoryItem() {
+        return schema(Map.of("repositoryId", string(), "revision", string()), List.of("repositoryId", "revision"));
+    }
+
+    private static Map<String, Object> searchCodeResult() {
+        return schema(Map.of("repositoryId", string(), "revision", string(), "items", items(internalProgramElement()), "page", page(),
+                "sourceCoverage", sourceCoverage()), List.of("repositoryId", "revision", "items", "page", "sourceCoverage"));
+    }
+
+    private static Map<String, Object> factSourceResult() {
+        return schema(Map.of("repositoryId", string(), "revision", string(), "factId", string(), "source", sourceSnippet(),
+                "factRange", factRange()), List.of("repositoryId", "revision", "factId", "source", "factRange"));
+    }
+
+    private static Map<String, Object> collection(Map<String, Object> item) {
+        return schema(Map.of("repositoryId", string(), "revision", string(), "items", items(item), "page", page()),
+                List.of("repositoryId", "revision", "items", "page"));
+    }
+
+    private static Map<String, Object> page() {
+        return schema(Map.of("offset", nonNegativeInteger(), "limit", positiveInteger(), "returned", nonNegativeInteger(),
+                "total", nonNegativeInteger(), "hasMore", Map.of("type", "boolean")),
+                List.of("offset", "limit", "returned", "total", "hasMore"));
+    }
+
+    private static Map<String, Object> sourceCoverage() {
+        return schema(Map.of("indexedSourceCount", nonNegativeInteger(), "issueCount", nonNegativeInteger(),
+                "issueCodes", items(string())), List.of("indexedSourceCount", "issueCount", "issueCodes"));
+    }
+
+    private static Map<String, Object> sourceSnippet() {
+        return schema(Map.of("path", string(), "startLine", positiveInteger(), "endLine", positiveInteger(), "code", string()),
+                List.of("path", "startLine", "endLine", "code"));
+    }
+
+    private static Map<String, Object> factRange() {
+        return schema(Map.of("startLine", positiveInteger(), "endLine", positiveInteger()), List.of("startLine", "endLine"));
+    }
+
+    private static Map<String, Object> internalProgramElement() {
+        return schema(Map.of("factId", string(), "kind", enumValue(CodeFactKind.values()), "displayName", string(),
+                "source", sourceSnippet()), List.of("factId", "kind", "displayName", "source"));
+    }
+
+    private static Map<String, Object> externalCallee() {
+        return schema(Map.of("displayName", string()), List.of("displayName"));
+    }
+
+    private static Map<String, Object> entryPointItem() {
+        return schema(Map.of("factId", string(), "handler", internalProgramElement(), "trigger", trigger()),
+                List.of("factId", "handler", "trigger"));
+    }
+
+    private static Map<String, Object> trigger() {
+        return schema(Map.of("kind", string(), "method", string(), "value", string()), List.of("kind"));
+    }
+
+    private static Map<String, Object> eventListenerItem() {
+        return schema(Map.of("eventType", string(), "handler", internalProgramElement()), List.of("eventType", "handler"));
+    }
+
+    private static Map<String, Object> implementationItem() {
+        return schema(Map.of("implementation", internalProgramElement(), "relationKind", Map.of("type", "string", "enum",
+                List.of("IMPLEMENTS", "OVERRIDES"))), List.of("implementation", "relationKind"));
+    }
+
+    private static Map<String, Object> referenceItem() {
+        return schema(Map.of("container", internalProgramElement(), "referenceSite", relationSite()), List.of("container", "referenceSite"));
+    }
+
+    private static Map<String, Object> callerItem() {
+        return schema(Map.of("caller", internalProgramElement(), "callSite", relationSite()), List.of("caller", "callSite"));
+    }
+
+    private static Map<String, Object> calleeItem() {
+        return schema(Map.of("callee", Map.of("oneOf", List.of(internalProgramElement(), externalCallee())), "callSite", relationSite()),
+                List.of("callee", "callSite"));
+    }
+
+    private static Map<String, Object> relationSite() {
+        return schema(Map.of("factId", string(), "source", sourceSnippet()), List.of("factId", "source"));
+    }
+
+    private static Map<String, Object> items(Map<String, Object> item) {
+        return Map.of("type", "array", "items", item);
+    }
+
+    private static Map<String, Object> string() {
+        return Map.of("type", "string");
+    }
+
+    private static Map<String, Object> nonNegativeInteger() {
+        return Map.of("type", "integer", "minimum", 0);
+    }
+
+    private static Map<String, Object> positiveInteger() {
+        return Map.of("type", "integer", "minimum", 1);
+    }
+
+    private static Map<String, Object> enumValue(Enum<?>[] values) {
+        return Map.of("type", "string", "enum", enumNames(values));
     }
 
     private static Map<String, Map<String, Object>> inputSchemas() {

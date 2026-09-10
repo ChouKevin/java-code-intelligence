@@ -75,6 +75,28 @@ class HttpMcpParityTest {
     }
 
     @Test
+    void authenticated_http_and_mcp_return_the_same_compact_source_coverage_for_empty_searches() throws Exception {
+        SemanticQueryFacade facade = mock(SemanticQueryFacade.class);
+        SemanticQueryContract.SearchCodeResult searchResult = new SemanticQueryContract.SearchCodeResult(REPOSITORY_ID, REVISION, List.of(),
+                new SemanticQueryContract.Page(0, 20, 0, 0, false),
+                new SemanticQueryContract.SourceCoverage(3, 2, List.of("PARSE_ERROR", "UNRESOLVED_TYPE")));
+        when(facade.searchCode(any())).thenReturn(searchResult);
+
+        String httpSuccess = authenticatedHttp(facade).perform(post("/api/v1/search-code")
+                        .header(QueryTokenFilter.TOKEN_HEADER, "query-token").contentType("application/json").content("""
+                                {"repositoryId":"orders","revision":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","query":"missing"}
+                                """))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        ObjectMapper mapper = applicationJsonMapper();
+        McpSchema.CallToolResult mcpSuccess = call(new QueryMcpToolCatalogConfiguration().mcpQueryToolSpecifications(facade, mapper),
+                "search_code", Map.of("repositoryId", REPOSITORY_ID, "revision", REVISION, "query", "missing"));
+
+        assertThat(mapper.readTree(httpSuccess)).isEqualTo(mapper.readTree(mapper.writeValueAsString(mcpSuccess.structuredContent())));
+        assertThat(httpSuccess).contains("\"sourceCoverage\":{\"indexedSourceCount\":3,\"issueCount\":2,\"issueCodes\":[\"PARSE_ERROR\",\"UNRESOLVED_TYPE\"]}")
+                .doesNotContain("sourcePath", "issues");
+    }
+
+    @Test
     void authenticated_http_rejects_an_unknown_legacy_field_with_the_shared_invalid_argument_error() throws Exception {
         SemanticQueryFacade facade = mock(SemanticQueryFacade.class);
         when(facade.searchCode(any())).thenReturn(emptyCollection());
@@ -152,9 +174,9 @@ class HttpMcpParityTest {
                         """));
     }
 
-    private static SemanticQueryContract.CollectionResult emptyCollection() {
-        return new SemanticQueryContract.CollectionResult(REPOSITORY_ID, REVISION, List.of(),
-                new SemanticQueryContract.Page(0, 20, 0, 0, false));
+    private static SemanticQueryContract.SearchCodeResult emptyCollection() {
+        return new SemanticQueryContract.SearchCodeResult(REPOSITORY_ID, REVISION, List.of(),
+                new SemanticQueryContract.Page(0, 20, 0, 0, false), new SemanticQueryContract.SourceCoverage(0, 0, List.of()));
     }
 
     private static MockMvc authenticatedHttp(SemanticQueryFacade facade) {

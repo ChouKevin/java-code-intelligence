@@ -174,6 +174,22 @@ public final class SemanticQueryContract {
     public record CollectionResult(String repositoryId, String revision, List<?> items, Page page) {
     }
 
+    /** Compact extraction status for the source rows already authorized for a code search. */
+    public record SourceCoverage(long indexedSourceCount, int issueCount, List<String> issueCodes) {
+        public SourceCoverage {
+            issueCodes = List.copyOf(Objects.requireNonNull(issueCodes, "source issue codes are required"));
+        }
+    }
+
+    public record SearchCodeResult(String repositoryId, String revision, List<ProgramElement> items, Page page,
+                                   SourceCoverage sourceCoverage) {
+        public SearchCodeResult {
+            items = List.copyOf(Objects.requireNonNull(items, "search items are required"));
+            page = Objects.requireNonNull(page, "page is required");
+            sourceCoverage = Objects.requireNonNull(sourceCoverage, "source coverage is required");
+        }
+    }
+
     public record FactSourceResult(String repositoryId, String revision, String factId,
                                    SourceSnippet source, FactRange factRange) {
     }
