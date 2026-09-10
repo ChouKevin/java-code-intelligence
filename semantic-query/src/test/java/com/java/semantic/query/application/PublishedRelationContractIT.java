@@ -12,8 +12,9 @@ import com.java.semantic.model.query.PublishedRelationQuery;
 import com.java.semantic.model.query.PublishedRelationResult;
 import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.model.repository.RepositoryRevision;
-import com.mongodb.client.MongoClients;
 import org.bson.Document;
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.data.mongodb.core.MongoTemplate;
@@ -27,12 +28,22 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 @Tag("mongo-it")
 class PublishedRelationContractIT extends PublishedMongoITSupport {
 
+    private static PublishedMongoLifecycle lifecycle;
+
+    @BeforeAll
+    static void startMongo() {
+        lifecycle = PublishedMongoLifecycle.start();
+    }
+
+    @AfterAll
+    static void stopMongo() {
+        lifecycle.close();
+    }
+
     @Test
     void returns_deterministically_paged_references_and_implementation_facts_from_the_current_generation() {
-        try (org.testcontainers.mongodb.MongoDBContainer container = new org.testcontainers.mongodb.MongoDBContainer(
-                org.testcontainers.utility.DockerImageName.parse("mongo:8.0.4"))) {
-            container.start();
-            MongoTemplate template = new MongoTemplate(MongoClients.create(container.getConnectionString()), "published_relations");
+        try (PublishedMongoLifecycle.Invocation invocation = lifecycle.openInvocation()) {
+            MongoTemplate template = invocation.template();
             seedCurrent(template, "orders");
             CodeFactIdentity declaration = methodIdentity("example.api", "Port", "handle", "src/main/java/example/api/Port.java");
             CodeFactIdentity alpha = methodIdentity("example.service", "AlphaService", "handle", "src/main/java/example/service/AlphaService.java");
@@ -66,10 +77,8 @@ class PublishedRelationContractIT extends PublishedMongoITSupport {
 
     @Test
     void omits_forbidden_relation_sources_without_disclosing_them() {
-        try (org.testcontainers.mongodb.MongoDBContainer container = new org.testcontainers.mongodb.MongoDBContainer(
-                org.testcontainers.utility.DockerImageName.parse("mongo:8.0.4"))) {
-            container.start();
-            MongoTemplate template = new MongoTemplate(MongoClients.create(container.getConnectionString()), "published_relation_authorization");
+        try (PublishedMongoLifecycle.Invocation invocation = lifecycle.openInvocation()) {
+            MongoTemplate template = invocation.template();
             seedCurrent(template, "orders");
             CodeFactIdentity declaration = methodIdentity("example.api", "Port", "handle", "src/main/java/example/api/Port.java");
             CodeFactIdentity privateSource = methodIdentity("example.privatecode", "PrivateService", "handle",
@@ -92,10 +101,8 @@ class PublishedRelationContractIT extends PublishedMongoITSupport {
 
     @Test
     void reads_direct_callers_by_target_and_callees_by_source() {
-        try (org.testcontainers.mongodb.MongoDBContainer container = new org.testcontainers.mongodb.MongoDBContainer(
-                org.testcontainers.utility.DockerImageName.parse("mongo:8.0.4"))) {
-            container.start();
-            MongoTemplate template = new MongoTemplate(MongoClients.create(container.getConnectionString()), "published_direct_calls");
+        try (PublishedMongoLifecycle.Invocation invocation = lifecycle.openInvocation()) {
+            MongoTemplate template = invocation.template();
             seedCurrent(template, "orders");
             CodeFactIdentity method = methodIdentity("example.service", "OrderService", "charge",
                     "src/main/java/example/service/OrderService.java");
@@ -122,10 +129,8 @@ class PublishedRelationContractIT extends PublishedMongoITSupport {
 
     @Test
     void fails_closed_before_disclosing_a_relation_with_inconsistent_flattened_fields() {
-        try (org.testcontainers.mongodb.MongoDBContainer container = new org.testcontainers.mongodb.MongoDBContainer(
-                org.testcontainers.utility.DockerImageName.parse("mongo:8.0.4"))) {
-            container.start();
-            MongoTemplate template = new MongoTemplate(MongoClients.create(container.getConnectionString()), "published_relation_contract");
+        try (PublishedMongoLifecycle.Invocation invocation = lifecycle.openInvocation()) {
+            MongoTemplate template = invocation.template();
             seedCurrent(template, "orders");
             CodeFactIdentity declaration = methodIdentity("example.api", "Port", "handle", "src/main/java/example/api/Port.java");
             CodeFactIdentity source = methodIdentity("example.service", "Service", "handle", "src/main/java/example/service/Service.java");

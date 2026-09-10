@@ -31,11 +31,11 @@ import com.mongodb.event.CommandListener;
 import com.mongodb.event.CommandStartedEvent;
 import java.util.concurrent.CopyOnWriteArrayList;
 import org.bson.Document;
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.data.mongodb.core.MongoTemplate;
-import org.testcontainers.mongodb.MongoDBContainer;
-import org.testcontainers.utility.DockerImageName;
 
 import java.time.Duration;
 import java.util.List;
@@ -47,12 +47,22 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 @Tag("mongo-it")
 class PublishedCodeFactContractIT extends PublishedMongoITSupport {
 
+    private static PublishedMongoLifecycle lifecycle;
+
+    @BeforeAll
+    static void startMongo() {
+        lifecycle = PublishedMongoLifecycle.start();
+    }
+
+    @AfterAll
+    static void stopMongo() {
+        lifecycle.close();
+    }
+
     @Test
     void method_search_and_get_ignore_unrelated_incompatible_projections_but_require_symbols() {
-        try (MongoDBContainer container = new MongoDBContainer(DockerImageName.parse("mongo:8.0.4"))) {
-            container.start();
-            MongoTemplate template = new MongoTemplate(com.mongodb.client.MongoClients.create(container.getConnectionString()),
-                    "published_codefact_partial_projection");
+        try (PublishedMongoLifecycle.Invocation invocation = lifecycle.openInvocation()) {
+            MongoTemplate template = invocation.template();
             seedCurrent(template, "orders");
             CodeFactIdentity identity = methodIdentity("example.payment", "PaymentService", "findPayment",
                     "src/main/java/example/payment/PaymentService.java");
@@ -90,9 +100,8 @@ class PublishedCodeFactContractIT extends PublishedMongoITSupport {
     }
     @Test
     void searches_authorized_derived_rows_and_rejects_denied_package_scope() {
-        try (MongoDBContainer container = new MongoDBContainer(DockerImageName.parse("mongo:8.0.4"))) {
-            container.start();
-            MongoTemplate template = new MongoTemplate(com.mongodb.client.MongoClients.create(container.getConnectionString()), "published_codefact");
+        try (PublishedMongoLifecycle.Invocation invocation = lifecycle.openInvocation()) {
+            MongoTemplate template = invocation.template();
             seedCurrent(template, "orders");
             CodeFactIdentity identity = methodIdentity("example.payment", "PaymentService", "findPayment", "src/main/java/example/payment/PaymentService.java");
             seedMethod(template, identity, java.util.List.of());
@@ -127,9 +136,8 @@ class PublishedCodeFactContractIT extends PublishedMongoITSupport {
 
     @Test
     void resolves_relation_search_rows_through_their_relation_authority() {
-        try (MongoDBContainer container = new MongoDBContainer(DockerImageName.parse("mongo:8.0.4"))) {
-            container.start();
-            MongoTemplate template = new MongoTemplate(com.mongodb.client.MongoClients.create(container.getConnectionString()), "published_codefact_relation");
+        try (PublishedMongoLifecycle.Invocation invocation = lifecycle.openInvocation()) {
+            MongoTemplate template = invocation.template();
             seedCurrent(template, "orders");
             CodeFactIdentity from = methodIdentity("example.payment", "PaymentService", "charge", "src/main/java/example/payment/PaymentService.java");
             SourceRange range = new SourceRange("src/main/java/example/payment/PaymentService.java",
@@ -161,9 +169,8 @@ class PublishedCodeFactContractIT extends PublishedMongoITSupport {
 
     @Test
     void returns_only_code_proven_fee_declaration_evidence() {
-        try (MongoDBContainer container = new MongoDBContainer(DockerImageName.parse("mongo:8.0.4"))) {
-            container.start();
-            MongoTemplate template = new MongoTemplate(com.mongodb.client.MongoClients.create(container.getConnectionString()), "published_codefact_fee");
+        try (PublishedMongoLifecycle.Invocation invocation = lifecycle.openInvocation()) {
+            MongoTemplate template = invocation.template();
             seedCurrent(template, "orders");
             CodeFactIdentity identity = methodIdentity("example.payment", "PaymentFeeCalculator", "feeFormula",
                     "src/main/java/example/payment/PaymentFeeCalculator.java");
@@ -186,9 +193,8 @@ class PublishedCodeFactContractIT extends PublishedMongoITSupport {
 
     @Test
     void unfiltered_search_requires_all_possible_authorities_while_exact_read_requires_only_its_authority() {
-        try (MongoDBContainer container = new MongoDBContainer(DockerImageName.parse("mongo:8.0.4"))) {
-            container.start();
-            MongoTemplate template = new MongoTemplate(com.mongodb.client.MongoClients.create(container.getConnectionString()), "published_codefact_projection");
+        try (PublishedMongoLifecycle.Invocation invocation = lifecycle.openInvocation()) {
+            MongoTemplate template = invocation.template();
             seedCurrent(template, "orders");
             CodeFactIdentity identity = methodIdentity("example.payment", "PaymentService", "findPayment",
                     "src/main/java/example/payment/PaymentService.java");
@@ -212,9 +218,8 @@ class PublishedCodeFactContractIT extends PublishedMongoITSupport {
 
     @Test
     void reports_only_pre_authorized_current_source_coverage_and_syntax_issues() {
-        try (MongoDBContainer container = new MongoDBContainer(DockerImageName.parse("mongo:8.0.4"))) {
-            container.start();
-            MongoTemplate template = new MongoTemplate(com.mongodb.client.MongoClients.create(container.getConnectionString()), "published_codefact_coverage");
+        try (PublishedMongoLifecycle.Invocation invocation = lifecycle.openInvocation()) {
+            MongoTemplate template = invocation.template();
             seedCurrent(template, "orders");
             CodeFactIdentity identity = methodIdentity("example.payment", "PaymentService", "findPayment",
                     "src/main/java/example/payment/PaymentService.java");
@@ -247,10 +252,10 @@ class PublishedCodeFactContractIT extends PublishedMongoITSupport {
                     }
                 }
             };
-            MongoClientSettings settings = MongoClientSettings.builder().applyConnectionString(new ConnectionString(container.getConnectionString()))
+            MongoClientSettings settings = MongoClientSettings.builder().applyConnectionString(new ConnectionString(lifecycle.connectionString()))
                     .addCommandListener(listener).build();
             try (MongoClient observedClient = MongoClients.create(settings)) {
-                MongoTemplate observedTemplate = new MongoTemplate(observedClient, "published_codefact_coverage");
+                MongoTemplate observedTemplate = new MongoTemplate(observedClient, invocation.databaseName());
                 CodeFactSearchService service = new CodeFactSearchService(observedTemplate, selector(observedTemplate, policy), Duration.ofSeconds(2));
 
                 CodeFactSearchResult broad = service.search(new CodeFactSearchQuery(new RepositoryId("orders"),
