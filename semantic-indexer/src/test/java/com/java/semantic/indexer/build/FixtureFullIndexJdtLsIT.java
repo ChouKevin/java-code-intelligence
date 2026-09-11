@@ -2,7 +2,6 @@ package com.java.semantic.indexer.build;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import com.java.semantic.config.JdtLsProperties;
 import com.java.semantic.model.index.GenerationId;
@@ -24,6 +23,7 @@ import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.model.repository.RepositoryRevision;
 import com.java.semantic.repository.domain.RepositorySnapshot;
 import com.java.semantic.semantic.adapter.jdtls.DefaultJdtWorkspaceManager;
+import com.java.semantic.semantic.adapter.jdtls.JdtLsHomeRequirement;
 import com.java.semantic.semantic.adapter.jdtls.JdtLsProcessFactory;
 import com.java.semantic.semantic.adapter.jdtls.JdtLsReadinessProbe;
 import com.java.semantic.semantic.adapter.jdtls.JdtWorkspaceLifecycleMetrics;
@@ -53,7 +53,6 @@ import org.springframework.boot.WebApplicationType;
 import org.springframework.boot.builder.SpringApplicationBuilder;
 import org.springframework.boot.web.server.context.WebServerApplicationContext;
 import org.springframework.context.ConfigurableApplicationContext;
-import org.springframework.util.StringUtils;
 import tools.jackson.databind.json.JsonMapper;
 
 /** Exercises a real JDT LS process before exporting fixture source through production projectors. */
@@ -91,7 +90,7 @@ class FixtureFullIndexJdtLsIT {
     @Test
     void exports_framework_api_contract_stub_fixture_with_complete_isolated_generations_after_starting_a_real_jdt_language_server()
             throws IOException {
-        Path jdtLsHome = requiredJdtLsHome();
+        Path jdtLsHome = JdtLsHomeRequirement.requireHome(System.getenv("JDTLS_HOME"));
         DefaultJdtWorkspaceManager manager = manager(jdtLsHome);
         try (GenericContainer<?> mongo = new GenericContainer<>(DockerImageName.parse("mongo:8.0.4")).withExposedPorts(27017)) {
             mongo.start();
@@ -451,14 +450,6 @@ class FixtureFullIndexJdtLsIT {
                         .map(entry -> new Document("name", entry.getKey()).append("version", entry.getValue())).toList())
                 .append("identityDigest", "0".repeat(64)).append("outstandingBatches", List.of())
                 .append("acknowledgedBatches", List.of()).append("failedOrAmbiguousBatches", List.of()));
-    }
-
-    private Path requiredJdtLsHome() {
-        String configuredHome = System.getenv("JDTLS_HOME");
-        assumeTrue(StringUtils.hasText(configuredHome), "JDTLS_HOME must be configured for real JDT LS integration tests");
-        Path home = Path.of(configuredHome);
-        assumeTrue(Files.isDirectory(home), "JDTLS_HOME must point at an installed JDT LS directory");
-        return home;
     }
 
     private DefaultJdtWorkspaceManager manager(Path home) {

@@ -1,7 +1,6 @@
 package com.java.semantic.indexer.build;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import com.java.semantic.config.JdtLsProperties;
 import com.java.semantic.indexer.incremental.ChangeKind;
@@ -15,6 +14,7 @@ import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.model.repository.RepositoryRevision;
 import com.java.semantic.repository.domain.RepositorySnapshot;
 import com.java.semantic.semantic.adapter.jdtls.DefaultJdtWorkspaceManager;
+import com.java.semantic.semantic.adapter.jdtls.JdtLsHomeRequirement;
 import com.java.semantic.semantic.adapter.jdtls.JdtLsProcessFactory;
 import com.java.semantic.semantic.adapter.jdtls.JdtLsReadinessProbe;
 import com.java.semantic.semantic.adapter.jdtls.JdtWorkspaceLifecycleMetrics;
@@ -30,7 +30,6 @@ import java.util.Set;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
-import org.springframework.util.StringUtils;
 
 /** Uses a real JDT LS process while checking the source selections published by incremental planning. */
 @Tag("jdtls-it")
@@ -41,7 +40,7 @@ class IncrementalPublicationJdtLsIT {
 
     @Test
     void exports_only_reanalyzed_body_and_signature_sources_and_omits_deleted_sources_after_real_jdt_ls_analysis() throws IOException {
-        Path jdtLsHome = requiredJdtLsHome();
+        Path jdtLsHome = JdtLsHomeRequirement.requireHome(System.getenv("JDTLS_HOME"));
         Path root = Files.createDirectories(temporaryDirectory.resolve("repository"));
         Files.writeString(root.resolve("pom.xml"), "<project><modelVersion>4.0.0</modelVersion><groupId>demo</groupId><artifactId>demo</artifactId><version>1</version></project>");
         Path source = Files.createDirectories(root.resolve("src/main/java/demo")).resolve("Sample.java");
@@ -114,14 +113,6 @@ class IncrementalPublicationJdtLsIT {
             @Override
             public Optional<Set<String>> supportedSources(String module) { return Optional.of(Set.of("src/main/java/demo/Sample.java")); }
         };
-    }
-
-    private Path requiredJdtLsHome() {
-        String configuredHome = System.getenv("JDTLS_HOME");
-        assumeTrue(StringUtils.hasText(configuredHome), "JDTLS_HOME must be configured for real JDT LS integration tests");
-        Path home = Path.of(configuredHome);
-        assumeTrue(Files.isDirectory(home), "JDTLS_HOME must point at an installed JDT LS directory");
-        return home;
     }
 
     private DefaultJdtWorkspaceManager manager(Path home) {

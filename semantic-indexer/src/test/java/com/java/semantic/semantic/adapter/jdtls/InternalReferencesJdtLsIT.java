@@ -11,7 +11,6 @@ import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
-import org.springframework.util.StringUtils;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -21,7 +20,6 @@ import java.util.List;
 import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 @Tag("jdtls-it")
 class InternalReferencesJdtLsIT {
@@ -39,7 +37,7 @@ class InternalReferencesJdtLsIT {
 
     @Test
     void should_find_repository_local_type_references_with_real_jdt_ls() throws IOException {
-        Path home = requireJdtlsHome(System.getenv("JDTLS_HOME"));
+        Path home = JdtLsHomeRequirement.requireHome(System.getenv("JDTLS_HOME"));
         Path root = copyFixture();
         DefaultJdtWorkspaceManager manager = manager(properties(home));
         Lsp4jJavaSemanticService service = new Lsp4jJavaSemanticService(manager);
@@ -62,16 +60,6 @@ class InternalReferencesJdtLsIT {
         } finally {
             manager.shutdownAll();
         }
-    }
-
-    private Path requireJdtlsHome(String configuredHome) {
-        assumeTrue(StringUtils.hasText(configuredHome),
-                "JDTLS_HOME must be configured for real JDT LS integration tests");
-        Path home = Path.of(configuredHome);
-        assertThat(Files.isDirectory(home))
-                .as("JDTLS_HOME must point at an installed JDT LS directory: %s", home)
-                .isTrue();
-        return home;
     }
 
     private JdtLsProperties properties(Path home) {

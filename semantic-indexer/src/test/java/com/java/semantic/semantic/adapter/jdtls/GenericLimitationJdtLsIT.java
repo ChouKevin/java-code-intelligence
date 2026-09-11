@@ -21,7 +21,6 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.springframework.util.CollectionUtils;
-import org.springframework.util.StringUtils;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -31,13 +30,11 @@ import java.util.List;
 import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 /**
  * 以真實 JDT LS 驗證整個遷移的前提:泛型超類別上的繼承呼叫也能精確解析
  *
- * 只在設定 JDTLS_HOME 時執行;透過 jdtls-it profile 納入,單元測試永不啟動真實伺服器
- * 這裡無法在本環境跑到(JDTLS_HOME 未設定),但寫成設定後即會斷言的形式
+ * 透過 jdtls-it profile 納入；選取案例時 JDTLS_HOME 必須指向 JDT LS 目錄，單元測試永不啟動真實伺服器
  */
 @Tag("jdtls-it")
 class GenericLimitationJdtLsIT {
@@ -61,9 +58,7 @@ class GenericLimitationJdtLsIT {
      */
     @Test
     void should_resolve_both_inherited_calls_when_declared_only_on_generic_superclass() throws IOException {
-        Path home = jdtlsHome();
-        assumeTrue(StringUtils.hasText(System.getenv("JDTLS_HOME")) && Files.isDirectory(home),
-                "JDTLS_HOME must point at an installed JDT LS");
+        Path home = JdtLsHomeRequirement.requireHome(System.getenv("JDTLS_HOME"));
         Path root = copyFixture();
         JdtLsProperties properties = properties(home);
         DefaultJdtWorkspaceManager manager = manager(properties);
@@ -98,9 +93,7 @@ class GenericLimitationJdtLsIT {
      */
     @Test
     void should_populate_workspace_symbols_only_after_the_import_settles() throws Exception {
-        Path home = jdtlsHome();
-        assumeTrue(StringUtils.hasText(System.getenv("JDTLS_HOME")) && Files.isDirectory(home),
-                "JDTLS_HOME must point at an installed JDT LS");
+        Path home = JdtLsHomeRequirement.requireHome(System.getenv("JDTLS_HOME"));
         Path root = copyFixture();
         JdtLsProperties properties = properties(home);
         JdtLsProcessFactory factory = new JdtLsProcessFactory(properties);
@@ -179,11 +172,6 @@ class GenericLimitationJdtLsIT {
                         new SemanticPosition(method.namePosition().line(), method.namePosition().character())))
                 .findFirst()
                 .orElseThrow(() -> new AssertionError("missing canonical method declaration position"));
-    }
-
-    private Path jdtlsHome() {
-        String home = System.getenv("JDTLS_HOME");
-        return StringUtils.hasText(home) ? Path.of(home) : Path.of("/opt/jdtls");
     }
 
     private JdtLsProperties properties(Path home) {

@@ -1,7 +1,6 @@
 package com.java.semantic.indexer.job;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import com.java.semantic.config.JdtLsProperties;
 import com.java.semantic.indexer.build.RepositoryBuildRunner;
@@ -17,6 +16,7 @@ import com.java.semantic.repository.adapter.jgit.JGitRepositoryAdapter;
 import com.java.semantic.repository.application.RepositoryRuntimeRegistry;
 import com.java.semantic.repository.config.RepositoryProperties;
 import com.java.semantic.semantic.adapter.jdtls.DefaultJdtWorkspaceManager;
+import com.java.semantic.semantic.adapter.jdtls.JdtLsHomeRequirement;
 import com.java.semantic.semantic.adapter.jdtls.JdtLsProcessFactory;
 import com.java.semantic.semantic.adapter.jdtls.JdtLsReadinessProbe;
 import com.java.semantic.semantic.adapter.jdtls.JdtWorkspaceLifecycleMetrics;
@@ -43,7 +43,6 @@ import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.data.mongodb.core.MongoTemplate;
-import org.springframework.util.StringUtils;
 import org.testcontainers.mongodb.MongoDBContainer;
 
 /** Exercises the production dispatcher build assembly against revisions admitted from a moving remote. */
@@ -67,7 +66,7 @@ class DispatchedBuildIT {
     @ValueSource(booleans = {false, true})
     void publishes_the_admitted_revision_from_a_moving_remote_for_incremental_and_full_fallback_builds(boolean modifyPom)
             throws Exception {
-        Path jdtLsHome = requiredJdtLsHome();
+        Path jdtLsHome = JdtLsHomeRequirement.requireHome(System.getenv("JDTLS_HOME"));
         try (MongoDBContainer mongo = mongo(); RemoteFixture remote = RemoteFixture.create(temporaryDirectory);
                 MongoClient mongoClient = MongoClients.create(mongo.getConnectionString())) {
             MongoTemplate template = new MongoTemplate(mongoClient, "dispatched_build");
@@ -143,14 +142,6 @@ class DispatchedBuildIT {
                 .find(new Document("sourceArtifactId", artifactId)).first();
         assertThat(artifact).isNotNull();
         return artifact.getString("utf8Content");
-    }
-
-    private Path requiredJdtLsHome() {
-        String configuredHome = System.getenv("JDTLS_HOME");
-        assumeTrue(StringUtils.hasText(configuredHome), "JDTLS_HOME must be configured for dispatcher integration");
-        Path home = Path.of(configuredHome);
-        assumeTrue(Files.isDirectory(home), "JDTLS_HOME must point at an installed JDT LS directory");
-        return home;
     }
 
     private DefaultJdtWorkspaceManager workspaceManager(Path home) {

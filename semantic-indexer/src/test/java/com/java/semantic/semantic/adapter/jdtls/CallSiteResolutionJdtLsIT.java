@@ -25,7 +25,6 @@ import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
-import org.springframework.util.StringUtils;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -35,8 +34,6 @@ import java.util.List;
 import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 @Tag("jdtls-it")
 class CallSiteResolutionJdtLsIT {
@@ -53,17 +50,8 @@ class CallSiteResolutionJdtLsIT {
     Path workspaceData;
 
     @Test
-    void should_reject_a_configured_jdtls_home_that_is_not_a_directory() {
-        Path invalidHome = workingTree.resolve("missing-jdtls-home");
-
-        assertThatThrownBy(() -> requireJdtlsHome(invalidHome.toString()))
-                .isInstanceOf(AssertionError.class)
-                .hasMessageContaining("JDTLS_HOME must point at an installed JDT LS directory");
-    }
-
-    @Test
     void should_resolve_call_sites_with_exact_targets_ranges_and_definition_fallbacks() throws IOException {
-        Path home = requireJdtlsHome(System.getenv("JDTLS_HOME"));
+        Path home = JdtLsHomeRequirement.requireHome(System.getenv("JDTLS_HOME"));
         Path root = copyFixture();
         DefaultJdtWorkspaceManager manager = manager(properties(home));
         Lsp4jJavaSemanticService service = new Lsp4jJavaSemanticService(manager);
@@ -129,7 +117,7 @@ class CallSiteResolutionJdtLsIT {
 
     @Test
     void should_resolve_a_qualifier_annotated_field_to_the_matching_bean_under_real_jdt() throws IOException {
-        Path home = requireJdtlsHome(System.getenv("JDTLS_HOME"));
+        Path home = JdtLsHomeRequirement.requireHome(System.getenv("JDTLS_HOME"));
         Path root = copyFixture();
         DefaultJdtWorkspaceManager manager = manager(properties(home));
         Lsp4jJavaSemanticService service = new Lsp4jJavaSemanticService(manager);
@@ -323,16 +311,6 @@ class CallSiteResolutionJdtLsIT {
                         new SemanticPosition(method.namePosition().line(), method.namePosition().character())))
                 .findFirst()
                 .orElseThrow(() -> new AssertionError("missing canonical method declaration position"));
-    }
-
-    private Path requireJdtlsHome(String configuredHome) {
-        assumeTrue(StringUtils.hasText(configuredHome),
-                "JDTLS_HOME must be configured for real JDT LS integration tests");
-        Path home = Path.of(configuredHome);
-        assertThat(Files.isDirectory(home))
-                .as("JDTLS_HOME must point at an installed JDT LS directory: %s", home)
-                .isTrue();
-        return home;
     }
 
     private JdtLsProperties properties(Path home) {
