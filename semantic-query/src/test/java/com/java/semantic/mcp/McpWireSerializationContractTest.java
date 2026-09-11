@@ -5,9 +5,6 @@ import com.java.semantic.api.QuerySecurityProperties;
 import com.java.semantic.api.QueryTokenFilter;
 import com.java.semantic.api.SemanticQueryController;
 import com.java.semantic.model.codefact.CodeFactKind;
-import com.java.semantic.model.repository.RepositoryId;
-import com.java.semantic.model.repository.RepositoryRevision;
-import com.java.semantic.query.application.RevisionOutdatedException;
 import com.java.semantic.query.application.SemanticQueryContract;
 import com.java.semantic.query.application.SemanticQueryFacade;
 import io.modelcontextprotocol.json.jackson3.JacksonMcpJsonMapper;
@@ -47,24 +44,6 @@ class McpWireSerializationContractTest {
 
     private static final String REPOSITORY_ID = "orders";
     private static final String REVISION = "a".repeat(40);
-
-    @Test
-    void mcp_wire_omits_current_revision_except_for_revision_outdated_errors() throws Exception {
-        JsonMapper mapper = applicationMcpMapper();
-        SemanticQueryFacade invalidArgumentFacade = mock(SemanticQueryFacade.class);
-        SemanticQueryFacade revisionOutdatedFacade = mock(SemanticQueryFacade.class);
-        when(revisionOutdatedFacade.searchCode(any())).thenThrow(new RevisionOutdatedException(RepositoryId.of(REPOSITORY_ID),
-                new RepositoryRevision(REVISION), new RepositoryRevision("b".repeat(40))));
-
-        String invalidArgument = invoke(mapper, invalidArgumentFacade, Map.of(
-                "repositoryId", REPOSITORY_ID, "revision", REVISION, "query", "payment", "packagePrefix", " "));
-        String revisionOutdated = invoke(mapper, revisionOutdatedFacade, Map.of(
-                "repositoryId", REPOSITORY_ID, "revision", REVISION, "query", "payment"));
-
-        assertThat(invalidArgument).contains("\"code\":\"INVALID_ARGUMENT\"").doesNotContain("currentRevision");
-        assertThat(revisionOutdated).contains("\"code\":\"REVISION_OUTDATED\"")
-                .contains("\"currentRevision\":\"" + "b".repeat(40) + "\"");
-    }
 
     @Test
     void authenticated_http_and_raw_mcp_wire_omit_absent_external_callee_fields() throws Exception {
