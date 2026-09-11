@@ -43,6 +43,8 @@ At startup, Indexer first completes any `RUNNING` job whose target was already p
 
 Requirements: Java 21, Maven 3.9+, Docker for Mongo and image checks, and JDT LS for Indexer smoke and end-to-end fixture checks.
 
+See [Testing and verification](docs/operations/testing.md) for the complete entry-point matrix, prerequisites, and CI selection responsibilities.
+
 ```bash
 mvn --batch-mode --no-transfer-progress test
 mvn --batch-mode --no-transfer-progress -Pmongo-it verify

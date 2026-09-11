@@ -2,6 +2,8 @@
 
 這個檢查使用 repository 內的 payment、order、video 固定 fixture，先以真實 JDT LS 與正式 Indexer exporter 建立、驗證、封存並發布 Mongo generation，再以同一個暫時 Mongo 啟動真正的 Query HTTP/MCP 服務。測試只在執行期間啟動 Query，結束時會關閉它與暫時 Mongo；不會啟動 Indexer Spring application，也不會預先寫入 Query facts。
 
+完整的測試入口與先決條件矩陣見 [Testing and verification](testing.md)。
+
 ## 前置條件與執行
 
 - Java 21、Maven 3.9+、可用的 Docker，以及真實 JDT LS 安裝。
@@ -11,7 +13,7 @@
 JDTLS_HOME=/opt/jdtls scripts/test-indexer-query-contract.sh
 ```
 
-這是 opt-in deployed boundary check，普通 `mvn --batch-mode --no-transfer-progress test` 不需要 Docker 或 JDT LS。
+這是 opt-in 的本機 fixture SDK journey，使用測試期間建立的暫時服務；它不是 `-Pdeployed-it` 的既有 Query deployment check，也不需要預先部署 Query。普通 `mvn --batch-mode --no-transfer-progress test` 不需要 Docker 或 JDT LS。
 
 ## fixture SDK journey 的證據
 

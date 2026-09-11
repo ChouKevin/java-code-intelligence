@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-: "${JDTLS_HOME:?JDTLS_HOME must point to a real JDT language server installation}"
-test -d "${JDTLS_HOME}"
+if [ -z "${JDTLS_HOME:-}" ] || [ ! -d "${JDTLS_HOME}" ]; then
+  echo "JDTLS_HOME must point to a real JDT language server installation directory" >&2
+  exit 1
+fi
 
 root_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${root_dir}"

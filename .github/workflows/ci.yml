@@ -44,7 +44,7 @@ jobs:
       - run: bash scripts/install-jdtls.sh /opt/jdtls
       - run: >-
           JDTLS_HOME=/opt/jdtls mvn --batch-mode --no-transfer-progress -pl semantic-indexer -am -Pjdtls-it
-          -Dtest=FixtureFullIndexJdtLsIT,ToolProjectionImplementationContractTest
+          -Dtest=InternalReferencesJdtLsIT
           -Dsurefire.failIfNoSpecifiedTests=false test
 
   indexer-query-contract:
