@@ -19,7 +19,6 @@ import com.java.semantic.syntax.domain.SourceTypeMetadata;
 import com.java.semantic.syntax.domain.SourceFieldMetadata;
 import com.java.semantic.syntax.domain.CompositeTypeReference;
 import com.java.semantic.syntax.domain.CompositeTypeReference.CompositeKind;
-import com.java.semantic.syntax.domain.EntryPointMethod;
 import com.java.semantic.syntax.domain.InferredTypeReference;
 import com.java.semantic.syntax.domain.NamedTypeReference;
 import com.java.semantic.syntax.domain.ParameterizedTypeReference;
@@ -686,27 +685,6 @@ class SourceTypeMetadataExtractorTest {
     void should_simplify_parameter_types_when_a_method_declares_qualified_or_generic_parameters() {
         assertThat(methodOf(classes, "com.example.syntax.AccountMapper", "updateStatus").paramTypes())
                 .containsExactly("Long", "String");
-    }
-
-    @Test
-    void should_include_every_module_when_the_repository_is_a_maven_aggregator() {
-        assertThat(multiModuleClasses)
-                .extracting(metadata -> metadata.declaration().identity().fullyQualifiedName())
-                .contains("com.example.api.OrderMessageListener",
-                        "com.example.service.OrderApplicationService",
-                        "com.example.persistence.OrderMapper");
-    }
-
-    @Test
-    void should_extract_a_single_module_repository_when_it_carries_no_build_file() {
-        RepositorySyntax syntax = SyntaxFixtures.extract(SyntaxFixtures.SPRING_BASIC);
-
-        assertThat(syntax.entryPoints())
-                .as("JDT Core 的 ASTParser 不讀 pom；source root 由目錄結構決定")
-                .flatExtracting(entry -> entry.methods().stream().map(EntryPointMethod::name).toList())
-                .containsExactly("getBasic");
-        assertThat(methodOf(syntax.sourceTypes(), "com.example.basic.BasicRepository", "findById")
-                .sqlSource()).isEqualTo(SqlSourceKind.MAPPER_XML);
     }
 
     private SourceTypeMetadata classOf(List<SourceTypeMetadata> source, String fullyQualifiedName) {

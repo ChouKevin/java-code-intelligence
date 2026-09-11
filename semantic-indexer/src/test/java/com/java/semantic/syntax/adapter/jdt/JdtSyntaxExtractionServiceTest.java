@@ -1,6 +1,7 @@
 package com.java.semantic.syntax.adapter.jdt;
 
 import com.java.semantic.syntax.domain.SourceMethodMetadata;
+import com.java.semantic.syntax.domain.EntryPointMethod;
 
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.Level;
@@ -17,6 +18,7 @@ import java.util.stream.Collectors;
 
 import com.java.semantic.syntax.domain.SourceTypeMetadata;
 import com.java.semantic.syntax.domain.RepositorySyntax;
+import com.java.semantic.syntax.domain.SqlSourceKind;
 import com.java.semantic.syntax.domain.SourceExtractionOutcome;
 import com.java.semantic.syntax.domain.SourceExtractionStatus;
 import com.java.semantic.syntax.domain.SyntaxInvocation;
@@ -89,6 +91,29 @@ class JdtSyntaxExtractionServiceTest {
         assertThat(syntax.sourceTypes())
                 .extracting(metadata -> metadata.declaration().identity().fullyQualifiedName())
                 .containsExactly("com.example.Healthy");
+    }
+
+    @Test
+    void should_include_every_module_when_the_repository_is_a_maven_aggregator() {
+        List<SourceTypeMetadata> multiModuleClasses = SyntaxFixtures.extractMultiModuleFixture().sourceTypes();
+
+        assertThat(multiModuleClasses)
+                .extracting(metadata -> metadata.declaration().identity().fullyQualifiedName())
+                .contains("com.example.api.OrderMessageListener",
+                        "com.example.service.OrderApplicationService",
+                        "com.example.persistence.OrderMapper");
+    }
+
+    @Test
+    void should_extract_a_single_module_repository_when_it_carries_no_build_file() {
+        RepositorySyntax syntax = SyntaxFixtures.extract(SyntaxFixtures.SPRING_BASIC);
+
+        assertThat(syntax.entryPoints())
+                .as("JDT Core 的 ASTParser 不讀 pom；source root 由目錄結構決定")
+                .flatExtracting(entry -> entry.methods().stream().map(EntryPointMethod::name).toList())
+                .containsExactly("getBasic");
+        assertThat(methodOf(syntax.sourceTypes(), "com.example.basic.BasicRepository", "findById")
+                .sqlSource()).isEqualTo(SqlSourceKind.MAPPER_XML);
     }
 
     @Test
@@ -192,6 +217,20 @@ class JdtSyntaxExtractionServiceTest {
                     }
                 }
                 """.formatted(marker));
+    }
+
+    private SourceTypeMetadata classOf(List<SourceTypeMetadata> source, String fullyQualifiedName) {
+        return source.stream()
+                .filter(metadata -> fullyQualifiedName.equals(metadata.declaration().identity().fullyQualifiedName()))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("no class metadata " + fullyQualifiedName));
+    }
+
+    private SourceMethodMetadata methodOf(List<SourceTypeMetadata> source, String fullyQualifiedName, String methodName) {
+        return classOf(source, fullyQualifiedName).members().methods().stream()
+                .filter(method -> methodName.equals(method.name()))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("no method " + fullyQualifiedName + "#" + methodName));
     }
 
     @Test
