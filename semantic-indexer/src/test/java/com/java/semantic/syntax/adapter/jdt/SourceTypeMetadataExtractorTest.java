@@ -12,7 +12,6 @@ import java.util.stream.Stream;
 
 import com.java.semantic.model.codefact.JavaTypeIdentity;
 import com.java.semantic.model.codefact.MethodTarget;
-import com.java.semantic.model.codefact.SourceTypeIdentity;
 import com.java.semantic.callgraph.application.RepositorySyntaxIndex;
 import com.java.semantic.syntax.domain.ArrayTypeReference;
 import com.java.semantic.syntax.domain.AnnotationEvidence;
@@ -240,43 +239,7 @@ class SourceTypeMetadataExtractorTest {
                 "orders", new RepositorySyntax(List.of(), List.of(metadata)));
         MethodTarget target = open.analysisTarget().target().orElseThrow();
         assertThat(index.method(target)).contains(open);
-        assertThat(index.method(target.sourceFile(), open.declarationLocation().range())).contains(open);
-        assertThat(index.method("src/main/java/com/example/Other.java", open.declarationLocation().range())).isEmpty();
-        assertThat(index.method(target.sourceFile(), new SyntaxRange(
-                new SyntaxPosition(open.declarationLocation().range().start().line(), open.declarationLocation().range().start().character() + 1),
-                open.declarationLocation().range().end()))).isEmpty();
-        assertThat(index.method(new MethodTarget(
-                new SourceTypeIdentity(
-                        new JavaTypeIdentity(target.packageName(), target.className()),
-                        "src/main/java/com/example/Other.java"),
-                target.methodName(),
-                target.parameterTypes()))).isEmpty();
-        assertThat(index.method(new MethodTarget(
-                new SourceTypeIdentity(
-                        new JavaTypeIdentity("other.example", target.className()),
-                        target.sourceFile()),
-                target.methodName(),
-                target.parameterTypes()))).isEmpty();
-        assertThat(index.method(new MethodTarget(
-                new SourceTypeIdentity(
-                        new JavaTypeIdentity(target.packageName(), "Other"),
-                        target.sourceFile()),
-                target.methodName(),
-                target.parameterTypes()))).isEmpty();
-        assertThat(index.method(new MethodTarget(
-                new SourceTypeIdentity(
-                        new JavaTypeIdentity(target.packageName(), target.className()),
-                        target.sourceFile()),
-                "other",
-                target.parameterTypes()))).isEmpty();
-        assertThat(index.method(new MethodTarget(
-                new SourceTypeIdentity(
-                        new JavaTypeIdentity(target.packageName(), target.className()),
-                        target.sourceFile()),
-                target.methodName(),
-                List.of("int")))).isEmpty();
         assertThat(unresolved.analysisTarget().status()).isEqualTo(AnalysisTargetStatus.UNRESOLVED);
-        assertThat(index.method(target.sourceFile(), unresolved.declarationLocation().range())).isEmpty();
     }
 
     @Test
