@@ -121,7 +121,6 @@ class SemanticQueryFacadeSourceTest {
         assertEquals(CodeFactId.from(relationIdentity).value(), firstElement.factId());
         assertEquals(firstElement.factId(), secondElement.factId());
         assertEquals("client.charge(request)", firstElement.source().code());
-        assertFalse(firstElement.source().code().isBlank());
     }
 
     @Test
