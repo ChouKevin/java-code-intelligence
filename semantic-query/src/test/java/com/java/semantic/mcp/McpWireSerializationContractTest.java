@@ -86,12 +86,6 @@ class McpWireSerializationContractTest {
                 .contains("\"resolutionStatus\":\"INDEXED\"")
                 .contains("\"resolutionStatus\":\"UNINDEXED_TARGET\"")
                 .doesNotContain("\"factId\":null", "\"kind\":null", "\"source\":null");
-        assertThat(mcpPayload).contains("\"callee\":{\"displayName\":\"client.charge(request)|client|charge|1\"}")
-                .contains("\"callee\":{\"factId\":\"" + "c".repeat(64) + "\",\"kind\":\"METHOD\",\"displayName\":\"Orders.complete()\",\"source\"")
-                .contains("\"resolutionStatus\":\"UNRESOLVED\"")
-                .contains("\"resolutionStatus\":\"INDEXED\"")
-                .contains("\"resolutionStatus\":\"UNINDEXED_TARGET\"")
-                .doesNotContain("\"factId\":null", "\"kind\":null", "\"source\":null");
         assertThat(mcpMapper.readTree(httpPayload))
                 .isEqualTo(mcpMapper.readTree(mcpPayload).get("result").get("structuredContent"));
     }
