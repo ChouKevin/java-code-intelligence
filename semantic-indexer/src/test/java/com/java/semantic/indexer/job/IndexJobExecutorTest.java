@@ -2,9 +2,12 @@ package com.java.semantic.indexer.job;
 
 import com.java.semantic.indexer.build.RepositoryBuildRunner;
 import com.java.semantic.indexer.build.IndexBuildService;
+import com.java.semantic.indexer.store.IndexSchemaMaintenanceRequiredException;
 import com.java.semantic.indexer.store.PublicationPort;
+import com.java.semantic.indexer.store.PublicationConflictException;
 import com.java.semantic.model.index.GenerationId;
 import com.java.semantic.model.index.RollbackGenerationCommand;
+import com.java.semantic.repository.application.RepositoryMutationException;
 import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.model.repository.RepositoryRevision;
 import java.util.Optional;
@@ -67,51 +70,11 @@ class IndexJobExecutorTest {
         verify(jobs, never()).fail(any(), any());
     }
 
-    @Test
-    void uncommitted_build_failure_fails_once_as_worker_interrupted() {
-        IndexJobStore jobs = mock(IndexJobStore.class);
-        RepositoryBuildRunner runner = mock(RepositoryBuildRunner.class);
-        IndexJob job = runningJob(IndexJobOperation.BUILD);
-        RuntimeException failure = new RuntimeException("worker failed");
-        doThrow(failure).when(runner).run(job);
-        when(jobs.reconcileCommitted(job.repositoryId())).thenReturn(Optional.empty());
-
-        assertThatThrownBy(() -> executor(jobs, runner).execute(job)).isSameAs(failure);
-
-        verify(jobs).fail(job.id(), IndexFailureCategory.WORKER_INTERRUPTED);
-    }
-
-    @Test
-    void validation_failure_uses_the_stable_validation_category() {
-        IndexJobStore jobs = mock(IndexJobStore.class);
-        RepositoryBuildRunner runner = mock(RepositoryBuildRunner.class);
-        IndexJob job = runningJob(IndexJobOperation.BUILD);
-        doThrow(new IndexBuildService.GenerationValidationException("CHECKOUT_CHANGED")).when(runner).run(job);
-        when(jobs.reconcileCommitted(job.repositoryId())).thenReturn(Optional.empty());
-
-        assertThatThrownBy(() -> executor(jobs, runner).execute(job))
-                .isInstanceOf(IndexBuildService.GenerationValidationException.class);
-
-        verify(jobs).fail(job.id(), IndexFailureCategory.VALIDATION_FAILED);
-    }
-
-    @Test
-    void schema_rebuild_requirement_uses_the_stable_schema_category() {
-        IndexJobStore jobs = mock(IndexJobStore.class);
-        RepositoryBuildRunner runner = mock(RepositoryBuildRunner.class);
-        IndexJob job = runningJob(IndexJobOperation.BUILD);
-        doThrow(new IndexSchemaRebuildRequiredException()).when(runner).run(job);
-        when(jobs.reconcileCommitted(job.repositoryId())).thenReturn(Optional.empty());
-
-        assertThatThrownBy(() -> executor(jobs, runner).execute(job))
-                .isInstanceOf(IndexSchemaRebuildRequiredException.class);
-
-        verify(jobs).fail(job.id(), IndexFailureCategory.SCHEMA_REBUILD_REQUIRED);
-    }
-
     @ParameterizedTest
-    @MethodSource("stableDomainFailures")
-    void stable_domain_failures_keep_their_public_category(RuntimeException failure, IndexFailureCategory category) {
+    @MethodSource("uncommittedBuildFailures")
+    void uncommitted_build_failures_fail_once_with_their_public_category(
+            RuntimeException failure,
+            IndexFailureCategory category) {
         IndexJobStore jobs = mock(IndexJobStore.class);
         RepositoryBuildRunner runner = mock(RepositoryBuildRunner.class);
         IndexJob job = runningJob(IndexJobOperation.BUILD);
@@ -180,13 +143,17 @@ class IndexJobExecutorTest {
         return new IndexJobExecutor(jobs, runner, mock(PublicationPort.class), Optional.empty());
     }
 
-    private static java.util.stream.Stream<Arguments> stableDomainFailures() {
+    private static java.util.stream.Stream<Arguments> uncommittedBuildFailures() {
         return java.util.stream.Stream.of(
-                Arguments.of(new com.java.semantic.indexer.store.PublicationConflictException(),
+                Arguments.of(new RuntimeException("worker failed"), IndexFailureCategory.WORKER_INTERRUPTED),
+                Arguments.of(new IndexBuildService.GenerationValidationException("CHECKOUT_CHANGED"),
+                        IndexFailureCategory.VALIDATION_FAILED),
+                Arguments.of(new IndexSchemaRebuildRequiredException(), IndexFailureCategory.SCHEMA_REBUILD_REQUIRED),
+                Arguments.of(new PublicationConflictException(),
                         IndexFailureCategory.PUBLICATION_CONFLICT),
-                Arguments.of(new com.java.semantic.repository.application.RepositoryMutationException("checkout failed"),
+                Arguments.of(new RepositoryMutationException("checkout failed"),
                         IndexFailureCategory.SOURCE_UNAVAILABLE),
-                Arguments.of(new com.java.semantic.indexer.store.IndexSchemaMaintenanceRequiredException("missing index"),
+                Arguments.of(new IndexSchemaMaintenanceRequiredException("missing index"),
                         IndexFailureCategory.SCHEMA_REBUILD_REQUIRED));
     }
 
