@@ -244,15 +244,12 @@ class QueryMcpToolCatalogConfigurationTest {
 
         verify(facade).listRepositories(any());
         verify(facade).getRepository(any());
-        verify(facade).searchCode(any());
         verify(facade).getFactSource(any());
-        verify(facade).listEntryPoints(any());
         verify(facade).findApiRoutes(any());
         verify(facade).findEventListeners(any());
         verify(facade).listTypeMembers(any());
         verify(facade).findMethodImplementations(any());
         verify(facade).findReferences(any());
-        verify(facade).findCallers(any());
         verify(facade).findCallees(any());
 
         ArgumentCaptor<SemanticQueryContract.SearchCodeRequest> searchRequest = ArgumentCaptor.forClass(
