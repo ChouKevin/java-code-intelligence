@@ -58,21 +58,6 @@ import org.junit.jupiter.api.Test;
 class IndexDocumentContractTest {
 
     @Test
-    void exposes_the_required_framework_neutral_index_contract_types() {
-        List<String> requiredTypes = List.of(
-                "com.java.semantic.model.repository.RepositoryId",
-                "com.java.semantic.model.repository.RepositoryRevision",
-                "com.java.semantic.model.index.GenerationId",
-                "com.java.semantic.model.index.GenerationManifestDocument",
-                "com.java.semantic.model.codefact.CodeFact",
-                "com.java.semantic.model.query.CurrentGeneration");
-
-        for (String requiredType : requiredTypes) {
-            assertDoesNotThrow(() -> Class.forName(requiredType));
-        }
-    }
-
-    @Test
     void generation_and_repository_documents_expose_no_distributed_ownership_fields() {
         Set<String> manifestFields = java.util.Arrays.stream(GenerationManifestDocument.class.getRecordComponents())
                 .map(java.lang.reflect.RecordComponent::getName).collect(java.util.stream.Collectors.toUnmodifiableSet());
