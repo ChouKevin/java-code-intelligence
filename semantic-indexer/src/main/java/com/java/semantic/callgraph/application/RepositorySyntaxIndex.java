@@ -1,5 +1,4 @@
 package com.java.semantic.callgraph.application;
-import com.java.semantic.model.codefact.SourceRange;
 
 import com.java.semantic.callgraph.domain.MethodId;
 import com.java.semantic.model.codefact.JavaIdentityNormalizer;

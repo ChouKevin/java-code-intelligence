@@ -20,6 +20,7 @@ final class JdtLsSemanticExceptionNormalizer {
     private JdtLsSemanticExceptionNormalizer() {
     }
 
+    @SuppressWarnings("removal") // ThreadDeath must remain a direct fatal rethrow.
     static <T> T normalize(Supplier<T> operation) {
         Objects.requireNonNull(operation, "operation is required");
         try {
@@ -57,6 +58,7 @@ final class JdtLsSemanticExceptionNormalizer {
                 : new SemanticProtocolException();
     }
 
+    @SuppressWarnings("removal") // Completion-wrapped ThreadDeath must remain fatal too.
     private static RuntimeException normalizedOrOriginal(RuntimeException exception) {
         Throwable candidate = exception;
         boolean completionWrapped = false;

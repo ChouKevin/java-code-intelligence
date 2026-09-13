@@ -20,7 +20,6 @@ import com.java.semantic.repository.domain.RepositorySnapshot;
 import com.java.semantic.semantic.domain.SemanticDeclarationAnchor;
 import com.java.semantic.semantic.domain.SemanticMethod;
 import com.java.semantic.semantic.domain.SemanticPosition;
-import com.java.semantic.semantic.domain.SemanticTargetNotFoundException;
 import com.java.semantic.syntax.adapter.jdt.JdtSyntaxExtractionService;
 import com.java.semantic.syntax.domain.AnalysisTargetStatus;
 import com.java.semantic.syntax.domain.CanonicalMethodDeclarationResolver;

@@ -438,7 +438,6 @@ public class DefaultJdtWorkspaceManager implements JdtWorkspaceManager, Reposito
         return session;
     }
 
-    @SuppressWarnings("removal")
     private JdtLsProcessFactory.LaunchHandle launch(
             RepositorySnapshot snapshot, JdtLsReadinessProbe.ImportProgressClient client) {
         RepositoryId repositoryId = snapshot.repositoryId();

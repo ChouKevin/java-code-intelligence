@@ -75,6 +75,7 @@ class IndexerArchitectureTest {
     }
 
     private static final class ForbiddenQueryDependency {
+        @SuppressWarnings("unused") // Intentional forbidden dependency marker for the ArchUnit negative probe.
         private SemanticQueryFacade facade;
     }
 }

@@ -59,13 +59,13 @@ public final class JdtWorkspaceLifecycleMetrics {
         }
         this.snapshotSupplier = supplier;
         for (WorkspaceState state : WorkspaceState.values()) {
-            Gauge.builder(WORKSPACES_TRACKED, supplier,
+            Gauge.builder(WORKSPACES_TRACKED, this.snapshotSupplier,
                             source -> source.get().workspaces().getOrDefault(state, 0))
                     .tag("state", tag(state))
                     .register(meterRegistry);
         }
         for (WorkspaceActivityKind kind : WorkspaceActivityKind.values()) {
-            Gauge.builder(WORKSPACE_ACTIVITY, supplier,
+            Gauge.builder(WORKSPACE_ACTIVITY, this.snapshotSupplier,
                             source -> source.get().activities().getOrDefault(kind, 0))
                     .tag("kind", tag(kind))
                     .register(meterRegistry);

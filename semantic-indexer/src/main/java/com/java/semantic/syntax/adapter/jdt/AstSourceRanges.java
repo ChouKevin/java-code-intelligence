@@ -1,5 +1,4 @@
 package com.java.semantic.syntax.adapter.jdt;
-import com.java.semantic.model.codefact.SourceRange;
 
 import com.java.semantic.model.codefact.SyntaxPosition;
 import com.java.semantic.model.codefact.SyntaxRange;

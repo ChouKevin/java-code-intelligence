@@ -3,7 +3,6 @@ package com.java.semantic.indexer.build;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.java.semantic.config.JdtLsProperties;
-import com.java.semantic.indexer.incremental.ChangeKind;
 import com.java.semantic.indexer.incremental.ChangedSource;
 import com.java.semantic.indexer.incremental.IncrementalIndexPlan;
 import com.java.semantic.indexer.incremental.IncrementalIndexPlanner;

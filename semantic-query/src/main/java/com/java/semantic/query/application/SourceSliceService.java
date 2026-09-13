@@ -26,7 +26,7 @@ public final class SourceSliceService {
 
     public PublishedSourceSegment methodSource(String repositoryId, String revision, CodeFactIdentity identity) {
         CodeFactDetails fact = codeFactReadService.get(repositoryId, revision, identity);
-        if (!(identity.canonicalIdentity() instanceof MethodTarget method)) { throw new CodeFactKindUnsupportedException(identity.kind()); }
+        if (!(identity.canonicalIdentity() instanceof MethodTarget)) { throw new CodeFactKindUnsupportedException(identity.kind()); }
         String content = sourceQueryService.getSource(fact.generation(), fact.location().sourceFile()).utf8Content();
         return slice(fact.generation(), fact.location(), content, Optional.empty(), 0);
     }

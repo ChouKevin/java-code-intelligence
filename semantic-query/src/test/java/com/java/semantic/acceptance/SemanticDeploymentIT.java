@@ -50,17 +50,17 @@ class SemanticDeploymentIT {
             assertThat(tools.tools()).extracting(McpSchema.Tool::name)
                 .containsExactlyInAnyOrderElementsOf(TOOL_NAMES);
 
-            Map<?, ?> repositories = successfulBody(client.callTool(new McpSchema.CallToolRequest("list_repositories", Map.of())), mapper);
+            Map<?, ?> repositories = successfulBody(client.callTool(McpSchema.CallToolRequest.builder("list_repositories").arguments(Map.of()).build()), mapper);
             Map<?, ?> repository = repository(repositories, repositoryId);
             String revision = String.valueOf(repository.get("revision"));
 
-            Map<?, ?> search = successfulBody(client.callTool(new McpSchema.CallToolRequest("search_code", Map.of(
-                    "repositoryId", repositoryId, "revision", revision, "query", "payment"))), mapper);
+            Map<?, ?> search = successfulBody(client.callTool(McpSchema.CallToolRequest.builder("search_code").arguments(Map.of(
+                    "repositoryId", repositoryId, "revision", revision, "query", "payment")).build()), mapper);
             Map<?, ?> fact = firstItem(search, "search_code");
             String factId = String.valueOf(fact.get("factId"));
 
-            Map<?, ?> factSource = successfulBody(client.callTool(new McpSchema.CallToolRequest("get_fact_source", Map.of(
-                    "repositoryId", repositoryId, "revision", revision, "factId", factId))), mapper);
+            Map<?, ?> factSource = successfulBody(client.callTool(McpSchema.CallToolRequest.builder("get_fact_source").arguments(Map.of(
+                    "repositoryId", repositoryId, "revision", revision, "factId", factId)).build()), mapper);
             assertThat(factSource.get("repositoryId")).isEqualTo(repositoryId);
             assertThat(factSource.get("revision")).isEqualTo(revision);
             assertThat(factSource.get("factId")).isEqualTo(factId);
@@ -76,7 +76,7 @@ class SemanticDeploymentIT {
                     .build(), HttpResponse.BodyHandlers.ofString());
             assertThat(httpResponse.statusCode()).isEqualTo(409);
 
-            McpSchema.CallToolResult mcpResult = client.callTool(new McpSchema.CallToolRequest("search_code", outdatedRequest));
+            McpSchema.CallToolResult mcpResult = client.callTool(McpSchema.CallToolRequest.builder("search_code").arguments(outdatedRequest).build());
             assertThat(mcpResult.isError()).isTrue();
             Map<?, ?> httpError = mapper.readValue(httpResponse.body(), Map.class);
             Map<?, ?> mcpError = mapper.convertValue(mcpResult.structuredContent(), Map.class);

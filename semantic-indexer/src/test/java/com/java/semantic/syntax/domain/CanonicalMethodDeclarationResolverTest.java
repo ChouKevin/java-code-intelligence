@@ -1,6 +1,5 @@
 package com.java.semantic.syntax.domain;
 
-import com.java.semantic.syntax.domain.SourceMethodMetadata;
 
 import com.java.semantic.model.codefact.JavaTypeIdentity;
 import com.java.semantic.model.codefact.MethodTarget;

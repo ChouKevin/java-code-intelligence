@@ -215,8 +215,8 @@ class QueryMcpToolCatalogConfigurationTest {
         McpStatelessServerFeatures.SyncToolSpecification specification = specification(configuration.mcpQueryToolSpecifications(facade,
                 new ObjectMapper()), "get_fact_source");
 
-        McpSchema.CallToolResult result = specification.callHandler().apply(null, new McpSchema.CallToolRequest("get_fact_source", Map.of(
-                "repositoryId", "orders", "revision", "a".repeat(40), "factId", "b".repeat(64))));
+        McpSchema.CallToolResult result = specification.callHandler().apply(null, McpSchema.CallToolRequest.builder("get_fact_source").arguments(Map.of(
+                "repositoryId", "orders", "revision", "a".repeat(40), "factId", "b".repeat(64))).build());
 
         assertTrue(result.isError());
         assertEquals(expected, result.structuredContent());
@@ -273,7 +273,7 @@ class QueryMcpToolCatalogConfigurationTest {
 
     private static void invoke(List<McpStatelessServerFeatures.SyncToolSpecification> specifications, String name,
                                Map<String, Object> arguments) {
-        specification(specifications, name).callHandler().apply(null, new McpSchema.CallToolRequest(name, arguments));
+        specification(specifications, name).callHandler().apply(null, McpSchema.CallToolRequest.builder(name).arguments(arguments).build());
     }
 
     private static Map<String, Object> repositoryRequest(Map<String, Object> arguments) {

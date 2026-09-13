@@ -3,7 +3,6 @@ package com.java.semantic.indexer.config;
 import java.time.Duration;
 import java.util.Optional;
 
-import com.java.semantic.indexer.build.IndexBuildService;
 import com.java.semantic.indexer.build.RepositoryBuildRunner;
 import com.java.semantic.indexer.build.RepositoryBuildScopeFactory;
 import com.java.semantic.indexer.job.IndexJobExecutor;

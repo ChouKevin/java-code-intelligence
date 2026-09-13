@@ -1472,10 +1472,6 @@ class DefaultJdtWorkspaceManagerTest {
             this.stopFailure = failure;
         }
 
-        private void clearStopFailure() {
-            this.stopFailure = null; // cs-allow
-        }
-
         private void blockProcessStarterReturn(CountDownLatch blocked, CountDownLatch release) {
             beforeProcessStarterReturns(process -> {
                 blocked.countDown();

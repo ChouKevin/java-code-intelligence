@@ -807,10 +807,6 @@ class SemanticCallGraphBuilderTest {
                 new SourceRange(target.sourceFile(), range), false, List.of());
     }
 
-    private static SourceMethodMetadata method(MethodTarget target) {
-        return method(target, true);
-    }
-
     private static SourceMethodMetadata method(MethodTarget target, boolean executableDeclaration) {
         return method(target, executableDeclaration, List.of());
     }

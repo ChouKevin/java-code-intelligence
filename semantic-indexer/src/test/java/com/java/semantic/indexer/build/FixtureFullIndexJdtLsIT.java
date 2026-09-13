@@ -8,8 +8,6 @@ import com.java.semantic.model.index.GenerationId;
 import com.java.semantic.model.index.IndexCollections;
 import com.java.semantic.model.index.GenerationWriteState;
 import com.java.semantic.model.index.RelationDocument;
-import com.java.semantic.model.index.SymbolDocument;
-import com.java.semantic.model.codefact.CodeFactKind;
 import com.java.semantic.model.codefact.ExternalTarget;
 import com.java.semantic.model.codefact.RelationKind;
 import com.java.semantic.model.codefact.RelationTarget;
@@ -29,6 +27,8 @@ import com.java.semantic.semantic.adapter.jdtls.JdtLsReadinessProbe;
 import com.java.semantic.semantic.adapter.jdtls.JdtWorkspaceLifecycleMetrics;
 import com.java.semantic.semantic.adapter.jdtls.Lsp4jJavaSemanticService;
 import com.java.semantic.query.SemanticQueryApplication;
+import com.mongodb.client.MongoClient;
+import com.mongodb.client.MongoClients;
 import io.modelcontextprotocol.client.McpClient;
 import io.modelcontextprotocol.client.McpSyncClient;
 import io.modelcontextprotocol.client.transport.HttpClientStreamableHttpTransport;
@@ -92,79 +92,81 @@ class FixtureFullIndexJdtLsIT {
             throws IOException {
         Path jdtLsHome = JdtLsHomeRequirement.requireHome(System.getenv("JDTLS_HOME"));
         DefaultJdtWorkspaceManager manager = manager(jdtLsHome);
-        try (GenericContainer<?> mongo = new GenericContainer<>(DockerImageName.parse("mongo:8.0.4")).withExposedPorts(27017)) {
+        try (GenericContainer<?> mongo = new GenericContainer<>(DockerImageName.parse("mongo:8.0.4"))) {
+            mongo.addExposedPort(27017);
             mongo.start();
-            org.springframework.data.mongodb.core.MongoTemplate template = new org.springframework.data.mongodb.core.MongoTemplate(
-                    com.mongodb.client.MongoClients.create("mongodb://" + mongo.getHost() + ":" + mongo.getMappedPort(27017)), "fixture_index");
-            new IndexSchemaBootstrap(template).bootstrap();
-            List<SourceIndexBatch> payment = exportAndPersist(manager, template, PAYMENT_FIXTURE, "payment-service", "a".repeat(40), "payment-generation");
-            List<SourceIndexBatch> video = exportAndPersist(manager, template, VIDEO_FIXTURE, "video-service", "b".repeat(40), "video-generation");
-            List<SourceIndexBatch> order = exportAndPersist(manager, template, ORDER_FIXTURE, "order-service", "c".repeat(40), "order-generation");
-            publish(template, "payment-service", "a".repeat(40), "payment-generation");
-            publish(template, "video-service", "b".repeat(40), "video-generation");
-            publish(template, "order-service", "c".repeat(40), "order-generation");
+            try (MongoClient client = MongoClients.create("mongodb://" + mongo.getHost() + ":" + mongo.getMappedPort(27017))) {
+                org.springframework.data.mongodb.core.MongoTemplate template = new org.springframework.data.mongodb.core.MongoTemplate(client, "fixture_index");
+                new IndexSchemaBootstrap(template).bootstrap();
+                List<SourceIndexBatch> payment = exportAndPersist(manager, template, PAYMENT_FIXTURE, "payment-service", "a".repeat(40), "payment-generation");
+                List<SourceIndexBatch> video = exportAndPersist(manager, template, VIDEO_FIXTURE, "video-service", "b".repeat(40), "video-generation");
+                List<SourceIndexBatch> order = exportAndPersist(manager, template, ORDER_FIXTURE, "order-service", "c".repeat(40), "order-generation");
+                publish(template, "payment-service", "a".repeat(40), "payment-generation");
+                publish(template, "video-service", "b".repeat(40), "video-generation");
+                publish(template, "order-service", "c".repeat(40), "order-generation");
 
-            assertThat(video).flatMap(SourceIndexBatch::symbols).extracting(document -> document.name())
-                    .contains("VideoFormat", "MP4", "WEBM", "MOV", "upload");
-            assertThat(payment).flatMap(SourceIndexBatch::symbols).extracting(document -> document.name())
-                    .contains("CREDIT_CARD", "BANK_TRANSFER", "WALLET", "calculate", "paymentMethods",
-                            "FeeFormulaUnavailableException");
-            assertThat(order).flatMap(SourceIndexBatch::symbols).extracting(document -> document.name())
-                    .contains("Order", "PENDING", "CONFIRMED", "SHIPPED", "CANCELLED", "cancel");
-            assertThat(payment).flatMap(SourceIndexBatch::entryPoints).extracting(document -> document.trigger().httpPath().orElseThrow())
-                    .contains("/payment-methods");
-            assertThat(template.getCollection(IndexCollections.ENTRY_POINTS).countDocuments(new Document("repoId", "video-service")
-                    .append("generationId", "video-generation").append("path", "/videos"))).isEqualTo(1L);
-            assertThat(template.getCollection(IndexCollections.SYMBOLS).countDocuments(new Document("repoId", "payment-service")
-                    .append("generationId", "payment-generation").append("name", "CREDIT_CARD"))).isEqualTo(1L);
-            assertThat(template.getCollection(IndexCollections.SYMBOLS).countDocuments(new Document("repoId", "order-service")
-                    .append("generationId", "payment-generation"))).isZero();
-            assertThat(video).flatMap(SourceIndexBatch::relations).extracting(document -> document.kind().name())
-                    .contains("IMPLEMENTS", "OVERRIDES", "CALLS_OUTBOUND_API", "PUBLISHES_MESSAGE");
-            List<RelationDocument> videoRelations = video.stream().flatMap(batch -> batch.relations().stream()).toList();
-            RelationDocument videoDestination = videoRelations.stream()
-                    .filter(document -> document.kind() == RelationKind.PUBLISHES_MESSAGE)
-                    .filter(document -> document.target() instanceof RelationTarget.External external
-                            && external.target().equals(new ExternalTarget.Destination("kafka", "video.uploaded")))
-                    .findFirst().orElseThrow();
-            assertThat(videoDestination.range().sourceFile())
-                    .isEqualTo("src/main/java/com/example/video/VideoEventPublisher.java");
-            assertThat(videoDestination.range().range().start().line()).isEqualTo(8);
-            assertThat(videoDestination.range().range().start().character()).isEqualTo(27);
-            RelationDocument videoEndpoint = videoRelations.stream()
-                    .filter(document -> document.kind() == RelationKind.CALLS_OUTBOUND_API)
-                    .filter(document -> document.target() instanceof RelationTarget.External external
-                            && external.target().equals(new ExternalTarget.Endpoint("POST", "/transcoding/jobs")))
-                    .findFirst().orElseThrow();
-            assertThat(videoEndpoint.range().sourceFile())
-                    .isEqualTo("src/main/java/com/example/video/DefaultVideoService.java");
-            assertThat(videoEndpoint.range().range().start().line()).isEqualTo(8);
-            assertThat(videoEndpoint.range().range().start().character()).isEqualTo(8);
-            assertThat(payment).flatMap(SourceIndexBatch::relations).extracting(document -> document.kind().name())
-                    .contains("READS_CONFIGURATION", "USES_SQL_IDENTIFIER", "USES_TYPE", "REFERENCES", "IMPLEMENTS", "OVERRIDES", "CALLS");
-            List<Document> paymentRelations = template.getCollection(IndexCollections.RELATIONS)
-                    .find(new Document("repoId", "payment-service").append("generationId", "payment-generation"))
-                    .into(new java.util.ArrayList<>());
-            Document paymentCall = paymentRelations.stream()
-                    .filter(document -> document.getString("from").contains("PaymentFeeCalculator")
-                            && document.getString("target").contains("FeeFormulaEvaluator")
-                            && "CALLS".equals(document.getString("kind")))
-                    .findFirst().orElseThrow();
-            assertThat(template.getCollection(IndexCollections.RELATIONS).countDocuments(new Document("from", paymentCall.getString("from"))))
-                    .isPositive();
-            assertThat(template.getCollection(IndexCollections.RELATIONS).countDocuments(new Document("target", paymentCall.getString("target"))))
-                    .isPositive();
-            assertThat(template.getCollection(IndexCollections.RELATIONS).find(new Document("repoId", "video-service")
-                    .append("generationId", "video-generation")).into(new java.util.ArrayList<>()))
-                    .allSatisfy(document -> {
-                        assertThat(document.getString("sourcePath")).isNotBlank();
-                        assertThat(document.get("from")).isNotNull();
-                        assertThat(document.get("target")).isNotNull();
-                    });
-            assertThat(template.getCollection(IndexCollections.SEARCH).find(new Document()).into(new java.util.ArrayList<>()))
-                    .allSatisfy(document -> assertThat(document.getString("sourcePath")).isNotBlank());
-            manager.shutdownAll();
-            follows_real_mcp_fixture_journeys(mongo);
+                assertThat(video).flatMap(SourceIndexBatch::symbols).extracting(document -> document.name())
+                        .contains("VideoFormat", "MP4", "WEBM", "MOV", "upload");
+                assertThat(payment).flatMap(SourceIndexBatch::symbols).extracting(document -> document.name())
+                        .contains("CREDIT_CARD", "BANK_TRANSFER", "WALLET", "calculate", "paymentMethods",
+                                "FeeFormulaUnavailableException");
+                assertThat(order).flatMap(SourceIndexBatch::symbols).extracting(document -> document.name())
+                        .contains("Order", "PENDING", "CONFIRMED", "SHIPPED", "CANCELLED", "cancel");
+                assertThat(payment).flatMap(SourceIndexBatch::entryPoints).extracting(document -> document.trigger().httpPath().orElseThrow())
+                        .contains("/payment-methods");
+                assertThat(template.getCollection(IndexCollections.ENTRY_POINTS).countDocuments(new Document("repoId", "video-service")
+                        .append("generationId", "video-generation").append("path", "/videos"))).isEqualTo(1L);
+                assertThat(template.getCollection(IndexCollections.SYMBOLS).countDocuments(new Document("repoId", "payment-service")
+                        .append("generationId", "payment-generation").append("name", "CREDIT_CARD"))).isEqualTo(1L);
+                assertThat(template.getCollection(IndexCollections.SYMBOLS).countDocuments(new Document("repoId", "order-service")
+                        .append("generationId", "payment-generation"))).isZero();
+                assertThat(video).flatMap(SourceIndexBatch::relations).extracting(document -> document.kind().name())
+                        .contains("IMPLEMENTS", "OVERRIDES", "CALLS_OUTBOUND_API", "PUBLISHES_MESSAGE");
+                List<RelationDocument> videoRelations = video.stream().flatMap(batch -> batch.relations().stream()).toList();
+                RelationDocument videoDestination = videoRelations.stream()
+                        .filter(document -> document.kind() == RelationKind.PUBLISHES_MESSAGE)
+                        .filter(document -> document.target() instanceof RelationTarget.External external
+                                && external.target().equals(new ExternalTarget.Destination("kafka", "video.uploaded")))
+                        .findFirst().orElseThrow();
+                assertThat(videoDestination.range().sourceFile())
+                        .isEqualTo("src/main/java/com/example/video/VideoEventPublisher.java");
+                assertThat(videoDestination.range().range().start().line()).isEqualTo(8);
+                assertThat(videoDestination.range().range().start().character()).isEqualTo(27);
+                RelationDocument videoEndpoint = videoRelations.stream()
+                        .filter(document -> document.kind() == RelationKind.CALLS_OUTBOUND_API)
+                        .filter(document -> document.target() instanceof RelationTarget.External external
+                                && external.target().equals(new ExternalTarget.Endpoint("POST", "/transcoding/jobs")))
+                        .findFirst().orElseThrow();
+                assertThat(videoEndpoint.range().sourceFile())
+                        .isEqualTo("src/main/java/com/example/video/DefaultVideoService.java");
+                assertThat(videoEndpoint.range().range().start().line()).isEqualTo(8);
+                assertThat(videoEndpoint.range().range().start().character()).isEqualTo(8);
+                assertThat(payment).flatMap(SourceIndexBatch::relations).extracting(document -> document.kind().name())
+                        .contains("READS_CONFIGURATION", "USES_SQL_IDENTIFIER", "USES_TYPE", "REFERENCES", "IMPLEMENTS", "OVERRIDES", "CALLS");
+                List<Document> paymentRelations = template.getCollection(IndexCollections.RELATIONS)
+                        .find(new Document("repoId", "payment-service").append("generationId", "payment-generation"))
+                        .into(new java.util.ArrayList<>());
+                Document paymentCall = paymentRelations.stream()
+                        .filter(document -> document.getString("from").contains("PaymentFeeCalculator")
+                                && document.getString("target").contains("FeeFormulaEvaluator")
+                                && "CALLS".equals(document.getString("kind")))
+                        .findFirst().orElseThrow();
+                assertThat(template.getCollection(IndexCollections.RELATIONS).countDocuments(new Document("from", paymentCall.getString("from"))))
+                        .isPositive();
+                assertThat(template.getCollection(IndexCollections.RELATIONS).countDocuments(new Document("target", paymentCall.getString("target"))))
+                        .isPositive();
+                assertThat(template.getCollection(IndexCollections.RELATIONS).find(new Document("repoId", "video-service")
+                        .append("generationId", "video-generation")).into(new java.util.ArrayList<>()))
+                        .allSatisfy(document -> {
+                            assertThat(document.getString("sourcePath")).isNotBlank();
+                            assertThat(document.get("from")).isNotNull();
+                            assertThat(document.get("target")).isNotNull();
+                        });
+                assertThat(template.getCollection(IndexCollections.SEARCH).find(new Document()).into(new java.util.ArrayList<>()))
+                        .allSatisfy(document -> assertThat(document.getString("sourcePath")).isNotBlank());
+                manager.shutdownAll();
+                follows_real_mcp_fixture_journeys(mongo);
+            }
         } finally {
             manager.shutdownAll();
         }
@@ -263,8 +265,8 @@ class FixtureFullIndexJdtLsIT {
                         emptyAndRecovery);
                 assertThat(items(emptySearch, "search_code")).isEmpty();
                 assertCoverageWithoutIssues(emptySearch);
-                McpSchema.CallToolResult outdatedResult = client.callTool(new McpSchema.CallToolRequest("search_code", Map.of(
-                        "repositoryId", "payment-service", "revision", "0".repeat(40), "query", "paymentMethods")));
+                McpSchema.CallToolResult outdatedResult = client.callTool(McpSchema.CallToolRequest.builder("search_code").arguments(Map.of(
+                        "repositoryId", "payment-service", "revision", "0".repeat(40), "query", "paymentMethods")).build());
                 assertThat(outdatedResult.isError()).isTrue();
                 Map<?, ?> outdated = mapper.convertValue(outdatedResult.structuredContent(), Map.class);
                 emptyAndRecovery.record(outdated, mapper);
@@ -312,7 +314,7 @@ class FixtureFullIndexJdtLsIT {
 
     private static Map<?, ?> successfulBody(McpSyncClient client, String toolName, Map<String, Object> arguments, JsonMapper mapper,
                                               JourneyRecorder journey) {
-        McpSchema.CallToolResult result = client.callTool(new McpSchema.CallToolRequest(toolName, arguments));
+        McpSchema.CallToolResult result = client.callTool(McpSchema.CallToolRequest.builder(toolName).arguments(arguments).build());
         assertThat(result.isError()).as("%s must succeed", toolName).isFalse();
         Map<?, ?> body = mapper.convertValue(result.structuredContent(), Map.class);
         journey.record(body, mapper);

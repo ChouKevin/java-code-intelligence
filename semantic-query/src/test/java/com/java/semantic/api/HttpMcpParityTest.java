@@ -198,6 +198,6 @@ class HttpMcpParityTest {
     private static McpSchema.CallToolResult call(List<McpStatelessServerFeatures.SyncToolSpecification> specifications,
                                                   String toolName, Map<String, Object> arguments) {
         return specifications.stream().filter(specification -> toolName.equals(specification.tool().name())).findFirst().orElseThrow()
-                .callHandler().apply(null, new McpSchema.CallToolRequest(toolName, arguments));
+                .callHandler().apply(null, McpSchema.CallToolRequest.builder(toolName).arguments(arguments).build());
     }
 }

@@ -24,7 +24,6 @@ import com.java.semantic.model.codefact.SourceTypeIdentity;
 import com.java.semantic.model.codefact.SyntaxPosition;
 import com.java.semantic.model.codefact.SyntaxRange;
 import com.java.semantic.model.index.EntryPointDocument;
-import com.java.semantic.model.index.GenerationFileDocument;
 import com.java.semantic.model.index.GenerationId;
 import com.java.semantic.model.index.GenerationManifestDocument;
 import com.java.semantic.model.index.GenerationWriteState;

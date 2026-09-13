@@ -58,5 +58,6 @@ class QueryArchitectureTest {
                 SemanticQueryApplication.class.getProtectionDomain().getCodeSource().getLocation());
     }
 
+    @SuppressWarnings("unused") // Intentional forbidden dependency marker for the ArchUnit negative probe.
     private IndexerRootRuntimeStandIn indexerRootRuntime;
 }

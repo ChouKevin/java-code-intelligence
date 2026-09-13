@@ -6,7 +6,6 @@ import com.java.semantic.model.codefact.CodeFactSearchQuery;
 import com.java.semantic.model.codefact.CodeFactScope;
 import com.java.semantic.model.index.ProjectionName;
 import com.java.semantic.model.index.IndexSchemaContract;
-import com.java.semantic.model.index.GenerationId;
 import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.model.repository.RepositoryRevision;
 import com.mongodb.client.MongoClients;

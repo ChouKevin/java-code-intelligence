@@ -3,7 +3,6 @@ import com.java.semantic.model.codefact.SyntaxPosition;
 import com.java.semantic.model.codefact.SyntaxRange;
 import com.java.semantic.model.codefact.SourceRange;
 
-import com.java.semantic.syntax.domain.SourceTypeKind;
 
 import com.java.semantic.model.codefact.JavaTypeIdentity;
 import com.java.semantic.model.codefact.MethodTarget;

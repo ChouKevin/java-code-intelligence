@@ -4,7 +4,6 @@ import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 
 import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.model.repository.RepositoryRevision;
-import java.util.Set;
 import org.junit.jupiter.api.Test;
 
 class TypeMemberQueryTest {

@@ -106,10 +106,6 @@ class McpWireSerializationContractTest {
                 .doesNotContain("\"outputSchema\":{}");
     }
 
-    private static String invoke(JsonMapper mapper, SemanticQueryFacade facade, Map<String, Object> arguments) throws Exception {
-        return invoke(mapper, facade, "search_code", arguments);
-    }
-
     private static String invoke(JsonMapper mapper, SemanticQueryFacade facade, String toolName, Map<String, Object> arguments) throws Exception {
         WebMvcStatelessServerTransport transport = WebMvcStatelessServerTransport.builder()
                 .jsonMapper(new JacksonMcpJsonMapper(mapper)).messageEndpoint("/mcp").build();

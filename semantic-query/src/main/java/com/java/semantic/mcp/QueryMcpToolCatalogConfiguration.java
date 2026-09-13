@@ -45,9 +45,8 @@ public class QueryMcpToolCatalogConfiguration {
     private static McpStatelessServerFeatures.SyncToolSpecification specification(SemanticMcpToolCatalog.ToolDefinition definition,
                                                                                     SemanticQueryFacade facade,
                                                                                     ObjectMapper objectMapper) {
-        McpSchema.Tool tool = McpSchema.Tool.builder(definition.name())
+        McpSchema.Tool tool = McpSchema.Tool.builder(definition.name(), SemanticMcpSchemaCatalog.inputSchema(definition.name()))
                 .description(definition.description())
-                .inputSchema(SemanticMcpSchemaCatalog.inputSchema(definition.name()))
                 .outputSchema(SemanticMcpSchemaCatalog.outputSchema(definition.name()))
                 .annotations(McpSchema.ToolAnnotations.builder()
                         .readOnlyHint(true)

@@ -3,7 +3,6 @@ package com.java.semantic.indexer.build;
 import com.java.semantic.indexer.incremental.IncrementalIndexPlan;
 import com.java.semantic.indexer.incremental.IncrementalIndexPlanner;
 import com.java.semantic.indexer.job.IndexJob;
-import com.java.semantic.indexer.store.MongoGenerationWriter;
 import com.java.semantic.indexer.store.GenerationWriteContext;
 import com.java.semantic.model.index.GenerationFileDocument;
 import com.java.semantic.model.index.GenerationId;

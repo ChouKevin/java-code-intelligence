@@ -4,7 +4,6 @@ import com.java.semantic.model.codefact.MethodTarget;
 import com.java.semantic.semantic.domain.SemanticMethod;
 import com.java.semantic.syntax.domain.SourceTypeMetadata;
 
-import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 

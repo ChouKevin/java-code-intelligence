@@ -6,7 +6,6 @@ import com.java.semantic.repository.domain.RepositorySnapshot;
 import com.java.semantic.model.codefact.JavaTypeIdentity;
 import com.java.semantic.model.codefact.MethodTarget;
 import com.java.semantic.model.codefact.SourceTypeIdentity;
-import com.java.semantic.semantic.domain.SemanticAmbiguousTypeException;
 import com.java.semantic.semantic.domain.SemanticCall;
 import com.java.semantic.semantic.domain.SemanticCallResolution;
 import com.java.semantic.semantic.domain.SemanticCallResolutionStatus;
@@ -14,7 +13,6 @@ import com.java.semantic.semantic.domain.SemanticDeclarationAnchor;
 import com.java.semantic.semantic.domain.SemanticCallSite;
 import com.java.semantic.semantic.domain.SemanticCallStatus;
 import com.java.semantic.semantic.domain.SemanticEngineNotReadyException;
-import com.java.semantic.semantic.domain.SemanticEngineStartFailedException;
 import com.java.semantic.semantic.domain.SemanticIncomingCallResult;
 import com.java.semantic.semantic.domain.SemanticImplementationIssueReason;
 import com.java.semantic.semantic.domain.SemanticImplementationResult;
@@ -91,7 +89,6 @@ import java.util.concurrent.atomic.AtomicInteger;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.catchThrowable;
-import static org.assertj.core.api.Assertions.catchThrowableOfType;
 
 @ExtendWith(OutputCaptureExtension.class)
 class Lsp4jJavaSemanticServiceTest {
@@ -1141,22 +1138,6 @@ class Lsp4jJavaSemanticServiceTest {
         } catch (IOException exception) {
             throw new IllegalStateException(exception);
         }
-    }
-
-    private String otherFile(String relativePath) throws IOException {
-        Path file = root.resolve("src/main/java").resolve(relativePath);
-        Files.createDirectories(file.getParent());
-        Files.writeString(file, "package com.other;\npublic class OrderCrudService {}\n");
-        return file.toUri().toString();
-    }
-
-    private String fileUri(String relativePath) {
-        return root.resolve(relativePath).toUri().toString();
-    }
-
-    private WorkspaceSymbol workspaceType(String name, String container, String uri) {
-        return new WorkspaceSymbol(name, SymbolKind.Class,
-                Either.forLeft(new Location(uri, range(0, 0, 30, 0))), container);
     }
 
     private DocumentSymbol classSymbol(String name, DocumentSymbol... methods) {

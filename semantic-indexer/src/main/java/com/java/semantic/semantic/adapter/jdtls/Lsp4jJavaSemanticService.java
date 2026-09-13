@@ -3,14 +3,12 @@ package com.java.semantic.semantic.adapter.jdtls;
 import com.java.semantic.repository.domain.RepositorySnapshot;
 import com.java.semantic.model.codefact.MethodTarget;
 import com.java.semantic.semantic.domain.JavaSemanticService;
-import com.java.semantic.semantic.domain.SemanticAmbiguousTypeException;
 import com.java.semantic.semantic.domain.SemanticCall;
 import com.java.semantic.semantic.domain.SemanticCallResolution;
 import com.java.semantic.semantic.domain.SemanticCallSite;
 import com.java.semantic.semantic.domain.SemanticCallStatus;
 import com.java.semantic.semantic.domain.SemanticBindingUnresolvedException;
 import com.java.semantic.semantic.domain.SemanticDeclarationAnchor;
-import com.java.semantic.semantic.domain.SemanticEngineException;
 import com.java.semantic.semantic.domain.SemanticIncomingCall;
 import com.java.semantic.semantic.domain.SemanticIncomingCallIssue;
 import com.java.semantic.semantic.domain.SemanticIncomingCallResult;
@@ -47,9 +45,6 @@ import org.eclipse.lsp4j.SymbolInformation;
 import org.eclipse.lsp4j.SymbolKind;
 import org.eclipse.lsp4j.TextDocumentIdentifier;
 import org.eclipse.lsp4j.TextDocumentItem;
-import org.eclipse.lsp4j.WorkspaceSymbol;
-import org.eclipse.lsp4j.WorkspaceSymbolLocation;
-import org.eclipse.lsp4j.WorkspaceSymbolParams;
 import org.eclipse.jdt.core.dom.AST;
 import org.eclipse.jdt.core.dom.ASTNode;
 import org.eclipse.jdt.core.dom.ASTParser;
@@ -869,10 +864,6 @@ public class Lsp4jJavaSemanticService implements JavaSemanticService {
         return location.uri()
                 + "#" + range.start().line() + ":" + range.start().character()
                 + "-" + range.end().line() + ":" + range.end().character();
-    }
-
-    private String signature(SemanticMethod method) {
-        return method.methodName() + "(" + String.join(", ", method.parameterTypes()) + ")";
     }
 
     private boolean isType(SymbolKind kind) {

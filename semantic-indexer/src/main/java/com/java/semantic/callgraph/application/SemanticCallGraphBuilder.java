@@ -24,7 +24,6 @@ import com.java.semantic.syntax.domain.SourceMethodMetadata;
 import com.java.semantic.syntax.domain.SourceTypeMetadata;
 import com.java.semantic.syntax.domain.RepositorySyntax;
 import com.java.semantic.syntax.domain.SyntaxInvocation;
-import com.java.semantic.model.codefact.SyntaxRange;
 import org.springframework.util.Assert;
 import org.springframework.util.StringUtils;
 

@@ -569,22 +569,9 @@ final class SourceTypeMetadataExtractor {
 
     // --- 註解衍生資訊 ---
 
-    /** 保留原始碼寫法，@org.springframework.stereotype.Service 不會被縮短 */
-    private static List<String> annotationNamesOf(BodyDeclaration declaration) {
-        return AnnotationReader.annotationsOf(declaration).stream()
-                .map(AnnotationReader::writtenNameOf)
-                .toList();
-    }
-
     private static List<AnnotationEvidence> annotationEvidenceOf(CompilationUnit unit, BodyDeclaration declaration) {
         return AnnotationReader.annotationsOf(declaration).stream()
                 .map(annotation -> annotationEvidenceOf(unit, annotation))
-                .toList();
-    }
-
-    private static List<String> annotationNamesOf(SingleVariableDeclaration declaration) {
-        return AnnotationReader.annotationsOf(declaration).stream()
-                .map(AnnotationReader::writtenNameOf)
                 .toList();
     }
 

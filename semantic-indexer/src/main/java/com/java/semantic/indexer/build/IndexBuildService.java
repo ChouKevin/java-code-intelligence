@@ -13,7 +13,6 @@ import com.java.semantic.model.index.GenerationWriteState;
 import com.java.semantic.model.index.IndexSchemaContract;
 import com.java.semantic.model.repository.RepositoryRevision;
 import java.nio.file.Path;
-import java.util.Date;
 import java.util.List;
 import java.util.Objects;
 import org.bson.Document;
