@@ -18,21 +18,13 @@ class QuerySecurityTest {
             assertThat(context).hasNotFailed();
             assertThat(context.getBean("queryRequestMonitoringFilter", FilterRegistrationBean.class).getFilter())
                     .isInstanceOf(QueryRequestMonitoringFilter.class);
+            assertThat(context.getBean("queryRequestMonitoringFilter", FilterRegistrationBean.class).getUrlPatterns().toArray())
+                    .containsExactlyInAnyOrder("/api/v1/*", "/mcp");
             assertThat(context.getBean("queryTokenFilter", FilterRegistrationBean.class).getFilter())
                     .isInstanceOf(QueryTokenFilter.class);
+            assertThat(context.getBean("queryTokenFilter", FilterRegistrationBean.class).getUrlPatterns().toArray())
+                    .containsExactlyInAnyOrder("/api/v1/*", "/mcp");
         });
-    }
-
-    @Test
-    void security_and_monitoring_filters_register_for_application_relative_query_routes() {
-        QuerySecurityConfiguration configuration = new QuerySecurityConfiguration();
-        QuerySecurityProperties properties = new QuerySecurityProperties();
-
-        FilterRegistrationBean<QueryRequestMonitoringFilter> monitoringRegistration = configuration.queryRequestMonitoringFilter();
-        FilterRegistrationBean<QueryTokenFilter> tokenRegistration = configuration.queryTokenFilter(properties);
-
-        assertThat(monitoringRegistration.getUrlPatterns()).containsExactlyInAnyOrder("/api/v1/*", "/mcp");
-        assertThat(tokenRegistration.getUrlPatterns()).containsExactlyInAnyOrder("/api/v1/*", "/mcp");
     }
 
     @Test
