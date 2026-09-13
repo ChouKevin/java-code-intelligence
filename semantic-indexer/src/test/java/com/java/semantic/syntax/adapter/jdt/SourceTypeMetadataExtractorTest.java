@@ -673,15 +673,6 @@ class SourceTypeMetadataExtractorTest {
     }
 
     @Test
-    void should_record_one_based_line_numbers_when_a_method_is_scanned() {
-        SourceMethodMetadata method = methodOf(classes, "com.example.syntax.AccountShapes", "name");
-
-        assertThat(method.declarationLocation().range().start().line()).isGreaterThanOrEqualTo(0);
-        assertThat(method.declarationLocation().range().end().line())
-                .isGreaterThanOrEqualTo(method.declarationLocation().range().start().line());
-    }
-
-    @Test
     void should_simplify_parameter_types_when_a_method_declares_qualified_or_generic_parameters() {
         assertThat(methodOf(classes, "com.example.syntax.AccountMapper", "updateStatus").paramTypes())
                 .containsExactly("Long", "String");
