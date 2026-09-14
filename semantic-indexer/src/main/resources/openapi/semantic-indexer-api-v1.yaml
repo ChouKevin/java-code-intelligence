@@ -79,6 +79,22 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/RepositoryNotFound' }
         '409': { $ref: '#/components/responses/IndexConflict' }
+  /index/repositories/{repoId}/git/comparisons:
+    post:
+      operationId: prepareRepositoryGitComparison
+      parameters: [ { $ref: '#/components/parameters/RepositoryId' } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/GitComparisonIndexRequest' }
+      responses:
+        '202': { $ref: '#/components/responses/IndexJobAccepted' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/RepositoryNotFound' }
+        '409': { $ref: '#/components/responses/IndexConflict' }
   /index/repositories/{repoId}/publication:
     get:
       operationId: getRepositoryPublication
@@ -271,7 +287,7 @@ components:
         jobId: { type: string }
         repositoryId: { type: string }
         target: { $ref: '#/components/schemas/IndexJobTarget', nullable: true }
-        operation: { type: string, enum: [BUILD, ROLLBACK, RESET, NO_WORK, GIT_REFS, GIT_HISTORY] }
+        operation: { type: string, enum: [BUILD, ROLLBACK, RESET, NO_WORK, GIT_REFS, GIT_HISTORY, GIT_COMPARISON] }
         phase: { type: string, enum: [ACCEPTED, RUNNING, COMPLETE, FAILED] }
         active: { type: boolean }
         failureCategory:
@@ -316,6 +332,13 @@ components:
         catalogId: { type: string, format: uuid }
         branch: { type: string, minLength: 1 }
         revision: { type: string, pattern: '^[0-9a-f]{40}$' }
+    GitComparisonIndexRequest:
+      type: object
+      additionalProperties: false
+      required: [previous, current]
+      properties:
+        previous: { type: string, pattern: '^[0-9a-f]{40}$' }
+        current: { type: string, pattern: '^[0-9a-f]{40}$' }
     GitEvidenceResult:
       type: object
       additionalProperties: false
@@ -324,6 +347,9 @@ components:
         evidenceId: { type: string, format: uuid }
         branch: { type: string, nullable: true }
         revision: { type: string, nullable: true, pattern: '^[0-9a-f]{40}$' }
+        comparisonId: { type: string, nullable: true, format: uuid }
+        previousSnapshotId: { type: string, nullable: true, format: uuid }
+        currentSnapshotId: { type: string, nullable: true, format: uuid }
     SyncRequest:
       type: object
       additionalProperties: false

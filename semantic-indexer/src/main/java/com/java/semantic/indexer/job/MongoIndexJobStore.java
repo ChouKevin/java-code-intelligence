@@ -10,6 +10,7 @@ import com.java.semantic.model.index.RollbackGenerationCommand;
 import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.model.repository.RepositoryRevision;
 import com.java.semantic.model.git.GitEvidenceId;
+import com.java.semantic.model.git.GitSnapshotId;
 import com.mongodb.DuplicateKeyException;
 import com.mongodb.ErrorCategory;
 import com.mongodb.MongoWriteException;
@@ -269,6 +270,9 @@ public final class MongoIndexJobStore implements IndexJobStore {
                 || Objects.isNull(previousSnapshotId) || Objects.isNull(currentSnapshotId)) {
             return false;
         }
+        if (!previousSnapshotId.equals(payload.getString("previousSnapshotId")) || !currentSnapshotId.equals(payload.getString("currentSnapshotId"))) {
+            return false;
+        }
         long readySnapshots = template.getCollection(IndexCollections.GIT_EVIDENCE_MANIFESTS).countDocuments(new Document(REPOSITORY_ID, job.repositoryId().value())
                 .append("kind", "SNAPSHOT").append("state", "READY").append("evidenceId", new Document("$in", List.of(previousSnapshotId, currentSnapshotId))));
         return readySnapshots == 2L;
@@ -327,6 +331,8 @@ public final class MongoIndexJobStore implements IndexJobStore {
         payload.branch().ifPresent(value -> document.append("branch", value));
         payload.revision().ifPresent(value -> document.append("revision", value.value()));
         payload.previousRevision().ifPresent(value -> document.append("previousRevision", value.value()));
+        payload.previousSnapshotId().ifPresent(value -> document.append("previousSnapshotId", value.value()));
+        payload.currentSnapshotId().ifPresent(value -> document.append("currentSnapshotId", value.value()));
         return document;
     }
 
@@ -515,14 +521,16 @@ public final class MongoIndexJobStore implements IndexJobStore {
             target = Optional.of(targetFrom(Objects.requireNonNull(document.get("target", Document.class), "target document is required")));
         }
         Optional<GitEvidenceJob> gitEvidence = Optional.empty();
-        if (operation == IndexJobOperation.GIT_REFS || operation == IndexJobOperation.GIT_HISTORY) {
+        if (operation == IndexJobOperation.GIT_REFS || operation == IndexJobOperation.GIT_HISTORY || operation == IndexJobOperation.GIT_COMPARISON) {
             Document payload = Objects.requireNonNull(document.get("gitEvidence", Document.class), "git evidence payload is required");
             Optional<GitEvidenceId> catalogId = Optional.ofNullable(payload.getString("catalogId")).map(GitEvidenceId::new);
             Optional<String> branch = Optional.ofNullable(payload.getString("branch"));
             Optional<RepositoryRevision> revision = Optional.ofNullable(payload.getString("revision")).map(RepositoryRevision::new);
             Optional<GitEvidenceId> evidenceId = Optional.ofNullable(payload.getString("evidenceId")).map(GitEvidenceId::new);
             Optional<RepositoryRevision> previousRevision = Optional.ofNullable(payload.getString("previousRevision")).map(RepositoryRevision::ofSha);
-            gitEvidence = Optional.of(new GitEvidenceJob(catalogId, branch, revision, evidenceId, previousRevision));
+            Optional<GitSnapshotId> previousSnapshotId = Optional.ofNullable(payload.getString("previousSnapshotId")).map(GitSnapshotId::new);
+            Optional<GitSnapshotId> currentSnapshotId = Optional.ofNullable(payload.getString("currentSnapshotId")).map(GitSnapshotId::new);
+            gitEvidence = Optional.of(new GitEvidenceJob(catalogId, branch, revision, evidenceId, previousRevision, previousSnapshotId, currentSnapshotId));
         }
         return new IndexJob(new IndexJobId(document.getString(JOB_ID)), RepositoryId.of(document.getString(REPOSITORY_ID)), target,
                 IndexJobPhase.valueOf(document.getString("phase")), Boolean.TRUE.equals(document.getBoolean(ACTIVE)),

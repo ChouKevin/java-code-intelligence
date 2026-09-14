@@ -3,6 +3,7 @@ package com.java.semantic.query.config;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.boot.context.properties.bind.ConstructorBinding;
 import org.springframework.boot.context.properties.bind.DefaultValue;
 import org.springframework.validation.annotation.Validated;
 
@@ -18,6 +19,7 @@ public record ReadPolicyProperties(
         @DefaultValue List<@Valid ClassRule> forbiddenClasses,
         @DefaultValue List<@Valid MethodRule> forbiddenMethods) {
 
+    @ConstructorBinding
     public ReadPolicyProperties {
         gitEvidenceAllowedRepositories = List.copyOf(Objects.requireNonNull(gitEvidenceAllowedRepositories, "git evidence allowed repositories are required"));
         forbiddenRepositories = List.copyOf(Objects.requireNonNull(forbiddenRepositories, "forbidden repositories are required"));

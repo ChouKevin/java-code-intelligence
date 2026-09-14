@@ -230,6 +230,7 @@ class JGitRepositoryAdapterComparisonTest {
              ObjectInserter inserter = git.getRepository().newObjectInserter()) {
             ObjectId blob = inserter.insert(Constants.OBJ_BLOB, "text\n".getBytes(java.nio.charset.StandardCharsets.UTF_8));
             TreeFormatter tree = new TreeFormatter();
+            tree.append("raw-path-hex:ff".getBytes(java.nio.charset.StandardCharsets.UTF_8), FileMode.REGULAR_FILE, blob);
             tree.append(new byte[] {(byte) 0xC3, (byte) 0x28}, FileMode.REGULAR_FILE, blob);
             ObjectId treeId = tree.insertTo(inserter);
             CommitBuilder builder = new CommitBuilder();
@@ -244,12 +245,15 @@ class JGitRepositoryAdapterComparisonTest {
             GitPreparedComparison comparison = new JGitRepositoryAdapter(new RepositoryProperties()).prepareComparison(repositoryDirectory,
                     RepositoryRevision.ofSha(commitId.name()), RepositoryRevision.ofSha(commitId.name()));
 
-            assertThat(comparison.previousEntries()).singleElement().satisfies(entry -> {
+            assertThat(comparison.previousEntries()).hasSize(2);
+            assertThat(comparison.previousEntries()).filteredOn(entry -> entry.path().equals("raw-path-hex:c328")).singleElement().satisfies(entry -> {
                 assertThat(entry.path()).isEqualTo("raw-path-hex:c328");
                 assertThat(entry.contentStatus()).isEqualTo(GitFileContentStatus.UNSUPPORTED_PATH);
                 assertThat(entry.byteLength()).isEqualTo(5L);
                 assertThat(entry.bytes()).isEmpty();
             });
+            assertThat(comparison.previousEntries()).filteredOn(entry -> entry.path().equals("raw-path-hex:ff")).singleElement()
+                    .satisfies(entry -> assertThat(entry.contentStatus()).isEqualTo(GitFileContentStatus.TEXT));
         }
     }
 

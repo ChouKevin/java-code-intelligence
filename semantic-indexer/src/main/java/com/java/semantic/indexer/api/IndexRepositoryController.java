@@ -114,12 +114,16 @@ public final class IndexRepositoryController {
                     job.failureCategory().map(Enum::name).orElse(null), // cs-allow
                     currentPointer.map(GenerationPointerResponse::from).orElse(null), // cs-allow
                     job.gitEvidence().flatMap(payload -> payload.evidenceId().map(id -> new GitEvidenceResultResponse(id.value(), payload.branch().orElse(null), // cs-allow
-                            payload.revision().map(com.java.semantic.model.repository.RepositoryRevision::value).orElse(null)))) // cs-allow
+                            payload.revision().map(com.java.semantic.model.repository.RepositoryRevision::value).orElse(null), // cs-allow
+                            payload.previousRevision().isPresent() ? id.value() : null, // cs-allow
+                            payload.previousSnapshotId().map(com.java.semantic.model.git.GitSnapshotId::value).orElse(null), // cs-allow
+                            payload.currentSnapshotId().map(com.java.semantic.model.git.GitSnapshotId::value).orElse(null)))) // cs-allow
                             .orElse(null)); // cs-allow
         }
     }
 
-    public record GitEvidenceResultResponse(String evidenceId, String branch, String revision) { }
+    public record GitEvidenceResultResponse(String evidenceId, String branch, String revision, String comparisonId,
+                                            String previousSnapshotId, String currentSnapshotId) { }
 
     public record IndexJobTargetResponse(String revision, String generationId, long generation) {
         static IndexJobTargetResponse from(com.java.semantic.indexer.job.IndexJobTarget target) {

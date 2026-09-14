@@ -135,7 +135,7 @@ public final class GitEvidencePublicationStore {
                 .append("previous", comparison.previous().value()).append("current", comparison.current().value()).append("previousSnapshotId", previousSnapshot.value())
                 .append("currentSnapshotId", currentSnapshot.value()).append("ancestry", comparison.ancestry().name()).append("preparedAt", java.util.Date.from(preparedAt))
                 .append("ownerJobId", job.id().value()).append("total", (long) comparison.changes().size()));
-        bind(job, new GitEvidenceId(comparisonId.value()));
+        bindComparison(job, comparisonId, previousSnapshot, currentSnapshot);
         publishSnapshot(job, previousSnapshot, comparison.previous().value(), comparison.previousEntries(), preparedAt);
         publishSnapshot(job, currentSnapshot, comparison.current().value(), comparison.currentEntries(), preparedAt);
         long ordinal = 0L;
@@ -176,13 +176,15 @@ public final class GitEvidencePublicationStore {
             }
             byte[] persistedBytes = text ? bytes : new byte[0];
             String checksum = checksum(persistedBytes);
+            String pathKey = pathKey(entry.rawPath());
             template.getCollection(IndexCollections.GIT_SNAPSHOT_FILES).insertOne(new Document("repoId", job.repositoryId().value()).append("snapshotId", snapshotId.value())
-                    .append("ordinal", ordinal).append("path", entry.path()).append("mode", entry.mode()).append("blobId", entry.blobId()).append("contentStatus", entry.contentStatus().name())
+                    .append("ordinal", ordinal).append("path", entry.path()).append("rawPath", entry.rawPath()).append("pathKey", pathKey)
+                    .append("mode", entry.mode()).append("blobId", entry.blobId()).append("contentStatus", entry.contentStatus().name())
                     .append("byteLength", entry.byteLength()).append("checksum", checksum));
             for (int start = 0, chunk = 0; start < persistedBytes.length; start += CHUNK_BYTES, chunk++) {
                 int end = Math.min(start + CHUNK_BYTES, persistedBytes.length);
                 template.getCollection(IndexCollections.GIT_SNAPSHOT_CHUNKS).insertOne(new Document("repoId", job.repositoryId().value()).append("snapshotId", snapshotId.value())
-                        .append("path", entry.path()).append("ordinal", (long) chunk).append("bytes", Arrays.copyOfRange(persistedBytes, start, end)));
+                        .append("pathKey", pathKey).append("ordinal", (long) chunk).append("bytes", Arrays.copyOfRange(persistedBytes, start, end)));
             }
             digest = digest(digest, snapshotRow(ordinal, entry, checksum));
             ordinal++;
@@ -253,14 +255,17 @@ public final class GitEvidencePublicationStore {
         for (GitSnapshotEntry expected : expectedEntries) {
             Document file = template.getCollection(IndexCollections.GIT_SNAPSHOT_FILES).find(Filters.and(Filters.eq("repoId", repositoryId.value()),
                     Filters.eq("snapshotId", snapshotId.value()), Filters.eq("ordinal", ordinal))).first();
-            if (Objects.isNull(file) || !expected.path().equals(file.getString("path")) || !expected.mode().equals(file.getString("mode"))
+            Optional<byte[]> storedRawPath = Objects.nonNull(file) ? binaryBytes(file.get("rawPath")) : Optional.empty();
+            if (Objects.isNull(file) || !expected.path().equals(file.getString("path")) || storedRawPath.isEmpty()
+                    || !Arrays.equals(expected.rawPath(), storedRawPath.get()) || !pathKey(expected.rawPath()).equals(file.getString("pathKey"))
+                    || !expected.mode().equals(file.getString("mode"))
                     || !expected.blobId().equals(file.getString("blobId")) || !expected.contentStatus().name().equals(file.getString("contentStatus"))
                     || file.getLong("byteLength") != expected.byteLength()) {
                 throw new PublicationConflictException();
             }
             byte[] expectedBytes = expected.contentStatus().name().equals("TEXT") ? expected.bytes() : new byte[0];
             String checksum = checksum(expectedBytes);
-            if (!checksum.equals(file.getString("checksum")) || !validSnapshotChunks(repositoryId, snapshotId, expected.path(), expectedBytes)) {
+            if (!checksum.equals(file.getString("checksum")) || !validSnapshotChunks(repositoryId, snapshotId, expected.rawPath(), expectedBytes)) {
                 throw new PublicationConflictException();
             }
             if (expected.contentStatus().name().equals("TEXT")) {
@@ -279,10 +284,10 @@ public final class GitEvidencePublicationStore {
         }
     }
 
-    private boolean validSnapshotChunks(RepositoryId repositoryId, GitSnapshotId snapshotId, String path, byte[] expectedBytes) {
+    private boolean validSnapshotChunks(RepositoryId repositoryId, GitSnapshotId snapshotId, byte[] rawPath, byte[] expectedBytes) {
         List<Document> chunks = new ArrayList<>();
         template.getCollection(IndexCollections.GIT_SNAPSHOT_CHUNKS).find(Filters.and(Filters.eq("repoId", repositoryId.value()),
-                Filters.eq("snapshotId", snapshotId.value()), Filters.eq("path", path))).sort(com.mongodb.client.model.Sorts.ascending("ordinal")).into(chunks);
+                Filters.eq("snapshotId", snapshotId.value()), Filters.eq("pathKey", pathKey(rawPath)))).sort(com.mongodb.client.model.Sorts.ascending("ordinal")).into(chunks);
         byte[] actual = new byte[0];
         long ordinal = 0L;
         for (Document chunk : chunks) {
@@ -419,9 +424,11 @@ public final class GitEvidencePublicationStore {
     }
 
     private static String snapshotRow(long ordinal, GitSnapshotEntry entry, String checksum) {
-        return ordinal + "\\u0000" + entry.path() + "\\u0000" + entry.mode() + "\\u0000" + entry.blobId() + "\\u0000"
+        return ordinal + "\\u0000" + entry.path() + "\\u0000" + pathKey(entry.rawPath()) + "\\u0000" + entry.mode() + "\\u0000" + entry.blobId() + "\\u0000"
                 + entry.contentStatus().name() + "\\u0000" + entry.byteLength() + "\\u0000" + checksum;
     }
+
+    private static String pathKey(byte[] rawPath) { return java.util.HexFormat.of().formatHex(rawPath); }
 
     private static String checksum(byte[] bytes) {
         try {
@@ -442,6 +449,13 @@ public final class GitEvidencePublicationStore {
     private void bind(IndexJob job, GitEvidenceId evidenceId) {
         template.getCollection(IndexCollections.INDEX_JOBS).updateOne(Filters.and(Filters.eq("jobId", job.id().value()),
                 Filters.eq("repoId", job.repositoryId().value()), Filters.eq("active", true)), Updates.set("gitEvidence.evidenceId", evidenceId.value()));
+    }
+
+    private void bindComparison(IndexJob job, GitComparisonId comparisonId, GitSnapshotId previousSnapshot, GitSnapshotId currentSnapshot) {
+        template.getCollection(IndexCollections.INDEX_JOBS).updateOne(Filters.and(Filters.eq("jobId", job.id().value()),
+                Filters.eq("repoId", job.repositoryId().value()), Filters.eq("active", true)), Updates.combine(
+                Updates.set("gitEvidence.evidenceId", comparisonId.value()), Updates.set("gitEvidence.previousSnapshotId", previousSnapshot.value()),
+                Updates.set("gitEvidence.currentSnapshotId", currentSnapshot.value())));
     }
 
     private void markReady(RepositoryId repositoryId, GitEvidenceId evidenceId) {

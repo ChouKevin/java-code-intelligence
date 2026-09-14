@@ -27,7 +27,7 @@ class IndexerOpenApiContractTest {
         assertThat(jobResponse).contains("enum: [ACCEPTED, RUNNING, COMPLETE, FAILED]");
         assertThat(jobStatus).contains("required: [jobId, repositoryId, operation, phase, active, gitEvidence]");
         assertThat(jobStatus).contains("target: { $ref: '#/components/schemas/IndexJobTarget', nullable: true }");
-        assertThat(jobStatus).contains("operation: { type: string, enum: [BUILD, ROLLBACK, RESET, NO_WORK, GIT_REFS, GIT_HISTORY] }");
+        assertThat(jobStatus).contains("operation: { type: string, enum: [BUILD, ROLLBACK, RESET, NO_WORK, GIT_REFS, GIT_HISTORY, GIT_COMPARISON] }");
         assertThat(jobStatus).contains("phase: { type: string, enum: [ACCEPTED, RUNNING, COMPLETE, FAILED] }");
 
         assertThat(jobResponse).doesNotContain("revision: {", "generationId: {", "generation: {");
@@ -41,11 +41,18 @@ class IndexerOpenApiContractTest {
                 "/index/uat/publication/release:", "/index/uat/repositories/{repoId}/reset:",
                 "operationId: awaitUatPublication", "operationId: resetUatRepositoryIndex");
         assertThat(document).contains("'409': { description: No active publication cycle is available to observe. }");
+        assertThat(document).contains("/index/repositories/{repoId}/git/comparisons:", "operationId: prepareRepositoryGitComparison",
+                "$ref: '#/components/schemas/GitComparisonIndexRequest'");
+        assertThat(schema(document, "GitComparisonIndexRequest")).contains("additionalProperties: false", "required: [previous, current]");
+        assertThat(schema(document, "GitEvidenceResult")).contains("comparisonId: { type: string, nullable: true, format: uuid }",
+                "previousSnapshotId: { type: string, nullable: true, format: uuid }", "currentSnapshotId: { type: string, nullable: true, format: uuid }");
 
         assertThat(recordComponentNames(IndexRepositoryController.IndexJobResponse.class))
                 .containsExactly("jobId", "repositoryId", "target", "phase", "failureCategory");
         assertThat(recordComponentNames(IndexRepositoryController.IndexJobStatusResponse.class))
                 .containsExactly("jobId", "repositoryId", "target", "operation", "phase", "active", "failureCategory", "currentPointer", "gitEvidence");
+        assertThat(recordComponentNames(IndexRepositoryController.GitEvidenceResultResponse.class))
+                .containsExactly("evidenceId", "branch", "revision", "comparisonId", "previousSnapshotId", "currentSnapshotId");
     }
 
     private static String openApi() throws IOException {
