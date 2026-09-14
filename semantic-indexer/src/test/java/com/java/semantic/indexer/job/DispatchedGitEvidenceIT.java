@@ -40,10 +40,12 @@ import org.testcontainers.mongodb.MongoDBContainer;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.PosixFilePermission;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
@@ -107,6 +109,33 @@ class DispatchedGitEvidenceIT {
             assertThat(history.items().getFirst().parents()).containsExactly(first.value());
             assertThat(history.items().get(1).subject()).isEmpty();
 
+            RepositoryRevision added = commitAdditional(seed, seedPath, "add", "Added.java", "class Added { }");
+            push(seed, "main");
+            IndexJob addComparisonJob = requests.prepareGitComparison(RepositoryId.of("orders"), head.value(), added.value());
+            dispatcher.dispatchOnce();
+            String addComparisonId = jobs.find(addComparisonJob.id()).orElseThrow().gitEvidence().orElseThrow().evidenceId().orElseThrow().value();
+            SemanticQueryContract.GitComparisonCollection additions = reader.comparisons(new SemanticQueryContract.GitComparisonRequest("orders",
+                    addComparisonId, head.value(), added.value(), 0, 20));
+            assertThat(additions.items()).extracting(SemanticQueryContract.GitChangeItem::kind).contains("ADD");
+
+            RepositoryRevision deleted = deleteAdditional(seed, seedPath, "delete", "Added.java");
+            push(seed, "main");
+            IndexJob deleteComparisonJob = requests.prepareGitComparison(RepositoryId.of("orders"), added.value(), deleted.value());
+            dispatcher.dispatchOnce();
+            String deleteComparisonId = jobs.find(deleteComparisonJob.id()).orElseThrow().gitEvidence().orElseThrow().evidenceId().orElseThrow().value();
+            SemanticQueryContract.GitComparisonCollection deletions = reader.comparisons(new SemanticQueryContract.GitComparisonRequest("orders",
+                    deleteComparisonId, added.value(), deleted.value(), 0, 20));
+            assertThat(deletions.items()).extracting(SemanticQueryContract.GitChangeItem::kind).contains("DELETE");
+
+            RepositoryRevision modeAndContent = commitModeAndContent(seed, seedPath);
+            push(seed, "main");
+            IndexJob modeComparisonJob = requests.prepareGitComparison(RepositoryId.of("orders"), deleted.value(), modeAndContent.value());
+            dispatcher.dispatchOnce();
+            String modeComparisonId = jobs.find(modeComparisonJob.id()).orElseThrow().gitEvidence().orElseThrow().evidenceId().orElseThrow().value();
+            SemanticQueryContract.GitComparisonCollection modeChanges = reader.comparisons(new SemanticQueryContract.GitComparisonRequest("orders",
+                    modeComparisonId, deleted.value(), modeAndContent.value(), 0, 20));
+            assertThat(modeChanges.items()).extracting(SemanticQueryContract.GitChangeItem::kind).contains("MODE");
+
             commit(seed, seedPath, "third", "class Evidence { int version; int later; }");
             push(seed, "main");
             assertThat(reader.branches(new SemanticQueryContract.GitBranchRequest("orders", Optional.of(catalogId), 0, 20)).items())
@@ -146,6 +175,31 @@ class DispatchedGitEvidenceIT {
         Files.writeString(seedPath.resolve("Evidence.java"), source);
         seed.add().addFilepattern(".").call();
         return RepositoryRevision.ofSha(seed.commit().setMessage(subject).setAuthor("Test", "test@example.test")
+                .setCommitter("Test", "test@example.test").call().getId().name());
+    }
+
+    private static RepositoryRevision commitAdditional(Git seed, Path seedPath, String subject, String filename, String source) throws Exception {
+        Files.writeString(seedPath.resolve(filename), source);
+        seed.add().addFilepattern(filename).call();
+        return RepositoryRevision.ofSha(seed.commit().setMessage(subject).setAuthor("Test", "test@example.test")
+                .setCommitter("Test", "test@example.test").call().getId().name());
+    }
+
+    private static RepositoryRevision deleteAdditional(Git seed, Path seedPath, String subject, String filename) throws Exception {
+        Files.delete(seedPath.resolve(filename));
+        seed.rm().addFilepattern(filename).call();
+        return RepositoryRevision.ofSha(seed.commit().setMessage(subject).setAuthor("Test", "test@example.test")
+                .setCommitter("Test", "test@example.test").call().getId().name());
+    }
+
+    private static RepositoryRevision commitModeAndContent(Git seed, Path seedPath) throws Exception {
+        Path evidence = seedPath.resolve("Evidence.java");
+        Files.writeString(evidence, "class Evidence { int version; int modeChanged; }");
+        Files.setPosixFilePermissions(evidence, Set.of(PosixFilePermission.OWNER_READ, PosixFilePermission.OWNER_WRITE,
+                PosixFilePermission.OWNER_EXECUTE, PosixFilePermission.GROUP_READ, PosixFilePermission.GROUP_EXECUTE,
+                PosixFilePermission.OTHERS_READ, PosixFilePermission.OTHERS_EXECUTE));
+        seed.add().addFilepattern("Evidence.java").call();
+        return RepositoryRevision.ofSha(seed.commit().setMessage("mode and content").setAuthor("Test", "test@example.test")
                 .setCommitter("Test", "test@example.test").call().getId().name());
     }
 

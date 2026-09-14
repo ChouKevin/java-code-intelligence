@@ -6,7 +6,6 @@ import com.java.semantic.model.git.GitFileContentStatus;
 import com.java.semantic.model.index.IndexCollections;
 import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.query.config.ConfiguredReadPolicy;
-import com.mongodb.client.model.CountOptions;
 import com.mongodb.client.model.Filters;
 import com.mongodb.client.model.Sorts;
 import com.mongodb.MongoException;
@@ -104,8 +103,8 @@ public final class GitEvidenceReadService {
             if (!required.previous().equals(requiredText(manifest, "previous")) || !required.current().equals(requiredText(manifest, "current"))) {
                 throw new IllegalArgumentException("comparison endpoints do not match the requested revisions");
             }
-            long total = validateComparisonLayout(repositoryId, required.comparisonId(), manifest);
-            List<SemanticQueryContract.GitChangeItem> changes = comparisonPage(repositoryId, required.comparisonId(), required.offset(), required.limit());
+            long total = comparisonTotal(manifest);
+            List<SemanticQueryContract.GitChangeItem> changes = comparisonPage(repositoryId, required.comparisonId(), required.offset(), required.limit(), total);
             return new SemanticQueryContract.GitComparisonCollection(repositoryId.value(), required.comparisonId(), required.previous(), required.current(),
                     requiredText(manifest, "previousSnapshotId"), requiredText(manifest, "currentSnapshotId"), requiredText(manifest, "ancestry"),
                     List.copyOf(changes), page(required.offset(), required.limit(), changes.size(), total));
@@ -127,20 +126,21 @@ public final class GitEvidenceReadService {
             if (!required.previous().equals(requiredText(manifest, "previous")) || !required.current().equals(requiredText(manifest, "current"))) {
                 throw new IllegalArgumentException("comparison endpoints do not match the requested revisions");
             }
-            long total = validateComparisonLayout(repositoryId, required.comparisonId(), manifest);
+            long total = comparisonTotal(manifest);
             Document row = template.getCollection(IndexCollections.GIT_COMPARISON_CHANGES).find(Filters.and(Filters.eq("repoId", repositoryId.value()),
                     Filters.eq("comparisonId", required.comparisonId()), Filters.eq("changeId", required.changeId()))).maxTime(storageTimeout.toMillis(), TimeUnit.MILLISECONDS).first();
             if (Objects.isNull(row)) {
                 throw new IllegalArgumentException("change does not belong to the comparison");
             }
-            if (changeCount(repositoryId, required.comparisonId(), required.changeId()) != 1L || requiredLong(row, "ordinal") >= total) {
+            SemanticQueryContract.GitChangeItem change = change(row);
+            if (!required.changeId().equals(change.changeId()) || requiredLong(row, "ordinal") >= total) {
                 throw new IndexContractMismatchException();
             }
             long ordinal = required.cursor().map(cursor -> decodeCursor(cursor, repositoryId, required.comparisonId(), required.previous(), required.current(),
                     required.changeId())).orElse(0L);
             PatchPage patchPage = patchPage(repositoryId, required.comparisonId(), required.changeId(), row, ordinal, required.cursor().isPresent());
             return new SemanticQueryContract.GitFileDiffResult(repositoryId.value(), required.comparisonId(), required.previous(), required.current(),
-                    change(row), patchPage.text(), patchPage.hasNext() ? Optional.of(encodeCursor(repositoryId, required.comparisonId(), required.previous(),
+                    change, patchPage.text(), patchPage.hasNext() ? Optional.of(encodeCursor(repositoryId, required.comparisonId(), required.previous(),
                             required.current(), required.changeId(), ordinal + 1L)) : Optional.empty());
         } catch (MongoException | DataAccessException exception) {
             throw new SemanticIndexUnavailableException(exception);
@@ -180,28 +180,20 @@ public final class GitEvidenceReadService {
         }
     }
 
-    private long validateComparisonLayout(RepositoryId repositoryId, String comparisonId, Document manifest) {
-        long expectedTotal = requiredLong(manifest, "total");
-        long actualTotal = comparisonCount(repositoryId, comparisonId);
-        if (actualTotal != expectedTotal) {
-            throw new IndexContractMismatchException();
-        }
-        if (expectedTotal == 0L) {
-            return 0L;
-        }
-        Document first = comparisonBoundary(repositoryId, comparisonId, Sorts.ascending("ordinal"));
-        Document last = comparisonBoundary(repositoryId, comparisonId, Sorts.descending("ordinal"));
-        if (requiredLong(first, "ordinal") != 0L || requiredLong(last, "ordinal") != expectedTotal - 1L) {
-            throw new IndexContractMismatchException();
-        }
-        return expectedTotal;
+    private static long comparisonTotal(Document manifest) {
+        return requiredLong(manifest, "total");
     }
 
-    private List<SemanticQueryContract.GitChangeItem> comparisonPage(RepositoryId repositoryId, String comparisonId, int offset, int limit) {
+    private List<SemanticQueryContract.GitChangeItem> comparisonPage(RepositoryId repositoryId, String comparisonId, int offset, int limit, long total) {
+        long expectedRows = pageRows(offset, limit, total);
+        if (expectedRows == 0L) {
+            return List.of();
+        }
         List<SemanticQueryContract.GitChangeItem> changes = new ArrayList<>();
         long expectedOrdinal = offset;
         for (Document row : template.getCollection(IndexCollections.GIT_COMPARISON_CHANGES).find(Filters.and(Filters.eq("repoId", repositoryId.value()),
-                Filters.eq("comparisonId", comparisonId))).sort(Sorts.ascending("ordinal")).skip(offset).limit(limit)
+                Filters.eq("comparisonId", comparisonId), Filters.gte("ordinal", expectedOrdinal),
+                Filters.lte("ordinal", expectedOrdinal + expectedRows - 1L))).sort(Sorts.ascending("ordinal")).limit(Math.toIntExact(expectedRows))
                 .maxTime(storageTimeout.toMillis(), TimeUnit.MILLISECONDS)) {
             SemanticQueryContract.GitChangeItem change = change(row);
             if (requiredLong(row, "ordinal") != expectedOrdinal || !repositoryId.value().equals(requiredText(row, "repoId"))
@@ -211,6 +203,9 @@ public final class GitEvidenceReadService {
             changes.add(change);
             expectedOrdinal++;
         }
+        if (changes.size() != Math.toIntExact(expectedRows)) {
+            throw new IndexContractMismatchException();
+        }
         return List.copyOf(changes);
     }
 
@@ -218,19 +213,31 @@ public final class GitEvidenceReadService {
         long expectedChunks = requiredLong(change, "patchChunkCount");
         String status = requiredText(change, "diffStatus");
         if (!"AVAILABLE".equals(status)) {
-            if (expectedChunks != 0L || hasCursor || chunkCount(repositoryId, comparisonId, changeId) != 0L) {
+            if (hasCursor) {
+                throw new IllegalArgumentException("diff cursor is invalid");
+            }
+            Document unexpected = template.getCollection(IndexCollections.GIT_COMPARISON_PATCHES).find(Filters.and(Filters.eq("repoId", repositoryId.value()),
+                    Filters.eq("comparisonId", comparisonId), Filters.eq("changeId", changeId))).limit(1)
+                    .maxTime(storageTimeout.toMillis(), TimeUnit.MILLISECONDS).first();
+            if (expectedChunks != 0L || Objects.nonNull(unexpected)) {
                 throw new IndexContractMismatchException();
             }
             return new PatchPage("", false);
         }
-        if (expectedChunks == 0L || ordinal >= expectedChunks || chunkCount(repositoryId, comparisonId, changeId) != expectedChunks
-                || !validPatchBoundaries(repositoryId, comparisonId, changeId, expectedChunks)) {
+        if (expectedChunks == 0L) {
             throw new IndexContractMismatchException();
+        }
+        if (ordinal >= expectedChunks) {
+            throw new IllegalArgumentException("diff cursor is invalid");
         }
         Document patch = template.getCollection(IndexCollections.GIT_COMPARISON_PATCHES).find(Filters.and(Filters.eq("repoId", repositoryId.value()),
                 Filters.eq("comparisonId", comparisonId), Filters.eq("changeId", changeId), Filters.eq("ordinal", ordinal)))
                 .maxTime(storageTimeout.toMillis(), TimeUnit.MILLISECONDS).first();
         if (Objects.isNull(patch)) {
+            throw new IndexContractMismatchException();
+        }
+        if (requiredLong(patch, "ordinal") != ordinal || !repositoryId.value().equals(requiredText(patch, "repoId"))
+                || !comparisonId.equals(requiredText(patch, "comparisonId")) || !changeId.equals(requiredText(patch, "changeId"))) {
             throw new IndexContractMismatchException();
         }
         String text = requiredString(patch, "patch");
@@ -240,45 +247,12 @@ public final class GitEvidenceReadService {
         return new PatchPage(text, ordinal + 1L < expectedChunks);
     }
 
-    private long chunkCount(RepositoryId repositoryId, String comparisonId, String changeId) {
-        return template.getCollection(IndexCollections.GIT_COMPARISON_PATCHES).countDocuments(Filters.and(Filters.eq("repoId", repositoryId.value()),
-                Filters.eq("comparisonId", comparisonId), Filters.eq("changeId", changeId)));
-    }
-
-    private long comparisonCount(RepositoryId repositoryId, String comparisonId) {
-        return template.getCollection(IndexCollections.GIT_COMPARISON_CHANGES).countDocuments(Filters.and(Filters.eq("repoId", repositoryId.value()),
-                Filters.eq("comparisonId", comparisonId)), new CountOptions().maxTime(storageTimeout.toMillis(), TimeUnit.MILLISECONDS));
-    }
-
-    private long changeCount(RepositoryId repositoryId, String comparisonId, String changeId) {
-        return template.getCollection(IndexCollections.GIT_COMPARISON_CHANGES).countDocuments(Filters.and(Filters.eq("repoId", repositoryId.value()),
-                Filters.eq("comparisonId", comparisonId), Filters.eq("changeId", changeId)), new CountOptions().maxTime(storageTimeout.toMillis(), TimeUnit.MILLISECONDS));
-    }
-
-    private Document comparisonBoundary(RepositoryId repositoryId, String comparisonId, org.bson.conversions.Bson sort) {
-        Document boundary = template.getCollection(IndexCollections.GIT_COMPARISON_CHANGES).find(Filters.and(Filters.eq("repoId", repositoryId.value()),
-                Filters.eq("comparisonId", comparisonId))).projection(new Document("ordinal", 1)).sort(sort).limit(1)
-                .maxTime(storageTimeout.toMillis(), TimeUnit.MILLISECONDS).first();
-        if (Objects.isNull(boundary)) {
-            throw new IndexContractMismatchException();
+    private static long pageRows(int offset, int limit, long total) {
+        long start = offset;
+        if (start >= total) {
+            return 0L;
         }
-        return boundary;
-    }
-
-    private Document patchBoundary(RepositoryId repositoryId, String comparisonId, String changeId, org.bson.conversions.Bson sort) {
-        Document boundary = template.getCollection(IndexCollections.GIT_COMPARISON_PATCHES).find(Filters.and(Filters.eq("repoId", repositoryId.value()),
-                Filters.eq("comparisonId", comparisonId), Filters.eq("changeId", changeId))).projection(new Document("ordinal", 1)).sort(sort).limit(1)
-                .maxTime(storageTimeout.toMillis(), TimeUnit.MILLISECONDS).first();
-        if (Objects.isNull(boundary)) {
-            throw new IndexContractMismatchException();
-        }
-        return boundary;
-    }
-
-    private boolean validPatchBoundaries(RepositoryId repositoryId, String comparisonId, String changeId, long expectedChunks) {
-        Document first = patchBoundary(repositoryId, comparisonId, changeId, Sorts.ascending("ordinal"));
-        Document last = patchBoundary(repositoryId, comparisonId, changeId, Sorts.descending("ordinal"));
-        return requiredLong(first, "ordinal") == 0L && requiredLong(last, "ordinal") == expectedChunks - 1L;
+        return Math.min((long) limit, total - start);
     }
 
     private record PatchPage(String text, boolean hasNext) { }
@@ -321,7 +295,7 @@ public final class GitEvidenceReadService {
 
     private static void validateEndpoint(String path, byte[] rawPath, String pathKey, String mode, String blobId) {
         if (path.isEmpty()) {
-            if (rawPath.length != 0 || !pathKey.isEmpty() || !mode.isEmpty() || !blobId.isEmpty()) {
+            if (rawPath.length != 0 || !pathKey.isEmpty() || !"0".equals(mode) || !"0".repeat(40).equals(blobId)) {
                 throw new IndexContractMismatchException();
             }
             return;
@@ -336,9 +310,12 @@ public final class GitEvidenceReadService {
                                                   String newPath, byte[] newRawPath, String newMode, String newBlobId) {
         boolean oldPresent = !oldPath.isEmpty();
         boolean newPresent = !newPath.isEmpty();
-        if ((kind == GitChangeKind.ADD && (oldPresent || oldRawPath.length != 0 || !oldMode.isEmpty() || !oldBlobId.isEmpty() || !newPresent))
-                || (kind == GitChangeKind.DELETE && (!oldPresent || newPresent || newRawPath.length != 0 || !newMode.isEmpty() || !newBlobId.isEmpty()))
-                || ((kind == GitChangeKind.MODIFY || kind == GitChangeKind.MODE || kind == GitChangeKind.RENAME) && (!oldPresent || !newPresent))) {
+        if ((kind == GitChangeKind.ADD && (oldPresent || !newPresent))
+                || (kind == GitChangeKind.DELETE && (!oldPresent || newPresent))
+                || (kind == GitChangeKind.MODIFY && (!oldPresent || !newPresent || !Arrays.equals(oldRawPath, newRawPath)
+                || !oldMode.equals(newMode) || oldBlobId.equals(newBlobId)))
+                || (kind == GitChangeKind.MODE && (!oldPresent || !newPresent || !Arrays.equals(oldRawPath, newRawPath) || oldMode.equals(newMode)))
+                || (kind == GitChangeKind.RENAME && (!oldPresent || !newPresent || Arrays.equals(oldRawPath, newRawPath)))) {
             throw new IndexContractMismatchException();
         }
     }
@@ -434,9 +411,13 @@ public final class GitEvidenceReadService {
     }
     private static String optionalString(Document document, String field) { return Objects.requireNonNullElse(document.getString(field), ""); }
     private static long requiredLong(Document document, String field) {
-        Number value = document.get(field, Number.class);
-        if (Objects.isNull(value) || value.longValue() < 0) { throw new IndexContractMismatchException(); }
-        return value.longValue();
+        Object value = document.get(field);
+        if (!(value instanceof Long || value instanceof Integer || value instanceof Short || value instanceof Byte)) {
+            throw new IndexContractMismatchException();
+        }
+        long resolved = ((Number) value).longValue();
+        if (resolved < 0L) { throw new IndexContractMismatchException(); }
+        return resolved;
     }
     private static Instant instant(Document document, String field) {
         java.util.Date value = document.getDate(field);

@@ -156,7 +156,7 @@ class GitEvidenceReadServiceIT {
                     "3".repeat(40), "2".repeat(40), 0, 20))).isInstanceOf(IllegalArgumentException.class);
             template.getCollection("git_comparison_patches").deleteOne(new Document("comparisonId", COMPARISON_ID).append("ordinal", 1L));
             assertThatThrownBy(() -> service.fileDiff(new SemanticQueryContract.GitFileDiffRequest("orders", COMPARISON_ID,
-                    REVISION, "2".repeat(40), "change-0", Optional.empty()))).isInstanceOf(IndexContractMismatchException.class);
+                    REVISION, "2".repeat(40), "change-0", first.nextCursor()))).isInstanceOf(IndexContractMismatchException.class);
             template.getCollection("git_comparison_changes").deleteOne(new Document("comparisonId", COMPARISON_ID).append("changeId", "change-0"));
             assertThatThrownBy(() -> service.comparisons(comparisonRequest)).isInstanceOf(IndexContractMismatchException.class);
             template.getCollection("git_evidence_manifests").updateOne(new Document("evidenceId", "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee"),
@@ -232,6 +232,59 @@ class GitEvidenceReadServiceIT {
     }
 
     @Test
+    void rejects_a_ready_mode_change_with_identical_modes() {
+        try (MongoDBContainer container = new MongoDBContainer(DockerImageName.parse("mongo:8.0.4"))) {
+            container.start();
+            MongoTemplate template = new MongoTemplate(MongoClients.create(container.getConnectionString()), "git_comparison_strict_shape");
+            seedRepository(template, "orders");
+            seedComparison(template, "orders", "READY");
+            template.getCollection("git_comparison_changes").updateOne(new Document("comparisonId", COMPARISON_ID)
+                    .append("changeId", "change-0"), new Document("$set", new Document("kind", "MODE")));
+
+            assertThatThrownBy(() -> service(template, List.of("orders")).comparisons(new SemanticQueryContract.GitComparisonRequest("orders",
+                    COMPARISON_ID, REVISION, "2".repeat(40), 0, 20))).isInstanceOf(IndexContractMismatchException.class);
+
+        }
+    }
+
+    @Test
+    void rejects_a_ready_comparison_change_with_a_fractional_ordinal() {
+        try (MongoDBContainer container = new MongoDBContainer(DockerImageName.parse("mongo:8.0.4"))) {
+            container.start();
+            MongoTemplate template = new MongoTemplate(MongoClients.create(container.getConnectionString()), "git_comparison_fractional_ordinal");
+            seedRepository(template, "orders");
+            seedComparison(template, "orders", "READY");
+            template.getCollection("git_comparison_changes").updateOne(new Document("comparisonId", COMPARISON_ID)
+                    .append("changeId", "change-0"), new Document("$set", new Document("ordinal", 0.5D)));
+            assertThatThrownBy(() -> service(template, List.of("orders")).comparisons(new SemanticQueryContract.GitComparisonRequest("orders",
+                    COMPARISON_ID, REVISION, "2".repeat(40), 0, 20))).isInstanceOf(IndexContractMismatchException.class);
+        }
+    }
+
+    @Test
+    void rejects_out_of_range_and_unavailable_patch_cursors_as_invalid_arguments() {
+        try (MongoDBContainer container = new MongoDBContainer(DockerImageName.parse("mongo:8.0.4"))) {
+            container.start();
+            MongoTemplate template = new MongoTemplate(MongoClients.create(container.getConnectionString()), "git_comparison_invalid_cursor");
+            seedRepository(template, "orders");
+            seedComparison(template, "orders", "READY");
+            GitEvidenceReadService service = service(template, List.of("orders"));
+            SemanticQueryContract.GitFileDiffResult first = service.fileDiff(new SemanticQueryContract.GitFileDiffRequest("orders", COMPARISON_ID,
+                    REVISION, "2".repeat(40), "change-0", Optional.empty()));
+            template.getCollection("git_comparison_changes").updateOne(new Document("comparisonId", COMPARISON_ID)
+                    .append("changeId", "change-0"), new Document("$set", new Document("patchChunkCount", 1L)));
+
+            assertThatThrownBy(() -> service.fileDiff(new SemanticQueryContract.GitFileDiffRequest("orders", COMPARISON_ID, REVISION,
+                    "2".repeat(40), "change-0", first.nextCursor()))).isInstanceOf(IllegalArgumentException.class);
+
+            template.getCollection("git_comparison_changes").updateOne(new Document("comparisonId", COMPARISON_ID)
+                    .append("changeId", "change-0"), new Document("$set", new Document("diffStatus", "BINARY").append("patchChunkCount", 0L)));
+            assertThatThrownBy(() -> service.fileDiff(new SemanticQueryContract.GitFileDiffRequest("orders", COMPARISON_ID, REVISION,
+                    "2".repeat(40), "change-0", first.nextCursor()))).isInstanceOf(IllegalArgumentException.class);
+        }
+    }
+
+    @Test
     void comparison_page_does_not_read_patch_rows_for_changes_outside_the_requested_page() {
         try (MongoDBContainer container = new MongoDBContainer(DockerImageName.parse("mongo:8.0.4"))) {
             container.start();
@@ -244,12 +297,14 @@ class GitEvidenceReadServiceIT {
                 seedComparison(template, "orders", "READY");
                 seedAdditionalChanges(template, 40);
                 int patchReadsBefore = recorder.patchReadCommands();
+                int scopedCountsBefore = recorder.scopedCountCommands();
 
                 SemanticQueryContract.GitComparisonCollection page = service(template, List.of("orders")).comparisons(
                         new SemanticQueryContract.GitComparisonRequest("orders", COMPARISON_ID, REVISION, "2".repeat(40), 0, 1));
 
                 assertThat(page.items()).hasSize(1);
                 assertThat(recorder.patchReadCommands() - patchReadsBefore).isZero();
+                assertThat(recorder.scopedCountCommands() - scopedCountsBefore).isZero();
             }
         }
     }
@@ -267,12 +322,14 @@ class GitEvidenceReadServiceIT {
                 seedComparison(template, "orders", "READY");
                 seedAdditionalChanges(template, 40);
                 int patchReadsBefore = recorder.patchReadCommands();
+                int scopedCountsBefore = recorder.scopedCountCommands();
 
                 SemanticQueryContract.GitFileDiffResult result = service(template, List.of("orders")).fileDiff(
                         new SemanticQueryContract.GitFileDiffRequest("orders", COMPARISON_ID, REVISION, "2".repeat(40), "change-0", Optional.empty()));
 
                 assertThat(result.patch()).isEqualTo("first\n");
                 assertThat(recorder.patchReadCommands() - patchReadsBefore).isLessThanOrEqualTo(4);
+                assertThat(recorder.scopedCountCommands() - scopedCountsBefore).isZero();
             }
         }
     }
@@ -361,6 +418,7 @@ class GitEvidenceReadServiceIT {
 
     private static final class MongoCommandRecorder implements CommandListener {
         private final AtomicInteger patchReadCommands = new AtomicInteger();
+        private final AtomicInteger scopedCountCommands = new AtomicInteger();
 
         @Override
         public void commandStarted(CommandStartedEvent event) {
@@ -369,10 +427,18 @@ class GitEvidenceReadServiceIT {
             if (collection.equals("git_comparison_patches")) {
                 patchReadCommands.incrementAndGet();
             }
+            if ((collection.equals("git_comparison_changes") || collection.equals("git_comparison_patches"))
+                    && (event.getCommand().containsKey("count") || event.getCommand().containsKey("aggregate"))) {
+                scopedCountCommands.incrementAndGet();
+            }
         }
 
         private int patchReadCommands() {
             return patchReadCommands.get();
+        }
+
+        private int scopedCountCommands() {
+            return scopedCountCommands.get();
         }
     }
 }
