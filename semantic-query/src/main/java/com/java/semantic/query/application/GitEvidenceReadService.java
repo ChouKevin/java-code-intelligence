@@ -475,10 +475,10 @@ public final class GitEvidenceReadService {
             if (reusedDecodedChunk) {
                 chunk = decodedStart.orElseThrow();
             } else {
-                chunk = chunkData(repositoryId, snapshotId, file, position.chunkOrdinal(), position.byteOffset(), position.line(), position.column());
+                chunk = chunkData(repositoryId, snapshotId, file, position.chunkOrdinal(), position.byteOffset(), position.line(), position.column(), budget);
             }
             decodedStart = Optional.empty();
-            if (!reusedDecodedChunk && !budget.accept(chunk.bytes().length)) {
+            if (Objects.isNull(chunk)) {
                 return new SearchPage(List.copyOf(matches), false, window.isEmpty() ? position : window.getFirst().position());
             }
             int character = charIndexAtByteOffset(chunk.text(), Math.toIntExact(position.byteOffset() - chunk.byteOffset()));
@@ -520,8 +520,8 @@ public final class GitEvidenceReadService {
         StringBuilder text = new StringBuilder();
         ReadPosition position = start;
         while (position.byteOffset() < file.byteLength() && text.codePointCount(0, text.length()) < 160) {
-            ChunkData chunk = chunkData(repositoryId, snapshotId, file, position.chunkOrdinal(), position.byteOffset(), position.line(), position.column());
-            if (!budget.accept(chunk.bytes().length)) {
+            ChunkData chunk = chunkData(repositoryId, snapshotId, file, position.chunkOrdinal(), position.byteOffset(), position.line(), position.column(), budget);
+            if (Objects.isNull(chunk)) {
                 return new Snippet(text.toString(), true);
             }
             int character = charIndexAtByteOffset(chunk.text(), Math.toIntExact(position.byteOffset() - chunk.byteOffset()));
@@ -555,8 +555,8 @@ public final class GitEvidenceReadService {
             throw new IllegalArgumentException("search cursor is invalid");
         }
         ReadPosition checkpoint = checkpoint(repositoryId, snapshotId, file, position.chunkOrdinal());
-        ChunkData chunk = chunkData(repositoryId, snapshotId, file, position.chunkOrdinal(), checkpoint.byteOffset(), checkpoint.line(), checkpoint.column());
-        if (!budget.accept(chunk.bytes().length) || position.byteOffset() < checkpoint.byteOffset()
+        ChunkData chunk = chunkData(repositoryId, snapshotId, file, position.chunkOrdinal(), checkpoint.byteOffset(), checkpoint.line(), checkpoint.column(), budget);
+        if (Objects.isNull(chunk) || position.byteOffset() < checkpoint.byteOffset()
                 || position.byteOffset() >= checkpoint.byteOffset() + chunk.bytes().length) {
             throw new IllegalArgumentException("search cursor is invalid");
         }
@@ -644,6 +644,11 @@ public final class GitEvidenceReadService {
     }
 
     private ChunkData chunkData(RepositoryId repositoryId, String snapshotId, SnapshotFile file, long ordinal, int byteOffset, int line, int column) {
+        return chunkData(repositoryId, snapshotId, file, ordinal, byteOffset, line, column, null);
+    }
+
+    private ChunkData chunkData(RepositoryId repositoryId, String snapshotId, SnapshotFile file, long ordinal, int byteOffset, int line, int column,
+                                SearchBudget budget) {
         Document row = snapshotChunk(repositoryId, snapshotId, file, ordinal);
         long offset = requiredLong(row, "byteOffset");
         int storedLine = Math.toIntExact(requiredLong(row, "line"));
@@ -652,6 +657,9 @@ public final class GitEvidenceReadService {
         if (offset > Integer.MAX_VALUE || bytes.length == 0 || bytes.length > MAX_RESPONSE_BYTES || byteOffset < offset
                 || byteOffset >= offset + bytes.length || offset + bytes.length > file.byteLength()) {
             throw new IndexContractMismatchException();
+        }
+        if (Objects.nonNull(budget) && !budget.accept(bytes.length)) {
+            return null;
         }
         return new ChunkData(Math.toIntExact(offset), bytes, decodeUtf8(bytes));
     }
