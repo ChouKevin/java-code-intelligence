@@ -118,7 +118,7 @@ public final class SemanticMcpSchemaCatalog {
     }
 
     private static Map<String, Object> gitFileItem() {
-        return schema(Map.of("path", string(), "pathKey", string(), "entryType", string(), "byteLength", nonNegativeInteger(), "contentStatus", string()),
+        return schema(Map.of("path", string(), "pathKey", string(), "entryType", Map.of("type", "string", "enum", List.of("FILE", "DIRECTORY")), "byteLength", nonNegativeInteger(), "contentStatus", string()),
                 List.of("path", "pathKey", "entryType", "byteLength", "contentStatus"));
     }
 
@@ -255,11 +255,11 @@ public final class SemanticMcpSchemaCatalog {
                 "current", revision(), "changeId", string(), "cursor", string()), List.of("repositoryId", "comparisonId", "previous", "current", "changeId")));
         schemas.put("list_files", pagedSchema(Map.of("repositoryId", repositoryId(), "snapshotId", gitEvidenceId(), "revision", revision(),
                 "directory", string()), List.of("repositoryId", "snapshotId", "revision", "directory")));
-        schemas.put("read_file", schema(Map.of("repositoryId", repositoryId(), "snapshotId", gitEvidenceId(), "revision", revision(), "path", string(),
+        schemas.put("read_file", schema(Map.of("repositoryId", repositoryId(), "snapshotId", gitEvidenceId(), "revision", revision(), "path", Map.of("type", "string", "minLength", 1),
                 "startLine", positiveInteger(), "maxLines", Map.of("type", "integer", "minimum", 1, "maximum", SemanticQueryContract.MAX_FILE_LINES,
-                        "default", SemanticQueryContract.DEFAULT_FILE_LINES), "cursor", string()), List.of("repositoryId", "snapshotId", "revision", "path")));
+                        "default", SemanticQueryContract.DEFAULT_FILE_LINES), "cursor", Map.of("type", "string", "minLength", 1)), List.of("repositoryId", "snapshotId", "revision", "path")));
         schemas.put("search_text", schema(Map.of("repositoryId", repositoryId(), "snapshotId", gitEvidenceId(), "revision", revision(),
-                "query", string(), "directory", string(), "cursor", string(), "limit", Map.of("type", "integer", "minimum", 1,
+                "query", Map.of("type", "string", "minLength", 1, "maxLength", 256), "directory", string(), "cursor", Map.of("type", "string", "minLength", 1), "limit", Map.of("type", "integer", "minimum", 1,
                         "maximum", SemanticQueryContract.MAX_LIMIT, "default", SemanticQueryContract.DEFAULT_LIMIT)),
                 List.of("repositoryId", "snapshotId", "revision", "query")));
         schemas.put("list_repositories", pagedSchema(Map.of(), List.of()));

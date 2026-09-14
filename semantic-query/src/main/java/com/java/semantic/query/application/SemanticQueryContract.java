@@ -361,8 +361,8 @@ public final class SemanticQueryContract {
     }
 
     private static String requireTextQuery(String query) {
-        String value = ModelValidation.requiredText(query, "query");
-        if (value.indexOf('\n') >= 0 || value.indexOf('\r') >= 0 || value.codePointCount(0, value.length()) > 256) {
+        String value = Objects.requireNonNull(query, "query is required");
+        if (value.isEmpty() || value.indexOf('\n') >= 0 || value.indexOf('\r') >= 0 || value.codePointCount(0, value.length()) > 256) {
             throw new IllegalArgumentException("query must be one single line of at most 256 Unicode code points");
         }
         return value;

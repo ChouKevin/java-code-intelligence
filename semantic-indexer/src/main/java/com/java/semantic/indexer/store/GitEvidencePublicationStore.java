@@ -272,8 +272,8 @@ public final class GitEvidencePublicationStore {
             byte[] expectedBytes = expected.contentStatus().name().equals("TEXT") ? expected.bytes() : new byte[0];
             String checksum = checksum(expectedBytes);
             Number chunkCount = file.get("chunkCount", Number.class);
-            if (!checksum.equals(file.getString("checksum")) || Objects.isNull(chunkCount)
-                    || !validSnapshotChunks(repositoryId, snapshotId, expected.rawPath(), expectedBytes, chunkCount.longValue())) {
+            if (!checksum.equals(file.getString("checksum")) || !integralLong(chunkCount).isPresent()
+                    || !validSnapshotChunks(repositoryId, snapshotId, expected.rawPath(), expectedBytes, integralLong(chunkCount).get())) {
                 throw new PublicationConflictException();
             }
             if (expected.contentStatus().name().equals("TEXT")) {
@@ -309,9 +309,13 @@ public final class GitEvidencePublicationStore {
             Number storedLine = chunk.get("line", Number.class);
             Number storedColumn = chunk.get("column", Number.class);
             Optional<byte[]> bytes = binaryBytes(chunk.get("bytes"));
-            if (Objects.isNull(storedOrdinal) || Objects.isNull(storedByteOffset) || Objects.isNull(storedLine) || Objects.isNull(storedColumn)
-                    || storedOrdinal.longValue() != ordinal || storedByteOffset.longValue() != byteOffset || storedLine.longValue() != position.line()
-                    || storedColumn.longValue() != position.column() || bytes.isEmpty() || bytes.get().length == 0 || bytes.get().length > CHUNK_BYTES) {
+            Optional<Long> integralOrdinal = integralLong(storedOrdinal);
+            Optional<Long> integralByteOffset = integralLong(storedByteOffset);
+            Optional<Long> integralLine = integralLong(storedLine);
+            Optional<Long> integralColumn = integralLong(storedColumn);
+            if (integralOrdinal.isEmpty() || integralByteOffset.isEmpty() || integralLine.isEmpty() || integralColumn.isEmpty()
+                    || integralOrdinal.get() != ordinal || integralByteOffset.get() != byteOffset || integralLine.get() != position.line()
+                    || integralColumn.get() != position.column() || bytes.isEmpty() || bytes.get().length == 0 || bytes.get().length > CHUNK_BYTES) {
                 return false;
             }
             Optional<SourcePosition> next = advance(position, bytes.get());
@@ -326,6 +330,13 @@ public final class GitEvidencePublicationStore {
             ordinal++;
         }
         return ordinal == expectedChunkCount && Arrays.equals(expectedBytes, actual);
+    }
+
+    private static Optional<Long> integralLong(Number value) {
+        if (value instanceof Long || value instanceof Integer || value instanceof Short || value instanceof Byte) {
+            return Optional.of(value.longValue());
+        }
+        return Optional.empty();
     }
 
     private static List<SnapshotChunk> snapshotChunks(byte[] bytes) {

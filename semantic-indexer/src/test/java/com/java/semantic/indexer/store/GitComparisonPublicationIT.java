@@ -127,6 +127,11 @@ class GitComparisonPublicationIT {
             template.getCollection(IndexCollections.GIT_EVIDENCE_MANIFESTS).updateOne(new org.bson.Document("evidenceId", comparisonId.value()),
                     new org.bson.Document("$set", new org.bson.Document("state", "PREPARING")));
             template.getCollection(IndexCollections.GIT_SNAPSHOT_CHUNKS).updateOne(new org.bson.Document("snapshotId", currentSnapshot.value()),
+                    new org.bson.Document("$set", new org.bson.Document("byteOffset", 0.5D)));
+
+            assertThatThrownBy(() -> store.validateComparisonPublication(repository, comparisonId, previousSnapshot, currentSnapshot, prepared))
+                    .isInstanceOf(PublicationConflictException.class);
+            template.getCollection(IndexCollections.GIT_SNAPSHOT_CHUNKS).updateOne(new org.bson.Document("snapshotId", currentSnapshot.value()),
                     new org.bson.Document("$unset", new org.bson.Document("byteOffset", "")));
 
             assertThatThrownBy(() -> store.validateComparisonPublication(repository, comparisonId, previousSnapshot, currentSnapshot, prepared))

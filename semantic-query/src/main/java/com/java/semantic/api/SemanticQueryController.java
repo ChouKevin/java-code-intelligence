@@ -145,7 +145,7 @@ public final class SemanticQueryController {
     @PostMapping("/git/search")
     public SemanticQueryContract.GitTextSearchResult gitSearch(@RequestBody GitTextSearchHttpRequest request) {
         return facade.searchText(new SemanticQueryContract.GitTextSearchRequest(requiredText(request.repositoryId(), "repositoryId"),
-                requiredText(request.snapshotId(), "snapshotId"), requiredText(request.revision(), "revision"), requiredText(request.query(), "query"),
+                requiredText(request.snapshotId(), "snapshotId"), requiredText(request.revision(), "revision"), requiredString(request.query(), "query"),
                 optionalText(request.directory()), optionalText(request.cursor()), limit(request.limit())));
     }
 
@@ -163,6 +163,13 @@ public final class SemanticQueryController {
 
     private static String requiredText(String value, String field) {
         if (!StringUtils.hasText(value)) {
+            throw new IllegalArgumentException(field + " is required");
+        }
+        return value;
+    }
+
+    private static String requiredString(String value, String field) {
+        if (Objects.isNull(value) || value.isEmpty()) {
             throw new IllegalArgumentException(field + " is required");
         }
         return value;

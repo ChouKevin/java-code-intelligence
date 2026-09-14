@@ -211,15 +211,16 @@ public final class GitEvidenceReadService {
             SearchPosition position = required.cursor().map(cursor -> decodeSearchCursor(cursor, repositoryId, required)).orElse(SearchPosition.initial());
             List<SemanticQueryContract.GitTextMatch> matches = new ArrayList<>();
             SearchBudget budget = new SearchBudget();
-            boolean cursorFileFound = required.cursor().isEmpty();
             String directory = required.directory().orElse("");
             Bson searchScope = Filters.and(Filters.eq("repoId", repositoryId.value()), Filters.eq("snapshotId", required.snapshotId()),
                     Filters.eq("contentStatus", "TEXT"), Filters.gte("ordinal", position.fileOrdinal()), directoryFilter(directory));
+            if (required.cursor().isPresent()) {
+                validateSearchCursorTarget(repositoryId, required.snapshotId(), position, directory);
+            }
             for (Document row : template.getCollection(IndexCollections.GIT_SNAPSHOT_FILES).find(searchScope).sort(Sorts.ascending("ordinal"))
                     .maxTime(storageTimeout.toMillis(), TimeUnit.MILLISECONDS)) {
                 SnapshotFile file = snapshotFile(row);
                 if (file.ordinal() == position.fileOrdinal()) {
-                    cursorFileFound = true;
                     if (file.chunkCount() == 0L) {
                         position = new SearchPosition(file.ordinal() + 1L, 0L, 0);
                         continue;
@@ -234,10 +235,16 @@ public final class GitEvidenceReadService {
                     return searchResult(repositoryId, required, matches, false, file.ordinal(), page.position().chunkOrdinal(), page.position().byteOffset(),
                             coverage(repositoryId, required.snapshotId(), required.directory().orElse(""), manifest));
                 }
+                if (matches.size() >= required.limit()) {
+                    Optional<SnapshotFile> next = nextSearchFile(repositoryId, required.snapshotId(), directory, file.ordinal());
+                    if (next.isPresent()) {
+                        return searchResult(repositoryId, required, matches, false, next.orElseThrow().ordinal(), 0L, 0,
+                                coverage(repositoryId, required.snapshotId(), required.directory().orElse(""), manifest));
+                    }
+                    return new SemanticQueryContract.GitTextSearchResult(repositoryId.value(), required.snapshotId(), required.revision(), List.copyOf(matches),
+                            true, Optional.empty(), coverage(repositoryId, required.snapshotId(), required.directory().orElse(""), manifest));
+                }
                 position = new SearchPosition(file.ordinal() + 1L, 0L, 0);
-            }
-            if (!cursorFileFound) {
-                throw new IllegalArgumentException("search cursor is invalid");
             }
             return new SemanticQueryContract.GitTextSearchResult(repositoryId.value(), required.snapshotId(), required.revision(), List.copyOf(matches),
                     true, Optional.empty(), coverage(repositoryId, required.snapshotId(), required.directory().orElse(""), manifest));
@@ -252,8 +259,10 @@ public final class GitEvidenceReadService {
 
     private Document snapshotManifest(RepositoryId repositoryId, String snapshotId, String revision) {
         Document manifest = ready(findManifest(repositoryId, new GitEvidenceId(snapshotId)), "SNAPSHOT");
-        if (!revision.equals(requiredText(manifest, "revision")) || requiredLong(manifest, "total") < 0L
-                || !requiredText(manifest, "contentDigest").matches("[0-9a-f]{64}")) {
+        if (!revision.equals(requiredText(manifest, "revision"))) {
+            throw new IllegalArgumentException("snapshot revision does not match request");
+        }
+        if (requiredLong(manifest, "total") < 0L || !requiredText(manifest, "contentDigest").matches("[0-9a-f]{64}")) {
             throw new IndexContractMismatchException();
         }
         Document coverage = manifest.get("contentCoverage", Document.class);
@@ -300,7 +309,13 @@ public final class GitEvidenceReadService {
             if ("DIRECTORY".equals(entryType)) {
                 items.add(new SemanticQueryContract.GitFileItem(path, java.util.HexFormat.of().formatHex(path.getBytes(StandardCharsets.UTF_8)), "DIRECTORY", 0L, "DIRECTORY"));
             } else if ("FILE".equals(entryType)) {
-                items.add(new SemanticQueryContract.GitFileItem(path, requiredText(row, "pathKey"), "FILE", requiredLong(row, "byteLength"), requiredText(row, "contentStatus")));
+                String contentStatus = requiredText(row, "contentStatus");
+                try {
+                    GitFileContentStatus.valueOf(contentStatus);
+                } catch (IllegalArgumentException exception) {
+                    throw new IndexContractMismatchException();
+                }
+                items.add(new SemanticQueryContract.GitFileItem(path, requiredText(row, "pathKey"), "FILE", requiredLong(row, "byteLength"), contentStatus));
             } else {
                 throw new IndexContractMismatchException();
             }
@@ -379,6 +394,11 @@ public final class GitEvidenceReadService {
         for (Document row : template.getCollection(IndexCollections.GIT_SNAPSHOT_FILES).aggregate(pipeline).maxTime(storageTimeout.toMillis(), TimeUnit.MILLISECONDS)) {
             String status = requiredText(row, "_id");
             long count = requiredLong(row, "count");
+            try {
+                GitFileContentStatus.valueOf(status);
+            } catch (IllegalArgumentException exception) {
+                throw new IndexContractMismatchException();
+            }
             Long priorCount = counts.put(status, count);
             if (count < 0L || Objects.nonNull(priorCount)) {
                 throw new IndexContractMismatchException();
@@ -458,8 +478,11 @@ public final class GitEvidenceReadService {
     }
 
     private static ReadPage page(StringBuilder content, ReadPosition start, ReadPosition end, boolean hasMore) {
-        boolean complete = !content.isEmpty() && content.charAt(content.length() - 1) == '\n';
-        int endLine = content.isEmpty() ? 0 : complete ? end.line() - 1 : end.line();
+        if (content.isEmpty()) {
+            return new ReadPage("", 0, 0, true, hasMore, end);
+        }
+        boolean complete = content.charAt(content.length() - 1) == '\n' || !hasMore;
+        int endLine = content.charAt(content.length() - 1) == '\n' ? end.line() - 1 : end.line();
         return new ReadPage(content.toString(), start.line(), endLine, complete, hasMore, end);
     }
 
@@ -492,7 +515,8 @@ public final class GitEvidenceReadService {
                     String candidate = windowText(window);
                     SearchToken first = window.getFirst();
                     if (candidate.startsWith(query)) {
-                        Snippet snippet = snippetAt(repositoryId, snapshotId, file, first.position(), budget);
+                        Snippet snippet = snippetAt(repositoryId, snapshotId, file, first.position(), budget,
+                                first.position().chunkOrdinal() == position.chunkOrdinal() ? Optional.of(chunk) : Optional.empty());
                         matches.add(new SemanticQueryContract.GitTextMatch(file.path(), file.pathKey(), first.position().line(), first.position().column(),
                                 snippet.text(), snippet.truncated()));
                         if (matches.size() == remaining) {
@@ -516,11 +540,20 @@ public final class GitEvidenceReadService {
         return new SearchPage(List.copyOf(matches), true, position);
     }
 
-    private Snippet snippetAt(RepositoryId repositoryId, String snapshotId, SnapshotFile file, ReadPosition start, SearchBudget budget) {
+    private Snippet snippetAt(RepositoryId repositoryId, String snapshotId, SnapshotFile file, ReadPosition start, SearchBudget budget,
+                              Optional<ChunkData> initialChunk) {
         StringBuilder text = new StringBuilder();
         ReadPosition position = start;
+        boolean omittedPrefix = position.column() > 1;
+        Optional<ChunkData> reusable = initialChunk;
         while (position.byteOffset() < file.byteLength() && text.codePointCount(0, text.length()) < 160) {
-            ChunkData chunk = chunkData(repositoryId, snapshotId, file, position.chunkOrdinal(), position.byteOffset(), position.line(), position.column(), budget);
+            ChunkData chunk;
+            if (reusable.isPresent()) {
+                chunk = reusable.orElseThrow();
+            } else {
+                chunk = chunkData(repositoryId, snapshotId, file, position.chunkOrdinal(), position.byteOffset(), position.line(), position.column(), budget);
+            }
+            reusable = Optional.empty();
             if (Objects.isNull(chunk)) {
                 return new Snippet(text.toString(), true);
             }
@@ -528,7 +561,7 @@ public final class GitEvidenceReadService {
             while (character < chunk.text().length() && text.codePointCount(0, text.length()) < 160) {
                 int codePoint = chunk.text().codePointAt(character);
                 if (codePoint == '\n') {
-                    return new Snippet(text.toString(), false);
+                    return new Snippet(text.toString(), omittedPrefix);
                 }
                 text.appendCodePoint(codePoint);
                 position = advance(position, codePoint);
@@ -538,7 +571,7 @@ public final class GitEvidenceReadService {
                 position = nextChunkPosition(repositoryId, snapshotId, file, position, chunk);
             }
         }
-        return new Snippet(text.toString(), position.byteOffset() < file.byteLength());
+        return new Snippet(text.toString(), omittedPrefix || position.byteOffset() < file.byteLength());
     }
 
     private static String windowText(List<SearchToken> window) {
@@ -568,6 +601,37 @@ public final class GitEvidenceReadService {
             index += Character.charCount(codePoint);
         }
         return new SearchStart(actual, Optional.of(chunk));
+    }
+
+    private void validateSearchCursorTarget(RepositoryId repositoryId, String snapshotId, SearchPosition position, String directory) {
+        List<Document> rows = new ArrayList<>();
+        Bson target = Filters.and(Filters.eq("repoId", repositoryId.value()), Filters.eq("snapshotId", snapshotId),
+                Filters.eq("contentStatus", "TEXT"), Filters.eq("ordinal", position.fileOrdinal()), directoryFilter(directory));
+        for (Document row : template.getCollection(IndexCollections.GIT_SNAPSHOT_FILES).find(target).limit(2)
+                .maxTime(storageTimeout.toMillis(), TimeUnit.MILLISECONDS)) {
+            rows.add(row);
+        }
+        if (rows.size() != 1) {
+            throw new IllegalArgumentException("search cursor is invalid");
+        }
+        SnapshotFile file = snapshotFile(rows.getFirst());
+        if (file.chunkCount() == 0L) {
+            if (position.chunkOrdinal() != 0L || position.byteOffset() != 0) {
+                throw new IllegalArgumentException("search cursor is invalid");
+            }
+            return;
+        }
+        if (position.chunkOrdinal() >= file.chunkCount() || position.byteOffset() >= file.byteLength()) {
+            throw new IllegalArgumentException("search cursor is invalid");
+        }
+    }
+
+    private Optional<SnapshotFile> nextSearchFile(RepositoryId repositoryId, String snapshotId, String directory, long ordinal) {
+        Bson next = Filters.and(Filters.eq("repoId", repositoryId.value()), Filters.eq("snapshotId", snapshotId), Filters.eq("contentStatus", "TEXT"),
+                Filters.gt("ordinal", ordinal), directoryFilter(directory));
+        Document row = template.getCollection(IndexCollections.GIT_SNAPSHOT_FILES).find(next).sort(Sorts.ascending("ordinal")).limit(1)
+                .maxTime(storageTimeout.toMillis(), TimeUnit.MILLISECONDS).first();
+        return Objects.isNull(row) ? Optional.empty() : Optional.of(snapshotFile(row));
     }
 
     private SemanticQueryContract.GitTextSearchResult searchResult(RepositoryId repositoryId, SemanticQueryContract.GitTextSearchRequest request,
@@ -637,7 +701,8 @@ public final class GitEvidenceReadService {
         int byteOffset = Math.toIntExact(requiredLong(row, "byteOffset"));
         int line = Math.toIntExact(requiredLong(row, "line"));
         int column = Math.toIntExact(requiredLong(row, "column"));
-        if (line < 1 || column < 1 || byteOffset < 0 || byteOffset >= file.byteLength()) {
+        if (line < 1 || column < 1 || byteOffset < 0 || byteOffset >= file.byteLength()
+                || (ordinal == 0L && (byteOffset != 0 || line != 1 || column != 1))) {
             throw new IndexContractMismatchException();
         }
         return new ReadPosition(ordinal, byteOffset, line, column, column == 1);
@@ -654,7 +719,7 @@ public final class GitEvidenceReadService {
         int storedLine = Math.toIntExact(requiredLong(row, "line"));
         int storedColumn = Math.toIntExact(requiredLong(row, "column"));
         byte[] bytes = requiredBytes(row, "bytes");
-        if (offset > Integer.MAX_VALUE || bytes.length == 0 || bytes.length > MAX_RESPONSE_BYTES || byteOffset < offset
+        if (offset > Integer.MAX_VALUE || (byteOffset == offset && (storedLine != line || storedColumn != column)) || bytes.length == 0 || bytes.length > MAX_RESPONSE_BYTES || byteOffset < offset
                 || byteOffset >= offset + bytes.length || offset + bytes.length > file.byteLength()) {
             throw new IndexContractMismatchException();
         }

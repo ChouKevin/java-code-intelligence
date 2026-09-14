@@ -33,6 +33,8 @@ class GitEvidenceReadServiceIT {
     private static final String COMPARISON_ID = "cccccccc-cccc-cccc-cccc-cccccccccccc";
     private static final String REVISION = "1".repeat(40);
     private static final String SNAPSHOT_ID = "ffffffff-ffff-ffff-ffff-ffffffffffff";
+    private static final String ALTERNATE_SNAPSHOT_ID = "99999999-9999-9999-9999-999999999999";
+    private static final String ALTERNATE_REVISION = "2".repeat(40);
 
     @Test
     void reads_snapshot_files_and_text_through_checkpoint_derived_cursors() {
@@ -68,7 +70,10 @@ class GitEvidenceReadServiceIT {
                 assertThat(match.snippet()).isEqualTo("needle needle");
                 assertThat(match.snippetTruncated()).isFalse();
             });
-            assertThat(secondSearch.items()).singleElement().satisfies(match -> assertThat(match.column()).isEqualTo(8));
+            assertThat(secondSearch.items()).singleElement().satisfies(match -> {
+                assertThat(match.column()).isEqualTo(8);
+                assertThat(match.snippetTruncated()).isTrue();
+            });
 
             String tamperedLegacyPosition = cursor("git-search", "orders", SNAPSHOT_ID, REVISION, "needle", "src", "0", "1", "7", "999", "999");
             assertThatThrownBy(() -> service.searchText(new SemanticQueryContract.GitTextSearchRequest("orders", SNAPSHOT_ID, REVISION,
@@ -82,6 +87,213 @@ class GitEvidenceReadServiceIT {
             template.getCollection("git_snapshot_chunks").deleteOne(new Document("snapshotId", SNAPSHOT_ID).append("ordinal", 1L));
             assertThatThrownBy(() -> service.readFile(new SemanticQueryContract.GitFileReadRequest("orders", SNAPSHOT_ID, REVISION,
                     "src/demo.txt", Optional.empty(), 1, first.nextCursor()))).isInstanceOf(IndexContractMismatchException.class);
+        }
+    }
+
+    @Test
+    void r1_rejects_revision_mismatch_empty_text_unknown_status_and_corrupt_checkpoint() {
+        try (MongoDBContainer container = new MongoDBContainer(DockerImageName.parse("mongo:8.0.4"))) {
+            container.start();
+            MongoTemplate template = new MongoTemplate(MongoClients.create(container.getConnectionString()), "git_snapshot_r1_contract");
+            seedSnapshot(template, "orders");
+            GitEvidenceReadService service = service(template, List.of("orders"));
+
+            assertThatThrownBy(() -> service.listFiles(new SemanticQueryContract.GitFileListRequest(
+                    "orders", SNAPSHOT_ID, "2".repeat(40), "", 0, 20))).isInstanceOf(IllegalArgumentException.class);
+            template.getCollection("git_snapshot_chunks").updateOne(new Document("snapshotId", SNAPSHOT_ID).append("ordinal", 0L),
+                    new Document("$set", new Document("line", 2L)));
+            assertThatThrownBy(() -> service.readFile(new SemanticQueryContract.GitFileReadRequest(
+                    "orders", SNAPSHOT_ID, REVISION, "src/demo.txt", Optional.empty(), 1, Optional.empty())))
+                    .isInstanceOf(IndexContractMismatchException.class);
+        }
+    }
+
+    @Test
+    void r1_reports_empty_text_as_an_empty_complete_range() {
+        try (MongoDBContainer container = new MongoDBContainer(DockerImageName.parse("mongo:8.0.4"))) {
+            container.start();
+            MongoTemplate template = new MongoTemplate(MongoClients.create(container.getConnectionString()), "git_snapshot_r1_empty");
+            seedReaderContinuationSnapshot(template, "orders");
+            SemanticQueryContract.GitFileContent empty = service(template, List.of("orders")).readFile(new SemanticQueryContract.GitFileReadRequest(
+                    "orders", SNAPSHOT_ID, REVISION, "src/empty.txt", Optional.empty(), 1, Optional.empty()));
+
+            assertThat(empty.content()).isEmpty();
+            assertThat(empty.startLine()).isZero();
+            assertThat(empty.endLine()).isZero();
+            assertThat(empty.startLineComplete()).isTrue();
+            assertThat(empty.endLineComplete()).isTrue();
+        }
+    }
+
+    @Test
+    void r1_reconstructs_unicode_crlf_and_long_unterminated_text_across_read_pages() {
+        try (MongoDBContainer container = new MongoDBContainer(DockerImageName.parse("mongo:8.0.4"))) {
+            container.start();
+            MongoTemplate template = new MongoTemplate(MongoClients.create(container.getConnectionString()), "git_snapshot_r1_read_pages");
+            seedSnapshot(template, "orders");
+            seedLongLineSnapshot(template, "orders");
+            GitEvidenceReadService service = service(template, List.of("orders"));
+
+            SemanticQueryContract.GitFileContent unicodeFirst = service.readFile(new SemanticQueryContract.GitFileReadRequest(
+                    "orders", SNAPSHOT_ID, REVISION, "src/demo.txt", Optional.empty(), 1, Optional.empty()));
+            SemanticQueryContract.GitFileContent unicodeSecond = service.readFile(new SemanticQueryContract.GitFileReadRequest(
+                    "orders", SNAPSHOT_ID, REVISION, "src/demo.txt", Optional.empty(), 1, unicodeFirst.nextCursor()));
+            SemanticQueryContract.GitFileContent unicodeThird = service.readFile(new SemanticQueryContract.GitFileReadRequest(
+                    "orders", SNAPSHOT_ID, REVISION, "src/demo.txt", Optional.empty(), 1, unicodeSecond.nextCursor()));
+            assertThat(unicodeFirst.content() + unicodeSecond.content() + unicodeThird.content()).isEqualTo("a😀\r\nneedle needle\n最後");
+            assertThat(unicodeThird.endLineComplete()).isTrue();
+            assertThat(unicodeThird.nextCursor()).isEmpty();
+
+            SemanticQueryContract.GitFileContent longFirst = service.readFile(new SemanticQueryContract.GitFileReadRequest(
+                    "orders", SNAPSHOT_ID, REVISION, "src/long-line.txt", Optional.empty(), 500, Optional.empty()));
+            SemanticQueryContract.GitFileContent longSecond = service.readFile(new SemanticQueryContract.GitFileReadRequest(
+                    "orders", SNAPSHOT_ID, REVISION, "src/long-line.txt", Optional.empty(), 500, longFirst.nextCursor()));
+            assertThat(longFirst.content().getBytes(StandardCharsets.UTF_8)).hasSize(64 * 1024);
+            assertThat(longFirst.nextCursor()).isPresent();
+            assertThat(longFirst.content() + longSecond.content()).isEqualTo("😀".repeat(20_000));
+            assertThat(longSecond.endLineComplete()).isTrue();
+            assertThat(longSecond.nextCursor()).isEmpty();
+        }
+    }
+
+    @Test
+    void r1_rejects_read_and_search_cursors_when_any_valid_authorized_scope_changes() {
+        try (MongoDBContainer container = new MongoDBContainer(DockerImageName.parse("mongo:8.0.4"))) {
+            container.start();
+            MongoTemplate template = new MongoTemplate(MongoClients.create(container.getConnectionString()), "git_snapshot_r1_cursor_scopes");
+            seedSnapshot(template, "orders");
+            seedSnapshot(template, "invoices");
+            insertTextSnapshotFile(template, "orders", 1L, "src/other.txt", "needle".getBytes(StandardCharsets.UTF_8));
+            insertTextSnapshotFile(template, "orders", 2L, "lib/other.txt", "needle".getBytes(StandardCharsets.UTF_8));
+            template.getCollection("git_evidence_manifests").updateOne(new Document("repoId", "orders").append("evidenceId", SNAPSHOT_ID),
+                    new Document("$set", new Document("total", 3L).append("contentCoverage.entryCount", 3L).append("contentCoverage.textEntries", 3L)
+                            .append("contentCoverage.textBytes", 34L)));
+            copySnapshot(template, "orders", SNAPSHOT_ID, ALTERNATE_SNAPSHOT_ID, REVISION);
+            copySnapshot(template, "orders", SNAPSHOT_ID, "88888888-8888-8888-8888-888888888888", ALTERNATE_REVISION);
+            GitEvidenceReadService service = service(template, List.of("orders", "invoices"));
+            String readCursor = cursor("git-file", "orders", SNAPSHOT_ID, REVISION, pathKey("src/demo.txt"), "0", "0");
+            String alternateRevisionCursor = cursor("git-file", "orders", "88888888-8888-8888-8888-888888888888", ALTERNATE_REVISION,
+                    pathKey("src/demo.txt"), "0", "0");
+            String searchCursor = cursor("git-search", "orders", SNAPSHOT_ID, REVISION, "needle", "src", "0", "0", "0");
+            String alternateRevisionSearchCursor = cursor("git-search", "orders", "88888888-8888-8888-8888-888888888888", ALTERNATE_REVISION,
+                    "needle", "src", "0", "0", "0");
+
+            assertThatThrownBy(() -> service.searchText(new SemanticQueryContract.GitTextSearchRequest("orders", SNAPSHOT_ID, REVISION,
+                    "needle", Optional.of("src"), Optional.of(readCursor), 1))).isInstanceOf(IllegalArgumentException.class);
+            assertThatThrownBy(() -> service.readFile(new SemanticQueryContract.GitFileReadRequest("invoices", SNAPSHOT_ID, REVISION,
+                    "src/demo.txt", Optional.empty(), 1, Optional.of(readCursor)))).isInstanceOf(IllegalArgumentException.class);
+            assertThatThrownBy(() -> service.readFile(new SemanticQueryContract.GitFileReadRequest("orders", ALTERNATE_SNAPSHOT_ID, REVISION,
+                    "src/demo.txt", Optional.empty(), 1, Optional.of(readCursor)))).isInstanceOf(IllegalArgumentException.class);
+            assertThatThrownBy(() -> service.readFile(new SemanticQueryContract.GitFileReadRequest("orders", SNAPSHOT_ID, REVISION,
+                    "src/demo.txt", Optional.empty(), 1, Optional.of(alternateRevisionCursor)))).isInstanceOf(IllegalArgumentException.class);
+            assertThatThrownBy(() -> service.readFile(new SemanticQueryContract.GitFileReadRequest("orders", SNAPSHOT_ID, REVISION,
+                    "src/other.txt", Optional.empty(), 1, Optional.of(readCursor)))).isInstanceOf(IllegalArgumentException.class);
+            assertThatThrownBy(() -> service.readFile(new SemanticQueryContract.GitFileReadRequest("orders", SNAPSHOT_ID, REVISION,
+                    "src/demo.txt", Optional.empty(), 1, Optional.of(searchCursor)))).isInstanceOf(IllegalArgumentException.class);
+            assertThatThrownBy(() -> service.searchText(new SemanticQueryContract.GitTextSearchRequest("invoices", SNAPSHOT_ID, REVISION,
+                    "needle", Optional.of("src"), Optional.of(searchCursor), 1))).isInstanceOf(IllegalArgumentException.class);
+            assertThatThrownBy(() -> service.searchText(new SemanticQueryContract.GitTextSearchRequest("orders", ALTERNATE_SNAPSHOT_ID, REVISION,
+                    "needle", Optional.of("src"), Optional.of(searchCursor), 1))).isInstanceOf(IllegalArgumentException.class);
+            assertThatThrownBy(() -> service.searchText(new SemanticQueryContract.GitTextSearchRequest("orders", SNAPSHOT_ID, REVISION,
+                    "needle", Optional.of("src"), Optional.of(alternateRevisionSearchCursor), 1))).isInstanceOf(IllegalArgumentException.class);
+            assertThatThrownBy(() -> service.searchText(new SemanticQueryContract.GitTextSearchRequest("orders", SNAPSHOT_ID, REVISION,
+                    "need", Optional.of("src"), Optional.of(searchCursor), 1))).isInstanceOf(IllegalArgumentException.class);
+            assertThatThrownBy(() -> service.searchText(new SemanticQueryContract.GitTextSearchRequest("orders", SNAPSHOT_ID, REVISION,
+                    "needle", Optional.of("lib"), Optional.of(searchCursor), 1))).isInstanceOf(IllegalArgumentException.class);
+        }
+    }
+
+    @Test
+    void r1_accepts_whitespace_literal_search_queries() {
+        assertThat(new SemanticQueryContract.GitTextSearchRequest("orders", SNAPSHOT_ID, REVISION, " ", Optional.empty(), Optional.empty(), 1).query())
+                .isEqualTo(" ");
+    }
+
+    @Test
+    void r1_rejects_corrupt_status_and_missing_cursor_target_and_stops_at_total_limit() {
+        try (MongoDBContainer container = new MongoDBContainer(DockerImageName.parse("mongo:8.0.4"))) {
+            container.start();
+            MongoTemplate template = new MongoTemplate(MongoClients.create(container.getConnectionString()), "git_snapshot_r1_search_contract");
+            seedReaderContinuationSnapshot(template, "orders");
+            insertTextSnapshotFile(template, "orders", 4L, "src/after.txt", "Zneedle-more".getBytes(StandardCharsets.UTF_8));
+            template.getCollection("git_evidence_manifests").updateOne(new Document("evidenceId", SNAPSHOT_ID), new Document("$set",
+                    new Document("total", 5L).append("contentCoverage.entryCount", 5L).append("contentCoverage.textEntries", 5L)
+                            .append("contentCoverage.textBytes", 229L)));
+            GitEvidenceReadService service = service(template, List.of("orders"));
+
+            SemanticQueryContract.GitTextSearchResult limited = service.searchText(new SemanticQueryContract.GitTextSearchRequest(
+                    "orders", SNAPSHOT_ID, REVISION, "Z", Optional.empty(), Optional.empty(), 1));
+            assertThat(limited.items()).singleElement().extracting(SemanticQueryContract.GitTextMatch::path).isEqualTo("src/edge.txt");
+            assertThatThrownBy(() -> service.searchText(new SemanticQueryContract.GitTextSearchRequest("orders", SNAPSHOT_ID, REVISION,
+                    "needle", Optional.empty(), Optional.of(cursor("git-search", "orders", SNAPSHOT_ID, REVISION, "needle", "", "9", "0", "0")), 1)))
+                    .isInstanceOf(IllegalArgumentException.class);
+            template.getCollection("git_snapshot_files").updateOne(new Document("snapshotId", SNAPSHOT_ID).append("ordinal", 4L),
+                    new Document("$set", new Document("contentStatus", "BROKEN")));
+            assertThatThrownBy(() -> service.listFiles(new SemanticQueryContract.GitFileListRequest("orders", SNAPSHOT_ID, REVISION, "", 0, 20)))
+                    .isInstanceOf(IndexContractMismatchException.class);
+        }
+    }
+
+    @Test
+    void r1_rejects_a_missing_search_cursor_target_before_later_rows_are_read() {
+        try (MongoDBContainer container = new MongoDBContainer(DockerImageName.parse("mongo:8.0.4"))) {
+            container.start();
+            MongoTemplate template = new MongoTemplate(MongoClients.create(container.getConnectionString()), "git_snapshot_r1_cursor_target");
+            seedReaderContinuationSnapshot(template, "orders");
+            insertTextSnapshotFile(template, "orders", 5L, "src/later.txt", "needle-more".getBytes(StandardCharsets.UTF_8));
+            template.getCollection("git_evidence_manifests").updateOne(new Document("evidenceId", SNAPSHOT_ID), new Document("$set",
+                    new Document("total", 5L).append("contentCoverage.entryCount", 5L).append("contentCoverage.textEntries", 5L)
+                            .append("contentCoverage.textBytes", 228L)));
+
+            assertThatThrownBy(() -> service(template, List.of("orders")).searchText(new SemanticQueryContract.GitTextSearchRequest(
+                    "orders", SNAPSHOT_ID, REVISION, "needle", Optional.empty(),
+                    Optional.of(cursor("git-search", "orders", SNAPSHOT_ID, REVISION, "needle", "", "4", "0", "0")), 1)))
+                    .isInstanceOf(IllegalArgumentException.class);
+        }
+    }
+
+    @Test
+    void r1_rejects_unknown_content_statuses_and_corrupt_chunk_zero_checkpoints() {
+        try (MongoDBContainer container = new MongoDBContainer(DockerImageName.parse("mongo:8.0.4"))) {
+            container.start();
+            MongoTemplate template = new MongoTemplate(MongoClients.create(container.getConnectionString()), "git_snapshot_r1_storage_contract");
+            seedSnapshot(template, "orders");
+            template.getCollection("git_snapshot_chunks").updateOne(new Document("snapshotId", SNAPSHOT_ID).append("ordinal", 0L),
+                    new Document("$set", new Document("line", 2L)));
+            assertThatThrownBy(() -> service(template, List.of("orders")).readFile(new SemanticQueryContract.GitFileReadRequest(
+                    "orders", SNAPSHOT_ID, REVISION, "src/demo.txt", Optional.empty(), 1, Optional.empty())))
+                    .isInstanceOf(IndexContractMismatchException.class);
+        }
+    }
+
+    @Test
+    void r1_rejects_unknown_content_statuses_in_snapshot_coverage() {
+        try (MongoDBContainer container = new MongoDBContainer(DockerImageName.parse("mongo:8.0.4"))) {
+            container.start();
+            MongoTemplate template = new MongoTemplate(MongoClients.create(container.getConnectionString()), "git_snapshot_r1_status_contract");
+            seedSnapshot(template, "orders");
+            insertSnapshotFile(template, "orders", 1L, "src/binary.bin".getBytes(StandardCharsets.UTF_8), "BINARY");
+            template.getCollection("git_evidence_manifests").updateOne(new Document("evidenceId", SNAPSHOT_ID), new Document("$set",
+                    new Document("total", 2L).append("contentCoverage.entryCount", 2L)));
+            template.getCollection("git_snapshot_files").updateOne(new Document("snapshotId", SNAPSHOT_ID).append("ordinal", 1L),
+                    new Document("$set", new Document("contentStatus", "BROKEN")));
+
+            assertThatThrownBy(() -> service(template, List.of("orders")).listFiles(new SemanticQueryContract.GitFileListRequest(
+                    "orders", SNAPSHOT_ID, REVISION, "src", 0, 20))).isInstanceOf(IndexContractMismatchException.class);
+        }
+    }
+
+    @Test
+    void r1_reuses_the_budgeted_match_chunk_for_its_snippet() {
+        try (MongoDBContainer container = new MongoDBContainer(DockerImageName.parse("mongo:8.0.4"))) {
+            container.start();
+            MongoTemplate template = new MongoTemplate(MongoClients.create(container.getConnectionString()), "git_snapshot_r1_budget_snippet");
+            seedSnippetBudgetSnapshot(template, "orders");
+
+            SemanticQueryContract.GitTextSearchResult result = service(template, List.of("orders")).searchText(
+                    new SemanticQueryContract.GitTextSearchRequest("orders", SNAPSHOT_ID, REVISION, "needle", Optional.empty(), Optional.empty(), 1));
+
+            assertThat(result.items()).singleElement().satisfies(match -> assertThat(match.snippet()).startsWith("needle"));
         }
     }
 
@@ -583,6 +795,30 @@ class GitEvidenceReadServiceIT {
         template.getCollection("git_snapshot_chunks").insertMany(chunks);
     }
 
+    private static void seedSnippetBudgetSnapshot(MongoTemplate template, String repositoryId) {
+        String path = "src/budget-snippet.txt";
+        byte[] ordinary = "x".repeat(64 * 1024).getBytes(StandardCharsets.UTF_8);
+        byte[] matched = ("needle" + "x".repeat(64 * 1024 - 6)).getBytes(StandardCharsets.UTF_8);
+        long byteLength = (long) ordinary.length * 63L + matched.length;
+        template.getCollection("git_evidence_manifests").insertOne(new Document("repoId", repositoryId).append("evidenceId", SNAPSHOT_ID)
+                .append("kind", "SNAPSHOT").append("state", "READY").append("gitEvidenceVersion", 1).append("revision", REVISION)
+                .append("total", 1L).append("contentDigest", "a".repeat(64)).append("fileTextBytesLimit", byteLength)
+                .append("snapshotTextBytesLimit", byteLength).append("contentCoverage", new Document("entryCount", 1L).append("textEntries", 1L)
+                        .append("textBytes", byteLength)));
+        template.getCollection("git_snapshot_files").insertOne(new Document("repoId", repositoryId).append("snapshotId", SNAPSHOT_ID)
+                .append("ordinal", 0L).append("path", path).append("rawPath", rawPath(path)).append("pathKey", pathKey(path)).append("mode", "100644")
+                .append("blobId", "1".repeat(40)).append("checksum", "b".repeat(64)).append("byteLength", byteLength)
+                .append("contentStatus", "TEXT").append("chunkCount", 64L));
+        List<Document> chunks = new java.util.ArrayList<>();
+        for (int ordinal = 0; ordinal < 64; ordinal++) {
+            byte[] bytes = ordinal == 63 ? matched : ordinary;
+            chunks.add(new Document("repoId", repositoryId).append("snapshotId", SNAPSHOT_ID).append("pathKey", pathKey(path)).append("ordinal", (long) ordinal)
+                    .append("byteOffset", (long) ordinal * ordinary.length).append("line", 1L).append("column", (long) ordinal * ordinary.length + 1L)
+                    .append("bytes", bytes));
+        }
+        template.getCollection("git_snapshot_chunks").insertMany(chunks);
+    }
+
     private static void seedReaderContinuationSnapshot(MongoTemplate template, String repositoryId) {
         byte[] searchable = "needle".getBytes(StandardCharsets.UTF_8);
         byte[] longLine = ("longneedle" + "x".repeat(200)).getBytes(StandardCharsets.UTF_8);
@@ -631,6 +867,44 @@ class GitEvidenceReadServiceIT {
                         .append("byteOffset", 0L).append("line", 1L).append("column", 1L).append("bytes", first),
                 new Document("repoId", repositoryId).append("snapshotId", SNAPSHOT_ID).append("pathKey", pathKey(path)).append("ordinal", 1L)
                         .append("byteOffset", (long) first.length).append("line", 2L).append("column", 5L).append("bytes", second)));
+    }
+
+    private static void seedLongLineSnapshot(MongoTemplate template, String repositoryId) {
+        String path = "src/long-line.txt";
+        String content = "😀".repeat(20_000);
+        byte[] bytes = content.getBytes(StandardCharsets.UTF_8);
+        byte[] first = java.util.Arrays.copyOfRange(bytes, 0, 64 * 1024);
+        byte[] second = java.util.Arrays.copyOfRange(bytes, first.length, bytes.length);
+        insertTextSnapshotFile(template, repositoryId, 1L, path, bytes);
+        template.getCollection("git_snapshot_chunks").deleteOne(new Document("snapshotId", SNAPSHOT_ID).append("pathKey", pathKey(path)).append("ordinal", 0L));
+        template.getCollection("git_snapshot_files").updateOne(new Document("snapshotId", SNAPSHOT_ID).append("ordinal", 1L),
+                new Document("$set", new Document("chunkCount", 2L)));
+        template.getCollection("git_snapshot_chunks").insertMany(List.of(
+                new Document("repoId", repositoryId).append("snapshotId", SNAPSHOT_ID).append("pathKey", pathKey(path)).append("ordinal", 0L)
+                        .append("byteOffset", 0L).append("line", 1L).append("column", 1L).append("bytes", first),
+                new Document("repoId", repositoryId).append("snapshotId", SNAPSHOT_ID).append("pathKey", pathKey(path)).append("ordinal", 1L)
+                        .append("byteOffset", (long) first.length).append("line", 1L).append("column", 16_385L).append("bytes", second)));
+        template.getCollection("git_evidence_manifests").updateOne(new Document("repoId", repositoryId).append("evidenceId", SNAPSHOT_ID),
+                new Document("$set", new Document("total", 2L).append("contentCoverage.entryCount", 2L).append("contentCoverage.textEntries", 2L)
+                        .append("contentCoverage.textBytes", (long) bytes.length + 27L)));
+    }
+
+    private static void copySnapshot(MongoTemplate template, String repositoryId, String sourceSnapshotId, String targetSnapshotId, String revision) {
+        copySnapshotRows(template, "git_evidence_manifests", new Document("repoId", repositoryId).append("evidenceId", sourceSnapshotId), row -> row
+                .append("evidenceId", targetSnapshotId).append("revision", revision));
+        copySnapshotRows(template, "git_snapshot_files", new Document("repoId", repositoryId).append("snapshotId", sourceSnapshotId), row -> row
+                .append("snapshotId", targetSnapshotId));
+        copySnapshotRows(template, "git_snapshot_chunks", new Document("repoId", repositoryId).append("snapshotId", sourceSnapshotId), row -> row
+                .append("snapshotId", targetSnapshotId));
+    }
+
+    private static void copySnapshotRows(MongoTemplate template, String collection, Document filter,
+                                         java.util.function.UnaryOperator<Document> change) {
+        for (Document source : template.getCollection(collection).find(filter)) {
+            Document copy = new Document(source);
+            copy.remove("_id");
+            template.getCollection(collection).insertOne(change.apply(copy));
+        }
     }
 
     private static String cursor(String... values) {

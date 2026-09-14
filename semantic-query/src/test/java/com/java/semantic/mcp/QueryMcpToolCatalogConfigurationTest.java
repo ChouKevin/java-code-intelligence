@@ -103,6 +103,23 @@ class QueryMcpToolCatalogConfigurationTest {
     }
 
     @Test
+    void git_evidence_mcp_schemas_match_the_public_string_bounds_and_file_entry_enum() {
+        QueryMcpToolCatalogConfiguration configuration = new QueryMcpToolCatalogConfiguration();
+        List<McpStatelessServerFeatures.SyncToolSpecification> specifications = configuration.mcpQueryToolSpecifications(
+                mock(SemanticQueryFacade.class), new ObjectMapper());
+        Map<String, Object> readProperties = properties(specification(specifications, "read_file").tool().inputSchema());
+        Map<String, Object> searchProperties = properties(specification(specifications, "search_text").tool().inputSchema());
+        Map<String, Object> fileItem = property(property(properties(specification(specifications, "list_files").tool().outputSchema()), "items"), "items");
+
+        assertEquals(1, property(readProperties, "path").get("minLength"));
+        assertEquals(1, property(readProperties, "cursor").get("minLength"));
+        assertEquals(1, property(searchProperties, "query").get("minLength"));
+        assertEquals(256, property(searchProperties, "query").get("maxLength"));
+        assertEquals(1, property(searchProperties, "cursor").get("minLength"));
+        assertEquals(List.of("FILE", "DIRECTORY"), property(properties(fileItem), "entryType").get("enum"));
+    }
+
+    @Test
     void tools_publish_concrete_success_schemas_with_compact_search_coverage_and_operation_specific_nested_items() {
         QueryMcpToolCatalogConfiguration configuration = new QueryMcpToolCatalogConfiguration();
         List<McpStatelessServerFeatures.SyncToolSpecification> specifications = configuration.mcpQueryToolSpecifications(

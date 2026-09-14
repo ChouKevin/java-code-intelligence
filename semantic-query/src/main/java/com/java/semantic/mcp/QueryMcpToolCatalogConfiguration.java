@@ -116,7 +116,7 @@ public class QueryMcpToolCatalogConfiguration {
             throw new IllegalArgumentException("request contains an unknown field");
         }
         for (String requiredField : SemanticMcpSchemaCatalog.requiredFields(toolName)) {
-            if (toolName.equals("list_files") && requiredField.equals("directory")) {
+            if ((toolName.equals("list_files") && requiredField.equals("directory")) || (toolName.equals("search_text") && requiredField.equals("query"))) {
                 requiredString(normalized, requiredField);
             } else {
                 requiredText(normalized, requiredField);
