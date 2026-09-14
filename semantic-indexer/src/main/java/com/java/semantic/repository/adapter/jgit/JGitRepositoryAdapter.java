@@ -208,32 +208,37 @@ public class JGitRepositoryAdapter implements GitRepositoryPort {
             walk.setRecursive(true);
             while (walk.next()) {
                 FileMode mode = walk.getFileMode(0);
+                SnapshotPath snapshotPath = snapshotPath(walk.getRawPath());
+                if (!snapshotPath.supported()) {
+                    entries.add(new GitSnapshotEntry(snapshotPath.value(), mode.toString(), walk.getObjectId(0).name(),
+                            GitFileContentStatus.UNSUPPORTED_PATH, 0L, new byte[0]));
+                    continue;
+                }
                 if (FileMode.GITLINK.equals(mode)) {
-                    entries.add(new GitSnapshotEntry(walk.getPathString(), mode.toString(), walk.getObjectId(0).name(), GitFileContentStatus.SUBMODULE, 0L, new byte[0]));
+                    entries.add(new GitSnapshotEntry(snapshotPath.value(), mode.toString(), walk.getObjectId(0).name(), GitFileContentStatus.SUBMODULE, 0L, new byte[0]));
                     continue;
                 }
                 ObjectLoader loader = repository.open(walk.getObjectId(0));
                 long size = loader.getSize();
                 if (FileMode.SYMLINK.equals(mode)) {
-                    entries.add(new GitSnapshotEntry(walk.getPathString(), mode.toString(), walk.getObjectId(0).name(), GitFileContentStatus.SYMLINK, size, new byte[0]));
+                    entries.add(new GitSnapshotEntry(snapshotPath.value(), mode.toString(), walk.getObjectId(0).name(), GitFileContentStatus.SYMLINK, size, new byte[0]));
                     continue;
                 }
                 if (size > properties.getGitEvidenceFileTextBytes()) {
-                    entries.add(new GitSnapshotEntry(walk.getPathString(), mode.toString(), walk.getObjectId(0).name(), GitFileContentStatus.TOO_LARGE, size, new byte[0]));
+                    entries.add(new GitSnapshotEntry(snapshotPath.value(), mode.toString(), walk.getObjectId(0).name(), GitFileContentStatus.TOO_LARGE, size, new byte[0]));
                     continue;
                 }
                 byte[] bytes = loader.getBytes();
                 GitFileContentStatus contentStatus = status(mode, bytes);
                 if (contentStatus == GitFileContentStatus.TEXT && exceedsSnapshotLimit(storedTextBytes, size)) {
-                    entries.add(new GitSnapshotEntry(walk.getPathString(), mode.toString(), walk.getObjectId(0).name(), GitFileContentStatus.TOO_LARGE, size, new byte[0]));
-                    continue;
+                    throw new RepositoryMutationException("exact snapshot text budget exceeded");
                 }
                 if (contentStatus == GitFileContentStatus.TEXT) {
                     storedTextBytes += size;
-                    entries.add(new GitSnapshotEntry(walk.getPathString(), mode.toString(), walk.getObjectId(0).name(), contentStatus, size, bytes));
+                    entries.add(new GitSnapshotEntry(snapshotPath.value(), mode.toString(), walk.getObjectId(0).name(), contentStatus, size, bytes));
                     continue;
                 }
-                entries.add(new GitSnapshotEntry(walk.getPathString(), mode.toString(), walk.getObjectId(0).name(), contentStatus, size, new byte[0]));
+                entries.add(new GitSnapshotEntry(snapshotPath.value(), mode.toString(), walk.getObjectId(0).name(), contentStatus, size, new byte[0]));
             }
         }
         return List.copyOf(entries);
@@ -316,8 +321,18 @@ public class JGitRepositoryAdapter implements GitRepositoryPort {
         if (containsNul(bytes)) { return GitFileContentStatus.BINARY; }
         String text = strictUtf8(bytes);
         if (text.isEmpty() && bytes.length > 0) { return GitFileContentStatus.UNSUPPORTED_ENCODING; }
-        if (text.contains("version https://git-lfs.github.com/spec/v1")) { return GitFileContentStatus.LFS_POINTER; }
+        if (text.matches("version https://git-lfs\\.github\\.com/spec/v1\\noid sha256:[0-9a-f]{64}\\nsize [0-9]+\\n?")) {
+            return GitFileContentStatus.LFS_POINTER;
+        }
         return GitFileContentStatus.TEXT;
+    }
+
+    private static SnapshotPath snapshotPath(byte[] rawPath) {
+        String path = strictUtf8(rawPath);
+        if (!path.isEmpty() || rawPath.length == 0) {
+            return new SnapshotPath(path, true);
+        }
+        return new SnapshotPath("raw-path-hex:" + java.util.HexFormat.of().formatHex(rawPath), false);
     }
 
     private static boolean containsNul(byte[] bytes) { for (byte value : bytes) { if (value == 0) { return true; } } return false; }
@@ -330,6 +345,8 @@ public class JGitRepositoryAdapter implements GitRepositoryPort {
             return "";
         }
     }
+
+    private record SnapshotPath(String value, boolean supported) { }
 
     private boolean exceedsSnapshotLimit(long storedTextBytes, long size) {
         try {

@@ -13,9 +13,12 @@ import org.eclipse.jgit.dircache.DirCacheEditor;
 import org.eclipse.jgit.dircache.DirCacheEntry;
 import org.eclipse.jgit.dircache.DirCacheEditor.PathEdit;
 import org.eclipse.jgit.lib.Constants;
+import org.eclipse.jgit.lib.CommitBuilder;
 import org.eclipse.jgit.lib.FileMode;
 import org.eclipse.jgit.lib.ObjectId;
 import org.eclipse.jgit.lib.ObjectInserter;
+import org.eclipse.jgit.lib.PersonIdent;
+import org.eclipse.jgit.lib.TreeFormatter;
 import org.eclipse.jgit.revwalk.RevCommit;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -38,7 +41,8 @@ class JGitRepositoryAdapterComparisonTest {
             Files.write(repositoryDirectory.resolve("binary.bin"), new byte[] {1, 0, 2});
             Files.write(repositoryDirectory.resolve("invalid.txt"), new byte[] {(byte) 0xC3, (byte) 0x28});
             Files.write(repositoryDirectory.resolve("large.txt"), new byte[2 * 1024 * 1024 + 1]);
-            Files.writeString(repositoryDirectory.resolve("pointer.txt"), "version https://git-lfs.github.com/spec/v1\noid sha256:abc\nsize 12\n");
+            Files.writeString(repositoryDirectory.resolve("pointer.txt"), "version https://git-lfs.github.com/spec/v1\noid sha256:" + "a".repeat(64) + "\nsize 12\n");
+            Files.writeString(repositoryDirectory.resolve("mentions-lfs.txt"), "See version https://git-lfs.github.com/spec/v1 for details.\n");
             git.add().addFilepattern(".").call();
             RevCommit previous = git.commit().setMessage("previous").setAuthor("tester", "tester@example.test").call();
             Files.writeString(repositoryDirectory.resolve("README.md"), "current\n");
@@ -48,7 +52,7 @@ class JGitRepositoryAdapterComparisonTest {
             GitPreparedComparison comparison = new JGitRepositoryAdapter(new RepositoryProperties()).prepareComparison(repositoryDirectory,
                     RepositoryRevision.ofSha(previous.getId().getName()), RepositoryRevision.ofSha(current.getId().getName()));
 
-            assertThat(comparison.previousEntries()).extracting(entry -> entry.path()).containsExactly("README.md", "binary.bin", "invalid.txt", "large.txt", "pointer.txt");
+            assertThat(comparison.previousEntries()).extracting(entry -> entry.path()).containsExactly("README.md", "binary.bin", "invalid.txt", "large.txt", "mentions-lfs.txt", "pointer.txt");
             assertThat(comparison.previousEntries()).filteredOn(entry -> entry.path().equals("binary.bin"))
                     .allSatisfy(entry -> {
                         assertThat(entry.contentStatus()).isEqualTo(GitFileContentStatus.BINARY);
@@ -67,6 +71,8 @@ class JGitRepositoryAdapterComparisonTest {
                         assertThat(entry.contentStatus()).isEqualTo(GitFileContentStatus.LFS_POINTER);
                         assertThat(entry.bytes()).isEmpty();
                     });
+            assertThat(comparison.previousEntries()).filteredOn(entry -> entry.path().equals("mentions-lfs.txt"))
+                    .allSatisfy(entry -> assertThat(entry.contentStatus()).isEqualTo(GitFileContentStatus.TEXT));
             assertThat(comparison.changes()).singleElement().satisfies(change -> assertThat(change.newPath()).isEqualTo("README.md"));
         }
     }
@@ -196,6 +202,52 @@ class JGitRepositoryAdapterComparisonTest {
                 assertThat(change.diffStatus()).isEqualTo("AVAILABLE");
                 assertThat(change.patch().getBytes(java.nio.charset.StandardCharsets.UTF_8).length).isGreaterThan((int) (2L * fileLimit + 64L * 1024L));
                 assertThat(change.patchChunks()).hasSizeGreaterThan(1);
+            });
+        }
+    }
+
+    @Test
+    void fails_the_entire_preparation_when_exact_snapshot_text_exceeds_its_total_budget() throws Exception {
+        try (Git git = Git.init().setDirectory(repositoryDirectory.toFile()).call()) {
+            RepositoryProperties properties = new RepositoryProperties();
+            properties.setGitEvidenceFileTextBytes(64L);
+            properties.setGitEvidenceSnapshotTextBytes(8L);
+            Files.writeString(repositoryDirectory.resolve("first.txt"), "first\n");
+            Files.writeString(repositoryDirectory.resolve("second.txt"), "second\n");
+            git.add().addFilepattern(".").call();
+            RevCommit commit = git.commit().setMessage("over budget").setAuthor("tester", "tester@example.test").call();
+
+            assertThatThrownBy(() -> new JGitRepositoryAdapter(properties).prepareComparison(repositoryDirectory,
+                    RepositoryRevision.ofSha(commit.getId().getName()), RepositoryRevision.ofSha(commit.getId().getName())))
+                    .isInstanceOf(RepositoryMutationException.class)
+                    .hasRootCauseMessage("exact snapshot text budget exceeded");
+        }
+    }
+
+    @Test
+    void classifies_a_non_utf8_raw_git_path_without_using_replacement_decoding() throws Exception {
+        try (Git git = Git.init().setDirectory(repositoryDirectory.toFile()).call();
+             ObjectInserter inserter = git.getRepository().newObjectInserter()) {
+            ObjectId blob = inserter.insert(Constants.OBJ_BLOB, "text\n".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            TreeFormatter tree = new TreeFormatter();
+            tree.append(new byte[] {(byte) 0xC3, (byte) 0x28}, FileMode.REGULAR_FILE, blob);
+            ObjectId treeId = tree.insertTo(inserter);
+            CommitBuilder builder = new CommitBuilder();
+            builder.setTreeId(treeId);
+            PersonIdent identity = new PersonIdent("tester", "tester@example.test");
+            builder.setAuthor(identity);
+            builder.setCommitter(identity);
+            builder.setMessage("invalid path");
+            ObjectId commitId = inserter.insert(Constants.OBJ_COMMIT, builder.build());
+            inserter.flush();
+
+            GitPreparedComparison comparison = new JGitRepositoryAdapter(new RepositoryProperties()).prepareComparison(repositoryDirectory,
+                    RepositoryRevision.ofSha(commitId.name()), RepositoryRevision.ofSha(commitId.name()));
+
+            assertThat(comparison.previousEntries()).singleElement().satisfies(entry -> {
+                assertThat(entry.path()).isEqualTo("raw-path-hex:c328");
+                assertThat(entry.contentStatus()).isEqualTo(GitFileContentStatus.UNSUPPORTED_PATH);
+                assertThat(entry.bytes()).isEmpty();
             });
         }
     }
