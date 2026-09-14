@@ -361,11 +361,13 @@ public final class SemanticQueryContract {
     }
 
     private static String requireTextQuery(String query) {
-        String value = Objects.requireNonNull(query, "query is required");
-        if (value.isEmpty() || value.indexOf('\n') >= 0 || value.indexOf('\r') >= 0 || value.codePointCount(0, value.length()) > 256) {
+        if (Objects.isNull(query)) {
+            throw new IllegalArgumentException("query is required");
+        }
+        if (query.isEmpty() || query.indexOf('\n') >= 0 || query.indexOf('\r') >= 0 || query.codePointCount(0, query.length()) > 256) {
             throw new IllegalArgumentException("query must be one single line of at most 256 Unicode code points");
         }
-        return value;
+        return query;
     }
 
     private static int requireContextLines(int contextLines) {

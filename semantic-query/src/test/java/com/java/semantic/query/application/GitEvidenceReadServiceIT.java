@@ -207,6 +207,8 @@ class GitEvidenceReadServiceIT {
     void r1_accepts_whitespace_literal_search_queries() {
         assertThat(new SemanticQueryContract.GitTextSearchRequest("orders", SNAPSHOT_ID, REVISION, " ", Optional.empty(), Optional.empty(), 1).query())
                 .isEqualTo(" ");
+        assertThatThrownBy(() -> new SemanticQueryContract.GitTextSearchRequest("orders", SNAPSHOT_ID, REVISION, null,
+                Optional.empty(), Optional.empty(), 1)).isInstanceOf(IllegalArgumentException.class);
     }
 
     @Test
@@ -294,6 +296,20 @@ class GitEvidenceReadServiceIT {
                     new SemanticQueryContract.GitTextSearchRequest("orders", SNAPSHOT_ID, REVISION, "needle", Optional.empty(), Optional.empty(), 1));
 
             assertThat(result.items()).singleElement().satisfies(match -> assertThat(match.snippet()).startsWith("needle"));
+        }
+    }
+
+    @Test
+    void r1_reuses_cross_chunk_literal_source_after_the_search_budget_is_exhausted() {
+        try (MongoDBContainer container = new MongoDBContainer(DockerImageName.parse("mongo:8.0.4"))) {
+            container.start();
+            MongoTemplate template = new MongoTemplate(MongoClients.create(container.getConnectionString()), "git_snapshot_r1_cross_chunk_snippet");
+            seedCrossChunkSnippetBudgetSnapshot(template, "orders");
+
+            SemanticQueryContract.GitTextSearchResult result = service(template, List.of("orders")).searchText(
+                    new SemanticQueryContract.GitTextSearchRequest("orders", SNAPSHOT_ID, REVISION, "ab", Optional.empty(), Optional.empty(), 1));
+
+            assertThat(result.items()).singleElement().satisfies(match -> assertThat(match.snippet()).startsWith("ab"));
         }
     }
 
@@ -812,6 +828,31 @@ class GitEvidenceReadServiceIT {
         List<Document> chunks = new java.util.ArrayList<>();
         for (int ordinal = 0; ordinal < 64; ordinal++) {
             byte[] bytes = ordinal == 63 ? matched : ordinary;
+            chunks.add(new Document("repoId", repositoryId).append("snapshotId", SNAPSHOT_ID).append("pathKey", pathKey(path)).append("ordinal", (long) ordinal)
+                    .append("byteOffset", (long) ordinal * ordinary.length).append("line", 1L).append("column", (long) ordinal * ordinary.length + 1L)
+                    .append("bytes", bytes));
+        }
+        template.getCollection("git_snapshot_chunks").insertMany(chunks);
+    }
+
+    private static void seedCrossChunkSnippetBudgetSnapshot(MongoTemplate template, String repositoryId) {
+        String path = "src/cross-chunk-snippet.txt";
+        byte[] ordinary = "x".repeat(64 * 1024).getBytes(StandardCharsets.UTF_8);
+        byte[] start = ("x".repeat(64 * 1024 - 1) + "a").getBytes(StandardCharsets.UTF_8);
+        byte[] end = ("b" + "x".repeat(64 * 1024 - 1)).getBytes(StandardCharsets.UTF_8);
+        long byteLength = (long) ordinary.length * 62L + start.length + end.length;
+        template.getCollection("git_evidence_manifests").insertOne(new Document("repoId", repositoryId).append("evidenceId", SNAPSHOT_ID)
+                .append("kind", "SNAPSHOT").append("state", "READY").append("gitEvidenceVersion", 1).append("revision", REVISION)
+                .append("total", 1L).append("contentDigest", "a".repeat(64)).append("fileTextBytesLimit", byteLength)
+                .append("snapshotTextBytesLimit", byteLength).append("contentCoverage", new Document("entryCount", 1L).append("textEntries", 1L)
+                        .append("textBytes", byteLength)));
+        template.getCollection("git_snapshot_files").insertOne(new Document("repoId", repositoryId).append("snapshotId", SNAPSHOT_ID)
+                .append("ordinal", 0L).append("path", path).append("rawPath", rawPath(path)).append("pathKey", pathKey(path)).append("mode", "100644")
+                .append("blobId", "1".repeat(40)).append("checksum", "b".repeat(64)).append("byteLength", byteLength)
+                .append("contentStatus", "TEXT").append("chunkCount", 64L));
+        List<Document> chunks = new java.util.ArrayList<>();
+        for (int ordinal = 0; ordinal < 64; ordinal++) {
+            byte[] bytes = ordinal == 62 ? start : ordinal == 63 ? end : ordinary;
             chunks.add(new Document("repoId", repositoryId).append("snapshotId", SNAPSHOT_ID).append("pathKey", pathKey(path)).append("ordinal", (long) ordinal)
                     .append("byteOffset", (long) ordinal * ordinary.length).append("line", 1L).append("column", (long) ordinal * ordinary.length + 1L)
                     .append("bytes", bytes));

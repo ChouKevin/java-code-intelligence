@@ -510,13 +510,16 @@ public final class GitEvidenceReadService {
                 ReadPosition tokenPosition = position;
                 position = advance(position, codePoint);
                 character += Character.charCount(codePoint);
-                window.add(new SearchToken(codePoint, tokenPosition));
+                window.add(new SearchToken(codePoint, tokenPosition, chunk));
                 while (windowText(window).length() >= query.length()) {
                     String candidate = windowText(window);
                     SearchToken first = window.getFirst();
                     if (candidate.startsWith(query)) {
-                        Snippet snippet = snippetAt(repositoryId, snapshotId, file, first.position(), budget,
-                                first.position().chunkOrdinal() == position.chunkOrdinal() ? Optional.of(chunk) : Optional.empty());
+                        Map<Long, ChunkData> reusableChunks = new java.util.HashMap<>();
+                        for (SearchToken token : window) {
+                            reusableChunks.put(token.position().chunkOrdinal(), token.chunk());
+                        }
+                        Snippet snippet = snippetAt(repositoryId, snapshotId, file, first.position(), budget, reusableChunks);
                         matches.add(new SemanticQueryContract.GitTextMatch(file.path(), file.pathKey(), first.position().line(), first.position().column(),
                                 snippet.text(), snippet.truncated()));
                         if (matches.size() == remaining) {
@@ -541,19 +544,15 @@ public final class GitEvidenceReadService {
     }
 
     private Snippet snippetAt(RepositoryId repositoryId, String snapshotId, SnapshotFile file, ReadPosition start, SearchBudget budget,
-                              Optional<ChunkData> initialChunk) {
+                              Map<Long, ChunkData> reusableChunks) {
         StringBuilder text = new StringBuilder();
         ReadPosition position = start;
         boolean omittedPrefix = position.column() > 1;
-        Optional<ChunkData> reusable = initialChunk;
         while (position.byteOffset() < file.byteLength() && text.codePointCount(0, text.length()) < 160) {
-            ChunkData chunk;
-            if (reusable.isPresent()) {
-                chunk = reusable.orElseThrow();
-            } else {
+            ChunkData chunk = reusableChunks.get(position.chunkOrdinal());
+            if (Objects.isNull(chunk)) {
                 chunk = chunkData(repositoryId, snapshotId, file, position.chunkOrdinal(), position.byteOffset(), position.line(), position.column(), budget);
             }
-            reusable = Optional.empty();
             if (Objects.isNull(chunk)) {
                 return new Snippet(text.toString(), true);
             }
@@ -865,7 +864,7 @@ public final class GitEvidenceReadService {
     }
     private record SearchStart(ReadPosition position, Optional<ChunkData> chunk) { }
     private record ChunkData(int byteOffset, byte[] bytes, String text) { }
-    private record SearchToken(int codePoint, ReadPosition position) { }
+    private record SearchToken(int codePoint, ReadPosition position, ChunkData chunk) { }
     private record SearchPage(List<SemanticQueryContract.GitTextMatch> matches, boolean complete, ReadPosition position) { }
     private record Snippet(String text, boolean truncated) { }
     private static final class SearchBudget {
