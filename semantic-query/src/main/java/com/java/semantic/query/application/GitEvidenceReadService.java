@@ -86,10 +86,6 @@ public final class GitEvidenceReadService {
 
     private void authorize(RepositoryId repositoryId) {
         readPolicy.requireGitEvidenceVisible(repositoryId);
-        if (Objects.isNull(template.getCollection(IndexCollections.GIT_EVIDENCE_MANIFESTS).find(Filters.eq("repoId", repositoryId.value()))
-                .maxTime(storageTimeout.toMillis(), TimeUnit.MILLISECONDS).first())) {
-            throw new RepositoryNotFoundException();
-        }
     }
 
     private Document catalogManifest(RepositoryId repositoryId, Optional<String> catalogId) {

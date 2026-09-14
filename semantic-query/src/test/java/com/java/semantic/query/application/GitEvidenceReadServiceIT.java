@@ -74,6 +74,18 @@ class GitEvidenceReadServiceIT {
     }
 
     @Test
+    void reports_absent_git_evidence_without_requiring_a_semantic_repository_row() {
+        try (MongoDBContainer container = new MongoDBContainer(DockerImageName.parse("mongo:8.0.4"))) {
+            container.start();
+            MongoTemplate template = new MongoTemplate(MongoClients.create(container.getConnectionString()), "git_evidence_absent");
+            GitEvidenceReadService service = service(template, List.of("orders"));
+
+            assertThatThrownBy(() -> service.branches(new SemanticQueryContract.GitBranchRequest("orders", Optional.of(CATALOG_ID), 0, 20)))
+                    .isInstanceOf(GitEvidenceNotFoundException.class);
+        }
+    }
+
+    @Test
     void denies_repository_and_granular_policy_before_ready_evidence_and_rechecks_a_revoked_policy() {
         try (MongoDBContainer container = new MongoDBContainer(DockerImageName.parse("mongo:8.0.4"))) {
             container.start();
