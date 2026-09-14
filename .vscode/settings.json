@@ -1,0 +1,6 @@
+{
+    "java.diagnostic.filter": [
+        "**/semantic-indexer/src/test/resources/fixtures/**",
+        "**/semantic-indexer/target/test-classes/fixtures/**"
+    ]
+}
