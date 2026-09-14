@@ -194,7 +194,8 @@ public class JGitRepositoryAdapter implements GitRepositoryPort {
     private void fetchRemote(Git git) throws GitAPIException {
         FetchCommand fetch = git.fetch().setRefSpecs(
                 new RefSpec("+refs/heads/*:refs/remotes/origin/*"),
-                new RefSpec("+refs/tags/*:refs/tags/*"));
+                new RefSpec("+refs/tags/*:refs/tags/*"))
+                .setRemoveDeletedRefs(true);
         credentialsProvider().ifPresent(fetch::setCredentialsProvider);
         fetch.call();
     }
