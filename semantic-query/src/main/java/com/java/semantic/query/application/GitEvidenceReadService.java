@@ -6,7 +6,9 @@ import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.query.config.ConfiguredReadPolicy;
 import com.mongodb.client.model.Filters;
 import com.mongodb.client.model.Sorts;
+import com.mongodb.MongoException;
 import org.bson.Document;
+import org.springframework.dao.DataAccessException;
 import org.springframework.data.mongodb.core.MongoTemplate;
 
 import java.time.Duration;
@@ -32,38 +34,54 @@ public final class GitEvidenceReadService {
     public SemanticQueryContract.GitBranchCollection branches(SemanticQueryContract.GitBranchRequest request) {
         SemanticQueryContract.GitBranchRequest required = Objects.requireNonNull(request, "git branch request is required");
         RepositoryId repositoryId = new RepositoryId(required.repositoryId());
-        authorize(repositoryId);
-        Document manifest = catalogManifest(repositoryId, required.catalogId());
-        long total = requiredLong(manifest, "total");
-        List<SemanticQueryContract.GitBranchItem> rows = new ArrayList<>();
-        for (Document row : template.getCollection(IndexCollections.GIT_BRANCHES).find(Filters.and(
-                Filters.eq("repoId", repositoryId.value()), Filters.eq("catalogId", manifest.getString("evidenceId"))))
-                .sort(Sorts.ascending("ordinal")).skip(required.offset()).limit(required.limit()).maxTime(storageTimeout.toMillis(), TimeUnit.MILLISECONDS)) {
-            rows.add(new SemanticQueryContract.GitBranchItem(requiredText(row, "branch"), requiredText(row, "head")));
+        try {
+            authorize(repositoryId);
+            Document manifest = catalogManifest(repositoryId, required.catalogId());
+            long total = requiredLong(manifest, "total");
+            List<SemanticQueryContract.GitBranchItem> rows = new ArrayList<>();
+            for (Document row : template.getCollection(IndexCollections.GIT_BRANCHES).find(Filters.and(
+                    Filters.eq("repoId", repositoryId.value()), Filters.eq("catalogId", manifest.getString("evidenceId"))))
+                    .sort(Sorts.ascending("ordinal")).skip(required.offset()).limit(required.limit()).maxTime(storageTimeout.toMillis(), TimeUnit.MILLISECONDS)) {
+                rows.add(new SemanticQueryContract.GitBranchItem(requiredText(row, "branch"), requiredText(row, "head")));
+            }
+            return new SemanticQueryContract.GitBranchCollection(repositoryId.value(), manifest.getString("evidenceId"),
+                    instant(manifest, "observedAt"), List.copyOf(rows), page(required.offset(), required.limit(), rows.size(), total));
+        } catch (MongoException | DataAccessException exception) {
+            throw new SemanticIndexUnavailableException(exception);
+        } catch (RepositoryNotFoundException | GitEvidenceNotFoundException | GitEvidenceNotReadyException | IndexContractMismatchException | IllegalArgumentException exception) {
+            throw exception;
+        } catch (RuntimeException exception) {
+            throw new IndexContractMismatchException();
         }
-        return new SemanticQueryContract.GitBranchCollection(repositoryId.value(), manifest.getString("evidenceId"),
-                instant(manifest, "observedAt"), List.copyOf(rows), page(required.offset(), required.limit(), rows.size(), total));
     }
 
     public SemanticQueryContract.GitCommitCollection commits(SemanticQueryContract.GitCommitRequest request) {
         SemanticQueryContract.GitCommitRequest required = Objects.requireNonNull(request, "git commit request is required");
         RepositoryId repositoryId = new RepositoryId(required.repositoryId());
-        authorize(repositoryId);
-        Document manifest = historyManifest(repositoryId, new GitEvidenceId(required.historyId()));
-        if (!required.revision().equals(requiredText(manifest, "revision"))) {
-            throw new IllegalArgumentException("history revision does not match the requested revision");
+        try {
+            authorize(repositoryId);
+            Document manifest = historyManifest(repositoryId, new GitEvidenceId(required.historyId()));
+            if (!required.revision().equals(requiredText(manifest, "revision"))) {
+                throw new IllegalArgumentException("history revision does not match the requested revision");
+            }
+            long total = requiredLong(manifest, "total");
+            List<SemanticQueryContract.GitCommitItem> rows = new ArrayList<>();
+            for (Document row : template.getCollection(IndexCollections.GIT_COMMITS).find(Filters.and(
+                    Filters.eq("repoId", repositoryId.value()), Filters.eq("historyId", required.historyId())))
+                    .sort(Sorts.ascending("ordinal")).skip(required.offset()).limit(required.limit()).maxTime(storageTimeout.toMillis(), TimeUnit.MILLISECONDS)) {
+                List<String> parents = row.getList("parents", String.class, List.of());
+                rows.add(new SemanticQueryContract.GitCommitItem(requiredText(row, "revision"), List.copyOf(parents),
+                        requiredString(row, "subject"), instant(row, "committedAt")));
+            }
+            return new SemanticQueryContract.GitCommitCollection(repositoryId.value(), required.historyId(), required.revision(),
+                    instant(manifest, "preparedAt"), List.copyOf(rows), page(required.offset(), required.limit(), rows.size(), total));
+        } catch (MongoException | DataAccessException exception) {
+            throw new SemanticIndexUnavailableException(exception);
+        } catch (RepositoryNotFoundException | GitEvidenceNotFoundException | GitEvidenceNotReadyException | IndexContractMismatchException | IllegalArgumentException exception) {
+            throw exception;
+        } catch (RuntimeException exception) {
+            throw new IndexContractMismatchException();
         }
-        long total = requiredLong(manifest, "total");
-        List<SemanticQueryContract.GitCommitItem> rows = new ArrayList<>();
-        for (Document row : template.getCollection(IndexCollections.GIT_COMMITS).find(Filters.and(
-                Filters.eq("repoId", repositoryId.value()), Filters.eq("historyId", required.historyId())))
-                .sort(Sorts.ascending("ordinal")).skip(required.offset()).limit(required.limit()).maxTime(storageTimeout.toMillis(), TimeUnit.MILLISECONDS)) {
-            List<String> parents = row.getList("parents", String.class, List.of());
-            rows.add(new SemanticQueryContract.GitCommitItem(requiredText(row, "revision"), List.copyOf(parents),
-                    requiredString(row, "subject"), instant(row, "committedAt")));
-        }
-        return new SemanticQueryContract.GitCommitCollection(repositoryId.value(), required.historyId(), required.revision(),
-                instant(manifest, "preparedAt"), List.copyOf(rows), page(required.offset(), required.limit(), rows.size(), total));
     }
 
     private void authorize(RepositoryId repositoryId) {

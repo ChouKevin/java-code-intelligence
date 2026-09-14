@@ -292,9 +292,6 @@ components:
         currentPointer:
           allOf: [{ $ref: '#/components/schemas/GenerationPointer' }]
           nullable: true
-        gitEvidence:
-          allOf: [{ $ref: '#/components/schemas/GitEvidenceResult' }]
-          nullable: true
         rollbackPointer:
           allOf: [{ $ref: '#/components/schemas/GenerationPointer' }]
           nullable: true
@@ -325,6 +322,8 @@ components:
       required: [evidenceId]
       properties:
         evidenceId: { type: string, format: uuid }
+        branch: { type: string, nullable: true }
+        revision: { type: string, nullable: true, pattern: '^[0-9a-f]{40}$' }
     SyncRequest:
       type: object
       additionalProperties: false

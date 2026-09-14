@@ -30,6 +30,7 @@ public final class GitEvidencePublicationStore {
     }
 
     public GitCatalogManifest beginCatalog(IndexJob job, Instant observedAt) {
+        verifySchemaBeforeEvidence();
         GitEvidenceId id = GitEvidenceId.create();
         GitCatalogManifest manifest = new GitCatalogManifest(id, job.repositoryId(), observedAt, GitEvidenceState.PREPARING, GitCatalogManifest.VERSION);
         template.getCollection(IndexCollections.GIT_EVIDENCE_MANIFESTS).insertOne(new Document("repoId", job.repositoryId().value())
@@ -41,6 +42,7 @@ public final class GitEvidencePublicationStore {
     }
 
     public GitHistoryManifest beginHistory(IndexJob job, GitEvidenceId catalogId, String branch, RepositoryRevision revision, Instant preparedAt) {
+        verifySchemaBeforeEvidence();
         GitEvidenceId id = GitEvidenceId.create();
         GitHistoryManifest manifest = new GitHistoryManifest(id, catalogId, job.repositoryId(), branch, revision, preparedAt,
                 GitEvidenceState.PREPARING, GitHistoryManifest.VERSION, 0L);
@@ -93,8 +95,61 @@ public final class GitEvidencePublicationStore {
     }
 
     private void ready(RepositoryId repositoryId, GitEvidenceId evidenceId, long total) {
+        validateRows(repositoryId, evidenceId, total);
         long modified = template.getCollection(IndexCollections.GIT_EVIDENCE_MANIFESTS).updateOne(Filters.and(Filters.eq("repoId", repositoryId.value()),
                 Filters.eq("evidenceId", evidenceId.value()), Filters.eq("state", "PREPARING")), Updates.combine(Updates.set("total", total), Updates.set("state", "READY"))).getModifiedCount();
         if (modified != 1L) { throw new PublicationConflictException(); }
+    }
+
+    public void verifySchemaBeforeEvidence() {
+        new MongoIndexSchemaReadinessVerifier(template).verify();
+    }
+
+    private void validateRows(RepositoryId repositoryId, GitEvidenceId evidenceId, long total) {
+        Document manifest = template.getCollection(IndexCollections.GIT_EVIDENCE_MANIFESTS).find(Filters.and(
+                Filters.eq("repoId", repositoryId.value()), Filters.eq("evidenceId", evidenceId.value()),
+                Filters.eq("state", "PREPARING"))).first();
+        if (Objects.isNull(manifest)) {
+            throw new PublicationConflictException();
+        }
+        String kind = manifest.getString("kind");
+        String collection = "CATALOG".equals(kind) ? IndexCollections.GIT_BRANCHES : IndexCollections.GIT_COMMITS;
+        String evidenceField = "CATALOG".equals(kind) ? "catalogId" : "historyId";
+        long ordinal = 0L;
+        for (Document row : template.getCollection(collection).find(Filters.and(Filters.eq("repoId", repositoryId.value()),
+                Filters.eq(evidenceField, evidenceId.value()))).sort(com.mongodb.client.model.Sorts.ascending("ordinal"))) {
+            Number storedOrdinal = row.get("ordinal", Number.class);
+            if (Objects.isNull(storedOrdinal) || storedOrdinal.longValue() != ordinal) {
+                throw new PublicationConflictException();
+            }
+            validateRow(kind, manifest, row, ordinal);
+            ordinal++;
+        }
+        if (ordinal != total) {
+            throw new PublicationConflictException();
+        }
+    }
+
+    private static void validateRow(String kind, Document manifest, Document row, long ordinal) {
+        if ("CATALOG".equals(kind)) {
+            if (!hasText(row.getString("branch")) || !isSha(row.getString("head"))) {
+                throw new PublicationConflictException();
+            }
+            return;
+        }
+        String revision = row.getString("revision");
+        List<String> parents = row.getList("parents", String.class, List.of());
+        if (!isSha(revision) || parents.stream().anyMatch(parent -> !isSha(parent)) || !hasText(row.getString("subject"))
+                || Objects.isNull(row.getDate("committedAt")) || (ordinal == 0L && !revision.equals(manifest.getString("revision")))) {
+            throw new PublicationConflictException();
+        }
+    }
+
+    private static boolean hasText(String value) {
+        return Objects.nonNull(value) && !value.isBlank();
+    }
+
+    private static boolean isSha(String value) {
+        return Objects.nonNull(value) && value.matches("[0-9a-f]{40}");
     }
 }

@@ -29,6 +29,7 @@ public final class GitEvidenceJobHandler {
         RepositoryRuntime runtime = repositories.get(job.repositoryId());
         runtime.lock().writeLock().lock();
         try {
+            evidence.verifySchemaBeforeEvidence();
             switch (job.operation()) {
                 case GIT_REFS -> refs(job, runtime);
                 case GIT_HISTORY -> history(job, runtime);
@@ -43,6 +44,9 @@ public final class GitEvidenceJobHandler {
     }
 
     private void refs(IndexJob job, RepositoryRuntime runtime) {
+        if (!git.isCloned(runtime.workingTree())) {
+            git.clone(runtime.workingTree(), runtime.remoteUrl());
+        }
         GitCatalogManifest manifest = evidence.beginCatalog(job, Instant.now());
         evidence.appendBranches(manifest, git.fetchRemoteBranches(runtime.workingTree()));
     }

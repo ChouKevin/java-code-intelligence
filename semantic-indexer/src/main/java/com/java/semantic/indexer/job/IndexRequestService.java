@@ -2,6 +2,7 @@ package com.java.semantic.indexer.job;
 
 import com.java.semantic.indexer.repository.RepositoryRevisionResolver;
 import com.java.semantic.repository.application.RepositoryNotFoundException;
+import com.java.semantic.repository.application.RepositoryRuntimeRegistry;
 import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.model.repository.RepositoryRevision;
 import com.java.semantic.model.index.PublishedGenerationPointer;
@@ -15,10 +16,12 @@ import java.util.Optional;
 @Service
 public final class IndexRequestService {
     private final RepositoryRevisionResolver revisionResolver;
+    private final RepositoryRuntimeRegistry repositories;
     private final IndexJobStore jobs;
 
-    public IndexRequestService(RepositoryRevisionResolver revisionResolver, IndexJobStore jobs) {
+    public IndexRequestService(RepositoryRevisionResolver revisionResolver, RepositoryRuntimeRegistry repositories, IndexJobStore jobs) {
         this.revisionResolver = Objects.requireNonNull(revisionResolver, "revision resolver is required");
+        this.repositories = Objects.requireNonNull(repositories, "repositories is required");
         this.jobs = Objects.requireNonNull(jobs, "jobs is required");
     }
 
@@ -66,10 +69,12 @@ public final class IndexRequestService {
     }
 
     public IndexJob prepareGitRefs(RepositoryId repositoryId) {
+        repositories.get(repositoryId);
         return jobs.admitGitRefs(repositoryId);
     }
 
     public IndexJob prepareGitHistory(RepositoryId repositoryId, String catalogId, String branch, String revision) {
+        repositories.get(repositoryId);
         return jobs.admitGitHistory(repositoryId, new GitEvidenceId(catalogId), branch, RepositoryRevision.ofSha(revision));
     }
 

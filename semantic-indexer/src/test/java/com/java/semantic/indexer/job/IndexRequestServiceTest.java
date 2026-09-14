@@ -1,6 +1,8 @@
 package com.java.semantic.indexer.job;
 
 import com.java.semantic.indexer.repository.RepositoryRevisionResolver;
+import com.java.semantic.repository.application.RepositoryRuntimeRegistry;
+import com.java.semantic.repository.application.RepositoryNotFoundException;
 import com.java.semantic.model.index.GenerationId;
 import com.java.semantic.model.index.ManifestDigest;
 import com.java.semantic.model.index.PublishedGenerationPointer;
@@ -11,14 +13,17 @@ import org.junit.jupiter.api.Test;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.verifyNoInteractions;
 
 class IndexRequestServiceTest {
     @Test
     void ensure_resolves_source_then_returns_an_accepted_job_without_waiting_for_work() {
         RepositoryRevisionResolver revisionResolver = mock(RepositoryRevisionResolver.class);
+        RepositoryRuntimeRegistry repositories = mock(RepositoryRuntimeRegistry.class);
         IndexJobStore store = mock(IndexJobStore.class);
         RepositoryId repositoryId = RepositoryId.of("payments");
         RepositoryRevision revision = new RepositoryRevision("a".repeat(40));
@@ -26,7 +31,7 @@ class IndexRequestServiceTest {
         when(revisionResolver.ensure(repositoryId)).thenReturn(revision);
         when(store.admitEnsure(repositoryId, revision)).thenReturn(job);
 
-        IndexJob result = new IndexRequestService(revisionResolver, store).ensure(repositoryId);
+        IndexJob result = new IndexRequestService(revisionResolver, repositories, store).ensure(repositoryId);
 
         assertThat(result).isEqualTo(job);
         org.mockito.InOrder order = org.mockito.Mockito.inOrder(store);
@@ -37,6 +42,7 @@ class IndexRequestServiceTest {
     @Test
     void accepts_sync_checkout_rebuild_and_rollback_as_deferred_jobs() {
         RepositoryRevisionResolver revisionResolver = mock(RepositoryRevisionResolver.class);
+        RepositoryRuntimeRegistry repositories = mock(RepositoryRuntimeRegistry.class);
         IndexJobStore store = mock(IndexJobStore.class);
         RepositoryId repositoryId = RepositoryId.of("payments");
         RepositoryRevision revision = new RepositoryRevision("b".repeat(40));
@@ -50,13 +56,29 @@ class IndexRequestServiceTest {
         when(store.admitRebuild(repositoryId, revision, current)).thenReturn(job);
         when(store.admitRollback(repositoryId, current, rollback)).thenReturn(job);
 
-        IndexRequestService service = new IndexRequestService(revisionResolver, store);
+        IndexRequestService service = new IndexRequestService(revisionResolver, repositories, store);
         assertThat(service.sync(repositoryId, Optional.of("main"))).isEqualTo(job);
         assertThat(service.checkout(repositoryId, revision.value())).isEqualTo(job);
         assertThat(service.rebuild(repositoryId, true, current)).isEqualTo(job);
         assertThat(service.rollback(repositoryId, current, rollback)).isEqualTo(job);
         verify(store).admitRebuild(repositoryId, revision, current);
         verify(store).admitRollback(repositoryId, current, rollback);
+    }
+
+    @Test
+    void rejects_unknown_git_evidence_admission_before_inserting_an_active_job() {
+        RepositoryRevisionResolver revisionResolver = mock(RepositoryRevisionResolver.class);
+        RepositoryRuntimeRegistry repositories = mock(RepositoryRuntimeRegistry.class);
+        IndexJobStore store = mock(IndexJobStore.class);
+        RepositoryId unknown = RepositoryId.of("unknown");
+        when(repositories.get(unknown)).thenThrow(new RepositoryNotFoundException(unknown));
+        IndexRequestService service = new IndexRequestService(revisionResolver, repositories, store);
+
+        assertThatThrownBy(() -> service.prepareGitRefs(unknown)).isInstanceOf(RepositoryNotFoundException.class);
+        assertThatThrownBy(() -> service.prepareGitHistory(unknown, "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", "main", "a".repeat(40)))
+                .isInstanceOf(RepositoryNotFoundException.class);
+
+        verifyNoInteractions(store);
     }
 
     private static PublishedGenerationPointer pointer(RepositoryRevision revision, String generationId, String jobId) {
