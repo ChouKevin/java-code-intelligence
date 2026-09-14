@@ -30,14 +30,16 @@ public final class GitEvidenceJobHandler {
         runtime.lock().writeLock().lock();
         try {
             evidence.verifySchemaBeforeEvidence();
-            switch (job.operation()) {
-                case GIT_REFS -> refs(job, runtime);
-                case GIT_HISTORY -> history(job, runtime);
-                default -> throw new IllegalArgumentException("not a Git evidence job");
+            try {
+                switch (job.operation()) {
+                    case GIT_REFS -> refs(job, runtime);
+                    case GIT_HISTORY -> history(job, runtime);
+                    default -> throw new IllegalArgumentException("not a Git evidence job");
+                }
+            } catch (RuntimeException exception) {
+                evidence.fail(job);
+                throw exception;
             }
-        } catch (RuntimeException exception) {
-            evidence.fail(job);
-            throw exception;
         } finally {
             runtime.lock().writeLock().unlock();
         }

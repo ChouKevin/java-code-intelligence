@@ -156,6 +156,9 @@ public final class GitEvidencePublicationStore {
         if (ordinal != total) {
             throw new PublicationConflictException();
         }
+        if ("HISTORY".equals(kind) && ordinal == 0L) {
+            throw new PublicationConflictException();
+        }
         if (!digest.equals(manifest.getString("contentDigest"))) {
             throw new PublicationConflictException();
         }
@@ -173,11 +176,13 @@ public final class GitEvidencePublicationStore {
         }
         String revision = row.getString("revision");
         List<String> parents = row.getList("parents", String.class, List.of());
-        if (!isSha(revision) || parents.stream().anyMatch(parent -> !isSha(parent)) || !hasText(row.getString("subject"))
+        if (!isSha(revision) || parents.stream().anyMatch(parent -> !isSha(parent)) || !hasString(row, "subject")
                 || Objects.isNull(row.getDate("committedAt")) || (ordinal == 0L && !revision.equals(manifest.getString("revision")))) {
             throw new PublicationConflictException();
         }
     }
+
+    private static boolean hasString(Document row, String field) { return row.get(field) instanceof String; }
 
     private static boolean hasText(String value) {
         return Objects.nonNull(value) && !value.isBlank();

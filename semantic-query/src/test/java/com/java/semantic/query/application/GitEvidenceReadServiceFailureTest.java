@@ -19,7 +19,7 @@ class GitEvidenceReadServiceFailureTest {
     @Test
     void maps_a_storage_outage_while_authorizing_to_the_shared_unavailable_error() {
         MongoTemplate template = mock(MongoTemplate.class);
-        when(template.getCollection(IndexCollections.REPOSITORIES)).thenThrow(new MongoException("storage unavailable"));
+        when(template.getCollection(IndexCollections.GIT_EVIDENCE_MANIFESTS)).thenThrow(new MongoException("storage unavailable"));
         ReadPolicyProperties properties = new ReadPolicyProperties(List.of("orders"), List.of(), List.of(), List.of(), List.of());
         GitEvidenceReadService service = new GitEvidenceReadService(template, new ConfiguredReadPolicy(properties), Duration.ofSeconds(2));
 

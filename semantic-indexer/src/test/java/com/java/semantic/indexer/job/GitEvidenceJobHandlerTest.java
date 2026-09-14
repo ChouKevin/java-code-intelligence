@@ -1,6 +1,7 @@
 package com.java.semantic.indexer.job;
 
 import com.java.semantic.indexer.store.GitEvidencePublicationStore;
+import com.java.semantic.indexer.store.IndexSchemaMaintenanceRequiredException;
 import com.java.semantic.model.git.GitCatalogManifest;
 import com.java.semantic.model.git.GitEvidenceId;
 import com.java.semantic.model.git.GitEvidenceState;
@@ -17,6 +18,8 @@ import java.util.Optional;
 
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class GitEvidenceJobHandlerTest {
@@ -45,5 +48,26 @@ class GitEvidenceJobHandlerTest {
         order.verify(evidence).beginCatalog(org.mockito.ArgumentMatchers.eq(job), org.mockito.ArgumentMatchers.any(Instant.class));
         order.verify(git).fetchRemoteBranches(runtime.workingTree());
         order.verify(evidence).appendBranches(manifest, List.of());
+    }
+
+    @Test
+    void does_not_attempt_manifest_cleanup_when_schema_verification_rejects_the_job() {
+        RepositoryId repositoryId = RepositoryId.of("orders");
+        RepositoryRuntime runtime = new RepositoryRuntime(repositoryId, "Orders", Path.of("target/orders"),
+                "file:///target/orders.git", "main");
+        RepositoryRuntimeRegistry repositories = mock(RepositoryRuntimeRegistry.class);
+        GitRepositoryPort git = mock(GitRepositoryPort.class);
+        GitEvidencePublicationStore evidence = mock(GitEvidencePublicationStore.class);
+        IndexJob job = new IndexJob(IndexJobId.create(), repositoryId, Optional.empty(), IndexJobPhase.RUNNING, true,
+                Optional.empty(), false, IndexJobOperation.GIT_REFS, Optional.of(GitEvidenceJob.refs()));
+        when(repositories.get(repositoryId)).thenReturn(runtime);
+        org.mockito.Mockito.doThrow(new IndexSchemaMaintenanceRequiredException("missing schema"))
+                .when(evidence).verifySchemaBeforeEvidence();
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> new GitEvidenceJobHandler(repositories, git, evidence).prepare(job))
+                .isInstanceOf(IndexSchemaMaintenanceRequiredException.class);
+
+        verify(evidence, never()).fail(job);
+        verify(git, never()).isCloned(runtime.workingTree());
     }
 }

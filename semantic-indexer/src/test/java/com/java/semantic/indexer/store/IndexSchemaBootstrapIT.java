@@ -2,12 +2,16 @@ package com.java.semantic.indexer.store;
 
 import com.java.semantic.model.index.IndexSchemaContract;
 import com.java.semantic.indexer.job.GitEvidenceJob;
+import com.java.semantic.indexer.job.GitEvidenceJobHandler;
 import com.java.semantic.indexer.job.IndexJob;
 import com.java.semantic.indexer.job.IndexJobId;
 import com.java.semantic.indexer.job.IndexJobOperation;
 import com.java.semantic.indexer.job.IndexJobPhase;
 import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.model.repository.RepositoryRevision;
+import com.java.semantic.repository.application.RepositoryRuntimeRegistry;
+import com.java.semantic.repository.domain.RepositoryRuntime;
+import com.java.semantic.repository.port.GitRepositoryPort;
 import org.bson.Document;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -24,6 +28,11 @@ import java.util.concurrent.TimeUnit;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.spy;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 @Tag("mongo-it")
 class IndexSchemaBootstrapIT {
@@ -84,6 +93,29 @@ class IndexSchemaBootstrapIT {
     }
 
     @Test
+    void git_evidence_handler_rejects_missing_schema_before_clone_fetch_or_manifest_cleanup_writes() {
+        try (MongoDBContainer container = MongoSchemaTestSupport.container()) {
+            org.springframework.data.mongodb.core.MongoTemplate template = MongoSchemaTestSupport.template(container);
+            RepositoryId repositoryId = RepositoryId.of("orders");
+            RepositoryRuntime runtime = new RepositoryRuntime(repositoryId, "Orders", java.nio.file.Path.of("target/orders"),
+                    "file:///target/orders.git", "main");
+            RepositoryRuntimeRegistry repositories = mock(RepositoryRuntimeRegistry.class);
+            GitRepositoryPort git = mock(GitRepositoryPort.class);
+            GitEvidencePublicationStore evidence = spy(new GitEvidencePublicationStore(template));
+            IndexJob job = new IndexJob(IndexJobId.create(), repositoryId, Optional.empty(), IndexJobPhase.RUNNING, true,
+                    Optional.empty(), false, IndexJobOperation.GIT_REFS, Optional.of(GitEvidenceJob.refs()));
+            when(repositories.get(repositoryId)).thenReturn(runtime);
+
+            assertThatThrownBy(() -> new GitEvidenceJobHandler(repositories, git, evidence).prepare(job))
+                    .isInstanceOf(IndexSchemaMaintenanceRequiredException.class);
+
+            verify(evidence, never()).fail(job);
+            verify(git, never()).isCloned(runtime.workingTree());
+            assertThat(template.collectionExists("git_evidence_manifests")).isFalse();
+        }
+    }
+
+    @Test
     void git_evidence_ready_rejects_missing_tampered_and_wrong_identity_rows_without_publication() {
         try (MongoDBContainer container = MongoSchemaTestSupport.container()) {
             org.springframework.data.mongodb.core.MongoTemplate template = MongoSchemaTestSupport.template(container);
@@ -131,6 +163,21 @@ class IndexSchemaBootstrapIT {
             assertThatThrownBy(() -> store.readyHistory(wrongHead, 1L)).isInstanceOf(PublicationConflictException.class);
             assertPreparing(template, wrongHead.historyId().value());
 
+            com.java.semantic.model.git.GitHistoryManifest missingSubject = store.beginHistory(runningHistory(orders, catalogId, revision), catalogId,
+                    "main", revision, Instant.now());
+            Document missingSubjectRow = commitRow("orders", missingSubject.historyId().value(), 0L, revision.value());
+            missingSubjectRow.remove("subject");
+            template.getCollection("git_commits").insertOne(missingSubjectRow);
+            assertThatThrownBy(() -> store.readyHistory(missingSubject, 1L)).isInstanceOf(PublicationConflictException.class);
+            assertPreparing(template, missingSubject.historyId().value());
+
+            com.java.semantic.model.git.GitHistoryManifest wrongSubjectType = store.beginHistory(runningHistory(orders, catalogId, revision), catalogId,
+                    "main", revision, Instant.now());
+            template.getCollection("git_commits").insertOne(commitRow("orders", wrongSubjectType.historyId().value(), 0L, revision.value())
+                    .append("subject", 7));
+            assertThatThrownBy(() -> store.readyHistory(wrongSubjectType, 1L)).isInstanceOf(PublicationConflictException.class);
+            assertPreparing(template, wrongSubjectType.historyId().value());
+
             com.java.semantic.model.git.GitHistoryManifest tampered = store.beginHistory(runningHistory(orders, catalogId, revision), catalogId,
                     "main", revision, Instant.now());
             store.appendCommit(tampered, 0L, new com.java.semantic.model.git.GitCommit(revision, List.of(), "original", Instant.now()));
@@ -138,6 +185,23 @@ class IndexSchemaBootstrapIT {
                     new Document("$set", new Document("subject", "substituted but valid")));
             assertThatThrownBy(() -> store.readyHistory(tampered, 1L)).isInstanceOf(PublicationConflictException.class);
             assertPreparing(template, tampered.historyId().value());
+        }
+    }
+
+    @Test
+    void git_history_ready_rejects_an_empty_stream_without_publishing_the_manifest() {
+        try (MongoDBContainer container = MongoSchemaTestSupport.container()) {
+            org.springframework.data.mongodb.core.MongoTemplate template = MongoSchemaTestSupport.template(container);
+            new IndexSchemaBootstrap(template).bootstrap();
+            GitEvidencePublicationStore store = new GitEvidencePublicationStore(template);
+            RepositoryId orders = RepositoryId.of("orders");
+            RepositoryRevision revision = RepositoryRevision.ofSha("1".repeat(40));
+            com.java.semantic.model.git.GitEvidenceId catalogId = com.java.semantic.model.git.GitEvidenceId.create();
+            com.java.semantic.model.git.GitHistoryManifest history = store.beginHistory(runningHistory(orders, catalogId, revision), catalogId,
+                    "main", revision, Instant.now());
+
+            assertThatThrownBy(() -> store.readyHistory(history, 0L)).isInstanceOf(PublicationConflictException.class);
+            assertPreparing(template, history.historyId().value());
         }
     }
 

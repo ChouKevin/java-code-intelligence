@@ -65,7 +65,7 @@ class DispatchedGitEvidenceIT {
         try (MongoDBContainer container = new MongoDBContainer("mongo:8.0.4");
              Git remote = Git.init().setBare(true).setDirectory(remotePath.toFile()).call();
              Git seed = Git.init().setInitialBranch("main").setDirectory(seedPath.toFile()).call()) {
-            RepositoryRevision first = commit(seed, seedPath, "first", "class Evidence { }");
+            RepositoryRevision first = commit(seed, seedPath, "", "class Evidence { }");
             seed.remoteAdd().setName("origin").setUri(new URIish(remotePath.toUri().toString())).call();
             push(seed, "main");
             remote.getRepository().updateRef("HEAD", true).link("refs/heads/main");
@@ -74,7 +74,6 @@ class DispatchedGitEvidenceIT {
             container.start();
             MongoTemplate template = new MongoTemplate(MongoClients.create(container.getConnectionString()), "dispatched_git_evidence");
             new IndexSchemaBootstrap(template).bootstrap();
-            template.getCollection(IndexCollections.REPOSITORIES).insertOne(new Document("repoId", "orders"));
             MongoIndexJobStore jobs = new MongoIndexJobStore(template);
             RepositoryRuntimeRegistry repositories = registry(remotePath);
             GitEvidenceJobHandler handler = new GitEvidenceJobHandler(repositories, new JGitRepositoryAdapter(properties(remotePath)),
@@ -106,6 +105,7 @@ class DispatchedGitEvidenceIT {
                     new SemanticQueryContract.GitCommitRequest("orders", historyId, head.value(), 0, 20));
             assertThat(history.items()).extracting(SemanticQueryContract.GitCommitItem::revision).containsExactly(head.value(), first.value());
             assertThat(history.items().getFirst().parents()).containsExactly(first.value());
+            assertThat(history.items().get(1).subject()).isEmpty();
 
             commit(seed, seedPath, "third", "class Evidence { int version; int later; }");
             push(seed, "main");
