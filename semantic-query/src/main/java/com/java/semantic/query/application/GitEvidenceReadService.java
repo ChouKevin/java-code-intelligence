@@ -218,12 +218,16 @@ public final class GitEvidenceReadService {
             for (Document row : template.getCollection(IndexCollections.GIT_SNAPSHOT_FILES).find(searchScope).sort(Sorts.ascending("ordinal"))
                     .maxTime(storageTimeout.toMillis(), TimeUnit.MILLISECONDS)) {
                 SnapshotFile file = snapshotFile(row);
+                if (file.ordinal() == position.fileOrdinal()) {
+                    cursorFileFound = true;
+                    if (file.chunkCount() == 0L) {
+                        position = new SearchPosition(file.ordinal() + 1L, 0L, 0);
+                        continue;
+                    }
+                }
                 SearchStart start = file.ordinal() == position.fileOrdinal()
                         ? decodeSearchPosition(repositoryId, required.snapshotId(), file, position, budget)
                         : new SearchStart(firstPosition(repositoryId, required.snapshotId(), file), Optional.empty());
-                if (file.ordinal() == position.fileOrdinal()) {
-                    cursorFileFound = true;
-                }
                 SearchPage page = searchFile(repositoryId, required.snapshotId(), file, start, required.query(), required.limit() - matches.size(), budget);
                 matches.addAll(page.matches());
                 if (!page.complete()) {
@@ -492,7 +496,14 @@ public final class GitEvidenceReadService {
                         matches.add(new SemanticQueryContract.GitTextMatch(file.path(), file.pathKey(), first.position().line(), first.position().column(),
                                 snippet.text(), snippet.truncated()));
                         if (matches.size() == remaining) {
-                            return new SearchPage(List.copyOf(matches), false, advance(first.position(), first.codePoint()));
+                            ReadPosition next = advance(first.position(), first.codePoint());
+                            if (next.byteOffset() == file.byteLength()) {
+                                return new SearchPage(List.copyOf(matches), true, next);
+                            }
+                            if (next.byteOffset() == chunk.byteOffset() + chunk.bytes().length) {
+                                next = nextChunkPosition(repositoryId, snapshotId, file, next, chunk);
+                            }
+                            return new SearchPage(List.copyOf(matches), false, next);
                         }
                     }
                     window.removeFirst();
@@ -523,7 +534,7 @@ public final class GitEvidenceReadService {
                 position = advance(position, codePoint);
                 character += Character.charCount(codePoint);
             }
-            if (position.byteOffset() < file.byteLength()) {
+            if (position.byteOffset() < file.byteLength() && character == chunk.text().length()) {
                 position = nextChunkPosition(repositoryId, snapshotId, file, position, chunk);
             }
         }
