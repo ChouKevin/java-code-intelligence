@@ -82,6 +82,9 @@ public class QueryMcpToolCatalogConfiguration {
             case "list_git_commits" -> facade.listGitCommits(convert(arguments, SemanticQueryContract.GitCommitRequest.class, objectMapper));
             case "compare_revisions" -> facade.compareRevisions(convert(arguments, SemanticQueryContract.GitComparisonRequest.class, objectMapper));
             case "get_file_diff" -> facade.getFileDiff(convert(arguments, SemanticQueryContract.GitFileDiffRequest.class, objectMapper));
+            case "list_files" -> facade.listFiles(convert(arguments, SemanticQueryContract.GitFileListRequest.class, objectMapper));
+            case "read_file" -> facade.readFile(convert(arguments, SemanticQueryContract.GitFileReadRequest.class, objectMapper));
+            case "search_text" -> facade.searchText(convert(arguments, SemanticQueryContract.GitTextSearchRequest.class, objectMapper));
             case "list_repositories" -> facade.listRepositories(convert(arguments, SemanticQueryContract.PageRequest.class, objectMapper));
             case "get_repository" -> facade.getRepository(convert(arguments, SemanticQueryContract.RepositoryRequest.class, objectMapper));
             case "search_code" -> facade.searchCode(convert(arguments, SemanticQueryContract.SearchCodeRequest.class, objectMapper));
@@ -128,6 +131,15 @@ public class QueryMcpToolCatalogConfiguration {
         }
         if (toolName.equals("list_git_branches")) {
             normalized.putIfAbsent("catalogId", Optional.empty());
+        }
+        if (toolName.equals("read_file")) {
+            normalized.putIfAbsent("startLine", Optional.empty());
+            normalized.putIfAbsent("maxLines", SemanticQueryContract.DEFAULT_FILE_LINES);
+            normalized.putIfAbsent("cursor", Optional.empty());
+        }
+        if (toolName.equals("search_text")) {
+            normalized.putIfAbsent("directory", Optional.empty());
+            normalized.putIfAbsent("cursor", Optional.empty());
         }
         if (toolName.equals("list_entry_points") || toolName.equals("list_type_members")) {
             normalized.putIfAbsent("kinds", Set.of());

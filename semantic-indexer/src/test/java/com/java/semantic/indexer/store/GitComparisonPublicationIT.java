@@ -103,6 +103,38 @@ class GitComparisonPublicationIT {
     }
 
     @Test
+    void refuses_a_ready_snapshot_with_a_missing_text_chunk_position_checkpoint() {
+        try (MongoDBContainer container = MongoSchemaTestSupport.container()) {
+            org.springframework.data.mongodb.core.MongoTemplate template = MongoSchemaTestSupport.template(container);
+            new IndexSchemaBootstrap(template).bootstrap();
+            RepositoryId repository = RepositoryId.of("orders");
+            RepositoryRevision previous = RepositoryRevision.ofSha("1".repeat(40));
+            RepositoryRevision current = RepositoryRevision.ofSha("2".repeat(40));
+            IndexJob job = comparisonJob(repository, previous, current);
+            GitSnapshotEntry entry = new GitSnapshotEntry("README.md", "100644", "3".repeat(40), GitFileContentStatus.TEXT,
+                    "context\\n".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            GitComparisonChange change = new GitComparisonChange("change-0", GitChangeKind.MODIFY, "README.md", "README.md", "100644",
+                    "100644", "3".repeat(40), "4".repeat(40), "@@ -1 +1 @@\\n-context\\n+changed\\n", "AVAILABLE");
+            GitPreparedComparison prepared = new GitPreparedComparison(previous, current, GitComparisonAncestry.PREVIOUS_ANCESTOR,
+                    List.of(entry), List.of(entry), List.of(change));
+            GitEvidencePublicationStore store = new GitEvidencePublicationStore(template);
+            store.publishComparison(job, prepared, Instant.now());
+            org.bson.Document manifest = template.getCollection(IndexCollections.GIT_EVIDENCE_MANIFESTS)
+                    .find(new org.bson.Document("kind", "COMPARISON")).first();
+            GitComparisonId comparisonId = new GitComparisonId(manifest.getString("evidenceId"));
+            GitSnapshotId previousSnapshot = new GitSnapshotId(manifest.getString("previousSnapshotId"));
+            GitSnapshotId currentSnapshot = new GitSnapshotId(manifest.getString("currentSnapshotId"));
+            template.getCollection(IndexCollections.GIT_EVIDENCE_MANIFESTS).updateOne(new org.bson.Document("evidenceId", comparisonId.value()),
+                    new org.bson.Document("$set", new org.bson.Document("state", "PREPARING")));
+            template.getCollection(IndexCollections.GIT_SNAPSHOT_CHUNKS).updateOne(new org.bson.Document("snapshotId", currentSnapshot.value()),
+                    new org.bson.Document("$unset", new org.bson.Document("byteOffset", "")));
+
+            assertThatThrownBy(() -> store.validateComparisonPublication(repository, comparisonId, previousSnapshot, currentSnapshot, prepared))
+                    .isInstanceOf(PublicationConflictException.class);
+        }
+    }
+
+    @Test
     void seals_the_configured_limits_and_coverage_with_the_snapshot_even_after_settings_change() {
         try (MongoDBContainer container = MongoSchemaTestSupport.container()) {
             org.springframework.data.mongodb.core.MongoTemplate template = MongoSchemaTestSupport.template(container);

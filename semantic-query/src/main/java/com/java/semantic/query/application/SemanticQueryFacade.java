@@ -85,6 +85,18 @@ public final class SemanticQueryFacade {
         return requireGitEvidenceReader().fileDiff(request);
     }
 
+    public SemanticQueryContract.GitFileCollection listFiles(SemanticQueryContract.GitFileListRequest request) {
+        return requireGitEvidenceReader().listFiles(request);
+    }
+
+    public SemanticQueryContract.GitFileContent readFile(SemanticQueryContract.GitFileReadRequest request) {
+        return requireGitEvidenceReader().readFile(request);
+    }
+
+    public SemanticQueryContract.GitTextSearchResult searchText(SemanticQueryContract.GitTextSearchRequest request) {
+        return requireGitEvidenceReader().searchText(request);
+    }
+
     private GitEvidenceReadService requireGitEvidenceReader() {
         if (Objects.isNull(gitEvidenceReadService)) { throw new IndexNotReadyException(); }
         return gitEvidenceReadService;

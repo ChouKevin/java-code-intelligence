@@ -128,6 +128,27 @@ public final class SemanticQueryController {
                 requiredText(request.current(), "current"), requiredText(request.changeId(), "changeId"), optionalText(request.cursor())));
     }
 
+    @PostMapping("/git/files")
+    public SemanticQueryContract.GitFileCollection gitFiles(@RequestBody GitFileListHttpRequest request) {
+        return facade.listFiles(new SemanticQueryContract.GitFileListRequest(requiredText(request.repositoryId(), "repositoryId"),
+                requiredText(request.snapshotId(), "snapshotId"), requiredText(request.revision(), "revision"),
+                required(request.directory(), "directory"), offset(request.offset()), limit(request.limit())));
+    }
+
+    @PostMapping("/git/file")
+    public SemanticQueryContract.GitFileContent gitFile(@RequestBody GitFileReadHttpRequest request) {
+        return facade.readFile(new SemanticQueryContract.GitFileReadRequest(requiredText(request.repositoryId(), "repositoryId"),
+                requiredText(request.snapshotId(), "snapshotId"), requiredText(request.revision(), "revision"), requiredText(request.path(), "path"),
+                Optional.ofNullable(request.startLine()), fileLines(request.maxLines()), optionalText(request.cursor())));
+    }
+
+    @PostMapping("/git/search")
+    public SemanticQueryContract.GitTextSearchResult gitSearch(@RequestBody GitTextSearchHttpRequest request) {
+        return facade.searchText(new SemanticQueryContract.GitTextSearchRequest(requiredText(request.repositoryId(), "repositoryId"),
+                requiredText(request.snapshotId(), "snapshotId"), requiredText(request.revision(), "revision"), requiredText(request.query(), "query"),
+                optionalText(request.directory()), optionalText(request.cursor()), limit(request.limit())));
+    }
+
     private static SemanticQueryContract.RelationRequest methodRelationRequest(MethodRelationHttpRequest request) {
         return new SemanticQueryContract.RelationRequest(requiredText(request.repositoryId(), "repositoryId"),
                 requiredText(request.revision(), "revision"), requiredText(request.methodFactId(), "methodFactId"),
@@ -167,6 +188,10 @@ public final class SemanticQueryController {
         return Objects.requireNonNullElse(contextLines, 0);
     }
 
+    private static int fileLines(Integer maxLines) {
+        return Objects.requireNonNullElse(maxLines, SemanticQueryContract.DEFAULT_FILE_LINES);
+    }
+
     record SearchCodeHttpRequest(String repositoryId, String revision, String query, Set<CodeFactKind> kinds,
                                  String packagePrefix, Integer offset, Integer limit) {
     }
@@ -198,4 +223,7 @@ public final class SemanticQueryController {
     record GitCommitHttpRequest(String repositoryId, String historyId, String revision, Integer offset, Integer limit) { }
     record GitComparisonHttpRequest(String repositoryId, String comparisonId, String previous, String current, Integer offset, Integer limit) { }
     record GitFileDiffHttpRequest(String repositoryId, String comparisonId, String previous, String current, String changeId, String cursor) { }
+    record GitFileListHttpRequest(String repositoryId, String snapshotId, String revision, String directory, Integer offset, Integer limit) { }
+    record GitFileReadHttpRequest(String repositoryId, String snapshotId, String revision, String path, Integer startLine, Integer maxLines, String cursor) { }
+    record GitTextSearchHttpRequest(String repositoryId, String snapshotId, String revision, String query, String directory, String cursor, Integer limit) { }
 }

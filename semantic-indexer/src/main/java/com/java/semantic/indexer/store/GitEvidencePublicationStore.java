@@ -24,6 +24,9 @@ import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
+import java.nio.ByteBuffer;
+import java.nio.charset.CharacterCodingException;
+import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -179,14 +182,15 @@ public final class GitEvidencePublicationStore {
             byte[] persistedBytes = text ? bytes : new byte[0];
             String checksum = checksum(persistedBytes);
             String pathKey = pathKey(entry.rawPath());
+            List<SnapshotChunk> chunks = snapshotChunks(persistedBytes);
             template.getCollection(IndexCollections.GIT_SNAPSHOT_FILES).insertOne(new Document("repoId", job.repositoryId().value()).append("snapshotId", snapshotId.value())
                     .append("ordinal", ordinal).append("path", entry.path()).append("rawPath", entry.rawPath()).append("pathKey", pathKey)
                     .append("mode", entry.mode()).append("blobId", entry.blobId()).append("contentStatus", entry.contentStatus().name())
-                    .append("byteLength", entry.byteLength()).append("checksum", checksum));
-            for (int start = 0, chunk = 0; start < persistedBytes.length; start += CHUNK_BYTES, chunk++) {
-                int end = Math.min(start + CHUNK_BYTES, persistedBytes.length);
+                    .append("byteLength", entry.byteLength()).append("checksum", checksum).append("chunkCount", (long) chunks.size()));
+            for (SnapshotChunk chunk : chunks) {
                 template.getCollection(IndexCollections.GIT_SNAPSHOT_CHUNKS).insertOne(new Document("repoId", job.repositoryId().value()).append("snapshotId", snapshotId.value())
-                        .append("pathKey", pathKey).append("ordinal", (long) chunk).append("bytes", Arrays.copyOfRange(persistedBytes, start, end)));
+                        .append("pathKey", pathKey).append("ordinal", chunk.ordinal()).append("byteOffset", chunk.byteOffset())
+                        .append("line", chunk.line()).append("column", chunk.column()).append("bytes", chunk.bytes()));
             }
             digest = digest(digest, snapshotRow(ordinal, entry, checksum));
             ordinal++;
@@ -267,7 +271,9 @@ public final class GitEvidencePublicationStore {
             }
             byte[] expectedBytes = expected.contentStatus().name().equals("TEXT") ? expected.bytes() : new byte[0];
             String checksum = checksum(expectedBytes);
-            if (!checksum.equals(file.getString("checksum")) || !validSnapshotChunks(repositoryId, snapshotId, expected.rawPath(), expectedBytes)) {
+            Number chunkCount = file.get("chunkCount", Number.class);
+            if (!checksum.equals(file.getString("checksum")) || Objects.isNull(chunkCount)
+                    || !validSnapshotChunks(repositoryId, snapshotId, expected.rawPath(), expectedBytes, chunkCount.longValue())) {
                 throw new PublicationConflictException();
             }
             if (expected.contentStatus().name().equals("TEXT")) {
@@ -286,24 +292,98 @@ public final class GitEvidencePublicationStore {
         }
     }
 
-    private boolean validSnapshotChunks(RepositoryId repositoryId, GitSnapshotId snapshotId, byte[] rawPath, byte[] expectedBytes) {
+    private boolean validSnapshotChunks(RepositoryId repositoryId, GitSnapshotId snapshotId, byte[] rawPath, byte[] expectedBytes, long expectedChunkCount) {
+        if (expectedChunkCount < 0L) {
+            return false;
+        }
         List<Document> chunks = new ArrayList<>();
         template.getCollection(IndexCollections.GIT_SNAPSHOT_CHUNKS).find(Filters.and(Filters.eq("repoId", repositoryId.value()),
                 Filters.eq("snapshotId", snapshotId.value()), Filters.eq("pathKey", pathKey(rawPath)))).sort(com.mongodb.client.model.Sorts.ascending("ordinal")).into(chunks);
         byte[] actual = new byte[0];
         long ordinal = 0L;
+        long byteOffset = 0L;
+        SourcePosition position = SourcePosition.initial();
         for (Document chunk : chunks) {
             Number storedOrdinal = chunk.get("ordinal", Number.class);
+            Number storedByteOffset = chunk.get("byteOffset", Number.class);
+            Number storedLine = chunk.get("line", Number.class);
+            Number storedColumn = chunk.get("column", Number.class);
             Optional<byte[]> bytes = binaryBytes(chunk.get("bytes"));
-            if (Objects.isNull(storedOrdinal) || storedOrdinal.longValue() != ordinal || bytes.isEmpty() || bytes.get().length == 0 || bytes.get().length > CHUNK_BYTES) {
+            if (Objects.isNull(storedOrdinal) || Objects.isNull(storedByteOffset) || Objects.isNull(storedLine) || Objects.isNull(storedColumn)
+                    || storedOrdinal.longValue() != ordinal || storedByteOffset.longValue() != byteOffset || storedLine.longValue() != position.line()
+                    || storedColumn.longValue() != position.column() || bytes.isEmpty() || bytes.get().length == 0 || bytes.get().length > CHUNK_BYTES) {
+                return false;
+            }
+            Optional<SourcePosition> next = advance(position, bytes.get());
+            if (next.isEmpty()) {
                 return false;
             }
             byte[] joined = Arrays.copyOf(actual, actual.length + bytes.get().length);
             System.arraycopy(bytes.get(), 0, joined, actual.length, bytes.get().length);
             actual = joined;
+            byteOffset += bytes.get().length;
+            position = next.get();
             ordinal++;
         }
-        return Arrays.equals(expectedBytes, actual);
+        return ordinal == expectedChunkCount && Arrays.equals(expectedBytes, actual);
+    }
+
+    private static List<SnapshotChunk> snapshotChunks(byte[] bytes) {
+        if (bytes.length == 0) {
+            return List.of();
+        }
+        List<SnapshotChunk> chunks = new ArrayList<>();
+        SourcePosition position = SourcePosition.initial();
+        for (int start = 0, ordinal = 0; start < bytes.length; ordinal++) {
+            int end = snapshotUtf8ChunkEnd(bytes, start);
+            byte[] chunkBytes = Arrays.copyOfRange(bytes, start, end);
+            chunks.add(new SnapshotChunk(ordinal, start, position.line(), position.column(), chunkBytes));
+            Optional<SourcePosition> next = advance(position, chunkBytes);
+            if (next.isEmpty()) {
+                throw new PublicationConflictException();
+            }
+            position = next.get();
+            start = end;
+        }
+        return List.copyOf(chunks);
+    }
+
+    private static int snapshotUtf8ChunkEnd(byte[] bytes, int start) {
+        int end = Math.min(start + CHUNK_BYTES, bytes.length);
+        while (end < bytes.length && (bytes[end] & 0xC0) == 0x80) {
+            end--;
+        }
+        if (end == start) {
+            throw new PublicationConflictException();
+        }
+        return end;
+    }
+
+    private static Optional<SourcePosition> advance(SourcePosition initial, byte[] bytes) {
+        try {
+            String text = StandardCharsets.UTF_8.newDecoder().onMalformedInput(CodingErrorAction.REPORT)
+                    .onUnmappableCharacter(CodingErrorAction.REPORT).decode(ByteBuffer.wrap(bytes)).toString();
+            long line = initial.line();
+            long column = initial.column();
+            for (int character = 0; character < text.length();) {
+                int codePoint = text.codePointAt(character);
+                character += Character.charCount(codePoint);
+                if (codePoint == '\n') {
+                    line++;
+                    column = 1L;
+                } else {
+                    column++;
+                }
+            }
+            return Optional.of(new SourcePosition(line, column));
+        } catch (CharacterCodingException exception) {
+            return Optional.empty();
+        }
+    }
+
+    private record SnapshotChunk(long ordinal, long byteOffset, long line, long column, byte[] bytes) { }
+    private record SourcePosition(long line, long column) {
+        private static SourcePosition initial() { return new SourcePosition(1L, 1L); }
     }
 
     private void validateChanges(RepositoryId repositoryId, GitComparisonId comparisonId, List<GitComparisonChange> expectedChanges) {

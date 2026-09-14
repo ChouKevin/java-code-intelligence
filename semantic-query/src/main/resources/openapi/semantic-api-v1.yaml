@@ -54,6 +54,12 @@ paths:
     $ref: '#/components/pathItems/GitComparisons'
   /api/v1/git/file-diff:
     $ref: '#/components/pathItems/GitFileDiff'
+  /api/v1/git/files:
+    $ref: '#/components/pathItems/GitFiles'
+  /api/v1/git/file:
+    $ref: '#/components/pathItems/GitFile'
+  /api/v1/git/search:
+    $ref: '#/components/pathItems/GitTextSearch'
 components:
   parameters:
     RepositoryId:
@@ -112,6 +118,42 @@ components:
         requestBody: {$ref: '#/components/requestBodies/GitFileDiffRequest'}
         responses:
           '200': {description: Exact change patch., content: {application/json: {schema: {$ref: '#/components/schemas/GitFileDiffResult'}}}}
+          '400': {$ref: '#/components/responses/InvalidArgument'}
+          '401': {$ref: '#/components/responses/AuthenticationRequired'}
+          '403': {$ref: '#/components/responses/AccessForbidden'}
+          '404': {$ref: '#/components/responses/NotFound'}
+          '409': {$ref: '#/components/responses/GitEvidenceNotReady'}
+          '503': {$ref: '#/components/responses/IndexUnavailable'}
+    GitFiles:
+      post:
+        summary: List direct entries from one exact READY Git snapshot directory.
+        requestBody: {$ref: '#/components/requestBodies/GitFileListRequest'}
+        responses:
+          '200': {description: Snapshot directory page and immutable content coverage., content: {application/json: {schema: {$ref: '#/components/schemas/GitFileCollection'}}}}
+          '400': {$ref: '#/components/responses/InvalidArgument'}
+          '401': {$ref: '#/components/responses/AuthenticationRequired'}
+          '403': {$ref: '#/components/responses/AccessForbidden'}
+          '404': {$ref: '#/components/responses/NotFound'}
+          '409': {$ref: '#/components/responses/GitEvidenceNotReady'}
+          '503': {$ref: '#/components/responses/IndexUnavailable'}
+    GitFile:
+      post:
+        summary: Read a bounded UTF-8 page from one exact READY Git snapshot file.
+        requestBody: {$ref: '#/components/requestBodies/GitFileReadRequest'}
+        responses:
+          '200': {description: Exact source page with optional continuation cursor., content: {application/json: {schema: {$ref: '#/components/schemas/GitFileContent'}}}}
+          '400': {$ref: '#/components/responses/InvalidArgument'}
+          '401': {$ref: '#/components/responses/AuthenticationRequired'}
+          '403': {$ref: '#/components/responses/AccessForbidden'}
+          '404': {$ref: '#/components/responses/NotFound'}
+          '409': {$ref: '#/components/responses/GitEvidenceNotReady'}
+          '503': {$ref: '#/components/responses/IndexUnavailable'}
+    GitTextSearch:
+      post:
+        summary: Search literal UTF-8 text in one exact READY Git snapshot.
+        requestBody: {$ref: '#/components/requestBodies/GitTextSearchRequest'}
+        responses:
+          '200': {description: Bounded literal-search page with optional continuation cursor., content: {application/json: {schema: {$ref: '#/components/schemas/GitTextSearchResult'}}}}
           '400': {$ref: '#/components/responses/InvalidArgument'}
           '401': {$ref: '#/components/responses/AuthenticationRequired'}
           '403': {$ref: '#/components/responses/AccessForbidden'}
@@ -243,6 +285,9 @@ components:
     GitCommitRequest: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/GitCommitRequest'}}}}
     GitComparisonRequest: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/GitComparisonRequest'}}}}
     GitFileDiffRequest: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/GitFileDiffRequest'}}}}
+    GitFileListRequest: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/GitFileListRequest'}}}}
+    GitFileReadRequest: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/GitFileReadRequest'}}}}
+    GitTextSearchRequest: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/GitTextSearchRequest'}}}}
     SearchCodeRequest: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/SearchCodeRequest'}}}}
     FactSourceRequest: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/FactSourceRequest'}}}}
     EntryPointRequest: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/EntryPointRequest'}}}}
@@ -354,6 +399,41 @@ components:
         current: {$ref: '#/components/schemas/Revision'}
         changeId: {type: string, minLength: 1}
         cursor: {type: string, minLength: 1}
+    GitFileListRequest:
+      type: object
+      additionalProperties: false
+      required: [repositoryId, snapshotId, revision, directory]
+      properties:
+        repositoryId: {$ref: '#/components/schemas/RepositoryId'}
+        snapshotId: {$ref: '#/components/schemas/GitEvidenceId'}
+        revision: {$ref: '#/components/schemas/Revision'}
+        directory: {type: string}
+        offset: {type: integer, minimum: 0, default: 0}
+        limit: {type: integer, minimum: 1, maximum: 100, default: 20}
+    GitFileReadRequest:
+      type: object
+      additionalProperties: false
+      required: [repositoryId, snapshotId, revision, path]
+      properties:
+        repositoryId: {$ref: '#/components/schemas/RepositoryId'}
+        snapshotId: {$ref: '#/components/schemas/GitEvidenceId'}
+        revision: {$ref: '#/components/schemas/Revision'}
+        path: {type: string, minLength: 1}
+        startLine: {type: integer, minimum: 1}
+        maxLines: {type: integer, minimum: 1, maximum: 500, default: 200}
+        cursor: {type: string, minLength: 1}
+    GitTextSearchRequest:
+      type: object
+      additionalProperties: false
+      required: [repositoryId, snapshotId, revision, query]
+      properties:
+        repositoryId: {$ref: '#/components/schemas/RepositoryId'}
+        snapshotId: {$ref: '#/components/schemas/GitEvidenceId'}
+        revision: {$ref: '#/components/schemas/Revision'}
+        query: {type: string, minLength: 1, maxLength: 256}
+        directory: {type: string}
+        cursor: {type: string, minLength: 1}
+        limit: {type: integer, minimum: 1, maximum: 100, default: 20}
     GitChangeItem:
       type: object
       additionalProperties: false
@@ -394,6 +474,81 @@ components:
         change: {$ref: '#/components/schemas/GitChangeItem'}
         patch: {type: string}
         nextCursor: {type: string}
+    GitFileItem:
+      type: object
+      additionalProperties: false
+      required: [path, pathKey, entryType, byteLength, contentStatus]
+      properties:
+        path: {type: string}
+        pathKey: {type: string}
+        entryType: {type: string, enum: [FILE, DIRECTORY]}
+        byteLength: {type: integer, minimum: 0}
+        contentStatus: {type: string}
+    GitSnapshotCoverage:
+      type: object
+      additionalProperties: false
+      required: [inventoryCount, readableTextCount, binaryCount, unsupportedEncodingCount, tooLargeCount, symlinkCount, submoduleCount, lfsPointerCount, unsupportedPathCount]
+      properties:
+        inventoryCount: {type: integer, minimum: 0}
+        readableTextCount: {type: integer, minimum: 0}
+        binaryCount: {type: integer, minimum: 0}
+        unsupportedEncodingCount: {type: integer, minimum: 0}
+        tooLargeCount: {type: integer, minimum: 0}
+        symlinkCount: {type: integer, minimum: 0}
+        submoduleCount: {type: integer, minimum: 0}
+        lfsPointerCount: {type: integer, minimum: 0}
+        unsupportedPathCount: {type: integer, minimum: 0}
+    GitFileCollection:
+      type: object
+      additionalProperties: false
+      required: [repositoryId, snapshotId, revision, items, page, coverage]
+      properties:
+        repositoryId: {$ref: '#/components/schemas/RepositoryId'}
+        snapshotId: {$ref: '#/components/schemas/GitEvidenceId'}
+        revision: {$ref: '#/components/schemas/Revision'}
+        items: {type: array, items: {$ref: '#/components/schemas/GitFileItem'}}
+        page: {$ref: '#/components/schemas/Page'}
+        coverage: {$ref: '#/components/schemas/GitSnapshotCoverage'}
+    GitFileContent:
+      type: object
+      additionalProperties: false
+      required: [repositoryId, snapshotId, revision, path, pathKey, contentStatus, content, startLine, endLine, startLineComplete, endLineComplete]
+      properties:
+        repositoryId: {$ref: '#/components/schemas/RepositoryId'}
+        snapshotId: {$ref: '#/components/schemas/GitEvidenceId'}
+        revision: {$ref: '#/components/schemas/Revision'}
+        path: {type: string}
+        pathKey: {type: string}
+        contentStatus: {type: string}
+        content: {type: string}
+        startLine: {type: integer, minimum: 0}
+        endLine: {type: integer, minimum: 0}
+        startLineComplete: {type: boolean}
+        endLineComplete: {type: boolean}
+        nextCursor: {type: string}
+    GitTextMatch:
+      type: object
+      additionalProperties: false
+      required: [path, pathKey, line, column, snippet, snippetTruncated]
+      properties:
+        path: {type: string}
+        pathKey: {type: string}
+        line: {type: integer, minimum: 1}
+        column: {type: integer, minimum: 1}
+        snippet: {type: string}
+        snippetTruncated: {type: boolean}
+    GitTextSearchResult:
+      type: object
+      additionalProperties: false
+      required: [repositoryId, snapshotId, revision, items, scanComplete, coverage]
+      properties:
+        repositoryId: {$ref: '#/components/schemas/RepositoryId'}
+        snapshotId: {$ref: '#/components/schemas/GitEvidenceId'}
+        revision: {$ref: '#/components/schemas/Revision'}
+        items: {type: array, items: {$ref: '#/components/schemas/GitTextMatch'}}
+        scanComplete: {type: boolean}
+        nextCursor: {type: string}
+        coverage: {$ref: '#/components/schemas/GitSnapshotCoverage'}
     Page:
       type: object
       additionalProperties: false
@@ -607,7 +762,7 @@ components:
       additionalProperties: false
       required: [code, message, retryable]
       properties:
-        code: {type: string, enum: [INVALID_ARGUMENT, REPOSITORY_NOT_FOUND, REVISION_OUTDATED, FACT_NOT_FOUND, FACT_KIND_MISMATCH, INDEX_UNAVAILABLE]}
+        code: {type: string, enum: [INVALID_ARGUMENT, REPOSITORY_NOT_FOUND, REVISION_OUTDATED, FACT_NOT_FOUND, FACT_KIND_MISMATCH, GIT_EVIDENCE_NOT_FOUND, GIT_EVIDENCE_NOT_READY, INDEX_UNAVAILABLE]}
         message: {type: string}
         retryable: {type: boolean}
         currentRevision: {$ref: '#/components/schemas/Revision'}

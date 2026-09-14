@@ -21,7 +21,7 @@ class SemanticQueryRuntimeDependencyTest {
     }
 
     @Test
-    void starts_without_mongo_connectivity_or_online_language_server_and_publishes_sixteen_tools() {
+    void starts_without_mongo_connectivity_or_online_language_server_and_publishes_nineteen_tools() {
         new WebApplicationContextRunner()
                 .withInitializer(new ConfigDataApplicationContextInitializer())
                 .withUserConfiguration(SemanticQueryApplication.class)
@@ -30,7 +30,7 @@ class SemanticQueryRuntimeDependencyTest {
                     assertThat(context).hasNotFailed();
                     Object catalog = context.getBean("mcpQueryToolSpecifications");
                     assertThat(catalog).isInstanceOf(List.class);
-                    assertThat((List<?>) catalog).hasSize(16).allSatisfy(tool ->
+                    assertThat((List<?>) catalog).hasSize(19).allSatisfy(tool ->
                             assertThat(tool).isInstanceOf(McpStatelessServerFeatures.SyncToolSpecification.class));
                     assertThat(context.getBeansOfType(Object.class).values())
                             .extracting(bean -> bean.getClass().getName())

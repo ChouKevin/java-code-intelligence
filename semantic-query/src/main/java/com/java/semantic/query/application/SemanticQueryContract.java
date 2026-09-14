@@ -19,6 +19,8 @@ public final class SemanticQueryContract {
     public static final int DEFAULT_LIMIT = 20;
     public static final int MAX_LIMIT = 100;
     public static final int MAX_CONTEXT_LINES = 20;
+    public static final int DEFAULT_FILE_LINES = 200;
+    public static final int MAX_FILE_LINES = 500;
 
     public record PageRequest(int offset, int limit) {
         public PageRequest {
@@ -162,6 +164,49 @@ public final class SemanticQueryContract {
         }
     }
 
+    public record GitFileListRequest(String repositoryId, String snapshotId, String revision, String directory, int offset, int limit) {
+        public GitFileListRequest {
+            repositoryId = requireRepositoryId(repositoryId);
+            snapshotId = ModelValidation.requiredText(snapshotId, "snapshot id");
+            revision = requireRevision(revision);
+            directory = Objects.requireNonNull(directory, "directory is required");
+            offset = requireOffset(offset);
+            limit = requireLimit(limit);
+        }
+    }
+
+    public record GitFileReadRequest(String repositoryId, String snapshotId, String revision, String path, Optional<Integer> startLine,
+                                     int maxLines, Optional<String> cursor) {
+        public GitFileReadRequest {
+            repositoryId = requireRepositoryId(repositoryId);
+            snapshotId = ModelValidation.requiredText(snapshotId, "snapshot id");
+            revision = requireRevision(revision);
+            path = ModelValidation.requiredText(path, "path");
+            startLine = Objects.requireNonNull(startLine, "start line is required");
+            if (startLine.isPresent() && startLine.get() < 1) {
+                throw new IllegalArgumentException("start line must be positive");
+            }
+            maxLines = requireFileLines(maxLines);
+            cursor = Objects.requireNonNull(cursor, "cursor is required");
+            if (cursor.isPresent() && startLine.isPresent()) {
+                throw new IllegalArgumentException("read cursor cannot be combined with start line");
+            }
+        }
+    }
+
+    public record GitTextSearchRequest(String repositoryId, String snapshotId, String revision, String query, Optional<String> directory,
+                                       Optional<String> cursor, int limit) {
+        public GitTextSearchRequest {
+            repositoryId = requireRepositoryId(repositoryId);
+            snapshotId = ModelValidation.requiredText(snapshotId, "snapshot id");
+            revision = requireRevision(revision);
+            query = requireTextQuery(query);
+            directory = Objects.requireNonNull(directory, "directory is required");
+            cursor = Objects.requireNonNull(cursor, "cursor is required");
+            limit = requireLimit(limit);
+        }
+    }
+
     public enum HttpMethod {
         GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS, TRACE, ALL
     }
@@ -201,6 +246,24 @@ public final class SemanticQueryContract {
     public record GitFileDiffResult(String repositoryId, String comparisonId, String previous, String current,
                                     GitChangeItem change, String patch, Optional<String> nextCursor) {
         public GitFileDiffResult { nextCursor = Objects.requireNonNull(nextCursor, "next cursor is required"); }
+    }
+    public record GitSnapshotCoverage(long inventoryCount, long readableTextCount, long binaryCount, long unsupportedEncodingCount,
+                                      long tooLargeCount, long symlinkCount, long submoduleCount, long lfsPointerCount,
+                                      long unsupportedPathCount) { }
+    public record GitFileItem(String path, String pathKey, String entryType, long byteLength, String contentStatus) { }
+    public record GitFileCollection(String repositoryId, String snapshotId, String revision, List<GitFileItem> items, Page page,
+                                    GitSnapshotCoverage coverage) {
+        public GitFileCollection { items = List.copyOf(Objects.requireNonNull(items, "git file items are required")); }
+    }
+    public record GitFileContent(String repositoryId, String snapshotId, String revision, String path, String pathKey,
+                                 String contentStatus, String content, int startLine, int endLine, boolean startLineComplete,
+                                 boolean endLineComplete, Optional<String> nextCursor) {
+        public GitFileContent { nextCursor = Objects.requireNonNull(nextCursor, "next cursor is required"); }
+    }
+    public record GitTextMatch(String path, String pathKey, int line, int column, String snippet, boolean snippetTruncated) { }
+    public record GitTextSearchResult(String repositoryId, String snapshotId, String revision, List<GitTextMatch> items,
+                                      boolean scanComplete, Optional<String> nextCursor, GitSnapshotCoverage coverage) {
+        public GitTextSearchResult { items = List.copyOf(Objects.requireNonNull(items, "git text matches are required")); nextCursor = Objects.requireNonNull(nextCursor, "next cursor is required"); }
     }
 
     public record SourceSnippet(String path, int startLine, int endLine, String code) {
@@ -288,6 +351,21 @@ public final class SemanticQueryContract {
         ModelValidation.require(limit >= 1 && limit <= MAX_LIMIT,
                 "limit must be between 1 and " + MAX_LIMIT);
         return limit;
+    }
+
+    private static int requireFileLines(int maxLines) {
+        if (maxLines < 1 || maxLines > MAX_FILE_LINES) {
+            throw new IllegalArgumentException("max lines must be between 1 and " + MAX_FILE_LINES);
+        }
+        return maxLines;
+    }
+
+    private static String requireTextQuery(String query) {
+        String value = ModelValidation.requiredText(query, "query");
+        if (value.indexOf('\n') >= 0 || value.indexOf('\r') >= 0 || value.codePointCount(0, value.length()) > 256) {
+            throw new IllegalArgumentException("query must be one single line of at most 256 Unicode code points");
+        }
+        return value;
     }
 
     private static int requireContextLines(int contextLines) {
