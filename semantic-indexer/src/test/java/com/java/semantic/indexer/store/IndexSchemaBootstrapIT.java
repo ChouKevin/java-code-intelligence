@@ -116,6 +116,34 @@ class IndexSchemaBootstrapIT {
     }
 
     @Test
+    void git_evidence_handler_rejects_a_conflicting_schema_before_clone_fetch_or_manifest_cleanup_writes() {
+        try (MongoDBContainer container = MongoSchemaTestSupport.container()) {
+            org.springframework.data.mongodb.core.MongoTemplate template = MongoSchemaTestSupport.template(container);
+            new IndexSchemaBootstrap(template).bootstrap();
+            template.getCollection("search").dropIndex("search_generation_fact_lookup");
+            template.getCollection("search").createIndex(new Document("unexpected", 1),
+                    new com.mongodb.client.model.IndexOptions().name("search_generation_fact_lookup"));
+            RepositoryId repositoryId = RepositoryId.of("orders");
+            RepositoryRuntime runtime = new RepositoryRuntime(repositoryId, "Orders", java.nio.file.Path.of("target/orders"),
+                    "file:///target/orders.git", "main");
+            RepositoryRuntimeRegistry repositories = mock(RepositoryRuntimeRegistry.class);
+            GitRepositoryPort git = mock(GitRepositoryPort.class);
+            GitEvidencePublicationStore evidence = spy(new GitEvidencePublicationStore(template));
+            IndexJob job = new IndexJob(IndexJobId.create(), repositoryId, Optional.empty(), IndexJobPhase.RUNNING, true,
+                    Optional.empty(), false, IndexJobOperation.GIT_REFS, Optional.of(GitEvidenceJob.refs()));
+            when(repositories.get(repositoryId)).thenReturn(runtime);
+
+            assertThatThrownBy(() -> new GitEvidenceJobHandler(repositories, git, evidence).prepare(job))
+                    .isInstanceOf(IndexSchemaMaintenanceRequiredException.class)
+                    .hasMessageContaining("conflicting index search.search_generation_fact_lookup");
+
+            verify(evidence, never()).fail(job);
+            verify(git, never()).isCloned(runtime.workingTree());
+            assertThat(template.getCollection("git_evidence_manifests").countDocuments()).isZero();
+        }
+    }
+
+    @Test
     void git_evidence_ready_rejects_missing_tampered_and_wrong_identity_rows_without_publication() {
         try (MongoDBContainer container = MongoSchemaTestSupport.container()) {
             org.springframework.data.mongodb.core.MongoTemplate template = MongoSchemaTestSupport.template(container);
