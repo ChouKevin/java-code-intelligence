@@ -27,7 +27,9 @@ import org.eclipse.jgit.lib.FileMode;
 import org.eclipse.jgit.lib.ObjectLoader;
 import org.eclipse.jgit.diff.DiffEntry;
 import org.eclipse.jgit.diff.DiffFormatter;
+import org.eclipse.jgit.diff.RenameDetector;
 import org.eclipse.jgit.treewalk.TreeWalk;
+import org.eclipse.jgit.treewalk.filter.TreeFilter;
 import org.eclipse.jgit.util.io.DisabledOutputStream;
 import org.eclipse.jgit.revwalk.RevWalk;
 import org.eclipse.jgit.revwalk.RevCommit;
@@ -49,7 +51,6 @@ import java.util.Collection;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.List;
-import java.util.Map;
 import java.time.Instant;
 import java.util.function.Consumer;
 import java.io.ByteArrayOutputStream;
@@ -270,17 +271,13 @@ public class JGitRepositoryAdapter implements GitRepositoryPort {
 
     private List<GitComparisonChange> changes(org.eclipse.jgit.lib.Repository repository, RevCommit previous, RevCommit current) throws IOException {
         List<GitComparisonChange> changes = new java.util.ArrayList<>();
-        PathInventory previousPaths = pathInventory(repository, previous);
-        PathInventory currentPaths = pathInventory(repository, current);
         try (ChunkingOutputStream output = new ChunkingOutputStream(); DiffFormatter formatter = new DiffFormatter(output)) {
             formatter.setRepository(repository);
-            formatter.setDetectRenames(true);
-            formatter.getRenameDetector().setRenameScore(60);
             long ordinal = 0L;
-            for (DiffEntry entry : formatter.scan(previous.getTree(), current.getTree())) {
+            for (DiffEntry entry : diffEntries(repository, previous, current)) {
                 output.reset();
-                SnapshotPath oldPath = comparisonPath(previousPaths, path(entry.getOldPath()), entry.getOldId().toObjectId(), entry.getOldMode());
-                SnapshotPath newPath = comparisonPath(currentPaths, path(entry.getNewPath()), entry.getNewId().toObjectId(), entry.getNewMode());
+                SnapshotPath oldPath = comparisonPath(entry.getOldPath());
+                SnapshotPath newPath = comparisonPath(entry.getNewPath());
                 String diffStatus = !oldPath.supported() || !newPath.supported() ? GitFileContentStatus.UNSUPPORTED_PATH.name() : diffStatus(repository, entry);
                 List<String> patchChunks = List.of();
                 if ("AVAILABLE".equals(diffStatus)) {
@@ -297,6 +294,20 @@ public class JGitRepositoryAdapter implements GitRepositoryPort {
             }
         }
         return List.copyOf(changes);
+    }
+
+    /** Uses JGit's raw TreeWalk only to retain path identity before DiffEntry renders it. */
+    private static List<DiffEntry> diffEntries(org.eclipse.jgit.lib.Repository repository, RevCommit previous, RevCommit current) throws IOException {
+        try (RawPathTreeWalk walk = new RawPathTreeWalk(repository)) {
+            walk.addTree(previous.getTree());
+            walk.addTree(current.getTree());
+            walk.setRecursive(true);
+            walk.setFilter(TreeFilter.ANY_DIFF);
+            RenameDetector detector = new RenameDetector(repository);
+            detector.setRenameScore(60);
+            detector.addAll(DiffEntry.scan(walk));
+            return detector.compute();
+        }
     }
 
     private String diffStatus(org.eclipse.jgit.lib.Repository repository, DiffEntry entry) throws IOException {
@@ -385,34 +396,19 @@ public class JGitRepositoryAdapter implements GitRepositoryPort {
         return new SnapshotPath("\u0000raw-path-hex:" + java.util.HexFormat.of().formatHex(rawPath), false, rawPath.clone());
     }
 
-    private static PathInventory pathInventory(org.eclipse.jgit.lib.Repository repository, RevCommit commit) throws IOException {
-        Map<String, List<TreePath>> paths = new java.util.HashMap<>();
-        try (TreeWalk walk = new TreeWalk(repository)) {
-            walk.addTree(commit.getTree());
-            walk.setRecursive(true);
-            while (walk.next()) {
-                String rendered = walk.getPathString();
-                paths.computeIfAbsent(rendered, ignored -> new java.util.ArrayList<>()).add(new TreePath(walk.getObjectId(0), walk.getFileMode(0),
-                        snapshotPath(walk.getRawPath())));
-            }
-        }
-        return new PathInventory(paths);
-    }
-
-    private static SnapshotPath comparisonPath(PathInventory inventory, String rendered, ObjectId objectId, FileMode mode) {
-        if (rendered.isEmpty()) {
+    private static SnapshotPath comparisonPath(String rendered) {
+        if (DiffEntry.DEV_NULL.equals(rendered)) {
             return new SnapshotPath("", true, new byte[0]);
         }
-        List<TreePath> candidates = inventory.paths().getOrDefault(rendered, List.of()).stream()
-                .filter(candidate -> candidate.objectId().equals(objectId) && candidate.mode().equals(mode)).toList();
-        if (candidates.size() == 1) {
-            return candidates.get(0).path();
+        String marker = "\u0000raw-path-hex:";
+        if (rendered.startsWith(marker)) {
+            try {
+                return snapshotPath(java.util.HexFormat.of().parseHex(rendered.substring(marker.length())));
+            } catch (IllegalArgumentException exception) {
+                throw new RepositoryMutationException("JGit produced an invalid raw path marker", exception);
+            }
         }
-        Optional<TreePath> unsupported = candidates.stream().filter(candidate -> !candidate.path().supported()).findFirst();
-        if (unsupported.isPresent()) {
-            return unsupported.orElseThrow().path();
-        }
-        return new SnapshotPath(rendered, true, rendered.getBytes(StandardCharsets.UTF_8));
+        return snapshotPath(rendered.getBytes(StandardCharsets.UTF_8));
     }
 
     private static boolean containsNul(byte[] bytes) { for (byte value : bytes) { if (value == 0) { return true; } } return false; }
@@ -431,9 +427,16 @@ public class JGitRepositoryAdapter implements GitRepositoryPort {
         @Override public byte[] rawPath() { return rawPath.clone(); }
     }
 
-    private record TreePath(ObjectId objectId, FileMode mode, SnapshotPath path) { }
+    private static final class RawPathTreeWalk extends TreeWalk {
+        private RawPathTreeWalk(org.eclipse.jgit.lib.Repository repository) {
+            super(repository);
+        }
 
-    private record PathInventory(Map<String, List<TreePath>> paths) { }
+        @Override
+        public String getPathString() {
+            return snapshotPath(getRawPath()).value();
+        }
+    }
 
     private boolean exceedsSnapshotLimit(long storedTextBytes, long size) {
         try {
@@ -503,7 +506,6 @@ public class JGitRepositoryAdapter implements GitRepositoryPort {
         }
     }
 
-    private static String path(String path) { return DiffEntry.DEV_NULL.equals(path) ? "" : path; }
 
     private RepositoryRevision resolveReachableCommit(String remoteUrl, ObjectId revision) {
         DfsRepositoryDescription description = new DfsRepositoryDescription("remote-revision-validation");

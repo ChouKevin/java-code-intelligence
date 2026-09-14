@@ -285,6 +285,92 @@ class JGitRepositoryAdapterComparisonTest {
         }
     }
 
+    @Test
+    void preserves_the_supported_raw_identity_when_a_malformed_path_has_the_same_jgit_rendering() throws Exception {
+        try (Git git = Git.init().setDirectory(repositoryDirectory.toFile()).call();
+             ObjectInserter inserter = git.getRepository().newObjectInserter()) {
+            byte[] malformed = new byte[] {(byte) 0xC3, (byte) 0x28};
+            byte[] supported = new byte[] {(byte) 0xC3, (byte) 0x83, (byte) 0x28};
+            ObjectId oldBlob = inserter.insert(Constants.OBJ_BLOB, "before\n".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            ObjectId newBlob = inserter.insert(Constants.OBJ_BLOB, "after\n".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            TreeFormatter previousTree = new TreeFormatter();
+            previousTree.append(malformed, FileMode.REGULAR_FILE, oldBlob);
+            previousTree.append(supported, FileMode.REGULAR_FILE, oldBlob);
+            ObjectId previous = rawCommit(inserter, previousTree.insertTo(inserter), null); // cs-allow: initial commit has no parent
+            TreeFormatter currentTree = new TreeFormatter();
+            currentTree.append(malformed, FileMode.REGULAR_FILE, oldBlob);
+            currentTree.append(supported, FileMode.REGULAR_FILE, newBlob);
+            ObjectId current = rawCommit(inserter, currentTree.insertTo(inserter), previous);
+            inserter.flush();
+
+            GitPreparedComparison comparison = new JGitRepositoryAdapter(new RepositoryProperties()).prepareComparison(repositoryDirectory,
+                    RepositoryRevision.ofSha(previous.name()), RepositoryRevision.ofSha(current.name()));
+
+            assertThat(comparison.changes()).singleElement().satisfies(change -> {
+                assertThat(change.oldRawPath()).containsExactly(supported);
+                assertThat(change.newRawPath()).containsExactly(supported);
+                assertThat(change.diffStatus()).isEqualTo("AVAILABLE");
+                assertThat(change.patch()).contains("before", "after");
+            });
+        }
+    }
+
+    @Test
+    void preserves_the_supported_raw_identity_for_a_delete_with_an_ambiguous_rendering() throws Exception {
+        try (Git git = Git.init().setDirectory(repositoryDirectory.toFile()).call();
+             ObjectInserter inserter = git.getRepository().newObjectInserter()) {
+            byte[] malformed = new byte[] {(byte) 0xC3, (byte) 0x28};
+            byte[] supported = new byte[] {(byte) 0xC3, (byte) 0x83, (byte) 0x28};
+            ObjectId blob = inserter.insert(Constants.OBJ_BLOB, "delete me\n".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            TreeFormatter previousTree = new TreeFormatter();
+            previousTree.append(malformed, FileMode.REGULAR_FILE, blob);
+            previousTree.append(supported, FileMode.REGULAR_FILE, blob);
+            ObjectId previous = rawCommit(inserter, previousTree.insertTo(inserter), null); // cs-allow: initial commit has no parent
+            ObjectId current = rawCommit(inserter, rawTree(inserter, malformed, blob), previous);
+            inserter.flush();
+
+            GitPreparedComparison comparison = new JGitRepositoryAdapter(new RepositoryProperties()).prepareComparison(repositoryDirectory,
+                    RepositoryRevision.ofSha(previous.name()), RepositoryRevision.ofSha(current.name()));
+
+            assertThat(comparison.changes()).singleElement().satisfies(change -> {
+                assertThat(change.kind()).isEqualTo(GitChangeKind.DELETE);
+                assertThat(change.oldRawPath()).containsExactly(supported);
+                assertThat(change.newRawPath()).isEmpty();
+                assertThat(change.diffStatus()).isEqualTo("AVAILABLE");
+            });
+        }
+    }
+
+    @Test
+    void preserves_raw_identity_for_a_rename_when_an_unchanged_malformed_path_has_the_same_rendering() throws Exception {
+        try (Git git = Git.init().setDirectory(repositoryDirectory.toFile()).call();
+             ObjectInserter inserter = git.getRepository().newObjectInserter()) {
+            byte[] malformed = new byte[] {(byte) 0xC3, (byte) 0x28};
+            byte[] source = new byte[] {(byte) 0xC3, (byte) 0x83, (byte) 0x28};
+            byte[] target = new byte[] {(byte) 0xC3, (byte) 0x83, (byte) 0x29};
+            ObjectId blob = inserter.insert(Constants.OBJ_BLOB, "rename me\n".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            TreeFormatter previousTree = new TreeFormatter();
+            previousTree.append(malformed, FileMode.REGULAR_FILE, blob);
+            previousTree.append(source, FileMode.REGULAR_FILE, blob);
+            ObjectId previous = rawCommit(inserter, previousTree.insertTo(inserter), null); // cs-allow: initial commit has no parent
+            TreeFormatter currentTree = new TreeFormatter();
+            currentTree.append(malformed, FileMode.REGULAR_FILE, blob);
+            currentTree.append(target, FileMode.REGULAR_FILE, blob);
+            ObjectId current = rawCommit(inserter, currentTree.insertTo(inserter), previous);
+            inserter.flush();
+
+            GitPreparedComparison comparison = new JGitRepositoryAdapter(new RepositoryProperties()).prepareComparison(repositoryDirectory,
+                    RepositoryRevision.ofSha(previous.name()), RepositoryRevision.ofSha(current.name()));
+
+            assertThat(comparison.changes()).singleElement().satisfies(change -> {
+                assertThat(change.kind()).isEqualTo(GitChangeKind.RENAME);
+                assertThat(change.oldRawPath()).containsExactly(source);
+                assertThat(change.newRawPath()).containsExactly(target);
+                assertThat(change.diffStatus()).isEqualTo("AVAILABLE");
+            });
+        }
+    }
+
     private static ObjectId rawTree(ObjectInserter inserter, byte[] rawPath, ObjectId blob) throws Exception {
         TreeFormatter tree = new TreeFormatter();
         tree.append(rawPath, FileMode.REGULAR_FILE, blob);

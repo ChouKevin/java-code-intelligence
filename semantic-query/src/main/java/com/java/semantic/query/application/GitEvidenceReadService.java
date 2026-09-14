@@ -1,13 +1,17 @@
 package com.java.semantic.query.application;
 
 import com.java.semantic.model.git.GitEvidenceId;
+import com.java.semantic.model.git.GitChangeKind;
+import com.java.semantic.model.git.GitFileContentStatus;
 import com.java.semantic.model.index.IndexCollections;
 import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.query.config.ConfiguredReadPolicy;
+import com.mongodb.client.model.CountOptions;
 import com.mongodb.client.model.Filters;
 import com.mongodb.client.model.Sorts;
 import com.mongodb.MongoException;
 import org.bson.Document;
+import org.bson.types.Binary;
 import org.springframework.dao.DataAccessException;
 import org.springframework.data.mongodb.core.MongoTemplate;
 
@@ -16,8 +20,10 @@ import java.util.concurrent.TimeUnit;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.nio.charset.StandardCharsets;
+import java.nio.charset.CharacterCodingException;
+import java.nio.charset.CodingErrorAction;
+import java.util.Arrays;
 import java.util.Base64;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -98,11 +104,8 @@ public final class GitEvidenceReadService {
             if (!required.previous().equals(requiredText(manifest, "previous")) || !required.current().equals(requiredText(manifest, "current"))) {
                 throw new IllegalArgumentException("comparison endpoints do not match the requested revisions");
             }
-            List<SemanticQueryContract.GitChangeItem> allChanges = validateComparisonChanges(repositoryId, required.comparisonId(), manifest);
-            long total = allChanges.size();
-            int pageStart = Math.min(required.offset(), allChanges.size());
-            int pageEnd = Math.min(pageStart + required.limit(), allChanges.size());
-            List<SemanticQueryContract.GitChangeItem> changes = List.copyOf(allChanges.subList(pageStart, pageEnd));
+            long total = validateComparisonLayout(repositoryId, required.comparisonId(), manifest);
+            List<SemanticQueryContract.GitChangeItem> changes = comparisonPage(repositoryId, required.comparisonId(), required.offset(), required.limit());
             return new SemanticQueryContract.GitComparisonCollection(repositoryId.value(), required.comparisonId(), required.previous(), required.current(),
                     requiredText(manifest, "previousSnapshotId"), requiredText(manifest, "currentSnapshotId"), requiredText(manifest, "ancestry"),
                     List.copyOf(changes), page(required.offset(), required.limit(), changes.size(), total));
@@ -124,13 +127,13 @@ public final class GitEvidenceReadService {
             if (!required.previous().equals(requiredText(manifest, "previous")) || !required.current().equals(requiredText(manifest, "current"))) {
                 throw new IllegalArgumentException("comparison endpoints do not match the requested revisions");
             }
-            List<SemanticQueryContract.GitChangeItem> allChanges = validateComparisonChanges(repositoryId, required.comparisonId(), manifest);
+            long total = validateComparisonLayout(repositoryId, required.comparisonId(), manifest);
             Document row = template.getCollection(IndexCollections.GIT_COMPARISON_CHANGES).find(Filters.and(Filters.eq("repoId", repositoryId.value()),
                     Filters.eq("comparisonId", required.comparisonId()), Filters.eq("changeId", required.changeId()))).maxTime(storageTimeout.toMillis(), TimeUnit.MILLISECONDS).first();
             if (Objects.isNull(row)) {
                 throw new IllegalArgumentException("change does not belong to the comparison");
             }
-            if (allChanges.stream().noneMatch(change -> change.changeId().equals(required.changeId()))) {
+            if (changeCount(repositoryId, required.comparisonId(), required.changeId()) != 1L || requiredLong(row, "ordinal") >= total) {
                 throw new IndexContractMismatchException();
             }
             long ordinal = required.cursor().map(cursor -> decodeCursor(cursor, repositoryId, required.comparisonId(), required.previous(), required.current(),
@@ -177,54 +180,38 @@ public final class GitEvidenceReadService {
         }
     }
 
-    private List<SemanticQueryContract.GitChangeItem> validateComparisonChanges(RepositoryId repositoryId, String comparisonId, Document manifest) {
+    private long validateComparisonLayout(RepositoryId repositoryId, String comparisonId, Document manifest) {
         long expectedTotal = requiredLong(manifest, "total");
+        long actualTotal = comparisonCount(repositoryId, comparisonId);
+        if (actualTotal != expectedTotal) {
+            throw new IndexContractMismatchException();
+        }
+        if (expectedTotal == 0L) {
+            return 0L;
+        }
+        Document first = comparisonBoundary(repositoryId, comparisonId, Sorts.ascending("ordinal"));
+        Document last = comparisonBoundary(repositoryId, comparisonId, Sorts.descending("ordinal"));
+        if (requiredLong(first, "ordinal") != 0L || requiredLong(last, "ordinal") != expectedTotal - 1L) {
+            throw new IndexContractMismatchException();
+        }
+        return expectedTotal;
+    }
+
+    private List<SemanticQueryContract.GitChangeItem> comparisonPage(RepositoryId repositoryId, String comparisonId, int offset, int limit) {
         List<SemanticQueryContract.GitChangeItem> changes = new ArrayList<>();
-        HashSet<String> identifiers = new HashSet<>();
-        long ordinal = 0L;
-        for (Document row : template.getCollection(IndexCollections.GIT_COMPARISON_CHANGES).find(Filters.and(
-                Filters.eq("repoId", repositoryId.value()), Filters.eq("comparisonId", comparisonId))).sort(Sorts.ascending("ordinal"))
+        long expectedOrdinal = offset;
+        for (Document row : template.getCollection(IndexCollections.GIT_COMPARISON_CHANGES).find(Filters.and(Filters.eq("repoId", repositoryId.value()),
+                Filters.eq("comparisonId", comparisonId))).sort(Sorts.ascending("ordinal")).skip(offset).limit(limit)
                 .maxTime(storageTimeout.toMillis(), TimeUnit.MILLISECONDS)) {
-            Number actualOrdinal = row.get("ordinal", Number.class);
-            if (Objects.isNull(actualOrdinal) || actualOrdinal.longValue() != ordinal || !repositoryId.value().equals(requiredText(row, "repoId"))
+            SemanticQueryContract.GitChangeItem change = change(row);
+            if (requiredLong(row, "ordinal") != expectedOrdinal || !repositoryId.value().equals(requiredText(row, "repoId"))
                     || !comparisonId.equals(requiredText(row, "comparisonId"))) {
                 throw new IndexContractMismatchException();
             }
-            SemanticQueryContract.GitChangeItem change = change(row);
-            if (!identifiers.add(change.changeId())) {
-                throw new IndexContractMismatchException();
-            }
-            validatePatchRows(repositoryId, comparisonId, change.changeId(), row);
             changes.add(change);
-            ordinal++;
-        }
-        if (ordinal != expectedTotal) {
-            throw new IndexContractMismatchException();
+            expectedOrdinal++;
         }
         return List.copyOf(changes);
-    }
-
-    private void validatePatchRows(RepositoryId repositoryId, String comparisonId, String changeId, Document change) {
-        long expectedChunks = requiredLong(change, "patchChunkCount");
-        String status = requiredText(change, "diffStatus");
-        long actualChunks = chunkCount(repositoryId, comparisonId, changeId);
-        if (!"AVAILABLE".equals(status)) {
-            if (expectedChunks != 0L || actualChunks != 0L) {
-                throw new IndexContractMismatchException();
-            }
-            return;
-        }
-        if (expectedChunks == 0L || actualChunks != expectedChunks || !contiguousPatchOrdinals(repositoryId, comparisonId, changeId, expectedChunks)) {
-            throw new IndexContractMismatchException();
-        }
-        for (Document chunk : template.getCollection(IndexCollections.GIT_COMPARISON_PATCHES).find(Filters.and(Filters.eq("repoId", repositoryId.value()),
-                Filters.eq("comparisonId", comparisonId), Filters.eq("changeId", changeId))).sort(Sorts.ascending("ordinal"))
-                .maxTime(storageTimeout.toMillis(), TimeUnit.MILLISECONDS)) {
-            String patch = requiredString(chunk, "patch");
-            if (patch.isEmpty() || patch.getBytes(StandardCharsets.UTF_8).length > 64 * 1024) {
-                throw new IndexContractMismatchException();
-            }
-        }
     }
 
     private PatchPage patchPage(RepositoryId repositoryId, String comparisonId, String changeId, Document change, long ordinal, boolean hasCursor) {
@@ -237,7 +224,7 @@ public final class GitEvidenceReadService {
             return new PatchPage("", false);
         }
         if (expectedChunks == 0L || ordinal >= expectedChunks || chunkCount(repositoryId, comparisonId, changeId) != expectedChunks
-                || !contiguousPatchOrdinals(repositoryId, comparisonId, changeId, expectedChunks)) {
+                || !validPatchBoundaries(repositoryId, comparisonId, changeId, expectedChunks)) {
             throw new IndexContractMismatchException();
         }
         Document patch = template.getCollection(IndexCollections.GIT_COMPARISON_PATCHES).find(Filters.and(Filters.eq("repoId", repositoryId.value()),
@@ -258,26 +245,130 @@ public final class GitEvidenceReadService {
                 Filters.eq("comparisonId", comparisonId), Filters.eq("changeId", changeId)));
     }
 
-    private boolean contiguousPatchOrdinals(RepositoryId repositoryId, String comparisonId, String changeId, long expectedChunks) {
-        long ordinal = 0L;
-        for (Document chunk : template.getCollection(IndexCollections.GIT_COMPARISON_PATCHES).find(Filters.and(Filters.eq("repoId", repositoryId.value()),
-                Filters.eq("comparisonId", comparisonId), Filters.eq("changeId", changeId))).projection(new Document("ordinal", 1))
-                .sort(Sorts.ascending("ordinal")).maxTime(storageTimeout.toMillis(), TimeUnit.MILLISECONDS)) {
-            Number actual = chunk.get("ordinal", Number.class);
-            if (Objects.isNull(actual) || actual.longValue() != ordinal) {
-                return false;
-            }
-            ordinal++;
+    private long comparisonCount(RepositoryId repositoryId, String comparisonId) {
+        return template.getCollection(IndexCollections.GIT_COMPARISON_CHANGES).countDocuments(Filters.and(Filters.eq("repoId", repositoryId.value()),
+                Filters.eq("comparisonId", comparisonId)), new CountOptions().maxTime(storageTimeout.toMillis(), TimeUnit.MILLISECONDS));
+    }
+
+    private long changeCount(RepositoryId repositoryId, String comparisonId, String changeId) {
+        return template.getCollection(IndexCollections.GIT_COMPARISON_CHANGES).countDocuments(Filters.and(Filters.eq("repoId", repositoryId.value()),
+                Filters.eq("comparisonId", comparisonId), Filters.eq("changeId", changeId)), new CountOptions().maxTime(storageTimeout.toMillis(), TimeUnit.MILLISECONDS));
+    }
+
+    private Document comparisonBoundary(RepositoryId repositoryId, String comparisonId, org.bson.conversions.Bson sort) {
+        Document boundary = template.getCollection(IndexCollections.GIT_COMPARISON_CHANGES).find(Filters.and(Filters.eq("repoId", repositoryId.value()),
+                Filters.eq("comparisonId", comparisonId))).projection(new Document("ordinal", 1)).sort(sort).limit(1)
+                .maxTime(storageTimeout.toMillis(), TimeUnit.MILLISECONDS).first();
+        if (Objects.isNull(boundary)) {
+            throw new IndexContractMismatchException();
         }
-        return ordinal == expectedChunks;
+        return boundary;
+    }
+
+    private Document patchBoundary(RepositoryId repositoryId, String comparisonId, String changeId, org.bson.conversions.Bson sort) {
+        Document boundary = template.getCollection(IndexCollections.GIT_COMPARISON_PATCHES).find(Filters.and(Filters.eq("repoId", repositoryId.value()),
+                Filters.eq("comparisonId", comparisonId), Filters.eq("changeId", changeId))).projection(new Document("ordinal", 1)).sort(sort).limit(1)
+                .maxTime(storageTimeout.toMillis(), TimeUnit.MILLISECONDS).first();
+        if (Objects.isNull(boundary)) {
+            throw new IndexContractMismatchException();
+        }
+        return boundary;
+    }
+
+    private boolean validPatchBoundaries(RepositoryId repositoryId, String comparisonId, String changeId, long expectedChunks) {
+        Document first = patchBoundary(repositoryId, comparisonId, changeId, Sorts.ascending("ordinal"));
+        Document last = patchBoundary(repositoryId, comparisonId, changeId, Sorts.descending("ordinal"));
+        return requiredLong(first, "ordinal") == 0L && requiredLong(last, "ordinal") == expectedChunks - 1L;
     }
 
     private record PatchPage(String text, boolean hasNext) { }
 
     private static SemanticQueryContract.GitChangeItem change(Document row) {
-        return new SemanticQueryContract.GitChangeItem(requiredText(row, "changeId"), requiredText(row, "kind"), optionalString(row, "oldPath"),
-                optionalString(row, "newPath"), optionalString(row, "oldMode"), optionalString(row, "newMode"), optionalString(row, "oldBlobId"),
-                optionalString(row, "newBlobId"), requiredText(row, "diffStatus"));
+        String kindText = requiredText(row, "kind");
+        GitChangeKind kind = enumValue(GitChangeKind.class, kindText);
+        String oldPath = requiredString(row, "oldPath");
+        String newPath = requiredString(row, "newPath");
+        byte[] oldRawPath = requiredBytes(row, "oldRawPath");
+        byte[] newRawPath = requiredBytes(row, "newRawPath");
+        String oldMode = requiredString(row, "oldMode");
+        String newMode = requiredString(row, "newMode");
+        String oldBlobId = requiredString(row, "oldBlobId");
+        String newBlobId = requiredString(row, "newBlobId");
+        String status = requiredText(row, "diffStatus");
+        validateStatus(status);
+        validateEndpoint(oldPath, oldRawPath, requiredString(row, "oldPathKey"), oldMode, oldBlobId);
+        validateEndpoint(newPath, newRawPath, requiredString(row, "newPathKey"), newMode, newBlobId);
+        validateChangeCombination(kind, oldPath, oldRawPath, oldMode, oldBlobId, newPath, newRawPath, newMode, newBlobId);
+        validatePatchMetadata(status, requiredLong(row, "patchChunkCount"));
+        return new SemanticQueryContract.GitChangeItem(requiredText(row, "changeId"), kind.name(), oldPath, newPath, oldMode, newMode, oldBlobId, newBlobId, status);
+    }
+
+    private static void validateStatus(String status) {
+        if ("AVAILABLE".equals(status)) {
+            return;
+        }
+        GitFileContentStatus contentStatus = enumValue(GitFileContentStatus.class, status);
+        if (contentStatus == GitFileContentStatus.TEXT) {
+            throw new IndexContractMismatchException();
+        }
+    }
+
+    private static void validatePatchMetadata(String status, long patchChunkCount) {
+        if (("AVAILABLE".equals(status) && patchChunkCount == 0L) || (!"AVAILABLE".equals(status) && patchChunkCount != 0L)) {
+            throw new IndexContractMismatchException();
+        }
+    }
+
+    private static void validateEndpoint(String path, byte[] rawPath, String pathKey, String mode, String blobId) {
+        if (path.isEmpty()) {
+            if (rawPath.length != 0 || !pathKey.isEmpty() || !mode.isEmpty() || !blobId.isEmpty()) {
+                throw new IndexContractMismatchException();
+            }
+            return;
+        }
+        if (rawPath.length == 0 || !pathKey.equals(java.util.HexFormat.of().formatHex(rawPath)) || !path.equals(displayPath(rawPath))
+                || !mode.matches("[0-7]{6}") || !blobId.matches("[0-9a-f]{40}")) {
+            throw new IndexContractMismatchException();
+        }
+    }
+
+    private static void validateChangeCombination(GitChangeKind kind, String oldPath, byte[] oldRawPath, String oldMode, String oldBlobId,
+                                                  String newPath, byte[] newRawPath, String newMode, String newBlobId) {
+        boolean oldPresent = !oldPath.isEmpty();
+        boolean newPresent = !newPath.isEmpty();
+        if ((kind == GitChangeKind.ADD && (oldPresent || oldRawPath.length != 0 || !oldMode.isEmpty() || !oldBlobId.isEmpty() || !newPresent))
+                || (kind == GitChangeKind.DELETE && (!oldPresent || newPresent || newRawPath.length != 0 || !newMode.isEmpty() || !newBlobId.isEmpty()))
+                || ((kind == GitChangeKind.MODIFY || kind == GitChangeKind.MODE || kind == GitChangeKind.RENAME) && (!oldPresent || !newPresent))) {
+            throw new IndexContractMismatchException();
+        }
+    }
+
+    private static String displayPath(byte[] rawPath) {
+        try {
+            return StandardCharsets.UTF_8.newDecoder().onMalformedInput(CodingErrorAction.REPORT).onUnmappableCharacter(CodingErrorAction.REPORT)
+                    .decode(java.nio.ByteBuffer.wrap(rawPath)).toString();
+        } catch (CharacterCodingException exception) {
+            return "\u0000raw-path-hex:" + java.util.HexFormat.of().formatHex(rawPath);
+        }
+    }
+
+    private static byte[] requiredBytes(Document document, String field) {
+        Object value = document.get(field);
+        if (value instanceof Binary binary) {
+            return binary.getData();
+        }
+        if (value instanceof byte[] bytes) {
+            return Arrays.copyOf(bytes, bytes.length);
+        }
+        throw new IndexContractMismatchException();
+    }
+
+    private static <E extends Enum<E>> E enumValue(Class<E> type, String value) {
+        try {
+            return Enum.valueOf(type, value);
+        } catch (IllegalArgumentException exception) {
+            throw new IndexContractMismatchException();
+        }
     }
 
     private static String encodeCursor(RepositoryId repositoryId, String comparisonId, String previous, String current, String changeId, long ordinal) {

@@ -2,7 +2,12 @@ package com.java.semantic.query.application;
 
 import com.java.semantic.query.config.ConfiguredReadPolicy;
 import com.java.semantic.query.config.ReadPolicyProperties;
+import com.mongodb.ConnectionString;
+import com.mongodb.MongoClientSettings;
+import com.mongodb.client.MongoClient;
 import com.mongodb.client.MongoClients;
+import com.mongodb.event.CommandListener;
+import com.mongodb.event.CommandStartedEvent;
 import org.bson.Document;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -14,6 +19,7 @@ import java.time.Duration;
 import java.util.Date;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -170,7 +176,9 @@ class GitEvidenceReadServiceIT {
             template.getCollection("git_comparison_changes").insertOne(new Document("repoId", "orders").append("comparisonId", COMPARISON_ID)
                     .append("ordinal", 1L).append("changeId", "change-1").append("kind", "MODIFY").append("oldPath", "OTHER.md")
                     .append("newPath", "OTHER.md").append("oldMode", "100644").append("newMode", "100644").append("oldBlobId", "5".repeat(40))
-                    .append("newBlobId", "6".repeat(40)).append("diffStatus", "AVAILABLE").append("patchChunkCount", 2L));
+                    .append("newBlobId", "6".repeat(40)).append("diffStatus", "AVAILABLE").append("patchChunkCount", 2L)
+                    .append("oldRawPath", rawPath("OTHER.md")).append("newRawPath", rawPath("OTHER.md"))
+                    .append("oldPathKey", rawPathKey("OTHER.md")).append("newPathKey", rawPathKey("OTHER.md")));
             template.getCollection("git_comparison_patches").insertMany(List.of(
                     new Document("repoId", "orders").append("comparisonId", COMPARISON_ID).append("changeId", "change-1").append("ordinal", 0L).append("patch", "other-first\n"),
                     new Document("repoId", "orders").append("comparisonId", COMPARISON_ID).append("changeId", "change-1").append("ordinal", 1L).append("patch", "other-second\n")));
@@ -184,6 +192,88 @@ class GitEvidenceReadServiceIT {
             assertThatThrownBy(() -> service.fileDiff(new SemanticQueryContract.GitFileDiffRequest("orders", COMPARISON_ID, REVISION,
                     "2".repeat(40), "change-0", Optional.of("x".repeat(2049))))).isInstanceOf(IllegalArgumentException.class)
                     .hasMessageContaining("cursor");
+        }
+    }
+
+    @Test
+    void rejects_a_ready_comparison_change_with_an_unknown_kind() {
+        try (MongoDBContainer container = new MongoDBContainer(DockerImageName.parse("mongo:8.0.4"))) {
+            container.start();
+            MongoTemplate template = new MongoTemplate(MongoClients.create(container.getConnectionString()), "git_comparison_invalid_kind");
+            seedRepository(template, "orders");
+            seedComparison(template, "orders", "READY");
+            template.getCollection("git_comparison_changes").updateOne(new Document("comparisonId", COMPARISON_ID)
+                    .append("changeId", "change-0"), new Document("$set", new Document("kind", "BROKEN")));
+
+            assertThatThrownBy(() -> service(template, List.of("orders")).comparisons(new SemanticQueryContract.GitComparisonRequest("orders",
+                    COMPARISON_ID, REVISION, "2".repeat(40), 0, 20))).isInstanceOf(IndexContractMismatchException.class);
+        }
+    }
+
+    @Test
+    void rejects_a_ready_comparison_change_with_an_invalid_status_or_endpoint_combination() {
+        try (MongoDBContainer container = new MongoDBContainer(DockerImageName.parse("mongo:8.0.4"))) {
+            container.start();
+            MongoTemplate template = new MongoTemplate(MongoClients.create(container.getConnectionString()), "git_comparison_invalid_shape");
+            seedRepository(template, "orders");
+            seedComparison(template, "orders", "READY");
+            template.getCollection("git_comparison_changes").updateOne(new Document("comparisonId", COMPARISON_ID)
+                    .append("changeId", "change-0"), new Document("$set", new Document("diffStatus", "BROKEN")));
+
+            assertThatThrownBy(() -> service(template, List.of("orders")).comparisons(new SemanticQueryContract.GitComparisonRequest("orders",
+                    COMPARISON_ID, REVISION, "2".repeat(40), 0, 20))).isInstanceOf(IndexContractMismatchException.class);
+
+            template.getCollection("git_comparison_changes").updateOne(new Document("comparisonId", COMPARISON_ID)
+                    .append("changeId", "change-0"), new Document("$set", new Document("diffStatus", "AVAILABLE").append("oldPath", "")));
+
+            assertThatThrownBy(() -> service(template, List.of("orders")).comparisons(new SemanticQueryContract.GitComparisonRequest("orders",
+                    COMPARISON_ID, REVISION, "2".repeat(40), 0, 20))).isInstanceOf(IndexContractMismatchException.class);
+        }
+    }
+
+    @Test
+    void comparison_page_does_not_read_patch_rows_for_changes_outside_the_requested_page() {
+        try (MongoDBContainer container = new MongoDBContainer(DockerImageName.parse("mongo:8.0.4"))) {
+            container.start();
+            MongoCommandRecorder recorder = new MongoCommandRecorder();
+            MongoClientSettings settings = MongoClientSettings.builder().applyConnectionString(new ConnectionString(container.getConnectionString()))
+                    .addCommandListener(recorder).build();
+            try (MongoClient client = MongoClients.create(settings)) {
+                MongoTemplate template = new MongoTemplate(client, "git_comparison_page_bound");
+                seedRepository(template, "orders");
+                seedComparison(template, "orders", "READY");
+                seedAdditionalChanges(template, 40);
+                int patchReadsBefore = recorder.patchReadCommands();
+
+                SemanticQueryContract.GitComparisonCollection page = service(template, List.of("orders")).comparisons(
+                        new SemanticQueryContract.GitComparisonRequest("orders", COMPARISON_ID, REVISION, "2".repeat(40), 0, 1));
+
+                assertThat(page.items()).hasSize(1);
+                assertThat(recorder.patchReadCommands() - patchReadsBefore).isZero();
+            }
+        }
+    }
+
+    @Test
+    void file_diff_reads_patch_rows_only_for_the_requested_change() {
+        try (MongoDBContainer container = new MongoDBContainer(DockerImageName.parse("mongo:8.0.4"))) {
+            container.start();
+            MongoCommandRecorder recorder = new MongoCommandRecorder();
+            MongoClientSettings settings = MongoClientSettings.builder().applyConnectionString(new ConnectionString(container.getConnectionString()))
+                    .addCommandListener(recorder).build();
+            try (MongoClient client = MongoClients.create(settings)) {
+                MongoTemplate template = new MongoTemplate(client, "git_comparison_diff_bound");
+                seedRepository(template, "orders");
+                seedComparison(template, "orders", "READY");
+                seedAdditionalChanges(template, 40);
+                int patchReadsBefore = recorder.patchReadCommands();
+
+                SemanticQueryContract.GitFileDiffResult result = service(template, List.of("orders")).fileDiff(
+                        new SemanticQueryContract.GitFileDiffRequest("orders", COMPARISON_ID, REVISION, "2".repeat(40), "change-0", Optional.empty()));
+
+                assertThat(result.patch()).isEqualTo("first\n");
+                assertThat(recorder.patchReadCommands() - patchReadsBefore).isLessThanOrEqualTo(4);
+            }
         }
     }
 
@@ -237,9 +327,52 @@ class GitEvidenceReadServiceIT {
         template.getCollection("git_comparison_changes").insertOne(new Document("repoId", repositoryId).append("comparisonId", COMPARISON_ID)
                 .append("ordinal", 0L).append("changeId", "change-0").append("kind", "MODIFY").append("oldPath", "README.md")
                 .append("newPath", "README.md").append("oldMode", "100644").append("newMode", "100644").append("oldBlobId", "3".repeat(40))
-                .append("newBlobId", "4".repeat(40)).append("diffStatus", "AVAILABLE").append("patchChunkCount", 2L));
+                .append("newBlobId", "4".repeat(40)).append("diffStatus", "AVAILABLE").append("patchChunkCount", 2L)
+                .append("oldRawPath", rawPath("README.md")).append("newRawPath", rawPath("README.md"))
+                .append("oldPathKey", rawPathKey("README.md")).append("newPathKey", rawPathKey("README.md")));
         template.getCollection("git_comparison_patches").insertMany(List.of(
                 new Document("repoId", repositoryId).append("comparisonId", COMPARISON_ID).append("changeId", "change-0").append("ordinal", 0L).append("patch", "first\n"),
                 new Document("repoId", repositoryId).append("comparisonId", COMPARISON_ID).append("changeId", "change-0").append("ordinal", 1L).append("patch", "second\n")));
+    }
+
+    private static void seedAdditionalChanges(MongoTemplate template, int count) {
+        template.getCollection("git_evidence_manifests").updateOne(new Document("evidenceId", COMPARISON_ID),
+                new Document("$set", new Document("total", (long) count + 1L)));
+        for (int ordinal = 1; ordinal <= count; ordinal++) {
+            String changeId = "change-" + ordinal;
+            template.getCollection("git_comparison_changes").insertOne(new Document("repoId", "orders").append("comparisonId", COMPARISON_ID)
+                    .append("ordinal", (long) ordinal).append("changeId", changeId).append("kind", "MODIFY").append("oldPath", "file-" + ordinal)
+                    .append("newPath", "file-" + ordinal).append("oldMode", "100644").append("newMode", "100644").append("oldBlobId", "5".repeat(40))
+                    .append("newBlobId", "6".repeat(40)).append("diffStatus", "AVAILABLE").append("patchChunkCount", 1L)
+                    .append("oldRawPath", rawPath("file-" + ordinal)).append("newRawPath", rawPath("file-" + ordinal))
+                    .append("oldPathKey", rawPathKey("file-" + ordinal)).append("newPathKey", rawPathKey("file-" + ordinal)));
+            template.getCollection("git_comparison_patches").insertOne(new Document("repoId", "orders").append("comparisonId", COMPARISON_ID)
+                    .append("changeId", changeId).append("ordinal", 0L).append("patch", "patch-" + ordinal + "\n"));
+        }
+    }
+
+    private static byte[] rawPath(String path) {
+        return path.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+    }
+
+    private static String rawPathKey(String path) {
+        return java.util.HexFormat.of().formatHex(rawPath(path));
+    }
+
+    private static final class MongoCommandRecorder implements CommandListener {
+        private final AtomicInteger patchReadCommands = new AtomicInteger();
+
+        @Override
+        public void commandStarted(CommandStartedEvent event) {
+            String collection = event.getCommand().containsKey("find") ? event.getCommand().getString("find").getValue()
+                    : event.getCommand().containsKey("aggregate") ? event.getCommand().getString("aggregate").getValue() : "";
+            if (collection.equals("git_comparison_patches")) {
+                patchReadCommands.incrementAndGet();
+            }
+        }
+
+        private int patchReadCommands() {
+            return patchReadCommands.get();
+        }
     }
 }
