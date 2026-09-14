@@ -130,7 +130,7 @@ public final class GitEvidenceReadService {
             Document row = template.getCollection(IndexCollections.GIT_COMPARISON_CHANGES).find(Filters.and(Filters.eq("repoId", repositoryId.value()),
                     Filters.eq("comparisonId", required.comparisonId()), Filters.eq("changeId", required.changeId()))).maxTime(storageTimeout.toMillis(), TimeUnit.MILLISECONDS).first();
             if (Objects.isNull(row)) {
-                throw new IllegalArgumentException("change does not belong to the comparison");
+                throw new IndexContractMismatchException();
             }
             SemanticQueryContract.GitChangeItem change = change(row);
             if (!required.changeId().equals(change.changeId()) || requiredLong(row, "ordinal") >= total) {

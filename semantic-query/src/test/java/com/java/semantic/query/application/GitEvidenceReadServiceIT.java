@@ -285,6 +285,27 @@ class GitEvidenceReadServiceIT {
     }
 
     @Test
+    void treats_a_removed_previously_published_change_as_unavailable_evidence() {
+        try (MongoDBContainer container = new MongoDBContainer(DockerImageName.parse("mongo:8.0.4"))) {
+            container.start();
+            MongoTemplate template = new MongoTemplate(MongoClients.create(container.getConnectionString()), "git_comparison_removed_change");
+            seedRepository(template, "orders");
+            seedComparison(template, "orders", "READY");
+            template.getCollection("git_comparison_changes").updateOne(new Document("comparisonId", COMPARISON_ID)
+                    .append("changeId", "change-0"), new Document("$set", new Document("changeId", "c-0")));
+            GitEvidenceReadService service = service(template, List.of("orders"));
+            SemanticQueryContract.GitComparisonCollection comparison = service.comparisons(new SemanticQueryContract.GitComparisonRequest("orders",
+                    COMPARISON_ID, REVISION, "2".repeat(40), 0, 1));
+            String publishedChangeId = comparison.items().getFirst().changeId();
+            template.getCollection("git_comparison_changes").deleteOne(new Document("comparisonId", COMPARISON_ID)
+                    .append("changeId", publishedChangeId));
+
+            assertThatThrownBy(() -> service.fileDiff(new SemanticQueryContract.GitFileDiffRequest("orders", COMPARISON_ID, REVISION,
+                    "2".repeat(40), publishedChangeId, Optional.empty()))).isInstanceOf(IndexContractMismatchException.class);
+        }
+    }
+
+    @Test
     void comparison_page_does_not_read_patch_rows_for_changes_outside_the_requested_page() {
         try (MongoDBContainer container = new MongoDBContainer(DockerImageName.parse("mongo:8.0.4"))) {
             container.start();
