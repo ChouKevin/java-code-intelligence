@@ -9,7 +9,17 @@ import com.java.semantic.model.index.IndexCollections;
 import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.model.repository.RepositoryRevision;
 import com.java.semantic.query.application.GitEvidenceReadService;
+import com.java.semantic.query.application.CodeFactReadService;
+import com.java.semantic.query.application.CodeFactSearchService;
+import com.java.semantic.query.application.CurrentRepositoryQueryService;
+import com.java.semantic.query.application.PublishedDiscoveryQueryService;
+import com.java.semantic.query.application.PublishedEntryPointQueryService;
+import com.java.semantic.query.application.PublishedRelationQueryService;
 import com.java.semantic.query.application.SemanticQueryContract;
+import com.java.semantic.query.application.SemanticQueryFacade;
+import com.java.semantic.query.application.SourceSliceService;
+import com.java.semantic.api.QueryApiExceptionHandler;
+import com.java.semantic.api.SemanticQueryController;
 import com.java.semantic.query.config.ConfiguredReadPolicy;
 import com.java.semantic.query.config.ReadPolicyProperties;
 import com.java.semantic.repository.adapter.jgit.JGitRepositoryAdapter;
@@ -24,6 +34,8 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.springframework.data.mongodb.core.MongoTemplate;
+import org.springframework.http.MediaType;
+import org.springframework.test.web.servlet.MockMvc;
 import org.testcontainers.mongodb.MongoDBContainer;
 
 import java.nio.file.Files;
@@ -35,6 +47,10 @@ import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+import static org.springframework.test.web.servlet.setup.MockMvcBuilders.standaloneSetup;
 
 /** A real JGit/Mongo slice of the normal dispatcher, reusable by later transport journeys. */
 @Tag("mongo-it")
@@ -77,6 +93,10 @@ class DispatchedGitEvidenceIT {
             SemanticQueryContract.GitBranchCollection catalog = reader.branches(
                     new SemanticQueryContract.GitBranchRequest("orders", Optional.of(catalogId), 0, 20));
             assertThat(catalog.items()).extracting(SemanticQueryContract.GitBranchItem::head).containsExactly(head.value());
+            httpReader(reader).perform(post("/api/v1/git/branches").contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"repositoryId\":\"orders\",\"catalogId\":\"" + catalogId + "\",\"offset\":0,\"limit\":20}"))
+                    .andExpect(status().isOk()).andExpect(jsonPath("$.catalogId").value(catalogId))
+                    .andExpect(jsonPath("$.items[0].head").value(head.value()));
 
             IndexJob historyJob = requests.prepareGitHistory(RepositoryId.of("orders"), catalogId, "main", head.value());
             dispatcher.dispatchOnce();
@@ -113,6 +133,13 @@ class DispatchedGitEvidenceIT {
     private static GitEvidenceReadService reader(MongoTemplate template) {
         ReadPolicyProperties policy = new ReadPolicyProperties(List.of("orders"), List.of(), List.of(), List.of(), List.of());
         return new GitEvidenceReadService(template, new ConfiguredReadPolicy(policy), Duration.ofSeconds(2));
+    }
+
+    private static MockMvc httpReader(GitEvidenceReadService reader) {
+        SemanticQueryFacade facade = new SemanticQueryFacade(mock(CurrentRepositoryQueryService.class), mock(CodeFactSearchService.class),
+                mock(SourceSliceService.class), mock(CodeFactReadService.class), mock(PublishedDiscoveryQueryService.class),
+                mock(PublishedEntryPointQueryService.class), mock(PublishedRelationQueryService.class), reader);
+        return standaloneSetup(new SemanticQueryController(facade)).setControllerAdvice(new QueryApiExceptionHandler()).build();
     }
 
     private static RepositoryRevision commit(Git seed, Path seedPath, String subject, String source) throws Exception {
