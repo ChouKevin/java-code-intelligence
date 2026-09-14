@@ -179,6 +179,26 @@ class GitEvidenceReadServiceIT {
     }
 
     @Test
+    void canonicalizes_a_non_eof_chunk_boundary_for_the_next_search_page() {
+        try (MongoDBContainer container = new MongoDBContainer(DockerImageName.parse("mongo:8.0.4"))) {
+            container.start();
+            MongoTemplate template = new MongoTemplate(MongoClients.create(container.getConnectionString()), "git_snapshot_chunk_boundary");
+            seedSnapshot(template, "orders");
+            GitEvidenceReadService service = service(template, List.of("orders"));
+
+            SemanticQueryContract.GitTextSearchResult first = service.searchText(new SemanticQueryContract.GitTextSearchRequest(
+                    "orders", SNAPSHOT_ID, REVISION, "d", Optional.of("src"), Optional.empty(), 1));
+            SemanticQueryContract.GitTextSearchResult second = service.searchText(new SemanticQueryContract.GitTextSearchRequest(
+                    "orders", SNAPSHOT_ID, REVISION, "d", Optional.of("src"), first.nextCursor(), 1));
+
+            assertThat(first.items()).singleElement().satisfies(match -> assertThat(match.column()).isEqualTo(4));
+            assertThat(first.scanComplete()).isFalse();
+            assertThat(first.nextCursor()).isPresent();
+            assertThat(second.items()).singleElement().satisfies(match -> assertThat(match.column()).isEqualTo(11));
+        }
+    }
+
+    @Test
     void reads_only_ready_repository_scoped_catalog_and_history_pages() {
         try (MongoDBContainer container = new MongoDBContainer(DockerImageName.parse("mongo:8.0.4"))) {
             container.start();
