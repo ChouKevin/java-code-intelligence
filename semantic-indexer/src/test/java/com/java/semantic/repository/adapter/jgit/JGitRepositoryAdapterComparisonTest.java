@@ -247,6 +247,7 @@ class JGitRepositoryAdapterComparisonTest {
             assertThat(comparison.previousEntries()).singleElement().satisfies(entry -> {
                 assertThat(entry.path()).isEqualTo("raw-path-hex:c328");
                 assertThat(entry.contentStatus()).isEqualTo(GitFileContentStatus.UNSUPPORTED_PATH);
+                assertThat(entry.byteLength()).isEqualTo(5L);
                 assertThat(entry.bytes()).isEmpty();
             });
         }

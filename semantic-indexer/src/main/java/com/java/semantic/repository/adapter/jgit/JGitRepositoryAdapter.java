@@ -210,8 +210,9 @@ public class JGitRepositoryAdapter implements GitRepositoryPort {
                 FileMode mode = walk.getFileMode(0);
                 SnapshotPath snapshotPath = snapshotPath(walk.getRawPath());
                 if (!snapshotPath.supported()) {
+                    long byteLength = FileMode.GITLINK.equals(mode) ? 0L : repository.open(walk.getObjectId(0)).getSize();
                     entries.add(new GitSnapshotEntry(snapshotPath.value(), mode.toString(), walk.getObjectId(0).name(),
-                            GitFileContentStatus.UNSUPPORTED_PATH, 0L, new byte[0]));
+                            GitFileContentStatus.UNSUPPORTED_PATH, byteLength, new byte[0]));
                     continue;
                 }
                 if (FileMode.GITLINK.equals(mode)) {
