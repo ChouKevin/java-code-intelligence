@@ -25,6 +25,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.junit.jupiter.api.Assertions.assertAll;
 
 @Tag("mongo-it")
 class GitEvidenceReadServiceIT {
@@ -265,6 +266,27 @@ class GitEvidenceReadServiceIT {
             assertThatThrownBy(() -> service(template, List.of("orders")).readFile(new SemanticQueryContract.GitFileReadRequest(
                     "orders", SNAPSHOT_ID, REVISION, "src/demo.txt", Optional.empty(), 1, Optional.empty())))
                     .isInstanceOf(IndexContractMismatchException.class);
+        }
+    }
+
+    @Test
+    void r2_rejects_direct_read_and_search_cursors_to_a_corrupt_nonzero_checkpoint() {
+        try (MongoDBContainer container = new MongoDBContainer(DockerImageName.parse("mongo:8.0.4"))) {
+            container.start();
+            MongoTemplate template = new MongoTemplate(MongoClients.create(container.getConnectionString()), "git_snapshot_r2_checkpoint_seek");
+            seedSnapshot(template, "orders");
+            template.getCollection("git_snapshot_chunks").updateOne(new Document("snapshotId", SNAPSHOT_ID).append("ordinal", 1L),
+                    new Document("$set", new Document("line", 7L).append("column", 9L)));
+            GitEvidenceReadService service = service(template, List.of("orders"));
+            String path = pathKey("src/demo.txt");
+
+            assertAll(
+                    () -> assertThatThrownBy(() -> service.readFile(new SemanticQueryContract.GitFileReadRequest("orders", SNAPSHOT_ID, REVISION,
+                            "src/demo.txt", Optional.empty(), 1, Optional.of(cursor("git-file", "orders", SNAPSHOT_ID, REVISION, path, "1", "11")))))
+                            .isInstanceOf(IndexContractMismatchException.class),
+                    () -> assertThatThrownBy(() -> service.searchText(new SemanticQueryContract.GitTextSearchRequest("orders", SNAPSHOT_ID, REVISION,
+                            "needle", Optional.empty(), Optional.of(cursor("git-search", "orders", SNAPSHOT_ID, REVISION, "needle", "", "0", "1", "11")), 1)))
+                            .isInstanceOf(IndexContractMismatchException.class));
         }
     }
 

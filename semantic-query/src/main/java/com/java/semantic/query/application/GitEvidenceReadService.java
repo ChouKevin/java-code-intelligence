@@ -226,9 +226,15 @@ public final class GitEvidenceReadService {
                         continue;
                     }
                 }
-                SearchStart start = file.ordinal() == position.fileOrdinal()
-                        ? decodeSearchPosition(repositoryId, required.snapshotId(), file, position, budget)
-                        : new SearchStart(firstPosition(repositoryId, required.snapshotId(), file), Optional.empty());
+                SearchStart start;
+                try {
+                    start = file.ordinal() == position.fileOrdinal()
+                            ? decodeSearchPosition(repositoryId, required.snapshotId(), file, position, budget)
+                            : new SearchStart(firstPosition(repositoryId, required.snapshotId(), file), Optional.empty());
+                } catch (SearchBudgetExhaustedException exception) {
+                    return searchResult(repositoryId, required, matches, false, file.ordinal(), position.chunkOrdinal(), position.byteOffset(),
+                            coverage(repositoryId, required.snapshotId(), required.directory().orElse(""), manifest));
+                }
                 SearchPage page = searchFile(repositoryId, required.snapshotId(), file, start, required.query(), required.limit() - matches.size(), budget);
                 matches.addAll(page.matches());
                 if (!page.complete()) {
@@ -586,7 +592,7 @@ public final class GitEvidenceReadService {
         if (position.chunkOrdinal() < 0L || position.chunkOrdinal() >= file.chunkCount() || position.byteOffset() < 0 || position.byteOffset() >= file.byteLength()) {
             throw new IllegalArgumentException("search cursor is invalid");
         }
-        ReadPosition checkpoint = checkpoint(repositoryId, snapshotId, file, position.chunkOrdinal());
+        ReadPosition checkpoint = checkpoint(repositoryId, snapshotId, file, position.chunkOrdinal(), budget);
         ChunkData chunk = chunkData(repositoryId, snapshotId, file, position.chunkOrdinal(), checkpoint.byteOffset(), checkpoint.line(), checkpoint.column(), budget);
         if (Objects.isNull(chunk) || position.byteOffset() < checkpoint.byteOffset()
                 || position.byteOffset() >= checkpoint.byteOffset() + chunk.bytes().length) {
@@ -696,6 +702,27 @@ public final class GitEvidenceReadService {
     }
 
     private ReadPosition checkpoint(RepositoryId repositoryId, String snapshotId, SnapshotFile file, long ordinal) {
+        return checkpoint(repositoryId, snapshotId, file, ordinal, null);
+    }
+
+    private ReadPosition checkpoint(RepositoryId repositoryId, String snapshotId, SnapshotFile file, long ordinal, SearchBudget budget) {
+        ReadPosition target = storedCheckpoint(repositoryId, snapshotId, file, ordinal);
+        if (ordinal == 0L) {
+            return target;
+        }
+        ReadPosition predecessor = storedCheckpoint(repositoryId, snapshotId, file, ordinal - 1L);
+        ChunkData predecessorChunk = chunkData(repositoryId, snapshotId, file, ordinal - 1L, predecessor.byteOffset(), predecessor.line(), predecessor.column(), budget);
+        if (Objects.isNull(predecessorChunk)) {
+            throw new SearchBudgetExhaustedException();
+        }
+        ReadPosition derived = advanceThrough(predecessor, predecessorChunk.text());
+        if (target.byteOffset() != derived.byteOffset() || target.line() != derived.line() || target.column() != derived.column()) {
+            throw new IndexContractMismatchException();
+        }
+        return target;
+    }
+
+    private ReadPosition storedCheckpoint(RepositoryId repositoryId, String snapshotId, SnapshotFile file, long ordinal) {
         Document row = snapshotChunk(repositoryId, snapshotId, file, ordinal);
         int byteOffset = Math.toIntExact(requiredLong(row, "byteOffset"));
         int line = Math.toIntExact(requiredLong(row, "line"));
@@ -736,7 +763,7 @@ public final class GitEvidenceReadService {
             }
             return position;
         }
-        ReadPosition next = checkpoint(repositoryId, snapshotId, file, nextOrdinal);
+        ReadPosition next = storedCheckpoint(repositoryId, snapshotId, file, nextOrdinal);
         if (next.byteOffset() != position.byteOffset() || next.line() != position.line() || next.column() != position.column()) {
             throw new IndexContractMismatchException();
         }
@@ -753,6 +780,16 @@ public final class GitEvidenceReadService {
             column++;
         }
         return new ReadPosition(position.chunkOrdinal(), Math.addExact(position.byteOffset(), utf8Bytes(codePoint)), line, column, codePoint == '\n');
+    }
+
+    private static ReadPosition advanceThrough(ReadPosition position, String text) {
+        ReadPosition derived = position;
+        for (int index = 0; index < text.length();) {
+            int codePoint = text.codePointAt(index);
+            derived = advance(derived, codePoint);
+            index += Character.charCount(codePoint);
+        }
+        return derived;
     }
 
     private Document snapshotChunk(RepositoryId repositoryId, String snapshotId, SnapshotFile file, long ordinal) {
@@ -867,6 +904,7 @@ public final class GitEvidenceReadService {
     private record SearchToken(int codePoint, ReadPosition position, ChunkData chunk) { }
     private record SearchPage(List<SemanticQueryContract.GitTextMatch> matches, boolean complete, ReadPosition position) { }
     private record Snippet(String text, boolean truncated) { }
+    private static final class SearchBudgetExhaustedException extends RuntimeException { }
     private static final class SearchBudget {
         private int bytes;
         private boolean accept(int additional) {
