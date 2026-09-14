@@ -8,7 +8,7 @@ Use TLS for a non-UAT MongoDB deployment, validate the server CA, and keep crede
 
 ## Jobs and the single dispatcher
 
-`ensure`, `sync`, `checkout`, `rebuild`, and `rollback` only store an asynchronous job. Admission resolves the requested Git ref to an exact reachable SHA, but checkout and JDT LS start only when the job runs.
+`ensure`, `sync`, `checkout`, `rebuild`, `rollback`, and Git-evidence preparation only store an asynchronous job. Admission resolves the requested Git ref to an exact reachable SHA, but checkout and JDT LS start only when the job runs.
 
 One Indexer process contains one `index-job-dispatcher` thread. It polls with `semantic.index-jobs.poll-delay` (default `1s`), starts the oldest `ACCEPTED` job, and runs it synchronously. There is no distributed-ownership protocol or automatic retry.
 
@@ -27,6 +27,8 @@ Submit a new job after correcting a failure. Do not edit a terminal job. Rebuild
 Startup recovery runs before normal polling. It marks a leftover `RUNNING` job `COMPLETE` when the exact target was already published; every other leftover `RUNNING` job becomes `FAILED/WORKER_INTERRUPTED`. It does not retry either case.
 
 Normal shutdown stops new polls and interrupts dispatcher work. If interruption occurs before publication, startup closes the job as interrupted. If publication completed before the process stopped, startup reconciles the stored publication intent to `COMPLETE`.
+
+Git evidence uses the same recovery lane. A `GIT_REFS` or `GIT_HISTORY` job is reconciled to COMPLETE only when its repository-scoped immutable manifest is already READY; otherwise startup records `FAILED/WORKER_INTERRUPTED`. Query reads no PREPARING or FAILED rows, and evidence preparation never changes a semantic repository pointer.
 
 ## Schema version 2
 

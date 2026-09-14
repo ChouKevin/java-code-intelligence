@@ -13,13 +13,20 @@ public final class IndexJobExecutor {
     private final RepositoryBuildRunner buildRunner;
     private final PublicationPort publication;
     private final Optional<ResetJobHandler> resetHandler;
+    private final Optional<GitEvidenceJobHandler> gitEvidenceHandler;
 
     public IndexJobExecutor(IndexJobStore jobs, RepositoryBuildRunner buildRunner, PublicationPort publication,
                             Optional<ResetJobHandler> resetHandler) {
+        this(jobs, buildRunner, publication, resetHandler, Optional.empty());
+    }
+
+    public IndexJobExecutor(IndexJobStore jobs, RepositoryBuildRunner buildRunner, PublicationPort publication,
+                            Optional<ResetJobHandler> resetHandler, Optional<GitEvidenceJobHandler> gitEvidenceHandler) {
         this.jobs = Objects.requireNonNull(jobs, "jobs is required");
         this.buildRunner = Objects.requireNonNull(buildRunner, "build runner is required");
         this.publication = Objects.requireNonNull(publication, "publication is required");
         this.resetHandler = Objects.requireNonNull(resetHandler, "reset handler is required");
+        this.gitEvidenceHandler = Objects.requireNonNull(gitEvidenceHandler, "git evidence handler is required");
     }
 
     public void execute(IndexJob job) {
@@ -42,6 +49,7 @@ public final class IndexJobExecutor {
             case BUILD -> buildRunner.run(job);
             case ROLLBACK -> rollback(job);
             case RESET -> resetHandler.orElseThrow(() -> new IllegalStateException("RESET handler is not registered")).reset(job);
+            case GIT_REFS, GIT_HISTORY -> gitEvidenceHandler.orElseThrow(() -> new IllegalStateException("Git evidence handler is not registered")).prepare(job);
             case NO_WORK -> throw new IllegalArgumentException("NO_WORK is not runnable");
         }
     }
@@ -51,6 +59,9 @@ public final class IndexJobExecutor {
             return;
         }
         if (reconcileCommitted(job)) {
+            return;
+        }
+        if (jobs.gitEvidenceReady(job)) {
             return;
         }
         jobs.fail(job.id(), IndexFailureCategory.WORKER_INTERRUPTED);

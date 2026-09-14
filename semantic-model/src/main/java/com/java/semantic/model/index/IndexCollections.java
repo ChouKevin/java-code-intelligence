@@ -14,6 +14,9 @@ public final class IndexCollections {
     public static final String RELATIONS = "relations";
     public static final String ENTRY_POINTS = "entry_points";
     public static final String SEARCH = "search";
+    public static final String GIT_EVIDENCE_MANIFESTS = "git_evidence_manifests";
+    public static final String GIT_BRANCHES = "git_branches";
+    public static final String GIT_COMMITS = "git_commits";
     public static final Map<ProjectionName, List<String>> PROJECTION_COLLECTIONS = Map.of(
             ProjectionName.SOURCES, List.of(GENERATION_FILES, SOURCE_ARTIFACTS),
             ProjectionName.SYMBOLS, List.of(SYMBOLS),

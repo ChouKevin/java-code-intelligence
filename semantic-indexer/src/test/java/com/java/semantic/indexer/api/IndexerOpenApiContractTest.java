@@ -25,9 +25,9 @@ class IndexerOpenApiContractTest {
         assertThat(jobResponse).contains("required: [jobId, repositoryId, phase]");
         assertThat(jobResponse).contains("target: { $ref: '#/components/schemas/IndexJobTarget', nullable: true }");
         assertThat(jobResponse).contains("enum: [ACCEPTED, RUNNING, COMPLETE, FAILED]");
-        assertThat(jobStatus).contains("required: [jobId, repositoryId, operation, phase, active]");
+        assertThat(jobStatus).contains("required: [jobId, repositoryId, operation, phase, active, gitEvidence]");
         assertThat(jobStatus).contains("target: { $ref: '#/components/schemas/IndexJobTarget', nullable: true }");
-        assertThat(jobStatus).contains("operation: { type: string, enum: [BUILD, ROLLBACK, RESET, NO_WORK] }");
+        assertThat(jobStatus).contains("operation: { type: string, enum: [BUILD, ROLLBACK, RESET, NO_WORK, GIT_REFS, GIT_HISTORY] }");
         assertThat(jobStatus).contains("phase: { type: string, enum: [ACCEPTED, RUNNING, COMPLETE, FAILED] }");
 
         assertThat(jobResponse).doesNotContain("revision: {", "generationId: {", "generation: {");
@@ -45,7 +45,7 @@ class IndexerOpenApiContractTest {
         assertThat(recordComponentNames(IndexRepositoryController.IndexJobResponse.class))
                 .containsExactly("jobId", "repositoryId", "target", "phase", "failureCategory");
         assertThat(recordComponentNames(IndexRepositoryController.IndexJobStatusResponse.class))
-                .containsExactly("jobId", "repositoryId", "target", "operation", "phase", "active", "failureCategory", "currentPointer");
+                .containsExactly("jobId", "repositoryId", "target", "operation", "phase", "active", "failureCategory", "currentPointer", "gitEvidence");
     }
 
     private static String openApi() throws IOException {

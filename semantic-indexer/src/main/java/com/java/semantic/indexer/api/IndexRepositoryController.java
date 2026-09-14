@@ -47,6 +47,16 @@ public final class IndexRepositoryController {
         return accepted(requests.checkout(RepositoryId.of(repoId), request.revision()));
     }
 
+    @PostMapping("/git/refs")
+    public ResponseEntity<IndexJobResponse> gitRefs(@PathVariable String repoId) {
+        return accepted(requests.prepareGitRefs(RepositoryId.of(repoId)));
+    }
+
+    @PostMapping("/git/history")
+    public ResponseEntity<IndexJobResponse> gitHistory(@PathVariable String repoId, @Valid @RequestBody GitHistoryIndexRequest request) {
+        return accepted(requests.prepareGitHistory(RepositoryId.of(repoId), request.catalogId(), request.branch(), request.revision()));
+    }
+
     @PostMapping("/rebuild")
     public ResponseEntity<IndexJobResponse> rebuild(@PathVariable String repoId, @Valid @RequestBody RebuildIndexRequest request) {
         return accepted(requests.rebuild(RepositoryId.of(repoId), Objects.requireNonNull(request, "rebuild request is required")
@@ -92,14 +102,19 @@ public final class IndexRepositoryController {
 
     public record IndexJobStatusResponse(String jobId, String repositoryId, IndexJobTargetResponse target,
                                          String operation, String phase, boolean active, String failureCategory,
-                                         GenerationPointerResponse currentPointer) {
+                                         GenerationPointerResponse currentPointer, GitEvidenceResultResponse gitEvidence) {
         static IndexJobStatusResponse from(IndexJob job, Optional<PublishedGenerationPointer> currentPointer) {
             return new IndexJobStatusResponse(job.id().value(), job.repositoryId().value(), job.target().map(IndexJobTargetResponse::from).orElse(null), // cs-allow
                     job.operation().name(), job.phase().name(), job.active(),
                     job.failureCategory().map(Enum::name).orElse(null), // cs-allow
-                    currentPointer.map(GenerationPointerResponse::from).orElse(null)); // cs-allow
+                    currentPointer.map(GenerationPointerResponse::from).orElse(null), // cs-allow
+                    job.gitEvidence().flatMap(payload -> payload.evidenceId().map(id -> new GitEvidenceResultResponse(id.value(), payload.branch().orElse(null), // cs-allow
+                            payload.revision().map(com.java.semantic.model.repository.RepositoryRevision::value).orElse(null)))) // cs-allow
+                            .orElse(null)); // cs-allow
         }
     }
+
+    public record GitEvidenceResultResponse(String evidenceId, String branch, String revision) { }
 
     public record IndexJobTargetResponse(String revision, String generationId, long generation) {
         static IndexJobTargetResponse from(com.java.semantic.indexer.job.IndexJobTarget target) {

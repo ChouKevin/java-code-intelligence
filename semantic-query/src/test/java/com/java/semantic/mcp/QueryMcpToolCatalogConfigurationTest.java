@@ -27,7 +27,27 @@ import static org.mockito.Mockito.when;
 class QueryMcpToolCatalogConfigurationTest {
 
     @Test
-    void publishes_exactly_the_twelve_approved_raw_tools_and_closed_schemas() {
+    void publishes_git_discovery_tools_with_closed_paged_input_schemas() {
+        QueryMcpToolCatalogConfiguration configuration = new QueryMcpToolCatalogConfiguration();
+        List<McpStatelessServerFeatures.SyncToolSpecification> specifications = configuration.mcpQueryToolSpecifications(
+                mock(SemanticQueryFacade.class), new ObjectMapper());
+
+        assertEquals(Set.of("list_git_branches", "list_git_commits"), specifications.stream()
+                .map(specification -> specification.tool().name())
+                .filter(name -> name.startsWith("list_git_"))
+                .collect(java.util.stream.Collectors.toSet()));
+        for (String name : Set.of("list_git_branches", "list_git_commits")) {
+            Map<String, Object> inputSchema = specification(specifications, name).tool().inputSchema();
+            assertFalse((Boolean) inputSchema.get("additionalProperties"));
+            Map<String, Object> properties = properties(inputSchema);
+            assertEquals(0, property(properties, "offset").get("default"));
+            assertEquals(SemanticQueryContract.DEFAULT_LIMIT, property(properties, "limit").get("default"));
+            assertEquals(SemanticQueryContract.MAX_LIMIT, property(properties, "limit").get("maximum"));
+        }
+    }
+
+    @Test
+    void publishes_exactly_the_fourteen_approved_raw_tools_and_closed_schemas() {
         QueryMcpToolCatalogConfiguration configuration = new QueryMcpToolCatalogConfiguration();
         List<McpStatelessServerFeatures.SyncToolSpecification> specifications = configuration.mcpQueryToolSpecifications(
                 mock(SemanticQueryFacade.class), new ObjectMapper());
@@ -35,9 +55,10 @@ class QueryMcpToolCatalogConfigurationTest {
         assertEquals(Set.of(
                 "list_repositories", "get_repository", "search_code", "get_fact_source",
                 "list_entry_points", "find_api_routes", "find_event_listeners", "list_type_members",
-                "find_method_implementations", "find_references", "find_callers", "find_callees"),
+                "find_method_implementations", "find_references", "find_callers", "find_callees",
+                "list_git_branches", "list_git_commits"),
                 specifications.stream().map(specification -> specification.tool().name()).collect(java.util.stream.Collectors.toSet()));
-        assertEquals(12, specifications.size());
+        assertEquals(14, specifications.size());
         for (McpStatelessServerFeatures.SyncToolSpecification specification : specifications) {
             assertFalse((Boolean) specification.tool().inputSchema().get("additionalProperties"));
             assertFalse(specification.tool().description().toLowerCase().contains("first tool"));

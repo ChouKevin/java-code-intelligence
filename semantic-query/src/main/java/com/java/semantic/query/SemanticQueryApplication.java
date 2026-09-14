@@ -1,6 +1,7 @@
 package com.java.semantic.query;
 
 import com.java.semantic.query.application.CurrentGenerationSelector;
+import com.java.semantic.query.application.GitEvidenceReadService;
 import com.java.semantic.query.application.CurrentRepositoryQueryService;
 import com.java.semantic.query.application.CurrentSourceQueryService;
 import com.java.semantic.query.application.CurrentSymbolQueryService;
@@ -99,9 +100,11 @@ public class SemanticQueryApplication {
                                             CodeFactReadService codeFactReadService,
                                             PublishedDiscoveryQueryService discoveryQueryService,
                                             PublishedEntryPointQueryService entryPointQueryService,
-                                            PublishedRelationQueryService relationQueryService) {
+                                             PublishedRelationQueryService relationQueryService, MongoTemplate template,
+                                             ConfiguredReadPolicy policy, SemanticQueryProperties properties) {
         return new SemanticQueryFacade(repositoryQueryService, codeFactSearchService, sourceSliceService, codeFactReadService,
-                discoveryQueryService, entryPointQueryService, relationQueryService);
+                discoveryQueryService, entryPointQueryService, relationQueryService,
+                new GitEvidenceReadService(template, policy, properties.storageTimeout()));
     }
 
     @Bean

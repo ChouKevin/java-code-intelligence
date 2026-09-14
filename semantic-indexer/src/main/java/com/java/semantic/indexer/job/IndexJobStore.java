@@ -5,6 +5,7 @@ import com.java.semantic.model.index.PublishedGenerationPointer;
 import com.java.semantic.model.index.RollbackGenerationCommand;
 import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.model.repository.RepositoryRevision;
+import com.java.semantic.model.git.GitEvidenceId;
 
 import java.util.Optional;
 
@@ -16,6 +17,8 @@ public interface IndexJobStore {
     IndexJob admitRollback(RepositoryId repositoryId, PublishedGenerationPointer expectedCurrent,
                            PublishedGenerationPointer expectedRollback);
     IndexJob admitReset(RepositoryId repositoryId);
+    IndexJob admitGitRefs(RepositoryId repositoryId);
+    IndexJob admitGitHistory(RepositoryId repositoryId, GitEvidenceId catalogId, String branch, RepositoryRevision revision);
     Optional<IndexJob> find(IndexJobId jobId);
     Optional<IndexJob> startNextAccepted();
     boolean complete(IndexJobId jobId);
@@ -27,4 +30,5 @@ public interface IndexJobStore {
     Optional<IndexPublicationState> publicationState(RepositoryId repositoryId);
     Optional<RollbackGenerationCommand> rollbackCommand(IndexJob job);
     Optional<IndexPublicationIntent> prepareBuildPublication(IndexJob job, ManifestDigest sealedManifestDigest);
+    boolean gitEvidenceReady(IndexJob job);
 }

@@ -3,6 +3,8 @@ package com.java.semantic.repository.adapter.jgit;
 import com.java.semantic.repository.application.RepositoryMutationException;
 import com.java.semantic.repository.config.RepositoryProperties;
 import com.java.semantic.model.repository.RepositoryRevision;
+import com.java.semantic.model.git.GitBranch;
+import com.java.semantic.model.git.GitCommit;
 import com.java.semantic.repository.port.GitRepositoryPort;
 import org.eclipse.jgit.api.CloneCommand;
 import org.eclipse.jgit.api.FetchCommand;
@@ -16,6 +18,8 @@ import org.eclipse.jgit.lib.ObjectId;
 import org.eclipse.jgit.lib.Ref;
 import org.eclipse.jgit.lib.RefUpdate;
 import org.eclipse.jgit.revwalk.RevWalk;
+import org.eclipse.jgit.revwalk.RevCommit;
+import org.eclipse.jgit.revwalk.RevSort;
 import org.eclipse.jgit.revwalk.RevObject;
 import org.eclipse.jgit.transport.CredentialsProvider;
 import org.eclipse.jgit.transport.RefSpec;
@@ -29,6 +33,9 @@ import java.nio.file.Path;
 import java.util.Collection;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.List;
+import java.time.Instant;
+import java.util.function.Consumer;
 
 /** JGit 的唯一 production adapter */
 @Component
@@ -123,6 +130,40 @@ public class JGitRepositoryAdapter implements GitRepositoryPort {
             throw exception;
         } catch (GitAPIException | RuntimeException exception) {
             throw new RepositoryMutationException("remote revision selection failed", exception);
+        }
+    }
+
+    @Override
+    public List<GitBranch> fetchRemoteBranches(Path workingTree) {
+        try (Git git = Git.open(workingTree.toFile())) {
+            fetchRemote(git);
+            return git.getRepository().getRefDatabase().getRefsByPrefix("refs/remotes/origin/").stream()
+                    .filter(reference -> !reference.getName().equals("refs/remotes/origin/HEAD"))
+                    .filter(reference -> Objects.nonNull(reference.getObjectId()))
+                    .map(reference -> new GitBranch(reference.getName().substring("refs/remotes/origin/".length()),
+                            RepositoryRevision.ofSha(reference.getObjectId().getName())))
+                    .sorted(java.util.Comparator.comparing(GitBranch::name)).toList();
+        } catch (IOException | GitAPIException | RuntimeException exception) {
+            throw new RepositoryMutationException("cannot prepare remote branch catalog", exception);
+        }
+    }
+
+    @Override
+    public void streamReachableHistory(Path workingTree, RepositoryRevision revision, Consumer<GitCommit> consumer) {
+        Consumer<GitCommit> requiredConsumer = Objects.requireNonNull(consumer, "history consumer is required");
+        try (Git git = Git.open(workingTree.toFile()); RevWalk walk = new RevWalk(git.getRepository())) {
+            RevCommit head = walk.parseCommit(ObjectId.fromString(revision.value()));
+            walk.sort(RevSort.TOPO);
+            walk.sort(RevSort.COMMIT_TIME_DESC, true);
+            walk.markStart(head);
+            for (RevCommit commit : walk) {
+                List<RepositoryRevision> parents = java.util.Arrays.stream(commit.getParents())
+                        .map(parent -> RepositoryRevision.ofSha(parent.getId().getName())).toList();
+                requiredConsumer.accept(new GitCommit(RepositoryRevision.ofSha(commit.getId().getName()), parents,
+                        commit.getShortMessage(), Instant.ofEpochSecond(commit.getCommitTime())));
+            }
+        } catch (IOException | RuntimeException exception) {
+            throw new RepositoryMutationException("cannot prepare reachable history", exception);
         }
     }
 

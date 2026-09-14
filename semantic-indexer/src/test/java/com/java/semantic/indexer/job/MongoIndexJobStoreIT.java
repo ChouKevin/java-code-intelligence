@@ -206,6 +206,34 @@ class MongoIndexJobStoreIT {
     }
 
     @Test
+    void git_evidence_uses_the_existing_active_job_constraint_and_recovers_only_ready_manifests() {
+        try (MongoDBContainer container = container()) {
+            MongoTemplate template = template(container);
+            MongoIndexJobStore store = store(template);
+            IndexJob accepted = store.admitGitRefs(RepositoryId.of("orders"));
+
+            assertThatThrownBy(() -> store.admit(RepositoryId.of("orders"), revision("a"), false))
+                    .isInstanceOf(IndexJobAlreadyActiveException.class);
+            IndexJob ready = store.startNextAccepted().orElseThrow();
+            String evidenceId = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
+            template.getCollection(IndexCollections.INDEX_JOBS).updateOne(new Document("jobId", ready.id().value()),
+                    new Document("$set", new Document("gitEvidence.evidenceId", evidenceId)));
+            template.getCollection(IndexCollections.GIT_EVIDENCE_MANIFESTS).insertOne(new Document("repoId", "orders")
+                    .append("evidenceId", evidenceId).append("ownerJobId", ready.id().value()).append("kind", "CATALOG")
+                    .append("state", "READY").append("gitEvidenceVersion", 1).append("observedAt", new Date()).append("total", 0L));
+
+            store.failUnreconciledRunningJobs();
+
+            assertThat(store.find(ready.id()).orElseThrow().phase()).isEqualTo(IndexJobPhase.COMPLETE);
+            IndexJob incomplete = store.admitGitRefs(RepositoryId.of("orders"));
+            IndexJob running = store.startNextAccepted().orElseThrow();
+            store.failUnreconciledRunningJobs();
+            assertThat(incomplete.id()).isEqualTo(running.id());
+            assertThat(store.find(incomplete.id()).orElseThrow().failureCategory()).contains(IndexFailureCategory.WORKER_INTERRUPTED);
+        }
+    }
+
+    @Test
     void build_publication_requires_running_job_and_preserves_rebuild_parent_precondition() {
         try (MongoDBContainer container = container()) {
             MongoTemplate template = template(container);

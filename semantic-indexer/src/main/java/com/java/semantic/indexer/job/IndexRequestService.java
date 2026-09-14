@@ -5,6 +5,7 @@ import com.java.semantic.repository.application.RepositoryNotFoundException;
 import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.model.repository.RepositoryRevision;
 import com.java.semantic.model.index.PublishedGenerationPointer;
+import com.java.semantic.model.git.GitEvidenceId;
 import org.springframework.stereotype.Service;
 
 import java.util.Objects;
@@ -62,6 +63,14 @@ public final class IndexRequestService {
                              PublishedGenerationPointer expectedRollback) {
         jobs.reconcileCommitted(repositoryId);
         return jobs.admitRollback(repositoryId, expectedCurrent, expectedRollback);
+    }
+
+    public IndexJob prepareGitRefs(RepositoryId repositoryId) {
+        return jobs.admitGitRefs(repositoryId);
+    }
+
+    public IndexJob prepareGitHistory(RepositoryId repositoryId, String catalogId, String branch, String revision) {
+        return jobs.admitGitHistory(repositoryId, new GitEvidenceId(catalogId), branch, RepositoryRevision.ofSha(revision));
     }
 
     private IndexJob admit(RepositoryId repositoryId, RepositoryRevision revision, boolean rebuild) {

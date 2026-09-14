@@ -16,7 +16,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 class ReadOnlyQueryControllerContractTest {
 
     @Test
-    void publishes_exactly_the_twelve_approved_application_routes() throws Exception {
+    void publishes_exactly_the_fourteen_approved_application_routes() throws Exception {
         Class<?> controller = Class.forName("com.java.semantic.api.SemanticQueryController");
         RequestMapping rootMapping = controller.getAnnotation(RequestMapping.class);
 
@@ -33,7 +33,9 @@ class ReadOnlyQueryControllerContractTest {
                 "POST /method-implementations",
                 "POST /references",
                 "POST /callers",
-                "POST /callees"), operationRoutes(controller));
+                "POST /callees",
+                "POST /git/branches",
+                "POST /git/commits"), operationRoutes(controller));
     }
 
     private static Set<String> operationRoutes(Class<?> controller) {

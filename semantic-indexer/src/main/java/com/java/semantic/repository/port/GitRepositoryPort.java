@@ -1,8 +1,12 @@
 package com.java.semantic.repository.port;
 
 import com.java.semantic.model.repository.RepositoryRevision;
+import com.java.semantic.model.git.GitBranch;
+import com.java.semantic.model.git.GitCommit;
 
 import java.nio.file.Path;
+import java.util.List;
+import java.util.function.Consumer;
 
 /** Git 操作的唯一出口,語意層與控制器都不得直接使用 JGit */
 public interface GitRepositoryPort {
@@ -18,4 +22,8 @@ public interface GitRepositoryPort {
     RepositoryRevision currentRevision(Path workingTree);
 
     RepositoryRevision resolveRemoteRef(String remoteUrl, String ref);
+
+    List<GitBranch> fetchRemoteBranches(Path workingTree);
+
+    void streamReachableHistory(Path workingTree, RepositoryRevision revision, Consumer<GitCommit> consumer);
 }

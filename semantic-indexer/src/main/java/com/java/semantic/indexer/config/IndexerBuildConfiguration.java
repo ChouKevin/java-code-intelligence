@@ -8,6 +8,7 @@ import com.java.semantic.indexer.build.RepositoryBuildScopeFactory;
 import com.java.semantic.indexer.job.IndexJobExecutor;
 import com.java.semantic.indexer.job.IndexJobProperties;
 import com.java.semantic.indexer.job.IndexJobStore;
+import com.java.semantic.indexer.job.GitEvidenceJobHandler;
 import com.java.semantic.indexer.repository.ExactRepositoryCheckout;
 import com.java.semantic.indexer.store.PublicationPort;
 import com.java.semantic.indexer.uat.NoOpPublicationGate;
@@ -42,8 +43,9 @@ public class IndexerBuildConfiguration {
     @Bean
     public IndexJobExecutor indexJobExecutor(IndexJobStore jobs, RepositoryBuildRunner buildRunner,
                                              PublicationPort publication,
-                                             Optional<IndexJobExecutor.ResetJobHandler> resetHandler) {
-        return new IndexJobExecutor(jobs, buildRunner, publication, resetHandler);
+                                             Optional<IndexJobExecutor.ResetJobHandler> resetHandler,
+                                             Optional<GitEvidenceJobHandler> gitEvidenceHandler) {
+        return new IndexJobExecutor(jobs, buildRunner, publication, resetHandler, gitEvidenceHandler);
     }
 
     @Bean

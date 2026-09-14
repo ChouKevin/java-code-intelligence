@@ -5,6 +5,7 @@
 - Indexer resolves exact Git commits, stores durable jobs, and runs one job at a time through one dispatcher thread.
 - Indexer performs checkout, JDT LS analysis, immutable generation writes, validation, sealing, and expected-parent pointer publication.
 - Query serves sealed MongoDB generations through HTTP and MCP without Git, JDT LS, or an online source fallback.
+- Indexer can prepare immutable, catalog-pinned Git branch/history evidence through the existing serialized job lane; Query reads authorized READY evidence from Mongo only.
 - Schema version 2 has no distributed worker ownership or backward decoder.
 - Payment, order, and video Git fixtures prove cold Query reads, exact revisions, two payment `v1` to `v2` transitions, and UAT-only reset isolation.
 

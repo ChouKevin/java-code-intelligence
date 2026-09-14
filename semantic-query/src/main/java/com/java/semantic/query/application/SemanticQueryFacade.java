@@ -43,12 +43,22 @@ public final class SemanticQueryFacade {
     private final PublishedDiscoveryQueryService discoveryQueryService;
     private final PublishedEntryPointQueryService entryPointQueryService;
     private final PublishedRelationQueryService relationQueryService;
+    private final GitEvidenceReadService gitEvidenceReadService;
 
     public SemanticQueryFacade(CurrentRepositoryQueryService repositoryQueryService, CodeFactSearchService codeFactSearchService,
                                SourceSliceService sourceSliceService, CodeFactReadService codeFactReadService,
                                PublishedDiscoveryQueryService discoveryQueryService,
                                PublishedEntryPointQueryService entryPointQueryService,
                                PublishedRelationQueryService relationQueryService) {
+        this(repositoryQueryService, codeFactSearchService, sourceSliceService, codeFactReadService, discoveryQueryService,
+                entryPointQueryService, relationQueryService, null);
+    }
+
+    public SemanticQueryFacade(CurrentRepositoryQueryService repositoryQueryService, CodeFactSearchService codeFactSearchService,
+                               SourceSliceService sourceSliceService, CodeFactReadService codeFactReadService,
+                               PublishedDiscoveryQueryService discoveryQueryService,
+                               PublishedEntryPointQueryService entryPointQueryService,
+                               PublishedRelationQueryService relationQueryService, GitEvidenceReadService gitEvidenceReadService) {
         this.repositoryQueryService = Objects.requireNonNull(repositoryQueryService, "repository query service is required");
         this.codeFactSearchService = Objects.requireNonNull(codeFactSearchService, "code fact search service is required");
         this.sourceSliceService = Objects.requireNonNull(sourceSliceService, "source slice service is required");
@@ -56,6 +66,20 @@ public final class SemanticQueryFacade {
         this.discoveryQueryService = Objects.requireNonNull(discoveryQueryService, "discovery query service is required");
         this.entryPointQueryService = Objects.requireNonNull(entryPointQueryService, "entry point query service is required");
         this.relationQueryService = Objects.requireNonNull(relationQueryService, "relation query service is required");
+        this.gitEvidenceReadService = gitEvidenceReadService;
+    }
+
+    public SemanticQueryContract.GitBranchCollection listGitBranches(SemanticQueryContract.GitBranchRequest request) {
+        return requireGitEvidenceReader().branches(request);
+    }
+
+    public SemanticQueryContract.GitCommitCollection listGitCommits(SemanticQueryContract.GitCommitRequest request) {
+        return requireGitEvidenceReader().commits(request);
+    }
+
+    private GitEvidenceReadService requireGitEvidenceReader() {
+        if (Objects.isNull(gitEvidenceReadService)) { throw new IndexNotReadyException(); }
+        return gitEvidenceReadService;
     }
 
     public SemanticQueryContract.RepositoryCollection listRepositories(SemanticQueryContract.PageRequest request) {

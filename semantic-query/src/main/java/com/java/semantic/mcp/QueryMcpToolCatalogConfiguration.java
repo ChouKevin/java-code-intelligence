@@ -3,6 +3,8 @@ package com.java.semantic.mcp;
 import com.java.semantic.query.application.CodeFactKindMismatchException;
 import com.java.semantic.query.application.CodeFactKindUnsupportedException;
 import com.java.semantic.query.application.CodeFactNotFoundException;
+import com.java.semantic.query.application.GitEvidenceNotFoundException;
+import com.java.semantic.query.application.GitEvidenceNotReadyException;
 import com.java.semantic.query.application.IndexContractMismatchException;
 import com.java.semantic.query.application.IndexNotReadyException;
 import com.java.semantic.query.application.InvalidCodeFactQueryException;
@@ -66,7 +68,7 @@ public class QueryMcpToolCatalogConfiguration {
             Object response = dispatch(toolName, normalizedArguments(toolName, arguments), facade, objectMapper);
             return McpSchema.CallToolResult.builder().addTextContent("Query completed")
                     .structuredContent(response).isError(false).build();
-        } catch (RevisionOutdatedException | RepositoryNotFoundException | CodeFactNotFoundException
+        } catch (RevisionOutdatedException | RepositoryNotFoundException | GitEvidenceNotFoundException | GitEvidenceNotReadyException | CodeFactNotFoundException
                 | CodeFactKindMismatchException | IndexNotReadyException | IndexContractMismatchException
                 | SemanticIndexUnavailableException | InvalidCodeFactQueryException | CodeFactKindUnsupportedException
                 | IllegalArgumentException exception) {
@@ -76,6 +78,8 @@ public class QueryMcpToolCatalogConfiguration {
 
     private static Object dispatch(String toolName, Map<String, Object> arguments, SemanticQueryFacade facade, ObjectMapper objectMapper) {
         return switch (toolName) {
+            case "list_git_branches" -> facade.listGitBranches(convert(arguments, SemanticQueryContract.GitBranchRequest.class, objectMapper));
+            case "list_git_commits" -> facade.listGitCommits(convert(arguments, SemanticQueryContract.GitCommitRequest.class, objectMapper));
             case "list_repositories" -> facade.listRepositories(convert(arguments, SemanticQueryContract.PageRequest.class, objectMapper));
             case "get_repository" -> facade.getRepository(convert(arguments, SemanticQueryContract.RepositoryRequest.class, objectMapper));
             case "search_code" -> facade.searchCode(convert(arguments, SemanticQueryContract.SearchCodeRequest.class, objectMapper));
@@ -119,6 +123,9 @@ public class QueryMcpToolCatalogConfiguration {
         if (toolName.equals("search_code")) {
             normalized.putIfAbsent("kinds", Set.of());
             normalized.putIfAbsent("packagePrefix", Optional.empty());
+        }
+        if (toolName.equals("list_git_branches")) {
+            normalized.putIfAbsent("catalogId", Optional.empty());
         }
         if (toolName.equals("list_entry_points") || toolName.equals("list_type_members")) {
             normalized.putIfAbsent("kinds", Set.of());

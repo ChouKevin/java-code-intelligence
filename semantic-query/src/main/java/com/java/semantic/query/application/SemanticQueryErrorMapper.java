@@ -13,6 +13,12 @@ public final class SemanticQueryErrorMapper {
         if (exception instanceof RepositoryNotFoundException) {
             return new SemanticQueryError("REPOSITORY_NOT_FOUND", "The requested repository was not found.", false, Optional.empty());
         }
+        if (exception instanceof GitEvidenceNotFoundException) {
+            return new SemanticQueryError("GIT_EVIDENCE_NOT_FOUND", "The requested Git evidence was not found.", false, Optional.empty());
+        }
+        if (exception instanceof GitEvidenceNotReadyException) {
+            return new SemanticQueryError("GIT_EVIDENCE_NOT_READY", "The requested Git evidence is not ready.", true, Optional.empty());
+        }
         if (exception instanceof CodeFactNotFoundException) {
             return new SemanticQueryError("FACT_NOT_FOUND", "The requested fact was not found.", false, Optional.empty());
         }

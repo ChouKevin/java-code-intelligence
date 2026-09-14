@@ -101,6 +101,19 @@ public final class SemanticQueryController {
         return facade.findCallees(methodRelationRequest(request));
     }
 
+    @PostMapping("/git/branches")
+    public SemanticQueryContract.GitBranchCollection gitBranches(@RequestBody GitBranchHttpRequest request) {
+        return facade.listGitBranches(new SemanticQueryContract.GitBranchRequest(requiredText(request.repositoryId(), "repositoryId"),
+                optionalText(request.catalogId()), offset(request.offset()), limit(request.limit())));
+    }
+
+    @PostMapping("/git/commits")
+    public SemanticQueryContract.GitCommitCollection gitCommits(@RequestBody GitCommitHttpRequest request) {
+        return facade.listGitCommits(new SemanticQueryContract.GitCommitRequest(requiredText(request.repositoryId(), "repositoryId"),
+                requiredText(request.historyId(), "historyId"), requiredText(request.revision(), "revision"),
+                offset(request.offset()), limit(request.limit())));
+    }
+
     private static SemanticQueryContract.RelationRequest methodRelationRequest(MethodRelationHttpRequest request) {
         return new SemanticQueryContract.RelationRequest(requiredText(request.repositoryId(), "repositoryId"),
                 requiredText(request.revision(), "revision"), requiredText(request.methodFactId(), "methodFactId"),
@@ -166,4 +179,7 @@ public final class SemanticQueryController {
 
     record RelationHttpRequest(String repositoryId, String revision, String factId, Integer offset, Integer limit) {
     }
+
+    record GitBranchHttpRequest(String repositoryId, String catalogId, Integer offset, Integer limit) { }
+    record GitCommitHttpRequest(String repositoryId, String historyId, String revision, Integer offset, Integer limit) { }
 }

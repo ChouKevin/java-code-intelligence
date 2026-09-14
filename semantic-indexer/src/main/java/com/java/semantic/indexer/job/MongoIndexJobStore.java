@@ -9,6 +9,7 @@ import com.java.semantic.model.index.PublishedGenerationPointer;
 import com.java.semantic.model.index.RollbackGenerationCommand;
 import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.model.repository.RepositoryRevision;
+import com.java.semantic.model.git.GitEvidenceId;
 import com.mongodb.DuplicateKeyException;
 import com.mongodb.ErrorCategory;
 import com.mongodb.MongoWriteException;
@@ -108,6 +109,16 @@ public final class MongoIndexJobStore implements IndexJobStore {
     }
 
     @Override
+    public IndexJob admitGitRefs(RepositoryId repositoryId) {
+        return insertGitJob(repositoryId, IndexJobOperation.GIT_REFS, GitEvidenceJob.refs());
+    }
+
+    @Override
+    public IndexJob admitGitHistory(RepositoryId repositoryId, GitEvidenceId catalogId, String branch, RepositoryRevision revision) {
+        return insertGitJob(repositoryId, IndexJobOperation.GIT_HISTORY, GitEvidenceJob.history(catalogId, branch, revision));
+    }
+
+    @Override
     public Optional<IndexJob> find(IndexJobId jobId) {
         return Optional.ofNullable(template.getCollection(IndexCollections.INDEX_JOBS).find(new Document(JOB_ID, jobId.value())).first())
                 .map(MongoIndexJobStore::from);
@@ -143,10 +154,12 @@ public final class MongoIndexJobStore implements IndexJobStore {
         for (Document repository : template.getCollection(IndexCollections.REPOSITORIES).find()) {
             reconcileCommitted(RepositoryId.of(repository.getString(REPOSITORY_ID)));
         }
+        reconcileReadyGitJobs();
     }
 
     @Override
     public void failUnreconciledRunningJobs() {
+        reconcileReadyGitJobs();
         template.getCollection(IndexCollections.INDEX_JOBS).updateMany(new Document(ACTIVE, true).append("phase", IndexJobPhase.RUNNING.name()),
                 new Document("$set", new Document(ACTIVE, false).append("phase", IndexJobPhase.FAILED.name())
                         .append("failureCategory", IndexFailureCategory.WORKER_INTERRUPTED.name())));
@@ -229,6 +242,19 @@ public final class MongoIndexJobStore implements IndexJobStore {
         return Optional.ofNullable(refreshed.get("publicationIntent", Document.class)).map(MongoIndexJobStore::intentFrom);
     }
 
+    @Override
+    public boolean gitEvidenceReady(IndexJob job) {
+        if (job.operation() != IndexJobOperation.GIT_REFS && job.operation() != IndexJobOperation.GIT_HISTORY) { return false; }
+        Document document = template.getCollection(IndexCollections.INDEX_JOBS).find(new Document(JOB_ID, job.id().value())
+                .append(REPOSITORY_ID, job.repositoryId().value())).first();
+        if (Objects.isNull(document)) { return false; }
+        Document payload = document.get("gitEvidence", Document.class);
+        if (Objects.isNull(payload) || Objects.isNull(payload.getString("evidenceId"))) { return false; }
+        Document manifest = template.getCollection(IndexCollections.GIT_EVIDENCE_MANIFESTS).find(new Document(REPOSITORY_ID, job.repositoryId().value())
+                .append("evidenceId", payload.getString("evidenceId")).append("ownerJobId", job.id().value()).append("state", "READY")).first();
+        return Objects.nonNull(manifest);
+    }
+
     private IndexJob insertBuild(RepositoryId repositoryId, RepositoryRevision revision, boolean rebuild,
                                  Optional<PublishedGenerationPointer> expectedParent) {
         IndexJobId jobId = IndexJobId.create();
@@ -237,6 +263,31 @@ public final class MongoIndexJobStore implements IndexJobStore {
         expectedParent.ifPresent(pointer -> job.append("expectedParent", pointerDocument(pointer)));
         insert(job, repositoryId);
         return from(job);
+    }
+
+    private IndexJob insertGitJob(RepositoryId repositoryId, IndexJobOperation operation, GitEvidenceJob payload) {
+        Objects.requireNonNull(repositoryId, "repository id is required");
+        IndexJobId jobId = IndexJobId.create();
+        Document job = new Document(JOB_ID, jobId.value()).append(REPOSITORY_ID, repositoryId.value()).append(ACTIVE, true)
+                .append("phase", IndexJobPhase.ACCEPTED.name()).append("operation", operation.name()).append("rebuild", false)
+                .append("gitEvidence", gitEvidenceDocument(payload)).append("createdAt", new Date());
+        insert(job, repositoryId);
+        return from(job);
+    }
+
+    private void reconcileReadyGitJobs() {
+        for (Document job : template.getCollection(IndexCollections.INDEX_JOBS).find(new Document(ACTIVE, true)
+                .append("phase", IndexJobPhase.RUNNING.name()).append("operation", new Document("$in", List.of(IndexJobOperation.GIT_REFS.name(), IndexJobOperation.GIT_HISTORY.name()))))) {
+            Document payload = job.get("gitEvidence", Document.class);
+            if (Objects.isNull(payload)) { continue; }
+            String evidenceId = payload.getString("evidenceId");
+            if (Objects.isNull(evidenceId)) { continue; }
+            Document manifest = template.getCollection(IndexCollections.GIT_EVIDENCE_MANIFESTS).find(new Document(REPOSITORY_ID, job.getString(REPOSITORY_ID))
+                    .append("evidenceId", evidenceId).append("ownerJobId", job.getString(JOB_ID)).append("state", "READY")).first();
+            if (Objects.nonNull(manifest)) {
+                terminal(new IndexJobId(job.getString(JOB_ID)), IndexJobPhase.COMPLETE, Optional.empty());
+            }
+        }
     }
 
     private IndexJob insertNoWork(RepositoryId repositoryId) {
@@ -251,6 +302,14 @@ public final class MongoIndexJobStore implements IndexJobStore {
                                            IndexJobOperation operation, boolean rebuild) {
         return new Document(JOB_ID, jobId.value()).append(REPOSITORY_ID, repositoryId.value()).append("target", targetDocument(target)).append(ACTIVE, true)
                 .append("phase", IndexJobPhase.ACCEPTED.name()).append("operation", operation.name()).append("rebuild", rebuild).append("createdAt", new Date());
+    }
+
+    private static Document gitEvidenceDocument(GitEvidenceJob payload) {
+        Document document = new Document();
+        payload.catalogId().ifPresent(value -> document.append("catalogId", value.value()));
+        payload.branch().ifPresent(value -> document.append("branch", value));
+        payload.revision().ifPresent(value -> document.append("revision", value.value()));
+        return document;
     }
 
     private static Document targetDocument(IndexJobTarget target) {
@@ -437,9 +496,18 @@ public final class MongoIndexJobStore implements IndexJobStore {
         if (operation == IndexJobOperation.BUILD || operation == IndexJobOperation.ROLLBACK) {
             target = Optional.of(targetFrom(Objects.requireNonNull(document.get("target", Document.class), "target document is required")));
         }
+        Optional<GitEvidenceJob> gitEvidence = Optional.empty();
+        if (operation == IndexJobOperation.GIT_REFS || operation == IndexJobOperation.GIT_HISTORY) {
+            Document payload = Objects.requireNonNull(document.get("gitEvidence", Document.class), "git evidence payload is required");
+            Optional<GitEvidenceId> catalogId = Optional.ofNullable(payload.getString("catalogId")).map(GitEvidenceId::new);
+            Optional<String> branch = Optional.ofNullable(payload.getString("branch"));
+            Optional<RepositoryRevision> revision = Optional.ofNullable(payload.getString("revision")).map(RepositoryRevision::new);
+            Optional<GitEvidenceId> evidenceId = Optional.ofNullable(payload.getString("evidenceId")).map(GitEvidenceId::new);
+            gitEvidence = Optional.of(new GitEvidenceJob(catalogId, branch, revision, evidenceId));
+        }
         return new IndexJob(new IndexJobId(document.getString(JOB_ID)), RepositoryId.of(document.getString(REPOSITORY_ID)), target,
                 IndexJobPhase.valueOf(document.getString("phase")), Boolean.TRUE.equals(document.getBoolean(ACTIVE)),
-                Optional.ofNullable(document.getString("failureCategory")).map(IndexFailureCategory::valueOf), Boolean.TRUE.equals(document.getBoolean("rebuild")), operation);
+                Optional.ofNullable(document.getString("failureCategory")).map(IndexFailureCategory::valueOf), Boolean.TRUE.equals(document.getBoolean("rebuild")), operation, gitEvidence);
     }
 
     private static IndexJobTarget targetFrom(Document document) {

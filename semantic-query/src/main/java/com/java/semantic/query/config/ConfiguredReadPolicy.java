@@ -27,6 +27,17 @@ public final class ConfiguredReadPolicy {
         return !properties.forbiddenRepositories().contains(repositoryId.value());
     }
 
+    /** Git evidence is repository-wide, so any granular semantic restriction denies it. */
+    public void requireGitEvidenceVisible(RepositoryId repositoryId) {
+        RepositoryId identity = Objects.requireNonNull(repositoryId, "repository id is required");
+        boolean granularRestriction = properties.forbiddenPackages().stream().anyMatch(rule -> rule.repoId().equals(identity.value()))
+                || properties.forbiddenClasses().stream().anyMatch(rule -> rule.repoId().equals(identity.value()))
+                || properties.forbiddenMethods().stream().anyMatch(rule -> rule.repoId().equals(identity.value()));
+        if (!isRepositoryVisible(identity) || !properties.gitEvidenceAllowedRepositories().contains(identity.value()) || granularRestriction) {
+            throw new com.java.semantic.query.application.RepositoryNotFoundException();
+        }
+    }
+
     public SearchAccessPlan searchAccessPlan(RepositoryId repositoryId) {
         RepositoryId identity = Objects.requireNonNull(repositoryId, "repository id is required");
         if (!isRepositoryVisible(identity)) {

@@ -59,7 +59,17 @@ public final class IndexSchemaContract {
                             "package", 1, "authority", 1, "tokens", 1), false, Map.of()),
                     index("search_scope_by_generation_authority", keys("repoId", 1, "generationId", 1,
                             "scopePackage", 1, "scopeClass", 1, "scopeMethod", 1, "scopeParameters", 1,
-                            "kind", 1, "package", 1, "authority", 1), false, Map.of())));
+                            "kind", 1, "package", 1, "authority", 1), false, Map.of())),
+            collection(IndexCollections.GIT_EVIDENCE_MANIFESTS,
+                    index("git_evidence_manifest_unique", keys("repoId", 1, "evidenceId", 1), true, Map.of()),
+                    index("git_evidence_ready_latest", keys("repoId", 1, "kind", 1, "state", 1, "observedAt", -1, "evidenceId", 1), false,
+                            Map.of("state", "READY"))),
+            collection(IndexCollections.GIT_BRANCHES,
+                    index("git_branch_row_unique", keys("repoId", 1, "catalogId", 1, "ordinal", 1), true, Map.of()),
+                    index("git_branch_lookup", keys("repoId", 1, "catalogId", 1, "branch", 1), true, Map.of())),
+            collection(IndexCollections.GIT_COMMITS,
+                    index("git_commit_row_unique", keys("repoId", 1, "historyId", 1, "ordinal", 1), true, Map.of()),
+                    index("git_commit_lookup", keys("repoId", 1, "historyId", 1, "revision", 1), true, Map.of())));
 
     private IndexSchemaContract() { }
 

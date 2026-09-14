@@ -52,6 +52,33 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/RepositoryNotFound' }
         '409': { $ref: '#/components/responses/IndexConflict' }
+  /index/repositories/{repoId}/git/refs:
+    post:
+      operationId: prepareRepositoryGitRefs
+      parameters: [ { $ref: '#/components/parameters/RepositoryId' } ]
+      responses:
+        '202': { $ref: '#/components/responses/IndexJobAccepted' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/RepositoryNotFound' }
+        '409': { $ref: '#/components/responses/IndexConflict' }
+  /index/repositories/{repoId}/git/history:
+    post:
+      operationId: prepareRepositoryGitHistory
+      parameters: [ { $ref: '#/components/parameters/RepositoryId' } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/GitHistoryIndexRequest' }
+      responses:
+        '202': { $ref: '#/components/responses/IndexJobAccepted' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/RepositoryNotFound' }
+        '409': { $ref: '#/components/responses/IndexConflict' }
   /index/repositories/{repoId}/publication:
     get:
       operationId: getRepositoryPublication
@@ -239,12 +266,12 @@ components:
     IndexJobStatusResponse:
       type: object
       additionalProperties: false
-      required: [jobId, repositoryId, operation, phase, active]
+      required: [jobId, repositoryId, operation, phase, active, gitEvidence]
       properties:
         jobId: { type: string }
         repositoryId: { type: string }
         target: { $ref: '#/components/schemas/IndexJobTarget', nullable: true }
-        operation: { type: string, enum: [BUILD, ROLLBACK, RESET, NO_WORK] }
+        operation: { type: string, enum: [BUILD, ROLLBACK, RESET, NO_WORK, GIT_REFS, GIT_HISTORY] }
         phase: { type: string, enum: [ACCEPTED, RUNNING, COMPLETE, FAILED] }
         active: { type: boolean }
         failureCategory:
@@ -254,6 +281,9 @@ components:
         currentPointer:
           allOf: [{ $ref: '#/components/schemas/GenerationPointer' }]
           nullable: true
+        gitEvidence:
+          allOf: [{ $ref: '#/components/schemas/GitEvidenceResult' }]
+          nullable: true
     IndexPublicationResponse:
       type: object
       additionalProperties: false
@@ -261,6 +291,9 @@ components:
       properties:
         currentPointer:
           allOf: [{ $ref: '#/components/schemas/GenerationPointer' }]
+          nullable: true
+        gitEvidence:
+          allOf: [{ $ref: '#/components/schemas/GitEvidenceResult' }]
           nullable: true
         rollbackPointer:
           allOf: [{ $ref: '#/components/schemas/GenerationPointer' }]
@@ -278,6 +311,20 @@ components:
         target: { type: object, nullable: true }
         candidates: { type: array, items: { type: object } }
         requestId: { type: string }
+    GitHistoryIndexRequest:
+      type: object
+      additionalProperties: false
+      required: [catalogId, branch, revision]
+      properties:
+        catalogId: { type: string, format: uuid }
+        branch: { type: string, minLength: 1 }
+        revision: { type: string, pattern: '^[0-9a-f]{40}$' }
+    GitEvidenceResult:
+      type: object
+      additionalProperties: false
+      required: [evidenceId]
+      properties:
+        evidenceId: { type: string, format: uuid }
     SyncRequest:
       type: object
       additionalProperties: false

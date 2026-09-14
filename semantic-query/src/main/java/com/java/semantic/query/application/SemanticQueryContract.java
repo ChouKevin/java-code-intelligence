@@ -120,6 +120,25 @@ public final class SemanticQueryContract {
         }
     }
 
+    public record GitBranchRequest(String repositoryId, Optional<String> catalogId, int offset, int limit) {
+        public GitBranchRequest {
+            repositoryId = requireRepositoryId(repositoryId);
+            catalogId = Objects.requireNonNull(catalogId, "catalog id is required").map(value -> ModelValidation.requiredText(value, "catalog id"));
+            offset = requireOffset(offset);
+            limit = requireLimit(limit);
+        }
+    }
+
+    public record GitCommitRequest(String repositoryId, String historyId, String revision, int offset, int limit) {
+        public GitCommitRequest {
+            repositoryId = requireRepositoryId(repositoryId);
+            historyId = ModelValidation.requiredText(historyId, "history id");
+            revision = requireRevision(revision);
+            offset = requireOffset(offset);
+            limit = requireLimit(limit);
+        }
+    }
+
     public enum HttpMethod {
         GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS, TRACE, ALL
     }
@@ -135,6 +154,19 @@ public final class SemanticQueryContract {
     }
 
     public record Page(int offset, int limit, int returned, long total, boolean hasMore) {
+    }
+
+    public record GitBranchItem(String branch, String head) { }
+    public record GitBranchCollection(String repositoryId, String catalogId, java.time.Instant observedAt,
+                                      List<GitBranchItem> items, Page page) {
+        public GitBranchCollection { items = List.copyOf(Objects.requireNonNull(items, "git branch items are required")); }
+    }
+    public record GitCommitItem(String revision, List<String> parents, String subject, java.time.Instant committedAt) {
+        public GitCommitItem { parents = List.copyOf(Objects.requireNonNull(parents, "git commit parents are required")); }
+    }
+    public record GitCommitCollection(String repositoryId, String historyId, String revision, java.time.Instant preparedAt,
+                                      List<GitCommitItem> items, Page page) {
+        public GitCommitCollection { items = List.copyOf(Objects.requireNonNull(items, "git commit items are required")); }
     }
 
     public record SourceSnippet(String path, int startLine, int endLine, String code) {
