@@ -139,6 +139,37 @@ class IndexJobExecutorTest {
         verify(jobs).fail(job.id(), IndexFailureCategory.WORKER_INTERRUPTED);
     }
 
+    @Test
+    void dispatches_git_comparisons_to_the_handler_before_the_terminal_completion_transition() {
+        IndexJobStore jobs = mock(IndexJobStore.class);
+        RepositoryBuildRunner runner = mock(RepositoryBuildRunner.class);
+        GitEvidenceJobHandler handler = mock(GitEvidenceJobHandler.class);
+        IndexJob job = runningJob(IndexJobOperation.GIT_COMPARISON);
+        when(jobs.complete(job.id())).thenReturn(true);
+
+        new IndexJobExecutor(jobs, runner, mock(PublicationPort.class), Optional.empty(), Optional.of(handler)).execute(job);
+
+        verify(handler).prepare(job);
+        verify(jobs).complete(job.id());
+    }
+
+    @Test
+    void failed_git_comparison_handler_never_reports_a_false_complete_terminal_state() {
+        IndexJobStore jobs = mock(IndexJobStore.class);
+        RepositoryBuildRunner runner = mock(RepositoryBuildRunner.class);
+        GitEvidenceJobHandler handler = mock(GitEvidenceJobHandler.class);
+        IndexJob job = runningJob(IndexJobOperation.GIT_COMPARISON);
+        RuntimeException failure = new RuntimeException("comparison preparation failed");
+        doThrow(failure).when(handler).prepare(job);
+        when(jobs.reconcileCommitted(job.repositoryId())).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> new IndexJobExecutor(jobs, runner, mock(PublicationPort.class), Optional.empty(), Optional.of(handler)).execute(job))
+                .isSameAs(failure);
+
+        verify(jobs, never()).complete(job.id());
+        verify(jobs).fail(job.id(), IndexFailureCategory.WORKER_INTERRUPTED);
+    }
+
     private static IndexJobExecutor executor(IndexJobStore jobs, RepositoryBuildRunner runner) {
         return new IndexJobExecutor(jobs, runner, mock(PublicationPort.class), Optional.empty());
     }

@@ -17,12 +17,15 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 
 /** Mongo-only reader for immutable Git catalog and history manifests. */
 public final class GitEvidenceReadService {
+    private static final int MAX_CURSOR_CHARACTERS = 2048;
+    private static final String DIFF_CURSOR_OPERATION = "git-file-diff";
     private final MongoTemplate template;
     private final ConfiguredReadPolicy readPolicy;
     private final Duration storageTimeout;
@@ -95,13 +98,11 @@ public final class GitEvidenceReadService {
             if (!required.previous().equals(requiredText(manifest, "previous")) || !required.current().equals(requiredText(manifest, "current"))) {
                 throw new IllegalArgumentException("comparison endpoints do not match the requested revisions");
             }
-            long total = requiredLong(manifest, "total");
-            List<SemanticQueryContract.GitChangeItem> changes = new ArrayList<>();
-            for (Document row : template.getCollection(IndexCollections.GIT_COMPARISON_CHANGES).find(Filters.and(
-                    Filters.eq("repoId", repositoryId.value()), Filters.eq("comparisonId", required.comparisonId())))
-                    .sort(Sorts.ascending("ordinal")).skip(required.offset()).limit(required.limit()).maxTime(storageTimeout.toMillis(), TimeUnit.MILLISECONDS)) {
-                changes.add(change(row));
-            }
+            List<SemanticQueryContract.GitChangeItem> allChanges = validateComparisonChanges(repositoryId, required.comparisonId(), manifest);
+            long total = allChanges.size();
+            int pageStart = Math.min(required.offset(), allChanges.size());
+            int pageEnd = Math.min(pageStart + required.limit(), allChanges.size());
+            List<SemanticQueryContract.GitChangeItem> changes = List.copyOf(allChanges.subList(pageStart, pageEnd));
             return new SemanticQueryContract.GitComparisonCollection(repositoryId.value(), required.comparisonId(), required.previous(), required.current(),
                     requiredText(manifest, "previousSnapshotId"), requiredText(manifest, "currentSnapshotId"), requiredText(manifest, "ancestry"),
                     List.copyOf(changes), page(required.offset(), required.limit(), changes.size(), total));
@@ -123,15 +124,21 @@ public final class GitEvidenceReadService {
             if (!required.previous().equals(requiredText(manifest, "previous")) || !required.current().equals(requiredText(manifest, "current"))) {
                 throw new IllegalArgumentException("comparison endpoints do not match the requested revisions");
             }
+            List<SemanticQueryContract.GitChangeItem> allChanges = validateComparisonChanges(repositoryId, required.comparisonId(), manifest);
             Document row = template.getCollection(IndexCollections.GIT_COMPARISON_CHANGES).find(Filters.and(Filters.eq("repoId", repositoryId.value()),
                     Filters.eq("comparisonId", required.comparisonId()), Filters.eq("changeId", required.changeId()))).maxTime(storageTimeout.toMillis(), TimeUnit.MILLISECONDS).first();
             if (Objects.isNull(row)) {
                 throw new IllegalArgumentException("change does not belong to the comparison");
             }
-            long ordinal = required.cursor().map(GitEvidenceReadService::decodeCursor).orElse(0L);
+            if (allChanges.stream().noneMatch(change -> change.changeId().equals(required.changeId()))) {
+                throw new IndexContractMismatchException();
+            }
+            long ordinal = required.cursor().map(cursor -> decodeCursor(cursor, repositoryId, required.comparisonId(), required.previous(), required.current(),
+                    required.changeId())).orElse(0L);
             PatchPage patchPage = patchPage(repositoryId, required.comparisonId(), required.changeId(), row, ordinal, required.cursor().isPresent());
             return new SemanticQueryContract.GitFileDiffResult(repositoryId.value(), required.comparisonId(), required.previous(), required.current(),
-                    change(row), patchPage.text(), patchPage.hasNext() ? Optional.of(encodeCursor(ordinal + 1L)) : Optional.empty());
+                    change(row), patchPage.text(), patchPage.hasNext() ? Optional.of(encodeCursor(repositoryId, required.comparisonId(), required.previous(),
+                            required.current(), required.changeId(), ordinal + 1L)) : Optional.empty());
         } catch (MongoException | DataAccessException exception) {
             throw new SemanticIndexUnavailableException(exception);
         } catch (RepositoryNotFoundException | GitEvidenceNotFoundException | GitEvidenceNotReadyException | IndexContractMismatchException | IllegalArgumentException exception) {
@@ -167,6 +174,56 @@ public final class GitEvidenceReadService {
         Document snapshot = ready(findManifest(repositoryId, new GitEvidenceId(snapshotId)), "SNAPSHOT");
         if (!revision.equals(requiredText(snapshot, "revision"))) {
             throw new IndexContractMismatchException();
+        }
+    }
+
+    private List<SemanticQueryContract.GitChangeItem> validateComparisonChanges(RepositoryId repositoryId, String comparisonId, Document manifest) {
+        long expectedTotal = requiredLong(manifest, "total");
+        List<SemanticQueryContract.GitChangeItem> changes = new ArrayList<>();
+        HashSet<String> identifiers = new HashSet<>();
+        long ordinal = 0L;
+        for (Document row : template.getCollection(IndexCollections.GIT_COMPARISON_CHANGES).find(Filters.and(
+                Filters.eq("repoId", repositoryId.value()), Filters.eq("comparisonId", comparisonId))).sort(Sorts.ascending("ordinal"))
+                .maxTime(storageTimeout.toMillis(), TimeUnit.MILLISECONDS)) {
+            Number actualOrdinal = row.get("ordinal", Number.class);
+            if (Objects.isNull(actualOrdinal) || actualOrdinal.longValue() != ordinal || !repositoryId.value().equals(requiredText(row, "repoId"))
+                    || !comparisonId.equals(requiredText(row, "comparisonId"))) {
+                throw new IndexContractMismatchException();
+            }
+            SemanticQueryContract.GitChangeItem change = change(row);
+            if (!identifiers.add(change.changeId())) {
+                throw new IndexContractMismatchException();
+            }
+            validatePatchRows(repositoryId, comparisonId, change.changeId(), row);
+            changes.add(change);
+            ordinal++;
+        }
+        if (ordinal != expectedTotal) {
+            throw new IndexContractMismatchException();
+        }
+        return List.copyOf(changes);
+    }
+
+    private void validatePatchRows(RepositoryId repositoryId, String comparisonId, String changeId, Document change) {
+        long expectedChunks = requiredLong(change, "patchChunkCount");
+        String status = requiredText(change, "diffStatus");
+        long actualChunks = chunkCount(repositoryId, comparisonId, changeId);
+        if (!"AVAILABLE".equals(status)) {
+            if (expectedChunks != 0L || actualChunks != 0L) {
+                throw new IndexContractMismatchException();
+            }
+            return;
+        }
+        if (expectedChunks == 0L || actualChunks != expectedChunks || !contiguousPatchOrdinals(repositoryId, comparisonId, changeId, expectedChunks)) {
+            throw new IndexContractMismatchException();
+        }
+        for (Document chunk : template.getCollection(IndexCollections.GIT_COMPARISON_PATCHES).find(Filters.and(Filters.eq("repoId", repositoryId.value()),
+                Filters.eq("comparisonId", comparisonId), Filters.eq("changeId", changeId))).sort(Sorts.ascending("ordinal"))
+                .maxTime(storageTimeout.toMillis(), TimeUnit.MILLISECONDS)) {
+            String patch = requiredString(chunk, "patch");
+            if (patch.isEmpty() || patch.getBytes(StandardCharsets.UTF_8).length > 64 * 1024) {
+                throw new IndexContractMismatchException();
+            }
         }
     }
 
@@ -223,16 +280,27 @@ public final class GitEvidenceReadService {
                 optionalString(row, "newBlobId"), requiredText(row, "diffStatus"));
     }
 
-    private static String encodeCursor(long ordinal) {
-        return Base64.getUrlEncoder().withoutPadding().encodeToString(Long.toString(ordinal).getBytes(StandardCharsets.UTF_8));
+    private static String encodeCursor(RepositoryId repositoryId, String comparisonId, String previous, String current, String changeId, long ordinal) {
+        String payload = String.join("\u001f", DIFF_CURSOR_OPERATION, repositoryId.value(), comparisonId, previous, current, changeId, Long.toString(ordinal));
+        return Base64.getUrlEncoder().withoutPadding().encodeToString(payload.getBytes(StandardCharsets.UTF_8));
     }
 
-    private static long decodeCursor(String cursor) {
+    private static long decodeCursor(String cursor, RepositoryId repositoryId, String comparisonId, String previous, String current, String changeId) {
         try {
-            long ordinal = Long.parseLong(new String(Base64.getUrlDecoder().decode(cursor), StandardCharsets.UTF_8));
-            if (ordinal < 0L) {
+            if (cursor.length() > MAX_CURSOR_CHARACTERS) {
                 throw new IllegalArgumentException("diff cursor is invalid");
             }
+            String decoded = new String(Base64.getUrlDecoder().decode(cursor), StandardCharsets.UTF_8);
+            if (decoded.length() > MAX_CURSOR_CHARACTERS) {
+                throw new IllegalArgumentException("diff cursor is invalid");
+            }
+            String[] values = decoded.split("\u001f", -1);
+            if (values.length != 7 || !DIFF_CURSOR_OPERATION.equals(values[0]) || !repositoryId.value().equals(values[1])
+                    || !comparisonId.equals(values[2]) || !previous.equals(values[3]) || !current.equals(values[4]) || !changeId.equals(values[5])) {
+                throw new IllegalArgumentException("diff cursor is invalid");
+            }
+            long ordinal = Long.parseLong(values[6]);
+            if (ordinal < 0L) { throw new IllegalArgumentException("diff cursor is invalid"); }
             return ordinal;
         } catch (IllegalArgumentException exception) {
             throw new IllegalArgumentException("diff cursor is invalid", exception);

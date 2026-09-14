@@ -80,6 +80,7 @@ public final class GitEvidenceJobHandler {
             git.clone(runtime.workingTree(), runtime.remoteUrl());
         }
         git.fetch(runtime.workingTree());
+        git.verifyComparisonEndpoints(runtime.workingTree(), previous, current);
         GitPreparedComparison comparison = git.prepareComparison(runtime.workingTree(), previous, current);
         evidence.publishComparison(job, comparison, Instant.now());
     }

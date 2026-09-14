@@ -15,6 +15,9 @@ import com.java.semantic.model.repository.RepositoryRevision;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.MediaType;
+import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import java.util.Optional;
 import java.time.Instant;
@@ -23,6 +26,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.verify;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 class IndexRepositoryControllerTest {
     @Test
@@ -102,6 +108,31 @@ class IndexRepositoryControllerTest {
         assertThatThrownBy(() -> controller.publication("missing"))
                 .isInstanceOf(org.springframework.web.server.ResponseStatusException.class)
                 .hasMessageContaining("repository publication was not found");
+    }
+
+    @Test
+    void comparison_admission_rejects_missing_null_and_invalid_shas_at_the_http_boundary_and_accepts_exact_payload() throws Exception {
+        IndexRequestService service = mock(IndexRequestService.class);
+        IndexJob comparison = new IndexJob(IndexJobId.create(), RepositoryId.of("orders"), Optional.empty(), IndexJobPhase.ACCEPTED, true,
+                Optional.empty(), false, IndexJobOperation.GIT_COMPARISON);
+        String previous = "a".repeat(40);
+        String current = "b".repeat(40);
+        when(service.prepareGitComparison(RepositoryId.of("orders"), previous, current)).thenReturn(comparison);
+        MockMvc mvc = MockMvcBuilders.standaloneSetup(new IndexRepositoryController(service)).build();
+
+        mvc.perform(post("/index/repositories/orders/git/comparisons").contentType(MediaType.APPLICATION_JSON).content("{}"))
+                .andExpect(status().isBadRequest());
+        mvc.perform(post("/index/repositories/orders/git/comparisons").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"previous\":null,\"current\":null}"))
+                .andExpect(status().isBadRequest());
+        mvc.perform(post("/index/repositories/orders/git/comparisons").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"previous\":\"bad\",\"current\":\"bad\"}"))
+                .andExpect(status().isBadRequest());
+        mvc.perform(post("/index/repositories/orders/git/comparisons").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"previous\":\"" + previous + "\",\"current\":\"" + current + "\"}"))
+                .andExpect(status().isAccepted());
+
+        verify(service).prepareGitComparison(RepositoryId.of("orders"), previous, current);
     }
 
     private static RollbackIndexRequest request(PublishedGenerationPointer current, PublishedGenerationPointer rollback) {

@@ -142,7 +142,9 @@ public final class GitEvidencePublicationStore {
         for (GitComparisonChange change : comparison.changes()) {
             template.getCollection(IndexCollections.GIT_COMPARISON_CHANGES).insertOne(new Document("repoId", job.repositoryId().value())
                     .append("comparisonId", comparisonId.value()).append("ordinal", ordinal).append("changeId", change.changeId()).append("kind", change.kind().name())
-                    .append("oldPath", change.oldPath()).append("newPath", change.newPath()).append("oldMode", change.oldMode()).append("newMode", change.newMode())
+                    .append("oldPath", change.oldPath()).append("newPath", change.newPath()).append("oldRawPath", change.oldRawPath())
+                    .append("newRawPath", change.newRawPath()).append("oldPathKey", pathKey(change.oldRawPath())).append("newPathKey", pathKey(change.newRawPath()))
+                    .append("oldMode", change.oldMode()).append("newMode", change.newMode())
                     .append("oldBlobId", change.oldBlobId()).append("newBlobId", change.newBlobId()).append("diffStatus", change.diffStatus())
                     .append("patchChunkCount", (long) change.patchChunks().size()));
             appendPatchChunks(job.repositoryId(), comparisonId, change);
@@ -311,6 +313,9 @@ public final class GitEvidencePublicationStore {
                     Filters.eq("comparisonId", comparisonId.value()), Filters.eq("ordinal", ordinal))).first();
             if (Objects.isNull(change) || !expected.changeId().equals(change.getString("changeId")) || !expected.kind().name().equals(change.getString("kind"))
                     || !expected.oldPath().equals(change.getString("oldPath")) || !expected.newPath().equals(change.getString("newPath"))
+                    || binaryBytes(change.get("oldRawPath")).filter(bytes -> Arrays.equals(bytes, expected.oldRawPath())).isEmpty()
+                    || binaryBytes(change.get("newRawPath")).filter(bytes -> Arrays.equals(bytes, expected.newRawPath())).isEmpty()
+                    || !pathKey(expected.oldRawPath()).equals(change.getString("oldPathKey")) || !pathKey(expected.newRawPath()).equals(change.getString("newPathKey"))
                     || !expected.oldMode().equals(change.getString("oldMode")) || !expected.newMode().equals(change.getString("newMode"))
                     || !expected.oldBlobId().equals(change.getString("oldBlobId")) || !expected.newBlobId().equals(change.getString("newBlobId"))
                     || !expected.diffStatus().equals(change.getString("diffStatus")) || !numberEquals(change, "patchChunkCount", expected.patchChunks().size())

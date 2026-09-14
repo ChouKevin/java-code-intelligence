@@ -25,6 +25,7 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Objects;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -246,8 +247,8 @@ class JGitRepositoryAdapterComparisonTest {
                     RepositoryRevision.ofSha(commitId.name()), RepositoryRevision.ofSha(commitId.name()));
 
             assertThat(comparison.previousEntries()).hasSize(2);
-            assertThat(comparison.previousEntries()).filteredOn(entry -> entry.path().equals("raw-path-hex:c328")).singleElement().satisfies(entry -> {
-                assertThat(entry.path()).isEqualTo("raw-path-hex:c328");
+            assertThat(comparison.previousEntries()).filteredOn(entry -> entry.path().equals("\u0000raw-path-hex:c328")).singleElement().satisfies(entry -> {
+                assertThat(entry.path()).isEqualTo("\u0000raw-path-hex:c328");
                 assertThat(entry.contentStatus()).isEqualTo(GitFileContentStatus.UNSUPPORTED_PATH);
                 assertThat(entry.byteLength()).isEqualTo(5L);
                 assertThat(entry.bytes()).isEmpty();
@@ -255,6 +256,52 @@ class JGitRepositoryAdapterComparisonTest {
             assertThat(comparison.previousEntries()).filteredOn(entry -> entry.path().equals("raw-path-hex:ff")).singleElement()
                     .satisfies(entry -> assertThat(entry.contentStatus()).isEqualTo(GitFileContentStatus.TEXT));
         }
+    }
+
+    @Test
+    void marks_a_changed_non_utf8_raw_path_unavailable_without_a_patch() throws Exception {
+        try (Git git = Git.init().setDirectory(repositoryDirectory.toFile()).call();
+             ObjectInserter inserter = git.getRepository().newObjectInserter()) {
+            byte[] rawPath = new byte[] {(byte) 0xC3, (byte) 0x28};
+            ObjectId previousBlob = inserter.insert(Constants.OBJ_BLOB, "before\n".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            ObjectId currentBlob = inserter.insert(Constants.OBJ_BLOB, "after\n".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            ObjectId previousTree = rawTree(inserter, rawPath, previousBlob);
+            ObjectId previous = rawCommit(inserter, previousTree, null); // cs-allow: initial commit has no parent
+            ObjectId currentTree = rawTree(inserter, rawPath, currentBlob);
+            ObjectId current = rawCommit(inserter, currentTree, previous);
+            inserter.flush();
+
+            GitPreparedComparison comparison = new JGitRepositoryAdapter(new RepositoryProperties()).prepareComparison(repositoryDirectory,
+                    RepositoryRevision.ofSha(previous.name()), RepositoryRevision.ofSha(current.name()));
+
+            assertThat(comparison.changes()).singleElement().satisfies(change -> {
+                assertThat(change.diffStatus()).isEqualTo(GitFileContentStatus.UNSUPPORTED_PATH.name());
+                assertThat(change.patchChunks()).isEmpty();
+                assertThat(change.oldPath()).isEqualTo("\u0000raw-path-hex:c328");
+                assertThat(change.newPath()).isEqualTo("\u0000raw-path-hex:c328");
+                assertThat(change.oldRawPath()).containsExactly(rawPath);
+                assertThat(change.newRawPath()).containsExactly(rawPath);
+            });
+        }
+    }
+
+    private static ObjectId rawTree(ObjectInserter inserter, byte[] rawPath, ObjectId blob) throws Exception {
+        TreeFormatter tree = new TreeFormatter();
+        tree.append(rawPath, FileMode.REGULAR_FILE, blob);
+        return tree.insertTo(inserter);
+    }
+
+    private static ObjectId rawCommit(ObjectInserter inserter, ObjectId treeId, ObjectId parent) throws Exception {
+        CommitBuilder builder = new CommitBuilder();
+        PersonIdent identity = new PersonIdent("tester", "tester@example.test");
+        builder.setTreeId(treeId);
+        if (Objects.nonNull(parent)) {
+            builder.setParentId(parent);
+        }
+        builder.setAuthor(identity);
+        builder.setCommitter(identity);
+        builder.setMessage("raw path");
+        return inserter.insert(Constants.OBJ_COMMIT, builder.build());
     }
 
     private static void addSpecialIndexEntries(Git git, String symlinkPath, FileMode symlinkMode, byte[] symlinkBytes,

@@ -6,6 +6,12 @@ import com.java.semantic.repository.config.RepositoryProperties;
 import org.eclipse.jgit.api.Git;
 import org.eclipse.jgit.api.errors.JGitInternalException;
 import org.eclipse.jgit.lib.Ref;
+import org.eclipse.jgit.lib.Constants;
+import org.eclipse.jgit.lib.CommitBuilder;
+import org.eclipse.jgit.lib.ObjectId;
+import org.eclipse.jgit.lib.ObjectInserter;
+import org.eclipse.jgit.lib.PersonIdent;
+import org.eclipse.jgit.lib.TreeFormatter;
 import org.eclipse.jgit.transport.RefSpec;
 import org.eclipse.jgit.transport.URIish;
 import org.junit.jupiter.api.Test;
@@ -148,6 +154,43 @@ class JGitRepositoryAdapterTest {
                     .resolveRemoteRef(fixture.remote().toUri().toString(), "annotated-v1");
 
             assertThat(resolved.value()).isEqualTo(revision);
+        }
+    }
+
+    @Test
+    void rejects_a_locally_retained_endpoint_after_the_trusted_remote_ref_is_rewritten() throws Exception {
+        try (RemoteFixture fixture = createRemote()) {
+            JGitRepositoryAdapter adapter = new JGitRepositoryAdapter(new RepositoryProperties());
+            Path clone = tempDirectory.resolve("rewritten-clone");
+            RepositoryRevision retained = RepositoryRevision.ofSha(fixture.seed().getRepository().resolve("refs/heads/main").getName());
+            adapter.clone(clone, fixture.remote().toUri().toString());
+            RepositoryRevision rewritten = rewriteRemoteHead(fixture.remote());
+            adapter.fetch(clone);
+
+            assertThatThrownBy(() -> adapter.verifyComparisonEndpoints(clone, retained, rewritten))
+                    .isInstanceOf(RepositoryMutationException.class)
+                    .hasMessageContaining("not reachable");
+        }
+    }
+
+    private static RepositoryRevision rewriteRemoteHead(Path remote) throws Exception {
+        try (Git bare = Git.open(remote.toFile()); ObjectInserter inserter = bare.getRepository().newObjectInserter()) {
+            ObjectId blob = inserter.insert(Constants.OBJ_BLOB, "rewritten\n".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            TreeFormatter tree = new TreeFormatter();
+            tree.append("sample.txt", org.eclipse.jgit.lib.FileMode.REGULAR_FILE, blob);
+            ObjectId treeId = tree.insertTo(inserter);
+            CommitBuilder commit = new CommitBuilder();
+            PersonIdent identity = new PersonIdent("Test", "test@example.test");
+            commit.setTreeId(treeId);
+            commit.setAuthor(identity);
+            commit.setCommitter(identity);
+            commit.setMessage("rewritten root");
+            ObjectId rewritten = inserter.insert(Constants.OBJ_COMMIT, commit.build());
+            inserter.flush();
+            org.eclipse.jgit.lib.RefUpdate update = bare.getRepository().updateRef("refs/heads/main");
+            update.setNewObjectId(rewritten);
+            update.forceUpdate();
+            return RepositoryRevision.ofSha(rewritten.name());
         }
     }
 

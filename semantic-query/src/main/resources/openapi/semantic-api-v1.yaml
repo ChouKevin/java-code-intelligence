@@ -331,6 +331,7 @@ components:
         revision: {$ref: '#/components/schemas/Revision'}
         preparedAt: {type: string, format: date-time}
         items: {type: array, items: {$ref: '#/components/schemas/GitCommitItem'}}
+        page: {$ref: '#/components/schemas/Page'}
     GitComparisonRequest:
       type: object
       additionalProperties: false
@@ -393,7 +394,6 @@ components:
         change: {$ref: '#/components/schemas/GitChangeItem'}
         patch: {type: string}
         nextCursor: {type: string}
-        page: {$ref: '#/components/schemas/Page'}
     Page:
       type: object
       additionalProperties: false

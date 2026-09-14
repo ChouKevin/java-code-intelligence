@@ -49,7 +49,7 @@ public final class IndexJobExecutor {
             case BUILD -> buildRunner.run(job);
             case ROLLBACK -> rollback(job);
             case RESET -> resetHandler.orElseThrow(() -> new IllegalStateException("RESET handler is not registered")).reset(job);
-            case GIT_REFS, GIT_HISTORY -> gitEvidenceHandler.orElseThrow(() -> new IllegalStateException("Git evidence handler is not registered")).prepare(job);
+            case GIT_REFS, GIT_HISTORY, GIT_COMPARISON -> gitEvidenceHandler.orElseThrow(() -> new IllegalStateException("Git evidence handler is not registered")).prepare(job);
             case NO_WORK -> throw new IllegalArgumentException("NO_WORK is not runnable");
         }
     }

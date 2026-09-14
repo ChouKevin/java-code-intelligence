@@ -2,6 +2,7 @@ package com.java.semantic.api;
 
 import com.java.semantic.model.codefact.CodeFactKind;
 import com.java.semantic.model.codefact.CodeFactSearchQuery;
+import com.java.semantic.query.application.SemanticQueryContract;
 import org.junit.jupiter.api.Test;
 import org.yaml.snakeyaml.Yaml;
 
@@ -73,6 +74,21 @@ class OpenApiContractTest {
                 "^[A-Za-z_$][A-Za-z0-9_$]*(?:\\.[A-Za-z_$][A-Za-z0-9_$]*)*$");
         assertThat(map(map(searchProperties.get("kinds")).get("items")).get("enum"))
                 .isEqualTo(Arrays.stream(CodeFactKind.values()).map(Enum::name).toList());
+    }
+
+    @Test
+    void keeps_commit_paging_and_file_diff_continuation_shapes_aligned_with_the_runtime_records() throws Exception {
+        Map<String, Object> root = openApi();
+        Map<String, Object> schemas = map(map(root.get("components")).get("schemas"));
+        Map<String, Object> commitProperties = map(map(schemas.get("GitCommitCollection")).get("properties"));
+        Map<String, Object> diffProperties = map(map(schemas.get("GitFileDiffResult")).get("properties"));
+
+        assertThat(commitProperties).containsKey("page");
+        assertThat(diffProperties).doesNotContainKey("page").containsKey("nextCursor");
+        assertThat(java.util.Arrays.stream(SemanticQueryContract.GitCommitCollection.class.getRecordComponents())
+                .map(component -> component.getName()).toList()).contains("page");
+        assertThat(java.util.Arrays.stream(SemanticQueryContract.GitFileDiffResult.class.getRecordComponents())
+                .map(component -> component.getName()).toList()).doesNotContain("page").contains("nextCursor");
     }
 
     @Test

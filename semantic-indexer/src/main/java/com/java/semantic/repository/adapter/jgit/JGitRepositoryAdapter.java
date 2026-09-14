@@ -49,6 +49,7 @@ import java.util.Collection;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.List;
+import java.util.Map;
 import java.time.Instant;
 import java.util.function.Consumer;
 import java.io.ByteArrayOutputStream;
@@ -100,6 +101,28 @@ public class JGitRepositoryAdapter implements GitRepositoryPort {
             throw exception;
         } catch (IOException | GitAPIException | RuntimeException exception) {
             throw new RepositoryMutationException("fetch failed", exception);
+        }
+    }
+
+    @Override
+    public void verifyComparisonEndpoints(Path workingTree, RepositoryRevision previous, RepositoryRevision current) {
+        try (Git git = Git.open(workingTree.toFile()); RevWalk walk = new RevWalk(git.getRepository())) {
+            RevCommit previousCommit = walk.parseCommit(ObjectId.fromString(previous.value()));
+            RevCommit currentCommit = walk.parseCommit(ObjectId.fromString(current.value()));
+            List<RevCommit> trustedHeads = git.getRepository().getRefDatabase().getRefsByPrefix("refs/remotes/origin/").stream()
+                    .filter(reference -> !reference.getName().equals("refs/remotes/origin/HEAD"))
+                    .filter(reference -> Objects.nonNull(reference.getObjectId()))
+                    .map(Ref::getObjectId)
+                    .map(objectId -> parseTrustedHead(walk, objectId))
+                    .toList();
+            if (!reachableFromTrustedHead(walk, previousCommit, trustedHeads)
+                    || !reachableFromTrustedHead(walk, currentCommit, trustedHeads)) {
+                throw new RepositoryMutationException("comparison endpoint is not reachable from a trusted remote ref");
+            }
+        } catch (RepositoryMutationException exception) {
+            throw exception;
+        } catch (IOException | RuntimeException exception) {
+            throw new RepositoryMutationException("cannot validate comparison endpoints", exception);
         }
     }
 
@@ -247,6 +270,8 @@ public class JGitRepositoryAdapter implements GitRepositoryPort {
 
     private List<GitComparisonChange> changes(org.eclipse.jgit.lib.Repository repository, RevCommit previous, RevCommit current) throws IOException {
         List<GitComparisonChange> changes = new java.util.ArrayList<>();
+        PathInventory previousPaths = pathInventory(repository, previous);
+        PathInventory currentPaths = pathInventory(repository, current);
         try (ChunkingOutputStream output = new ChunkingOutputStream(); DiffFormatter formatter = new DiffFormatter(output)) {
             formatter.setRepository(repository);
             formatter.setDetectRenames(true);
@@ -254,7 +279,9 @@ public class JGitRepositoryAdapter implements GitRepositoryPort {
             long ordinal = 0L;
             for (DiffEntry entry : formatter.scan(previous.getTree(), current.getTree())) {
                 output.reset();
-                String diffStatus = diffStatus(repository, entry);
+                SnapshotPath oldPath = comparisonPath(previousPaths, path(entry.getOldPath()), entry.getOldId().toObjectId(), entry.getOldMode());
+                SnapshotPath newPath = comparisonPath(currentPaths, path(entry.getNewPath()), entry.getNewId().toObjectId(), entry.getNewMode());
+                String diffStatus = !oldPath.supported() || !newPath.supported() ? GitFileContentStatus.UNSUPPORTED_PATH.name() : diffStatus(repository, entry);
                 List<String> patchChunks = List.of();
                 if ("AVAILABLE".equals(diffStatus)) {
                     formatter.format(entry);
@@ -263,8 +290,9 @@ public class JGitRepositoryAdapter implements GitRepositoryPort {
                         diffStatus = "TOO_LARGE";
                     }
                 }
-                changes.add(new GitComparisonChange("c-" + ordinal, changeKind(entry), path(entry.getOldPath()), path(entry.getNewPath()),
-                        entry.getOldMode().toString(), entry.getNewMode().toString(), entry.getOldId().name(), entry.getNewId().name(), patchChunks, diffStatus));
+                changes.add(new GitComparisonChange("c-" + ordinal, changeKind(entry), oldPath.value(), newPath.value(),
+                        entry.getOldMode().toString(), entry.getNewMode().toString(), entry.getOldId().name(), entry.getNewId().name(), patchChunks,
+                        diffStatus, oldPath.rawPath(), newPath.rawPath()));
                 ordinal++;
             }
         }
@@ -307,6 +335,27 @@ public class JGitRepositoryAdapter implements GitRepositoryPort {
         return GitComparisonAncestry.DIVERGED;
     }
 
+    private static RevCommit parseTrustedHead(RevWalk walk, ObjectId objectId) {
+        try {
+            return walk.parseCommit(objectId);
+        } catch (IOException exception) {
+            throw new RepositoryMutationException("trusted remote ref is not a commit", exception);
+        }
+    }
+
+    private static boolean reachableFromTrustedHead(RevWalk walk, RevCommit endpoint, List<RevCommit> trustedHeads) {
+        for (RevCommit trustedHead : trustedHeads) {
+            try {
+                if (walk.isMergedInto(endpoint, trustedHead)) {
+                    return true;
+                }
+            } catch (IOException exception) {
+                throw new RepositoryMutationException("cannot validate comparison endpoint reachability", exception);
+            }
+        }
+        return false;
+    }
+
     private static GitChangeKind changeKind(DiffEntry entry) {
         return switch (entry.getChangeType()) {
             case ADD -> GitChangeKind.ADD;
@@ -331,9 +380,39 @@ public class JGitRepositoryAdapter implements GitRepositoryPort {
     private static SnapshotPath snapshotPath(byte[] rawPath) {
         String path = strictUtf8(rawPath);
         if (!path.isEmpty() || rawPath.length == 0) {
-            return new SnapshotPath(path, true);
+            return new SnapshotPath(path, true, rawPath.clone());
         }
-        return new SnapshotPath("raw-path-hex:" + java.util.HexFormat.of().formatHex(rawPath), false);
+        return new SnapshotPath("\u0000raw-path-hex:" + java.util.HexFormat.of().formatHex(rawPath), false, rawPath.clone());
+    }
+
+    private static PathInventory pathInventory(org.eclipse.jgit.lib.Repository repository, RevCommit commit) throws IOException {
+        Map<String, List<TreePath>> paths = new java.util.HashMap<>();
+        try (TreeWalk walk = new TreeWalk(repository)) {
+            walk.addTree(commit.getTree());
+            walk.setRecursive(true);
+            while (walk.next()) {
+                String rendered = walk.getPathString();
+                paths.computeIfAbsent(rendered, ignored -> new java.util.ArrayList<>()).add(new TreePath(walk.getObjectId(0), walk.getFileMode(0),
+                        snapshotPath(walk.getRawPath())));
+            }
+        }
+        return new PathInventory(paths);
+    }
+
+    private static SnapshotPath comparisonPath(PathInventory inventory, String rendered, ObjectId objectId, FileMode mode) {
+        if (rendered.isEmpty()) {
+            return new SnapshotPath("", true, new byte[0]);
+        }
+        List<TreePath> candidates = inventory.paths().getOrDefault(rendered, List.of()).stream()
+                .filter(candidate -> candidate.objectId().equals(objectId) && candidate.mode().equals(mode)).toList();
+        if (candidates.size() == 1) {
+            return candidates.get(0).path();
+        }
+        Optional<TreePath> unsupported = candidates.stream().filter(candidate -> !candidate.path().supported()).findFirst();
+        if (unsupported.isPresent()) {
+            return unsupported.orElseThrow().path();
+        }
+        return new SnapshotPath(rendered, true, rendered.getBytes(StandardCharsets.UTF_8));
     }
 
     private static boolean containsNul(byte[] bytes) { for (byte value : bytes) { if (value == 0) { return true; } } return false; }
@@ -347,7 +426,14 @@ public class JGitRepositoryAdapter implements GitRepositoryPort {
         }
     }
 
-    private record SnapshotPath(String value, boolean supported) { }
+    private record SnapshotPath(String value, boolean supported, byte[] rawPath) {
+        private SnapshotPath { rawPath = rawPath.clone(); }
+        @Override public byte[] rawPath() { return rawPath.clone(); }
+    }
+
+    private record TreePath(ObjectId objectId, FileMode mode, SnapshotPath path) { }
+
+    private record PathInventory(Map<String, List<TreePath>> paths) { }
 
     private boolean exceedsSnapshotLimit(long storedTextBytes, long size) {
         try {

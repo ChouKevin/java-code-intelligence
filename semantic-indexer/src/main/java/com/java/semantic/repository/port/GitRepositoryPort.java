@@ -18,6 +18,9 @@ public interface GitRepositoryPort {
 
     void fetch(Path workingTree);
 
+    /** Verifies immutable comparison endpoints are still reachable from fetched trusted remote heads. */
+    void verifyComparisonEndpoints(Path workingTree, RepositoryRevision previous, RepositoryRevision current);
+
     void checkoutDetached(Path workingTree, RepositoryRevision revision);
 
     RepositoryRevision currentRevision(Path workingTree);
