@@ -110,7 +110,7 @@ class GitEvidenceReadServiceIT {
     }
 
     @Test
-    void limits_resumed_search_to_four_mebibytes_of_checkpoint_decoded_chunks() {
+    void does_not_decode_invalid_utf8_beyond_the_four_mebibyte_search_budget() {
         try (MongoDBContainer container = new MongoDBContainer(DockerImageName.parse("mongo:8.0.4"))) {
             container.start();
             MongoTemplate template = new MongoTemplate(MongoClients.create(container.getConnectionString()), "git_snapshot_search_budget");
@@ -484,7 +484,8 @@ class GitEvidenceReadServiceIT {
     private static void seedBudgetSnapshot(MongoTemplate template, String repositoryId) {
         String path = "src/budget.txt";
         byte[] ordinary = "x".repeat(64 * 1024).getBytes(StandardCharsets.UTF_8);
-        byte[] finalChunk = "x".repeat(64 * 1024 - "needle".length()).concat("needle").getBytes(StandardCharsets.UTF_8);
+        byte[] finalChunk = new byte[64 * 1024];
+        java.util.Arrays.fill(finalChunk, (byte) 0xc3);
         long byteLength = (long) ordinary.length * 64L + finalChunk.length;
         template.getCollection("git_evidence_manifests").insertOne(new Document("repoId", repositoryId).append("evidenceId", SNAPSHOT_ID)
                 .append("kind", "SNAPSHOT").append("state", "READY").append("gitEvidenceVersion", 1).append("revision", REVISION)

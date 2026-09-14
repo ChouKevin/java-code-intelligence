@@ -258,8 +258,10 @@ public final class SemanticMcpSchemaCatalog {
         schemas.put("read_file", schema(Map.of("repositoryId", repositoryId(), "snapshotId", gitEvidenceId(), "revision", revision(), "path", string(),
                 "startLine", positiveInteger(), "maxLines", Map.of("type", "integer", "minimum", 1, "maximum", SemanticQueryContract.MAX_FILE_LINES,
                         "default", SemanticQueryContract.DEFAULT_FILE_LINES), "cursor", string()), List.of("repositoryId", "snapshotId", "revision", "path")));
-        schemas.put("search_text", pagedSchema(Map.of("repositoryId", repositoryId(), "snapshotId", gitEvidenceId(), "revision", revision(),
-                "query", string(), "directory", string(), "cursor", string()), List.of("repositoryId", "snapshotId", "revision", "query")));
+        schemas.put("search_text", schema(Map.of("repositoryId", repositoryId(), "snapshotId", gitEvidenceId(), "revision", revision(),
+                "query", string(), "directory", string(), "cursor", string(), "limit", Map.of("type", "integer", "minimum", 1,
+                        "maximum", SemanticQueryContract.MAX_LIMIT, "default", SemanticQueryContract.DEFAULT_LIMIT)),
+                List.of("repositoryId", "snapshotId", "revision", "query")));
         schemas.put("list_repositories", pagedSchema(Map.of(), List.of()));
         schemas.put("get_repository", schema(Map.of("repositoryId", repositoryId()), List.of("repositoryId")));
         schemas.put("search_code", pagedSchema(Map.of(

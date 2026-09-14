@@ -263,6 +263,9 @@ class QueryMcpToolCatalogConfigurationTest {
         invoke(specifications, "find_references", repositoryRequest(Map.of("factId", "b".repeat(64))));
         invoke(specifications, "find_callers", repositoryRequest(Map.of("methodFactId", "b".repeat(64))));
         invoke(specifications, "find_callees", repositoryRequest(Map.of("methodFactId", "b".repeat(64))));
+        invoke(specifications, "list_files", snapshotRequest(Map.of("directory", "")));
+        invoke(specifications, "read_file", snapshotRequest(Map.of("path", "src/Evidence.java")));
+        invoke(specifications, "search_text", snapshotRequest(Map.of("query", "Evidence")));
 
         verify(facade).listRepositories(any());
         verify(facade).getRepository(any());
@@ -291,6 +294,24 @@ class QueryMcpToolCatalogConfigurationTest {
                 SemanticQueryContract.RelationRequest.class);
         verify(facade).findCallers(callerRequest.capture());
         assertEquals("b".repeat(64), callerRequest.getValue().factId());
+
+        ArgumentCaptor<SemanticQueryContract.GitFileListRequest> fileListRequest = ArgumentCaptor.forClass(
+                SemanticQueryContract.GitFileListRequest.class);
+        verify(facade).listFiles(fileListRequest.capture());
+        assertEquals(0, fileListRequest.getValue().offset());
+        assertEquals(SemanticQueryContract.DEFAULT_LIMIT, fileListRequest.getValue().limit());
+        ArgumentCaptor<SemanticQueryContract.GitFileReadRequest> fileReadRequest = ArgumentCaptor.forClass(
+                SemanticQueryContract.GitFileReadRequest.class);
+        verify(facade).readFile(fileReadRequest.capture());
+        assertEquals(Optional.empty(), fileReadRequest.getValue().startLine());
+        assertEquals(SemanticQueryContract.DEFAULT_FILE_LINES, fileReadRequest.getValue().maxLines());
+        assertEquals(Optional.empty(), fileReadRequest.getValue().cursor());
+        ArgumentCaptor<SemanticQueryContract.GitTextSearchRequest> textSearchRequest = ArgumentCaptor.forClass(
+                SemanticQueryContract.GitTextSearchRequest.class);
+        verify(facade).searchText(textSearchRequest.capture());
+        assertEquals(Optional.empty(), textSearchRequest.getValue().directory());
+        assertEquals(Optional.empty(), textSearchRequest.getValue().cursor());
+        assertEquals(SemanticQueryContract.DEFAULT_LIMIT, textSearchRequest.getValue().limit());
     }
 
     private static void invoke(List<McpStatelessServerFeatures.SyncToolSpecification> specifications, String name,
@@ -302,6 +323,12 @@ class QueryMcpToolCatalogConfigurationTest {
         Map<String, Object> request = new java.util.LinkedHashMap<>(arguments);
         request.put("repositoryId", "orders");
         request.put("revision", "a".repeat(40));
+        return Map.copyOf(request);
+    }
+
+    private static Map<String, Object> snapshotRequest(Map<String, Object> arguments) {
+        Map<String, Object> request = new java.util.LinkedHashMap<>(repositoryRequest(arguments));
+        request.put("snapshotId", "c".repeat(36));
         return Map.copyOf(request);
     }
 

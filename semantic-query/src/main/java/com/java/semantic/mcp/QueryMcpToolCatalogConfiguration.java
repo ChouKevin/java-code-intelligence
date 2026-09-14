@@ -116,7 +116,11 @@ public class QueryMcpToolCatalogConfiguration {
             throw new IllegalArgumentException("request contains an unknown field");
         }
         for (String requiredField : SemanticMcpSchemaCatalog.requiredFields(toolName)) {
-            requiredText(normalized, requiredField);
+            if (toolName.equals("list_files") && requiredField.equals("directory")) {
+                requiredString(normalized, requiredField);
+            } else {
+                requiredText(normalized, requiredField);
+            }
         }
         if (SemanticMcpSchemaCatalog.allowedFields(toolName).contains("offset")) {
             normalized.putIfAbsent("offset", 0);
@@ -140,6 +144,7 @@ public class QueryMcpToolCatalogConfiguration {
         if (toolName.equals("search_text")) {
             normalized.putIfAbsent("directory", Optional.empty());
             normalized.putIfAbsent("cursor", Optional.empty());
+            normalized.putIfAbsent("limit", SemanticQueryContract.DEFAULT_LIMIT);
         }
         if (toolName.equals("list_entry_points") || toolName.equals("list_type_members")) {
             normalized.putIfAbsent("kinds", Set.of());
@@ -154,6 +159,14 @@ public class QueryMcpToolCatalogConfiguration {
     private static String requiredText(Map<String, Object> request, String field) {
         Object value = request.get(field);
         if (!(value instanceof String text) || !StringUtils.hasText(text)) {
+            throw new IllegalArgumentException(field + " is required");
+        }
+        return text;
+    }
+
+    private static String requiredString(Map<String, Object> request, String field) {
+        Object value = request.get(field);
+        if (!(value instanceof String text)) {
             throw new IllegalArgumentException(field + " is required");
         }
         return text;

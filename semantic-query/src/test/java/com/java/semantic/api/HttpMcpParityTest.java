@@ -4,12 +4,14 @@ import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.model.repository.RepositoryRevision;
 import com.java.semantic.mcp.QueryMcpToolCatalogConfiguration;
 import com.java.semantic.query.application.CodeFactKindMismatchException;
+import com.java.semantic.query.application.GitEvidenceNotFoundException;
 import com.java.semantic.query.application.RevisionOutdatedException;
 import com.java.semantic.query.application.SemanticQueryContract;
 import com.java.semantic.query.application.SemanticQueryFacade;
 import io.modelcontextprotocol.server.McpStatelessServerFeatures;
 import io.modelcontextprotocol.spec.McpSchema;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
@@ -31,6 +33,8 @@ import java.util.stream.Stream;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -94,6 +98,82 @@ class HttpMcpParityTest {
         assertThat(mapper.readTree(httpSuccess)).isEqualTo(mapper.readTree(mapper.writeValueAsString(mcpSuccess.structuredContent())));
         assertThat(httpSuccess).contains("\"sourceCoverage\":{\"indexedSourceCount\":3,\"issueCount\":2,\"issueCodes\":[\"PARSE_ERROR\",\"UNRESOLVED_TYPE\"]}")
                 .doesNotContain("sourcePath", "issues");
+    }
+
+    @Test
+    void git_snapshot_operations_dispatch_the_same_defaulted_facade_requests_and_structured_bodies_over_http_and_mcp() throws Exception {
+        SemanticQueryFacade facade = mock(SemanticQueryFacade.class);
+        String snapshotId = "c".repeat(36);
+        SemanticQueryContract.GitSnapshotCoverage coverage = new SemanticQueryContract.GitSnapshotCoverage(1, 1, 0, 0, 0, 0, 0, 0, 0);
+        SemanticQueryContract.GitFileCollection files = new SemanticQueryContract.GitFileCollection(REPOSITORY_ID, snapshotId, REVISION,
+                List.of(new SemanticQueryContract.GitFileItem("src/Evidence.java", "src/Evidence.java", "BLOB", 17, "TEXT")),
+                new SemanticQueryContract.Page(0, 20, 1, 1, false), coverage);
+        SemanticQueryContract.GitFileContent file = new SemanticQueryContract.GitFileContent(REPOSITORY_ID, snapshotId, REVISION,
+                "src/Evidence.java", "src/Evidence.java", "TEXT", "class Evidence { }\n", 1, 1, true, true, java.util.Optional.empty());
+        SemanticQueryContract.GitTextSearchResult search = new SemanticQueryContract.GitTextSearchResult(REPOSITORY_ID, snapshotId, REVISION,
+                List.of(new SemanticQueryContract.GitTextMatch("src/Evidence.java", "src/Evidence.java", 1, 7, "class Evidence { }", false)),
+                true, java.util.Optional.empty(), coverage);
+        when(facade.listFiles(any())).thenReturn(files);
+        when(facade.readFile(any())).thenReturn(file);
+        when(facade.searchText(any())).thenReturn(search);
+
+        MockMvc http = authenticatedHttp(facade);
+        ObjectMapper mapper = applicationJsonMapper();
+        List<McpStatelessServerFeatures.SyncToolSpecification> specifications = new QueryMcpToolCatalogConfiguration()
+                .mcpQueryToolSpecifications(facade, mapper);
+        String filesHttp = http.perform(post("/api/v1/git/files").header(QueryTokenFilter.TOKEN_HEADER, "query-token")
+                        .contentType("application/json").content("{\"repositoryId\":\"orders\",\"snapshotId\":\"" + snapshotId
+                                + "\",\"revision\":\"" + REVISION + "\",\"directory\":\"\"}"))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        McpSchema.CallToolResult filesMcp = call(specifications, "list_files", Map.of("repositoryId", REPOSITORY_ID,
+                "snapshotId", snapshotId, "revision", REVISION, "directory", ""));
+        String fileHttp = http.perform(post("/api/v1/git/file").header(QueryTokenFilter.TOKEN_HEADER, "query-token")
+                        .contentType("application/json").content("{\"repositoryId\":\"orders\",\"snapshotId\":\"" + snapshotId
+                                + "\",\"revision\":\"" + REVISION + "\",\"path\":\"src/Evidence.java\"}"))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        McpSchema.CallToolResult fileMcp = call(specifications, "read_file", Map.of("repositoryId", REPOSITORY_ID,
+                "snapshotId", snapshotId, "revision", REVISION, "path", "src/Evidence.java"));
+        String searchHttp = http.perform(post("/api/v1/git/search").header(QueryTokenFilter.TOKEN_HEADER, "query-token")
+                        .contentType("application/json").content("{\"repositoryId\":\"orders\",\"snapshotId\":\"" + snapshotId
+                                + "\",\"revision\":\"" + REVISION + "\",\"query\":\"Evidence\"}"))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        McpSchema.CallToolResult searchMcp = call(specifications, "search_text", Map.of("repositoryId", REPOSITORY_ID,
+                "snapshotId", snapshotId, "revision", REVISION, "query", "Evidence"));
+
+        assertThat(mapper.readTree(filesHttp)).isEqualTo(mapper.readTree(mapper.writeValueAsString(filesMcp.structuredContent())));
+        assertThat(mapper.readTree(fileHttp)).isEqualTo(mapper.readTree(mapper.writeValueAsString(fileMcp.structuredContent())));
+        assertThat(mapper.readTree(searchHttp)).isEqualTo(mapper.readTree(mapper.writeValueAsString(searchMcp.structuredContent())));
+        ArgumentCaptor<SemanticQueryContract.GitFileListRequest> filesRequest = ArgumentCaptor.forClass(SemanticQueryContract.GitFileListRequest.class);
+        verify(facade, times(2)).listFiles(filesRequest.capture());
+        assertThat(filesRequest.getAllValues()).allSatisfy(request -> {
+            assertThat(request.directory()).isEmpty();
+            assertThat(request.offset()).isZero();
+            assertThat(request.limit()).isEqualTo(SemanticQueryContract.DEFAULT_LIMIT);
+        });
+        ArgumentCaptor<SemanticQueryContract.GitFileReadRequest> fileRequest = ArgumentCaptor.forClass(SemanticQueryContract.GitFileReadRequest.class);
+        verify(facade, times(2)).readFile(fileRequest.capture());
+        assertThat(fileRequest.getAllValues()).allSatisfy(request -> {
+            assertThat(request.startLine()).isEmpty();
+            assertThat(request.maxLines()).isEqualTo(SemanticQueryContract.DEFAULT_FILE_LINES);
+            assertThat(request.cursor()).isEmpty();
+        });
+        ArgumentCaptor<SemanticQueryContract.GitTextSearchRequest> searchRequest = ArgumentCaptor.forClass(SemanticQueryContract.GitTextSearchRequest.class);
+        verify(facade, times(2)).searchText(searchRequest.capture());
+        assertThat(searchRequest.getAllValues()).allSatisfy(request -> {
+            assertThat(request.directory()).isEmpty();
+            assertThat(request.cursor()).isEmpty();
+            assertThat(request.limit()).isEqualTo(SemanticQueryContract.DEFAULT_LIMIT);
+        });
+
+        when(facade.searchText(any())).thenThrow(new GitEvidenceNotFoundException());
+        String searchFailureHttp = http.perform(post("/api/v1/git/search").header(QueryTokenFilter.TOKEN_HEADER, "query-token")
+                        .contentType("application/json").content("{\"repositoryId\":\"orders\",\"snapshotId\":\"" + snapshotId
+                                + "\",\"revision\":\"" + REVISION + "\",\"query\":\"Evidence\"}"))
+                .andExpect(status().isNotFound()).andReturn().getResponse().getContentAsString();
+        McpSchema.CallToolResult searchFailureMcp = call(specifications, "search_text", Map.of("repositoryId", REPOSITORY_ID,
+                "snapshotId", snapshotId, "revision", REVISION, "query", "Evidence"));
+        assertThat(mapper.readTree(searchFailureHttp)).isEqualTo(mapper.readTree(mapper.writeValueAsString(searchFailureMcp.structuredContent())));
+        assertThat(searchFailureMcp.isError()).isTrue();
     }
 
     @Test

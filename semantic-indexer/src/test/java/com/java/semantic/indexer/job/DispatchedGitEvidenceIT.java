@@ -113,10 +113,21 @@ class DispatchedGitEvidenceIT {
             push(seed, "main");
             IndexJob addComparisonJob = requests.prepareGitComparison(RepositoryId.of("orders"), head.value(), added.value());
             dispatcher.dispatchOnce();
-            String addComparisonId = jobs.find(addComparisonJob.id()).orElseThrow().gitEvidence().orElseThrow().evidenceId().orElseThrow().value();
+            IndexJob addComparisonComplete = jobs.find(addComparisonJob.id()).orElseThrow();
+            String addComparisonId = addComparisonComplete.gitEvidence().orElseThrow().evidenceId().orElseThrow().value();
             SemanticQueryContract.GitComparisonCollection additions = reader.comparisons(new SemanticQueryContract.GitComparisonRequest("orders",
                     addComparisonId, head.value(), added.value(), 0, 20));
             assertThat(additions.items()).extracting(SemanticQueryContract.GitChangeItem::kind).contains("ADD");
+            String snapshotId = addComparisonComplete.gitEvidence().orElseThrow().currentSnapshotId().orElseThrow().value();
+            SemanticQueryContract.GitFileCollection snapshotFiles = reader.listFiles(new SemanticQueryContract.GitFileListRequest("orders",
+                    snapshotId, added.value(), "", 0, 20));
+            assertThat(snapshotFiles.items()).extracting(SemanticQueryContract.GitFileItem::path).contains("Added.java", "Evidence.java");
+            SemanticQueryContract.GitFileContent snapshotFile = reader.readFile(new SemanticQueryContract.GitFileReadRequest("orders", snapshotId,
+                    added.value(), "Added.java", Optional.empty(), 20, Optional.empty()));
+            assertThat(snapshotFile.content()).contains("class Added");
+            SemanticQueryContract.GitTextSearchResult snapshotSearch = reader.searchText(new SemanticQueryContract.GitTextSearchRequest("orders", snapshotId,
+                    added.value(), "class", Optional.empty(), Optional.empty(), 20));
+            assertThat(snapshotSearch.items()).extracting(SemanticQueryContract.GitTextMatch::path).contains("Added.java", "Evidence.java");
 
             RepositoryRevision deleted = deleteAdditional(seed, seedPath, "delete", "Added.java");
             push(seed, "main");
