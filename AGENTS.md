@@ -24,8 +24,11 @@ or business conclusions.
   validation, and generation publication. Query never starts or controls Indexer.
 - `semantic-model` stays framework-neutral. Do not depend on Spring, MongoDB, JGit,
   JDT, MCP, or transport DTOs from this module.
-- Query serves only the current published revision. Repository-scoped requests must
-  carry `repositoryId` and the exact `revision`; do not silently replace either.
+- Semantic Query tools serve only the current published revision. Repository-scoped
+  requests must carry `repositoryId` and the exact `revision`; do not silently
+  replace either. Git evidence tools may read specifically prepared historical
+  evidence from Mongo, but Query remains Mongo-only and never starts or controls
+  Indexer.
 - HTTP and MCP are two transports over the same application facade and result
   contract. Do not implement separate query behavior or response shapes for MCP.
 - MCP tools return indexed facts and source evidence. They must not infer whether a
