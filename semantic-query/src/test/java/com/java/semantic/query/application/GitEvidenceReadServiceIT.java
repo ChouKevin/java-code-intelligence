@@ -73,9 +73,55 @@ class GitEvidenceReadServiceIT {
         }
     }
 
+    @Test
+    void denies_repository_and_granular_policy_before_ready_evidence_and_rechecks_a_revoked_policy() {
+        try (MongoDBContainer container = new MongoDBContainer(DockerImageName.parse("mongo:8.0.4"))) {
+            container.start();
+            MongoTemplate template = new MongoTemplate(MongoClients.create(container.getConnectionString()), "git_evidence_policy");
+            seedRepository(template, "orders");
+            seedCatalog(template, "orders", CATALOG_ID, "READY");
+            SemanticQueryContract.GitBranchRequest request = new SemanticQueryContract.GitBranchRequest("orders", Optional.of(CATALOG_ID), 0, 20);
+            GitEvidenceReadService allowed = service(template, List.of("orders"));
+            assertThat(allowed.branches(request).items()).hasSize(2);
+
+            assertDenied(service(template, new ReadPolicyProperties(List.of("orders"), List.of("orders"), List.of(), List.of(), List.of())), request);
+            assertDenied(service(template, new ReadPolicyProperties(List.of("orders"), List.of(),
+                    List.of(new ReadPolicyProperties.PackageRule("orders", "example.private")), List.of(), List.of())), request);
+            assertDenied(service(template, new ReadPolicyProperties(List.of("orders"), List.of(), List.of(),
+                    List.of(new ReadPolicyProperties.ClassRule("orders", "example.private", "PrivateType")), List.of())), request);
+            assertDenied(service(template, new ReadPolicyProperties(List.of("orders"), List.of(), List.of(), List.of(),
+                    List.of(new ReadPolicyProperties.MethodRule("orders", "example.private", "PrivateType", "read", List.of())))), request);
+            assertDenied(service(template, List.of()), request);
+        }
+    }
+
+    @Test
+    void rejects_malformed_ready_rows_as_a_shared_contract_mismatch() {
+        try (MongoDBContainer container = new MongoDBContainer(DockerImageName.parse("mongo:8.0.4"))) {
+            container.start();
+            MongoTemplate template = new MongoTemplate(MongoClients.create(container.getConnectionString()), "git_evidence_malformed");
+            seedRepository(template, "orders");
+            seedCatalog(template, "orders", CATALOG_ID, "READY");
+            template.getCollection("git_branches").updateOne(new Document("repoId", "orders").append("catalogId", CATALOG_ID)
+                    .append("ordinal", 0L), new Document("$set", new Document("head", 42)));
+
+            assertThatThrownBy(() -> service(template, List.of("orders")).branches(
+                    new SemanticQueryContract.GitBranchRequest("orders", Optional.of(CATALOG_ID), 0, 20)))
+                    .isInstanceOf(IndexContractMismatchException.class);
+        }
+    }
+
     private static GitEvidenceReadService service(MongoTemplate template, List<String> allowedRepositories) {
         ReadPolicyProperties properties = new ReadPolicyProperties(allowedRepositories, List.of(), List.of(), List.of(), List.of());
+        return service(template, properties);
+    }
+
+    private static GitEvidenceReadService service(MongoTemplate template, ReadPolicyProperties properties) {
         return new GitEvidenceReadService(template, new ConfiguredReadPolicy(properties), Duration.ofSeconds(2));
+    }
+
+    private static void assertDenied(GitEvidenceReadService service, SemanticQueryContract.GitBranchRequest request) {
+        assertThatThrownBy(() -> service.branches(request)).isInstanceOf(RepositoryNotFoundException.class);
     }
 
     private static void seedRepository(MongoTemplate template, String repositoryId) {

@@ -1,6 +1,13 @@
 package com.java.semantic.indexer.store;
 
 import com.java.semantic.model.index.IndexSchemaContract;
+import com.java.semantic.indexer.job.GitEvidenceJob;
+import com.java.semantic.indexer.job.IndexJob;
+import com.java.semantic.indexer.job.IndexJobId;
+import com.java.semantic.indexer.job.IndexJobOperation;
+import com.java.semantic.indexer.job.IndexJobPhase;
+import com.java.semantic.model.repository.RepositoryId;
+import com.java.semantic.model.repository.RepositoryRevision;
 import org.bson.Document;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -9,6 +16,8 @@ import org.testcontainers.mongodb.MongoDBContainer;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Optional;
+import java.time.Instant;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
@@ -57,6 +66,78 @@ class IndexSchemaBootstrapIT {
             assertThatThrownBy(writer::verifySchemaBeforeGeneration).isInstanceOf(IndexSchemaMaintenanceRequiredException.class)
                     .hasMessageContaining("conflicting index search.search_generation_fact_lookup")
                     .hasMessageContaining("schema-maintenance identity");
+        }
+    }
+
+    @Test
+    void git_evidence_writer_rejects_missing_schema_before_any_manifest_write() {
+        try (MongoDBContainer container = MongoSchemaTestSupport.container()) {
+            org.springframework.data.mongodb.core.MongoTemplate template = MongoSchemaTestSupport.template(container);
+            RepositoryId repositoryId = RepositoryId.of("orders");
+            IndexJob job = new IndexJob(IndexJobId.create(), repositoryId, Optional.empty(), IndexJobPhase.RUNNING, true,
+                    Optional.empty(), false, IndexJobOperation.GIT_REFS, Optional.of(GitEvidenceJob.refs()));
+
+            assertThatThrownBy(() -> new GitEvidencePublicationStore(template).beginCatalog(job, java.time.Instant.now()))
+                    .isInstanceOf(IndexSchemaMaintenanceRequiredException.class);
+            assertThat(template.collectionExists("git_evidence_manifests")).isFalse();
+        }
+    }
+
+    @Test
+    void git_evidence_ready_rejects_missing_tampered_and_wrong_identity_rows_without_publication() {
+        try (MongoDBContainer container = MongoSchemaTestSupport.container()) {
+            org.springframework.data.mongodb.core.MongoTemplate template = MongoSchemaTestSupport.template(container);
+            new IndexSchemaBootstrap(template).bootstrap();
+            GitEvidencePublicationStore store = new GitEvidencePublicationStore(template);
+            RepositoryId orders = RepositoryId.of("orders");
+
+            com.java.semantic.model.git.GitCatalogManifest missing = store.beginCatalog(runningRefs(orders), Instant.now());
+            assertThatThrownBy(() -> store.readyCatalog(missing, 1L)).isInstanceOf(PublicationConflictException.class);
+            assertPreparing(template, missing.catalogId().value());
+
+            com.java.semantic.model.git.GitCatalogManifest malformed = store.beginCatalog(runningRefs(orders), Instant.now());
+            template.getCollection("git_branches").insertOne(new Document("repoId", "orders").append("catalogId", malformed.catalogId().value())
+                    .append("ordinal", 0L).append("branch", "main"));
+            assertThatThrownBy(() -> store.readyCatalog(malformed, 1L)).isInstanceOf(PublicationConflictException.class);
+            assertPreparing(template, malformed.catalogId().value());
+
+            com.java.semantic.model.git.GitCatalogManifest wrongIdentity = store.beginCatalog(runningRefs(orders), Instant.now());
+            template.getCollection("git_branches").insertOne(new Document("repoId", "billing").append("catalogId", wrongIdentity.catalogId().value())
+                    .append("ordinal", 0L).append("branch", "main").append("head", "1".repeat(40)));
+            assertThatThrownBy(() -> store.readyCatalog(wrongIdentity, 1L)).isInstanceOf(PublicationConflictException.class);
+            assertPreparing(template, wrongIdentity.catalogId().value());
+        }
+    }
+
+    @Test
+    void git_history_ready_rejects_noncontiguous_rows_and_a_head_that_differs_from_the_manifest() {
+        try (MongoDBContainer container = MongoSchemaTestSupport.container()) {
+            org.springframework.data.mongodb.core.MongoTemplate template = MongoSchemaTestSupport.template(container);
+            new IndexSchemaBootstrap(template).bootstrap();
+            GitEvidencePublicationStore store = new GitEvidencePublicationStore(template);
+            RepositoryId orders = RepositoryId.of("orders");
+            RepositoryRevision revision = RepositoryRevision.ofSha("1".repeat(40));
+            com.java.semantic.model.git.GitEvidenceId catalogId = com.java.semantic.model.git.GitEvidenceId.create();
+
+            com.java.semantic.model.git.GitHistoryManifest noncontiguous = store.beginHistory(runningHistory(orders, catalogId, revision), catalogId,
+                    "main", revision, Instant.now());
+            template.getCollection("git_commits").insertOne(commitRow("orders", noncontiguous.historyId().value(), 1L, revision.value()));
+            assertThatThrownBy(() -> store.readyHistory(noncontiguous, 1L)).isInstanceOf(PublicationConflictException.class);
+            assertPreparing(template, noncontiguous.historyId().value());
+
+            com.java.semantic.model.git.GitHistoryManifest wrongHead = store.beginHistory(runningHistory(orders, catalogId, revision), catalogId,
+                    "main", revision, Instant.now());
+            template.getCollection("git_commits").insertOne(commitRow("orders", wrongHead.historyId().value(), 0L, "2".repeat(40)));
+            assertThatThrownBy(() -> store.readyHistory(wrongHead, 1L)).isInstanceOf(PublicationConflictException.class);
+            assertPreparing(template, wrongHead.historyId().value());
+
+            com.java.semantic.model.git.GitHistoryManifest tampered = store.beginHistory(runningHistory(orders, catalogId, revision), catalogId,
+                    "main", revision, Instant.now());
+            store.appendCommit(tampered, 0L, new com.java.semantic.model.git.GitCommit(revision, List.of(), "original", Instant.now()));
+            template.getCollection("git_commits").updateOne(new Document("historyId", tampered.historyId().value()),
+                    new Document("$set", new Document("subject", "substituted but valid")));
+            assertThatThrownBy(() -> store.readyHistory(tampered, 1L)).isInstanceOf(PublicationConflictException.class);
+            assertPreparing(template, tampered.historyId().value());
         }
     }
 
@@ -112,6 +193,27 @@ class IndexSchemaBootstrapIT {
         } catch (Throwable failure) {
             failures.add(failure);
         }
+    }
+
+    private static IndexJob runningRefs(RepositoryId repositoryId) {
+        return new IndexJob(IndexJobId.create(), repositoryId, Optional.empty(), IndexJobPhase.RUNNING, true, Optional.empty(), false,
+                IndexJobOperation.GIT_REFS, Optional.of(GitEvidenceJob.refs()));
+    }
+
+    private static IndexJob runningHistory(RepositoryId repositoryId, com.java.semantic.model.git.GitEvidenceId catalogId,
+                                           RepositoryRevision revision) {
+        return new IndexJob(IndexJobId.create(), repositoryId, Optional.empty(), IndexJobPhase.RUNNING, true, Optional.empty(), false,
+                IndexJobOperation.GIT_HISTORY, Optional.of(GitEvidenceJob.history(catalogId, "main", revision)));
+    }
+
+    private static Document commitRow(String repositoryId, String historyId, long ordinal, String revision) {
+        return new Document("repoId", repositoryId).append("historyId", historyId).append("ordinal", ordinal).append("revision", revision)
+                .append("parents", List.of()).append("subject", "subject").append("committedAt", java.util.Date.from(Instant.now()));
+    }
+
+    private static void assertPreparing(org.springframework.data.mongodb.core.MongoTemplate template, String evidenceId) {
+        assertThat(template.getCollection("git_evidence_manifests").find(new Document("evidenceId", evidenceId)).first().getString("state"))
+                .isEqualTo("PREPARING");
     }
 
     private static void await(CountDownLatch latch) {
