@@ -1,35 +1,54 @@
 package com.java.semantic.indexer.store;
 
 import com.java.semantic.indexer.job.IndexJob;
+import com.java.semantic.repository.config.RepositoryProperties;
 import com.java.semantic.model.git.GitBranch;
 import com.java.semantic.model.git.GitCatalogManifest;
 import com.java.semantic.model.git.GitCommit;
 import com.java.semantic.model.git.GitEvidenceId;
 import com.java.semantic.model.git.GitEvidenceState;
 import com.java.semantic.model.git.GitHistoryManifest;
+import com.java.semantic.model.git.GitPreparedComparison;
+import com.java.semantic.model.git.GitSnapshotEntry;
+import com.java.semantic.model.git.GitSnapshotId;
+import com.java.semantic.model.git.GitComparisonId;
+import com.java.semantic.model.git.GitComparisonChange;
 import com.java.semantic.model.index.IndexCollections;
 import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.model.repository.RepositoryRevision;
 import com.mongodb.client.model.Filters;
 import com.mongodb.client.model.Updates;
 import org.bson.Document;
+import org.bson.types.Binary;
 import org.springframework.data.mongodb.core.MongoTemplate;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 
 /** Writes immutable Git rows first and makes them visible only through a final READY manifest transition. */
 @Component
 public final class GitEvidencePublicationStore {
+    private static final int CHUNK_BYTES = 64 * 1024;
     private final MongoTemplate template;
+    private final RepositoryProperties properties;
 
     public GitEvidencePublicationStore(MongoTemplate template) {
+        this(template, new RepositoryProperties());
+    }
+
+    @Autowired
+    public GitEvidencePublicationStore(MongoTemplate template, RepositoryProperties properties) {
         this.template = Objects.requireNonNull(template, "mongo template is required");
+        this.properties = Objects.requireNonNull(properties, "repository properties are required");
     }
 
     public GitCatalogManifest beginCatalog(IndexJob job, Instant observedAt) {
@@ -105,9 +124,332 @@ public final class GitEvidencePublicationStore {
                 Filters.eq("ownerJobId", job.id().value()), Filters.eq("state", "PREPARING")), Updates.set("state", "FAILED"));
     }
 
+    /** Publishes full immutable snapshots first, then makes their direct comparison visible last. */
+    public void publishComparison(IndexJob job, GitPreparedComparison comparison, Instant preparedAt) {
+        verifySchemaBeforeEvidence();
+        GitComparisonId comparisonId = GitComparisonId.create();
+        GitSnapshotId previousSnapshot = GitSnapshotId.create();
+        GitSnapshotId currentSnapshot = GitSnapshotId.create();
+        template.getCollection(IndexCollections.GIT_EVIDENCE_MANIFESTS).insertOne(new Document("repoId", job.repositoryId().value())
+                .append("evidenceId", comparisonId.value()).append("kind", "COMPARISON").append("state", "PREPARING").append("gitEvidenceVersion", 1)
+                .append("previous", comparison.previous().value()).append("current", comparison.current().value()).append("previousSnapshotId", previousSnapshot.value())
+                .append("currentSnapshotId", currentSnapshot.value()).append("ancestry", comparison.ancestry().name()).append("preparedAt", java.util.Date.from(preparedAt))
+                .append("ownerJobId", job.id().value()).append("total", (long) comparison.changes().size()));
+        bind(job, new GitEvidenceId(comparisonId.value()));
+        publishSnapshot(job, previousSnapshot, comparison.previous().value(), comparison.previousEntries(), preparedAt);
+        publishSnapshot(job, currentSnapshot, comparison.current().value(), comparison.currentEntries(), preparedAt);
+        long ordinal = 0L;
+        for (GitComparisonChange change : comparison.changes()) {
+            template.getCollection(IndexCollections.GIT_COMPARISON_CHANGES).insertOne(new Document("repoId", job.repositoryId().value())
+                    .append("comparisonId", comparisonId.value()).append("ordinal", ordinal).append("changeId", change.changeId()).append("kind", change.kind().name())
+                    .append("oldPath", change.oldPath()).append("newPath", change.newPath()).append("oldMode", change.oldMode()).append("newMode", change.newMode())
+                    .append("oldBlobId", change.oldBlobId()).append("newBlobId", change.newBlobId()).append("diffStatus", change.diffStatus())
+                    .append("patchChunkCount", (long) change.patchChunks().size()));
+            appendPatchChunks(job.repositoryId(), comparisonId, change);
+            ordinal++;
+        }
+        validateComparisonPublication(job.repositoryId(), comparisonId, previousSnapshot, currentSnapshot, comparison);
+        markReady(job.repositoryId(), new GitEvidenceId(comparisonId.value()));
+    }
+
+    private void publishSnapshot(IndexJob job, GitSnapshotId snapshotId, String revision, List<GitSnapshotEntry> entries, Instant preparedAt) {
+        EvidenceLimits limits = evidenceLimits();
+        long totalText = 0L;
+        long textEntries = 0L;
+        template.getCollection(IndexCollections.GIT_EVIDENCE_MANIFESTS).insertOne(new Document("repoId", job.repositoryId().value()).append("evidenceId", snapshotId.value())
+                .append("kind", "SNAPSHOT").append("state", "PREPARING").append("gitEvidenceVersion", 1).append("revision", revision)
+                .append("preparedAt", java.util.Date.from(preparedAt)).append("ownerJobId", job.id().value()).append("total", (long) entries.size())
+                .append("contentDigest", emptyDigest()).append("fileTextBytesLimit", limits.fileTextBytes())
+                .append("snapshotTextBytesLimit", limits.snapshotTextBytes()).append("contentCoverage", new Document("textBytes", 0L)
+                        .append("textEntries", 0L).append("entryCount", (long) entries.size())));
+        long ordinal = 0L;
+        String digest = emptyDigest();
+        for (GitSnapshotEntry entry : entries) {
+            byte[] bytes = entry.bytes();
+            boolean text = entry.contentStatus().name().equals("TEXT");
+            if (text) {
+                totalText += entry.byteLength();
+                textEntries++;
+            }
+            if (totalText > limits.snapshotTextBytes() || text && entry.byteLength() > limits.fileTextBytes()) {
+                throw new PublicationConflictException();
+            }
+            byte[] persistedBytes = text ? bytes : new byte[0];
+            String checksum = checksum(persistedBytes);
+            template.getCollection(IndexCollections.GIT_SNAPSHOT_FILES).insertOne(new Document("repoId", job.repositoryId().value()).append("snapshotId", snapshotId.value())
+                    .append("ordinal", ordinal).append("path", entry.path()).append("mode", entry.mode()).append("blobId", entry.blobId()).append("contentStatus", entry.contentStatus().name())
+                    .append("byteLength", entry.byteLength()).append("checksum", checksum));
+            for (int start = 0, chunk = 0; start < persistedBytes.length; start += CHUNK_BYTES, chunk++) {
+                int end = Math.min(start + CHUNK_BYTES, persistedBytes.length);
+                template.getCollection(IndexCollections.GIT_SNAPSHOT_CHUNKS).insertOne(new Document("repoId", job.repositoryId().value()).append("snapshotId", snapshotId.value())
+                        .append("path", entry.path()).append("ordinal", (long) chunk).append("bytes", Arrays.copyOfRange(persistedBytes, start, end)));
+            }
+            digest = digest(digest, snapshotRow(ordinal, entry, checksum));
+            ordinal++;
+        }
+        setContentDigest(job.repositoryId(), new GitEvidenceId(snapshotId.value()), digest);
+        setSnapshotCoverage(job.repositoryId(), snapshotId, totalText, textEntries, entries.size());
+        validateSnapshotPublication(job.repositoryId(), snapshotId, revision, entries, totalText, limits);
+        markReady(job.repositoryId(), new GitEvidenceId(snapshotId.value()));
+    }
+
+    void validateComparisonPublication(RepositoryId repositoryId, GitComparisonId comparisonId, GitSnapshotId previousSnapshot,
+                                       GitSnapshotId currentSnapshot, GitPreparedComparison expected) {
+        long readySnapshots = template.getCollection(IndexCollections.GIT_EVIDENCE_MANIFESTS).countDocuments(Filters.and(
+                Filters.eq("repoId", repositoryId.value()), Filters.eq("kind", "SNAPSHOT"), Filters.eq("state", "READY"),
+                Filters.in("evidenceId", List.of(previousSnapshot.value(), currentSnapshot.value()))));
+        Document manifest = template.getCollection(IndexCollections.GIT_EVIDENCE_MANIFESTS).find(Filters.and(Filters.eq("repoId", repositoryId.value()),
+                Filters.eq("evidenceId", comparisonId.value()), Filters.eq("kind", "COMPARISON"), Filters.eq("state", "PREPARING"))).first();
+        if (readySnapshots != 2L || Objects.isNull(manifest) || !expected.previous().value().equals(manifest.getString("previous"))
+                || !expected.current().value().equals(manifest.getString("current")) || !previousSnapshot.value().equals(manifest.getString("previousSnapshotId"))
+                || !currentSnapshot.value().equals(manifest.getString("currentSnapshotId")) || !expected.ancestry().name().equals(manifest.getString("ancestry"))) {
+            throw new PublicationConflictException();
+        }
+        validateReadySnapshot(repositoryId, previousSnapshot, expected.previous().value(), expected.previousEntries());
+        validateReadySnapshot(repositoryId, currentSnapshot, expected.current().value(), expected.currentEntries());
+        validateChanges(repositoryId, comparisonId, expected.changes());
+    }
+
+    private void appendPatchChunks(RepositoryId repositoryId, GitComparisonId comparisonId, GitComparisonChange change) {
+        if (!"AVAILABLE".equals(change.diffStatus())) {
+            return;
+        }
+        long ordinal = 0L;
+        for (String patch : change.patchChunks()) {
+            byte[] patchBytes = patch.getBytes(StandardCharsets.UTF_8);
+            if (patchBytes.length == 0 || patchBytes.length > CHUNK_BYTES) {
+                throw new PublicationConflictException();
+            }
+            template.getCollection(IndexCollections.GIT_COMPARISON_PATCHES).insertOne(new Document("repoId", repositoryId.value())
+                    .append("comparisonId", comparisonId.value()).append("changeId", change.changeId()).append("ordinal", ordinal)
+                    .append("patch", patch));
+            ordinal++;
+        }
+    }
+
+    private void validateSnapshotPublication(RepositoryId repositoryId, GitSnapshotId snapshotId, String revision,
+                                             List<GitSnapshotEntry> expectedEntries, long expectedTextBytes, EvidenceLimits limits) {
+        validateSnapshotContents(repositoryId, snapshotId, revision, expectedEntries, expectedTextBytes, "PREPARING", limits);
+    }
+
+    private void validateReadySnapshot(RepositoryId repositoryId, GitSnapshotId snapshotId, String revision,
+                                       List<GitSnapshotEntry> expectedEntries) {
+        long expectedTextBytes = expectedEntries.stream().filter(entry -> entry.contentStatus().name().equals("TEXT"))
+                .mapToLong(GitSnapshotEntry::byteLength).sum();
+        Document manifest = snapshotManifest(repositoryId, snapshotId, "READY");
+        validateSnapshotContents(repositoryId, snapshotId, revision, expectedEntries, expectedTextBytes, "READY", limitsFrom(manifest));
+    }
+
+    private void validateSnapshotContents(RepositoryId repositoryId, GitSnapshotId snapshotId, String revision,
+                                          List<GitSnapshotEntry> expectedEntries, long expectedTextBytes, String state, EvidenceLimits limits) {
+        Document manifest = snapshotManifest(repositoryId, snapshotId, state);
+        if (Objects.isNull(manifest) || !revision.equals(manifest.getString("revision")) || manifest.getLong("total") != expectedEntries.size()) {
+            throw new PublicationConflictException();
+        }
+        long actualTextBytes = 0L;
+        long actualTextEntries = 0L;
+        String digest = emptyDigest();
+        long ordinal = 0L;
+        for (GitSnapshotEntry expected : expectedEntries) {
+            Document file = template.getCollection(IndexCollections.GIT_SNAPSHOT_FILES).find(Filters.and(Filters.eq("repoId", repositoryId.value()),
+                    Filters.eq("snapshotId", snapshotId.value()), Filters.eq("ordinal", ordinal))).first();
+            if (Objects.isNull(file) || !expected.path().equals(file.getString("path")) || !expected.mode().equals(file.getString("mode"))
+                    || !expected.blobId().equals(file.getString("blobId")) || !expected.contentStatus().name().equals(file.getString("contentStatus"))
+                    || file.getLong("byteLength") != expected.byteLength()) {
+                throw new PublicationConflictException();
+            }
+            byte[] expectedBytes = expected.contentStatus().name().equals("TEXT") ? expected.bytes() : new byte[0];
+            String checksum = checksum(expectedBytes);
+            if (!checksum.equals(file.getString("checksum")) || !validSnapshotChunks(repositoryId, snapshotId, expected.path(), expectedBytes)) {
+                throw new PublicationConflictException();
+            }
+            if (expected.contentStatus().name().equals("TEXT")) {
+                actualTextBytes += expected.byteLength();
+                actualTextEntries++;
+            }
+            digest = digest(digest, snapshotRow(ordinal, expected, checksum));
+            ordinal++;
+        }
+        long actualFiles = template.getCollection(IndexCollections.GIT_SNAPSHOT_FILES).countDocuments(Filters.and(Filters.eq("repoId", repositoryId.value()),
+                Filters.eq("snapshotId", snapshotId.value())));
+        if (actualFiles != expectedEntries.size() || actualTextBytes != expectedTextBytes || !digest.equals(manifest.getString("contentDigest"))
+                || !coverageMatches(manifest, actualTextBytes, actualTextEntries, expectedEntries.size())
+                || !limitsMatch(manifest, limits)) {
+            throw new PublicationConflictException();
+        }
+    }
+
+    private boolean validSnapshotChunks(RepositoryId repositoryId, GitSnapshotId snapshotId, String path, byte[] expectedBytes) {
+        List<Document> chunks = new ArrayList<>();
+        template.getCollection(IndexCollections.GIT_SNAPSHOT_CHUNKS).find(Filters.and(Filters.eq("repoId", repositoryId.value()),
+                Filters.eq("snapshotId", snapshotId.value()), Filters.eq("path", path))).sort(com.mongodb.client.model.Sorts.ascending("ordinal")).into(chunks);
+        byte[] actual = new byte[0];
+        long ordinal = 0L;
+        for (Document chunk : chunks) {
+            Number storedOrdinal = chunk.get("ordinal", Number.class);
+            Optional<byte[]> bytes = binaryBytes(chunk.get("bytes"));
+            if (Objects.isNull(storedOrdinal) || storedOrdinal.longValue() != ordinal || bytes.isEmpty() || bytes.get().length == 0 || bytes.get().length > CHUNK_BYTES) {
+                return false;
+            }
+            byte[] joined = Arrays.copyOf(actual, actual.length + bytes.get().length);
+            System.arraycopy(bytes.get(), 0, joined, actual.length, bytes.get().length);
+            actual = joined;
+            ordinal++;
+        }
+        return Arrays.equals(expectedBytes, actual);
+    }
+
+    private void validateChanges(RepositoryId repositoryId, GitComparisonId comparisonId, List<GitComparisonChange> expectedChanges) {
+        long ordinal = 0L;
+        for (GitComparisonChange expected : expectedChanges) {
+            Document change = template.getCollection(IndexCollections.GIT_COMPARISON_CHANGES).find(Filters.and(Filters.eq("repoId", repositoryId.value()),
+                    Filters.eq("comparisonId", comparisonId.value()), Filters.eq("ordinal", ordinal))).first();
+            if (Objects.isNull(change) || !expected.changeId().equals(change.getString("changeId")) || !expected.kind().name().equals(change.getString("kind"))
+                    || !expected.oldPath().equals(change.getString("oldPath")) || !expected.newPath().equals(change.getString("newPath"))
+                    || !expected.oldMode().equals(change.getString("oldMode")) || !expected.newMode().equals(change.getString("newMode"))
+                    || !expected.oldBlobId().equals(change.getString("oldBlobId")) || !expected.newBlobId().equals(change.getString("newBlobId"))
+                    || !expected.diffStatus().equals(change.getString("diffStatus")) || !numberEquals(change, "patchChunkCount", expected.patchChunks().size())
+                    || !validPatchChunks(repositoryId, comparisonId, expected)) {
+                throw new PublicationConflictException();
+            }
+            ordinal++;
+        }
+        long actual = template.getCollection(IndexCollections.GIT_COMPARISON_CHANGES).countDocuments(Filters.and(Filters.eq("repoId", repositoryId.value()),
+                Filters.eq("comparisonId", comparisonId.value())));
+        if (actual != expectedChanges.size()) {
+            throw new PublicationConflictException();
+        }
+    }
+
+    private boolean validPatchChunks(RepositoryId repositoryId, GitComparisonId comparisonId, GitComparisonChange expected) {
+        List<Document> chunks = new ArrayList<>();
+        template.getCollection(IndexCollections.GIT_COMPARISON_PATCHES).find(Filters.and(Filters.eq("repoId", repositoryId.value()),
+                Filters.eq("comparisonId", comparisonId.value()), Filters.eq("changeId", expected.changeId())))
+                .sort(com.mongodb.client.model.Sorts.ascending("ordinal")).into(chunks);
+        if (!"AVAILABLE".equals(expected.diffStatus())) {
+            return chunks.isEmpty() && expected.patch().isEmpty();
+        }
+        long ordinal = 0L;
+        for (Document chunk : chunks) {
+            Number storedOrdinal = chunk.get("ordinal", Number.class);
+            String patch = chunk.getString("patch");
+            if (Objects.isNull(storedOrdinal) || storedOrdinal.longValue() != ordinal || Objects.isNull(patch)
+                    || patch.getBytes(StandardCharsets.UTF_8).length == 0 || patch.getBytes(StandardCharsets.UTF_8).length > CHUNK_BYTES
+                    || ordinal >= expected.patchChunks().size() || !patch.equals(expected.patchChunks().get((int) ordinal))) {
+                return false;
+            }
+            ordinal++;
+        }
+        return ordinal == expected.patchChunks().size();
+    }
+
+    private EvidenceLimits evidenceLimits() {
+        return new EvidenceLimits(properties.getGitEvidenceFileTextBytes(), properties.getGitEvidenceSnapshotTextBytes());
+    }
+
+    private Document snapshotManifest(RepositoryId repositoryId, GitSnapshotId snapshotId, String state) {
+        return template.getCollection(IndexCollections.GIT_EVIDENCE_MANIFESTS).find(Filters.and(Filters.eq("repoId", repositoryId.value()),
+                Filters.eq("evidenceId", snapshotId.value()), Filters.eq("kind", "SNAPSHOT"), Filters.eq("state", state))).first();
+    }
+
+    private static EvidenceLimits limitsFrom(Document manifest) {
+        if (Objects.isNull(manifest)) {
+            throw new PublicationConflictException();
+        }
+        Number fileLimit = manifest.get("fileTextBytesLimit", Number.class);
+        Number snapshotLimit = manifest.get("snapshotTextBytesLimit", Number.class);
+        if (Objects.isNull(fileLimit) || Objects.isNull(snapshotLimit)) {
+            throw new PublicationConflictException();
+        }
+        return new EvidenceLimits(fileLimit.longValue(), snapshotLimit.longValue());
+    }
+
+    private void setSnapshotCoverage(RepositoryId repositoryId, GitSnapshotId snapshotId, long textBytes, long textEntries, int entryCount) {
+        long modified = template.getCollection(IndexCollections.GIT_EVIDENCE_MANIFESTS).updateOne(Filters.and(Filters.eq("repoId", repositoryId.value()),
+                Filters.eq("evidenceId", snapshotId.value()), Filters.eq("state", "PREPARING")), Updates.set("contentCoverage",
+                new Document("textBytes", textBytes).append("textEntries", textEntries).append("entryCount", (long) entryCount))).getModifiedCount();
+        if (modified != 1L) {
+            throw new PublicationConflictException();
+        }
+    }
+
+    private static boolean coverageMatches(Document manifest, long textBytes, long textEntries, int entryCount) {
+        Document coverage = manifest.get("contentCoverage", Document.class);
+        if (Objects.isNull(coverage)) {
+            return false;
+        }
+        Number storedBytes = coverage.get("textBytes", Number.class);
+        Number storedEntries = coverage.get("textEntries", Number.class);
+        Number storedTotal = coverage.get("entryCount", Number.class);
+        return Objects.nonNull(storedBytes) && Objects.nonNull(storedEntries) && Objects.nonNull(storedTotal)
+                && storedBytes.longValue() == textBytes && storedEntries.longValue() == textEntries && storedTotal.longValue() == entryCount;
+    }
+
+    private static boolean limitsMatch(Document manifest, EvidenceLimits limits) {
+        Number fileLimit = manifest.get("fileTextBytesLimit", Number.class);
+        Number snapshotLimit = manifest.get("snapshotTextBytesLimit", Number.class);
+        return Objects.nonNull(fileLimit) && Objects.nonNull(snapshotLimit) && fileLimit.longValue() == limits.fileTextBytes()
+                && snapshotLimit.longValue() == limits.snapshotTextBytes();
+    }
+
+    private static boolean numberEquals(Document document, String field, int expected) {
+        Number actual = document.get(field, Number.class);
+        return Objects.nonNull(actual) && actual.longValue() == expected;
+    }
+
+    private static int utf8ChunkEnd(byte[] bytes, int offset) {
+        int end = Math.min(bytes.length, offset + CHUNK_BYTES);
+        while (end < bytes.length && (bytes[end] & 0xC0) == 0x80) {
+            end--;
+        }
+        if (end == offset) {
+            throw new PublicationConflictException();
+        }
+        return end;
+    }
+
+    private static Optional<byte[]> binaryBytes(Object value) {
+        if (value instanceof Binary binary) {
+            return Optional.of(binary.getData());
+        }
+        if (value instanceof byte[] bytes) {
+            return Optional.of(Arrays.copyOf(bytes, bytes.length));
+        }
+        return Optional.empty();
+    }
+
+    private static String snapshotRow(long ordinal, GitSnapshotEntry entry, String checksum) {
+        return ordinal + "\\u0000" + entry.path() + "\\u0000" + entry.mode() + "\\u0000" + entry.blobId() + "\\u0000"
+                + entry.contentStatus().name() + "\\u0000" + entry.byteLength() + "\\u0000" + checksum;
+    }
+
+    private static String checksum(byte[] bytes) {
+        try {
+            return java.util.HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes));
+        } catch (NoSuchAlgorithmException exception) {
+            throw new IllegalStateException("SHA-256 is unavailable", exception);
+        }
+    }
+
+    private record EvidenceLimits(long fileTextBytes, long snapshotTextBytes) {
+        private EvidenceLimits {
+            if (fileTextBytes <= 0L || snapshotTextBytes <= 0L || fileTextBytes > snapshotTextBytes) {
+                throw new PublicationConflictException();
+            }
+        }
+    }
+
     private void bind(IndexJob job, GitEvidenceId evidenceId) {
         template.getCollection(IndexCollections.INDEX_JOBS).updateOne(Filters.and(Filters.eq("jobId", job.id().value()),
                 Filters.eq("repoId", job.repositoryId().value()), Filters.eq("active", true)), Updates.set("gitEvidence.evidenceId", evidenceId.value()));
+    }
+
+    private void markReady(RepositoryId repositoryId, GitEvidenceId evidenceId) {
+        long modified = template.getCollection(IndexCollections.GIT_EVIDENCE_MANIFESTS).updateOne(Filters.and(Filters.eq("repoId", repositoryId.value()),
+                Filters.eq("evidenceId", evidenceId.value()), Filters.eq("state", "PREPARING")), Updates.set("state", "READY")).getModifiedCount();
+        if (modified != 1L) {
+            throw new PublicationConflictException();
+        }
     }
 
     private void ready(RepositoryId repositoryId, GitEvidenceId evidenceId, long total) {

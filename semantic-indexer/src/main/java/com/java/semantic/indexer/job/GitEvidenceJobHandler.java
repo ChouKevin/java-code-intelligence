@@ -4,6 +4,7 @@ import com.java.semantic.indexer.store.GitEvidencePublicationStore;
 import com.java.semantic.model.git.GitCatalogManifest;
 import com.java.semantic.model.git.GitHistoryManifest;
 import com.java.semantic.model.repository.RepositoryRevision;
+import com.java.semantic.model.git.GitPreparedComparison;
 import com.java.semantic.repository.application.RepositoryRuntimeRegistry;
 import com.java.semantic.repository.domain.RepositoryRuntime;
 import com.java.semantic.repository.port.GitRepositoryPort;
@@ -34,6 +35,7 @@ public final class GitEvidenceJobHandler {
                 switch (job.operation()) {
                     case GIT_REFS -> refs(job, runtime);
                     case GIT_HISTORY -> history(job, runtime);
+                    case GIT_COMPARISON -> comparison(job, runtime);
                     default -> throw new IllegalArgumentException("not a Git evidence job");
                 }
             } catch (RuntimeException exception) {
@@ -68,5 +70,17 @@ public final class GitEvidenceJobHandler {
             evidence.appendCommit(manifest, ordinal.getAndIncrement(), commit);
         });
         evidence.readyHistory(manifest, ordinal.get());
+    }
+
+    private void comparison(IndexJob job, RepositoryRuntime runtime) {
+        GitEvidenceJob payload = job.gitEvidence().orElseThrow(() -> new IllegalStateException("Git comparison payload is required"));
+        RepositoryRevision previous = payload.previousRevision().orElseThrow(() -> new IllegalArgumentException("Git comparison previous is required"));
+        RepositoryRevision current = payload.revision().orElseThrow(() -> new IllegalArgumentException("Git comparison current is required"));
+        if (!git.isCloned(runtime.workingTree())) {
+            git.clone(runtime.workingTree(), runtime.remoteUrl());
+        }
+        git.fetch(runtime.workingTree());
+        GitPreparedComparison comparison = git.prepareComparison(runtime.workingTree(), previous, current);
+        evidence.publishComparison(job, comparison, Instant.now());
     }
 }

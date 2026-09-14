@@ -19,6 +19,8 @@ public interface IndexJobStore {
     IndexJob admitReset(RepositoryId repositoryId);
     IndexJob admitGitRefs(RepositoryId repositoryId);
     IndexJob admitGitHistory(RepositoryId repositoryId, GitEvidenceId catalogId, String branch, RepositoryRevision revision);
+
+    IndexJob admitGitComparison(RepositoryId repositoryId, RepositoryRevision previous, RepositoryRevision current);
     Optional<IndexJob> find(IndexJobId jobId);
     Optional<IndexJob> startNextAccepted();
     boolean complete(IndexJobId jobId);

@@ -17,6 +17,10 @@ public final class IndexCollections {
     public static final String GIT_EVIDENCE_MANIFESTS = "git_evidence_manifests";
     public static final String GIT_BRANCHES = "git_branches";
     public static final String GIT_COMMITS = "git_commits";
+    public static final String GIT_SNAPSHOT_FILES = "git_snapshot_files";
+    public static final String GIT_SNAPSHOT_CHUNKS = "git_snapshot_chunks";
+    public static final String GIT_COMPARISON_CHANGES = "git_comparison_changes";
+    public static final String GIT_COMPARISON_PATCHES = "git_comparison_patches";
     public static final Map<ProjectionName, List<String>> PROJECTION_COLLECTIONS = Map.of(
             ProjectionName.SOURCES, List.of(GENERATION_FILES, SOURCE_ARTIFACTS),
             ProjectionName.SYMBOLS, List.of(SYMBOLS),

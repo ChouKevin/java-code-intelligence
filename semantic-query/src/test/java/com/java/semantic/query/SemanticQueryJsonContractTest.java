@@ -38,7 +38,7 @@ class SemanticQueryJsonContractTest {
                 .run(context -> {
                     Object catalog = context.getBean("mcpQueryToolSpecifications");
                     assertThat(catalog).isInstanceOf(List.class);
-                    assertThat((List<?>) catalog).hasSize(12);
+                    assertThat((List<?>) catalog).hasSize(16);
                 });
     }
 

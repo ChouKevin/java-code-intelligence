@@ -119,6 +119,11 @@ public final class MongoIndexJobStore implements IndexJobStore {
     }
 
     @Override
+    public IndexJob admitGitComparison(RepositoryId repositoryId, RepositoryRevision previous, RepositoryRevision current) {
+        return insertGitJob(repositoryId, IndexJobOperation.GIT_COMPARISON, GitEvidenceJob.comparison(previous, current));
+    }
+
+    @Override
     public Optional<IndexJob> find(IndexJobId jobId) {
         return Optional.ofNullable(template.getCollection(IndexCollections.INDEX_JOBS).find(new Document(JOB_ID, jobId.value())).first())
                 .map(MongoIndexJobStore::from);
@@ -244,7 +249,8 @@ public final class MongoIndexJobStore implements IndexJobStore {
 
     @Override
     public boolean gitEvidenceReady(IndexJob job) {
-        if (job.operation() != IndexJobOperation.GIT_REFS && job.operation() != IndexJobOperation.GIT_HISTORY) { return false; }
+        if (job.operation() != IndexJobOperation.GIT_REFS && job.operation() != IndexJobOperation.GIT_HISTORY
+                && job.operation() != IndexJobOperation.GIT_COMPARISON) { return false; }
         Document document = template.getCollection(IndexCollections.INDEX_JOBS).find(new Document(JOB_ID, job.id().value())
                 .append(REPOSITORY_ID, job.repositoryId().value())).first();
         if (Objects.isNull(document)) { return false; }
@@ -252,7 +258,20 @@ public final class MongoIndexJobStore implements IndexJobStore {
         if (Objects.isNull(payload) || Objects.isNull(payload.getString("evidenceId"))) { return false; }
         Document manifest = template.getCollection(IndexCollections.GIT_EVIDENCE_MANIFESTS).find(new Document(REPOSITORY_ID, job.repositoryId().value())
                 .append("evidenceId", payload.getString("evidenceId")).append("ownerJobId", job.id().value()).append("state", "READY")).first();
-        return Objects.nonNull(manifest);
+        if (Objects.isNull(manifest)) { return false; }
+        if (job.operation() != IndexJobOperation.GIT_COMPARISON) { return true; }
+        String previous = payload.getString("previousRevision");
+        String current = payload.getString("revision");
+        String previousSnapshotId = manifest.getString("previousSnapshotId");
+        String currentSnapshotId = manifest.getString("currentSnapshotId");
+        if (!"COMPARISON".equals(manifest.getString("kind")) || Objects.isNull(previous) || Objects.isNull(current)
+                || !previous.equals(manifest.getString("previous")) || !current.equals(manifest.getString("current"))
+                || Objects.isNull(previousSnapshotId) || Objects.isNull(currentSnapshotId)) {
+            return false;
+        }
+        long readySnapshots = template.getCollection(IndexCollections.GIT_EVIDENCE_MANIFESTS).countDocuments(new Document(REPOSITORY_ID, job.repositoryId().value())
+                .append("kind", "SNAPSHOT").append("state", "READY").append("evidenceId", new Document("$in", List.of(previousSnapshotId, currentSnapshotId))));
+        return readySnapshots == 2L;
     }
 
     private IndexJob insertBuild(RepositoryId repositoryId, RepositoryRevision revision, boolean rebuild,
@@ -277,14 +296,12 @@ public final class MongoIndexJobStore implements IndexJobStore {
 
     private void reconcileReadyGitJobs() {
         for (Document job : template.getCollection(IndexCollections.INDEX_JOBS).find(new Document(ACTIVE, true)
-                .append("phase", IndexJobPhase.RUNNING.name()).append("operation", new Document("$in", List.of(IndexJobOperation.GIT_REFS.name(), IndexJobOperation.GIT_HISTORY.name()))))) {
+                .append("phase", IndexJobPhase.RUNNING.name()).append("operation", new Document("$in", List.of(IndexJobOperation.GIT_REFS.name(), IndexJobOperation.GIT_HISTORY.name(), IndexJobOperation.GIT_COMPARISON.name()))))) {
             Document payload = job.get("gitEvidence", Document.class);
             if (Objects.isNull(payload)) { continue; }
             String evidenceId = payload.getString("evidenceId");
             if (Objects.isNull(evidenceId)) { continue; }
-            Document manifest = template.getCollection(IndexCollections.GIT_EVIDENCE_MANIFESTS).find(new Document(REPOSITORY_ID, job.getString(REPOSITORY_ID))
-                    .append("evidenceId", evidenceId).append("ownerJobId", job.getString(JOB_ID)).append("state", "READY")).first();
-            if (Objects.nonNull(manifest)) {
+            if (gitEvidenceReady(from(job))) {
                 terminal(new IndexJobId(job.getString(JOB_ID)), IndexJobPhase.COMPLETE, Optional.empty());
             }
         }
@@ -309,6 +326,7 @@ public final class MongoIndexJobStore implements IndexJobStore {
         payload.catalogId().ifPresent(value -> document.append("catalogId", value.value()));
         payload.branch().ifPresent(value -> document.append("branch", value));
         payload.revision().ifPresent(value -> document.append("revision", value.value()));
+        payload.previousRevision().ifPresent(value -> document.append("previousRevision", value.value()));
         return document;
     }
 
@@ -503,7 +521,8 @@ public final class MongoIndexJobStore implements IndexJobStore {
             Optional<String> branch = Optional.ofNullable(payload.getString("branch"));
             Optional<RepositoryRevision> revision = Optional.ofNullable(payload.getString("revision")).map(RepositoryRevision::new);
             Optional<GitEvidenceId> evidenceId = Optional.ofNullable(payload.getString("evidenceId")).map(GitEvidenceId::new);
-            gitEvidence = Optional.of(new GitEvidenceJob(catalogId, branch, revision, evidenceId));
+            Optional<RepositoryRevision> previousRevision = Optional.ofNullable(payload.getString("previousRevision")).map(RepositoryRevision::ofSha);
+            gitEvidence = Optional.of(new GitEvidenceJob(catalogId, branch, revision, evidenceId, previousRevision));
         }
         return new IndexJob(new IndexJobId(document.getString(JOB_ID)), RepositoryId.of(document.getString(REPOSITORY_ID)), target,
                 IndexJobPhase.valueOf(document.getString("phase")), Boolean.TRUE.equals(document.getBoolean(ACTIVE)),

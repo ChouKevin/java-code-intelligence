@@ -47,7 +47,7 @@ class QueryMcpToolCatalogConfigurationTest {
     }
 
     @Test
-    void publishes_exactly_the_fourteen_approved_raw_tools_and_closed_schemas() {
+    void publishes_exactly_the_sixteen_implemented_raw_tools_and_closed_schemas() {
         QueryMcpToolCatalogConfiguration configuration = new QueryMcpToolCatalogConfiguration();
         List<McpStatelessServerFeatures.SyncToolSpecification> specifications = configuration.mcpQueryToolSpecifications(
                 mock(SemanticQueryFacade.class), new ObjectMapper());
@@ -56,9 +56,9 @@ class QueryMcpToolCatalogConfigurationTest {
                 "list_repositories", "get_repository", "search_code", "get_fact_source",
                 "list_entry_points", "find_api_routes", "find_event_listeners", "list_type_members",
                 "find_method_implementations", "find_references", "find_callers", "find_callees",
-                "list_git_branches", "list_git_commits"),
+                "list_git_branches", "list_git_commits", "compare_revisions", "get_file_diff"),
                 specifications.stream().map(specification -> specification.tool().name()).collect(java.util.stream.Collectors.toSet()));
-        assertEquals(14, specifications.size());
+        assertEquals(16, specifications.size());
         for (McpStatelessServerFeatures.SyncToolSpecification specification : specifications) {
             assertFalse((Boolean) specification.tool().inputSchema().get("additionalProperties"));
             assertFalse(specification.tool().description().toLowerCase().contains("first tool"));

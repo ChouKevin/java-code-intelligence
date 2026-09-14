@@ -5,6 +5,12 @@ import com.java.semantic.repository.config.RepositoryProperties;
 import com.java.semantic.model.repository.RepositoryRevision;
 import com.java.semantic.model.git.GitBranch;
 import com.java.semantic.model.git.GitCommit;
+import com.java.semantic.model.git.GitComparisonAncestry;
+import com.java.semantic.model.git.GitComparisonChange;
+import com.java.semantic.model.git.GitChangeKind;
+import com.java.semantic.model.git.GitFileContentStatus;
+import com.java.semantic.model.git.GitPreparedComparison;
+import com.java.semantic.model.git.GitSnapshotEntry;
 import com.java.semantic.repository.port.GitRepositoryPort;
 import org.eclipse.jgit.api.CloneCommand;
 import org.eclipse.jgit.api.FetchCommand;
@@ -17,6 +23,12 @@ import org.eclipse.jgit.util.FS;
 import org.eclipse.jgit.lib.ObjectId;
 import org.eclipse.jgit.lib.Ref;
 import org.eclipse.jgit.lib.RefUpdate;
+import org.eclipse.jgit.lib.FileMode;
+import org.eclipse.jgit.lib.ObjectLoader;
+import org.eclipse.jgit.diff.DiffEntry;
+import org.eclipse.jgit.diff.DiffFormatter;
+import org.eclipse.jgit.treewalk.TreeWalk;
+import org.eclipse.jgit.util.io.DisabledOutputStream;
 import org.eclipse.jgit.revwalk.RevWalk;
 import org.eclipse.jgit.revwalk.RevCommit;
 import org.eclipse.jgit.revwalk.RevSort;
@@ -28,6 +40,9 @@ import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.charset.CharacterCodingException;
+import java.nio.charset.CodingErrorAction;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Collection;
@@ -36,10 +51,14 @@ import java.util.Optional;
 import java.util.List;
 import java.time.Instant;
 import java.util.function.Consumer;
+import java.io.ByteArrayOutputStream;
+import java.io.OutputStream;
 
 /** JGit 的唯一 production adapter */
 @Component
 public class JGitRepositoryAdapter implements GitRepositoryPort {
+
+    private static final int PATCH_CHUNK_BYTES = 64 * 1024;
 
     private final RepositoryProperties properties;
 
@@ -166,6 +185,221 @@ public class JGitRepositoryAdapter implements GitRepositoryPort {
             throw new RepositoryMutationException("cannot prepare reachable history", exception);
         }
     }
+
+    @Override
+    public GitPreparedComparison prepareComparison(Path workingTree, RepositoryRevision previous, RepositoryRevision current) {
+        try (Git git = Git.open(workingTree.toFile()); RevWalk walk = new RevWalk(git.getRepository())) {
+            RevCommit previousCommit = walk.parseCommit(ObjectId.fromString(previous.value()));
+            RevCommit currentCommit = walk.parseCommit(ObjectId.fromString(current.value()));
+            List<GitSnapshotEntry> previousEntries = snapshot(git.getRepository(), previousCommit);
+            List<GitSnapshotEntry> currentEntries = snapshot(git.getRepository(), currentCommit);
+            List<GitComparisonChange> changes = changes(git.getRepository(), previousCommit, currentCommit);
+            return new GitPreparedComparison(previous, current, ancestry(walk, previousCommit, currentCommit), previousEntries, currentEntries, changes);
+        } catch (IOException | RuntimeException exception) {
+            throw new RepositoryMutationException("cannot prepare exact Git comparison", exception);
+        }
+    }
+
+    private List<GitSnapshotEntry> snapshot(org.eclipse.jgit.lib.Repository repository, RevCommit commit) throws IOException {
+        List<GitSnapshotEntry> entries = new java.util.ArrayList<>();
+        long storedTextBytes = 0L;
+        try (TreeWalk walk = new TreeWalk(repository)) {
+            walk.addTree(commit.getTree());
+            walk.setRecursive(true);
+            while (walk.next()) {
+                FileMode mode = walk.getFileMode(0);
+                if (FileMode.GITLINK.equals(mode)) {
+                    entries.add(new GitSnapshotEntry(walk.getPathString(), mode.toString(), walk.getObjectId(0).name(), GitFileContentStatus.SUBMODULE, 0L, new byte[0]));
+                    continue;
+                }
+                ObjectLoader loader = repository.open(walk.getObjectId(0));
+                long size = loader.getSize();
+                if (FileMode.SYMLINK.equals(mode)) {
+                    entries.add(new GitSnapshotEntry(walk.getPathString(), mode.toString(), walk.getObjectId(0).name(), GitFileContentStatus.SYMLINK, size, new byte[0]));
+                    continue;
+                }
+                if (size > properties.getGitEvidenceFileTextBytes()) {
+                    entries.add(new GitSnapshotEntry(walk.getPathString(), mode.toString(), walk.getObjectId(0).name(), GitFileContentStatus.TOO_LARGE, size, new byte[0]));
+                    continue;
+                }
+                byte[] bytes = loader.getBytes();
+                GitFileContentStatus contentStatus = status(mode, bytes);
+                if (contentStatus == GitFileContentStatus.TEXT && exceedsSnapshotLimit(storedTextBytes, size)) {
+                    entries.add(new GitSnapshotEntry(walk.getPathString(), mode.toString(), walk.getObjectId(0).name(), GitFileContentStatus.TOO_LARGE, size, new byte[0]));
+                    continue;
+                }
+                if (contentStatus == GitFileContentStatus.TEXT) {
+                    storedTextBytes += size;
+                    entries.add(new GitSnapshotEntry(walk.getPathString(), mode.toString(), walk.getObjectId(0).name(), contentStatus, size, bytes));
+                    continue;
+                }
+                entries.add(new GitSnapshotEntry(walk.getPathString(), mode.toString(), walk.getObjectId(0).name(), contentStatus, size, new byte[0]));
+            }
+        }
+        return List.copyOf(entries);
+    }
+
+    private List<GitComparisonChange> changes(org.eclipse.jgit.lib.Repository repository, RevCommit previous, RevCommit current) throws IOException {
+        List<GitComparisonChange> changes = new java.util.ArrayList<>();
+        try (ChunkingOutputStream output = new ChunkingOutputStream(); DiffFormatter formatter = new DiffFormatter(output)) {
+            formatter.setRepository(repository);
+            formatter.setDetectRenames(true);
+            formatter.getRenameDetector().setRenameScore(60);
+            long ordinal = 0L;
+            for (DiffEntry entry : formatter.scan(previous.getTree(), current.getTree())) {
+                output.reset();
+                String diffStatus = diffStatus(repository, entry);
+                List<String> patchChunks = List.of();
+                if ("AVAILABLE".equals(diffStatus)) {
+                    formatter.format(entry);
+                    patchChunks = output.chunks();
+                    if (patchChunks.isEmpty() && output.hasBytes()) {
+                        diffStatus = "TOO_LARGE";
+                    }
+                }
+                changes.add(new GitComparisonChange("c-" + ordinal, changeKind(entry), path(entry.getOldPath()), path(entry.getNewPath()),
+                        entry.getOldMode().toString(), entry.getNewMode().toString(), entry.getOldId().name(), entry.getNewId().name(), patchChunks, diffStatus));
+                ordinal++;
+            }
+        }
+        return List.copyOf(changes);
+    }
+
+    private String diffStatus(org.eclipse.jgit.lib.Repository repository, DiffEntry entry) throws IOException {
+        GitFileContentStatus oldStatus = entryStatus(repository, entry.getOldId().toObjectId(), entry.getOldMode());
+        GitFileContentStatus newStatus = entryStatus(repository, entry.getNewId().toObjectId(), entry.getNewMode());
+        if (oldStatus != GitFileContentStatus.TEXT) {
+            return oldStatus.name();
+        }
+        if (newStatus != GitFileContentStatus.TEXT) {
+            return newStatus.name();
+        }
+        return "AVAILABLE";
+    }
+
+    private GitFileContentStatus entryStatus(org.eclipse.jgit.lib.Repository repository, ObjectId id, FileMode mode) throws IOException {
+        if (ObjectId.zeroId().equals(id)) {
+            return GitFileContentStatus.TEXT;
+        }
+        if (FileMode.GITLINK.equals(mode)) {
+            return GitFileContentStatus.SUBMODULE;
+        }
+        if (FileMode.SYMLINK.equals(mode)) {
+            return GitFileContentStatus.SYMLINK;
+        }
+        ObjectLoader loader = repository.open(id);
+        if (loader.getSize() > properties.getGitEvidenceFileTextBytes()) {
+            return GitFileContentStatus.TOO_LARGE;
+        }
+        return status(mode, loader.getBytes());
+    }
+
+    private static GitComparisonAncestry ancestry(RevWalk walk, RevCommit previous, RevCommit current) throws IOException {
+        if (previous.equals(current)) { return GitComparisonAncestry.SAME; }
+        if (walk.isMergedInto(previous, current)) { return GitComparisonAncestry.PREVIOUS_ANCESTOR; }
+        if (walk.isMergedInto(current, previous)) { return GitComparisonAncestry.CURRENT_ANCESTOR; }
+        return GitComparisonAncestry.DIVERGED;
+    }
+
+    private static GitChangeKind changeKind(DiffEntry entry) {
+        return switch (entry.getChangeType()) {
+            case ADD -> GitChangeKind.ADD;
+            case DELETE -> GitChangeKind.DELETE;
+            case RENAME, COPY -> GitChangeKind.RENAME;
+            case MODIFY -> entry.getOldMode().equals(entry.getNewMode()) ? GitChangeKind.MODIFY : GitChangeKind.MODE;
+        };
+    }
+
+    private static GitFileContentStatus status(FileMode mode, byte[] bytes) {
+        if (FileMode.SYMLINK.equals(mode)) { return GitFileContentStatus.SYMLINK; }
+        if (FileMode.GITLINK.equals(mode)) { return GitFileContentStatus.SUBMODULE; }
+        if (containsNul(bytes)) { return GitFileContentStatus.BINARY; }
+        String text = strictUtf8(bytes);
+        if (text.isEmpty() && bytes.length > 0) { return GitFileContentStatus.UNSUPPORTED_ENCODING; }
+        if (text.contains("version https://git-lfs.github.com/spec/v1")) { return GitFileContentStatus.LFS_POINTER; }
+        return GitFileContentStatus.TEXT;
+    }
+
+    private static boolean containsNul(byte[] bytes) { for (byte value : bytes) { if (value == 0) { return true; } } return false; }
+
+    private static String strictUtf8(byte[] bytes) {
+        try {
+            return StandardCharsets.UTF_8.newDecoder().onMalformedInput(CodingErrorAction.REPORT).onUnmappableCharacter(CodingErrorAction.REPORT)
+                    .decode(java.nio.ByteBuffer.wrap(bytes)).toString();
+        } catch (CharacterCodingException exception) {
+            return "";
+        }
+    }
+
+    private boolean exceedsSnapshotLimit(long storedTextBytes, long size) {
+        try {
+            return Math.addExact(storedTextBytes, size) > properties.getGitEvidenceSnapshotTextBytes();
+        } catch (ArithmeticException exception) {
+            return true;
+        }
+    }
+
+    private static final class ChunkingOutputStream extends OutputStream {
+        private final List<String> chunks = new java.util.ArrayList<>();
+        private final ByteArrayOutputStream pending = new ByteArrayOutputStream(PATCH_CHUNK_BYTES + 4);
+
+        @Override
+        public void write(int value) {
+            pending.write(value);
+            drainCompleteChunks();
+        }
+
+        @Override
+        public void write(byte[] bytes, int offset, int length) {
+            pending.write(bytes, offset, length);
+            drainCompleteChunks();
+        }
+
+        private List<String> chunks() {
+            byte[] remaining = pending.toByteArray();
+            if (remaining.length > 0) {
+                appendChunk(remaining, remaining.length);
+                pending.reset();
+            }
+            return List.copyOf(chunks);
+        }
+
+        private boolean hasBytes() {
+            return !chunks.isEmpty() || pending.size() > 0;
+        }
+
+        private void reset() {
+            chunks.clear();
+            pending.reset();
+        }
+
+        private void drainCompleteChunks() {
+            byte[] bytes = pending.toByteArray();
+            while (bytes.length > PATCH_CHUNK_BYTES) {
+                int end = PATCH_CHUNK_BYTES;
+                while (end > 0 && (bytes[end] & 0xC0) == 0x80) {
+                    end--;
+                }
+                if (end == 0) {
+                    throw new RepositoryMutationException("JGit produced an invalid UTF-8 patch");
+                }
+                appendChunk(bytes, end);
+                pending.reset();
+                pending.write(bytes, end, bytes.length - end);
+                bytes = pending.toByteArray();
+            }
+        }
+
+        private void appendChunk(byte[] bytes, int length) {
+            String chunk = strictUtf8(java.util.Arrays.copyOf(bytes, length));
+            if (chunk.isEmpty() && length > 0) {
+                throw new RepositoryMutationException("JGit produced an invalid UTF-8 patch");
+            }
+            chunks.add(chunk);
+        }
+    }
+
+    private static String path(String path) { return DiffEntry.DEV_NULL.equals(path) ? "" : path; }
 
     private RepositoryRevision resolveReachableCommit(String remoteUrl, ObjectId revision) {
         DfsRepositoryDescription description = new DfsRepositoryDescription("remote-revision-validation");

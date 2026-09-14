@@ -57,6 +57,11 @@ public final class IndexRepositoryController {
         return accepted(requests.prepareGitHistory(RepositoryId.of(repoId), request.catalogId(), request.branch(), request.revision()));
     }
 
+    @PostMapping("/git/comparisons")
+    public ResponseEntity<IndexJobResponse> gitComparison(@PathVariable String repoId, @Valid @RequestBody GitComparisonIndexRequest request) {
+        return accepted(requests.prepareGitComparison(RepositoryId.of(repoId), request.previous(), request.current()));
+    }
+
     @PostMapping("/rebuild")
     public ResponseEntity<IndexJobResponse> rebuild(@PathVariable String repoId, @Valid @RequestBody RebuildIndexRequest request) {
         return accepted(requests.rebuild(RepositoryId.of(repoId), Objects.requireNonNull(request, "rebuild request is required")

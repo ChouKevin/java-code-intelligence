@@ -80,6 +80,8 @@ public class QueryMcpToolCatalogConfiguration {
         return switch (toolName) {
             case "list_git_branches" -> facade.listGitBranches(convert(arguments, SemanticQueryContract.GitBranchRequest.class, objectMapper));
             case "list_git_commits" -> facade.listGitCommits(convert(arguments, SemanticQueryContract.GitCommitRequest.class, objectMapper));
+            case "compare_revisions" -> facade.compareRevisions(convert(arguments, SemanticQueryContract.GitComparisonRequest.class, objectMapper));
+            case "get_file_diff" -> facade.getFileDiff(convert(arguments, SemanticQueryContract.GitFileDiffRequest.class, objectMapper));
             case "list_repositories" -> facade.listRepositories(convert(arguments, SemanticQueryContract.PageRequest.class, objectMapper));
             case "get_repository" -> facade.getRepository(convert(arguments, SemanticQueryContract.RepositoryRequest.class, objectMapper));
             case "search_code" -> facade.searchCode(convert(arguments, SemanticQueryContract.SearchCodeRequest.class, objectMapper));

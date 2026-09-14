@@ -114,6 +114,20 @@ public final class SemanticQueryController {
                 offset(request.offset()), limit(request.limit())));
     }
 
+    @PostMapping("/git/comparisons")
+    public SemanticQueryContract.GitComparisonCollection gitComparisons(@RequestBody GitComparisonHttpRequest request) {
+        return facade.compareRevisions(new SemanticQueryContract.GitComparisonRequest(requiredText(request.repositoryId(), "repositoryId"),
+                requiredText(request.comparisonId(), "comparisonId"), requiredText(request.previous(), "previous"),
+                requiredText(request.current(), "current"), offset(request.offset()), limit(request.limit())));
+    }
+
+    @PostMapping("/git/file-diff")
+    public SemanticQueryContract.GitFileDiffResult gitFileDiff(@RequestBody GitFileDiffHttpRequest request) {
+        return facade.getFileDiff(new SemanticQueryContract.GitFileDiffRequest(requiredText(request.repositoryId(), "repositoryId"),
+                requiredText(request.comparisonId(), "comparisonId"), requiredText(request.previous(), "previous"),
+                requiredText(request.current(), "current"), requiredText(request.changeId(), "changeId"), optionalText(request.cursor())));
+    }
+
     private static SemanticQueryContract.RelationRequest methodRelationRequest(MethodRelationHttpRequest request) {
         return new SemanticQueryContract.RelationRequest(requiredText(request.repositoryId(), "repositoryId"),
                 requiredText(request.revision(), "revision"), requiredText(request.methodFactId(), "methodFactId"),
@@ -182,4 +196,6 @@ public final class SemanticQueryController {
 
     record GitBranchHttpRequest(String repositoryId, String catalogId, Integer offset, Integer limit) { }
     record GitCommitHttpRequest(String repositoryId, String historyId, String revision, Integer offset, Integer limit) { }
+    record GitComparisonHttpRequest(String repositoryId, String comparisonId, String previous, String current, Integer offset, Integer limit) { }
+    record GitFileDiffHttpRequest(String repositoryId, String comparisonId, String previous, String current, String changeId, String cursor) { }
 }

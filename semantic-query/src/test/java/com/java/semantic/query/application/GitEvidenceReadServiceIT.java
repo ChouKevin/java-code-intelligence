@@ -22,6 +22,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class GitEvidenceReadServiceIT {
     private static final String CATALOG_ID = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
     private static final String HISTORY_ID = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb";
+    private static final String COMPARISON_ID = "cccccccc-cccc-cccc-cccc-cccccccccccc";
     private static final String REVISION = "1".repeat(40);
 
     @Test
@@ -123,6 +124,39 @@ class GitEvidenceReadServiceIT {
         }
     }
 
+    @Test
+    void reads_only_a_ready_exact_comparison_and_returns_bounded_patch_continuations() {
+        try (MongoDBContainer container = new MongoDBContainer(DockerImageName.parse("mongo:8.0.4"))) {
+            container.start();
+            MongoTemplate template = new MongoTemplate(MongoClients.create(container.getConnectionString()), "git_comparison_read");
+            seedRepository(template, "orders");
+            seedComparison(template, "orders", "READY");
+            GitEvidenceReadService service = service(template, List.of("orders"));
+            SemanticQueryContract.GitComparisonRequest comparisonRequest = new SemanticQueryContract.GitComparisonRequest("orders", COMPARISON_ID,
+                    REVISION, "2".repeat(40), 0, 20);
+
+            SemanticQueryContract.GitComparisonCollection comparison = service.comparisons(comparisonRequest);
+            SemanticQueryContract.GitFileDiffResult first = service.fileDiff(new SemanticQueryContract.GitFileDiffRequest("orders", COMPARISON_ID,
+                    REVISION, "2".repeat(40), "change-0", Optional.empty()));
+            SemanticQueryContract.GitFileDiffResult second = service.fileDiff(new SemanticQueryContract.GitFileDiffRequest("orders", COMPARISON_ID,
+                    REVISION, "2".repeat(40), "change-0", first.nextCursor()));
+
+            assertThat(comparison.items()).singleElement().satisfies(change -> assertThat(change.changeId()).isEqualTo("change-0"));
+            assertThat(first.patch()).isEqualTo("first\n");
+            assertThat(first.nextCursor()).isPresent();
+            assertThat(second.patch()).isEqualTo("second\n");
+            assertThat(second.nextCursor()).isEmpty();
+            assertThatThrownBy(() -> service.comparisons(new SemanticQueryContract.GitComparisonRequest("orders", COMPARISON_ID,
+                    "3".repeat(40), "2".repeat(40), 0, 20))).isInstanceOf(IllegalArgumentException.class);
+            template.getCollection("git_comparison_patches").deleteOne(new Document("comparisonId", COMPARISON_ID).append("ordinal", 1L));
+            assertThatThrownBy(() -> service.fileDiff(new SemanticQueryContract.GitFileDiffRequest("orders", COMPARISON_ID,
+                    REVISION, "2".repeat(40), "change-0", Optional.empty()))).isInstanceOf(IndexContractMismatchException.class);
+            template.getCollection("git_evidence_manifests").updateOne(new Document("evidenceId", "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee"),
+                    new Document("$set", new Document("state", "PREPARING")));
+            assertThatThrownBy(() -> service.comparisons(comparisonRequest)).isInstanceOf(GitEvidenceNotReadyException.class);
+        }
+    }
+
     private static GitEvidenceReadService service(MongoTemplate template, List<String> allowedRepositories) {
         ReadPolicyProperties properties = new ReadPolicyProperties(allowedRepositories, List.of(), List.of(), List.of(), List.of());
         return service(template, properties);
@@ -158,5 +192,24 @@ class GitEvidenceReadServiceIT {
         template.getCollection("git_commits").insertOne(new Document("repoId", repositoryId).append("historyId", HISTORY_ID)
                 .append("ordinal", 0L).append("revision", REVISION).append("parents", List.of("2".repeat(40)))
                 .append("subject", "prepared commit").append("committedAt", new Date()));
+    }
+
+    private static void seedComparison(MongoTemplate template, String repositoryId, String state) {
+        String current = "2".repeat(40);
+        template.getCollection("git_evidence_manifests").insertMany(List.of(
+                new Document("repoId", repositoryId).append("evidenceId", "dddddddd-dddd-dddd-dddd-dddddddddddd").append("kind", "SNAPSHOT")
+                        .append("state", "READY").append("gitEvidenceVersion", 1).append("revision", REVISION),
+                new Document("repoId", repositoryId).append("evidenceId", "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee").append("kind", "SNAPSHOT")
+                        .append("state", "READY").append("gitEvidenceVersion", 1).append("revision", current),
+                new Document("repoId", repositoryId).append("evidenceId", COMPARISON_ID).append("kind", "COMPARISON").append("state", state)
+                        .append("gitEvidenceVersion", 1).append("previous", REVISION).append("current", current).append("previousSnapshotId", "dddddddd-dddd-dddd-dddd-dddddddddddd")
+                        .append("currentSnapshotId", "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee").append("ancestry", "PREVIOUS_ANCESTOR").append("total", 1L)));
+        template.getCollection("git_comparison_changes").insertOne(new Document("repoId", repositoryId).append("comparisonId", COMPARISON_ID)
+                .append("ordinal", 0L).append("changeId", "change-0").append("kind", "MODIFY").append("oldPath", "README.md")
+                .append("newPath", "README.md").append("oldMode", "100644").append("newMode", "100644").append("oldBlobId", "3".repeat(40))
+                .append("newBlobId", "4".repeat(40)).append("diffStatus", "AVAILABLE").append("patchChunkCount", 2L));
+        template.getCollection("git_comparison_patches").insertMany(List.of(
+                new Document("repoId", repositoryId).append("comparisonId", COMPARISON_ID).append("changeId", "change-0").append("ordinal", 0L).append("patch", "first\n"),
+                new Document("repoId", repositoryId).append("comparisonId", COMPARISON_ID).append("changeId", "change-0").append("ordinal", 1L).append("patch", "second\n")));
     }
 }

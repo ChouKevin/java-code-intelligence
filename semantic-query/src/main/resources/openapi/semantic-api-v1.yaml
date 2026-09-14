@@ -50,6 +50,10 @@ paths:
     $ref: '#/components/pathItems/GitBranches'
   /api/v1/git/commits:
     $ref: '#/components/pathItems/GitCommits'
+  /api/v1/git/comparisons:
+    $ref: '#/components/pathItems/GitComparisons'
+  /api/v1/git/file-diff:
+    $ref: '#/components/pathItems/GitFileDiff'
 components:
   parameters:
     RepositoryId:
@@ -84,6 +88,30 @@ components:
         requestBody: {$ref: '#/components/requestBodies/GitCommitRequest'}
         responses:
           '200': {description: History-pinned commit page., content: {application/json: {schema: {$ref: '#/components/schemas/GitCommitCollection'}}}}
+          '400': {$ref: '#/components/responses/InvalidArgument'}
+          '401': {$ref: '#/components/responses/AuthenticationRequired'}
+          '403': {$ref: '#/components/responses/AccessForbidden'}
+          '404': {$ref: '#/components/responses/NotFound'}
+          '409': {$ref: '#/components/responses/GitEvidenceNotReady'}
+          '503': {$ref: '#/components/responses/IndexUnavailable'}
+    GitComparisons:
+      post:
+        summary: List one immutable direct comparison of exact Git revisions.
+        requestBody: {$ref: '#/components/requestBodies/GitComparisonRequest'}
+        responses:
+          '200': {description: Exact comparison page., content: {application/json: {schema: {$ref: '#/components/schemas/GitComparisonCollection'}}}}
+          '400': {$ref: '#/components/responses/InvalidArgument'}
+          '401': {$ref: '#/components/responses/AuthenticationRequired'}
+          '403': {$ref: '#/components/responses/AccessForbidden'}
+          '404': {$ref: '#/components/responses/NotFound'}
+          '409': {$ref: '#/components/responses/GitEvidenceNotReady'}
+          '503': {$ref: '#/components/responses/IndexUnavailable'}
+    GitFileDiff:
+      post:
+        summary: Read one bounded patch from an immutable exact comparison.
+        requestBody: {$ref: '#/components/requestBodies/GitFileDiffRequest'}
+        responses:
+          '200': {description: Exact change patch., content: {application/json: {schema: {$ref: '#/components/schemas/GitFileDiffResult'}}}}
           '400': {$ref: '#/components/responses/InvalidArgument'}
           '401': {$ref: '#/components/responses/AuthenticationRequired'}
           '403': {$ref: '#/components/responses/AccessForbidden'}
@@ -213,6 +241,8 @@ components:
   requestBodies:
     GitBranchRequest: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/GitBranchRequest'}}}}
     GitCommitRequest: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/GitCommitRequest'}}}}
+    GitComparisonRequest: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/GitComparisonRequest'}}}}
+    GitFileDiffRequest: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/GitFileDiffRequest'}}}}
     SearchCodeRequest: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/SearchCodeRequest'}}}}
     FactSourceRequest: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/FactSourceRequest'}}}}
     EntryPointRequest: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/EntryPointRequest'}}}}
@@ -301,6 +331,68 @@ components:
         revision: {$ref: '#/components/schemas/Revision'}
         preparedAt: {type: string, format: date-time}
         items: {type: array, items: {$ref: '#/components/schemas/GitCommitItem'}}
+    GitComparisonRequest:
+      type: object
+      additionalProperties: false
+      required: [repositoryId, comparisonId, previous, current]
+      properties:
+        repositoryId: {$ref: '#/components/schemas/RepositoryId'}
+        comparisonId: {type: string, format: uuid}
+        previous: {$ref: '#/components/schemas/Revision'}
+        current: {$ref: '#/components/schemas/Revision'}
+        offset: {type: integer, minimum: 0, default: 0}
+        limit: {type: integer, minimum: 1, maximum: 100, default: 20}
+    GitFileDiffRequest:
+      type: object
+      additionalProperties: false
+      required: [repositoryId, comparisonId, previous, current, changeId]
+      properties:
+        repositoryId: {$ref: '#/components/schemas/RepositoryId'}
+        comparisonId: {type: string, format: uuid}
+        previous: {$ref: '#/components/schemas/Revision'}
+        current: {$ref: '#/components/schemas/Revision'}
+        changeId: {type: string, minLength: 1}
+        cursor: {type: string, minLength: 1}
+    GitChangeItem:
+      type: object
+      additionalProperties: false
+      required: [changeId, kind, diffStatus]
+      properties:
+        changeId: {type: string}
+        kind: {type: string, enum: [ADD, DELETE, MODIFY, RENAME, MODE]}
+        oldPath: {type: string}
+        newPath: {type: string}
+        oldMode: {type: string}
+        newMode: {type: string}
+        oldBlobId: {type: string}
+        newBlobId: {type: string}
+        diffStatus: {type: string}
+    GitComparisonCollection:
+      type: object
+      additionalProperties: false
+      required: [repositoryId, comparisonId, previous, current, previousSnapshotId, currentSnapshotId, ancestry, items, page]
+      properties:
+        repositoryId: {$ref: '#/components/schemas/RepositoryId'}
+        comparisonId: {type: string, format: uuid}
+        previous: {$ref: '#/components/schemas/Revision'}
+        current: {$ref: '#/components/schemas/Revision'}
+        previousSnapshotId: {type: string, format: uuid}
+        currentSnapshotId: {type: string, format: uuid}
+        ancestry: {type: string, enum: [SAME, PREVIOUS_ANCESTOR, CURRENT_ANCESTOR, DIVERGED]}
+        items: {type: array, items: {$ref: '#/components/schemas/GitChangeItem'}}
+        page: {$ref: '#/components/schemas/Page'}
+    GitFileDiffResult:
+      type: object
+      additionalProperties: false
+      required: [repositoryId, comparisonId, previous, current, change, patch]
+      properties:
+        repositoryId: {$ref: '#/components/schemas/RepositoryId'}
+        comparisonId: {type: string, format: uuid}
+        previous: {$ref: '#/components/schemas/Revision'}
+        current: {$ref: '#/components/schemas/Revision'}
+        change: {$ref: '#/components/schemas/GitChangeItem'}
+        patch: {type: string}
+        nextCursor: {type: string}
         page: {$ref: '#/components/schemas/Page'}
     Page:
       type: object

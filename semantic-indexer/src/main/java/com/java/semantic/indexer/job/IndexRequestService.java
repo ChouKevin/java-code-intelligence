@@ -78,6 +78,11 @@ public final class IndexRequestService {
         return jobs.admitGitHistory(repositoryId, new GitEvidenceId(catalogId), branch, RepositoryRevision.ofSha(revision));
     }
 
+    public IndexJob prepareGitComparison(RepositoryId repositoryId, String previous, String current) {
+        repositories.get(repositoryId);
+        return jobs.admitGitComparison(repositoryId, RepositoryRevision.ofSha(previous), RepositoryRevision.ofSha(current));
+    }
+
     private IndexJob admit(RepositoryId repositoryId, RepositoryRevision revision, boolean rebuild) {
         jobs.reconcileCommitted(repositoryId);
         return jobs.admit(repositoryId, revision, rebuild);

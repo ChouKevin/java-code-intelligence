@@ -48,6 +48,8 @@ public final class SemanticMcpSchemaCatalog {
         Map<String, Map<String, Object>> schemas = new LinkedHashMap<>();
         schemas.put("list_git_branches", gitBranchCollection());
         schemas.put("list_git_commits", gitCommitCollection());
+        schemas.put("compare_revisions", gitComparisonCollection());
+        schemas.put("get_file_diff", gitFileDiffResult());
         schemas.put("list_repositories", repositoryCollection());
         schemas.put("get_repository", repositoryItem());
         schemas.put("search_code", searchCodeResult());
@@ -78,6 +80,23 @@ public final class SemanticMcpSchemaCatalog {
                 "committedAt", string()), List.of("revision", "parents", "subject", "committedAt"));
         return schema(Map.of("repositoryId", repositoryId(), "historyId", gitEvidenceId(), "revision", revision(), "preparedAt", string(),
                 "items", items(item), "page", page()), List.of("repositoryId", "historyId", "revision", "preparedAt", "items", "page"));
+    }
+
+    private static Map<String, Object> gitComparisonCollection() {
+        return schema(Map.of("repositoryId", repositoryId(), "comparisonId", gitEvidenceId(), "previous", revision(), "current", revision(),
+                "previousSnapshotId", gitEvidenceId(), "currentSnapshotId", gitEvidenceId(), "ancestry", string(), "items", items(gitChange()), "page", page()),
+                List.of("repositoryId", "comparisonId", "previous", "current", "previousSnapshotId", "currentSnapshotId", "ancestry", "items", "page"));
+    }
+
+    private static Map<String, Object> gitFileDiffResult() {
+        return schema(Map.of("repositoryId", repositoryId(), "comparisonId", gitEvidenceId(), "previous", revision(), "current", revision(),
+                "change", gitChange(), "patch", string(), "nextCursor", string()),
+                List.of("repositoryId", "comparisonId", "previous", "current", "change", "patch"));
+    }
+
+    private static Map<String, Object> gitChange() {
+        return schema(Map.of("changeId", string(), "kind", string(), "oldPath", string(), "newPath", string(), "oldMode", string(),
+                "newMode", string(), "oldBlobId", string(), "newBlobId", string(), "diffStatus", string()), List.of("changeId", "kind", "diffStatus"));
     }
 
     private static Map<String, Object> repositoryItem() {
@@ -190,6 +209,10 @@ public final class SemanticMcpSchemaCatalog {
                 List.of("repositoryId")));
         schemas.put("list_git_commits", pagedSchema(Map.of("repositoryId", repositoryId(), "historyId", gitEvidenceId(), "revision", revision()),
                 List.of("repositoryId", "historyId", "revision")));
+        schemas.put("compare_revisions", pagedSchema(Map.of("repositoryId", repositoryId(), "comparisonId", gitEvidenceId(), "previous", revision(), "current", revision()),
+                List.of("repositoryId", "comparisonId", "previous", "current")));
+        schemas.put("get_file_diff", schema(Map.of("repositoryId", repositoryId(), "comparisonId", gitEvidenceId(), "previous", revision(),
+                "current", revision(), "changeId", string(), "cursor", string()), List.of("repositoryId", "comparisonId", "previous", "current", "changeId")));
         schemas.put("list_repositories", pagedSchema(Map.of(), List.of()));
         schemas.put("get_repository", schema(Map.of("repositoryId", repositoryId()), List.of("repositoryId")));
         schemas.put("search_code", pagedSchema(Map.of(

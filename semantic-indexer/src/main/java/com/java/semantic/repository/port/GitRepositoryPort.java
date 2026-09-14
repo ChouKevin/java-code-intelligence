@@ -3,6 +3,7 @@ package com.java.semantic.repository.port;
 import com.java.semantic.model.repository.RepositoryRevision;
 import com.java.semantic.model.git.GitBranch;
 import com.java.semantic.model.git.GitCommit;
+import com.java.semantic.model.git.GitPreparedComparison;
 
 import java.nio.file.Path;
 import java.util.List;
@@ -26,4 +27,6 @@ public interface GitRepositoryPort {
     List<GitBranch> fetchRemoteBranches(Path workingTree);
 
     void streamReachableHistory(Path workingTree, RepositoryRevision revision, Consumer<GitCommit> consumer);
+
+    GitPreparedComparison prepareComparison(Path workingTree, RepositoryRevision previous, RepositoryRevision current);
 }

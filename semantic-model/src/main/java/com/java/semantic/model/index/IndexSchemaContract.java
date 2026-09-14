@@ -69,7 +69,17 @@ public final class IndexSchemaContract {
                     index("git_branch_lookup", keys("repoId", 1, "catalogId", 1, "branch", 1), true, Map.of())),
             collection(IndexCollections.GIT_COMMITS,
                     index("git_commit_row_unique", keys("repoId", 1, "historyId", 1, "ordinal", 1), true, Map.of()),
-                    index("git_commit_lookup", keys("repoId", 1, "historyId", 1, "revision", 1), true, Map.of())));
+                    index("git_commit_lookup", keys("repoId", 1, "historyId", 1, "revision", 1), true, Map.of())),
+            collection(IndexCollections.GIT_SNAPSHOT_FILES,
+                    index("git_snapshot_file_unique", keys("repoId", 1, "snapshotId", 1, "path", 1), true, Map.of()),
+                    index("git_snapshot_file_ordinal", keys("repoId", 1, "snapshotId", 1, "ordinal", 1), true, Map.of())),
+            collection(IndexCollections.GIT_SNAPSHOT_CHUNKS,
+                    index("git_snapshot_chunk_unique", keys("repoId", 1, "snapshotId", 1, "path", 1, "ordinal", 1), true, Map.of())),
+            collection(IndexCollections.GIT_COMPARISON_CHANGES,
+                    index("git_comparison_change_unique", keys("repoId", 1, "comparisonId", 1, "ordinal", 1), true, Map.of()),
+                    index("git_comparison_change_id", keys("repoId", 1, "comparisonId", 1, "changeId", 1), true, Map.of())),
+            collection(IndexCollections.GIT_COMPARISON_PATCHES,
+                    index("git_comparison_patch_unique", keys("repoId", 1, "comparisonId", 1, "changeId", 1, "ordinal", 1), true, Map.of())));
 
     private IndexSchemaContract() { }
 

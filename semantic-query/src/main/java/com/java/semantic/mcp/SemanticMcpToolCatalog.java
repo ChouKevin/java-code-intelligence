@@ -8,6 +8,8 @@ public final class SemanticMcpToolCatalog {
     private static final List<ToolDefinition> TOOLS = List.of(
             tool("list_git_branches", "List branches from one immutable READY Git catalog; responses pin catalogId for later pages."),
             tool("list_git_commits", "List the stored topological/time commit history for one exact READY Git history revision."),
+            tool("compare_revisions", "List one immutable direct comparison of exact previous and current Git trees; page.hasMore means request another page."),
+            tool("get_file_diff", "Read a bounded JGit-produced patch for one returned comparison change; nextCursor continues the same exact endpoints."),
             tool("list_repositories", "List visible repositories and their current revisions. If a later call reports REVISION_OUTDATED, read the current revision and acquire fresh returned IDs."),
             tool("get_repository", "Read one known repository and its current revision. Copy repositoryId exactly from Semantic results."),
             tool("search_code", "Search ASCII alphanumeric code-name tokens by prefix, not natural language. Copy repositoryId and revision exactly; page.hasMore means request another page. Empty items mean no matching indexed evidence."),

@@ -17,7 +17,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class OpenApiContractTest {
 
     @Test
-    void advertises_the_fourteen_application_routes_and_shared_application_errors() throws Exception {
+    void advertises_the_sixteen_implemented_application_routes_and_shared_application_errors() throws Exception {
         Map<String, Object> root = map(new Yaml().load(Files.readString(Path.of("src", "main", "resources", "openapi",
                 "semantic-api-v1.yaml"))));
         Map<String, Object> paths = map(root.get("paths"));
@@ -37,13 +37,16 @@ class OpenApiContractTest {
                 "/api/v1/callers",
                 "/api/v1/callees",
                 "/api/v1/git/branches",
-                "/api/v1/git/commits");
+                "/api/v1/git/commits",
+                "/api/v1/git/comparisons",
+                "/api/v1/git/file-diff");
         assertThat(schemas).containsKeys("SemanticQueryError", "RepositoryCollection", "RepositoryItem",
                 "FactSourceResult", "SearchCodeRequest", "FactSourceRequest", "EntryPointRequest", "ApiRouteRequest",
                 "EventListenerRequest", "TypeMemberRequest", "RelationRequest", "InternalProgramElement", "ExternalCallee",
                 "EntryPointItem", "SourceCoverage",
                 "Trigger", "EventListenerItem", "ImplementationItem", "CallerItem", "CalleeItem", "ReferenceItem", "RelationSite",
-                "GitBranchRequest", "GitCommitRequest", "GitBranchCollection", "GitCommitCollection", "GitBranchItem", "GitCommitItem");
+                "GitBranchRequest", "GitCommitRequest", "GitBranchCollection", "GitCommitCollection", "GitBranchItem", "GitCommitItem",
+                "GitComparisonRequest", "GitFileDiffRequest", "GitComparisonCollection", "GitFileDiffResult", "GitChangeItem");
         assertThat(map(schemas.get("SemanticQueryError")).get("properties")).asInstanceOf(org.assertj.core.api.InstanceOfAssertFactories.MAP)
                 .containsOnlyKeys("code", "message", "retryable", "currentRevision");
     }

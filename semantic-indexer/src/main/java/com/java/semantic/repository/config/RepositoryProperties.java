@@ -16,6 +16,8 @@ public class RepositoryProperties {
     private Duration repositoryLockTimeout = Duration.ofSeconds(5);
     private String gitUsername = "";
     private String gitToken = "";
+    private long gitEvidenceFileTextBytes = 2L * 1024L * 1024L;
+    private long gitEvidenceSnapshotTextBytes = 256L * 1024L * 1024L;
     private Map<String, RepositoryConfig> repositories = new LinkedHashMap<>();
 
     public String getDataRoot() {
@@ -48,6 +50,28 @@ public class RepositoryProperties {
 
     public void setGitToken(String gitToken) {
         this.gitToken = gitToken;
+    }
+
+    public long getGitEvidenceFileTextBytes() {
+        return gitEvidenceFileTextBytes;
+    }
+
+    public void setGitEvidenceFileTextBytes(long gitEvidenceFileTextBytes) {
+        if (gitEvidenceFileTextBytes <= 0L) {
+            throw new IllegalArgumentException("git evidence file text bytes must be positive");
+        }
+        this.gitEvidenceFileTextBytes = gitEvidenceFileTextBytes;
+    }
+
+    public long getGitEvidenceSnapshotTextBytes() {
+        return gitEvidenceSnapshotTextBytes;
+    }
+
+    public void setGitEvidenceSnapshotTextBytes(long gitEvidenceSnapshotTextBytes) {
+        if (gitEvidenceSnapshotTextBytes <= 0L) {
+            throw new IllegalArgumentException("git evidence snapshot text bytes must be positive");
+        }
+        this.gitEvidenceSnapshotTextBytes = gitEvidenceSnapshotTextBytes;
     }
 
     public Map<String, RepositoryConfig> getRepositories() {

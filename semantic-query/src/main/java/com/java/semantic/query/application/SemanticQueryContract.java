@@ -139,6 +139,29 @@ public final class SemanticQueryContract {
         }
     }
 
+    public record GitComparisonRequest(String repositoryId, String comparisonId, String previous, String current, int offset, int limit) {
+        public GitComparisonRequest {
+            repositoryId = requireRepositoryId(repositoryId);
+            comparisonId = ModelValidation.requiredText(comparisonId, "comparison id");
+            previous = requireRevision(previous);
+            current = requireRevision(current);
+            offset = requireOffset(offset);
+            limit = requireLimit(limit);
+        }
+    }
+
+    public record GitFileDiffRequest(String repositoryId, String comparisonId, String previous, String current, String changeId,
+                                     Optional<String> cursor) {
+        public GitFileDiffRequest {
+            repositoryId = requireRepositoryId(repositoryId);
+            comparisonId = ModelValidation.requiredText(comparisonId, "comparison id");
+            previous = requireRevision(previous);
+            current = requireRevision(current);
+            changeId = ModelValidation.requiredText(changeId, "change id");
+            cursor = Objects.requireNonNull(cursor, "cursor is required");
+        }
+    }
+
     public enum HttpMethod {
         GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS, TRACE, ALL
     }
@@ -167,6 +190,17 @@ public final class SemanticQueryContract {
     public record GitCommitCollection(String repositoryId, String historyId, String revision, java.time.Instant preparedAt,
                                       List<GitCommitItem> items, Page page) {
         public GitCommitCollection { items = List.copyOf(Objects.requireNonNull(items, "git commit items are required")); }
+    }
+    public record GitChangeItem(String changeId, String kind, String oldPath, String newPath, String oldMode, String newMode,
+                                String oldBlobId, String newBlobId, String diffStatus) { }
+    public record GitComparisonCollection(String repositoryId, String comparisonId, String previous, String current,
+                                          String previousSnapshotId, String currentSnapshotId, String ancestry,
+                                          List<GitChangeItem> items, Page page) {
+        public GitComparisonCollection { items = List.copyOf(Objects.requireNonNull(items, "git comparison items are required")); }
+    }
+    public record GitFileDiffResult(String repositoryId, String comparisonId, String previous, String current,
+                                    GitChangeItem change, String patch, Optional<String> nextCursor) {
+        public GitFileDiffResult { nextCursor = Objects.requireNonNull(nextCursor, "next cursor is required"); }
     }
 
     public record SourceSnippet(String path, int startLine, int endLine, String code) {

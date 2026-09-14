@@ -234,6 +234,33 @@ class MongoIndexJobStoreIT {
     }
 
     @Test
+    void comparison_recovery_requires_a_ready_matching_comparison_and_both_ready_snapshots() {
+        try (MongoDBContainer container = container()) {
+            MongoTemplate template = template(container);
+            MongoIndexJobStore store = store(template);
+            IndexJob accepted = store.admitGitComparison(RepositoryId.of("orders"), revision("a"), revision("b"));
+            IndexJob running = store.startNextAccepted().orElseThrow();
+            String comparisonId = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
+            String previousSnapshotId = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb";
+            String currentSnapshotId = "cccccccc-cccc-cccc-cccc-cccccccccccc";
+            template.getCollection(IndexCollections.INDEX_JOBS).updateOne(new Document("jobId", running.id().value()),
+                    new Document("$set", new Document("gitEvidence.evidenceId", comparisonId)));
+            template.getCollection(IndexCollections.GIT_EVIDENCE_MANIFESTS).insertMany(List.of(
+                    new Document("repoId", "orders").append("evidenceId", comparisonId).append("ownerJobId", running.id().value())
+                            .append("kind", "COMPARISON").append("state", "READY").append("previous", revision("a").value())
+                            .append("current", revision("b").value()).append("previousSnapshotId", previousSnapshotId).append("currentSnapshotId", currentSnapshotId),
+                    new Document("repoId", "orders").append("evidenceId", previousSnapshotId).append("kind", "SNAPSHOT").append("state", "READY"),
+                    new Document("repoId", "orders").append("evidenceId", currentSnapshotId).append("kind", "SNAPSHOT").append("state", "PREPARING")));
+
+            store.failUnreconciledRunningJobs();
+
+            assertThat(store.find(accepted.id()).orElseThrow().phase()).isEqualTo(IndexJobPhase.FAILED);
+            IndexJob retry = store.admitGitComparison(RepositoryId.of("orders"), revision("a"), revision("b"));
+            assertThat(retry.phase()).isEqualTo(IndexJobPhase.ACCEPTED);
+        }
+    }
+
+    @Test
     void build_publication_requires_running_job_and_preserves_rebuild_parent_precondition() {
         try (MongoDBContainer container = container()) {
             MongoTemplate template = template(container);
