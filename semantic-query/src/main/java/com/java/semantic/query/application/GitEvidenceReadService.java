@@ -297,12 +297,48 @@ public final class GitEvidenceReadService {
             throw new IndexContractMismatchException();
         }
         Document parent = parents.getFirst();
-        if (!"READY".equals(requiredText(parent, "state"))) {
+        String parentState = requiredText(parent, "state");
+        if ("PREPARING".equals(parentState) || "FAILED".equals(parentState)) {
             throw new GitEvidenceNotReadyException();
         }
+        if (!"READY".equals(parentState)) {
+            throw new IndexContractMismatchException();
+        }
         if (parent.getInteger("gitEvidenceVersion", 0) != 1 || !ownerJobId.equals(requiredText(parent, "ownerJobId"))
-                || !requiredText(parent, "previousSnapshotId").matches("[0-9a-f-]{36}") || !requiredText(parent, "currentSnapshotId").matches("[0-9a-f-]{36}")
                 || !requiredText(parent, "previous").matches("[0-9a-f]{40}") || !requiredText(parent, "current").matches("[0-9a-f]{40}")) {
+            throw new IndexContractMismatchException();
+        }
+        GitEvidenceId requestedSnapshotId = canonicalGitEvidenceId(snapshotId);
+        GitEvidenceId previousSnapshotId = canonicalGitEvidenceId(requiredText(parent, "previousSnapshotId"));
+        GitEvidenceId currentSnapshotId = canonicalGitEvidenceId(requiredText(parent, "currentSnapshotId"));
+        String previousRevision = requiredText(parent, "previous");
+        String currentRevision = requiredText(parent, "current");
+        boolean requestedPrevious = requestedSnapshotId.equals(previousSnapshotId) && revision.equals(previousRevision);
+        boolean requestedCurrent = requestedSnapshotId.equals(currentSnapshotId) && revision.equals(currentRevision);
+        if (requestedPrevious == requestedCurrent) {
+            throw new IndexContractMismatchException();
+        }
+        GitEvidenceId siblingSnapshotId = requestedPrevious ? currentSnapshotId : previousSnapshotId;
+        String siblingRevision = requestedPrevious ? currentRevision : previousRevision;
+        if (requestedSnapshotId.equals(siblingSnapshotId)) {
+            throw new IndexContractMismatchException();
+        }
+        requireReadySiblingSnapshot(repositoryId, siblingSnapshotId, siblingRevision, ownerJobId);
+    }
+
+    private void requireReadySiblingSnapshot(RepositoryId repositoryId, GitEvidenceId siblingSnapshotId, String siblingRevision, String ownerJobId) {
+        Document sibling = findManifest(repositoryId, siblingSnapshotId);
+        if (Objects.isNull(sibling) || !"SNAPSHOT".equals(requiredText(sibling, "kind")) || !"READY".equals(requiredText(sibling, "state"))
+                || sibling.getInteger("gitEvidenceVersion", 0) != 1 || !repositoryId.value().equals(requiredText(sibling, "repoId"))
+                || !ownerJobId.equals(requiredText(sibling, "ownerJobId")) || !siblingRevision.equals(requiredText(sibling, "revision"))) {
+            throw new IndexContractMismatchException();
+        }
+    }
+
+    private static GitEvidenceId canonicalGitEvidenceId(String value) {
+        try {
+            return new GitEvidenceId(value);
+        } catch (IllegalArgumentException exception) {
             throw new IndexContractMismatchException();
         }
     }

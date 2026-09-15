@@ -93,12 +93,14 @@ class GitEvidenceReadServiceIT {
     }
 
     @Test
-    void exposes_snapshot_rows_only_when_its_single_owning_comparison_is_ready() {
+    void requires_a_complete_ready_comparison_owner_for_snapshot_rows() {
         try (MongoDBContainer container = new MongoDBContainer(DockerImageName.parse("mongo:8.0.4"))) {
             container.start();
             MongoTemplate template = new MongoTemplate(MongoClients.create(container.getConnectionString()), "git_snapshot_comparison_owner");
             seedSnapshot(template, "orders");
             GitEvidenceReadService service = service(template, List.of("orders"));
+            String siblingSnapshotId = siblingSnapshotId("orders", "job-snapshot");
+            template.getCollection("git_evidence_manifests").deleteOne(new Document("evidenceId", siblingSnapshotId));
             template.getCollection("git_evidence_manifests").updateMany(new Document("kind", "COMPARISON"),
                     new Document("$set", new Document("state", "PREPARING")));
 
@@ -115,7 +117,26 @@ class GitEvidenceReadServiceIT {
             template.getCollection("git_evidence_manifests").updateMany(new Document("kind", "COMPARISON"),
                     new Document("$set", new Document("state", "READY")));
 
+            assertThatThrownBy(() -> service.listFiles(new SemanticQueryContract.GitFileListRequest("orders", SNAPSHOT_ID, REVISION, "", 0, 1)))
+                    .isInstanceOf(IndexContractMismatchException.class);
+            template.getCollection("git_evidence_manifests").updateMany(new Document("kind", "COMPARISON"),
+                    new Document("$set", new Document("state", "UNKNOWN")));
+            assertThatThrownBy(() -> service.listFiles(new SemanticQueryContract.GitFileListRequest("orders", SNAPSHOT_ID, REVISION, "", 0, 1)))
+                    .isInstanceOf(IndexContractMismatchException.class);
+            template.getCollection("git_evidence_manifests").updateMany(new Document("kind", "COMPARISON"),
+                    new Document("$set", new Document("state", "READY")));
+            template.getCollection("git_evidence_manifests").insertOne(new Document("repoId", "orders")
+                    .append("evidenceId", siblingSnapshotId).append("kind", "SNAPSHOT").append("state", "READY")
+                    .append("gitEvidenceVersion", 1).append("ownerJobId", "wrong-owner").append("revision", "2".repeat(40)));
+            assertThatThrownBy(() -> service.listFiles(new SemanticQueryContract.GitFileListRequest("orders", SNAPSHOT_ID, REVISION, "", 0, 1)))
+                    .isInstanceOf(IndexContractMismatchException.class);
+            template.getCollection("git_evidence_manifests").updateOne(new Document("evidenceId", siblingSnapshotId),
+                    new Document("$set", new Document("ownerJobId", "job-snapshot")));
             assertThat(service.listFiles(new SemanticQueryContract.GitFileListRequest("orders", SNAPSHOT_ID, REVISION, "", 0, 1)).items()).isNotEmpty();
+            template.getCollection("git_evidence_manifests").updateOne(new Document("kind", "COMPARISON"),
+                    new Document("$set", new Document("previousSnapshotId", "a".repeat(36))));
+            assertThatThrownBy(() -> service.listFiles(new SemanticQueryContract.GitFileListRequest("orders", SNAPSHOT_ID, REVISION, "", 0, 1)))
+                    .isInstanceOf(IndexContractMismatchException.class);
         }
     }
 
@@ -1096,10 +1117,18 @@ class GitEvidenceReadServiceIT {
     }
 
     private static void seedReadyComparisonOwner(MongoTemplate template, String repositoryId, String snapshotId, String revision, String ownerJobId) {
+        String siblingSnapshotId = siblingSnapshotId(repositoryId, ownerJobId);
+        template.getCollection("git_evidence_manifests").insertOne(new Document("repoId", repositoryId).append("evidenceId", siblingSnapshotId)
+                .append("kind", "SNAPSHOT").append("state", "READY").append("gitEvidenceVersion", 1).append("ownerJobId", ownerJobId)
+                .append("revision", "2".repeat(40)));
         template.getCollection("git_evidence_manifests").insertOne(new Document("repoId", repositoryId)
                 .append("evidenceId", java.util.UUID.randomUUID().toString()).append("kind", "COMPARISON").append("state", "READY")
                 .append("gitEvidenceVersion", 1).append("ownerJobId", ownerJobId).append("previous", "2".repeat(40)).append("current", revision)
-                .append("previousSnapshotId", "dddddddd-dddd-dddd-dddd-dddddddddddd").append("currentSnapshotId", snapshotId));
+                .append("previousSnapshotId", siblingSnapshotId).append("currentSnapshotId", snapshotId));
+    }
+
+    private static String siblingSnapshotId(String repositoryId, String ownerJobId) {
+        return java.util.UUID.nameUUIDFromBytes((repositoryId + ":" + ownerJobId).getBytes(StandardCharsets.UTF_8)).toString();
     }
 
     private static void seedLongLineSnapshot(MongoTemplate template, String repositoryId) {
