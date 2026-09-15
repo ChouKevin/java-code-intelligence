@@ -148,6 +148,24 @@ class GitEvidenceReadServiceIT {
     }
 
     @Test
+    void final003_does_not_replay_a_terminal_admitted_single_code_point_match_after_budget_exhaustion() {
+        try (MongoDBContainer container = new MongoDBContainer(DockerImageName.parse("mongo:8.0.4"))) {
+            container.start();
+            MongoTemplate template = new MongoTemplate(MongoClients.create(container.getConnectionString()), "final003_kmp_green");
+            seedBudgetDuplicateSnapshot(template, "orders");
+            GitEvidenceReadService service = service(template, List.of("orders"));
+            SemanticQueryContract.GitTextSearchResult first = service.searchText(new SemanticQueryContract.GitTextSearchRequest(
+                    "orders", SNAPSHOT_ID, REVISION, "a", Optional.empty(), Optional.empty(), 100));
+            SemanticQueryContract.GitTextSearchResult replay = service.searchText(new SemanticQueryContract.GitTextSearchRequest(
+                    "orders", SNAPSHOT_ID, REVISION, "a", Optional.empty(), first.nextCursor(), 100));
+
+            assertThat(first.items()).hasSize(1);
+            assertThat(first.scanComplete()).isFalse();
+            assertThat(replay.items()).isEmpty();
+        }
+    }
+
+    @Test
     void r1_rejects_revision_mismatch_empty_text_unknown_status_and_corrupt_checkpoint() {
         try (MongoDBContainer container = new MongoDBContainer(DockerImageName.parse("mongo:8.0.4"))) {
             container.start();
@@ -912,6 +930,33 @@ class GitEvidenceReadServiceIT {
         }
         template.getCollection("git_snapshot_chunks").insertMany(chunks);
         seedReadyComparisonOwner(template, repositoryId, SNAPSHOT_ID, REVISION, "job-budget");
+    }
+
+    private static void seedBudgetDuplicateSnapshot(MongoTemplate template, String repositoryId) {
+        seedSnapshot(template, repositoryId);
+        template.getCollection("git_snapshot_files").deleteMany(new Document("repoId", repositoryId).append("snapshotId", SNAPSHOT_ID));
+        template.getCollection("git_snapshot_chunks").deleteMany(new Document("repoId", repositoryId).append("snapshotId", SNAPSHOT_ID));
+        byte[] ordinary = "b".repeat(64 * 1024).getBytes(StandardCharsets.UTF_8);
+        byte[] terminal = java.util.Arrays.copyOf(ordinary, ordinary.length);
+        terminal[terminal.length - 1] = (byte) 'a';
+        for (int file = 0; file < 2; file++) {
+            String path = file == 0 ? "A.txt" : "B.txt";
+            template.getCollection("git_snapshot_files").insertOne(new Document("repoId", repositoryId).append("snapshotId", SNAPSHOT_ID)
+                    .append("ordinal", (long) file).append("path", path).append("rawPath", rawPath(path)).append("pathKey", pathKey(path)).append("mode", "100644")
+                    .append("blobId", Integer.toString(file + 1).repeat(40)).append("checksum", "b".repeat(64)).append("byteLength", 2L * 1024L * 1024L)
+                    .append("contentStatus", "TEXT").append("chunkCount", 32L));
+            List<Document> chunks = new java.util.ArrayList<>();
+            for (int ordinal = 0; ordinal < 32; ordinal++) {
+                byte[] bytes = file == 1 && ordinal == 30 ? terminal : ordinary;
+                chunks.add(new Document("repoId", repositoryId).append("snapshotId", SNAPSHOT_ID).append("pathKey", pathKey(path)).append("ordinal", (long) ordinal)
+                        .append("byteOffset", (long) ordinal * ordinary.length).append("line", 1L).append("column", (long) ordinal * ordinary.length + 1L)
+                        .append("bytes", bytes));
+            }
+            template.getCollection("git_snapshot_chunks").insertMany(chunks);
+        }
+        template.getCollection("git_evidence_manifests").updateOne(new Document("repoId", repositoryId).append("evidenceId", SNAPSHOT_ID), new Document("$set",
+                new Document("total", 2L).append("fileTextBytesLimit", 2L * 1024L * 1024L).append("snapshotTextBytesLimit", 4L * 1024L * 1024L)
+                        .append("contentCoverage.entryCount", 2L).append("contentCoverage.textEntries", 2L).append("contentCoverage.textBytes", 4L * 1024L * 1024L)));
     }
 
     private static void seedSnippetBudgetSnapshot(MongoTemplate template, String repositoryId) {
