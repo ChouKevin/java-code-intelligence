@@ -2,19 +2,21 @@
 
 ## Runtime boundary
 
-Run Indexer and Query separately. Indexer performs Git checkout and offline JDT LS analysis before it seals and publishes a MongoDB generation. Query starts without JDT LS, a checkout, or an Indexer process; it serves only persisted data from the current sealed generation.
+Run Indexer and Query separately. Indexer performs Git checkout and offline JDT LS analysis before it seals and publishes a MongoDB generation. Query starts without JDT LS, a checkout, or an Indexer process; it serves only persisted data from the current sealed generation. Query also reads separately prepared READY Git evidence from Mongo; it never opens a repository to do so.
 
 Send `X-Api-Token: $SEMANTIC_QUERY_API_TOKEN` on every Query HTTP request and on every MCP request to `/mcp`.
 
 ## Query surface
 
-MCP exposes exactly these twelve raw tool names:
+MCP exposes exactly nineteen raw tool names:
 
 - `list_repositories`, `get_repository`, `search_code`, `get_fact_source`
 - `list_entry_points`, `find_api_routes`, `find_event_listeners`, `list_type_members`
 - `find_method_implementations`, `find_references`, `find_callers`, `find_callees`
+- `list_git_branches`, `list_git_commits`, `compare_revisions`, `get_file_diff`
+- `list_files`, `read_file`, `search_text`
 
-The HTTP surface has the equivalent twelve routes:
+The HTTP surface has the equivalent nineteen routes:
 
 | Operation | HTTP route |
 | --- | --- |
@@ -30,6 +32,13 @@ The HTTP surface has the equivalent twelve routes:
 | `find_references` | `POST /api/v1/references` |
 | `find_callers` | `POST /api/v1/callers` |
 | `find_callees` | `POST /api/v1/callees` |
+| `list_git_branches` | `POST /api/v1/git/branches` |
+| `list_git_commits` | `POST /api/v1/git/commits` |
+| `compare_revisions` | `POST /api/v1/git/comparisons` |
+| `get_file_diff` | `POST /api/v1/git/file-diff` |
+| `list_files` | `POST /api/v1/git/files` |
+| `read_file` | `POST /api/v1/git/file` |
+| `search_text` | `POST /api/v1/git/search` |
 
 ## Revision recovery
 

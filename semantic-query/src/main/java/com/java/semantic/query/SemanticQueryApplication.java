@@ -13,6 +13,7 @@ import com.java.semantic.query.application.PublishedRelationQueryService;
 import com.java.semantic.query.application.SourceSliceService;
 import com.java.semantic.query.application.SemanticQueryFacade;
 import com.java.semantic.query.config.ConfiguredReadPolicy;
+import com.java.semantic.query.config.GitEvidenceProperties;
 import com.java.semantic.query.config.ReadPolicyProperties;
 import com.java.semantic.query.config.SemanticQueryProperties;
 import com.java.semantic.query.store.MongoIndexSchemaVerifier;
@@ -24,7 +25,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.data.mongodb.core.MongoTemplate;
 
 @SpringBootApplication(scanBasePackages = {"com.java.semantic.query", "com.java.semantic.api", "com.java.semantic.mcp"})
-@EnableConfigurationProperties({SemanticQueryProperties.class, ReadPolicyProperties.class})
+@EnableConfigurationProperties({SemanticQueryProperties.class, ReadPolicyProperties.class, GitEvidenceProperties.class})
 public class SemanticQueryApplication {
 
     public static void main(String[] args) {
@@ -32,8 +33,8 @@ public class SemanticQueryApplication {
     }
 
     @Bean
-    ConfiguredReadPolicy configuredReadPolicy(ReadPolicyProperties properties) {
-        return new ConfiguredReadPolicy(properties);
+    ConfiguredReadPolicy configuredReadPolicy(ReadPolicyProperties properties, GitEvidenceProperties gitEvidenceProperties) {
+        return new ConfiguredReadPolicy(properties, gitEvidenceProperties);
     }
 
     @Bean

@@ -11,15 +11,22 @@ import com.java.semantic.model.codefact.SourceTypeIdentity;
 import com.java.semantic.model.codefact.RelationIdentity;
 import com.java.semantic.model.codefact.EntryPointIdentity;
 
+import java.util.List;
 import java.util.Objects;
 
 /** Query-side authorization policy. Repository visibility is checked before any pointer read. */
 public final class ConfiguredReadPolicy {
 
     private final ReadPolicyProperties properties;
+    private final GitEvidenceProperties gitEvidenceProperties;
 
     public ConfiguredReadPolicy(ReadPolicyProperties properties) {
+        this(properties, new GitEvidenceProperties(List.of()));
+    }
+
+    public ConfiguredReadPolicy(ReadPolicyProperties properties, GitEvidenceProperties gitEvidenceProperties) {
         this.properties = Objects.requireNonNull(properties, "read policy properties are required");
+        this.gitEvidenceProperties = Objects.requireNonNull(gitEvidenceProperties, "git evidence properties are required");
     }
 
     public boolean isRepositoryVisible(RepositoryId repositoryId) {
@@ -33,7 +40,7 @@ public final class ConfiguredReadPolicy {
         boolean granularRestriction = properties.forbiddenPackages().stream().anyMatch(rule -> rule.repoId().equals(identity.value()))
                 || properties.forbiddenClasses().stream().anyMatch(rule -> rule.repoId().equals(identity.value()))
                 || properties.forbiddenMethods().stream().anyMatch(rule -> rule.repoId().equals(identity.value()));
-        if (!isRepositoryVisible(identity) || !properties.gitEvidenceAllowedRepositories().contains(identity.value()) || granularRestriction) {
+        if (!isRepositoryVisible(identity) || !gitEvidenceProperties.allowedRepositories().contains(identity.value()) || granularRestriction) {
             throw new com.java.semantic.query.application.RepositoryNotFoundException();
         }
     }

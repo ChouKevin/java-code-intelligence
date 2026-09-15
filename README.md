@@ -35,7 +35,7 @@ semantic:
 
 A build checks out only its stored commit, removes untracked and ignored checkout content, runs the exporter, validates the new generation, seals it, and changes the repository pointer with an expected-parent compare-and-set. Query reads only that pointer and its sealed generation. Every successful source response includes the published repository revision.
 
-Git review evidence is a separate, historical capability. An administrator can prepare an immutable remote-branch catalog and then a history for one catalog-pinned branch head through the same one-job dispatcher. These jobs never alter the semantic current pointer. Query remains Mongo-only and exposes only READY evidence to repositories listed in `semantic.query.read-policy.git-evidence-allowed-repositories`; the allowlist is empty by default.
+Git review evidence is a separate, historical capability. An administrator can prepare an immutable remote-branch catalog and then a history for one catalog-pinned branch head through the same one-job dispatcher. These jobs never alter the semantic current pointer. Query remains Mongo-only and exposes only READY evidence to repositories listed in `semantic.query.git-evidence.allowed-repositories`; the allowlist is empty by default.
 
 Job failures use stable categories: `WORKER_INTERRUPTED`, `SOURCE_UNAVAILABLE`, `SCHEMA_REBUILD_REQUIRED`, `PUBLICATION_CONFLICT`, and `VALIDATION_FAILED`. Retry means submitting a new job; the dispatcher does not retry automatically.
 
@@ -85,21 +85,23 @@ Configure every repository with a Git `url` and `defaultBranch`. Indexer admin e
 
 Query starts without an online JDT LS or an Indexer process. It reads only the sealed, currently published MongoDB generation. Authenticate every Query HTTP request and every `/mcp` request with `X-Api-Token: $SEMANTIC_QUERY_API_TOKEN`.
 
-The MCP endpoint is `/mcp` and publishes exactly these raw tool names:
+The MCP endpoint is `/mcp` and publishes exactly these nineteen raw tool names:
 
 - `list_repositories`, `get_repository`, `search_code`, `get_fact_source`
 - `list_entry_points`, `find_api_routes`, `find_event_listeners`, `list_type_members`
 - `find_method_implementations`, `find_references`, `find_callers`, `find_callees`
-- `list_git_branches`, `list_git_commits`
+- `list_git_branches`, `list_git_commits`, `compare_revisions`, `get_file_diff`
+- `list_files`, `read_file`, `search_text`
 
 The matching HTTP routes are:
 
 - `GET /api/v1/repositories` and `GET /api/v1/repositories/{repositoryId}`
 - `POST /api/v1/search-code`, `/api/v1/fact-source`, `/api/v1/entry-points`, `/api/v1/api-routes`
 - `POST /api/v1/event-listeners`, `/api/v1/type-members`, `/api/v1/method-implementations`, `/api/v1/references`, `/api/v1/callers`, `/api/v1/callees`
-- `POST /api/v1/git/branches` and `/api/v1/git/commits`
+- `POST /api/v1/git/branches`, `/api/v1/git/commits`, `/api/v1/git/comparisons`, and `/api/v1/git/file-diff`
+- `POST /api/v1/git/files`, `/api/v1/git/file`, and `/api/v1/git/search`
 
-Git branch responses pin their immutable `catalogId`; history responses require the returned `historyId` and exact revision. A pending evidence ID returns `GIT_EVIDENCE_NOT_READY`, while unavailable or cross-repository evidence is not disclosed.
+Git branch responses pin their immutable `catalogId`; history responses require the returned `historyId` and exact revision. Comparisons return their immutable comparison and snapshot IDs; files, reads, and searches use the matching snapshot ID and SHA. A pending evidence ID returns `GIT_EVIDENCE_NOT_READY`, while unavailable or cross-repository evidence is not disclosed. See [Git review context operations](docs/operations/git-review-context.md) for preparation, continuation, coverage, retention, and release order.
 
 All repository-scoped calls must copy the current `repositoryId` and `revision` from `list_repositories` or `get_repository`. Query never substitutes a revision. On `REVISION_OUTDATED`, read the returned `currentRevision`; retry a direct search with that revision, and rediscover revision-scoped fact IDs before retrying a fact-bound request.
 

@@ -66,7 +66,8 @@ class FixtureFullIndexJdtLsIT {
     private static final String QUERY_TOKEN = "fixture-query-token";
     private static final List<String> TOOL_NAMES = List.of(
             "list_repositories", "get_repository", "search_code", "get_fact_source", "list_entry_points", "find_api_routes",
-            "find_event_listeners", "list_type_members", "find_method_implementations", "find_references", "find_callers", "find_callees");
+            "find_event_listeners", "list_type_members", "find_method_implementations", "find_references", "find_callers", "find_callees",
+            "list_git_branches", "list_git_commits", "compare_revisions", "get_file_diff", "list_files", "read_file", "search_text");
 
     @TempDir
     Path temporaryDirectory;

@@ -244,7 +244,8 @@ public final class SemanticQueryContract {
         public GitComparisonCollection { items = List.copyOf(Objects.requireNonNull(items, "git comparison items are required")); }
     }
     public record GitFileDiffResult(String repositoryId, String comparisonId, String previous, String current,
-                                    GitChangeItem change, String patch, Optional<String> nextCursor) {
+                                    GitChangeItem change, String patch,
+                                    @JsonInclude(JsonInclude.Include.NON_ABSENT) Optional<String> nextCursor) {
         public GitFileDiffResult { nextCursor = Objects.requireNonNull(nextCursor, "next cursor is required"); }
     }
     public record GitSnapshotCoverage(long inventoryCount, long readableTextCount, long binaryCount, long unsupportedEncodingCount,
@@ -257,12 +258,13 @@ public final class SemanticQueryContract {
     }
     public record GitFileContent(String repositoryId, String snapshotId, String revision, String path, String pathKey,
                                  String contentStatus, String content, int startLine, int endLine, boolean startLineComplete,
-                                 boolean endLineComplete, Optional<String> nextCursor) {
+                                 boolean endLineComplete, @JsonInclude(JsonInclude.Include.NON_ABSENT) Optional<String> nextCursor) {
         public GitFileContent { nextCursor = Objects.requireNonNull(nextCursor, "next cursor is required"); }
     }
     public record GitTextMatch(String path, String pathKey, int line, int column, String snippet, boolean snippetTruncated) { }
     public record GitTextSearchResult(String repositoryId, String snapshotId, String revision, List<GitTextMatch> items,
-                                      boolean scanComplete, Optional<String> nextCursor, GitSnapshotCoverage coverage) {
+                                      boolean scanComplete, @JsonInclude(JsonInclude.Include.NON_ABSENT) Optional<String> nextCursor,
+                                      GitSnapshotCoverage coverage) {
         public GitTextSearchResult { items = List.copyOf(Objects.requireNonNull(items, "git text matches are required")); nextCursor = Objects.requireNonNull(nextCursor, "next cursor is required"); }
     }
 

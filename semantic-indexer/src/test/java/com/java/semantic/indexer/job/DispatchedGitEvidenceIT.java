@@ -21,6 +21,7 @@ import com.java.semantic.query.application.SourceSliceService;
 import com.java.semantic.api.QueryApiExceptionHandler;
 import com.java.semantic.api.SemanticQueryController;
 import com.java.semantic.query.config.ConfiguredReadPolicy;
+import com.java.semantic.query.config.GitEvidenceProperties;
 import com.java.semantic.query.config.ReadPolicyProperties;
 import com.java.semantic.repository.adapter.jgit.JGitRepositoryAdapter;
 import com.java.semantic.repository.application.RepositoryRuntimeRegistry;
@@ -171,8 +172,9 @@ class DispatchedGitEvidenceIT {
     }
 
     private static GitEvidenceReadService reader(MongoTemplate template) {
-        ReadPolicyProperties policy = new ReadPolicyProperties(List.of("orders"), List.of(), List.of(), List.of(), List.of());
-        return new GitEvidenceReadService(template, new ConfiguredReadPolicy(policy), Duration.ofSeconds(2));
+        ReadPolicyProperties policy = new ReadPolicyProperties(List.of(), List.of(), List.of(), List.of());
+        GitEvidenceProperties gitEvidence = new GitEvidenceProperties(List.of("orders"));
+        return new GitEvidenceReadService(template, new ConfiguredReadPolicy(policy, gitEvidence), Duration.ofSeconds(2));
     }
 
     private static MockMvc httpReader(GitEvidenceReadService reader) {

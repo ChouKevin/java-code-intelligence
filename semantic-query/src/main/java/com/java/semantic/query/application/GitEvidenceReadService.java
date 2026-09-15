@@ -594,8 +594,10 @@ public final class GitEvidenceReadService {
         }
         ReadPosition checkpoint = checkpoint(repositoryId, snapshotId, file, position.chunkOrdinal(), budget);
         ChunkData chunk = chunkData(repositoryId, snapshotId, file, position.chunkOrdinal(), checkpoint.byteOffset(), checkpoint.line(), checkpoint.column(), budget);
-        if (Objects.isNull(chunk) || position.byteOffset() < checkpoint.byteOffset()
-                || position.byteOffset() >= checkpoint.byteOffset() + chunk.bytes().length) {
+        if (Objects.isNull(chunk)) {
+            throw new SearchBudgetExhaustedException();
+        }
+        if (position.byteOffset() < checkpoint.byteOffset() || position.byteOffset() >= checkpoint.byteOffset() + chunk.bytes().length) {
             throw new IllegalArgumentException("search cursor is invalid");
         }
         int character = charIndexAtByteOffset(chunk.text(), Math.toIntExact(position.byteOffset() - checkpoint.byteOffset()));

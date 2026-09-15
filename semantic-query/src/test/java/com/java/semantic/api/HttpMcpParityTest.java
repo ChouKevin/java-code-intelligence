@@ -110,10 +110,15 @@ class HttpMcpParityTest {
                 new SemanticQueryContract.Page(0, 20, 1, 1, false), coverage);
         SemanticQueryContract.GitFileContent file = new SemanticQueryContract.GitFileContent(REPOSITORY_ID, snapshotId, REVISION,
                 "src/Evidence.java", "src/Evidence.java", "TEXT", "class Evidence { }\n", 1, 1, true, true, java.util.Optional.empty());
+        SemanticQueryContract.GitChangeItem change = new SemanticQueryContract.GitChangeItem("change-1", "MODIFY", "src/Evidence.java",
+                "src/Evidence.java", "100644", "100644", "c".repeat(40), "d".repeat(40), "TEXT");
+        SemanticQueryContract.GitFileDiffResult diff = new SemanticQueryContract.GitFileDiffResult(REPOSITORY_ID, "comparison-1",
+                "b".repeat(40), REVISION, change, "diff --git a/src/Evidence.java b/src/Evidence.java\n", java.util.Optional.empty());
         SemanticQueryContract.GitTextSearchResult search = new SemanticQueryContract.GitTextSearchResult(REPOSITORY_ID, snapshotId, REVISION,
                 List.of(new SemanticQueryContract.GitTextMatch("src/Evidence.java", "src/Evidence.java", 1, 7, "class Evidence { }", false)),
                 true, java.util.Optional.empty(), coverage);
         when(facade.listFiles(any())).thenReturn(files);
+        when(facade.getFileDiff(any())).thenReturn(diff);
         when(facade.readFile(any())).thenReturn(file);
         when(facade.searchText(any())).thenReturn(search);
 
@@ -127,6 +132,12 @@ class HttpMcpParityTest {
                 .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
         McpSchema.CallToolResult filesMcp = call(specifications, "list_files", Map.of("repositoryId", REPOSITORY_ID,
                 "snapshotId", snapshotId, "revision", REVISION, "directory", ""));
+        String diffHttp = http.perform(post("/api/v1/git/file-diff").header(QueryTokenFilter.TOKEN_HEADER, "query-token")
+                        .contentType("application/json").content("{\"repositoryId\":\"orders\",\"comparisonId\":\"comparison-1\",\"previous\":\""
+                                + "b".repeat(40) + "\",\"current\":\"" + REVISION + "\",\"changeId\":\"change-1\"}"))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        McpSchema.CallToolResult diffMcp = call(specifications, "get_file_diff", Map.of("repositoryId", REPOSITORY_ID,
+                "comparisonId", "comparison-1", "previous", "b".repeat(40), "current", REVISION, "changeId", "change-1"));
         String fileHttp = http.perform(post("/api/v1/git/file").header(QueryTokenFilter.TOKEN_HEADER, "query-token")
                         .contentType("application/json").content("{\"repositoryId\":\"orders\",\"snapshotId\":\"" + snapshotId
                                 + "\",\"revision\":\"" + REVISION + "\",\"path\":\"src/Evidence.java\"}"))
@@ -141,8 +152,12 @@ class HttpMcpParityTest {
                 "snapshotId", snapshotId, "revision", REVISION, "query", "Evidence"));
 
         assertThat(mapper.readTree(filesHttp)).isEqualTo(mapper.readTree(mapper.writeValueAsString(filesMcp.structuredContent())));
+        assertThat(mapper.readTree(diffHttp)).isEqualTo(mapper.readTree(mapper.writeValueAsString(diffMcp.structuredContent())));
         assertThat(mapper.readTree(fileHttp)).isEqualTo(mapper.readTree(mapper.writeValueAsString(fileMcp.structuredContent())));
         assertThat(mapper.readTree(searchHttp)).isEqualTo(mapper.readTree(mapper.writeValueAsString(searchMcp.structuredContent())));
+        assertThat(diffHttp).doesNotContain("nextCursor");
+        assertThat(fileHttp).doesNotContain("nextCursor");
+        assertThat(searchHttp).doesNotContain("nextCursor");
         ArgumentCaptor<SemanticQueryContract.GitFileListRequest> filesRequest = ArgumentCaptor.forClass(SemanticQueryContract.GitFileListRequest.class);
         verify(facade, times(2)).listFiles(filesRequest.capture());
         assertThat(filesRequest.getAllValues()).allSatisfy(request -> {

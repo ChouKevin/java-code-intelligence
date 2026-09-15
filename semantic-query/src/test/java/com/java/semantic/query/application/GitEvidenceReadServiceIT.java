@@ -1,6 +1,7 @@
 package com.java.semantic.query.application;
 
 import com.java.semantic.query.config.ConfiguredReadPolicy;
+import com.java.semantic.query.config.GitEvidenceProperties;
 import com.java.semantic.query.config.ReadPolicyProperties;
 import com.mongodb.ConnectionString;
 import com.mongodb.MongoClientSettings;
@@ -429,6 +430,30 @@ class GitEvidenceReadServiceIT {
     }
 
     @Test
+    void replays_the_final_match_cursor_across_an_equivalent_four_mebibyte_multi_file_boundary() {
+        try (MongoDBContainer container = new MongoDBContainer(DockerImageName.parse("mongo:8.0.4"))) {
+            container.start();
+            MongoTemplate template = new MongoTemplate(MongoClients.create(container.getConnectionString()), "git_snapshot_search_replay");
+            seedReplaySearchSnapshot(template, "orders");
+            GitEvidenceReadService service = service(template, List.of("orders"));
+            SemanticQueryContract.GitTextSearchRequest request = new SemanticQueryContract.GitTextSearchRequest(
+                    "orders", SNAPSHOT_ID, REVISION, "stable-token", Optional.empty(), Optional.empty(), 1);
+
+            SemanticQueryContract.GitTextSearchResult result = service.searchText(request);
+            List<SemanticQueryContract.GitTextMatch> matches = new java.util.ArrayList<>();
+            while (result.nextCursor().isPresent()) {
+                matches.addAll(result.items());
+                result = service.searchText(new SemanticQueryContract.GitTextSearchRequest("orders", SNAPSHOT_ID, REVISION,
+                        "stable-token", Optional.empty(), result.nextCursor(), 1));
+            }
+
+            matches.addAll(result.items());
+            assertThat(matches).hasSize(30);
+            assertThat(result.scanComplete()).isTrue();
+        }
+    }
+
+    @Test
     void canonicalizes_a_non_eof_chunk_boundary_for_the_next_search_page() {
         try (MongoDBContainer container = new MongoDBContainer(DockerImageName.parse("mongo:8.0.4"))) {
             container.start();
@@ -520,12 +545,12 @@ class GitEvidenceReadServiceIT {
             GitEvidenceReadService allowed = service(template, List.of("orders"));
             assertThat(allowed.branches(request).items()).hasSize(2);
 
-            assertDenied(service(template, new ReadPolicyProperties(List.of("orders"), List.of("orders"), List.of(), List.of(), List.of())), request);
-            assertDenied(service(template, new ReadPolicyProperties(List.of("orders"), List.of(),
+            assertDenied(service(template, new ReadPolicyProperties(List.of("orders"), List.of(), List.of(), List.of())), request);
+            assertDenied(service(template, new ReadPolicyProperties(List.of(),
                     List.of(new ReadPolicyProperties.PackageRule("orders", "example.private")), List.of(), List.of())), request);
-            assertDenied(service(template, new ReadPolicyProperties(List.of("orders"), List.of(), List.of(),
+            assertDenied(service(template, new ReadPolicyProperties(List.of(), List.of(),
                     List.of(new ReadPolicyProperties.ClassRule("orders", "example.private", "PrivateType")), List.of())), request);
-            assertDenied(service(template, new ReadPolicyProperties(List.of("orders"), List.of(), List.of(), List.of(),
+            assertDenied(service(template, new ReadPolicyProperties(List.of(), List.of(), List.of(),
                     List.of(new ReadPolicyProperties.MethodRule("orders", "example.private", "PrivateType", "read", List.of())))), request);
             assertDenied(service(template, List.of()), request);
         }
@@ -773,12 +798,12 @@ class GitEvidenceReadServiceIT {
     }
 
     private static GitEvidenceReadService service(MongoTemplate template, List<String> allowedRepositories) {
-        ReadPolicyProperties properties = new ReadPolicyProperties(allowedRepositories, List.of(), List.of(), List.of(), List.of());
-        return service(template, properties);
+        return new GitEvidenceReadService(template, new ConfiguredReadPolicy(new ReadPolicyProperties(List.of(), List.of(), List.of(), List.of()),
+                new GitEvidenceProperties(allowedRepositories)), Duration.ofSeconds(2));
     }
 
     private static GitEvidenceReadService service(MongoTemplate template, ReadPolicyProperties properties) {
-        return new GitEvidenceReadService(template, new ConfiguredReadPolicy(properties), Duration.ofSeconds(2));
+        return new GitEvidenceReadService(template, new ConfiguredReadPolicy(properties, new GitEvidenceProperties(List.of("orders"))), Duration.ofSeconds(2));
     }
 
     private static void assertDenied(GitEvidenceReadService service, SemanticQueryContract.GitBranchRequest request) {
@@ -930,6 +955,38 @@ class GitEvidenceReadServiceIT {
                         .append("byteOffset", 0L).append("line", 1L).append("column", 1L).append("bytes", first),
                 new Document("repoId", repositoryId).append("snapshotId", SNAPSHOT_ID).append("pathKey", pathKey(path)).append("ordinal", 1L)
                         .append("byteOffset", (long) first.length).append("line", 2L).append("column", 5L).append("bytes", second)));
+    }
+
+    private static void seedReplaySearchSnapshot(MongoTemplate template, String repositoryId) {
+        String path = "src/Service.java";
+        StringBuilder content = new StringBuilder("class Service {\n  static int version() { return 2; }\n");
+        for (int index = 0; index < 30; index++) {
+            content.append("  // stable-token current ").append(index).append("\n");
+        }
+        content.append("}\n");
+        byte[] bytes = content.toString().getBytes(StandardCharsets.UTF_8);
+        byte[] noHit = ("// no matching text ".repeat(3_276)).getBytes(StandardCharsets.UTF_8);
+        long noHitFileCount = 72L;
+        long total = 7L + noHitFileCount;
+        long textBytes = bytes.length + noHitFileCount * noHit.length;
+        template.getCollection("git_evidence_manifests").insertOne(new Document("repoId", repositoryId).append("evidenceId", SNAPSHOT_ID)
+                .append("kind", "SNAPSHOT").append("state", "READY").append("gitEvidenceVersion", 1).append("revision", REVISION)
+                .append("total", total).append("contentDigest", "a".repeat(64)).append("fileTextBytesLimit", 1_048_576L)
+                .append("snapshotTextBytesLimit", textBytes).append("contentCoverage", new Document("entryCount", total).append("textEntries", total)
+                        .append("textBytes", textBytes)));
+        for (int ordinal = 0; ordinal < 6; ordinal++) {
+            insertSnapshotFile(template, repositoryId, ordinal, rawPath("src/empty" + ordinal + ".txt"), "TEXT");
+        }
+        template.getCollection("git_snapshot_files").insertOne(new Document("repoId", repositoryId).append("snapshotId", SNAPSHOT_ID)
+                .append("ordinal", 6L).append("path", path).append("rawPath", rawPath(path)).append("pathKey", pathKey(path)).append("mode", "100644")
+                .append("blobId", "1".repeat(40)).append("checksum", "b".repeat(64)).append("byteLength", (long) bytes.length)
+                .append("contentStatus", "TEXT").append("chunkCount", 1L));
+        template.getCollection("git_snapshot_chunks").insertOne(new Document("repoId", repositoryId).append("snapshotId", SNAPSHOT_ID)
+                .append("pathKey", pathKey(path)).append("ordinal", 0L).append("byteOffset", 0L).append("line", 1L).append("column", 1L)
+                .append("bytes", bytes));
+        for (int index = 0; index < noHitFileCount; index++) {
+            insertTextSnapshotFile(template, repositoryId, 7L + index, "src/nohit/NoHit" + index + ".java", noHit);
+        }
     }
 
     private static void seedLongLineSnapshot(MongoTemplate template, String repositoryId) {
