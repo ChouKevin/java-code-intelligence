@@ -82,12 +82,15 @@ complete only when `scanComplete` is true and it has no continuation. List and
 search pages default to 20 and allow at most 100 items; reads default to 200 and
 allow at most 500 lines. `coverage` reports inventory entries that cannot provide
 searchable text, including binary, unsupported encoding, oversized, symlink,
-submodule, LFS pointer, and unsupported path entries. A text file over 2 MiB is
-retained as `TOO_LARGE` coverage rather than readable text; a snapshot exceeding
-256 MiB total text fails preparation and never publishes READY. Read and patch
-payloads are capped at 64 KiB; search scans at most 4 MiB per call and returns an
-incomplete cursor when that budget is exhausted. Query never uses Git, a checkout,
-Indexer, JDT, or JDT LS to fill an incomplete result.
+submodule, LFS pointer, and unsupported path entries. The configurable preparation
+defaults are 2 MiB text per file and 256 MiB total text per snapshot. A file over
+its effective per-file limit is retained as `TOO_LARGE` coverage rather than
+readable text; a snapshot exceeding its effective total limit fails preparation and
+never publishes READY. Each READY manifest records its effective limits and
+coverage, so later configuration changes do not reinterpret sealed evidence. Read
+and patch payloads are capped at 64 KiB; search scans at most 4 MiB per call and
+returns an incomplete cursor when that budget is exhausted. Query never uses Git, a
+checkout, Indexer, JDT, or JDT LS to fill an incomplete result.
 
 For example, carry the `repositoryId`, `currentSnapshotId`, and `current` SHA
 returned by the comparison job unchanged into a current-source read or search:
