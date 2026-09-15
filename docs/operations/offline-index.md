@@ -28,7 +28,7 @@ Startup recovery runs before normal polling. It marks a leftover `RUNNING` job `
 
 Normal shutdown stops new polls and interrupts dispatcher work. If interruption occurs before publication, startup closes the job as interrupted. If publication completed before the process stopped, startup reconciles the stored publication intent to `COMPLETE`.
 
-Git evidence uses the same recovery lane. A `GIT_REFS` or `GIT_HISTORY` job is reconciled to COMPLETE only when its repository-scoped immutable manifest is already READY; otherwise startup records `FAILED/WORKER_INTERRUPTED`. Query reads no PREPARING or FAILED rows, and evidence preparation never changes a semantic repository pointer.
+Git evidence uses the same recovery lane. A `GIT_REFS`, `GIT_HISTORY`, or `GIT_COMPARISON` job is reconciled to COMPLETE only when its repository-scoped immutable catalog, history, or comparison manifest is already READY; otherwise startup records `FAILED/WORKER_INTERRUPTED`. A READY comparison retains immutable previous/current snapshots for historical file, diff, and search reads. Query reads no PREPARING or FAILED rows, and evidence preparation never changes a semantic repository pointer.
 
 ## Schema version 2
 
@@ -36,16 +36,17 @@ Schema bootstrap is a separate maintenance action. Indexer does not create or re
 
 For a projection change:
 
-1. Deploy and verify the schema bootstrap with the maintenance identity.
-2. Deploy Indexer.
-3. Rebuild each affected repository and verify its sealed manifest.
-4. Deploy Query only after all required current generations use the new projection.
+1. Stop the old Indexer and settle active jobs through their normal terminal recovery before maintenance.
+2. Deploy and verify the schema bootstrap with the maintenance identity.
+3. Deploy Indexer.
+4. Rebuild each affected repository and verify its sealed manifest.
+5. Deploy Query only after all required current generations use the new projection.
 
 Back up pointer, job, manifest, and generation collections together. There is no automatic generation garbage collection; deletion needs a separate approved retention procedure.
 
 ## Query operation
 
-Query reads MongoDB only. It must continue serving the repository catalog, search, source, type/member, route, reference, implementation, caller, and callee tool families while Indexer is stopped. It never starts JDT LS or repairs missing data online. A stale requested revision returns `REVISION_OUTDATED` with the current revision so the caller can retry with that revision.
+Query reads MongoDB only. It must continue serving the repository catalog, search, source, type/member, route, reference, implementation, caller, and callee tool families while Indexer is stopped. It never starts JDT LS or repairs missing data online. A stale requested semantic revision returns `REVISION_OUTDATED` with the current revision so the caller can retry with that revision. Historical Git evidence reads keep their returned immutable evidence ID and exact SHA; they do not use semantic revision recovery.
 
 ## UAT-only controls
 

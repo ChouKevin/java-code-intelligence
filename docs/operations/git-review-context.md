@@ -13,9 +13,10 @@ denied for every Git-evidence operation.
 
 ## Prepare immutable evidence
 
-First apply the additive schema bootstrap with the schema-maintenance identity.
-Then deploy the new Indexer, prepare and verify evidence, and only then deploy the
-new Query release. See [tool-data-evolution.md](tool-data-evolution.md) for the
+First stop the old Indexer and settle every active job through its normal terminal
+recovery. Then apply the additive schema bootstrap with the schema-maintenance
+identity, deploy the new Indexer, prepare and verify evidence, and only then deploy
+the new Query release. See [tool-data-evolution.md](tool-data-evolution.md) for the
 maintenance/bootstrap and rebuild order. A changed persisted meaning requires an
 explicit cutover and rebuild; this version does not use compatibility decoders.
 
@@ -77,12 +78,16 @@ and exact SHA. The seven matching HTTP routes and MCP tools are:
 | `POST /api/v1/git/search` | `search_text` |
 
 Continue whenever a response supplies `nextCursor`; a `search_text` result is
-complete only when `scanComplete` is true and it has no continuation. `coverage`
-reports inventory entries that cannot provide searchable text, including binary,
-unsupported encoding, oversized, symlink, submodule, LFS pointer, and unsupported
-path entries. Read and patch payloads are capped at 64 KiB; search scans at most
-4 MiB per call. Query never uses Git, a checkout, Indexer, JDT, or JDT LS to fill
-an incomplete result.
+complete only when `scanComplete` is true and it has no continuation. List and
+search pages default to 20 and allow at most 100 items; reads default to 200 and
+allow at most 500 lines. `coverage` reports inventory entries that cannot provide
+searchable text, including binary, unsupported encoding, oversized, symlink,
+submodule, LFS pointer, and unsupported path entries. A text file over 2 MiB is
+retained as `TOO_LARGE` coverage rather than readable text; a snapshot exceeding
+256 MiB total text fails preparation and never publishes READY. Read and patch
+payloads are capped at 64 KiB; search scans at most 4 MiB per call and returns an
+incomplete cursor when that budget is exhausted. Query never uses Git, a checkout,
+Indexer, JDT, or JDT LS to fill an incomplete result.
 
 For example, carry the `repositoryId`, `currentSnapshotId`, and `current` SHA
 returned by the comparison job unchanged into a current-source read or search:
@@ -102,8 +107,9 @@ request fields; never derive an offset from it.
 
 The repository-owned synthetic external-client journey has no JDT requirement and
 is deliberately opt-in because it starts temporary MongoDB and local application
-processes. It first packages fresh executable jars, then performs admin HTTP,
-dispatcher/READY publication, Query HTTP, and MCP SDK calls:
+processes. It requires Java 21, Maven 3.9+, and a reachable Docker daemon for its
+temporary MongoDB container. It first packages fresh executable jars, then performs
+admin HTTP, dispatcher/READY publication, Query HTTP, and MCP SDK calls:
 
 ```bash
 MAVEN_CMD=/path/to/apache-maven-3.9.6/bin/mvn bash scripts/test-git-review-context-journey.sh

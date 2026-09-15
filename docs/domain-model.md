@@ -6,11 +6,11 @@
 
 ## Job lifecycle
 
-An `IndexJob` has one operation (`BUILD`, `ROLLBACK`, `RESET`, `GIT_REFS`, `GIT_HISTORY`, or terminal `NO_WORK`) and one phase (`ACCEPTED`, `RUNNING`, `COMPLETE`, or `FAILED`). Build and rollback jobs carry an exact target; reset and Git evidence jobs do not invent one. One dispatcher starts the oldest accepted job and the executor owns its terminal transition.
+An `IndexJob` has one operation (`BUILD`, `ROLLBACK`, `RESET`, `GIT_REFS`, `GIT_HISTORY`, `GIT_COMPARISON`, or terminal `NO_WORK`) and one phase (`ACCEPTED`, `RUNNING`, `COMPLETE`, or `FAILED`). Build and rollback jobs carry an exact target; reset and Git evidence jobs do not invent one. One dispatcher starts the oldest accepted job and the executor owns its terminal transition.
 
 Jobs store only the data needed by this single-process lane and have no automatic retry state. Failures use stable categories so an operator can correct the cause and submit a new job. Startup only reconciles an already-published target or closes unfinished running work as interrupted.
 
-`GIT_REFS` records an immutable catalog of fetched remote branch heads. `GIT_HISTORY` requires a catalog ID, branch, and exact catalog-pinned head, then streams its reachable DAG in stable topological/time order with all parent SHAs. Its manifest becomes READY only after all rows are written. Git evidence is historical and independent of semantic generation publication; it neither changes a current pointer nor permits Query-side Git access.
+`GIT_REFS` records an immutable catalog of fetched remote branch heads. `GIT_HISTORY` requires a catalog ID, branch, and exact catalog-pinned head, then streams its reachable DAG in stable topological/time order with all parent SHAs. `GIT_COMPARISON` records the exact previous/current SHA pair and immutable previous/current snapshots. Each Git manifest becomes READY only after all of its rows are written. On startup, a completed Git manifest already READY reconciles its job to `COMPLETE`; an incomplete one becomes `FAILED/WORKER_INTERRUPTED`. Git evidence is historical and independent of semantic generation publication; it neither changes a current pointer nor permits Query-side Git access.
 
 ## Generation lifecycle
 

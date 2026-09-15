@@ -79,7 +79,7 @@ export SEMANTIC_MONGODB_URI='mongodb://query-reader:...@mongo/semantic?tls=true'
 export SEMANTIC_QUERY_API_TOKEN='<query-read-token>'
 ```
 
-Configure every repository with a Git `url` and `defaultBranch`. Indexer admin endpoints under `/index/repositories/{repoId}` accept asynchronous `ensure`, `sync`, `checkout`, `rebuild`, and `rollback` commands. Query requests carry a `repositoryId` and exact `revision`; a request for a previous revision returns `REVISION_OUTDATED` with the current revision.
+Configure every repository with a Git `url` and `defaultBranch`. Indexer admin endpoints under `/index/repositories/{repoId}` accept asynchronous `ensure`, `sync`, `checkout`, `rebuild`, and `rollback` commands. The twelve semantic Query tools carry a `repositoryId` and the current semantic `revision`; a request for a previous semantic revision returns `REVISION_OUTDATED` with the current revision.
 
 ## Query contract
 
@@ -103,7 +103,7 @@ The matching HTTP routes are:
 
 Git branch responses pin their immutable `catalogId`; history responses require the returned `historyId` and exact revision. Comparisons return their immutable comparison and snapshot IDs; files, reads, and searches use the matching snapshot ID and SHA. A pending evidence ID returns `GIT_EVIDENCE_NOT_READY`, while unavailable or cross-repository evidence is not disclosed. See [Git review context operations](docs/operations/git-review-context.md) for preparation, continuation, coverage, retention, and release order.
 
-All repository-scoped calls must copy the current `repositoryId` and `revision` from `list_repositories` or `get_repository`. Query never substitutes a revision. On `REVISION_OUTDATED`, read the returned `currentRevision`; retry a direct search with that revision, and rediscover revision-scoped fact IDs before retrying a fact-bound request.
+For the twelve semantic tools, copy the current `repositoryId` and `revision` from `list_repositories` or `get_repository`. Query never substitutes a semantic revision. On `REVISION_OUTDATED`, read the returned `currentRevision`; retry a direct semantic search with that revision, and rediscover revision-scoped fact IDs before retrying a fact-bound request. Git review routes instead use the returned immutable catalog, history, comparison, and snapshot IDs with their historical SHA; do not replace that SHA with the current semantic revision.
 
 ## Schema and UAT controls
 
