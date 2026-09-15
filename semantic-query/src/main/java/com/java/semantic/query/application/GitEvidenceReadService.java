@@ -918,7 +918,13 @@ public final class GitEvidenceReadService {
 
     private static String digest(String value) {
         try {
-            return java.util.HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.UTF_8)));
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            for (int index = 0; index < value.length(); index++) {
+                char codeUnit = value.charAt(index);
+                digest.update((byte) (codeUnit >>> 8));
+                digest.update((byte) codeUnit);
+            }
+            return java.util.HexFormat.of().formatHex(digest.digest());
         } catch (NoSuchAlgorithmException exception) {
             throw new IllegalStateException("SHA-256 is unavailable", exception);
         }

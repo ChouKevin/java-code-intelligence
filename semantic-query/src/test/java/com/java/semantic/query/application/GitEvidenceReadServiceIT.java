@@ -3,10 +3,12 @@ package com.java.semantic.query.application;
 import com.java.semantic.query.config.ConfiguredReadPolicy;
 import com.java.semantic.query.config.GitEvidenceProperties;
 import com.java.semantic.query.config.ReadPolicyProperties;
+import com.java.semantic.model.index.IndexSchemaContract;
 import com.mongodb.ConnectionString;
 import com.mongodb.MongoClientSettings;
 import com.mongodb.client.MongoClient;
 import com.mongodb.client.MongoClients;
+import com.mongodb.client.model.IndexOptions;
 import com.mongodb.event.CommandListener;
 import com.mongodb.event.CommandStartedEvent;
 import org.bson.Document;
@@ -89,6 +91,53 @@ class GitEvidenceReadServiceIT {
             template.getCollection("git_snapshot_chunks").deleteOne(new Document("snapshotId", SNAPSHOT_ID).append("ordinal", 1L));
             assertThatThrownBy(() -> service.readFile(new SemanticQueryContract.GitFileReadRequest("orders", SNAPSHOT_ID, REVISION,
                     "src/demo.txt", Optional.empty(), 1, first.nextCursor()))).isInstanceOf(IndexContractMismatchException.class);
+        }
+    }
+
+    @Test
+    void r2_rejects_a_search_cursor_replayed_with_a_distinct_lone_high_surrogate_query() {
+        try (MongoDBContainer container = new MongoDBContainer(DockerImageName.parse("mongo:8.0.4"))) {
+            container.start();
+            MongoTemplate template = new MongoTemplate(MongoClients.create(container.getConnectionString()), "git_snapshot_r2_surrogate_cursor");
+            seedSnapshot(template, "orders");
+            byte[] questionMarks = "??".getBytes(StandardCharsets.UTF_8);
+            insertTextSnapshotFile(template, "orders", 1L, "src/question.txt", questionMarks);
+            template.getCollection("git_evidence_manifests").updateOne(new Document("repoId", "orders").append("evidenceId", SNAPSHOT_ID), new Document("$set",
+                    new Document("total", 2L).append("contentCoverage.entryCount", 2L).append("contentCoverage.textEntries", 2L)
+                            .append("contentCoverage.textBytes", 27L + questionMarks.length)));
+            GitEvidenceReadService service = service(template, List.of("orders"));
+
+            SemanticQueryContract.GitTextSearchResult first = service.searchText(new SemanticQueryContract.GitTextSearchRequest(
+                    "orders", SNAPSHOT_ID, REVISION, "?", Optional.empty(), Optional.empty(), 1));
+
+            assertThat(first.nextCursor()).isPresent();
+            assertThatThrownBy(() -> service.searchText(new SemanticQueryContract.GitTextSearchRequest(
+                    "orders", SNAPSHOT_ID, REVISION, "\uD800", Optional.empty(), first.nextCursor(), 1)))
+                    .isInstanceOf(IllegalArgumentException.class);
+        }
+    }
+
+    @Test
+    void r2_owner_comparison_lookup_uses_the_unhinted_owner_job_index() {
+        try (MongoDBContainer container = new MongoDBContainer(DockerImageName.parse("mongo:8.0.4"))) {
+            container.start();
+            MongoTemplate template = new MongoTemplate(MongoClients.create(container.getConnectionString()), "git_snapshot_r2_owner_lookup");
+            createManifestOwnerLookupIndex(template);
+            seedSnapshot(template, "orders");
+            seedUnrelatedComparisonOwners(template, "orders", 256);
+            GitEvidenceReadService service = service(template, List.of("orders"));
+
+            assertThat(service.listFiles(new SemanticQueryContract.GitFileListRequest("orders", SNAPSHOT_ID, REVISION, "", 0, 1)).items()).isNotEmpty();
+            Document find = ownerComparisonFind("orders", "job-snapshot");
+            Document explain = template.getDb().runCommand(new Document("explain", find).append("verbosity", "executionStats"));
+            Document statistics = explain.get("executionStats", Document.class);
+
+            assertThat(find.containsKey("hint")).isFalse();
+            assertThat(number(statistics, "nReturned")).isEqualTo(1L);
+            assertThat(number(statistics, "totalKeysExamined")).isEqualTo(1L);
+            assertThat(number(statistics, "totalDocsExamined")).isEqualTo(1L);
+            assertThat(containsDocumentValue(statistics.get("executionStages"), "stage", "IXSCAN")).isTrue();
+            assertThat(containsDocumentValue(statistics.get("executionStages"), "indexName", "git_evidence_manifest_owner_lookup")).isTrue();
         }
     }
 
@@ -1131,6 +1180,58 @@ class GitEvidenceReadServiceIT {
         return java.util.UUID.nameUUIDFromBytes((repositoryId + ":" + ownerJobId).getBytes(StandardCharsets.UTF_8)).toString();
     }
 
+    private static void createManifestOwnerLookupIndex(MongoTemplate template) {
+        IndexSchemaContract.CollectionSpec manifests = IndexSchemaContract.collections().stream()
+                .filter(collection -> collection.name().equals("git_evidence_manifests")).findFirst().orElseThrow();
+        IndexSchemaContract.IndexSpec ownerLookup = manifests.indexes().stream()
+                .filter(index -> index.name().equals("git_evidence_manifest_owner_lookup")).findFirst().orElseThrow();
+        template.getCollection(manifests.name()).createIndex(new Document(ownerLookup.keys()), new IndexOptions().name(ownerLookup.name()).unique(ownerLookup.unique()));
+    }
+
+    private static void seedUnrelatedComparisonOwners(MongoTemplate template, String repositoryId, int count) {
+        for (int index = 0; index < count; index++) {
+            template.getCollection("git_evidence_manifests").insertOne(new Document("repoId", repositoryId)
+                    .append("evidenceId", java.util.UUID.nameUUIDFromBytes(("unrelated-" + index).getBytes(StandardCharsets.UTF_8)).toString())
+                    .append("kind", "COMPARISON").append("state", "READY").append("gitEvidenceVersion", 1)
+                    .append("ownerJobId", "unrelated-job-" + index).append("previous", "3".repeat(40)).append("current", "4".repeat(40))
+                    .append("previousSnapshotId", java.util.UUID.nameUUIDFromBytes(("previous-" + index).getBytes(StandardCharsets.UTF_8)).toString())
+                    .append("currentSnapshotId", java.util.UUID.nameUUIDFromBytes(("current-" + index).getBytes(StandardCharsets.UTF_8)).toString()));
+        }
+    }
+
+    private static Document ownerComparisonFind(String repositoryId, String ownerJobId) {
+        Document previousEndpoint = new Document("previousSnapshotId", SNAPSHOT_ID).append("previous", REVISION);
+        Document currentEndpoint = new Document("currentSnapshotId", SNAPSHOT_ID).append("current", REVISION);
+        Document filter = new Document("$and", List.of(new Document("repoId", repositoryId), new Document("kind", "COMPARISON"),
+                new Document("ownerJobId", ownerJobId), new Document("$or", List.of(previousEndpoint, currentEndpoint))));
+        return new Document("find", "git_evidence_manifests").append("filter", filter).append("limit", 2L).append("maxTimeMS", 2_000L);
+    }
+
+    private static long number(Document document, String field) {
+        return document.get(field, Number.class).longValue();
+    }
+
+    private static boolean containsDocumentValue(Object value, String field, String expected) {
+        if (value instanceof Document document) {
+            if (expected.equals(document.getString(field))) {
+                return true;
+            }
+            for (Object nested : document.values()) {
+                if (containsDocumentValue(nested, field, expected)) {
+                    return true;
+                }
+            }
+        }
+        if (value instanceof List<?> values) {
+            for (Object nested : values) {
+                if (containsDocumentValue(nested, field, expected)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
     private static void seedLongLineSnapshot(MongoTemplate template, String repositoryId) {
         String path = "src/long-line.txt";
         String content = "😀".repeat(20_000);
@@ -1185,7 +1286,13 @@ class GitEvidenceReadServiceIT {
 
     private static String digest(String value) {
         try {
-            return java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.UTF_8)));
+            java.security.MessageDigest digest = java.security.MessageDigest.getInstance("SHA-256");
+            for (int index = 0; index < value.length(); index++) {
+                char codeUnit = value.charAt(index);
+                digest.update((byte) (codeUnit >>> 8));
+                digest.update((byte) codeUnit);
+            }
+            return java.util.HexFormat.of().formatHex(digest.digest());
         } catch (java.security.NoSuchAlgorithmException exception) {
             throw new IllegalStateException(exception);
         }

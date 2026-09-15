@@ -60,6 +60,15 @@ class MongoIndexSchemaVerifierIT {
                 .isInstanceOf(IndexNotReadyException.class);
     }
 
+    @Test
+    void rejects_a_missing_git_evidence_manifest_owner_lookup_index() {
+        createExpectedSchema();
+        template.getCollection("git_evidence_manifests").dropIndex("git_evidence_manifest_owner_lookup");
+
+        assertThatThrownBy(() -> new MongoIndexSchemaVerifier(template, Duration.ofSeconds(2)).verify())
+                .isInstanceOf(IndexNotReadyException.class);
+    }
+
     private void createExpectedSchema() {
         for (IndexSchemaContract.CollectionSpec collection : IndexSchemaContract.collections()) {
             template.createCollection(collection.name());

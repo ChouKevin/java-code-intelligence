@@ -47,6 +47,23 @@ class IndexSchemaBootstrapIT {
     }
 
     @Test
+    void creates_the_nonunique_git_evidence_manifest_owner_lookup_idempotently() {
+        try (MongoDBContainer container = MongoSchemaTestSupport.container()) {
+            org.springframework.data.mongodb.core.MongoTemplate template = MongoSchemaTestSupport.template(container);
+            IndexSchemaBootstrap bootstrap = new IndexSchemaBootstrap(template);
+
+            bootstrap.bootstrap();
+            bootstrap.bootstrap();
+
+            assertThat(template.getCollection("git_evidence_manifests").listIndexes().into(new ArrayList<>())).anySatisfy(index -> {
+                assertThat(index.getString("name")).isEqualTo("git_evidence_manifest_owner_lookup");
+                assertThat(index.get("key", Document.class)).containsExactlyEntriesOf(new Document("repoId", 1).append("kind", 1).append("ownerJobId", 1));
+                assertThat(index.getBoolean("unique", false)).isFalse();
+            });
+        }
+    }
+
+    @Test
     void refuses_a_conflicting_named_index() {
         try (MongoDBContainer container = MongoSchemaTestSupport.container()) {
             org.springframework.data.mongodb.core.MongoTemplate template = MongoSchemaTestSupport.template(container);
