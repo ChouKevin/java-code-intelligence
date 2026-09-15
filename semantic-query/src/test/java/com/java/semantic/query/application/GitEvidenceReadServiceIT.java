@@ -109,6 +109,10 @@ class GitEvidenceReadServiceIT {
             assertThatThrownBy(() -> service.searchText(new SemanticQueryContract.GitTextSearchRequest("orders", SNAPSHOT_ID, REVISION,
                     "needle", Optional.empty(), Optional.empty(), 1))).isInstanceOf(GitEvidenceNotReadyException.class);
             template.getCollection("git_evidence_manifests").updateMany(new Document("kind", "COMPARISON"),
+                    new Document("$set", new Document("state", "FAILED")));
+            assertThatThrownBy(() -> service.listFiles(new SemanticQueryContract.GitFileListRequest("orders", SNAPSHOT_ID, REVISION, "", 0, 1)))
+                    .isInstanceOf(GitEvidenceNotReadyException.class);
+            template.getCollection("git_evidence_manifests").updateMany(new Document("kind", "COMPARISON"),
                     new Document("$set", new Document("state", "READY")));
 
             assertThat(service.listFiles(new SemanticQueryContract.GitFileListRequest("orders", SNAPSHOT_ID, REVISION, "", 0, 1)).items()).isNotEmpty();
