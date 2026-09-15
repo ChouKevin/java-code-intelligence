@@ -42,6 +42,6 @@ The HTTP surface has the equivalent nineteen routes:
 
 ## Revision recovery
 
-`list_repositories` returns each visible repository with its current revision. `get_repository` returns the current revision for one known repository. Copy those exact values into the twelve semantic repository-scoped requests.
+`list_repositories` accepts pagination only and returns each visible repository's current identity and revision. `get_repository` accepts only `repositoryId` and returns the current identity and revision for that repository. Copy those returned values into the other ten semantic repository-scoped requests.
 
-Query does not silently read an older or newer semantic revision. A semantic request with a stale revision returns `REVISION_OUTDATED` and includes `currentRevision`. Read that value and retry the same semantic operation with the replacement revision. A stale semantic request is not retryable without changing its revision. Git review operations are historical: retain their returned immutable catalog, history, comparison, and snapshot IDs with the exact requested historical SHA rather than replacing it with the current semantic revision.
+Query does not silently read an older or newer semantic revision. One of the other ten semantic requests with a stale revision returns `REVISION_OUTDATED` and includes `currentRevision`. Read that value and retry the same semantic operation with the replacement revision. A stale semantic request is not retryable without changing its revision. Git review operations are historical: retain their returned immutable catalog, history, comparison, and snapshot IDs with the exact requested historical SHA rather than replacing it with the current semantic revision.
