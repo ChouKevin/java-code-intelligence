@@ -969,10 +969,10 @@ public final class GitEvidenceReadService {
         }
 
         private Optional<ReadPosition> firstPosition() {
-            if (seen == 0L) {
+            if (seen == 0L || matched == 0) {
                 return Optional.empty();
             }
-            long first = Math.max(0L, seen - Math.max(1, matched));
+            long first = seen - matched;
             SearchToken token = tokens[(int) (first % tokens.length)];
             return Optional.ofNullable(token).map(SearchToken::position);
         }
