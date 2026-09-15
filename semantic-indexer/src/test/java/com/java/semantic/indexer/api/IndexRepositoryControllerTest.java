@@ -25,6 +25,7 @@ import java.time.Instant;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.verify;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -133,6 +134,32 @@ class IndexRepositoryControllerTest {
                 .andExpect(status().isAccepted());
 
         verify(service).prepareGitComparison(RepositoryId.of("orders"), previous, current);
+    }
+
+    @Test
+    void history_admission_rejects_invalid_catalog_and_revision_before_job_admission_and_accepts_exact_payload() throws Exception {
+        IndexRequestService service = mock(IndexRequestService.class);
+        IndexJob history = mock(IndexJob.class);
+        when(history.id()).thenReturn(IndexJobId.create());
+        when(history.repositoryId()).thenReturn(RepositoryId.of("orders"));
+        when(history.target()).thenReturn(Optional.empty());
+        when(history.phase()).thenReturn(IndexJobPhase.ACCEPTED);
+        when(history.failureCategory()).thenReturn(Optional.empty());
+        String catalogId = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
+        String revision = "a".repeat(40);
+        when(service.prepareGitHistory(RepositoryId.of("orders"), catalogId, "main", revision)).thenReturn(history);
+        MockMvc mvc = MockMvcBuilders.standaloneSetup(new IndexRepositoryController(service)).build();
+
+        mvc.perform(post("/index/repositories/orders/git/history").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"catalogId\":\"bad\",\"branch\":\"main\",\"revision\":\"bad\"}"))
+                .andExpect(status().isBadRequest());
+        verify(service, never()).prepareGitHistory(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
+        mvc.perform(post("/index/repositories/orders/git/history").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"catalogId\":\"" + catalogId + "\",\"branch\":\"main\",\"revision\":\"" + revision + "\"}"))
+                .andExpect(status().isAccepted());
+
+        verify(service).prepareGitHistory(RepositoryId.of("orders"), catalogId, "main", revision);
     }
 
     private static RollbackIndexRequest request(PublishedGenerationPointer current, PublishedGenerationPointer rollback) {

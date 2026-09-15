@@ -18,6 +18,8 @@ import org.springframework.data.mongodb.core.MongoTemplate;
 import java.nio.charset.CharacterCodingException;
 import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -277,7 +279,32 @@ public final class GitEvidenceReadService {
                 || requiredLong(manifest, "snapshotTextBytesLimit") < 0L) {
             throw new IndexContractMismatchException();
         }
+        requireReadyComparisonOwner(repositoryId, snapshotId, revision, manifest);
         return manifest;
+    }
+
+    private void requireReadyComparisonOwner(RepositoryId repositoryId, String snapshotId, String revision, Document snapshot) {
+        String ownerJobId = requiredText(snapshot, "ownerJobId");
+        Bson endpoint = Filters.or(Filters.and(Filters.eq("previousSnapshotId", snapshotId), Filters.eq("previous", revision)),
+                Filters.and(Filters.eq("currentSnapshotId", snapshotId), Filters.eq("current", revision)));
+        List<Document> parents = new ArrayList<>();
+        for (Document parent : template.getCollection(IndexCollections.GIT_EVIDENCE_MANIFESTS).find(Filters.and(
+                Filters.eq("repoId", repositoryId.value()), Filters.eq("kind", "COMPARISON"), Filters.eq("ownerJobId", ownerJobId), endpoint)).limit(2)
+                .maxTime(storageTimeout.toMillis(), TimeUnit.MILLISECONDS)) {
+            parents.add(parent);
+        }
+        if (parents.size() != 1) {
+            throw new IndexContractMismatchException();
+        }
+        Document parent = parents.getFirst();
+        if (!"READY".equals(requiredText(parent, "state"))) {
+            throw new GitEvidenceNotReadyException();
+        }
+        if (parent.getInteger("gitEvidenceVersion", 0) != 1 || !ownerJobId.equals(requiredText(parent, "ownerJobId"))
+                || !requiredText(parent, "previousSnapshotId").matches("[0-9a-f-]{36}") || !requiredText(parent, "currentSnapshotId").matches("[0-9a-f-]{36}")
+                || !requiredText(parent, "previous").matches("[0-9a-f]{40}") || !requiredText(parent, "current").matches("[0-9a-f]{40}")) {
+            throw new IndexContractMismatchException();
+        }
     }
 
     private FileEntries directEntries(RepositoryId repositoryId, String snapshotId, String directory, int offset, int limit) {
@@ -495,7 +522,7 @@ public final class GitEvidenceReadService {
     private SearchPage searchFile(RepositoryId repositoryId, String snapshotId, SnapshotFile file, SearchStart start, String query, int remaining,
                                   SearchBudget budget) {
         List<SemanticQueryContract.GitTextMatch> matches = new ArrayList<>();
-        List<SearchToken> window = new ArrayList<>();
+        KmpMatcher matcher = new KmpMatcher(query);
         ReadPosition position = start.position();
         Optional<ChunkData> decodedStart = start.chunk();
         while (position.byteOffset() < file.byteLength()) {
@@ -508,7 +535,7 @@ public final class GitEvidenceReadService {
             }
             decodedStart = Optional.empty();
             if (Objects.isNull(chunk)) {
-                return new SearchPage(List.copyOf(matches), false, window.isEmpty() ? position : window.getFirst().position());
+                return new SearchPage(List.copyOf(matches), false, matcher.firstPosition().orElse(position));
             }
             int character = charIndexAtByteOffset(chunk.text(), Math.toIntExact(position.byteOffset() - chunk.byteOffset()));
             while (character < chunk.text().length()) {
@@ -516,30 +543,27 @@ public final class GitEvidenceReadService {
                 ReadPosition tokenPosition = position;
                 position = advance(position, codePoint);
                 character += Character.charCount(codePoint);
-                window.add(new SearchToken(codePoint, tokenPosition, chunk));
-                while (windowText(window).length() >= query.length()) {
-                    String candidate = windowText(window);
-                    SearchToken first = window.getFirst();
-                    if (candidate.startsWith(query)) {
-                        Map<Long, ChunkData> reusableChunks = new java.util.HashMap<>();
-                        for (SearchToken token : window) {
-                            reusableChunks.put(token.position().chunkOrdinal(), token.chunk());
-                        }
-                        Snippet snippet = snippetAt(repositoryId, snapshotId, file, first.position(), budget, reusableChunks);
-                        matches.add(new SemanticQueryContract.GitTextMatch(file.path(), file.pathKey(), first.position().line(), first.position().column(),
-                                snippet.text(), snippet.truncated()));
-                        if (matches.size() == remaining) {
-                            ReadPosition next = advance(first.position(), first.codePoint());
-                            if (next.byteOffset() == file.byteLength()) {
-                                return new SearchPage(List.copyOf(matches), true, next);
-                            }
-                            if (next.byteOffset() == chunk.byteOffset() + chunk.bytes().length) {
-                                next = nextChunkPosition(repositoryId, snapshotId, file, next, chunk);
-                            }
-                            return new SearchPage(List.copyOf(matches), false, next);
-                        }
+                Optional<List<SearchToken>> match = matcher.accept(new SearchToken(codePoint, tokenPosition, chunk));
+                if (match.isPresent()) {
+                    List<SearchToken> tokens = match.orElseThrow();
+                    SearchToken first = tokens.getFirst();
+                    Map<Long, ChunkData> reusableChunks = new java.util.HashMap<>();
+                    for (SearchToken token : tokens) {
+                        reusableChunks.put(token.position().chunkOrdinal(), token.chunk());
                     }
-                    window.removeFirst();
+                    Snippet snippet = snippetAt(repositoryId, snapshotId, file, first.position(), budget, reusableChunks);
+                    matches.add(new SemanticQueryContract.GitTextMatch(file.path(), file.pathKey(), first.position().line(), first.position().column(),
+                            snippet.text(), snippet.truncated()));
+                    if (matches.size() == remaining) {
+                        ReadPosition next = advance(first.position(), first.codePoint());
+                        if (next.byteOffset() == file.byteLength()) {
+                            return new SearchPage(List.copyOf(matches), true, next);
+                        }
+                        if (next.byteOffset() == chunk.byteOffset() + chunk.bytes().length) {
+                            next = nextChunkPosition(repositoryId, snapshotId, file, next, chunk);
+                        }
+                        return new SearchPage(List.copyOf(matches), false, next);
+                    }
                 }
             }
             if (position.byteOffset() < file.byteLength()) {
@@ -577,14 +601,6 @@ public final class GitEvidenceReadService {
             }
         }
         return new Snippet(text.toString(), omittedPrefix || position.byteOffset() < file.byteLength());
-    }
-
-    private static String windowText(List<SearchToken> window) {
-        StringBuilder candidate = new StringBuilder();
-        for (SearchToken token : window) {
-            candidate.appendCodePoint(token.codePoint());
-        }
-        return candidate.toString();
     }
 
     private SearchStart decodeSearchPosition(RepositoryId repositoryId, String snapshotId, SnapshotFile file, SearchPosition position,
@@ -665,14 +681,14 @@ public final class GitEvidenceReadService {
     }
 
     private static String encodeReadCursor(RepositoryId repositoryId, SemanticQueryContract.GitFileReadRequest request, SnapshotFile file, ReadPosition position) {
-        return cursor(FILE_CURSOR_OPERATION, repositoryId.value(), request.snapshotId(), request.revision(), file.pathKey(),
+        return cursor(FILE_CURSOR_OPERATION, repositoryId.value(), request.snapshotId(), request.revision(), digest(file.pathKey()),
                 Long.toString(position.chunkOrdinal()), Integer.toString(position.byteOffset()));
     }
 
     private ReadPosition decodeReadCursor(String cursor, RepositoryId repositoryId, SemanticQueryContract.GitFileReadRequest request, SnapshotFile file) {
         List<String> values = cursor(cursor, 7, FILE_CURSOR_OPERATION);
         if (!repositoryId.value().equals(values.get(1)) || !request.snapshotId().equals(values.get(2)) || !request.revision().equals(values.get(3))
-                || !file.pathKey().equals(values.get(4))) {
+                || !digest(file.pathKey()).equals(values.get(4))) {
             throw new IllegalArgumentException("file cursor is invalid");
         }
         try {
@@ -815,14 +831,14 @@ public final class GitEvidenceReadService {
     }
 
     private static String encodeSearchCursor(RepositoryId repositoryId, SemanticQueryContract.GitTextSearchRequest request, SearchPosition position) {
-        return cursor(SEARCH_CURSOR_OPERATION, repositoryId.value(), request.snapshotId(), request.revision(), request.query(), request.directory().orElse(""),
+        return cursor(SEARCH_CURSOR_OPERATION, repositoryId.value(), request.snapshotId(), request.revision(), digest(request.query()), digest(request.directory().orElse("")),
                 Long.toString(position.fileOrdinal()), Long.toString(position.chunkOrdinal()), Integer.toString(position.byteOffset()));
     }
 
     private static SearchPosition decodeSearchCursor(String cursor, RepositoryId repositoryId, SemanticQueryContract.GitTextSearchRequest request) {
         List<String> values = cursor(cursor, 9, SEARCH_CURSOR_OPERATION);
         if (!repositoryId.value().equals(values.get(1)) || !request.snapshotId().equals(values.get(2)) || !request.revision().equals(values.get(3))
-                || !request.query().equals(values.get(4)) || !request.directory().orElse("").equals(values.get(5))) {
+                || !digest(request.query()).equals(values.get(4)) || !digest(request.directory().orElse("")).equals(values.get(5))) {
             throw new IllegalArgumentException("search cursor is invalid");
         }
         try {
@@ -855,7 +871,21 @@ public final class GitEvidenceReadService {
     }
 
     private static int utf8Bytes(int codePoint) {
-        return new String(Character.toChars(codePoint)).getBytes(StandardCharsets.UTF_8).length;
+        if (codePoint <= 0x7f) {
+            return 1;
+        }
+        if (codePoint <= 0x7ff) {
+            return 2;
+        }
+        return codePoint <= 0xffff ? 3 : 4;
+    }
+
+    private static String digest(String value) {
+        try {
+            return java.util.HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.UTF_8)));
+        } catch (NoSuchAlgorithmException exception) {
+            throw new IllegalStateException("SHA-256 is unavailable", exception);
+        }
     }
 
     private static String cursor(String... values) {
@@ -904,6 +934,64 @@ public final class GitEvidenceReadService {
     private record SearchStart(ReadPosition position, Optional<ChunkData> chunk) { }
     private record ChunkData(int byteOffset, byte[] bytes, String text) { }
     private record SearchToken(int codePoint, ReadPosition position, ChunkData chunk) { }
+    private static final class KmpMatcher {
+        private final int[] query;
+        private final int[] fallback;
+        private final SearchToken[] tokens;
+        private int matched;
+        private long seen;
+
+        private KmpMatcher(String text) {
+            this.query = text.codePoints().toArray();
+            this.fallback = fallback(query);
+            this.tokens = new SearchToken[query.length];
+        }
+
+        private Optional<List<SearchToken>> accept(SearchToken token) {
+            while (matched > 0 && query[matched] != token.codePoint()) {
+                matched = fallback[matched - 1];
+            }
+            if (query[matched] == token.codePoint()) {
+                matched++;
+            }
+            tokens[(int) (seen % tokens.length)] = token;
+            seen++;
+            if (matched != query.length) {
+                return Optional.empty();
+            }
+            List<SearchToken> match = new ArrayList<>(query.length);
+            long first = seen - query.length;
+            for (int index = 0; index < query.length; index++) {
+                match.add(tokens[(int) ((first + index) % tokens.length)]);
+            }
+            matched = fallback[matched - 1];
+            return Optional.of(List.copyOf(match));
+        }
+
+        private Optional<ReadPosition> firstPosition() {
+            if (seen == 0L) {
+                return Optional.empty();
+            }
+            long first = Math.max(0L, seen - Math.max(1, matched));
+            SearchToken token = tokens[(int) (first % tokens.length)];
+            return Optional.ofNullable(token).map(SearchToken::position);
+        }
+
+        private static int[] fallback(int[] query) {
+            int[] values = new int[query.length];
+            int length = 0;
+            for (int index = 1; index < query.length; index++) {
+                while (length > 0 && query[length] != query[index]) {
+                    length = values[length - 1];
+                }
+                if (query[length] == query[index]) {
+                    length++;
+                }
+                values[index] = length;
+            }
+            return values;
+        }
+    }
     private record SearchPage(List<SemanticQueryContract.GitTextMatch> matches, boolean complete, ReadPosition position) { }
     private record Snippet(String text, boolean truncated) { }
     private static final class SearchBudgetExhaustedException extends RuntimeException { }

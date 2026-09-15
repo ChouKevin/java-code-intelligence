@@ -93,6 +93,57 @@ class GitEvidenceReadServiceIT {
     }
 
     @Test
+    void exposes_snapshot_rows_only_when_its_single_owning_comparison_is_ready() {
+        try (MongoDBContainer container = new MongoDBContainer(DockerImageName.parse("mongo:8.0.4"))) {
+            container.start();
+            MongoTemplate template = new MongoTemplate(MongoClients.create(container.getConnectionString()), "git_snapshot_comparison_owner");
+            seedSnapshot(template, "orders");
+            GitEvidenceReadService service = service(template, List.of("orders"));
+            template.getCollection("git_evidence_manifests").updateMany(new Document("kind", "COMPARISON"),
+                    new Document("$set", new Document("state", "PREPARING")));
+
+            assertThatThrownBy(() -> service.listFiles(new SemanticQueryContract.GitFileListRequest("orders", SNAPSHOT_ID, REVISION, "", 0, 1)))
+                    .isInstanceOf(GitEvidenceNotReadyException.class);
+            assertThatThrownBy(() -> service.readFile(new SemanticQueryContract.GitFileReadRequest("orders", SNAPSHOT_ID, REVISION,
+                    "src/demo.txt", Optional.empty(), 1, Optional.empty()))).isInstanceOf(GitEvidenceNotReadyException.class);
+            assertThatThrownBy(() -> service.searchText(new SemanticQueryContract.GitTextSearchRequest("orders", SNAPSHOT_ID, REVISION,
+                    "needle", Optional.empty(), Optional.empty(), 1))).isInstanceOf(GitEvidenceNotReadyException.class);
+            template.getCollection("git_evidence_manifests").updateMany(new Document("kind", "COMPARISON"),
+                    new Document("$set", new Document("state", "READY")));
+
+            assertThat(service.listFiles(new SemanticQueryContract.GitFileListRequest("orders", SNAPSHOT_ID, REVISION, "", 0, 1)).items()).isNotEmpty();
+        }
+    }
+
+    @Test
+    void reconstructs_long_path_read_cursors_with_fixed_identity_and_rejects_another_file_replay() {
+        try (MongoDBContainer container = new MongoDBContainer(DockerImageName.parse("mongo:8.0.4"))) {
+            container.start();
+            MongoTemplate template = new MongoTemplate(MongoClients.create(container.getConnectionString()), "git_snapshot_long_path_cursor");
+            seedSnapshot(template, "orders");
+            String path = "nested/".repeat(10_000) + "evidence.txt";
+            byte[] bytes = "first\nsecond\n".getBytes(StandardCharsets.UTF_8);
+            insertTextSnapshotFile(template, "orders", 1L, path, bytes);
+            insertTextSnapshotFile(template, "orders", 2L, path + ".other", bytes);
+            template.getCollection("git_evidence_manifests").updateOne(new Document("repoId", "orders").append("evidenceId", SNAPSHOT_ID), new Document("$set",
+                    new Document("total", 3L).append("contentCoverage.entryCount", 3L).append("contentCoverage.textEntries", 3L)
+                            .append("contentCoverage.textBytes", 27L + 2L * bytes.length)));
+            GitEvidenceReadService service = service(template, List.of("orders"));
+
+            SemanticQueryContract.GitFileContent first = service.readFile(new SemanticQueryContract.GitFileReadRequest("orders", SNAPSHOT_ID, REVISION,
+                    path, Optional.empty(), 1, Optional.empty()));
+            SemanticQueryContract.GitFileContent second = service.readFile(new SemanticQueryContract.GitFileReadRequest("orders", SNAPSHOT_ID, REVISION,
+                    path, Optional.empty(), 1, first.nextCursor()));
+
+            assertThat(path).hasSizeGreaterThan(65_536);
+            assertThat(first.nextCursor()).isPresent();
+            assertThat(second.content()).isEqualTo("second\n");
+            assertThatThrownBy(() -> service.readFile(new SemanticQueryContract.GitFileReadRequest("orders", SNAPSHOT_ID, REVISION,
+                    path + ".other", Optional.empty(), 1, first.nextCursor()))).isInstanceOf(IllegalArgumentException.class);
+        }
+    }
+
+    @Test
     void r1_rejects_revision_mismatch_empty_text_unknown_status_and_corrupt_checkpoint() {
         try (MongoDBContainer container = new MongoDBContainer(DockerImageName.parse("mongo:8.0.4"))) {
             container.start();
@@ -840,7 +891,7 @@ class GitEvidenceReadServiceIT {
         }
         long byteLength = (long) ordinary.length * 64L + finalChunk.length;
         template.getCollection("git_evidence_manifests").insertOne(new Document("repoId", repositoryId).append("evidenceId", SNAPSHOT_ID)
-                .append("kind", "SNAPSHOT").append("state", "READY").append("gitEvidenceVersion", 1).append("revision", REVISION)
+                .append("kind", "SNAPSHOT").append("state", "READY").append("gitEvidenceVersion", 1).append("ownerJobId", "job-budget").append("revision", REVISION)
                 .append("total", 1L).append("contentDigest", "a".repeat(64)).append("fileTextBytesLimit", byteLength)
                 .append("snapshotTextBytesLimit", byteLength).append("contentCoverage", new Document("entryCount", 1L).append("textEntries", 1L)
                         .append("textBytes", byteLength)));
@@ -856,6 +907,7 @@ class GitEvidenceReadServiceIT {
                     .append("bytes", bytes));
         }
         template.getCollection("git_snapshot_chunks").insertMany(chunks);
+        seedReadyComparisonOwner(template, repositoryId, SNAPSHOT_ID, REVISION, "job-budget");
     }
 
     private static void seedSnippetBudgetSnapshot(MongoTemplate template, String repositoryId) {
@@ -864,7 +916,7 @@ class GitEvidenceReadServiceIT {
         byte[] matched = ("needle" + "x".repeat(64 * 1024 - 6)).getBytes(StandardCharsets.UTF_8);
         long byteLength = (long) ordinary.length * 63L + matched.length;
         template.getCollection("git_evidence_manifests").insertOne(new Document("repoId", repositoryId).append("evidenceId", SNAPSHOT_ID)
-                .append("kind", "SNAPSHOT").append("state", "READY").append("gitEvidenceVersion", 1).append("revision", REVISION)
+                .append("kind", "SNAPSHOT").append("state", "READY").append("gitEvidenceVersion", 1).append("ownerJobId", "job-snippet").append("revision", REVISION)
                 .append("total", 1L).append("contentDigest", "a".repeat(64)).append("fileTextBytesLimit", byteLength)
                 .append("snapshotTextBytesLimit", byteLength).append("contentCoverage", new Document("entryCount", 1L).append("textEntries", 1L)
                         .append("textBytes", byteLength)));
@@ -880,6 +932,7 @@ class GitEvidenceReadServiceIT {
                     .append("bytes", bytes));
         }
         template.getCollection("git_snapshot_chunks").insertMany(chunks);
+        seedReadyComparisonOwner(template, repositoryId, SNAPSHOT_ID, REVISION, "job-snippet");
     }
 
     private static void seedCrossChunkSnippetBudgetSnapshot(MongoTemplate template, String repositoryId) {
@@ -889,7 +942,7 @@ class GitEvidenceReadServiceIT {
         byte[] end = ("b" + "x".repeat(64 * 1024 - 1)).getBytes(StandardCharsets.UTF_8);
         long byteLength = (long) ordinary.length * 62L + start.length + end.length;
         template.getCollection("git_evidence_manifests").insertOne(new Document("repoId", repositoryId).append("evidenceId", SNAPSHOT_ID)
-                .append("kind", "SNAPSHOT").append("state", "READY").append("gitEvidenceVersion", 1).append("revision", REVISION)
+                .append("kind", "SNAPSHOT").append("state", "READY").append("gitEvidenceVersion", 1).append("ownerJobId", "job-cross-chunk").append("revision", REVISION)
                 .append("total", 1L).append("contentDigest", "a".repeat(64)).append("fileTextBytesLimit", byteLength)
                 .append("snapshotTextBytesLimit", byteLength).append("contentCoverage", new Document("entryCount", 1L).append("textEntries", 1L)
                         .append("textBytes", byteLength)));
@@ -905,6 +958,7 @@ class GitEvidenceReadServiceIT {
                     .append("bytes", bytes));
         }
         template.getCollection("git_snapshot_chunks").insertMany(chunks);
+        seedReadyComparisonOwner(template, repositoryId, SNAPSHOT_ID, REVISION, "job-cross-chunk");
     }
 
     private static void seedReaderContinuationSnapshot(MongoTemplate template, String repositoryId) {
@@ -913,7 +967,7 @@ class GitEvidenceReadServiceIT {
         byte[] edge = "Z".getBytes(StandardCharsets.UTF_8);
         long textBytes = (long) searchable.length + longLine.length + edge.length;
         template.getCollection("git_evidence_manifests").insertOne(new Document("repoId", repositoryId).append("evidenceId", SNAPSHOT_ID)
-                .append("kind", "SNAPSHOT").append("state", "READY").append("gitEvidenceVersion", 1).append("revision", REVISION)
+                .append("kind", "SNAPSHOT").append("state", "READY").append("gitEvidenceVersion", 1).append("ownerJobId", "job-reader").append("revision", REVISION)
                 .append("total", 4L).append("contentDigest", "a".repeat(64)).append("fileTextBytesLimit", 1_048_576L)
                 .append("snapshotTextBytesLimit", 1_048_576L).append("contentCoverage", new Document("entryCount", 4L).append("textEntries", 4L)
                         .append("textBytes", textBytes)));
@@ -921,6 +975,7 @@ class GitEvidenceReadServiceIT {
         insertTextSnapshotFile(template, repositoryId, 1L, "src/searchable.txt", searchable);
         insertTextSnapshotFile(template, repositoryId, 2L, "src/long.txt", longLine);
         insertTextSnapshotFile(template, repositoryId, 3L, "src/edge.txt", edge);
+        seedReadyComparisonOwner(template, repositoryId, SNAPSHOT_ID, REVISION, "job-reader");
     }
 
     private static void insertTextSnapshotFile(MongoTemplate template, String repositoryId, long ordinal, String path, byte[] bytes) {
@@ -942,7 +997,7 @@ class GitEvidenceReadServiceIT {
         byte[] first = "a😀\r\nneed".getBytes(StandardCharsets.UTF_8);
         byte[] second = java.util.Arrays.copyOfRange(text, first.length, text.length);
         template.getCollection("git_evidence_manifests").insertOne(new Document("repoId", repositoryId).append("evidenceId", SNAPSHOT_ID)
-                .append("kind", "SNAPSHOT").append("state", "READY").append("gitEvidenceVersion", 1).append("revision", REVISION)
+                .append("kind", "SNAPSHOT").append("state", "READY").append("gitEvidenceVersion", 1).append("ownerJobId", "job-snapshot").append("revision", REVISION)
                 .append("total", 1L).append("contentDigest", "a".repeat(64)).append("fileTextBytesLimit", 1_048_576L)
                 .append("snapshotTextBytesLimit", 1_048_576L).append("contentCoverage", new Document("entryCount", 1L).append("textEntries", 1L)
                         .append("textBytes", (long) text.length)));
@@ -955,6 +1010,7 @@ class GitEvidenceReadServiceIT {
                         .append("byteOffset", 0L).append("line", 1L).append("column", 1L).append("bytes", first),
                 new Document("repoId", repositoryId).append("snapshotId", SNAPSHOT_ID).append("pathKey", pathKey(path)).append("ordinal", 1L)
                         .append("byteOffset", (long) first.length).append("line", 2L).append("column", 5L).append("bytes", second)));
+        seedReadyComparisonOwner(template, repositoryId, SNAPSHOT_ID, REVISION, "job-snapshot");
     }
 
     private static void seedReplaySearchSnapshot(MongoTemplate template, String repositoryId) {
@@ -970,7 +1026,7 @@ class GitEvidenceReadServiceIT {
         long total = 7L + noHitFileCount;
         long textBytes = bytes.length + noHitFileCount * noHit.length;
         template.getCollection("git_evidence_manifests").insertOne(new Document("repoId", repositoryId).append("evidenceId", SNAPSHOT_ID)
-                .append("kind", "SNAPSHOT").append("state", "READY").append("gitEvidenceVersion", 1).append("revision", REVISION)
+                .append("kind", "SNAPSHOT").append("state", "READY").append("gitEvidenceVersion", 1).append("ownerJobId", "job-replay").append("revision", REVISION)
                 .append("total", total).append("contentDigest", "a".repeat(64)).append("fileTextBytesLimit", 1_048_576L)
                 .append("snapshotTextBytesLimit", textBytes).append("contentCoverage", new Document("entryCount", total).append("textEntries", total)
                         .append("textBytes", textBytes)));
@@ -987,6 +1043,14 @@ class GitEvidenceReadServiceIT {
         for (int index = 0; index < noHitFileCount; index++) {
             insertTextSnapshotFile(template, repositoryId, 7L + index, "src/nohit/NoHit" + index + ".java", noHit);
         }
+        seedReadyComparisonOwner(template, repositoryId, SNAPSHOT_ID, REVISION, "job-replay");
+    }
+
+    private static void seedReadyComparisonOwner(MongoTemplate template, String repositoryId, String snapshotId, String revision, String ownerJobId) {
+        template.getCollection("git_evidence_manifests").insertOne(new Document("repoId", repositoryId)
+                .append("evidenceId", java.util.UUID.randomUUID().toString()).append("kind", "COMPARISON").append("state", "READY")
+                .append("gitEvidenceVersion", 1).append("ownerJobId", ownerJobId).append("previous", "2".repeat(40)).append("current", revision)
+                .append("previousSnapshotId", "dddddddd-dddd-dddd-dddd-dddddddddddd").append("currentSnapshotId", snapshotId));
     }
 
     private static void seedLongLineSnapshot(MongoTemplate template, String repositoryId) {
@@ -1010,12 +1074,14 @@ class GitEvidenceReadServiceIT {
     }
 
     private static void copySnapshot(MongoTemplate template, String repositoryId, String sourceSnapshotId, String targetSnapshotId, String revision) {
+        String ownerJobId = "job-" + targetSnapshotId;
         copySnapshotRows(template, "git_evidence_manifests", new Document("repoId", repositoryId).append("evidenceId", sourceSnapshotId), row -> row
-                .append("evidenceId", targetSnapshotId).append("revision", revision));
+                .append("evidenceId", targetSnapshotId).append("revision", revision).append("ownerJobId", ownerJobId));
         copySnapshotRows(template, "git_snapshot_files", new Document("repoId", repositoryId).append("snapshotId", sourceSnapshotId), row -> row
                 .append("snapshotId", targetSnapshotId));
         copySnapshotRows(template, "git_snapshot_chunks", new Document("repoId", repositoryId).append("snapshotId", sourceSnapshotId), row -> row
                 .append("snapshotId", targetSnapshotId));
+        seedReadyComparisonOwner(template, repositoryId, targetSnapshotId, revision, ownerJobId);
     }
 
     private static void copySnapshotRows(MongoTemplate template, String collection, Document filter,
@@ -1028,8 +1094,23 @@ class GitEvidenceReadServiceIT {
     }
 
     private static String cursor(String... values) {
+        if ("git-file".equals(values[0])) {
+            values[4] = digest(values[4]);
+        }
+        if ("git-search".equals(values[0])) {
+            values[4] = digest(values[4]);
+            values[5] = digest(values[5]);
+        }
         return java.util.Arrays.stream(values).map(value -> Base64.getUrlEncoder().withoutPadding().encodeToString(value.getBytes(StandardCharsets.UTF_8)))
                 .collect(java.util.stream.Collectors.joining("."));
+    }
+
+    private static String digest(String value) {
+        try {
+            return java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.UTF_8)));
+        } catch (java.security.NoSuchAlgorithmException exception) {
+            throw new IllegalStateException(exception);
+        }
     }
 
     private static String pathKey(String path) {
