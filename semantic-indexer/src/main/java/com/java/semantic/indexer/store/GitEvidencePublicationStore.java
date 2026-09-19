@@ -141,6 +141,10 @@ public final class GitEvidencePublicationStore {
         GitSnapshotId previousSnapshot = GitSnapshotId.create();
         GitSnapshotId currentSnapshot = GitSnapshotId.create();
         bindComparison(requiredJob, comparisonId, previousSnapshot, currentSnapshot, requiredOwnership);
+        String comparisonDigest = emptyDigest();
+        for (int ordinal = 0; ordinal < comparison.changes().size(); ordinal++) {
+            comparisonDigest = digest(comparisonDigest, comparisonRow(ordinal, comparison.changes().get(ordinal)));
+        }
         Document comparisonManifest = ownershipDocument(new Document("repoId", requiredJob.repositoryId().value())
                 .append("evidenceId", comparisonId.value()).append("kind", "COMPARISON").append("state", "PREPARING")
                 .append("gitEvidenceVersion", com.java.semantic.model.index.IndexSchemaContract.GIT_EVIDENCE_VERSION)
@@ -148,11 +152,10 @@ public final class GitEvidencePublicationStore {
                 .append("previousSnapshotId", previousSnapshot.value()).append("currentSnapshotId", currentSnapshot.value())
                 .append("ancestry", comparison.ancestry().name()).append("preparedAt", java.util.Date.from(preparedAt))
                 .append("ownerJobId", requiredJob.id().value()).append("total", (long) comparison.changes().size())
-                .append("contentDigest", emptyDigest()), requiredOwnership);
+                .append("contentDigest", comparisonDigest), requiredOwnership);
         template.getCollection(IndexCollections.GIT_EVIDENCE_MANIFESTS).insertOne(comparisonManifest);
         publishSnapshot(requiredJob, previousSnapshot, comparison.previous().value(), comparison.previousEntries(), preparedAt, requiredOwnership);
         publishSnapshot(requiredJob, currentSnapshot, comparison.current().value(), comparison.currentEntries(), preparedAt, requiredOwnership);
-        String comparisonDigest = emptyDigest();
         long ordinal = 0L;
         for (GitComparisonChange change : comparison.changes()) {
             template.getCollection(IndexCollections.GIT_COMPARISON_CHANGES).insertOne(new Document("repoId", requiredJob.repositoryId().value())
@@ -163,11 +166,9 @@ public final class GitEvidencePublicationStore {
                     .append("oldBlobId", change.oldBlobId()).append("newBlobId", change.newBlobId()).append("diffStatus", change.diffStatus())
                     .append("patchChunkCount", (long) change.patchChunks().size()));
             appendPatchChunks(requiredJob.repositoryId(), comparisonId, change);
-            comparisonDigest = digest(comparisonDigest, comparisonRow(ordinal, change));
             ordinal++;
         }
         validateComparisonPublication(requiredJob.repositoryId(), comparisonId, previousSnapshot, currentSnapshot, comparison);
-        setContentDigest(requiredJob.repositoryId(), new GitEvidenceId(comparisonId.value()), comparisonDigest);
         markReady(requiredJob.repositoryId(), new GitEvidenceId(comparisonId.value()));
         return new ComparisonPublication(comparisonId, previousSnapshot, currentSnapshot);
     }
