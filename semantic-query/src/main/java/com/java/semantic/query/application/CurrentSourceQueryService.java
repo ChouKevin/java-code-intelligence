@@ -26,26 +26,22 @@ import java.util.concurrent.TimeUnit;
 
 public final class CurrentSourceQueryService {
     private final MongoTemplate template;
-    private final CurrentGenerationSelector selector;
+    private final SelectedGenerationGuard guard;
     private final Duration storageTimeout;
 
-    public CurrentSourceQueryService(MongoTemplate template, CurrentGenerationSelector selector, Duration storageTimeout) {
+    public CurrentSourceQueryService(MongoTemplate template, SelectedGenerationGuard guard, Duration storageTimeout) {
         this.template = Objects.requireNonNull(template, "mongo template is required");
-        this.selector = Objects.requireNonNull(selector, "current generation selector is required");
+        this.guard = Objects.requireNonNull(guard, "selected generation guard is required");
         this.storageTimeout = Objects.requireNonNull(storageTimeout, "storage timeout is required");
     }
 
-    public PublishedSource getSource(String repositoryId, String revision, SourceTypeIdentity sourceType) {
-        SourceTypeIdentity identity = Objects.requireNonNull(sourceType, "source type identity is required");
-        SelectedGeneration context = selector.selectSource(repositoryId, revision, identity);
-        return getSource(context, identity);
-    }
 
     public PublishedSource getSource(SelectedGeneration context, SourceTypeIdentity sourceType) {
         SelectedGeneration selected = Objects.requireNonNull(context, "selected generation is required");
+        guard.requireRepositoryVisible(selected);
         SourceTypeIdentity identity = Objects.requireNonNull(sourceType, "source type identity is required");
-        selector.requireCompatible(selected, CurrentGenerationSelector.SOURCES);
-        selector.requireSourceVisible(selected, identity);
+        guard.requireSourceVisible(selected, identity);
+        guard.require(selected, SelectedGenerationGuard.SOURCES);
         try {
             requireAuthorizedCurrentSource(selected, identity);
             Document mapping = template.getCollection(IndexCollections.GENERATION_FILES).find(Filters.and(
@@ -67,8 +63,8 @@ public final class CurrentSourceQueryService {
         }
     }
 
-    PublishedSource getSource(SelectedGeneration current, String sourcePath) {
-        SelectedGeneration selected = Objects.requireNonNull(current, "selected generation is required");
+    PublishedSource getSource(SelectedGeneration context, String sourcePath) {
+        SelectedGeneration selected = Objects.requireNonNull(context, "selected generation is required");
         String path = com.java.semantic.model.support.ModelValidation.repositoryRelativePath(sourcePath);
         try {
             Document mapping = template.getCollection(IndexCollections.GENERATION_FILES).find(Filters.and(
@@ -91,16 +87,16 @@ public final class CurrentSourceQueryService {
 
     PublishedSource getSource(CodeFactDetails details) {
         CodeFactDetails requiredDetails = Objects.requireNonNull(details, "code fact details are required");
-        SelectedGeneration current = requiredDetails.generation();
+        SelectedGeneration selected = requiredDetails.generation();
         CodeFactIdentity identity = requiredDetails.fact().identity();
         String sourcePath = requiredDetails.location().sourceFile();
-        if (!current.repositoryId().equals(identity.repositoryId()) || !current.revision().equals(identity.repositoryRevision())) {
+        if (!selected.repositoryId().equals(identity.repositoryId()) || !selected.revision().equals(identity.repositoryRevision())) {
             throw new IndexContractMismatchException();
         }
-        selector.requireCompatible(current, CurrentGenerationSelector.SOURCES);
-        selector.requireVisible(current, identity);
-        requireAllSourceSymbolsVisible(current, sourcePath);
-        return getSource(current, sourcePath);
+        guard.requireVisible(selected, identity);
+        guard.require(selected, SelectedGenerationGuard.SOURCES);
+        requireAllSourceSymbolsVisible(selected, sourcePath);
+        return getSource(selected, sourcePath);
     }
 
     private void requireAuthorizedCurrentSource(SelectedGeneration current, SourceTypeIdentity identity) {
@@ -128,7 +124,7 @@ public final class CurrentSourceQueryService {
                     Filters.eq("repoId", current.repositoryId().value()), Filters.eq("generationId", current.generationId().value()),
                     Filters.eq("sourcePath", sourcePath))).maxTime(storageTimeout.toMillis(), TimeUnit.MILLISECONDS)) {
                 SymbolDocument symbol = decodeSymbol(stored, current);
-                selector.requireVisible(current, symbol.fact().identity());
+                guard.requireVisible(current, symbol.fact().identity());
                 symbols.add(symbol);
             }
         } catch (MongoException | DataAccessException exception) {

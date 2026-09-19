@@ -38,29 +38,23 @@ public final class PublishedDiscoveryQueryService {
     private static final Set<String> LISTENER_ANNOTATIONS = Set.of("org.springframework.context.event.EventListener",
             "org.springframework.transaction.event.TransactionalEventListener", "EventListener", "TransactionalEventListener");
     private final MongoTemplate template;
-    private final CurrentGenerationSelector selector;
+    private final SelectedGenerationGuard guard;
     private final Duration storageTimeout;
     private final SourceIndexCoverageReader coverageReader;
 
-    public PublishedDiscoveryQueryService(MongoTemplate template, CurrentGenerationSelector selector, Duration storageTimeout) {
+    public PublishedDiscoveryQueryService(MongoTemplate template, SelectedGenerationGuard guard, Duration storageTimeout) {
         this.template = Objects.requireNonNull(template, "mongo template is required");
-        this.selector = Objects.requireNonNull(selector, "current generation selector is required");
+        this.guard = Objects.requireNonNull(guard, "selected generation guard is required");
         this.storageTimeout = Objects.requireNonNull(storageTimeout, "storage timeout is required");
         this.coverageReader = new SourceIndexCoverageReader(template, storageTimeout);
     }
 
-    public DeclarationResolutionResult resolveDeclaration(DeclarationResolutionQuery query) {
-        DeclarationResolutionQuery requiredQuery = Objects.requireNonNull(query, "query is required");
-        SelectedGeneration context = selector.selectSource(requiredQuery.repositoryId().value(), requiredQuery.revision().value(),
-                requiredQuery.context(), CurrentGenerationSelector.SYMBOLS);
-        return resolveDeclaration(context, requiredQuery);
-    }
 
     public DeclarationResolutionResult resolveDeclaration(SelectedGeneration context, DeclarationResolutionQuery query) {
         SelectedGeneration selected = Objects.requireNonNull(context, "selected generation is required");
         DeclarationResolutionQuery requiredQuery = Objects.requireNonNull(query, "query is required");
         requireSourceContext(selected, requiredQuery.repositoryId(), requiredQuery.revision(), requiredQuery.context());
-        SearchAccessPlan accessPlan = selector.searchAccessPlan(requiredQuery.repositoryId().value());
+        SearchAccessPlan accessPlan = guard.searchAccessPlan(requiredQuery.repositoryId().value());
         try {
             FindIterable<Document> rows = template.getCollection(IndexCollections.SYMBOLS).find(accessPlan.authorized(Filters.and(
                     Filters.eq("repoId", selected.repositoryId().value()), Filters.eq("generationId", selected.generationId().value()),
@@ -71,7 +65,7 @@ public final class PublishedDiscoveryQueryService {
                 SymbolDocument symbol = CodeFactReadService.decode(row, selected, template);
                 if (isSupportedDeclaration(symbol.kind()) && ownsContext(symbol, requiredQuery.context())
                         && containsPosition(symbol, requiredQuery.position())) {
-                    selector.requireVisible(selected, symbol.fact().identity());
+                    guard.requireVisible(selected, symbol.fact().identity());
                     candidates.add(new CodeFactSummary(symbol.fact(), symbol.range()));
                 }
             }
@@ -86,18 +80,12 @@ public final class PublishedDiscoveryQueryService {
         }
     }
 
-    public EventListenerResult discoverEventListeners(EventListenerQuery query) {
-        EventListenerQuery requiredQuery = Objects.requireNonNull(query, "query is required");
-        SelectedGeneration context = selector.select(requiredQuery.repositoryId().value(), requiredQuery.revision().value(),
-                CurrentGenerationSelector.SYMBOLS);
-        return discoverEventListeners(context, requiredQuery);
-    }
 
     public EventListenerResult discoverEventListeners(SelectedGeneration context, EventListenerQuery query) {
         SelectedGeneration selected = Objects.requireNonNull(context, "selected generation is required");
         EventListenerQuery requiredQuery = Objects.requireNonNull(query, "query is required");
-        requireContext(selected, requiredQuery.repositoryId(), requiredQuery.revision(), CurrentGenerationSelector.SYMBOLS);
-        SearchAccessPlan accessPlan = selector.searchAccessPlan(requiredQuery.repositoryId().value());
+        requireContext(selected, requiredQuery.repositoryId(), requiredQuery.revision(), SelectedGenerationGuard.SYMBOLS);
+        SearchAccessPlan accessPlan = guard.searchAccessPlan(requiredQuery.repositoryId().value());
         try {
             org.bson.conversions.Bson filter = accessPlan.authorizedMethod(listenerFilter(selected, requiredQuery));
             long total = template.getCollection(IndexCollections.SYMBOLS).countDocuments(filter,
@@ -133,7 +121,7 @@ public final class PublishedDiscoveryQueryService {
                 || !target.parameterTypes().contains(query.eventType()) || !hasListenerAnnotation(symbol)) {
             throw new IndexContractMismatchException();
         }
-        selector.requireVisible(current, symbol.fact().identity());
+        guard.requireVisible(current, symbol.fact().identity());
         if (!CodeFactScope.from(symbol.fact().identity()).equals(flattenedScope(row))) {
             throw new IndexContractMismatchException();
         }
@@ -172,18 +160,12 @@ public final class PublishedDiscoveryQueryService {
         return text;
     }
 
-    public TypeMemberResult discoverTypeMembers(TypeMemberQuery query) {
-        TypeMemberQuery requiredQuery = Objects.requireNonNull(query, "query is required");
-        SelectedGeneration context = selector.selectSource(requiredQuery.repositoryId().value(), requiredQuery.revision().value(),
-                requiredQuery.sourceType(), CurrentGenerationSelector.SYMBOLS);
-        return discoverTypeMembers(context, requiredQuery);
-    }
 
     public TypeMemberResult discoverTypeMembers(SelectedGeneration context, TypeMemberQuery query) {
         SelectedGeneration selected = Objects.requireNonNull(context, "selected generation is required");
         TypeMemberQuery requiredQuery = Objects.requireNonNull(query, "query is required");
         requireSourceContext(selected, requiredQuery.repositoryId(), requiredQuery.revision(), requiredQuery.sourceType());
-        SearchAccessPlan accessPlan = selector.searchAccessPlan(requiredQuery.repositoryId().value());
+        SearchAccessPlan accessPlan = guard.searchAccessPlan(requiredQuery.repositoryId().value());
         try {
             List<String> kinds = requiredQuery.kinds().stream().map(Enum::name).sorted().toList();
             org.bson.conversions.Bson filter = accessPlan.authorized(Filters.and(Filters.eq("repoId", selected.repositoryId().value()),
@@ -200,7 +182,7 @@ public final class PublishedDiscoveryQueryService {
                 if (!requiredQuery.kinds().contains(symbol.kind()) || !requiredQuery.sourceType().fullyQualifiedName().equals(symbol.owner())) {
                     throw new IndexContractMismatchException();
                 }
-                selector.requireVisible(selected, symbol.fact().identity());
+                guard.requireVisible(selected, symbol.fact().identity());
                 members.add(new CodeFactSummary(symbol.fact(), symbol.range()));
             }
             boolean hasMore = requiredQuery.offset() + members.size() < total;
@@ -218,8 +200,8 @@ public final class PublishedDiscoveryQueryService {
     private void requireSourceContext(SelectedGeneration context, com.java.semantic.model.repository.RepositoryId repositoryId,
                                       com.java.semantic.model.repository.RepositoryRevision revision,
                                       com.java.semantic.model.codefact.SourceTypeIdentity sourceType) {
-        requireContext(context, repositoryId, revision, CurrentGenerationSelector.SYMBOLS);
-        selector.requireSourceVisible(context, sourceType);
+        guard.requireSourceVisible(context, sourceType);
+        requireContext(context, repositoryId, revision, SelectedGenerationGuard.SYMBOLS);
     }
 
     private void requireContext(SelectedGeneration context, com.java.semantic.model.repository.RepositoryId repositoryId,
@@ -228,7 +210,7 @@ public final class PublishedDiscoveryQueryService {
         if (!context.repositoryId().equals(repositoryId) || !context.revision().equals(revision)) {
             throw new IllegalArgumentException("query repository and revision must match the selected generation");
         }
-        selector.requireCompatible(context, requirements);
+        guard.require(context, requirements);
     }
     private static boolean isSupportedDeclaration(CodeFactKind kind) {
         return kind == CodeFactKind.TYPE || kind == CodeFactKind.METHOD || kind == CodeFactKind.FIELD

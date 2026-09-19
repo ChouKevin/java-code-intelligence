@@ -7,6 +7,7 @@ import com.java.semantic.model.codefact.SourceTypeIdentity;
 import com.java.semantic.model.codefact.TypeMemberQuery;
 import com.java.semantic.model.codefact.CodeFactKind;
 import com.java.semantic.model.index.SourceIndexScope;
+import com.java.semantic.model.query.SelectedGeneration;
 import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.model.repository.RepositoryRevision;
 import com.java.semantic.query.config.ConfiguredReadPolicy;
@@ -40,20 +41,20 @@ class PublishedDiscoveryContractIT extends PublishedMongoITSupport {
             MongoTemplate template = new MongoTemplate(com.mongodb.client.MongoClients.create(container.getConnectionString()), "published_discovery");
             seedCurrent(template, "orders");
             com.java.semantic.model.codefact.CodeFactIdentity identity = methodIdentity("example.video", "VideoListener", "onReady", "src/main/java/example/video/VideoListener.java");
-            seedMethod(template, identity, List.of(new AnnotationFact("org.springframework.context.event.EventListener")));
-            PublishedDiscoveryQueryService service = new PublishedDiscoveryQueryService(template, selector(template, policy()), Duration.ofSeconds(2));
+            CurrentGenerationSelector selector = selector(template, policy());
+            SelectedGeneration context = selector.select("orders", REVISION, SelectedGenerationGuard.SYMBOLS);
+            PublishedDiscoveryQueryService service = new PublishedDiscoveryQueryService(template, guard(template, policy()), Duration.ofSeconds(2));
             SourceTypeIdentity type = ((com.java.semantic.model.codefact.MethodTarget) identity.canonicalIdentity()).sourceType();
             seedCoverageSource(template, type.sourceFile(), "JDT_SYNTAX_PROBLEM", new SourceIndexScope(true, List.of("example.video"),
                     List.of(SourceIndexScope.classKey("example.video", "VideoListener")),
                     List.of(SourceIndexScope.methodKey("example.video", "VideoListener", "onReady", List.of("VideoReady")))));
-
-            assertThat(service.discoverEventListeners(new EventListenerQuery(new RepositoryId("orders"), new RepositoryRevision(REVISION),
+            assertThat(service.discoverEventListeners(context, new EventListenerQuery(new RepositoryId("orders"), new RepositoryRevision(REVISION),
                     "example.events.VideoReady", 0, 20)).candidates()).hasSize(1);
-            assertThat(service.resolveDeclaration(new DeclarationResolutionQuery(new RepositoryId("orders"), new RepositoryRevision(REVISION),
+            assertThat(service.resolveDeclaration(context, new DeclarationResolutionQuery(new RepositoryId("orders"), new RepositoryRevision(REVISION),
                     type, "onReady", Optional.empty())).declaration()).isPresent();
-            assertThat(service.resolveDeclaration(new DeclarationResolutionQuery(new RepositoryId("orders"), new RepositoryRevision(REVISION),
+            assertThat(service.resolveDeclaration(context, new DeclarationResolutionQuery(new RepositoryId("orders"), new RepositoryRevision(REVISION),
                     type, "localVariable", Optional.empty())).declaration()).isEmpty();
-            com.java.semantic.model.codefact.TypeMemberResult methods = service.discoverTypeMembers(new TypeMemberQuery(
+            com.java.semantic.model.codefact.TypeMemberResult methods = service.discoverTypeMembers(context, new TypeMemberQuery(
                     new RepositoryId("orders"), new RepositoryRevision(REVISION), type, Set.of(CodeFactKind.METHOD), 0, 20));
             assertThat(methods.members()).extracting(member -> member.fact().identity().canonicalForm())
                     .containsExactly(identity.canonicalForm());
@@ -63,11 +64,11 @@ class PublishedDiscoveryContractIT extends PublishedMongoITSupport {
             seedMember(template, type, CodeFactKind.FIELD, "state", 2);
             seedMember(template, type, CodeFactKind.ENUM_CONSTANT, "READY", 3);
             seedMember(template, type, CodeFactKind.RECORD_COMPONENT, "id", 4);
-            com.java.semantic.model.codefact.TypeMemberResult allMembers = service.discoverTypeMembers(new TypeMemberQuery(
+            com.java.semantic.model.codefact.TypeMemberResult allMembers = service.discoverTypeMembers(context, new TypeMemberQuery(
                     new RepositoryId("orders"), new RepositoryRevision(REVISION), type, TypeMemberQuery.MEMBER_KINDS, 0, 20));
             assertThat(allMembers.members()).extracting(member -> member.fact().identity().kind())
                     .containsExactly(CodeFactKind.ENUM_CONSTANT, CodeFactKind.FIELD, CodeFactKind.METHOD, CodeFactKind.RECORD_COMPONENT);
-            com.java.semantic.model.codefact.TypeMemberResult page = service.discoverTypeMembers(new TypeMemberQuery(
+            com.java.semantic.model.codefact.TypeMemberResult page = service.discoverTypeMembers(context, new TypeMemberQuery(
                     new RepositoryId("orders"), new RepositoryRevision(REVISION), type, TypeMemberQuery.MEMBER_KINDS, 1, 2));
             assertThat(page.totalCount()).isEqualTo(4);
             assertThat(page.hasMore()).isTrue();
@@ -99,10 +100,12 @@ class PublishedDiscoveryContractIT extends PublishedMongoITSupport {
                     .addCommandListener(listener).build();
             try (MongoClient client = MongoClients.create(settings)) {
                 MongoTemplate observedTemplate = new MongoTemplate(client, "published_listener_page");
+                CurrentGenerationSelector selector = selector(observedTemplate, policy());
+                SelectedGeneration context = selector.select("orders", REVISION, SelectedGenerationGuard.SYMBOLS);
                 PublishedDiscoveryQueryService service = new PublishedDiscoveryQueryService(observedTemplate,
-                        selector(observedTemplate, policy()), Duration.ofSeconds(2));
+                        guard(observedTemplate, policy()), Duration.ofSeconds(2));
 
-                com.java.semantic.model.codefact.EventListenerResult result = service.discoverEventListeners(new EventListenerQuery(
+                com.java.semantic.model.codefact.EventListenerResult result = service.discoverEventListeners(context, new EventListenerQuery(
                         new RepositoryId("orders"), new RepositoryRevision(REVISION), "example.events.VideoReady", 1, 1));
 
                 assertThat(result.totalCount()).isEqualTo(2);
@@ -138,9 +141,12 @@ class PublishedDiscoveryContractIT extends PublishedMongoITSupport {
             ConfiguredReadPolicy deniedPolicy = new ConfiguredReadPolicy(new ReadPolicyProperties(List.of(), List.of(), List.of(),
                     List.of(new ReadPolicyProperties.MethodRule("orders", "example.private", "PrivateListener", "onVideo",
                             List.of("example.events.VideoReady")))));
-            PublishedDiscoveryQueryService service = new PublishedDiscoveryQueryService(template, selector(template, deniedPolicy), Duration.ofSeconds(2));
+            CurrentGenerationSelector selector = selector(template, deniedPolicy);
+            SelectedGeneration context = selector.select("orders", REVISION, SelectedGenerationGuard.SYMBOLS);
+            PublishedDiscoveryQueryService service = new PublishedDiscoveryQueryService(template,
+                    guard(template, deniedPolicy), Duration.ofSeconds(2));
 
-            com.java.semantic.model.codefact.EventListenerResult result = service.discoverEventListeners(new EventListenerQuery(
+            com.java.semantic.model.codefact.EventListenerResult result = service.discoverEventListeners(context, new EventListenerQuery(
                     new RepositoryId("orders"), new RepositoryRevision(REVISION), "example.events.VideoReady", 1, 1));
 
             assertThat(result.totalCount()).isEqualTo(1);

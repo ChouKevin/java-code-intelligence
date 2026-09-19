@@ -27,29 +27,19 @@ import java.util.concurrent.TimeUnit;
 /** Derived search reader that exposes a row only after its authoritative declaration validates. */
 public final class CodeFactSearchService {
     private final MongoTemplate template;
-    private final CurrentGenerationSelector selector;
+    private final SelectedGenerationGuard guard;
     private final Duration storageTimeout;
     private final CodeFactReadService codeFactReader;
     private final SourceIndexCoverageReader coverageReader;
 
-    public CodeFactSearchService(MongoTemplate template, CurrentGenerationSelector selector, Duration storageTimeout) {
+    public CodeFactSearchService(MongoTemplate template, SelectedGenerationGuard guard, Duration storageTimeout) {
         this.template = Objects.requireNonNull(template, "mongo template is required");
-        this.selector = Objects.requireNonNull(selector, "current generation selector is required");
+        this.guard = Objects.requireNonNull(guard, "selected generation guard is required");
         this.storageTimeout = Objects.requireNonNull(storageTimeout, "storage timeout is required");
-        this.codeFactReader = new CodeFactReadService(template, selector, storageTimeout);
+        this.codeFactReader = new CodeFactReadService(template, guard, storageTimeout);
         this.coverageReader = new SourceIndexCoverageReader(template, storageTimeout);
     }
 
-    CurrentGenerationSelector selector() {
-        return selector;
-    }
-
-    public CodeFactSearchResult search(CodeFactSearchQuery query) {
-        CodeFactSearchQuery requiredQuery = Objects.requireNonNull(query, "query is required");
-        SelectedGeneration context = selector.select(requiredQuery.repositoryId().value(), requiredQuery.revision().value(),
-                CodeFactReadService.requirementsForSearchKinds(requiredQuery.kinds()));
-        return search(context, requiredQuery);
-    }
 
     public CodeFactSearchResult search(SelectedGeneration context, CodeFactSearchQuery query) {
         SelectedGeneration selected = Objects.requireNonNull(context, "selected generation is required");
@@ -57,10 +47,10 @@ public final class CodeFactSearchService {
         if (!selected.repositoryId().equals(requiredQuery.repositoryId()) || !selected.revision().equals(requiredQuery.revision())) {
             throw new IllegalArgumentException("query repository and revision must match the selected generation");
         }
-        selector.requireCompatible(selected, CodeFactReadService.requirementsForSearchKinds(requiredQuery.kinds()));
-        SearchAccessPlan accessPlan = selector.searchAccessPlan(requiredQuery.repositoryId().value());
+        SearchAccessPlan accessPlan = guard.searchAccessPlan(requiredQuery.repositoryId().value());
         requiredQuery.packagePrefix().filter(prefix -> !accessPlan.isPackageVisible(prefix))
                 .ifPresent(prefix -> { throw new RepositoryNotFoundException(); });
+        guard.require(selected, CodeFactReadService.requirementsForSearchKinds(requiredQuery.kinds()));
         List<String> tokens = normalizedTokens(requiredQuery.query());
         try {
             Bson filter = accessPlan.authorized(filter(selected, requiredQuery, tokens));
@@ -72,7 +62,7 @@ public final class CodeFactSearchService {
             List<CodeFactSummary> facts = new ArrayList<>();
             for (Document row : rows) {
                 CodeFactSummary fact = authoritativeFact(row, selected);
-                selector.requireVisible(selected, fact.fact().identity());
+                guard.requireVisible(selected, fact.fact().identity());
                 facts.add(fact);
             }
             return new CodeFactSearchResult(selected, requiredQuery, facts, total, requiredQuery.offset() + facts.size() < total,

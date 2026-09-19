@@ -57,11 +57,13 @@ class PublishedRelationContractIT extends PublishedMongoITSupport {
             seedRelation(template, alpha, RelationKind.REFERENCES, new RelationTarget.Internal(declaration), alphaRange);
             seedRelation(template, beta, RelationKind.IMPLEMENTS, new RelationTarget.Internal(declaration), betaRange);
             seedRelation(template, alpha, RelationKind.OVERRIDES, new RelationTarget.Internal(declaration), alphaRange);
-            PublishedRelationQueryService service = new PublishedRelationQueryService(template, selector(template, policy()), Duration.ofSeconds(2));
+            CurrentGenerationSelector selector = selector(template, policy());
+            SelectedGeneration context = selector.selectCodeFact("orders", REVISION, declaration, SelectedGenerationGuard.RELATIONS);
+            PublishedRelationQueryService service = new PublishedRelationQueryService(template, guard(template, policy()), Duration.ofSeconds(2));
             PublishedRelationQuery query = new PublishedRelationQuery(new RepositoryId("orders"), new RepositoryRevision(REVISION), declaration, 0, 1);
 
-            PublishedRelationResult references = service.findReferences(query);
-            PublishedRelationResult implementations = service.findImplementations(new PublishedRelationQuery(
+            PublishedRelationResult references = service.findReferences(context, query);
+            PublishedRelationResult implementations = service.findImplementations(context, new PublishedRelationQuery(
                     new RepositoryId("orders"), new RepositoryRevision(REVISION), declaration, 0, 20));
 
             assertThat(references.generation().generationId().value()).isEqualTo("g1");
@@ -86,12 +88,15 @@ class PublishedRelationContractIT extends PublishedMongoITSupport {
             seedMethod(template, declaration, List.of());
             seedMethod(template, privateSource, List.of());
             seedRelation(template, privateSource, RelationKind.REFERENCES, new RelationTarget.Internal(declaration), range(privateSource, 4));
-            PublishedRelationQueryService service = new PublishedRelationQueryService(template,
-                    selector(template, policy(new com.java.semantic.query.config.ReadPolicyProperties.PackageRule("orders", "example.privatecode"))),
+            CurrentGenerationSelector selector = selector(template,
+                    policy(new com.java.semantic.query.config.ReadPolicyProperties.PackageRule("orders", "example.privatecode")));
+            SelectedGeneration context = selector.selectCodeFact("orders", REVISION, declaration, SelectedGenerationGuard.RELATIONS);
+            PublishedRelationQueryService service = new PublishedRelationQueryService(template, guard(template,
+                    policy(new com.java.semantic.query.config.ReadPolicyProperties.PackageRule("orders", "example.privatecode"))),
                     Duration.ofSeconds(2));
-
-            PublishedRelationResult result = service.findReferences(new PublishedRelationQuery(new RepositoryId("orders"),
-                    new RepositoryRevision(REVISION), declaration, 0, 20));
+            PublishedRelationQuery query = new PublishedRelationQuery(new RepositoryId("orders"),
+                    new RepositoryRevision(REVISION), declaration, 0, 20);
+            PublishedRelationResult result = service.findReferences(context, query);
 
             assertThat(result.relations()).isEmpty();
             assertThat(result.page().totalCount()).isZero();
@@ -115,11 +120,13 @@ class PublishedRelationContractIT extends PublishedMongoITSupport {
             seedMethod(template, callee, List.of());
             seedRelation(template, caller, RelationKind.CALLS, new RelationTarget.Internal(method), range(caller, 4));
             seedRelation(template, method, RelationKind.CALLS, new RelationTarget.Internal(callee), range(method, 8));
-            PublishedRelationQueryService service = new PublishedRelationQueryService(template, selector(template, policy()), Duration.ofSeconds(2));
+            CurrentGenerationSelector selector = selector(template, policy());
+            SelectedGeneration context = selector.selectCodeFact("orders", REVISION, method, SelectedGenerationGuard.RELATIONS);
+            PublishedRelationQueryService service = new PublishedRelationQueryService(template, guard(template, policy()), Duration.ofSeconds(2));
             PublishedRelationQuery query = new PublishedRelationQuery(new RepositoryId("orders"), new RepositoryRevision(REVISION), method, 0, 20);
 
-            PublishedRelationResult callers = service.findCallers(query);
-            PublishedRelationResult callees = service.findCallees(query);
+            PublishedRelationResult callers = service.findCallers(context, query);
+            PublishedRelationResult callees = service.findCallees(context, query);
 
             assertThat(callers.relations()).extracting(relation -> relation.from().canonicalForm()).containsExactly(caller.canonicalForm());
             assertThat(callees.relations()).extracting(relation -> relation.target().canonicalForm())
@@ -139,17 +146,18 @@ class PublishedRelationContractIT extends PublishedMongoITSupport {
             seedRelation(template, source, RelationKind.REFERENCES, new RelationTarget.Internal(declaration), range(source, 4));
             template.getCollection("relations").updateOne(new Document("from", source.canonicalForm()),
                     new Document("$set", new Document("canonical", "forged-canonical")));
-            PublishedRelationQueryService service = new PublishedRelationQueryService(template, selector(template, policy()), Duration.ofSeconds(2));
+            CurrentGenerationSelector selector = selector(template, policy());
+            SelectedGeneration current = selector.selectCodeFact("orders", REVISION, declaration, SelectedGenerationGuard.RELATIONS);
+            PublishedRelationQueryService service = new PublishedRelationQueryService(template, guard(template, policy()), Duration.ofSeconds(2));
+            PublishedRelationQuery query = new PublishedRelationQuery(new RepositoryId("orders"),
+                    new RepositoryRevision(REVISION), declaration, 0, 20);
 
-            assertThatThrownBy(() -> service.findReferences(new PublishedRelationQuery(new RepositoryId("orders"),
-                    new RepositoryRevision(REVISION), declaration, 0, 20)))
+            assertThatThrownBy(() -> service.findReferences(current, query))
                     .isInstanceOf(IndexContractMismatchException.class)
                     .hasMessage("INDEX_CONTRACT_MISMATCH");
             template.getCollection("relations").updateOne(new Document("from", source.canonicalForm()),
                     new Document("$set", new Document("canonical", seedRelationCanonical(source, declaration))));
             Document stored = template.getCollection("relations").find().first();
-            SelectedGeneration current = selector(template, policy()).selectCodeFact("orders", REVISION, declaration,
-                    CurrentGenerationSelector.RELATIONS);
 
             for (Document mutation : List.of(
                     new Document("repoId", "billing"),

@@ -64,9 +64,9 @@ class SemanticQueryFacadeDiscoveryTest {
         CodeFactDetails method = new CodeFactDetails(generation, new CodeFact(CodeFactId.from(methodIdentity), methodIdentity), range(), List.of());
         CodeFactReadService facts = mock(CodeFactReadService.class);
         PublishedDiscoveryQueryService discovery = mock(PublishedDiscoveryQueryService.class);
-        when(facts.get(new CodeFactReadQuery(new RepositoryId(REPOSITORY), new RepositoryRevision(REVISION), CodeFactId.from(typeIdentity))))
+        when(facts.get(generation, new CodeFactReadQuery(new RepositoryId(REPOSITORY), new RepositoryRevision(REVISION), CodeFactId.from(typeIdentity))))
                 .thenReturn(type);
-        when(discovery.discoverTypeMembers(any())).thenReturn(new com.java.semantic.model.codefact.TypeMemberResult(generation,
+        when(discovery.discoverTypeMembers(any(SelectedGeneration.class), any(TypeMemberQuery.class))).thenReturn(new com.java.semantic.model.codefact.TypeMemberResult(generation,
                 new com.java.semantic.model.codefact.TypeMemberQuery(new RepositoryId(REPOSITORY), new RepositoryRevision(REVISION), TYPE,
                         Set.of(CodeFactKind.METHOD), 0, 20),
                 List.of(new com.java.semantic.model.codefact.CodeFactSummary(method.fact(), method.location())), 1, false,
@@ -89,7 +89,7 @@ class SemanticQueryFacadeDiscoveryTest {
                 CodeFactKind.METHOD, new MethodTarget(TYPE, "pay", List.of()));
         CodeFactDetails method = new CodeFactDetails(generation, new CodeFact(CodeFactId.from(methodIdentity), methodIdentity), range(), List.of());
         CodeFactReadService facts = mock(CodeFactReadService.class);
-        when(facts.get(new CodeFactReadQuery(new RepositoryId(REPOSITORY), new RepositoryRevision(REVISION), CodeFactId.from(methodIdentity))))
+        when(facts.get(generation, new CodeFactReadQuery(new RepositoryId(REPOSITORY), new RepositoryRevision(REVISION), CodeFactId.from(methodIdentity))))
                 .thenReturn(method);
 
         SemanticQueryFacade facade = facade(facts, mock(PublishedDiscoveryQueryService.class));
@@ -111,11 +111,11 @@ class SemanticQueryFacadeDiscoveryTest {
                 summary(CodeFactKind.ENUM_CONSTANT, new MemberIdentity(TYPE, "PAID")),
                 summary(CodeFactKind.RECORD_COMPONENT, new MemberIdentity(TYPE, "receipt")));
         CodeFactReadService facts = mock(CodeFactReadService.class);
-        when(facts.get(new CodeFactReadQuery(new RepositoryId(REPOSITORY), new RepositoryRevision(REVISION), CodeFactId.from(typeIdentity))))
+        when(facts.get(generation, new CodeFactReadQuery(new RepositoryId(REPOSITORY), new RepositoryRevision(REVISION), CodeFactId.from(typeIdentity))))
                 .thenReturn(details(generation, typeIdentity));
         PublishedDiscoveryQueryService discovery = mock(PublishedDiscoveryQueryService.class);
-        when(discovery.discoverTypeMembers(any())).thenAnswer(invocation -> {
-            TypeMemberQuery query = invocation.getArgument(0);
+        when(discovery.discoverTypeMembers(any(SelectedGeneration.class), any(TypeMemberQuery.class))).thenAnswer(invocation -> {
+            TypeMemberQuery query = invocation.getArgument(1);
             return new TypeMemberResult(generation, query, members, members.size(), false,
                     new SourceIndexCoverage(0, List.of()));
         });
@@ -126,7 +126,7 @@ class SemanticQueryFacadeDiscoveryTest {
                 CodeFactId.from(typeIdentity).value(), Set.of(), 0, 20));
 
         ArgumentCaptor<TypeMemberQuery> queryCaptor = ArgumentCaptor.forClass(TypeMemberQuery.class);
-        verify(discovery).discoverTypeMembers(queryCaptor.capture());
+        verify(discovery).discoverTypeMembers(any(SelectedGeneration.class), queryCaptor.capture());
         assertEquals(Set.of(CodeFactKind.METHOD, CodeFactKind.FIELD, CodeFactKind.ENUM_CONSTANT, CodeFactKind.RECORD_COMPONENT),
                 queryCaptor.getValue().kinds());
         assertEquals(List.of(CodeFactKind.METHOD, CodeFactKind.FIELD, CodeFactKind.ENUM_CONSTANT, CodeFactKind.RECORD_COMPONENT),
@@ -145,12 +145,13 @@ class SemanticQueryFacadeDiscoveryTest {
         CodeFactIdentity methodFact = new CodeFactIdentity(new RepositoryId(REPOSITORY), new RepositoryRevision(REVISION),
                 CodeFactKind.METHOD, target);
         CodeFactReadService facts = mock(CodeFactReadService.class);
-        when(facts.get(new CodeFactReadQuery(new RepositoryId(REPOSITORY), new RepositoryRevision(REVISION), CodeFactId.from(entryPointFact))))
+        when(facts.get(generation, new CodeFactReadQuery(new RepositoryId(REPOSITORY), new RepositoryRevision(REVISION), CodeFactId.from(entryPointFact))))
                 .thenReturn(details(generation, entryPointFact));
-        when(facts.get(new CodeFactReadQuery(new RepositoryId(REPOSITORY), new RepositoryRevision(REVISION), CodeFactId.from(methodFact))))
+        when(facts.get(generation, new CodeFactReadQuery(new RepositoryId(REPOSITORY), new RepositoryRevision(REVISION), CodeFactId.from(methodFact))))
                 .thenReturn(details(generation, methodFact));
         PublishedEntryPointQueryService entryPoints = mock(PublishedEntryPointQueryService.class);
-        when(entryPoints.listEntryPoints(REPOSITORY, REVISION, Set.of(EntryPointKind.HTTP), 0, 20))
+        when(entryPoints.listEntryPoints(any(SelectedGeneration.class), any(String.class), any(String.class),
+                any(), anyInt(), anyInt()))
                 .thenReturn(new PublishedEntryPointResult(generation, List.of(new PublishedEntryPoint(generation,
                         CodeFactId.from(entryPointFact).value(), entryPointIdentity.canonicalForm(), EntryPointKind.HTTP,
                         target.canonicalForm(), "/payments", TYPE.sourceFile())), 2, true));
@@ -174,11 +175,11 @@ class SemanticQueryFacadeDiscoveryTest {
         CodeFactIdentity methodFact = new CodeFactIdentity(new RepositoryId(REPOSITORY), new RepositoryRevision(REVISION),
                 CodeFactKind.METHOD, target);
         CodeFactReadService facts = mock(CodeFactReadService.class);
-        when(facts.get(new CodeFactReadQuery(new RepositoryId(REPOSITORY), new RepositoryRevision(REVISION), CodeFactId.from(methodFact))))
+        when(facts.get(generation, new CodeFactReadQuery(new RepositoryId(REPOSITORY), new RepositoryRevision(REVISION), CodeFactId.from(methodFact))))
                 .thenReturn(details(generation, methodFact));
         PublishedDiscoveryQueryService discovery = mock(PublishedDiscoveryQueryService.class);
         String eventType = "com.example.payment.PaymentReceived";
-        when(discovery.discoverEventListeners(any())).thenReturn(new EventListenerResult(generation,
+        when(discovery.discoverEventListeners(any(SelectedGeneration.class), any(EventListenerQuery.class))).thenReturn(new EventListenerResult(generation,
                 new EventListenerQuery(new RepositoryId(REPOSITORY), new RepositoryRevision(REVISION), eventType, 0, 20),
                 List.of(new EventListenerCandidate(target, range(), List.of())), 1, false));
 
@@ -191,7 +192,6 @@ class SemanticQueryFacadeDiscoveryTest {
         assertEquals(eventType, item.eventType());
         assertEquals(CodeFactKind.METHOD, item.handler().kind());
     }
-
     private static SemanticQueryFacade facade(CodeFactReadService facts, PublishedDiscoveryQueryService discovery) {
         return facade(facts, discovery, mock(PublishedEntryPointQueryService.class));
     }
@@ -202,21 +202,11 @@ class SemanticQueryFacadeDiscoveryTest {
         CurrentGenerationSelector selector = mock(CurrentGenerationSelector.class);
         CodeFactSearchService search = mock(CodeFactSearchService.class);
         when(selector.select(any(String.class), any(String.class), any())).thenReturn(generation());
-        when(search.selector()).thenReturn(selector);
-        when(facts.get(any(SelectedGeneration.class), any(CodeFactReadQuery.class)))
-                .thenAnswer(invocation -> facts.get(invocation.getArgument(1)));
         when(source.factSource(any(SelectedGeneration.class), any(CodeFactReadQuery.class), anyInt()))
-                .thenAnswer(invocation -> source.factSource(invocation.getArgument(1), invocation.getArgument(2)));
-        when(source.factSource(any(CodeFactReadQuery.class), anyInt())).thenReturn(new FactSourceSlice(generation(), range(), range(), "x"));
-        when(discovery.discoverTypeMembers(any(SelectedGeneration.class), any(TypeMemberQuery.class)))
-                .thenAnswer(invocation -> discovery.discoverTypeMembers(invocation.getArgument(1)));
-        when(discovery.discoverEventListeners(any(SelectedGeneration.class), any(EventListenerQuery.class)))
-                .thenAnswer(invocation -> discovery.discoverEventListeners(invocation.getArgument(1)));
-        when(entryPoints.listEntryPoints(any(SelectedGeneration.class), any(String.class), any(String.class), any(), anyInt(), anyInt()))
-                .thenAnswer(invocation -> entryPoints.listEntryPoints(invocation.getArgument(1), invocation.getArgument(2),
-                        invocation.getArgument(3), invocation.getArgument(4), invocation.getArgument(5)));
-        return new SemanticQueryFacade(mock(CurrentRepositoryQueryService.class), search, source, facts,
-                discovery, entryPoints, mock(PublishedRelationQueryService.class));
+                .thenReturn(new FactSourceSlice(generation(), range(), range(), "x"));
+        SelectedSemanticQueryService selected = new SelectedSemanticQueryService(search, source, facts, discovery,
+                entryPoints, mock(PublishedRelationQueryService.class));
+        return new SemanticQueryFacade(selector, selected, mock(CurrentRepositoryQueryService.class));
     }
 
     private static CodeFactDetails details(SelectedGeneration generation, CodeFactIdentity identity) {

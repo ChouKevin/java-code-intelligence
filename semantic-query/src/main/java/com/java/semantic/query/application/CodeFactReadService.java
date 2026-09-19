@@ -38,25 +38,18 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
-/** Resolves derived search rows to their one authoritative current-generation fact. */
+/** Resolves derived search rows to their one authoritative selected-generation fact. */
 public final class CodeFactReadService {
     private final MongoTemplate template;
-    private final CurrentGenerationSelector selector;
+    private final SelectedGenerationGuard guard;
     private final Duration storageTimeout;
 
-    public CodeFactReadService(MongoTemplate template, CurrentGenerationSelector selector, Duration storageTimeout) {
+    public CodeFactReadService(MongoTemplate template, SelectedGenerationGuard guard, Duration storageTimeout) {
         this.template = Objects.requireNonNull(template, "mongo template is required");
-        this.selector = Objects.requireNonNull(selector, "current generation selector is required");
+        this.guard = Objects.requireNonNull(guard, "selected generation guard is required");
         this.storageTimeout = Objects.requireNonNull(storageTimeout, "storage timeout is required");
     }
 
-    /** Public exact-read contract: the opaque id must have been published by an authorized search row. */
-    public CodeFactDetails get(CodeFactReadQuery query) {
-        CodeFactReadQuery request = Objects.requireNonNull(query, "code fact read query is required");
-        SelectedGeneration context = selector.select(request.repositoryId().value(), request.revision().value(),
-                new ProjectionRequirements(EnumSet.of(ProjectionName.SEARCH)));
-        return get(context, request);
-    }
 
     public CodeFactDetails get(SelectedGeneration context, CodeFactReadQuery query) {
         SelectedGeneration selected = Objects.requireNonNull(context, "selected generation is required");
@@ -64,8 +57,8 @@ public final class CodeFactReadService {
         if (!selected.repositoryId().equals(request.repositoryId()) || !selected.revision().equals(request.revision())) {
             throw new IllegalArgumentException("query repository and revision must match the selected generation");
         }
-        SearchAccessPlan accessPlan = selector.searchAccessPlan(request.repositoryId().value());
-        selector.requireCompatible(selected, new ProjectionRequirements(EnumSet.of(ProjectionName.SEARCH)));
+        SearchAccessPlan accessPlan = guard.searchAccessPlan(request.repositoryId().value());
+        guard.require(selected, new ProjectionRequirements(EnumSet.of(ProjectionName.SEARCH)));
         try {
             Bson filter = accessPlan.authorized(Filters.and(Filters.eq("repoId", selected.repositoryId().value()),
                     Filters.eq("generationId", selected.generationId().value()), Filters.eq("factId", request.factId().value())));
@@ -73,10 +66,10 @@ public final class CodeFactReadService {
                     .maxTime(storageTimeout.toMillis(), TimeUnit.MILLISECONDS).first();
             if (Objects.isNull(row)) { throw new CodeFactNotFoundException(); }
             SearchRow search = searchRow(row, selected);
-            selector.requireCompatible(selected, requirementsForSearchKinds(Set.of(search.kind())));
+            guard.require(selected, requirementsForSearchKinds(Set.of(search.kind())));
             CodeFactDetails details = authoritative(selected, search.kind(), search.factId());
             verifySearchRow(search, details, selected);
-            selector.requireVisible(selected, details.fact().identity());
+            guard.requireVisible(selected, details.fact().identity());
             return details;
         } catch (MongoException | DataAccessException exception) {
             throw new SemanticIndexUnavailableException(exception);
@@ -88,11 +81,13 @@ public final class CodeFactReadService {
     }
 
     /** Internal exact-identity helper for source slices that have not yet been handed a search hit. */
-    CodeFactDetails get(String repositoryId, String revision, CodeFactIdentity identity) {
+    CodeFactDetails get(SelectedGeneration context, CodeFactIdentity identity) {
+        SelectedGeneration selected = Objects.requireNonNull(context, "selected generation is required");
         CodeFactIdentity expectedIdentity = Objects.requireNonNull(identity, "code fact identity is required");
-        SelectedGeneration current = selector.selectCodeFact(repositoryId, revision, expectedIdentity);
+        guard.requireVisible(selected, expectedIdentity);
+        guard.require(selected, requirementsForSearchKinds(Set.of(expectedIdentity.kind())));
         try {
-            CodeFactDetails details = authoritative(current, expectedIdentity.kind(), CodeFactId.from(expectedIdentity));
+            CodeFactDetails details = authoritative(selected, expectedIdentity.kind(), CodeFactId.from(expectedIdentity));
             if (!expectedIdentity.equals(details.fact().identity())) { throw new IndexContractMismatchException(); }
             return details;
         } catch (MongoException | DataAccessException exception) {

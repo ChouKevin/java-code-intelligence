@@ -68,14 +68,14 @@ public final class SelectedSemanticQueryService {
     }
 
     public static SelectedSemanticQueryService create(org.springframework.data.mongodb.core.MongoTemplate template,
-                                                       CurrentGenerationSelector selector, Duration storageTimeout) {
-        CodeFactReadService factReader = new CodeFactReadService(template, selector, storageTimeout);
-        CurrentSourceQueryService sourceReader = new CurrentSourceQueryService(template, selector, storageTimeout);
-        return new SelectedSemanticQueryService(new CodeFactSearchService(template, selector, storageTimeout),
+                                                       SelectedGenerationGuard guard, Duration storageTimeout) {
+        CodeFactReadService factReader = new CodeFactReadService(template, guard, storageTimeout);
+        CurrentSourceQueryService sourceReader = new CurrentSourceQueryService(template, guard, storageTimeout);
+        return new SelectedSemanticQueryService(new CodeFactSearchService(template, guard, storageTimeout),
                 new SourceSliceService(sourceReader, factReader), factReader,
-                new PublishedDiscoveryQueryService(template, selector, storageTimeout),
-                new PublishedEntryPointQueryService(template, selector, storageTimeout),
-                new PublishedRelationQueryService(template, selector, storageTimeout));
+                new PublishedDiscoveryQueryService(template, guard, storageTimeout),
+                new PublishedEntryPointQueryService(template, guard, storageTimeout),
+                new PublishedRelationQueryService(template, guard, storageTimeout));
     }
 
     public SearchCodeResult searchCode(SelectedGeneration context, SearchCodeRequest request) {

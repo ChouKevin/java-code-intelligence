@@ -16,6 +16,8 @@ import com.java.semantic.model.index.IndexSchemaContract;
 import com.java.semantic.model.index.SourceIndexScope;
 import com.java.semantic.model.index.GenerationId;
 import com.java.semantic.model.index.SourceArtifactDocument;
+import com.java.semantic.model.index.ManifestDigest;
+import com.java.semantic.model.query.SelectedGeneration;
 import com.java.semantic.model.index.SourceArtifactId;
 import com.java.semantic.model.index.SymbolDocument;
 import com.java.semantic.model.repository.RepositoryId;
@@ -78,9 +80,10 @@ class CurrentQueryContractIT {
         SourceArtifactDocument artifact = seedSource("orders", "g1", type.sourceFile(), content);
         seedTypeSymbol("orders", REVISION, "g1", type, artifact.id());
 
-        assertThat(sourceService(policy()).getSource("orders", REVISION, type).utf8Content()).isEqualTo(content);
+        assertThat(sourceService(policy()).getSource(sourceContext(policy(), "orders", REVISION, type), type).utf8Content()).isEqualTo(content);
         assertThatThrownBy(() -> sourceService(policy(new ReadPolicyProperties.PackageRule("orders", "example")))
-                .getSource("orders", REVISION, type)).isInstanceOf(RepositoryNotFoundException.class);
+                .getSource(sourceContext(policy(new ReadPolicyProperties.PackageRule("orders", "example")), "orders", REVISION, type), type))
+                .isInstanceOf(RepositoryNotFoundException.class);
 
         seedManifest("orders", REVISION_2, "g2", DIGEST_2, true);
         String currentContent = "package example.api; class OrderService { String revision = \"R2\"; }";
@@ -88,14 +91,14 @@ class CurrentQueryContractIT {
         seedTypeSymbol("orders", REVISION_2, "g2", type, currentArtifact.id());
         seedCurrent("orders", REVISION_2, "g2", DIGEST_2);
 
-        assertThatThrownBy(() -> sourceService(policy()).getSource("orders", REVISION, type))
+        assertThatThrownBy(() -> sourceService(policy()).getSource(sourceContext(policy(), "orders", REVISION, type), type))
                 .isInstanceOfSatisfying(RevisionOutdatedException.class,
                         exception -> assertThat(exception.currentRevision().value()).isEqualTo(REVISION_2));
-        assertThat(sourceService(policy()).getSource("orders", REVISION_2, type).utf8Content()).isEqualTo(currentContent);
+        assertThat(sourceService(policy()).getSource(sourceContext(policy(), "orders", REVISION_2, type), type).utf8Content()).isEqualTo(currentContent);
 
         seedCurrent("orders", REVISION, "g1", DIGEST);
-        assertThat(sourceService(policy()).getSource("orders", REVISION, type).utf8Content()).isEqualTo(content);
-        assertThatThrownBy(() -> sourceService(policy()).getSource("orders", REVISION_2, type))
+        assertThat(sourceService(policy()).getSource(sourceContext(policy(), "orders", REVISION, type), type).utf8Content()).isEqualTo(content);
+        assertThatThrownBy(() -> sourceService(policy()).getSource(sourceContext(policy(), "orders", REVISION_2, type), type))
                 .isInstanceOfSatisfying(RevisionOutdatedException.class,
                         exception -> assertThat(exception.currentRevision().value()).isEqualTo(REVISION));
     }
@@ -130,20 +133,26 @@ class CurrentQueryContractIT {
         seedCurrent("orders");
         seedManifest("orders", true);
         seedMethodSymbol("orders", REVISION, "g1", method);
-        CurrentSymbolQueryService service = new CurrentSymbolQueryService(template, selector(policy()), Duration.ofSeconds(2));
+        CurrentGenerationSelector selector = selector(policy());
+        SelectedGeneration context = selector.selectCodeFact("orders", REVISION, identity, SelectedGenerationGuard.SYMBOLS);
+        CurrentSymbolQueryService service = new CurrentSymbolQueryService(template, guard(policy()), Duration.ofSeconds(2));
 
-        assertThat(service.getSymbol("orders", REVISION, identity).symbolId()).isEqualTo(CodeFactId.from(identity).value());
-        assertThatThrownBy(() -> new CurrentSymbolQueryService(template, selector(policy(new ReadPolicyProperties.MethodRule(
-                "orders", "example.api", "OrderService", "find", List.of("java.lang.String")))), Duration.ofSeconds(2))
-                .getSymbol("orders", REVISION, identity)).isInstanceOf(RepositoryNotFoundException.class);
+        assertThat(service.getSymbol(context, identity).symbolId()).isEqualTo(CodeFactId.from(identity).value());
+        ConfiguredReadPolicy deniedPolicy = policy(new ReadPolicyProperties.MethodRule(
+                "orders", "example.api", "OrderService", "find", List.of("java.lang.String")));
+        assertThatThrownBy(() -> new CurrentSymbolQueryService(template, guard(deniedPolicy), Duration.ofSeconds(2))
+                .getSymbol(selector(deniedPolicy).selectCodeFact("orders", REVISION, identity, SelectedGenerationGuard.SYMBOLS), identity))
+                .isInstanceOf(RepositoryNotFoundException.class);
     }
 
     @Test
     void hides_forbidden_repositories_before_validating_typed_identities() {
-        assertThatThrownBy(() -> sourceService(policy("orders")).getSource("orders", REVISION, null))
+        SelectedGeneration hiddenContext = new SelectedGeneration(new RepositoryId("orders"), new RepositoryRevision(REVISION),
+                new GenerationId("g1"), new ManifestDigest(DIGEST));
+        assertThatThrownBy(() -> sourceService(policy("orders")).getSource(hiddenContext, (SourceTypeIdentity) null))
                 .isInstanceOf(RepositoryNotFoundException.class);
-        assertThatThrownBy(() -> new CurrentSymbolQueryService(template, selector(policy("orders")), Duration.ofSeconds(2))
-                .getSymbol("orders", REVISION, null)).isInstanceOf(RepositoryNotFoundException.class);
+        assertThatThrownBy(() -> new CurrentSymbolQueryService(template, guard(policy("orders")), Duration.ofSeconds(2))
+                .getSymbol(hiddenContext, null)).isInstanceOf(RepositoryNotFoundException.class);
     }
 
     @Test
@@ -157,9 +166,10 @@ class CurrentQueryContractIT {
         SourceArtifactDocument artifact = seedSource("orders", "g1", allowed.sourceFile(), "class PublicFacade {} class SecretAdmin {}");
         seedTypeSymbol("orders", REVISION, "g1", allowed, artifact.id());
         seedTypeSymbol("orders", REVISION, "g1", denied, artifact.id());
-
-        assertThatThrownBy(() -> sourceService(policy(new ReadPolicyProperties.ClassRule(
-                "orders", "example.api", "SecretAdmin"))).getSource("orders", REVISION, allowed))
+        ConfiguredReadPolicy deniedPolicy = policy(new ReadPolicyProperties.ClassRule(
+                "orders", "example.api", "SecretAdmin"));
+        assertThatThrownBy(() -> sourceService(deniedPolicy).getSource(
+                sourceContext(deniedPolicy, "orders", REVISION, allowed), allowed))
                 .isInstanceOf(RepositoryNotFoundException.class);
     }
 
@@ -171,11 +181,11 @@ class CurrentQueryContractIT {
                 CodeFactKind.MAPPER_STATEMENT, statement);
         seedCurrent("orders");
         seedManifest("orders", true);
-        seedMapperSymbol("orders", REVISION, "g1", statement);
-
-        assertThatThrownBy(() -> new CurrentSymbolQueryService(template, selector(policy(new ReadPolicyProperties.MethodRule(
-                "orders", "example.api", "OrderMapper", "find", List.of("java.lang.String")))), Duration.ofSeconds(2))
-                .getSymbol("orders", REVISION, identity)).isInstanceOf(RepositoryNotFoundException.class);
+        ConfiguredReadPolicy deniedPolicy = policy(new ReadPolicyProperties.MethodRule(
+                "orders", "example.api", "OrderMapper", "find", List.of("java.lang.String")));
+        assertThatThrownBy(() -> new CurrentSymbolQueryService(template, guard(deniedPolicy), Duration.ofSeconds(2))
+                .getSymbol(symbolContext(deniedPolicy, "orders", REVISION, identity), identity))
+                .isInstanceOf(RepositoryNotFoundException.class);
     }
 
     @Test
@@ -186,7 +196,7 @@ class CurrentQueryContractIT {
         SourceArtifactDocument artifact = seedSource("orders", "g1", type.sourceFile(), "");
         seedTypeSymbol("orders", REVISION, "g1", type, artifact.id());
 
-        assertThat(sourceService(policy()).getSource("orders", REVISION, type).utf8Content()).isEmpty();
+        assertThat(sourceService(policy()).getSource(sourceContext(policy(), "orders", REVISION, type), type).utf8Content()).isEmpty();
     }
 
     @Test
@@ -221,12 +231,14 @@ class CurrentQueryContractIT {
         seedTypeSymbol("orders", REVISION, "g1", ordersType, shared.id());
         seedTypeSymbol("billing", REVISION, "g1", billingType, shared.id());
 
-        assertThatThrownBy(() -> sourceService(policy()).getSource("billing", REVISION, billingType))
+        assertThatThrownBy(() -> sourceService(policy()).getSource(sourceContext(policy(), "billing", REVISION, billingType), billingType))
                 .isInstanceOf(IndexNotReadyException.class);
 
         seedGenerationFile("billing", "g1", billingType.sourceFile(), shared);
-        assertThat(sourceService(policy()).getSource("billing", REVISION, billingType).utf8Content()).isEqualTo(content);
-        assertThatThrownBy(() -> sourceService(policy("billing")).getSource("billing", REVISION, billingType))
+        assertThat(sourceService(policy()).getSource(sourceContext(policy(), "billing", REVISION, billingType), billingType).utf8Content()).isEqualTo(content);
+        assertThatThrownBy(() -> sourceService(policy("billing")).getSource(
+                new SelectedGeneration(new RepositoryId("billing"), new RepositoryRevision(REVISION),
+                        new GenerationId("g1"), new ManifestDigest(DIGEST)), billingType))
                 .isInstanceOf(RepositoryNotFoundException.class);
     }
 
@@ -237,9 +249,10 @@ class CurrentQueryContractIT {
         seedManifest("hidden-current", true);
         seedCurrent("hidden-stale", REVISION_2, "g2", DIGEST_2);
         seedManifest("hidden-stale", REVISION_2, "g2", DIGEST_2, true);
-
         for (String repositoryId : List.of("hidden-missing", "hidden-unpublished", "hidden-current", "hidden-stale")) {
-            assertThatThrownBy(() -> sourceService(policy(repositoryId)).getSource(repositoryId, REVISION, null))
+            SelectedGeneration hiddenContext = new SelectedGeneration(new RepositoryId(repositoryId), new RepositoryRevision(REVISION),
+                    new GenerationId("g1"), new ManifestDigest(DIGEST));
+            assertThatThrownBy(() -> sourceService(policy(repositoryId)).getSource(hiddenContext, (SourceTypeIdentity) null))
                     .isInstanceOf(RepositoryNotFoundException.class)
                     .hasMessage("REPOSITORY_NOT_FOUND")
                     .hasNoCause();
@@ -251,9 +264,11 @@ class CurrentQueryContractIT {
         try (MongoClient unavailableClient = MongoClients.create(
                 "mongodb://127.0.0.1:1/semantic?serverSelectionTimeoutMS=100&connectTimeoutMS=100")) {
             MongoTemplate unavailableTemplate = new MongoTemplate(unavailableClient, "semantic");
+            SelectedGeneration unavailableContext = new SelectedGeneration(new RepositoryId("orders"),
+                    new RepositoryRevision(REVISION), new GenerationId("g1"), new ManifestDigest(DIGEST));
             CurrentSourceQueryService unavailable = new CurrentSourceQueryService(unavailableTemplate,
-                    new CurrentGenerationSelector(unavailableTemplate, policy(), Duration.ofMillis(250)), Duration.ofMillis(250));
-            assertThatThrownBy(() -> unavailable.getSource("orders", REVISION, sourceType()))
+                    new SelectedGenerationGuard(unavailableTemplate, policy(), Duration.ofMillis(250)), Duration.ofMillis(250));
+            assertThatThrownBy(() -> unavailable.getSource(unavailableContext, sourceType()))
                     .isInstanceOf(SemanticIndexUnavailableException.class)
                     .hasMessage("SEMANTIC_INDEX_UNAVAILABLE");
         }
@@ -280,9 +295,11 @@ class CurrentQueryContractIT {
         try (MongoClient client = MongoClients.create(settings)) {
             MongoTemplate observedTemplate = new MongoTemplate(client, "semantic_query_contract_test");
             CurrentGenerationSelector observedSelector = new CurrentGenerationSelector(observedTemplate, policy(), timeout);
-            CurrentSourceQueryService observedService = new CurrentSourceQueryService(observedTemplate, observedSelector, timeout);
+            SelectedGeneration observedContext = observedSelector.selectSource("orders", REVISION, type);
+            CurrentSourceQueryService observedService = new CurrentSourceQueryService(observedTemplate,
+                    new SelectedGenerationGuard(observedTemplate, policy(), timeout), timeout);
 
-            assertThat(observedService.getSource("orders", REVISION, type).utf8Content()).isEqualTo("class OrderService {}");
+            assertThat(observedService.getSource(observedContext, type).utf8Content()).isEqualTo("class OrderService {}");
         }
 
         List<String> expectedCollections = List.of(
@@ -294,7 +311,21 @@ class CurrentQueryContractIT {
     }
 
     private CurrentSourceQueryService sourceService(ConfiguredReadPolicy policy) {
-        return new CurrentSourceQueryService(template, selector(policy), Duration.ofSeconds(2));
+        return new CurrentSourceQueryService(template, guard(policy), Duration.ofSeconds(2));
+    }
+
+    private SelectedGeneration sourceContext(ConfiguredReadPolicy policy, String repositoryId, String revision,
+                                             SourceTypeIdentity sourceType) {
+        return selector(policy).selectSource(repositoryId, revision, sourceType);
+    }
+
+    private SelectedGeneration symbolContext(ConfiguredReadPolicy policy, String repositoryId, String revision,
+                                             CodeFactIdentity identity) {
+        return selector(policy).selectCodeFact(repositoryId, revision, identity, SelectedGenerationGuard.SYMBOLS);
+    }
+
+    private SelectedGenerationGuard guard(ConfiguredReadPolicy policy) {
+        return new SelectedGenerationGuard(template, policy, Duration.ofSeconds(2));
     }
 
     private CurrentGenerationSelector selector(ConfiguredReadPolicy policy) {

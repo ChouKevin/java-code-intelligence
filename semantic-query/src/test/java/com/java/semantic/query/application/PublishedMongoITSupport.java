@@ -18,6 +18,8 @@ import com.java.semantic.model.index.SourceArtifactDocument;
 import com.java.semantic.model.index.GenerationFileDocument;
 import com.java.semantic.model.index.SourceIndexScope;
 import com.java.semantic.model.repository.RepositoryId;
+import com.java.semantic.model.index.ProjectionRequirements;
+import com.java.semantic.model.query.SelectedGeneration;
 import com.java.semantic.model.repository.RepositoryRevision;
 import com.java.semantic.query.config.ConfiguredReadPolicy;
 import com.java.semantic.query.config.ReadPolicyProperties;
@@ -42,6 +44,15 @@ abstract class PublishedMongoITSupport {
 
     static CurrentGenerationSelector selector(MongoTemplate template, ConfiguredReadPolicy policy) {
         return new CurrentGenerationSelector(template, policy, Duration.ofSeconds(2));
+    }
+
+    static SelectedGeneration selected(MongoTemplate template, ConfiguredReadPolicy policy, String repositoryId, String revision,
+                                       ProjectionRequirements requirements) {
+        return selector(template, policy).select(repositoryId, revision, requirements);
+    }
+
+    static SelectedGenerationGuard guard(MongoTemplate template, ConfiguredReadPolicy policy) {
+        return new SelectedGenerationGuard(template, policy, Duration.ofSeconds(2));
     }
 
     static void seedCurrent(MongoTemplate template, String repositoryId) {

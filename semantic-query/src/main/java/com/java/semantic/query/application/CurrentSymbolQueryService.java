@@ -19,25 +19,31 @@ import java.util.concurrent.TimeUnit;
 
 public final class CurrentSymbolQueryService {
     private final MongoTemplate template;
-    private final CurrentGenerationSelector selector;
+    private final SelectedGenerationGuard guard;
     private final Duration storageTimeout;
 
-    public CurrentSymbolQueryService(MongoTemplate template, CurrentGenerationSelector selector, Duration storageTimeout) {
+    public CurrentSymbolQueryService(MongoTemplate template, SelectedGenerationGuard guard, Duration storageTimeout) {
         this.template = Objects.requireNonNull(template, "mongo template is required");
-        this.selector = Objects.requireNonNull(selector, "current generation selector is required");
+        this.guard = Objects.requireNonNull(guard, "selected generation guard is required");
         this.storageTimeout = Objects.requireNonNull(storageTimeout, "storage timeout is required");
     }
 
-    public CurrentSymbol getSymbol(String repositoryId, String revision, CodeFactIdentity identity) {
-        SelectedGeneration current = selector.selectCodeFact(repositoryId, revision, identity);
+    public CurrentSymbol getSymbol(SelectedGeneration context, CodeFactIdentity identity) {
+        SelectedGeneration selected = Objects.requireNonNull(context, "selected generation is required");
+        guard.require(selected, SelectedGenerationGuard.SYMBOLS);
         CodeFactIdentity requestedIdentity = Objects.requireNonNull(identity, "code fact identity is required");
+        if (!selected.repositoryId().equals(requestedIdentity.repositoryId())
+                || !selected.revision().equals(requestedIdentity.repositoryRevision())) {
+            throw new IllegalArgumentException("code fact identity repository and revision must match the selected generation");
+        }
+        guard.requireVisible(selected, requestedIdentity);
         CodeFactId symbolId = CodeFactId.from(requestedIdentity);
         try {
             Document symbol = template.getCollection(IndexCollections.SYMBOLS).find(Filters.and(
-                            Filters.eq("repoId", current.repositoryId().value()), Filters.eq("generationId", current.generationId().value()),
+                            Filters.eq("repoId", selected.repositoryId().value()), Filters.eq("generationId", selected.generationId().value()),
                             Filters.eq("symbolId", symbolId.value()))).maxTime(storageTimeout.toMillis(), TimeUnit.MILLISECONDS).first();
             if (Objects.isNull(symbol)) { throw new IndexNotReadyException(); }
-            SymbolDocument decoded = decodeSymbol(symbol, current);
+            SymbolDocument decoded = decodeSymbol(symbol, selected);
             String canonical = text(symbol, "canonical");
             String sourcePath = text(symbol, "sourcePath");
             CodeFact fact = decoded.fact();
@@ -45,7 +51,7 @@ public final class CurrentSymbolQueryService {
                     || !requestedIdentity.canonicalForm().equals(canonical) || !sourcePath.equals(decoded.range().sourceFile())) {
                 throw new IndexContractMismatchException();
             }
-            return new CurrentSymbol(current, symbolId.value(), canonical, sourcePath);
+            return new CurrentSymbol(selected, symbolId.value(), canonical, sourcePath);
         } catch (MongoException | DataAccessException exception) {
             throw new SemanticIndexUnavailableException(exception);
         } catch (IndexNotReadyException | IndexContractMismatchException exception) {

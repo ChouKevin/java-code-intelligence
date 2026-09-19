@@ -29,18 +29,15 @@ import java.util.concurrent.TimeUnit;
 /** Query boundary for published relation facts. */
 public final class PublishedRelationQueryService {
     private final MongoTemplate template;
-    private final CurrentGenerationSelector generationSelector;
+    private final SelectedGenerationGuard guard;
     private final Duration storageTimeout;
 
-    public PublishedRelationQueryService(MongoTemplate template, CurrentGenerationSelector generationSelector, Duration storageTimeout) {
+    public PublishedRelationQueryService(MongoTemplate template, SelectedGenerationGuard guard, Duration storageTimeout) {
         this.template = Objects.requireNonNull(template, "mongo template is required");
-        this.generationSelector = Objects.requireNonNull(generationSelector, "generation selector is required");
+        this.guard = Objects.requireNonNull(guard, "selected generation guard is required");
         this.storageTimeout = Objects.requireNonNull(storageTimeout, "storage timeout is required");
     }
 
-    public PublishedRelationResult findReferences(PublishedRelationQuery query) {
-        return findByTarget(query, EnumSet.of(RelationKind.REFERENCES));
-    }
 
     public PublishedRelationResult findReferences(SelectedGeneration context, PublishedRelationQuery query) {
         PublishedRelationQuery request = Objects.requireNonNull(query, "relation query is required");
@@ -48,9 +45,6 @@ public final class PublishedRelationQueryService {
                 new RelationTarget.Internal(request.target()).canonicalForm());
     }
 
-    public PublishedRelationResult findImplementations(PublishedRelationQuery query) {
-        return findByTarget(query, EnumSet.of(RelationKind.IMPLEMENTS, RelationKind.OVERRIDES));
-    }
 
     public PublishedRelationResult findImplementations(SelectedGeneration context, PublishedRelationQuery query) {
         PublishedRelationQuery request = Objects.requireNonNull(query, "relation query is required");
@@ -58,9 +52,6 @@ public final class PublishedRelationQueryService {
                 new RelationTarget.Internal(request.target()).canonicalForm());
     }
 
-    public PublishedRelationResult findCallers(PublishedRelationQuery query) {
-        return findByTarget(query, EnumSet.of(RelationKind.CALLS));
-    }
 
     public PublishedRelationResult findCallers(SelectedGeneration context, PublishedRelationQuery query) {
         PublishedRelationQuery request = Objects.requireNonNull(query, "relation query is required");
@@ -68,32 +59,12 @@ public final class PublishedRelationQueryService {
                 new RelationTarget.Internal(request.target()).canonicalForm());
     }
 
-    public PublishedRelationResult findCallees(PublishedRelationQuery query) {
-        return findBySource(query, EnumSet.of(RelationKind.CALLS));
-    }
 
     public PublishedRelationResult findCallees(SelectedGeneration context, PublishedRelationQuery query) {
         PublishedRelationQuery request = Objects.requireNonNull(query, "relation query is required");
         return find(context, request, EnumSet.of(RelationKind.CALLS), "from", request.target().canonicalForm());
     }
 
-    private PublishedRelationResult findByTarget(PublishedRelationQuery query, EnumSet<RelationKind> kinds) {
-        PublishedRelationQuery request = Objects.requireNonNull(query, "relation query is required");
-        return find(request, kinds, "target", new RelationTarget.Internal(request.target()).canonicalForm());
-    }
-
-    private PublishedRelationResult findBySource(PublishedRelationQuery query, EnumSet<RelationKind> kinds) {
-        PublishedRelationQuery request = Objects.requireNonNull(query, "relation query is required");
-        return find(request, kinds, "from", request.target().canonicalForm());
-    }
-
-    private PublishedRelationResult find(PublishedRelationQuery query, EnumSet<RelationKind> kinds, String endpointField,
-                                         String endpointValue) {
-        PublishedRelationQuery request = Objects.requireNonNull(query, "relation query is required");
-        SelectedGeneration context = generationSelector.selectCodeFact(request.repositoryId().value(), request.revision().value(), request.target(),
-                CurrentGenerationSelector.RELATIONS);
-        return find(context, request, kinds, endpointField, endpointValue);
-    }
 
     private PublishedRelationResult find(SelectedGeneration context, PublishedRelationQuery query, EnumSet<RelationKind> kinds,
                                          String endpointField, String endpointValue) {
@@ -102,8 +73,8 @@ public final class PublishedRelationQueryService {
         if (!selected.repositoryId().equals(request.repositoryId()) || !selected.revision().equals(request.revision())) {
             throw new IllegalArgumentException("query repository and revision must match the selected generation");
         }
-        generationSelector.requireCompatible(selected, CurrentGenerationSelector.RELATIONS);
-        generationSelector.requireVisible(selected, request.target());
+        guard.require(selected, SelectedGenerationGuard.RELATIONS);
+        guard.requireVisible(selected, request.target());
         ensureSymbol(selected, request.target());
         List<RelationDocument> visible = readRelations(selected, kinds, endpointField, endpointValue);
         int start = Math.min(request.offset(), visible.size());
@@ -167,9 +138,9 @@ public final class PublishedRelationQueryService {
 
     boolean isVisible(SelectedGeneration current, RelationDocument relation) {
         try {
-            generationSelector.requireVisible(current, relation.from());
+            guard.requireVisible(current, relation.from());
             if (relation.target() instanceof RelationTarget.Internal internalTarget) {
-                generationSelector.requireVisible(current, internalTarget.identity());
+                guard.requireVisible(current, internalTarget.identity());
                 ensureSymbol(current, internalTarget.identity());
             }
             ensureSymbol(current, relation.from());

@@ -65,6 +65,7 @@ class SemanticQueryFacadeSourceTest {
     private PublishedDiscoveryQueryService discoveryQueryService;
     private PublishedEntryPointQueryService entryPointQueryService;
     private SemanticQueryFacade facade;
+    private CurrentGenerationSelector selector;
     private SelectedGeneration generation;
     private CodeFactIdentity relationIdentity;
 
@@ -78,15 +79,11 @@ class SemanticQueryFacadeSourceTest {
         entryPointQueryService = mock(PublishedEntryPointQueryService.class);
         generation = generation(REPOSITORY_ID, REVISION, "g-payment");
         relationIdentity = relationIdentity();
-        CurrentGenerationSelector selector = mock(CurrentGenerationSelector.class);
+        selector = mock(CurrentGenerationSelector.class);
         when(selector.select(any(String.class), any(String.class), any())).thenReturn(generation);
-        when(searchService.selector()).thenReturn(selector);
-        when(searchService.search(any(SelectedGeneration.class), any(CodeFactSearchQuery.class)))
-                .thenAnswer(invocation -> searchService.search(invocation.getArgument(1)));
-        when(sourceSliceService.factSource(any(SelectedGeneration.class), any(CodeFactReadQuery.class), anyInt()))
-                .thenAnswer(invocation -> sourceSliceService.factSource(invocation.getArgument(1), invocation.getArgument(2)));
-        facade = new SemanticQueryFacade(repositoryService, searchService, sourceSliceService, codeFactReadService,
-                discoveryQueryService, entryPointQueryService, mock(PublishedRelationQueryService.class));
+        SelectedSemanticQueryService selected = new SelectedSemanticQueryService(searchService, sourceSliceService,
+                codeFactReadService, discoveryQueryService, entryPointQueryService, mock(PublishedRelationQueryService.class));
+        facade = new SemanticQueryFacade(selector, selected, repositoryService);
     }
 
     @Test
@@ -119,8 +116,8 @@ class SemanticQueryFacadeSourceTest {
                         Optional.empty(), 0, 20),
                 List.of(summary), 1, false, new SourceIndexCoverage(0, List.of()));
         FactSourceSlice slice = new FactSourceSlice(generation, FACT_RANGE, FACT_RANGE, sourceWithFact());
-        when(searchService.search(any(CodeFactSearchQuery.class))).thenReturn(result);
-        when(sourceSliceService.factSource(any(), any(Integer.class))).thenReturn(slice);
+        when(searchService.search(any(SelectedGeneration.class), any(CodeFactSearchQuery.class))).thenReturn(result);
+        when(sourceSliceService.factSource(any(SelectedGeneration.class), any(CodeFactReadQuery.class), anyInt())).thenReturn(slice);
 
         SemanticQueryContract.SearchCodeResult first = facade.searchCode(searchRequest());
         SemanticQueryContract.SearchCodeResult second = facade.searchCode(searchRequest());
@@ -141,7 +138,7 @@ class SemanticQueryFacadeSourceTest {
                 new SourceIndexIssue("internal/hidden/Payment.java", "PARSE_ERROR"),
                 new SourceIndexIssue("src/Orders.java", "UNRESOLVED_TYPE"),
                 new SourceIndexIssue("src/Orders.java", "PARSE_ERROR"))));
-        when(searchService.search(any(CodeFactSearchQuery.class))).thenReturn(result);
+        when(searchService.search(any(SelectedGeneration.class), any(CodeFactSearchQuery.class))).thenReturn(result);
 
         String response = new ObjectMapper().writeValueAsString(facade.searchCode(searchRequest()));
 
@@ -152,7 +149,7 @@ class SemanticQueryFacadeSourceTest {
     @Test
     void fact_source_accepts_a_relation_fact_and_preserves_exact_code() {
         FactSourceSlice slice = new FactSourceSlice(generation, FACT_RANGE, FACT_RANGE, sourceWithFact());
-        when(sourceSliceService.factSource(any(), any(Integer.class))).thenReturn(slice);
+        when(sourceSliceService.factSource(any(SelectedGeneration.class), any(CodeFactReadQuery.class), anyInt())).thenReturn(slice);
 
         FactSourceResult result = facade.getFactSource(new FactSourceRequest(REPOSITORY_ID, REVISION,
                 CodeFactId.from(relationIdentity).value(), 0));
@@ -164,7 +161,7 @@ class SemanticQueryFacadeSourceTest {
     @Test
     void fact_source_reports_the_expanded_source_range_separately_from_the_fact_range() {
         FactSourceSlice slice = new FactSourceSlice(generation, CONTEXT_RANGE, FACT_RANGE, sourceWithFact());
-        when(sourceSliceService.factSource(any(), any(Integer.class))).thenReturn(slice);
+        when(sourceSliceService.factSource(any(SelectedGeneration.class), any(CodeFactReadQuery.class), anyInt())).thenReturn(slice);
 
         FactSourceResult result = facade.getFactSource(new FactSourceRequest(REPOSITORY_ID, REVISION,
                 CodeFactId.from(relationIdentity).value(), 2));

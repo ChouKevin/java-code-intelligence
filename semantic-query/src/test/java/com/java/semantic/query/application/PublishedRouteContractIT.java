@@ -19,8 +19,10 @@ import com.java.semantic.model.codefact.SyntaxRange;
 import com.java.semantic.model.index.EntryPointDocument;
 import com.java.semantic.model.index.GenerationId;
 import com.java.semantic.model.index.persistence.EntryPointPersistence;
+import com.java.semantic.model.query.SelectedGeneration;
 import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.model.repository.RepositoryRevision;
+import com.java.semantic.query.config.ConfiguredReadPolicy;
 import com.mongodb.ConnectionString;
 import com.mongodb.MongoClientSettings;
 import com.mongodb.client.MongoClient;
@@ -60,10 +62,13 @@ class PublishedRouteContractIT extends PublishedMongoITSupport {
             MongoClientSettings settings = MongoClientSettings.builder().applyConnectionString(new ConnectionString(container.getConnectionString()))
                     .addCommandListener(listener).build();
             try (MongoClient client = MongoClients.create(settings)) {
-                MongoTemplate template = new MongoTemplate(client, "published_route_invalid");
-                PublishedEntryPointQueryService service = new PublishedEntryPointQueryService(template, selector(template, policy()), Duration.ofSeconds(2));
+                MongoTemplate template = new MongoTemplate(client, "published_route");
+                SelectedGeneration context = new SelectedGeneration(new RepositoryId("orders"), new RepositoryRevision(REVISION),
+                        new GenerationId("g1"), new com.java.semantic.model.index.ManifestDigest(DIGEST));
+                PublishedEntryPointQueryService service = new PublishedEntryPointQueryService(template,
+                        guard(template, policy()), Duration.ofSeconds(2));
 
-                assertThatThrownBy(() -> service.findRoutes("orders", REVISION, "BAD METHOD", "payments"))
+                assertThatThrownBy(() -> service.findRoutes(context, "orders", REVISION, "BAD METHOD", "payments", 0, 20))
                         .isInstanceOf(IllegalArgumentException.class);
             }
             assertThat(collections).isEmpty();
@@ -99,20 +104,23 @@ class PublishedRouteContractIT extends PublishedMongoITSupport {
                     .append("scopePackage", scope.packageName()).append("scopeClass", scope.className())
                     .append("scopeMethod", scope.methodName().orElse("")).append("scopeParameters", scope.parameterTypes())
                     .append("scopePath", scope.sourcePath().orElse("")));
-            PublishedEntryPointQueryService service = new PublishedEntryPointQueryService(template, selector(template, policy()), Duration.ofSeconds(2));
+            CurrentGenerationSelector selector = selector(template, policy());
+            SelectedGeneration context = selector.select("orders", REVISION, SelectedGenerationGuard.ENTRY_POINTS);
+            PublishedEntryPointQueryService service = new PublishedEntryPointQueryService(template, guard(template, policy()), Duration.ofSeconds(2));
 
-            java.util.List<com.java.semantic.model.codefact.PublishedEntryPoint> routes = service.findRoutes("orders", REVISION, "GET", "/payments/{id}");
+            java.util.List<com.java.semantic.model.codefact.PublishedEntryPoint> routes = service.findRoutes(context, "orders", REVISION,
+                    "GET", "/payments/{id}", 0, 20).entryPoints();
             assertThat(routes).extracting(value -> value.factId())
                     .containsExactly(entryPoint.fact().id().value());
-            assertThat(service.findRoutes("orders", REVISION, "POST", "/payments/{id}")).isEmpty();
-            CodeFactSearchService search = new CodeFactSearchService(template, selector(template, policy()), Duration.ofSeconds(2));
-            com.java.semantic.model.codefact.CodeFactId searchFactId = search.search(new CodeFactSearchQuery(
-                    new RepositoryId("orders"), new RepositoryRevision(REVISION), "payment"))
-                    .facts().getFirst().fact().id();
-            CodeFactReadService reader = new CodeFactReadService(template, selector(template, policy()), Duration.ofSeconds(2));
-            assertThat(reader.get(new CodeFactReadQuery(new RepositoryId("orders"), new RepositoryRevision(REVISION),
-                    searchFactId))
-                    .fact().identity()).isEqualTo(identity);
+            assertThat(service.findRoutes(context, "orders", REVISION, "POST", "/payments/{id}", 0, 20).entryPoints()).isEmpty();
+            SelectedGeneration searchContext = selector.selectCodeFact("orders", REVISION, identity,
+                    CodeFactReadService.requirementsForSearchKinds(java.util.Set.of(CodeFactKind.API_ROUTE)));
+            CodeFactSearchService search = new CodeFactSearchService(template, guard(template, policy()), Duration.ofSeconds(2));
+            com.java.semantic.model.codefact.CodeFactId searchFactId = search.search(searchContext, new CodeFactSearchQuery(
+                    new RepositoryId("orders"), new RepositoryRevision(REVISION), "payment")).facts().getFirst().fact().id();
+            CodeFactReadService reader = new CodeFactReadService(template, guard(template, policy()), Duration.ofSeconds(2));
+            assertThat(reader.get(searchContext, new CodeFactReadQuery(new RepositoryId("orders"), new RepositoryRevision(REVISION),
+                    searchFactId)).fact().identity()).isEqualTo(identity);
         }
     }
 
@@ -125,19 +133,23 @@ class PublishedRouteContractIT extends PublishedMongoITSupport {
             EntryPointDocument hidden = entryPoint("example.private", "HiddenPayments", "hidden", "/hidden");
             storeEntryPoint(template, hidden, new CodeFactScope("example.api", "Payments", java.util.Optional.of("hidden"),
                     java.util.List.of(), java.util.Optional.of("src/main/java/HiddenPayments.java")));
+            ConfiguredReadPolicy deniedPolicy = policy(new com.java.semantic.query.config.ReadPolicyProperties.PackageRule("orders", "example.private"));
+            CurrentGenerationSelector deniedSelector = selector(template, deniedPolicy);
+            SelectedGeneration deniedContext = deniedSelector.select("orders", REVISION, SelectedGenerationGuard.ENTRY_POINTS);
             PublishedEntryPointQueryService denied = new PublishedEntryPointQueryService(template,
-                    selector(template, policy(new com.java.semantic.query.config.ReadPolicyProperties.PackageRule("orders", "example.private"))),
-                    Duration.ofSeconds(2));
+                    guard(template, deniedPolicy), Duration.ofSeconds(2));
 
-            assertThatThrownBy(() -> denied.findRoutes("orders", REVISION, "GET", "/hidden"))
+            assertThatThrownBy(() -> denied.findRoutes(deniedContext, "orders", REVISION, "GET", "/hidden", 0, 20))
                     .isInstanceOf(RepositoryNotFoundException.class);
 
             EntryPointDocument malformed = entryPoint("example.api", "Payments", "malformed", "/malformed");
             storeEntryPoint(template, malformed, new CodeFactScope("example.api", "ForgedPayments", java.util.Optional.of("malformed"),
                     java.util.List.of(), java.util.Optional.of("src/main/java/Payments.java")));
-            PublishedEntryPointQueryService allowed = new PublishedEntryPointQueryService(template, selector(template, policy()), Duration.ofSeconds(2));
+            CurrentGenerationSelector allowedSelector = selector(template, policy());
+            SelectedGeneration allowedContext = allowedSelector.select("orders", REVISION, SelectedGenerationGuard.ENTRY_POINTS);
+            PublishedEntryPointQueryService allowed = new PublishedEntryPointQueryService(template, guard(template, policy()), Duration.ofSeconds(2));
 
-            assertThatThrownBy(() -> allowed.findRoutes("orders", REVISION, "GET", "/malformed"))
+            assertThatThrownBy(() -> allowed.findRoutes(allowedContext, "orders", REVISION, "GET", "/malformed", 0, 20))
                     .isInstanceOf(IndexContractMismatchException.class);
         }
     }
@@ -166,10 +178,12 @@ class PublishedRouteContractIT extends PublishedMongoITSupport {
             }
             EntryPointDocument differentPath = entryPoint("example.api", "Payments", "other", "GET", "/other");
             storeEntryPoint(template, differentPath, CodeFactScope.from(differentPath.fact().identity()));
-            PublishedEntryPointQueryService service = new PublishedEntryPointQueryService(template, selector(template, policy()), Duration.ofSeconds(2));
+            CurrentGenerationSelector selector = selector(template, policy());
+            SelectedGeneration context = selector.select("orders", REVISION, SelectedGenerationGuard.ENTRY_POINTS);
+            PublishedEntryPointQueryService service = new PublishedEntryPointQueryService(template, guard(template, policy()), Duration.ofSeconds(2));
 
-            PublishedEntryPointResult get = service.findRoutes("orders", REVISION, "GET", "/payments", 0, 20);
-            PublishedEntryPointResult all = service.findRoutes("orders", REVISION, "ALL", "/payments", 0, 20);
+            PublishedEntryPointResult get = service.findRoutes(context, "orders", REVISION, "GET", "/payments", 0, 20);
+            PublishedEntryPointResult all = service.findRoutes(context, "orders", REVISION, "ALL", "/payments", 0, 20);
 
             assertThat(get.totalCount()).isEqualTo(2);
             assertThat(get.entryPoints()).extracting(com.java.semantic.model.codefact.PublishedEntryPoint::factId)
@@ -177,7 +191,7 @@ class PublishedRouteContractIT extends PublishedMongoITSupport {
             assertThat(all.totalCount()).isEqualTo(1);
             assertThat(all.entryPoints()).extracting(com.java.semantic.model.codefact.PublishedEntryPoint::factId)
                     .containsExactly(routes.getLast().fact().id().value());
-            assertThat(service.findRoutes("orders", REVISION, "POST", "/other", 0, 20).entryPoints()).isEmpty();
+            assertThat(service.findRoutes(context, "orders", REVISION, "POST", "/other", 0, 20).entryPoints()).isEmpty();
         }
     }
 

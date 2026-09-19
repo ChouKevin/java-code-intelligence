@@ -9,6 +9,9 @@ import com.java.semantic.model.codefact.SourceTypeIdentity;
 import com.java.semantic.model.codefact.SyntaxPosition;
 import com.java.semantic.model.codefact.SyntaxRange;
 import com.java.semantic.model.codefact.TypeMemberQuery;
+import com.java.semantic.model.index.GenerationId;
+import com.java.semantic.model.index.ManifestDigest;
+import com.java.semantic.model.query.SelectedGeneration;
 import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.model.repository.RepositoryRevision;
 import com.java.semantic.query.config.ConfiguredReadPolicy;
@@ -51,28 +54,29 @@ class PublishedAuthorizationContractIT extends PublishedMongoITSupport {
             try (MongoClient client = MongoClients.create(settings)) {
                 MongoTemplate template = new MongoTemplate(client, "published_authorization");
                 ConfiguredReadPolicy deniedPolicy = policy(new ReadPolicyProperties.PackageRule("orders", "example.payment"));
-                CurrentGenerationSelector deniedSelector = selector(template, deniedPolicy);
-                CodeFactSearchService search = new CodeFactSearchService(template, deniedSelector, Duration.ofSeconds(2));
-                PublishedDiscoveryQueryService discovery = new PublishedDiscoveryQueryService(template, deniedSelector, Duration.ofSeconds(2));
+                SelectedGenerationGuard deniedGuard = guard(template, deniedPolicy);
+                SelectedGeneration context = new SelectedGeneration(new RepositoryId("orders"), new RepositoryRevision(REVISION),
+                        new GenerationId("g1"), new ManifestDigest(DIGEST));
+                CodeFactSearchService search = new CodeFactSearchService(template, deniedGuard, Duration.ofSeconds(2));
+                PublishedDiscoveryQueryService discovery = new PublishedDiscoveryQueryService(template, deniedGuard, Duration.ofSeconds(2));
                 SourceSliceService source = new SourceSliceService(
-                        new CurrentSourceQueryService(template, deniedSelector, Duration.ofSeconds(2)),
-                        new CodeFactReadService(template, deniedSelector, Duration.ofSeconds(2)));
+                        new CurrentSourceQueryService(template, deniedGuard, Duration.ofSeconds(2)),
+                        new CodeFactReadService(template, deniedGuard, Duration.ofSeconds(2)));
                 String path = "src/main/java/example/payment/PaymentService.java";
                 SourceTypeIdentity type = new SourceTypeIdentity(new com.java.semantic.model.codefact.JavaTypeIdentity("example.payment", "PaymentService"), path);
                 CodeFactIdentity method = methodIdentity("example.payment", "PaymentService", "pay", path);
                 SourceRange range = new SourceRange(path, new SyntaxRange(new SyntaxPosition(0, 0), new SyntaxPosition(0, 1)));
-
-                assertThatThrownBy(() -> search.search(new CodeFactSearchQuery(new RepositoryId("orders"), new RepositoryRevision(REVISION),
+                assertThatThrownBy(() -> search.search(context, new CodeFactSearchQuery(new RepositoryId("orders"), new RepositoryRevision(REVISION),
                         "payment", Set.of(), Optional.of("example.payment"), 0, 20))).isInstanceOf(RepositoryNotFoundException.class);
-                assertThatThrownBy(() -> discovery.resolveDeclaration(new DeclarationResolutionQuery(new RepositoryId("orders"),
+                assertThatThrownBy(() -> discovery.resolveDeclaration(context, new DeclarationResolutionQuery(new RepositoryId("orders"),
                         new RepositoryRevision(REVISION), type, "pay", Optional.empty()))).isInstanceOf(RepositoryNotFoundException.class);
-                assertThatThrownBy(() -> discovery.discoverTypeMembers(new TypeMemberQuery(new RepositoryId("orders"),
+                assertThatThrownBy(() -> discovery.discoverTypeMembers(context, new TypeMemberQuery(new RepositoryId("orders"),
                         new RepositoryRevision(REVISION), type, Set.of(com.java.semantic.model.codefact.CodeFactKind.METHOD), 0, 20)))
                         .isInstanceOf(RepositoryNotFoundException.class);
-                assertThatThrownBy(() -> source.methodSource("orders", REVISION, method)).isInstanceOf(RepositoryNotFoundException.class);
-                assertThatThrownBy(() -> source.sourceSegment(new SourceSegmentQuery(new RepositoryId("orders"),
+                assertThatThrownBy(() -> source.methodSource(context, method)).isInstanceOf(RepositoryNotFoundException.class);
+                assertThatThrownBy(() -> source.sourceSegment(context, new SourceSegmentQuery(new RepositoryId("orders"),
                         new RepositoryRevision(REVISION), type, range))).isInstanceOf(RepositoryNotFoundException.class);
-                assertThatThrownBy(() -> source.evidenceSource("orders", REVISION, method)).isInstanceOf(RepositoryNotFoundException.class);
+                assertThatThrownBy(() -> source.evidenceSource(context, method)).isInstanceOf(RepositoryNotFoundException.class);
             }
             assertThat(reads).isEmpty();
         }

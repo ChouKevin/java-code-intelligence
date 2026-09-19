@@ -7,6 +7,7 @@ import com.java.semantic.model.codefact.CodeFactScope;
 import com.java.semantic.model.index.ProjectionName;
 import com.java.semantic.model.index.IndexSchemaContract;
 import com.java.semantic.model.repository.RepositoryId;
+import com.java.semantic.model.query.SelectedGeneration;
 import com.java.semantic.model.repository.RepositoryRevision;
 import com.mongodb.client.MongoClients;
 import java.time.Duration;
@@ -33,11 +34,14 @@ class ToolProjectionEvolutionIT extends PublishedMongoITSupport {
             seedCurrent(template, "orders");
             template.getCollection("generation_manifests").updateOne(new Document("repoId", "orders").append("generationId", "g1"),
                     new Document("$set", new Document("projectionVersions", v1Versions())));
-            CodeFactSearchService search = new CodeFactSearchService(template, selector(template, policy()), Duration.ofSeconds(2));
+            CurrentGenerationSelector selector = selector(template, policy());
+            SelectedGenerationGuard guard = guard(template, policy());
+            CodeFactSearchService search = new CodeFactSearchService(template, guard, Duration.ofSeconds(2));
             CodeFactSearchQuery query = new CodeFactSearchQuery(new RepositoryId("orders"), new RepositoryRevision(REVISION), "payment",
                     java.util.Set.of(CodeFactKind.METHOD), Optional.empty(), 0, 20);
 
-            assertThatThrownBy(() -> search.search(query)).isInstanceOf(IndexContractMismatchException.class)
+            assertThatThrownBy(() -> search.search(selector.select("orders", REVISION,
+                    CodeFactReadService.requirementsForSearchKinds(query.kinds())), query)).isInstanceOf(IndexContractMismatchException.class)
                     .hasMessage("INDEX_CONTRACT_MISMATCH");
 
             CodeFactIdentity identity = methodIdentity("example.payment", "PaymentService", "findPayment",
@@ -49,12 +53,13 @@ class ToolProjectionEvolutionIT extends PublishedMongoITSupport {
             template.getCollection("repositories").updateOne(new Document("repoId", "orders"), new Document("$set",
                     new Document("currentPointer.generationId", "g2").append("currentPointer.manifestDigest", "3".repeat(64))
                             .append("currentPointer.committedJobId", "job-g2").append("currentPointer.publishedAt", new java.util.Date())));
-
-            assertThat(search.search(query).generation().generationId().value()).isEqualTo("g2");
-            assertThat(search.search(query).facts()).extracting(summary -> summary.fact().identity().canonicalForm())
+            SelectedGeneration context = selector.select("orders", REVISION,
+                    CodeFactReadService.requirementsForSearchKinds(query.kinds()));
+            assertThat(search.search(context, query).generation().generationId().value()).isEqualTo("g2");
+            assertThat(search.search(context, query).facts()).extracting(summary -> summary.fact().identity().canonicalForm())
                     .contains(identity.canonicalForm());
-            assertThat(selector(template, policy()).selectCodeFact("orders", REVISION, identity,
-                    CurrentGenerationSelector.SEARCH).generationId().value()).isEqualTo("g2");
+            assertThat(selector.selectCodeFact("orders", REVISION, identity,
+                    SelectedGenerationGuard.SEARCH).generationId().value()).isEqualTo("g2");
             assertThat(selector(template, policy()).currentRepository("orders").revision().value()).isEqualTo(REVISION);
         }
     }

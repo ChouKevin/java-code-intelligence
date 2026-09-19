@@ -1,6 +1,7 @@
 package com.java.semantic.query;
 
 import com.java.semantic.query.application.CurrentGenerationSelector;
+import com.java.semantic.query.application.SelectedGenerationGuard;
 import com.java.semantic.query.application.GitEvidenceReadService;
 import com.java.semantic.query.application.CurrentRepositoryQueryService;
 import com.java.semantic.query.application.CurrentSourceQueryService;
@@ -45,48 +46,54 @@ public class SemanticQueryApplication {
     }
 
     @Bean
+    SelectedGenerationGuard selectedGenerationGuard(MongoTemplate template, ConfiguredReadPolicy policy,
+                                                   SemanticQueryProperties properties) {
+        return new SelectedGenerationGuard(template, policy, properties.storageTimeout());
+    }
+
+    @Bean
     CurrentRepositoryQueryService currentRepositoryQueryService(CurrentGenerationSelector selector) {
         return new CurrentRepositoryQueryService(selector);
     }
 
     @Bean
-    CurrentSourceQueryService currentSourceQueryService(MongoTemplate template, CurrentGenerationSelector selector,
+    CurrentSourceQueryService currentSourceQueryService(MongoTemplate template, SelectedGenerationGuard guard,
                                                          SemanticQueryProperties properties) {
-        return new CurrentSourceQueryService(template, selector, properties.storageTimeout());
+        return new CurrentSourceQueryService(template, guard, properties.storageTimeout());
     }
 
     @Bean
-    CurrentSymbolQueryService currentSymbolQueryService(MongoTemplate template, CurrentGenerationSelector selector,
+    CurrentSymbolQueryService currentSymbolQueryService(MongoTemplate template, SelectedGenerationGuard guard,
                                                          SemanticQueryProperties properties) {
-        return new CurrentSymbolQueryService(template, selector, properties.storageTimeout());
+        return new CurrentSymbolQueryService(template, guard, properties.storageTimeout());
     }
 
     @Bean
-    CodeFactReadService codeFactReadService(MongoTemplate template, CurrentGenerationSelector selector, SemanticQueryProperties properties) {
-        return new CodeFactReadService(template, selector, properties.storageTimeout());
+    CodeFactReadService codeFactReadService(MongoTemplate template, SelectedGenerationGuard guard, SemanticQueryProperties properties) {
+        return new CodeFactReadService(template, guard, properties.storageTimeout());
     }
 
     @Bean
-    CodeFactSearchService codeFactSearchService(MongoTemplate template, CurrentGenerationSelector selector, SemanticQueryProperties properties) {
-        return new CodeFactSearchService(template, selector, properties.storageTimeout());
+    CodeFactSearchService codeFactSearchService(MongoTemplate template, SelectedGenerationGuard guard, SemanticQueryProperties properties) {
+        return new CodeFactSearchService(template, guard, properties.storageTimeout());
     }
 
     @Bean
-    PublishedDiscoveryQueryService publishedDiscoveryQueryService(MongoTemplate template, CurrentGenerationSelector selector,
+    PublishedDiscoveryQueryService publishedDiscoveryQueryService(MongoTemplate template, SelectedGenerationGuard guard,
                                                                    SemanticQueryProperties properties) {
-        return new PublishedDiscoveryQueryService(template, selector, properties.storageTimeout());
+        return new PublishedDiscoveryQueryService(template, guard, properties.storageTimeout());
     }
 
     @Bean
-    PublishedEntryPointQueryService publishedEntryPointQueryService(MongoTemplate template, CurrentGenerationSelector selector,
+    PublishedEntryPointQueryService publishedEntryPointQueryService(MongoTemplate template, SelectedGenerationGuard guard,
                                                                      SemanticQueryProperties properties) {
-        return new PublishedEntryPointQueryService(template, selector, properties.storageTimeout());
+        return new PublishedEntryPointQueryService(template, guard, properties.storageTimeout());
     }
 
     @Bean
-    PublishedRelationQueryService publishedRelationQueryService(MongoTemplate template, CurrentGenerationSelector selector,
+    PublishedRelationQueryService publishedRelationQueryService(MongoTemplate template, SelectedGenerationGuard guard,
                                                                 SemanticQueryProperties properties) {
-        return new PublishedRelationQueryService(template, selector, properties.storageTimeout());
+        return new PublishedRelationQueryService(template, guard, properties.storageTimeout());
     }
 
     @Bean

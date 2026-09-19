@@ -30,25 +30,15 @@ import java.util.regex.Pattern;
 public final class PublishedEntryPointQueryService {
     private static final Pattern HTTP_METHOD = Pattern.compile("^[A-Z]+$");
     private final MongoTemplate template;
-    private final CurrentGenerationSelector selector;
+    private final SelectedGenerationGuard guard;
     private final Duration storageTimeout;
 
-    public PublishedEntryPointQueryService(MongoTemplate template, CurrentGenerationSelector selector, Duration storageTimeout) {
+    public PublishedEntryPointQueryService(MongoTemplate template, SelectedGenerationGuard guard, Duration storageTimeout) {
         this.template = Objects.requireNonNull(template, "mongo template is required");
-        this.selector = Objects.requireNonNull(selector, "current generation selector is required");
+        this.guard = Objects.requireNonNull(guard, "selected generation guard is required");
         this.storageTimeout = Objects.requireNonNull(storageTimeout, "storage timeout is required");
     }
 
-    public List<PublishedEntryPoint> findRoutes(String repositoryId, String revision, String httpMethod, String path) {
-        return allEntryPoints(offset -> findRoutes(repositoryId, revision, httpMethod, path, offset,
-                SemanticQueryContract.MAX_LIMIT));
-    }
-
-    public PublishedEntryPointResult findRoutes(String repositoryId, String revision, String httpMethod, String path,
-                                                int offset, int limit) {
-        SelectedGeneration context = selector.select(repositoryId, revision, CurrentGenerationSelector.ENTRY_POINTS);
-        return findRoutes(context, repositoryId, revision, httpMethod, path, offset, limit);
-    }
 
     public PublishedEntryPointResult findRoutes(SelectedGeneration context, String repositoryId, String revision, String httpMethod,
                                                 String path, int offset, int limit) {
@@ -59,8 +49,8 @@ public final class PublishedEntryPointQueryService {
         if (!selected.repositoryId().value().equals(repositoryId) || !selected.revision().value().equals(revision)) {
             throw new IllegalArgumentException("request repository and revision must match the selected generation");
         }
-        selector.requireCompatible(selected, CurrentGenerationSelector.ENTRY_POINTS);
-        SearchAccessPlan accessPlan = selector.searchAccessPlan(repositoryId);
+        guard.require(selected, SelectedGenerationGuard.ENTRY_POINTS);
+        SearchAccessPlan accessPlan = guard.searchAccessPlan(repositoryId);
         try {
             org.bson.conversions.Bson filter = accessPlan.authorized(Filters.and(
                     Filters.eq("repoId", selected.repositoryId().value()), Filters.eq("generationId", selected.generationId().value()),
@@ -78,7 +68,7 @@ public final class PublishedEntryPointQueryService {
                         || !requestedPath.equals(entryPoint.trigger().httpPath().orElse(""))
                         || !entryPoint.fact().id().value().equals(required(row, "entryPointId"))
                         || !entryPoint.fact().identity().canonicalForm().equals(required(row, "canonical"))) { throw new IndexContractMismatchException(); }
-                selector.requireVisible(selected, entryPoint.fact().identity());
+                guard.requireVisible(selected, entryPoint.fact().identity());
                 if (!CodeFactScope.from(entryPoint.fact().identity()).equals(flattenedScope(row))) { throw new IndexContractMismatchException(); }
                 result.add(new PublishedEntryPoint(selected, entryPoint.fact().id().value(), entryPoint.fact().identity().canonicalForm(),
                         entryPoint.kind(), entryPoint.method().canonicalForm(), entryPoint.trigger().httpPath().orElseThrow(IndexContractMismatchException::new),
@@ -94,18 +84,6 @@ public final class PublishedEntryPointQueryService {
         }
     }
 
-    /** Lists only persisted, policy-visible entry points from one exact published revision. */
-    public List<PublishedEntryPoint> listEntryPoints(String repositoryId, String revision) {
-        return allEntryPoints(offset -> listEntryPoints(repositoryId, revision, Set.of(), offset,
-                SemanticQueryContract.MAX_LIMIT));
-    }
-
-    /** Lists a deterministic page of persisted, policy-visible entry points from one exact published revision. */
-    public PublishedEntryPointResult listEntryPoints(String repositoryId, String revision, Set<EntryPointKind> kinds,
-                                                      int offset, int limit) {
-        SelectedGeneration context = selector.select(repositoryId, revision, CurrentGenerationSelector.ENTRY_POINTS);
-        return listEntryPoints(context, repositoryId, revision, kinds, offset, limit);
-    }
 
     public PublishedEntryPointResult listEntryPoints(SelectedGeneration context, String repositoryId, String revision,
                                                       Set<EntryPointKind> kinds, int offset, int limit) {
@@ -115,8 +93,8 @@ public final class PublishedEntryPointQueryService {
         if (!selectedGeneration.repositoryId().value().equals(repositoryId) || !selectedGeneration.revision().value().equals(revision)) {
             throw new IllegalArgumentException("request repository and revision must match the selected generation");
         }
-        selector.requireCompatible(selectedGeneration, CurrentGenerationSelector.ENTRY_POINTS);
-        SearchAccessPlan accessPlan = selector.searchAccessPlan(repositoryId);
+        guard.require(selectedGeneration, SelectedGenerationGuard.ENTRY_POINTS);
+        SearchAccessPlan accessPlan = guard.searchAccessPlan(repositoryId);
         try {
             org.bson.conversions.Bson base = Filters.and(Filters.eq("repoId", selectedGeneration.repositoryId().value()),
                     Filters.eq("generationId", selectedGeneration.generationId().value()));
@@ -138,7 +116,7 @@ public final class PublishedEntryPointQueryService {
                         || !entryPoint.fact().identity().canonicalForm().equals(required(row, "canonical"))) {
                     throw new IndexContractMismatchException();
                 }
-                selector.requireVisible(selectedGeneration, entryPoint.fact().identity());
+                guard.requireVisible(selectedGeneration, entryPoint.fact().identity());
                 if (!CodeFactScope.from(entryPoint.fact().identity()).equals(flattenedScope(row))) {
                     throw new IndexContractMismatchException();
                 }
@@ -217,16 +195,4 @@ public final class PublishedEntryPointQueryService {
         }
     }
 
-    private static List<PublishedEntryPoint> allEntryPoints(java.util.function.IntFunction<PublishedEntryPointResult> pageReader) {
-        List<PublishedEntryPoint> entryPoints = new ArrayList<>();
-        int offset = 0;
-        boolean hasMore = true;
-        while (hasMore) {
-            PublishedEntryPointResult page = pageReader.apply(offset);
-            entryPoints.addAll(page.entryPoints());
-            hasMore = page.hasMore();
-            offset += page.entryPoints().size();
-        }
-        return List.copyOf(entryPoints);
-    }
 }

@@ -24,30 +24,33 @@ public final class SourceSliceService {
         this.codeFactReadService = Objects.requireNonNull(codeFactReadService, "code fact read service is required");
     }
 
-    public PublishedSourceSegment methodSource(String repositoryId, String revision, CodeFactIdentity identity) {
-        CodeFactDetails fact = codeFactReadService.get(repositoryId, revision, identity);
-        if (!(identity.canonicalIdentity() instanceof MethodTarget)) { throw new CodeFactKindUnsupportedException(identity.kind()); }
-        String content = sourceQueryService.getSource(fact.generation(), fact.location().sourceFile()).utf8Content();
-        return slice(fact.generation(), fact.location(), content, Optional.empty(), 0);
+    public PublishedSourceSegment methodSource(SelectedGeneration context, CodeFactIdentity identity) {
+        SelectedGeneration selected = Objects.requireNonNull(context, "selected generation is required");
+        CodeFactIdentity requiredIdentity = Objects.requireNonNull(identity, "code fact identity is required");
+        CodeFactDetails fact = codeFactReadService.get(selected, requiredIdentity);
+        if (!(requiredIdentity.canonicalIdentity() instanceof MethodTarget)) {
+            throw new CodeFactKindUnsupportedException(requiredIdentity.kind());
+        }
+        String content = sourceQueryService.getSource(fact).utf8Content();
+        return slice(selected, fact.location(), content, Optional.empty(), 0);
     }
 
-    public PublishedSourceSegment sourceSegment(SourceSegmentQuery query) {
+    public PublishedSourceSegment sourceSegment(SelectedGeneration context, SourceSegmentQuery query) {
+        SelectedGeneration selected = Objects.requireNonNull(context, "selected generation is required");
         SourceSegmentQuery required = Objects.requireNonNull(query, "query is required");
-        com.java.semantic.query.application.PublishedSource source = sourceQueryService.getSource(required.repositoryId().value(),
-                required.revision().value(), required.sourceType());
-        return slice(source.generation(), required.range(), source.utf8Content(), Optional.empty(), 0);
+        if (!selected.repositoryId().equals(required.repositoryId()) || !selected.revision().equals(required.revision())) {
+            throw new IllegalArgumentException("query repository and revision must match the selected generation");
+        }
+        PublishedSource source = sourceQueryService.getSource(selected, required.sourceType());
+        return slice(selected, required.range(), source.utf8Content(), Optional.empty(), 0);
     }
 
-    public PublishedSourceSegment evidenceSource(String repositoryId, String revision, CodeFactIdentity identity) {
-        CodeFactDetails fact = codeFactReadService.get(repositoryId, revision, identity);
-        String content = sourceQueryService.getSource(fact.generation(), fact.location().sourceFile()).utf8Content();
-        return slice(fact.generation(), fact.location(), content, Optional.of(fact.fact().identity()), 0);
-    }
-
-    public FactSourceSlice factSource(CodeFactReadQuery query, int contextLines) {
-        CodeFactReadQuery requiredQuery = Objects.requireNonNull(query, "code fact read query is required");
-        CodeFactDetails selected = codeFactReadService.get(requiredQuery);
-        return factSource(selected.generation(), requiredQuery, contextLines);
+    public PublishedSourceSegment evidenceSource(SelectedGeneration context, CodeFactIdentity identity) {
+        SelectedGeneration selected = Objects.requireNonNull(context, "selected generation is required");
+        CodeFactIdentity requiredIdentity = Objects.requireNonNull(identity, "code fact identity is required");
+        CodeFactDetails fact = codeFactReadService.get(selected, requiredIdentity);
+        String content = sourceQueryService.getSource(fact).utf8Content();
+        return slice(selected, fact.location(), content, Optional.of(fact.fact().identity()), 0);
     }
 
     public FactSourceSlice factSource(SelectedGeneration context, CodeFactReadQuery query, int contextLines) {

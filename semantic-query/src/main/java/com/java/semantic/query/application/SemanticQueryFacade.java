@@ -13,14 +13,6 @@ public final class SemanticQueryFacade {
     private final CurrentGenerationSelector currentSelector;
     private final SelectedSemanticQueryService selectedQueries;
 
-    public SemanticQueryFacade(CurrentRepositoryQueryService repositoryQueryService, CodeFactSearchService codeFactSearchService,
-                               SourceSliceService sourceSliceService, CodeFactReadService codeFactReadService,
-                               PublishedDiscoveryQueryService discoveryQueryService,
-                               PublishedEntryPointQueryService entryPointQueryService,
-                               PublishedRelationQueryService relationQueryService) {
-        this(repositoryQueryService, codeFactSearchService, sourceSliceService, codeFactReadService, discoveryQueryService,
-                entryPointQueryService, relationQueryService, null);
-    }
 
     public SemanticQueryFacade(CurrentGenerationSelector currentSelector, SelectedSemanticQueryService selectedQueries,
                                CurrentRepositoryQueryService repositoryQueryService) {
@@ -35,22 +27,6 @@ public final class SemanticQueryFacade {
         this.gitEvidenceReadService = gitEvidenceReadService;
     }
 
-    public SemanticQueryFacade(CurrentRepositoryQueryService repositoryQueryService, CodeFactSearchService codeFactSearchService,
-                               SourceSliceService sourceSliceService, CodeFactReadService codeFactReadService,
-                               PublishedDiscoveryQueryService discoveryQueryService,
-                               PublishedEntryPointQueryService entryPointQueryService,
-                               PublishedRelationQueryService relationQueryService, GitEvidenceReadService gitEvidenceReadService) {
-        this.repositoryQueryService = Objects.requireNonNull(repositoryQueryService, "repository query service is required");
-        CodeFactSearchService search = Objects.requireNonNull(codeFactSearchService, "code fact search service is required");
-        SourceSliceService source = Objects.requireNonNull(sourceSliceService, "source slice service is required");
-        CodeFactReadService factReader = Objects.requireNonNull(codeFactReadService, "code fact read service is required");
-        PublishedDiscoveryQueryService discovery = Objects.requireNonNull(discoveryQueryService, "discovery query service is required");
-        PublishedEntryPointQueryService entryPoints = Objects.requireNonNull(entryPointQueryService, "entry point query service is required");
-        PublishedRelationQueryService relations = Objects.requireNonNull(relationQueryService, "relation query service is required");
-        this.currentSelector = search.selector();
-        this.selectedQueries = new SelectedSemanticQueryService(search, source, factReader, discovery, entryPoints, relations);
-        this.gitEvidenceReadService = gitEvidenceReadService;
-    }
 
     public SemanticQueryContract.GitBranchCollection listGitBranches(SemanticQueryContract.GitBranchRequest request) {
         return requireGitEvidenceReader().branches(request);
@@ -108,64 +84,64 @@ public final class SemanticQueryFacade {
     public SemanticQueryContract.SearchCodeResult searchCode(SemanticQueryContract.SearchCodeRequest request) {
         SemanticQueryContract.SearchCodeRequest requiredRequest = Objects.requireNonNull(request, "search code request is required");
         SelectedGeneration context = select(requiredRequest.repositoryId(), requiredRequest.revision(),
-                CurrentGenerationSelector.SEARCH_WITH_SOURCES);
+                SelectedGenerationGuard.SEARCH_WITH_SOURCES);
         return selectedQueries.searchCode(context, requiredRequest);
     }
 
     public SemanticQueryContract.FactSourceResult getFactSource(SemanticQueryContract.FactSourceRequest request) {
         SemanticQueryContract.FactSourceRequest requiredRequest = Objects.requireNonNull(request, "fact source request is required");
         SelectedGeneration context = select(requiredRequest.repositoryId(), requiredRequest.revision(),
-                CurrentGenerationSelector.SEARCH_WITH_SOURCES);
+                SelectedGenerationGuard.SEARCH_WITH_SOURCES);
         return selectedQueries.getFactSource(context, requiredRequest);
     }
 
     public SemanticQueryContract.CollectionResult listEntryPoints(SemanticQueryContract.EntryPointRequest request) {
         SemanticQueryContract.EntryPointRequest requiredRequest = Objects.requireNonNull(request, "entry point request is required");
         SelectedGeneration context = select(requiredRequest.repositoryId(), requiredRequest.revision(),
-                CurrentGenerationSelector.ENTRY_POINTS);
+                SelectedGenerationGuard.ENTRY_POINTS);
         return selectedQueries.listEntryPoints(context, requiredRequest);
     }
 
     public SemanticQueryContract.CollectionResult findApiRoutes(SemanticQueryContract.ApiRouteRequest request) {
         SemanticQueryContract.ApiRouteRequest requiredRequest = Objects.requireNonNull(request, "API route request is required");
         SelectedGeneration context = select(requiredRequest.repositoryId(), requiredRequest.revision(),
-                CurrentGenerationSelector.ENTRY_POINTS);
+                SelectedGenerationGuard.ENTRY_POINTS);
         return selectedQueries.findApiRoutes(context, requiredRequest);
     }
 
     public SemanticQueryContract.CollectionResult findEventListeners(SemanticQueryContract.EventListenerRequest request) {
         SemanticQueryContract.EventListenerRequest requiredRequest = Objects.requireNonNull(request, "event listener request is required");
-        SelectedGeneration context = select(requiredRequest.repositoryId(), requiredRequest.revision(), CurrentGenerationSelector.SYMBOLS);
+        SelectedGeneration context = select(requiredRequest.repositoryId(), requiredRequest.revision(), SelectedGenerationGuard.SYMBOLS);
         return selectedQueries.findEventListeners(context, requiredRequest);
     }
 
     public SemanticQueryContract.CollectionResult listTypeMembers(SemanticQueryContract.TypeMemberRequest request) {
         SemanticQueryContract.TypeMemberRequest requiredRequest = Objects.requireNonNull(request, "type member request is required");
-        SelectedGeneration context = select(requiredRequest.repositoryId(), requiredRequest.revision(), CurrentGenerationSelector.SEARCH);
+        SelectedGeneration context = select(requiredRequest.repositoryId(), requiredRequest.revision(), SelectedGenerationGuard.SEARCH);
         return selectedQueries.listTypeMembers(context, requiredRequest);
     }
 
     public SemanticQueryContract.CollectionResult findMethodImplementations(SemanticQueryContract.RelationRequest request) {
         SemanticQueryContract.RelationRequest requiredRequest = Objects.requireNonNull(request, "relation request is required");
-        SelectedGeneration context = select(requiredRequest.repositoryId(), requiredRequest.revision(), CurrentGenerationSelector.SEARCH);
+        SelectedGeneration context = select(requiredRequest.repositoryId(), requiredRequest.revision(), SelectedGenerationGuard.SEARCH);
         return selectedQueries.findMethodImplementations(context, requiredRequest);
     }
 
     public SemanticQueryContract.CollectionResult findReferences(SemanticQueryContract.RelationRequest request) {
         SemanticQueryContract.RelationRequest requiredRequest = Objects.requireNonNull(request, "relation request is required");
-        SelectedGeneration context = select(requiredRequest.repositoryId(), requiredRequest.revision(), CurrentGenerationSelector.SEARCH);
+        SelectedGeneration context = select(requiredRequest.repositoryId(), requiredRequest.revision(), SelectedGenerationGuard.SEARCH);
         return selectedQueries.findReferences(context, requiredRequest);
     }
 
     public SemanticQueryContract.CollectionResult findCallers(SemanticQueryContract.RelationRequest request) {
         SemanticQueryContract.RelationRequest requiredRequest = Objects.requireNonNull(request, "relation request is required");
-        SelectedGeneration context = select(requiredRequest.repositoryId(), requiredRequest.revision(), CurrentGenerationSelector.SEARCH);
+        SelectedGeneration context = select(requiredRequest.repositoryId(), requiredRequest.revision(), SelectedGenerationGuard.SEARCH);
         return selectedQueries.findCallers(context, requiredRequest);
     }
 
     public SemanticQueryContract.CollectionResult findCallees(SemanticQueryContract.RelationRequest request) {
         SemanticQueryContract.RelationRequest requiredRequest = Objects.requireNonNull(request, "relation request is required");
-        SelectedGeneration context = select(requiredRequest.repositoryId(), requiredRequest.revision(), CurrentGenerationSelector.SEARCH);
+        SelectedGeneration context = select(requiredRequest.repositoryId(), requiredRequest.revision(), SelectedGenerationGuard.SEARCH);
         return selectedQueries.findCallees(context, requiredRequest);
     }
 

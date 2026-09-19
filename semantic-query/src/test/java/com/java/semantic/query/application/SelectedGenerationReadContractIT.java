@@ -56,14 +56,15 @@ class SelectedGenerationReadContractIT extends PublishedMongoITSupport {
             seedGeneration(template, repositoryId, newRevision, "g2", "4".repeat(64), "return \"B\";");
             seedPointer(template, repositoryId, pointer(oldRevision, "g1", "2".repeat(64)));
             CurrentGenerationSelector currentSelector = selector(template, policy());
-            SelectedSemanticQueryService selectedQueries = SelectedSemanticQueryService.create(template, currentSelector, Duration.ofSeconds(2));
+            SelectedGenerationGuard guard = guard(template, policy());
+            SelectedSemanticQueryService selectedQueries = SelectedSemanticQueryService.create(template, guard, Duration.ofSeconds(2));
             SemanticQueryFacade currentQueries = new SemanticQueryFacade(currentSelector, selectedQueries,
                     new CurrentRepositoryQueryService(currentSelector));
 
             SemanticQueryContract.SearchCodeRequest request = new SemanticQueryContract.SearchCodeRequest(repositoryId.value(), oldRevision.value(),
                     "Order", Set.of(CodeFactKind.TYPE), Optional.empty(), 0, 20);
             SelectedGeneration selected = currentSelector.select(request.repositoryId(), request.revision(),
-                    CurrentGenerationSelector.SEARCH_WITH_SOURCES);
+                    SelectedGenerationGuard.SEARCH_WITH_SOURCES);
             template.getCollection("repositories").updateOne(new Document("repoId", repositoryId.value()),
                     new Document("$set", new Document("currentPointer", newPointer)));
             SemanticQueryContract.SearchCodeResult result = selectedQueries.searchCode(selected, request);

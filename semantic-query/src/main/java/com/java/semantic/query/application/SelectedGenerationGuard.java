@@ -18,13 +18,22 @@ import org.springframework.util.StringUtils;
 
 import java.time.Duration;
 import java.util.HashMap;
+import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.TimeUnit;
-
 /** Validates policy and projection compatibility for a generation selected at admission. */
 public final class SelectedGenerationGuard {
+    static final ProjectionRequirements SOURCES = new ProjectionRequirements(EnumSet.of(ProjectionName.SOURCES, ProjectionName.SYMBOLS));
+    static final ProjectionRequirements SYMBOLS = new ProjectionRequirements(EnumSet.of(ProjectionName.SYMBOLS));
+    static final ProjectionRequirements RELATIONS = new ProjectionRequirements(EnumSet.of(ProjectionName.RELATIONS, ProjectionName.SYMBOLS));
+    static final ProjectionRequirements ENTRY_POINTS = new ProjectionRequirements(EnumSet.of(ProjectionName.ENTRY_POINTS, ProjectionName.SYMBOLS));
+    static final ProjectionRequirements SEARCH = new ProjectionRequirements(EnumSet.of(ProjectionName.SEARCH, ProjectionName.SYMBOLS));
+    static final ProjectionRequirements SEARCH_WITH_SOURCES = new ProjectionRequirements(EnumSet.of(ProjectionName.SEARCH,
+            ProjectionName.SOURCES, ProjectionName.SYMBOLS));
+    static final ProjectionRequirements ALL_PROJECTIONS = new ProjectionRequirements(EnumSet.allOf(ProjectionName.class));
+
     private final MongoTemplate template;
     private final ConfiguredReadPolicy readPolicy;
     private final Duration storageTimeout;
@@ -35,9 +44,19 @@ public final class SelectedGenerationGuard {
         this.storageTimeout = Objects.requireNonNull(storageTimeout, "storage timeout is required");
     }
 
+    public void requireRepositoryVisible(SelectedGeneration context) {
+        SelectedGeneration selected = Objects.requireNonNull(context, "selected generation is required");
+        if (!readPolicy.isRepositoryVisible(selected.repositoryId())) {
+            throw new RepositoryNotFoundException();
+        }
+    }
+
     public SelectedGeneration require(SelectedGeneration context, ProjectionRequirements requirements) {
         SelectedGeneration selected = Objects.requireNonNull(context, "selected generation is required");
         ProjectionRequirements requiredRequirements = Objects.requireNonNull(requirements, "projection requirements are required");
+        if (!readPolicy.isRepositoryVisible(selected.repositoryId())) {
+            throw new RepositoryNotFoundException();
+        }
         try {
             Document manifest = template.getCollection(IndexCollections.GENERATION_MANIFESTS).find(Filters.and(
                             Filters.eq("repoId", selected.repositoryId().value()), Filters.eq("generationId", selected.generationId().value()),

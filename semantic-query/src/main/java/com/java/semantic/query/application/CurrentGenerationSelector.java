@@ -12,7 +12,6 @@ import com.java.semantic.model.query.SelectedGeneration;
 import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.model.repository.RepositoryRevision;
 import com.java.semantic.query.config.ConfiguredReadPolicy;
-import com.java.semantic.query.config.SearchAccessPlan;
 import com.mongodb.MongoException;
 import com.mongodb.client.FindIterable;
 import com.mongodb.client.model.Filters;
@@ -33,14 +32,6 @@ import java.util.concurrent.TimeUnit;
 
 /** The sole policy boundary for every generation-backed query read. */
 public final class CurrentGenerationSelector {
-    public static final ProjectionRequirements SOURCES = new ProjectionRequirements(EnumSet.of(ProjectionName.SOURCES, ProjectionName.SYMBOLS));
-    public static final ProjectionRequirements SYMBOLS = new ProjectionRequirements(EnumSet.of(ProjectionName.SYMBOLS));
-    public static final ProjectionRequirements RELATIONS = new ProjectionRequirements(EnumSet.of(ProjectionName.RELATIONS, ProjectionName.SYMBOLS));
-    public static final ProjectionRequirements ENTRY_POINTS = new ProjectionRequirements(EnumSet.of(ProjectionName.ENTRY_POINTS, ProjectionName.SYMBOLS));
-    public static final ProjectionRequirements SEARCH = new ProjectionRequirements(EnumSet.of(ProjectionName.SEARCH, ProjectionName.SYMBOLS));
-    public static final ProjectionRequirements SEARCH_WITH_SOURCES = new ProjectionRequirements(EnumSet.of(ProjectionName.SEARCH,
-            ProjectionName.SOURCES, ProjectionName.SYMBOLS));
-    public static final ProjectionRequirements ALL_PROJECTIONS = new ProjectionRequirements(EnumSet.allOf(ProjectionName.class));
     private final MongoTemplate template;
     private final SelectedGenerationGuard guard;
     private final Duration storageTimeout;
@@ -52,7 +43,7 @@ public final class CurrentGenerationSelector {
     }
 
     public SelectedGeneration selectSource(String requestedRepositoryId, String requestedRevision, SourceTypeIdentity sourceType) {
-        return selectSource(requestedRepositoryId, requestedRevision, sourceType, SOURCES);
+        return selectSource(requestedRepositoryId, requestedRevision, sourceType, SelectedGenerationGuard.SOURCES);
     }
 
     /** Selects an authorized source scope while requiring only the caller's actual persisted projections. */
@@ -66,17 +57,6 @@ public final class CurrentGenerationSelector {
         return guard.require(current, requiredRequirements);
     }
 
-    void requireVisible(SelectedGeneration current, CodeFactIdentity codeFact) {
-        guard.requireVisible(current, codeFact);
-    }
-
-    void requireSourceVisible(SelectedGeneration current, SourceTypeIdentity sourceType) {
-        guard.requireSourceVisible(current, sourceType);
-    }
-
-    void requireCompatible(SelectedGeneration current, ProjectionRequirements requirements) {
-        guard.require(current, requirements);
-    }
 
     public SelectedGeneration selectCodeFact(String requestedRepositoryId, String requestedRevision, CodeFactIdentity codeFact) {
         Request request = request(requestedRepositoryId, requestedRevision);
@@ -110,16 +90,13 @@ public final class CurrentGenerationSelector {
         return guard.require(selectedPointer(request), requiredRequirements);
     }
 
-    public SearchAccessPlan searchAccessPlan(String requestedRepositoryId) {
-        return guard.searchAccessPlan(requestedRepositoryId);
-    }
 
     private static ProjectionRequirements requirementsFor(CodeFactIdentity identity) {
         return switch (identity.kind()) {
             case ANNOTATION_USAGE, TYPE_USAGE, SQL_IDENTIFIER, CONFIGURATION_KEY, OUTBOUND_API, MQ_PUBLISHER, ERROR_CONTRACT ->
                     new ProjectionRequirements(EnumSet.of(ProjectionName.RELATIONS, ProjectionName.SYMBOLS));
-            case API_ROUTE, MQ_DESTINATION, SCHEDULE -> ENTRY_POINTS;
-            default -> SYMBOLS;
+            case API_ROUTE, MQ_DESTINATION, SCHEDULE -> SelectedGenerationGuard.ENTRY_POINTS;
+            default -> SelectedGenerationGuard.SYMBOLS;
         };
     }
 
