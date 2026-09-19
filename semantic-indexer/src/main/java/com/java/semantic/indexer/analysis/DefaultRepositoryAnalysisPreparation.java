@@ -21,6 +21,9 @@ import java.util.Objects;
 
 /** Coordinates a fresh lease, post-import attestation, and a bound semantic service. */
 public final class DefaultRepositoryAnalysisPreparation implements RepositoryAnalysisPreparation {
+    private static final String PROCESS_ANNOTATIONS =
+            "org.eclipse.jdt.core.compiler.processAnnotations";
+
     private final JdtWorkspaceManager workspaceManager;
     private final JdtLsEffectiveEnvironmentInspector inspector;
     private final FullIndexPlanner planner;
@@ -115,10 +118,13 @@ public final class DefaultRepositoryAnalysisPreparation implements RepositoryAna
         return List.copyOf(roots);
     }
 
-    private static java.util.Map<String, String> effectiveCompilerOptions(AnalysisInputs inputs) {
+    static java.util.Map<String, String> effectiveCompilerOptions(AnalysisInputs inputs) {
         java.util.Map<String, String> options = new java.util.TreeMap<>();
         for (AnalysisInputs.Project project : inputs.projects()) {
             for (java.util.Map.Entry<String, String> option : project.compilerOptions().entrySet()) {
+                if (PROCESS_ANNOTATIONS.equals(option.getKey())) {
+                    continue;
+                }
                 String existing = options.putIfAbsent(option.getKey(), option.getValue());
                 if (existing != null && !existing.equals(option.getValue())) {
                     throw new IllegalStateException("included projects disagree on compiler option " + option.getKey());
