@@ -113,12 +113,6 @@ public final class PublishedRelationQueryService {
                 new PublishedRelationPage(request.offset(), request.limit(), page.size(), visible.size()));
     }
 
-    private SelectedGeneration selectAndValidateTarget(PublishedRelationQuery query) {
-        SelectedGeneration current = generationSelector.selectCodeFact(query.repositoryId().value(), query.revision().value(), query.target(),
-                CurrentGenerationSelector.RELATIONS);
-        ensureSymbol(current, query.target());
-        return current;
-    }
 
     private List<RelationDocument> readRelations(SelectedGeneration current, EnumSet<RelationKind> kinds, String endpointField,
                                                  String endpointValue) {

@@ -42,6 +42,7 @@ import static com.java.semantic.query.application.SemanticQueryContract.EventLis
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -198,8 +199,23 @@ class SemanticQueryFacadeDiscoveryTest {
     private static SemanticQueryFacade facade(CodeFactReadService facts, PublishedDiscoveryQueryService discovery,
                                               PublishedEntryPointQueryService entryPoints) {
         SourceSliceService source = mock(SourceSliceService.class);
-        when(source.factSource(any(CodeFactReadQuery.class), any(Integer.class))).thenReturn(new FactSourceSlice(generation(), range(), range(), "x"));
-        return new SemanticQueryFacade(mock(CurrentRepositoryQueryService.class), mock(CodeFactSearchService.class), source, facts,
+        CurrentGenerationSelector selector = mock(CurrentGenerationSelector.class);
+        CodeFactSearchService search = mock(CodeFactSearchService.class);
+        when(selector.select(any(String.class), any(String.class), any())).thenReturn(generation());
+        when(search.selector()).thenReturn(selector);
+        when(facts.get(any(SelectedGeneration.class), any(CodeFactReadQuery.class)))
+                .thenAnswer(invocation -> facts.get(invocation.getArgument(1)));
+        when(source.factSource(any(SelectedGeneration.class), any(CodeFactReadQuery.class), anyInt()))
+                .thenAnswer(invocation -> source.factSource(invocation.getArgument(1), invocation.getArgument(2)));
+        when(source.factSource(any(CodeFactReadQuery.class), anyInt())).thenReturn(new FactSourceSlice(generation(), range(), range(), "x"));
+        when(discovery.discoverTypeMembers(any(SelectedGeneration.class), any(TypeMemberQuery.class)))
+                .thenAnswer(invocation -> discovery.discoverTypeMembers(invocation.getArgument(1)));
+        when(discovery.discoverEventListeners(any(SelectedGeneration.class), any(EventListenerQuery.class)))
+                .thenAnswer(invocation -> discovery.discoverEventListeners(invocation.getArgument(1)));
+        when(entryPoints.listEntryPoints(any(SelectedGeneration.class), any(String.class), any(String.class), any(), anyInt(), anyInt()))
+                .thenAnswer(invocation -> entryPoints.listEntryPoints(invocation.getArgument(1), invocation.getArgument(2),
+                        invocation.getArgument(3), invocation.getArgument(4), invocation.getArgument(5)));
+        return new SemanticQueryFacade(mock(CurrentRepositoryQueryService.class), search, source, facts,
                 discovery, entryPoints, mock(PublishedRelationQueryService.class));
     }
 

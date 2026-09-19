@@ -40,6 +40,10 @@ public final class CodeFactSearchService {
         this.coverageReader = new SourceIndexCoverageReader(template, storageTimeout);
     }
 
+    CurrentGenerationSelector selector() {
+        return selector;
+    }
+
     public CodeFactSearchResult search(CodeFactSearchQuery query) {
         CodeFactSearchQuery requiredQuery = Objects.requireNonNull(query, "query is required");
         SelectedGeneration context = selector.select(requiredQuery.repositoryId().value(), requiredQuery.revision().value(),

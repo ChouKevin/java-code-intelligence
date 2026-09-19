@@ -12,6 +12,7 @@ import com.java.semantic.query.application.PublishedEntryPointQueryService;
 import com.java.semantic.query.application.PublishedRelationQueryService;
 import com.java.semantic.query.application.SourceSliceService;
 import com.java.semantic.query.application.SemanticQueryFacade;
+import com.java.semantic.query.application.SelectedSemanticQueryService;
 import com.java.semantic.query.config.ConfiguredReadPolicy;
 import com.java.semantic.query.config.GitEvidenceProperties;
 import com.java.semantic.query.config.ReadPolicyProperties;
@@ -95,16 +96,22 @@ public class SemanticQueryApplication {
     }
 
     @Bean
-    SemanticQueryFacade semanticQueryFacade(CurrentRepositoryQueryService repositoryQueryService,
-                                            CodeFactSearchService codeFactSearchService,
-                                            SourceSliceService sourceSliceService,
-                                            CodeFactReadService codeFactReadService,
-                                            PublishedDiscoveryQueryService discoveryQueryService,
-                                            PublishedEntryPointQueryService entryPointQueryService,
-                                             PublishedRelationQueryService relationQueryService, MongoTemplate template,
-                                             ConfiguredReadPolicy policy, SemanticQueryProperties properties) {
-        return new SemanticQueryFacade(repositoryQueryService, codeFactSearchService, sourceSliceService, codeFactReadService,
-                discoveryQueryService, entryPointQueryService, relationQueryService,
+    SelectedSemanticQueryService selectedSemanticQueryService(CodeFactSearchService codeFactSearchService,
+                                                              SourceSliceService sourceSliceService,
+                                                              CodeFactReadService codeFactReadService,
+                                                              PublishedDiscoveryQueryService discoveryQueryService,
+                                                              PublishedEntryPointQueryService entryPointQueryService,
+                                                              PublishedRelationQueryService relationQueryService) {
+        return new SelectedSemanticQueryService(codeFactSearchService, sourceSliceService, codeFactReadService,
+                discoveryQueryService, entryPointQueryService, relationQueryService);
+    }
+
+    @Bean
+    SemanticQueryFacade semanticQueryFacade(CurrentGenerationSelector selector,
+                                            SelectedSemanticQueryService selectedQueries,
+                                            CurrentRepositoryQueryService repositoryQueryService, MongoTemplate template,
+                                            ConfiguredReadPolicy policy, SemanticQueryProperties properties) {
+        return new SemanticQueryFacade(selector, selectedQueries, repositoryQueryService,
                 new GitEvidenceReadService(template, policy, properties.storageTimeout()));
     }
 

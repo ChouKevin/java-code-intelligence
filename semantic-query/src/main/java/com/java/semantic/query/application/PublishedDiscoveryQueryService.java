@@ -51,24 +51,32 @@ public final class PublishedDiscoveryQueryService {
 
     public DeclarationResolutionResult resolveDeclaration(DeclarationResolutionQuery query) {
         DeclarationResolutionQuery requiredQuery = Objects.requireNonNull(query, "query is required");
-        SearchAccessPlan accessPlan = selector.searchAccessPlan(requiredQuery.repositoryId().value());
-        SelectedGeneration current = selector.selectSource(requiredQuery.repositoryId().value(), requiredQuery.revision().value(),
+        SelectedGeneration context = selector.selectSource(requiredQuery.repositoryId().value(), requiredQuery.revision().value(),
                 requiredQuery.context(), CurrentGenerationSelector.SYMBOLS);
+        return resolveDeclaration(context, requiredQuery);
+    }
+
+    public DeclarationResolutionResult resolveDeclaration(SelectedGeneration context, DeclarationResolutionQuery query) {
+        SelectedGeneration selected = Objects.requireNonNull(context, "selected generation is required");
+        DeclarationResolutionQuery requiredQuery = Objects.requireNonNull(query, "query is required");
+        requireSourceContext(selected, requiredQuery.repositoryId(), requiredQuery.revision(), requiredQuery.context());
+        SearchAccessPlan accessPlan = selector.searchAccessPlan(requiredQuery.repositoryId().value());
         try {
             FindIterable<Document> rows = template.getCollection(IndexCollections.SYMBOLS).find(accessPlan.authorized(Filters.and(
-                    Filters.eq("repoId", current.repositoryId().value()), Filters.eq("generationId", current.generationId().value()),
+                    Filters.eq("repoId", selected.repositoryId().value()), Filters.eq("generationId", selected.generationId().value()),
                     Filters.eq("sourcePath", requiredQuery.context().sourceFile()), Filters.eq("name", requiredQuery.symbol()))))
                     .sort(Sorts.ascending("canonical")).maxTime(storageTimeout.toMillis(), TimeUnit.MILLISECONDS);
             List<CodeFactSummary> candidates = new ArrayList<>();
             for (Document row : rows) {
-                SymbolDocument symbol = CodeFactReadService.decode(row, current, template);
+                SymbolDocument symbol = CodeFactReadService.decode(row, selected, template);
                 if (isSupportedDeclaration(symbol.kind()) && ownsContext(symbol, requiredQuery.context())
                         && containsPosition(symbol, requiredQuery.position())) {
-                    selector.requireVisible(current, symbol.fact().identity());
+                    selector.requireVisible(selected, symbol.fact().identity());
                     candidates.add(new CodeFactSummary(symbol.fact(), symbol.range()));
                 }
             }
-            return new DeclarationResolutionResult(current, candidates.stream().min(Comparator.comparing(candidate -> candidate.fact().id().value())));
+            return new DeclarationResolutionResult(selected,
+                    candidates.stream().min(Comparator.comparing(candidate -> candidate.fact().id().value())));
         } catch (MongoException | DataAccessException exception) {
             throw new SemanticIndexUnavailableException(exception);
         } catch (RepositoryNotFoundException | IndexContractMismatchException exception) {
@@ -80,11 +88,18 @@ public final class PublishedDiscoveryQueryService {
 
     public EventListenerResult discoverEventListeners(EventListenerQuery query) {
         EventListenerQuery requiredQuery = Objects.requireNonNull(query, "query is required");
-        SearchAccessPlan accessPlan = selector.searchAccessPlan(requiredQuery.repositoryId().value());
-        SelectedGeneration current = selector.select(requiredQuery.repositoryId().value(), requiredQuery.revision().value(),
+        SelectedGeneration context = selector.select(requiredQuery.repositoryId().value(), requiredQuery.revision().value(),
                 CurrentGenerationSelector.SYMBOLS);
+        return discoverEventListeners(context, requiredQuery);
+    }
+
+    public EventListenerResult discoverEventListeners(SelectedGeneration context, EventListenerQuery query) {
+        SelectedGeneration selected = Objects.requireNonNull(context, "selected generation is required");
+        EventListenerQuery requiredQuery = Objects.requireNonNull(query, "query is required");
+        requireContext(selected, requiredQuery.repositoryId(), requiredQuery.revision(), CurrentGenerationSelector.SYMBOLS);
+        SearchAccessPlan accessPlan = selector.searchAccessPlan(requiredQuery.repositoryId().value());
         try {
-            org.bson.conversions.Bson filter = accessPlan.authorizedMethod(listenerFilter(current, requiredQuery));
+            org.bson.conversions.Bson filter = accessPlan.authorizedMethod(listenerFilter(selected, requiredQuery));
             long total = template.getCollection(IndexCollections.SYMBOLS).countDocuments(filter,
                     new com.mongodb.client.model.CountOptions().maxTime(storageTimeout.toMillis(), TimeUnit.MILLISECONDS));
             FindIterable<Document> rows = template.getCollection(IndexCollections.SYMBOLS).find(filter)
@@ -92,10 +107,10 @@ public final class PublishedDiscoveryQueryService {
                     .maxTime(storageTimeout.toMillis(), TimeUnit.MILLISECONDS);
             List<EventListenerCandidate> candidates = new ArrayList<>();
             for (Document row : rows) {
-                SymbolDocument symbol = CodeFactReadService.decode(row, current, template);
-                candidates.add(listenerCandidate(row, symbol, current, requiredQuery));
+                SymbolDocument symbol = CodeFactReadService.decode(row, selected, template);
+                candidates.add(listenerCandidate(row, symbol, selected, requiredQuery));
             }
-            return new EventListenerResult(current, requiredQuery, candidates, total,
+            return new EventListenerResult(selected, requiredQuery, candidates, total,
                     requiredQuery.offset() + candidates.size() < total);
         } catch (MongoException | DataAccessException exception) {
             throw new SemanticIndexUnavailableException(exception);
@@ -159,13 +174,20 @@ public final class PublishedDiscoveryQueryService {
 
     public TypeMemberResult discoverTypeMembers(TypeMemberQuery query) {
         TypeMemberQuery requiredQuery = Objects.requireNonNull(query, "query is required");
-        SearchAccessPlan accessPlan = selector.searchAccessPlan(requiredQuery.repositoryId().value());
-        SelectedGeneration current = selector.selectSource(requiredQuery.repositoryId().value(), requiredQuery.revision().value(),
+        SelectedGeneration context = selector.selectSource(requiredQuery.repositoryId().value(), requiredQuery.revision().value(),
                 requiredQuery.sourceType(), CurrentGenerationSelector.SYMBOLS);
+        return discoverTypeMembers(context, requiredQuery);
+    }
+
+    public TypeMemberResult discoverTypeMembers(SelectedGeneration context, TypeMemberQuery query) {
+        SelectedGeneration selected = Objects.requireNonNull(context, "selected generation is required");
+        TypeMemberQuery requiredQuery = Objects.requireNonNull(query, "query is required");
+        requireSourceContext(selected, requiredQuery.repositoryId(), requiredQuery.revision(), requiredQuery.sourceType());
+        SearchAccessPlan accessPlan = selector.searchAccessPlan(requiredQuery.repositoryId().value());
         try {
             List<String> kinds = requiredQuery.kinds().stream().map(Enum::name).sorted().toList();
-            org.bson.conversions.Bson filter = accessPlan.authorized(Filters.and(Filters.eq("repoId", current.repositoryId().value()),
-                    Filters.eq("generationId", current.generationId().value()), Filters.eq("owner", requiredQuery.sourceType().fullyQualifiedName()),
+            org.bson.conversions.Bson filter = accessPlan.authorized(Filters.and(Filters.eq("repoId", selected.repositoryId().value()),
+                    Filters.eq("generationId", selected.generationId().value()), Filters.eq("owner", requiredQuery.sourceType().fullyQualifiedName()),
                     Filters.in("kind", kinds)));
             long total = template.getCollection(IndexCollections.SYMBOLS).countDocuments(filter,
                     new com.mongodb.client.model.CountOptions().maxTime(storageTimeout.toMillis(), TimeUnit.MILLISECONDS));
@@ -174,16 +196,16 @@ public final class PublishedDiscoveryQueryService {
                     .maxTime(storageTimeout.toMillis(), TimeUnit.MILLISECONDS);
             List<CodeFactSummary> members = new ArrayList<>();
             for (Document row : rows) {
-                SymbolDocument symbol = CodeFactReadService.decode(row, current, template);
+                SymbolDocument symbol = CodeFactReadService.decode(row, selected, template);
                 if (!requiredQuery.kinds().contains(symbol.kind()) || !requiredQuery.sourceType().fullyQualifiedName().equals(symbol.owner())) {
                     throw new IndexContractMismatchException();
                 }
-                selector.requireVisible(current, symbol.fact().identity());
+                selector.requireVisible(selected, symbol.fact().identity());
                 members.add(new CodeFactSummary(symbol.fact(), symbol.range()));
             }
             boolean hasMore = requiredQuery.offset() + members.size() < total;
-            return new TypeMemberResult(current, requiredQuery, members, total, hasMore,
-                    coverageReader.coverage(current, accessPlan, Optional.empty(), Optional.of(requiredQuery.sourceType().sourceFile())));
+            return new TypeMemberResult(selected, requiredQuery, members, total, hasMore,
+                    coverageReader.coverage(selected, accessPlan, Optional.empty(), Optional.of(requiredQuery.sourceType().sourceFile())));
         } catch (MongoException | DataAccessException exception) {
             throw new SemanticIndexUnavailableException(exception);
         } catch (RepositoryNotFoundException | IndexContractMismatchException exception) {
@@ -193,6 +215,21 @@ public final class PublishedDiscoveryQueryService {
         }
     }
 
+    private void requireSourceContext(SelectedGeneration context, com.java.semantic.model.repository.RepositoryId repositoryId,
+                                      com.java.semantic.model.repository.RepositoryRevision revision,
+                                      com.java.semantic.model.codefact.SourceTypeIdentity sourceType) {
+        requireContext(context, repositoryId, revision, CurrentGenerationSelector.SYMBOLS);
+        selector.requireSourceVisible(context, sourceType);
+    }
+
+    private void requireContext(SelectedGeneration context, com.java.semantic.model.repository.RepositoryId repositoryId,
+                                com.java.semantic.model.repository.RepositoryRevision revision,
+                                com.java.semantic.model.index.ProjectionRequirements requirements) {
+        if (!context.repositoryId().equals(repositoryId) || !context.revision().equals(revision)) {
+            throw new IllegalArgumentException("query repository and revision must match the selected generation");
+        }
+        selector.requireCompatible(context, requirements);
+    }
     private static boolean isSupportedDeclaration(CodeFactKind kind) {
         return kind == CodeFactKind.TYPE || kind == CodeFactKind.METHOD || kind == CodeFactKind.FIELD
                 || kind == CodeFactKind.ENUM_CONSTANT || kind == CodeFactKind.RECORD_COMPONENT || kind == CodeFactKind.MAPPER_STATEMENT;

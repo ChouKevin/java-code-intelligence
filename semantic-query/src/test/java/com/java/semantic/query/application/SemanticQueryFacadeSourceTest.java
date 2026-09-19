@@ -4,6 +4,7 @@ import com.java.semantic.model.codefact.CodeFact;
 import com.java.semantic.model.codefact.CodeFactId;
 import com.java.semantic.model.codefact.CodeFactIdentity;
 import com.java.semantic.model.codefact.CodeFactKind;
+import com.java.semantic.model.codefact.CodeFactReadQuery;
 import com.java.semantic.model.codefact.CodeFactSearchQuery;
 import com.java.semantic.model.codefact.CodeFactSearchResult;
 import com.java.semantic.model.codefact.CodeFactSummary;
@@ -44,6 +45,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -74,10 +76,17 @@ class SemanticQueryFacadeSourceTest {
         codeFactReadService = mock(CodeFactReadService.class);
         discoveryQueryService = mock(PublishedDiscoveryQueryService.class);
         entryPointQueryService = mock(PublishedEntryPointQueryService.class);
-        facade = new SemanticQueryFacade(repositoryService, searchService, sourceSliceService, codeFactReadService,
-                discoveryQueryService, entryPointQueryService, mock(PublishedRelationQueryService.class));
         generation = generation(REPOSITORY_ID, REVISION, "g-payment");
         relationIdentity = relationIdentity();
+        CurrentGenerationSelector selector = mock(CurrentGenerationSelector.class);
+        when(selector.select(any(String.class), any(String.class), any())).thenReturn(generation);
+        when(searchService.selector()).thenReturn(selector);
+        when(searchService.search(any(SelectedGeneration.class), any(CodeFactSearchQuery.class)))
+                .thenAnswer(invocation -> searchService.search(invocation.getArgument(1)));
+        when(sourceSliceService.factSource(any(SelectedGeneration.class), any(CodeFactReadQuery.class), anyInt()))
+                .thenAnswer(invocation -> sourceSliceService.factSource(invocation.getArgument(1), invocation.getArgument(2)));
+        facade = new SemanticQueryFacade(repositoryService, searchService, sourceSliceService, codeFactReadService,
+                discoveryQueryService, entryPointQueryService, mock(PublishedRelationQueryService.class));
     }
 
     @Test

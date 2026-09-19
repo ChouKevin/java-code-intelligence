@@ -36,20 +36,28 @@ public final class CurrentSourceQueryService {
     }
 
     public PublishedSource getSource(String repositoryId, String revision, SourceTypeIdentity sourceType) {
-        SelectedGeneration current = selector.selectSource(repositoryId, revision, sourceType);
         SourceTypeIdentity identity = Objects.requireNonNull(sourceType, "source type identity is required");
+        SelectedGeneration context = selector.selectSource(repositoryId, revision, identity);
+        return getSource(context, identity);
+    }
+
+    public PublishedSource getSource(SelectedGeneration context, SourceTypeIdentity sourceType) {
+        SelectedGeneration selected = Objects.requireNonNull(context, "selected generation is required");
+        SourceTypeIdentity identity = Objects.requireNonNull(sourceType, "source type identity is required");
+        selector.requireCompatible(selected, CurrentGenerationSelector.SOURCES);
+        selector.requireSourceVisible(selected, identity);
         try {
-            requireAuthorizedCurrentSource(current, identity);
+            requireAuthorizedCurrentSource(selected, identity);
             Document mapping = template.getCollection(IndexCollections.GENERATION_FILES).find(Filters.and(
-                            Filters.eq("repoId", current.repositoryId().value()), Filters.eq("generationId", current.generationId().value()),
+                            Filters.eq("repoId", selected.repositoryId().value()), Filters.eq("generationId", selected.generationId().value()),
                             Filters.eq("sourcePath", identity.sourceFile()))).maxTime(storageTimeout.toMillis(), TimeUnit.MILLISECONDS).first();
             if (Objects.isNull(mapping)) { throw new IndexNotReadyException(); }
-            GenerationFileDocument generationFile = decodeGenerationFile(mapping, current, identity.sourceFile());
+            GenerationFileDocument generationFile = decodeGenerationFile(mapping, selected, identity.sourceFile());
             String artifactId = generationFile.sourceArtifactId().value();
             Document artifact = template.getCollection(IndexCollections.SOURCE_ARTIFACTS).find(Filters.eq("sourceArtifactId", artifactId))
                     .maxTime(storageTimeout.toMillis(), TimeUnit.MILLISECONDS).first();
             if (Objects.isNull(artifact)) { throw new IndexNotReadyException(); }
-            return new PublishedSource(current, identity.sourceFile(), artifactContent(artifact, new SourceArtifactId(artifactId)));
+            return new PublishedSource(selected, identity.sourceFile(), artifactContent(artifact, new SourceArtifactId(artifactId)));
         } catch (MongoException | DataAccessException exception) {
             throw new SemanticIndexUnavailableException(exception);
         } catch (RepositoryNotFoundException | IndexNotReadyException | IndexContractMismatchException exception) {

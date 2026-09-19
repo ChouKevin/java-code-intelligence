@@ -237,7 +237,23 @@ class SemanticQueryFacadeRelationTest {
 
     private static SemanticQueryFacade facade(CodeFactReadService facts, SourceSliceService source,
                                               PublishedRelationQueryService relations) {
-        return new SemanticQueryFacade(mock(CurrentRepositoryQueryService.class), mock(CodeFactSearchService.class), source, facts,
+        CurrentGenerationSelector selector = mock(CurrentGenerationSelector.class);
+        CodeFactSearchService search = mock(CodeFactSearchService.class);
+        when(selector.select(any(String.class), any(String.class), any())).thenReturn(generation());
+        when(search.selector()).thenReturn(selector);
+        when(facts.get(any(SelectedGeneration.class), any(CodeFactReadQuery.class)))
+                .thenAnswer(invocation -> facts.get(invocation.getArgument(1)));
+        when(source.factSource(any(SelectedGeneration.class), any(CodeFactReadQuery.class), anyInt()))
+                .thenAnswer(invocation -> source.factSource(invocation.getArgument(1), invocation.getArgument(2)));
+        when(relations.findImplementations(any(SelectedGeneration.class), any(PublishedRelationQuery.class)))
+                .thenAnswer(invocation -> relations.findImplementations(invocation.getArgument(1)));
+        when(relations.findReferences(any(SelectedGeneration.class), any(PublishedRelationQuery.class)))
+                .thenAnswer(invocation -> relations.findReferences(invocation.getArgument(1)));
+        when(relations.findCallers(any(SelectedGeneration.class), any(PublishedRelationQuery.class)))
+                .thenAnswer(invocation -> relations.findCallers(invocation.getArgument(1)));
+        when(relations.findCallees(any(SelectedGeneration.class), any(PublishedRelationQuery.class)))
+                .thenAnswer(invocation -> relations.findCallees(invocation.getArgument(1)));
+        return new SemanticQueryFacade(mock(CurrentRepositoryQueryService.class), search, source, facts,
                 mock(PublishedDiscoveryQueryService.class), mock(PublishedEntryPointQueryService.class), relations);
     }
 

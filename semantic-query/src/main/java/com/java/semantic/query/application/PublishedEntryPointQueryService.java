@@ -103,13 +103,23 @@ public final class PublishedEntryPointQueryService {
     /** Lists a deterministic page of persisted, policy-visible entry points from one exact published revision. */
     public PublishedEntryPointResult listEntryPoints(String repositoryId, String revision, Set<EntryPointKind> kinds,
                                                       int offset, int limit) {
+        SelectedGeneration context = selector.select(repositoryId, revision, CurrentGenerationSelector.ENTRY_POINTS);
+        return listEntryPoints(context, repositoryId, revision, kinds, offset, limit);
+    }
+
+    public PublishedEntryPointResult listEntryPoints(SelectedGeneration context, String repositoryId, String revision,
+                                                      Set<EntryPointKind> kinds, int offset, int limit) {
+        SelectedGeneration selectedGeneration = Objects.requireNonNull(context, "selected generation is required");
         Set<EntryPointKind> requestedKinds = Set.copyOf(Objects.requireNonNull(kinds, "entry point kinds are required"));
         requirePage(offset, limit);
+        if (!selectedGeneration.repositoryId().value().equals(repositoryId) || !selectedGeneration.revision().value().equals(revision)) {
+            throw new IllegalArgumentException("request repository and revision must match the selected generation");
+        }
+        selector.requireCompatible(selectedGeneration, CurrentGenerationSelector.ENTRY_POINTS);
         SearchAccessPlan accessPlan = selector.searchAccessPlan(repositoryId);
-        SelectedGeneration current = selector.select(repositoryId, revision, CurrentGenerationSelector.ENTRY_POINTS);
         try {
-            org.bson.conversions.Bson base = Filters.and(Filters.eq("repoId", current.repositoryId().value()),
-                    Filters.eq("generationId", current.generationId().value()));
+            org.bson.conversions.Bson base = Filters.and(Filters.eq("repoId", selectedGeneration.repositoryId().value()),
+                    Filters.eq("generationId", selectedGeneration.generationId().value()));
             org.bson.conversions.Bson selected = requestedKinds.isEmpty() ? base : Filters.and(base,
                     Filters.in("entryPoint.kind", requestedKinds.stream().map(Enum::name).sorted().toList()));
             org.bson.conversions.Bson filter = accessPlan.authorized(selected);
@@ -121,21 +131,22 @@ public final class PublishedEntryPointQueryService {
             List<PublishedEntryPoint> result = new ArrayList<>();
             for (Document row : rows) {
                 EntryPointDocument entryPoint = template.getConverter().read(EntryPointPersistence.class, row).toModel();
-                if (!current.repositoryId().equals(entryPoint.repositoryId()) || !current.generationId().equals(entryPoint.generationId())
+                if (!selectedGeneration.repositoryId().equals(entryPoint.repositoryId())
+                        || !selectedGeneration.generationId().equals(entryPoint.generationId())
                         || (!requestedKinds.isEmpty() && !requestedKinds.contains(entryPoint.kind()))
                         || !entryPoint.fact().id().value().equals(required(row, "entryPointId"))
                         || !entryPoint.fact().identity().canonicalForm().equals(required(row, "canonical"))) {
                     throw new IndexContractMismatchException();
                 }
-                selector.requireVisible(current, entryPoint.fact().identity());
+                selector.requireVisible(selectedGeneration, entryPoint.fact().identity());
                 if (!CodeFactScope.from(entryPoint.fact().identity()).equals(flattenedScope(row))) {
                     throw new IndexContractMismatchException();
                 }
-                result.add(new PublishedEntryPoint(current, entryPoint.fact().id().value(), entryPoint.fact().identity().canonicalForm(),
+                result.add(new PublishedEntryPoint(selectedGeneration, entryPoint.fact().id().value(), entryPoint.fact().identity().canonicalForm(),
                         entryPoint.kind(), entryPoint.method().canonicalForm(), triggerValue(entryPoint),
                         entryPoint.range().sourceFile()));
             }
-            return new PublishedEntryPointResult(current, result, total, offset + result.size() < total);
+            return new PublishedEntryPointResult(selectedGeneration, result, total, offset + result.size() < total);
         } catch (MongoException | DataAccessException exception) {
             throw new SemanticIndexUnavailableException(exception);
         } catch (IndexContractMismatchException | RepositoryNotFoundException exception) {

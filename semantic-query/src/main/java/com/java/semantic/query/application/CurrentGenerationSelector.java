@@ -70,6 +70,10 @@ public final class CurrentGenerationSelector {
         guard.requireVisible(current, codeFact);
     }
 
+    void requireSourceVisible(SelectedGeneration current, SourceTypeIdentity sourceType) {
+        guard.requireSourceVisible(current, sourceType);
+    }
+
     void requireCompatible(SelectedGeneration current, ProjectionRequirements requirements) {
         guard.require(current, requirements);
     }
