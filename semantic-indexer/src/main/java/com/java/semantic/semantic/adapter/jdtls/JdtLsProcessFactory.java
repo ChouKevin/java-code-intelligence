@@ -93,7 +93,7 @@ public final class JdtLsProcessFactory {
             throws IOException, InterruptedException, ExecutionException, TimeoutException {
         Objects.requireNonNull(processStartedObserver, "processStartedObserver is required");
         Path launcherJar = findLauncherJar();
-        Path configuration = prepareWritableConfiguration(workspaceData);
+        Path configuration = prepareWritablePaths(workspaceRoot, workspaceData);
         List<String> command = createCommand(launcherJar, workspaceData, configuration);
         Process process = processStarter.start(command);
         log.info("phase=jdtls-process outcome=started");
@@ -182,7 +182,7 @@ public final class JdtLsProcessFactory {
         return builder.start();
     }
 
-    private Path prepareWritableConfiguration(Path workspaceData) throws IOException {
+    private Path prepareWritablePaths(Path workspaceRoot, Path workspaceData) throws IOException {
         Path configuration = workspaceData.resolve("configuration").toAbsolutePath().normalize();
         if (!configuration.startsWith(workspaceData.toAbsolutePath().normalize())) {
             throw new IOException("JDT LS configuration escaped its workspace data directory");
@@ -203,13 +203,18 @@ public final class JdtLsProcessFactory {
         if (properties.getIsolationMode() == JdtLsProperties.IsolationMode.LINUX_UID) {
             UserPrincipalLookupService lookup = workspaceData.getFileSystem().getUserPrincipalLookupService();
             UserPrincipal analysisUser = lookup.lookupPrincipalByName(Long.toString(properties.getAnalysisUid()));
-            try (Stream<Path> paths = Files.walk(workspaceData)) {
-                for (Path path : paths.toList()) {
-                    Files.setOwner(path, analysisUser);
-                }
-            }
+            assignAnalysisOwner(workspaceRoot, analysisUser);
+            assignAnalysisOwner(workspaceData, analysisUser);
         }
         return configuration;
+    }
+
+    private void assignAnalysisOwner(Path path, UserPrincipal analysisUser) throws IOException {
+        try (Stream<Path> paths = Files.walk(path)) {
+            for (Path descendant : paths.toList()) {
+                Files.setOwner(descendant, analysisUser);
+            }
+        }
     }
 
     private InitializeParams createInitializeParams(Path workspaceRoot) {
