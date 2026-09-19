@@ -18,7 +18,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class OpenApiContractTest {
 
     @Test
-    void advertises_the_nineteen_implemented_application_routes_and_shared_application_errors() throws Exception {
+    void advertises_the_thirty_implemented_application_routes_and_shared_application_errors() throws Exception {
         Map<String, Object> root = map(new Yaml().load(Files.readString(Path.of("src", "main", "resources", "openapi",
                 "semantic-api-v1.yaml"))));
         Map<String, Object> paths = map(root.get("paths"));
@@ -43,7 +43,18 @@ class OpenApiContractTest {
                 "/api/v1/git/file-diff",
                 "/api/v1/git/files",
                 "/api/v1/git/file",
-                "/api/v1/git/search");
+                "/api/v1/git/search",
+                "/api/v1/repositories/{repositoryId}/reviews/{reviewId}",
+                "/api/v1/reviews/search-code",
+                "/api/v1/reviews/fact-source",
+                "/api/v1/reviews/entry-points",
+                "/api/v1/reviews/api-routes",
+                "/api/v1/reviews/event-listeners",
+                "/api/v1/reviews/type-members",
+                "/api/v1/reviews/method-implementations",
+                "/api/v1/reviews/references",
+                "/api/v1/reviews/callers",
+                "/api/v1/reviews/callees");
         assertThat(schemas).containsKeys("SemanticQueryError", "RepositoryCollection", "RepositoryItem",
                 "FactSourceResult", "SearchCodeRequest", "FactSourceRequest", "EntryPointRequest", "ApiRouteRequest",
                 "EventListenerRequest", "TypeMemberRequest", "RelationRequest", "InternalProgramElement", "ExternalCallee",
@@ -52,7 +63,12 @@ class OpenApiContractTest {
                 "GitBranchRequest", "GitCommitRequest", "GitBranchCollection", "GitCommitCollection", "GitBranchItem", "GitCommitItem",
                 "GitComparisonRequest", "GitFileDiffRequest", "GitComparisonCollection", "GitFileDiffResult", "GitChangeItem",
                 "GitFileListRequest", "GitFileReadRequest", "GitTextSearchRequest", "GitFileCollection", "GitFileContent",
-                "GitTextSearchResult", "GitFileItem", "GitTextMatch", "GitSnapshotCoverage");
+                "GitTextSearchResult", "GitFileItem", "GitTextMatch", "GitSnapshotCoverage",
+                "ReviewDetails", "ReviewContext", "ReviewCoverage", "ReviewSearchCodeRequest", "ReviewFactSourceRequest",
+                "ReviewEntryPointRequest", "ReviewApiRouteRequest", "ReviewEventListenerRequest", "ReviewTypeMemberRequest",
+                "ReviewMethodRelationRequest", "ReviewRelationRequest", "ReviewSearchCodeResult", "ReviewFactSourceResult",
+                "ReviewEntryPointResult", "ReviewEventListenerResult", "ReviewTypeMemberResult", "ReviewImplementationResult",
+                "ReviewReferenceResult", "ReviewCallerResult", "ReviewCalleeResult");
         assertThat(map(schemas.get("SemanticQueryError")).get("properties")).asInstanceOf(org.assertj.core.api.InstanceOfAssertFactories.MAP)
                 .containsOnlyKeys("code", "message", "retryable", "currentRevision");
     }
@@ -183,6 +199,27 @@ class OpenApiContractTest {
                 .containsExactly("indexedSourceCount", "issueCount", "issueCodes");
         assertThat(map(sourceCoverage.get("properties"))).containsOnlyKeys("indexedSourceCount", "issueCount", "issueCodes");
     }
+    @Test
+    void publishes_closed_review_side_requests_without_generation_input_and_concrete_wrapped_results() throws Exception {
+        Map<String, Object> root = openApi();
+        Map<String, Object> schemas = map(map(root.get("components")).get("schemas"));
+        for (String schemaName : Set.of("ReviewSearchCodeRequest", "ReviewFactSourceRequest", "ReviewEntryPointRequest",
+                "ReviewApiRouteRequest", "ReviewEventListenerRequest", "ReviewTypeMemberRequest",
+                "ReviewMethodRelationRequest", "ReviewRelationRequest")) {
+            Map<String, Object> request = map(schemas.get(schemaName));
+            assertThat(request).containsEntry("additionalProperties", false);
+            assertThat(map(request.get("properties"))).containsKeys("repositoryId", "reviewId", "side", "revision")
+                    .doesNotContainKeys("generationId", "generation", "prompt", "queryText");
+        }
+        assertThat(responseSchema(root, "/api/v1/reviews/search-code"))
+                .containsEntry("$ref", "#/components/schemas/ReviewSearchCodeResult");
+        assertThat(responseSchema(root, "/api/v1/reviews/fact-source"))
+                .containsEntry("$ref", "#/components/schemas/ReviewFactSourceResult");
+        assertThat(map(schemas.get("ReviewSearchCodeResult"))).containsEntry("additionalProperties", false);
+        assertThat(map(schemas.get("ReviewContext")).get("required")).asInstanceOf(org.assertj.core.api.InstanceOfAssertFactories.LIST)
+                .containsExactly("repositoryId", "reviewId", "side", "revision", "generationId", "coverage");
+    }
+
 
     private static void assertRequired(Map<String, Object> schemas, String schemaName, List<String> required) {
         assertThat(map(schemas.get(schemaName)).get("required")).asInstanceOf(org.assertj.core.api.InstanceOfAssertFactories.LIST)

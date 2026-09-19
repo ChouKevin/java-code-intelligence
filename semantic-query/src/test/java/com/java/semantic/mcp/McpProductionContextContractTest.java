@@ -85,6 +85,8 @@ class McpProductionContextContractTest {
                 .withInitializer(new ConfigDataApplicationContextInitializer())
                 .withUserConfiguration(SemanticMcpConfiguration.class)
                 .withBean(SemanticQueryFacade.class, () -> facade)
+                .withBean(com.java.semantic.query.application.ReviewQueryFacade.class,
+                        () -> mock(com.java.semantic.query.application.ReviewQueryFacade.class))
                 .withConfiguration(AutoConfigurations.of(JacksonAutoConfiguration.class, McpServerJsonMapperAutoConfiguration.class,
                         McpServerStatelessWebMvcAutoConfiguration.class, McpServerStatelessAutoConfiguration.class));
     }

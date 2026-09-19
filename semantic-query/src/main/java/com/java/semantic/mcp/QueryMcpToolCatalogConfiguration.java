@@ -15,6 +15,12 @@ import com.java.semantic.query.application.SemanticQueryContract;
 import com.java.semantic.query.application.SemanticQueryError;
 import com.java.semantic.query.application.SemanticQueryErrorMapper;
 import com.java.semantic.query.application.SemanticQueryFacade;
+import com.java.semantic.query.application.ReviewContextMismatchException;
+import com.java.semantic.query.application.ReviewFailedException;
+import com.java.semantic.query.application.ReviewNotFoundException;
+import com.java.semantic.query.application.ReviewNotReadyException;
+import com.java.semantic.query.application.ReviewQueryContract;
+import com.java.semantic.query.application.ReviewQueryFacade;
 import io.modelcontextprotocol.server.McpStatelessServerFeatures;
 import io.modelcontextprotocol.spec.McpSchema;
 import org.springframework.context.annotation.Bean;
@@ -38,14 +44,14 @@ public class QueryMcpToolCatalogConfiguration {
 
     @Bean
     public List<McpStatelessServerFeatures.SyncToolSpecification> mcpQueryToolSpecifications(
-            SemanticQueryFacade facade, ObjectMapper objectMapper) {
+            SemanticQueryFacade facade, ReviewQueryFacade reviewFacade, ObjectMapper objectMapper) {
         return SemanticMcpToolCatalog.tools().stream()
-                .map(tool -> specification(tool, facade, objectMapper))
+                .map(tool -> specification(tool, facade, reviewFacade, objectMapper))
                 .toList();
     }
 
     private static McpStatelessServerFeatures.SyncToolSpecification specification(SemanticMcpToolCatalog.ToolDefinition definition,
-                                                                                    SemanticQueryFacade facade,
+                                                                                    SemanticQueryFacade facade, ReviewQueryFacade reviewFacade,
                                                                                     ObjectMapper objectMapper) {
         McpSchema.Tool tool = McpSchema.Tool.builder(definition.name(), SemanticMcpSchemaCatalog.inputSchema(definition.name()))
                 .description(definition.description())
@@ -58,25 +64,27 @@ public class QueryMcpToolCatalogConfiguration {
                 .build();
         return McpStatelessServerFeatures.SyncToolSpecification.builder()
                 .tool(tool)
-                .callHandler((context, request) -> invokeFacade(definition.name(), request.arguments(), facade, objectMapper))
+                .callHandler((context, request) -> invokeFacade(definition.name(), request.arguments(), facade, reviewFacade, objectMapper))
                 .build();
     }
 
     private static McpSchema.CallToolResult invokeFacade(String toolName, Map<String, Object> arguments, SemanticQueryFacade facade,
-                                                         ObjectMapper objectMapper) {
+                                                         ReviewQueryFacade reviewFacade, ObjectMapper objectMapper) {
         try {
-            Object response = dispatch(toolName, normalizedArguments(toolName, arguments), facade, objectMapper);
+            Object response = dispatch(toolName, normalizedArguments(toolName, arguments), facade, reviewFacade, objectMapper);
             return McpSchema.CallToolResult.builder().addTextContent("Query completed")
                     .structuredContent(response).isError(false).build();
-        } catch (RevisionOutdatedException | RepositoryNotFoundException | GitEvidenceNotFoundException | GitEvidenceNotReadyException | CodeFactNotFoundException
-                | CodeFactKindMismatchException | IndexNotReadyException | IndexContractMismatchException
+        } catch (RevisionOutdatedException | RepositoryNotFoundException | ReviewNotFoundException | ReviewNotReadyException
+                | ReviewFailedException | ReviewContextMismatchException | GitEvidenceNotFoundException | GitEvidenceNotReadyException
+                | CodeFactNotFoundException | CodeFactKindMismatchException | IndexNotReadyException | IndexContractMismatchException
                 | SemanticIndexUnavailableException | InvalidCodeFactQueryException | CodeFactKindUnsupportedException
                 | IllegalArgumentException exception) {
             return applicationFailure(ERROR_MAPPER.map(exception));
         }
     }
 
-    private static Object dispatch(String toolName, Map<String, Object> arguments, SemanticQueryFacade facade, ObjectMapper objectMapper) {
+    private static Object dispatch(String toolName, Map<String, Object> arguments, SemanticQueryFacade facade,
+                                   ReviewQueryFacade reviewFacade, ObjectMapper objectMapper) {
         return switch (toolName) {
             case "list_git_branches" -> facade.listGitBranches(convert(arguments, SemanticQueryContract.GitBranchRequest.class, objectMapper));
             case "list_git_commits" -> facade.listGitCommits(convert(arguments, SemanticQueryContract.GitCommitRequest.class, objectMapper));
@@ -95,6 +103,15 @@ public class QueryMcpToolCatalogConfiguration {
             case "list_type_members" -> facade.listTypeMembers(convert(arguments, SemanticQueryContract.TypeMemberRequest.class, objectMapper));
             case "find_method_implementations", "find_callers", "find_callees", "find_references" ->
                     relation(toolName, arguments, facade, objectMapper);
+            case "get_review" -> reviewFacade.getReview(convert(arguments, ReviewQueryContract.ReviewRequest.class, objectMapper));
+            case "review_search_code" -> reviewFacade.searchCode(convert(arguments, ReviewQueryContract.ReviewSearchCodeRequest.class, objectMapper));
+            case "review_get_fact_source" -> reviewFacade.getFactSource(convert(arguments, ReviewQueryContract.ReviewFactSourceRequest.class, objectMapper));
+            case "review_list_entry_points" -> reviewFacade.listEntryPoints(convert(arguments, ReviewQueryContract.ReviewEntryPointRequest.class, objectMapper));
+            case "review_find_api_routes" -> reviewFacade.findApiRoutes(convert(arguments, ReviewQueryContract.ReviewApiRouteRequest.class, objectMapper));
+            case "review_find_event_listeners" -> reviewFacade.findEventListeners(convert(arguments, ReviewQueryContract.ReviewEventListenerRequest.class, objectMapper));
+            case "review_list_type_members" -> reviewFacade.listTypeMembers(convert(arguments, ReviewQueryContract.ReviewTypeMemberRequest.class, objectMapper));
+            case "review_find_method_implementations", "review_find_references", "review_find_callers", "review_find_callees" ->
+                    reviewRelation(toolName, arguments, reviewFacade, objectMapper);
             default -> throw new IllegalArgumentException("unknown Semantic MCP tool");
         };
     }
@@ -107,6 +124,18 @@ public class QueryMcpToolCatalogConfiguration {
             case "find_callers" -> facade.findCallers(request);
             case "find_callees" -> facade.findCallees(request);
             default -> throw new IllegalArgumentException("unknown Semantic MCP relation tool");
+        };
+    }
+
+    private static Object reviewRelation(String toolName, Map<String, Object> arguments, ReviewQueryFacade reviewFacade,
+                                         ObjectMapper objectMapper) {
+        ReviewQueryContract.ReviewRelationRequest request = convert(arguments, ReviewQueryContract.ReviewRelationRequest.class, objectMapper);
+        return switch (toolName) {
+            case "review_find_method_implementations" -> reviewFacade.findMethodImplementations(request);
+            case "review_find_references" -> reviewFacade.findReferences(request);
+            case "review_find_callers" -> reviewFacade.findCallers(request);
+            case "review_find_callees" -> reviewFacade.findCallees(request);
+            default -> throw new IllegalArgumentException("unknown Semantic MCP review relation tool");
         };
     }
 
@@ -129,7 +158,7 @@ public class QueryMcpToolCatalogConfiguration {
         if (SemanticMcpSchemaCatalog.allowedFields(toolName).contains("contextLines")) {
             normalized.putIfAbsent("contextLines", 0);
         }
-        if (toolName.equals("search_code")) {
+        if (toolName.equals("search_code") || toolName.equals("review_search_code")) {
             normalized.putIfAbsent("kinds", Set.of());
             normalized.putIfAbsent("packagePrefix", Optional.empty());
         }
@@ -146,7 +175,8 @@ public class QueryMcpToolCatalogConfiguration {
             normalized.putIfAbsent("cursor", Optional.empty());
             normalized.putIfAbsent("limit", SemanticQueryContract.DEFAULT_LIMIT);
         }
-        if (toolName.equals("list_entry_points") || toolName.equals("list_type_members")) {
+        if (toolName.equals("list_entry_points") || toolName.equals("list_type_members")
+                || toolName.equals("review_list_entry_points") || toolName.equals("review_list_type_members")) {
             normalized.putIfAbsent("kinds", Set.of());
         }
         if (normalized.containsKey("methodFactId")) {

@@ -91,25 +91,33 @@ class McpWireSerializationContractTest {
     }
 
     @Test
-    void tools_list_serializes_the_concrete_search_success_schema() throws Exception {
+    void tools_list_serializes_concrete_current_and_review_success_schemas() throws Exception {
         JsonMapper mapper = applicationMcpMapper();
 
         String payload = listTools(mapper, mock(SemanticQueryFacade.class));
         int searchToolStart = payload.indexOf("\"name\":\"search_code\"");
         int nextToolStart = payload.indexOf("\"name\":\"get_fact_source\"", searchToolStart);
+        int reviewToolStart = payload.indexOf("\"name\":\"review_search_code\"");
+        int nextReviewToolStart = payload.indexOf("\"name\":\"review_get_fact_source\"", reviewToolStart);
         assertThat(searchToolStart).isGreaterThanOrEqualTo(0);
         assertThat(nextToolStart).isGreaterThan(searchToolStart);
+        assertThat(reviewToolStart).isGreaterThanOrEqualTo(0);
+        assertThat(nextReviewToolStart).isGreaterThan(reviewToolStart);
         String searchTool = payload.substring(searchToolStart, nextToolStart);
+        String reviewTool = payload.substring(reviewToolStart, nextReviewToolStart);
 
         assertThat(searchTool).contains("\"outputSchema\":{")
                 .contains("\"sourceCoverage\":{", "\"indexedSourceCount\"", "\"issueCount\"", "\"issueCodes\"")
                 .doesNotContain("\"outputSchema\":{}");
+        assertThat(reviewTool).contains("\"outputSchema\":{", "\"context\":{", "\"result\":{",
+                "\"semanticLimitations\"", "\"generationId\"").doesNotContain("\"outputSchema\":{}");
     }
 
     private static String invoke(JsonMapper mapper, SemanticQueryFacade facade, String toolName, Map<String, Object> arguments) throws Exception {
         WebMvcStatelessServerTransport transport = WebMvcStatelessServerTransport.builder()
                 .jsonMapper(new JacksonMcpJsonMapper(mapper)).messageEndpoint("/mcp").build();
-        McpServer.sync(transport).tools(new QueryMcpToolCatalogConfiguration().mcpQueryToolSpecifications(facade, mapper)).build();
+        McpServer.sync(transport).tools(new QueryMcpToolCatalogConfiguration().mcpQueryToolSpecifications(facade,
+                mock(com.java.semantic.query.application.ReviewQueryFacade.class), mapper)).build();
         String requestBody = mapper.writeValueAsString(Map.of("jsonrpc", "2.0", "id", 1, "method", "tools/call",
                 "params", Map.of("name", toolName, "arguments", arguments)));
         MockHttpServletRequest servletRequest = new MockHttpServletRequest("POST", "/mcp");
@@ -128,7 +136,8 @@ class McpWireSerializationContractTest {
     private static String listTools(JsonMapper mapper, SemanticQueryFacade facade) throws Exception {
         WebMvcStatelessServerTransport transport = WebMvcStatelessServerTransport.builder()
                 .jsonMapper(new JacksonMcpJsonMapper(mapper)).messageEndpoint("/mcp").build();
-        McpServer.sync(transport).tools(new QueryMcpToolCatalogConfiguration().mcpQueryToolSpecifications(facade, mapper)).build();
+        McpServer.sync(transport).tools(new QueryMcpToolCatalogConfiguration().mcpQueryToolSpecifications(facade,
+                mock(com.java.semantic.query.application.ReviewQueryFacade.class), mapper)).build();
         String requestBody = mapper.writeValueAsString(Map.of("jsonrpc", "2.0", "id", 1, "method", "tools/list", "params", Map.of()));
         MockHttpServletRequest servletRequest = new MockHttpServletRequest("POST", "/mcp");
         servletRequest.setContentType(MediaType.APPLICATION_JSON_VALUE);

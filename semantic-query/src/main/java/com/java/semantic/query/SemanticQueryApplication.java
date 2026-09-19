@@ -16,6 +16,8 @@ import com.java.semantic.query.application.PublishedRelationQueryService;
 import com.java.semantic.query.application.SourceSliceService;
 import com.java.semantic.query.application.SemanticQueryFacade;
 import com.java.semantic.query.application.SelectedSemanticQueryService;
+import com.java.semantic.query.application.ReviewQueryFacade;
+import com.java.semantic.query.application.SourceIndexCoverageReader;
 import com.java.semantic.query.config.ConfiguredReadPolicy;
 import com.java.semantic.query.config.GitEvidenceProperties;
 import com.java.semantic.query.config.ReadPolicyProperties;
@@ -124,6 +126,18 @@ public class SemanticQueryApplication {
                                                               PublishedRelationQueryService relationQueryService) {
         return new SelectedSemanticQueryService(codeFactSearchService, sourceSliceService, codeFactReadService,
                 discoveryQueryService, entryPointQueryService, relationQueryService);
+    }
+
+    @Bean
+    SourceIndexCoverageReader sourceIndexCoverageReader(MongoTemplate template, SemanticQueryProperties properties) {
+        return new SourceIndexCoverageReader(template, properties.storageTimeout());
+    }
+
+    @Bean
+    ReviewQueryFacade reviewQueryFacade(ReviewGenerationSelector selector, ReviewManifestReadService manifests,
+                                        SelectedSemanticQueryService selectedQueries, SelectedGenerationGuard guard,
+                                        SourceIndexCoverageReader coverageReader) {
+        return new ReviewQueryFacade(selector, manifests, selectedQueries, guard, coverageReader);
     }
 
     @Bean

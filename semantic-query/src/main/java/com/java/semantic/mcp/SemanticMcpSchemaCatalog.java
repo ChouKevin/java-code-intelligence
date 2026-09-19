@@ -7,6 +7,7 @@ import com.java.semantic.model.codefact.EntryPointKind;
 import com.java.semantic.model.codefact.TypeMemberQuery;
 import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.model.repository.RepositoryRevision;
+import com.java.semantic.model.review.ReviewSide;
 import com.java.semantic.query.application.SemanticQueryContract;
 
 import java.util.ArrayList;
@@ -65,6 +66,17 @@ public final class SemanticMcpSchemaCatalog {
         schemas.put("find_references", collection(referenceItem()));
         schemas.put("find_callers", collection(callerItem()));
         schemas.put("find_callees", collection(calleeItem()));
+        schemas.put("get_review", reviewDetails());
+        schemas.put("review_search_code", reviewResult(searchCodeResult()));
+        schemas.put("review_get_fact_source", reviewResult(factSourceResult()));
+        schemas.put("review_list_entry_points", reviewResult(collection(entryPointItem())));
+        schemas.put("review_find_api_routes", reviewResult(collection(entryPointItem())));
+        schemas.put("review_find_event_listeners", reviewResult(collection(eventListenerItem())));
+        schemas.put("review_list_type_members", reviewResult(collection(internalProgramElement())));
+        schemas.put("review_find_method_implementations", reviewResult(collection(implementationItem())));
+        schemas.put("review_find_references", reviewResult(collection(referenceItem())));
+        schemas.put("review_find_callers", reviewResult(collection(callerItem())));
+        schemas.put("review_find_callees", reviewResult(collection(calleeItem())));
         return Map.copyOf(schemas);
     }
 
@@ -167,6 +179,33 @@ public final class SemanticMcpSchemaCatalog {
     private static Map<String, Object> sourceCoverage() {
         return schema(Map.of("indexedSourceCount", nonNegativeInteger(), "issueCount", nonNegativeInteger(),
                 "issueCodes", items(string())), List.of("indexedSourceCount", "issueCount", "issueCodes"));
+    }
+
+    private static Map<String, Object> reviewResult(Map<String, Object> result) {
+        return schema(Map.of("context", reviewContext(), "result", result), List.of("context", "result"));
+    }
+
+    private static Map<String, Object> reviewContext() {
+        return schema(Map.of("repositoryId", repositoryId(), "reviewId", reviewId(), "side", enumValue(ReviewSide.values()),
+                "revision", revision(), "generationId", string(), "coverage", reviewCoverage()),
+                List.of("repositoryId", "reviewId", "side", "revision", "generationId", "coverage"));
+    }
+
+    private static Map<String, Object> reviewCoverage() {
+        return schema(Map.of("sourceCoverage", sourceCoverage(), "semanticLimitations", items(string())),
+                List.of("sourceCoverage", "semanticLimitations"));
+    }
+
+    private static Map<String, Object> reviewDetails() {
+        Map<String, Object> baseline = schema(Map.of("revision", revision(), "generationId", string(), "manifestDigest", string(),
+                "capturedAt", string()), List.of("revision", "generationId", "manifestDigest", "capturedAt"));
+        Map<String, Object> endpoint = schema(Map.of("revision", revision(), "generationId", string(), "manifestDigest", string(),
+                "analysisFingerprint", string(), "snapshotId", string(), "coverage", reviewCoverage()),
+                List.of("revision", "generationId", "manifestDigest", "analysisFingerprint", "snapshotId", "coverage"));
+        return schema(Map.of("repositoryId", repositoryId(), "reviewId", reviewId(), "comparisonType", Map.of("type", "string",
+                "enum", List.of("CURRENT_TO_COMMIT")), "capturedBaseline", baseline, "a", endpoint, "b", endpoint,
+                "comparisonId", string(), "publishedAt", string()),
+                List.of("repositoryId", "reviewId", "comparisonType", "capturedBaseline", "a", "b", "comparisonId", "publishedAt"));
     }
 
     private static Map<String, Object> sourceSnippet() {
@@ -277,6 +316,23 @@ public final class SemanticMcpSchemaCatalog {
         schemas.put("find_api_routes", pagedSchema(Map.of(
                 "repositoryId", repositoryId(), "revision", revision(), "httpMethod", httpMethod(), "path", path()),
                 List.of("repositoryId", "revision", "httpMethod", "path")));
+        schemas.put("get_review", schema(Map.of("repositoryId", repositoryId(), "reviewId", reviewId()),
+                List.of("repositoryId", "reviewId")));
+        schemas.put("review_search_code", reviewPagedSchema(Map.of("query", query(), "kinds", codeFactKinds(),
+                "packagePrefix", Map.of("type", "string", "description", "Optional fully qualified prefix used only to narrow search.")),
+                List.of("query")));
+        schemas.put("review_get_fact_source", reviewSchema(Map.of("factId", factId("factId"), "contextLines", contextLines()),
+                List.of("factId")));
+        schemas.put("review_list_entry_points", reviewPagedSchema(Map.of("kinds", entryPointKinds()), List.of()));
+        schemas.put("review_find_api_routes", reviewPagedSchema(Map.of("httpMethod", httpMethod(), "path", path()),
+                List.of("httpMethod", "path")));
+        schemas.put("review_find_event_listeners", reviewPagedSchema(Map.of("eventType", eventType()), List.of("eventType")));
+        schemas.put("review_list_type_members", reviewPagedSchema(Map.of("typeFactId", factId("typeFactId"), "kinds", memberKinds()),
+                List.of("typeFactId")));
+        schemas.put("review_find_method_implementations", reviewRelationSchema("methodFactId"));
+        schemas.put("review_find_references", reviewRelationSchema("factId"));
+        schemas.put("review_find_callers", reviewRelationSchema("methodFactId"));
+        schemas.put("review_find_callees", reviewRelationSchema("methodFactId"));
         schemas.put("find_event_listeners", pagedSchema(Map.of(
                 "repositoryId", repositoryId(), "revision", revision(), "eventType", eventType()),
                 List.of("repositoryId", "revision", "eventType")));
@@ -284,6 +340,7 @@ public final class SemanticMcpSchemaCatalog {
                 "repositoryId", repositoryId(), "revision", revision(), "typeFactId", factId("typeFactId"), "kinds", memberKinds()),
                 List.of("repositoryId", "revision", "typeFactId")));
         schemas.put("find_method_implementations", relationSchema("methodFactId"));
+
         schemas.put("find_references", relationSchema("factId"));
         schemas.put("find_callers", relationSchema("methodFactId"));
         schemas.put("find_callees", relationSchema("methodFactId"));
@@ -293,6 +350,37 @@ public final class SemanticMcpSchemaCatalog {
     private static Map<String, Object> relationSchema(String fieldName) {
         return pagedSchema(Map.of("repositoryId", repositoryId(), "revision", revision(), fieldName, factId(fieldName)),
                 List.of("repositoryId", "revision", fieldName));
+    }
+    private static Map<String, Object> reviewRelationSchema(String fieldName) {
+        return reviewPagedSchema(Map.of(fieldName, factId(fieldName)), List.of(fieldName));
+    }
+
+    private static Map<String, Object> reviewPagedSchema(Map<String, Object> fields, List<String> required) {
+        Map<String, Object> properties = reviewProperties(fields);
+        properties.put("offset", Map.of("type", "integer", "minimum", 0, "default", 0));
+        properties.put("limit", Map.of("type", "integer", "minimum", 1, "maximum", SemanticQueryContract.MAX_LIMIT,
+                "default", SemanticQueryContract.DEFAULT_LIMIT));
+        return schema(properties, reviewRequired(required));
+    }
+
+    private static Map<String, Object> reviewSchema(Map<String, Object> fields, List<String> required) {
+        return schema(reviewProperties(fields), reviewRequired(required));
+    }
+
+    private static Map<String, Object> reviewProperties(Map<String, Object> fields) {
+        Map<String, Object> properties = new LinkedHashMap<>();
+        properties.put("repositoryId", repositoryId());
+        properties.put("reviewId", reviewId());
+        properties.put("side", enumValue(ReviewSide.values()));
+        properties.put("revision", revision());
+        properties.putAll(fields);
+        return properties;
+    }
+
+    private static List<String> reviewRequired(List<String> fields) {
+        List<String> required = new ArrayList<>(List.of("repositoryId", "reviewId", "side", "revision"));
+        required.addAll(fields);
+        return List.copyOf(required);
     }
 
     private static Map<String, Object> pagedSchema(Map<String, Object> fields, List<String> required) {
@@ -316,6 +404,10 @@ public final class SemanticMcpSchemaCatalog {
     private static Map<String, Object> repositoryId() {
         return Map.of("type", "string", "minLength", RepositoryId.MIN_LENGTH, "maxLength", RepositoryId.MAX_LENGTH,
                 "pattern", RepositoryId.PATTERN, "description", "Copy repositoryId exactly from a Semantic result.");
+    }
+
+    private static Map<String, Object> reviewId() {
+        return Map.of("type", "string", "minLength", 1, "description", "Copy reviewId exactly from a Semantic review result.");
     }
 
     private static Map<String, Object> revision() {

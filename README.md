@@ -79,31 +79,30 @@ export SEMANTIC_MONGODB_URI='mongodb://query-reader:...@mongo/semantic?tls=true'
 export SEMANTIC_QUERY_API_TOKEN='<query-read-token>'
 ```
 
-Configure every repository with a Git `url` and `defaultBranch`. Indexer admin endpoints under `/index/repositories/{repoId}` accept asynchronous `ensure`, `sync`, `checkout`, `rebuild`, and `rollback` commands. `list_repositories` accepts pagination only, and `get_repository` accepts only `repositoryId`; both discover the current semantic repository identity and revision. The other ten semantic Query tools consume that returned `repositoryId` and current semantic `revision`; a request for a previous semantic revision returns `REVISION_OUTDATED` with the current revision.
+Configure every repository with a Git `url` and `defaultBranch`. Indexer admin endpoints under `/index/repositories/{repoId}` accept asynchronous `ensure`, `sync`, `checkout`, `rebuild`, and `rollback` commands. `list_repositories` accepts pagination only, and `get_repository` accepts only `repositoryId`; both discover the current semantic repository identity and revision. The other ten current-generation semantic Query tools consume that returned `repositoryId` and current semantic `revision`; a request for a previous semantic revision returns `REVISION_OUTDATED` with the current revision. Review discovery instead returns two immutable READY sides; every review-side operation requires the returned `repositoryId`, `reviewId`, `side`, and exact side `revision`.
 
 ## Query contract
 
-Query starts without an online JDT LS or an Indexer process. It reads only the sealed, currently published MongoDB generation. Authenticate every Query HTTP request and every `/mcp` request with `X-Api-Token: $SEMANTIC_QUERY_API_TOKEN`.
+Query starts without an online JDT LS or an Indexer process. It reads only sealed MongoDB generations: the current published pointer for current-generation operations and immutable READY review membership for review operations. Authenticate every Query HTTP request and every `/mcp` request with `X-Api-Token: $SEMANTIC_QUERY_API_TOKEN`.
 
-The MCP endpoint is `/mcp` and publishes exactly these nineteen raw tool names:
+The MCP endpoint is `/mcp` and publishes exactly thirty raw tool names:
 
-- `list_repositories`, `get_repository`, `search_code`, `get_fact_source`
-- `list_entry_points`, `find_api_routes`, `find_event_listeners`, `list_type_members`
-- `find_method_implementations`, `find_references`, `find_callers`, `find_callees`
-- `list_git_branches`, `list_git_commits`, `compare_revisions`, `get_file_diff`
-- `list_files`, `read_file`, `search_text`
+- Current-generation discovery and semantic evidence: `list_repositories`, `get_repository`, `search_code`, `get_fact_source`, `list_entry_points`, `find_api_routes`, `find_event_listeners`, `list_type_members`, `find_method_implementations`, `find_references`, `find_callers`, `find_callees`
+- Historical Git evidence: `list_git_branches`, `list_git_commits`, `compare_revisions`, `get_file_diff`, `list_files`, `read_file`, `search_text`
+- Immutable review discovery and side evidence: `get_review`, `review_search_code`, `review_get_fact_source`, `review_list_entry_points`, `review_find_api_routes`, `review_find_event_listeners`, `review_list_type_members`, `review_find_method_implementations`, `review_find_references`, `review_find_callers`, `review_find_callees`
 
 The matching HTTP routes are:
 
 - `GET /api/v1/repositories` and `GET /api/v1/repositories/{repositoryId}`
-- `POST /api/v1/search-code`, `/api/v1/fact-source`, `/api/v1/entry-points`, `/api/v1/api-routes`
-- `POST /api/v1/event-listeners`, `/api/v1/type-members`, `/api/v1/method-implementations`, `/api/v1/references`, `/api/v1/callers`, `/api/v1/callees`
-- `POST /api/v1/git/branches`, `/api/v1/git/commits`, `/api/v1/git/comparisons`, and `/api/v1/git/file-diff`
-- `POST /api/v1/git/files`, `/api/v1/git/file`, and `/api/v1/git/search`
+- `POST /api/v1/search-code`, `/api/v1/fact-source`, `/api/v1/entry-points`, `/api/v1/api-routes`, `/api/v1/event-listeners`, `/api/v1/type-members`, `/api/v1/method-implementations`, `/api/v1/references`, `/api/v1/callers`, `/api/v1/callees`
+- `POST /api/v1/git/branches`, `/api/v1/git/commits`, `/api/v1/git/comparisons`, `/api/v1/git/file-diff`, `/api/v1/git/files`, `/api/v1/git/file`, `/api/v1/git/search`
+- `GET /api/v1/repositories/{repositoryId}/reviews/{reviewId}` and `POST /api/v1/reviews/search-code`, `/api/v1/reviews/fact-source`, `/api/v1/reviews/entry-points`, `/api/v1/reviews/api-routes`, `/api/v1/reviews/event-listeners`, `/api/v1/reviews/type-members`, `/api/v1/reviews/method-implementations`, `/api/v1/reviews/references`, `/api/v1/reviews/callers`, `/api/v1/reviews/callees`
+
+Current-generation semantic calls select only the current published pointer and never substitute a revision. Review calls select only immutable READY membership: use `get_review` to discover safe opaque A/B metadata, then send exact `repositoryId`, `reviewId`, `side`, and side `revision`. Each review-side result repeats that context and filtered source coverage; it does not expose persistence models, local paths, or artifact inventories. Neither current nor review tools accept generation IDs or natural-language/generative input.
 
 Git branch responses pin their immutable `catalogId`; history responses require the returned `historyId` and exact revision. Comparisons return their immutable comparison and snapshot IDs; files, reads, and searches use the matching snapshot ID and SHA. A pending evidence ID returns `GIT_EVIDENCE_NOT_READY`, while unavailable or cross-repository evidence is not disclosed. See [Git review context operations](docs/operations/git-review-context.md) for preparation, continuation, coverage, retention, and release order.
 
-`list_repositories` accepts only pagination and `get_repository` only `repositoryId`; use either discovery result's current `repositoryId` and `revision` in the other ten semantic tools. Query never substitutes a semantic revision. On `REVISION_OUTDATED`, read the returned `currentRevision`; retry a direct semantic search with that revision, and rediscover revision-scoped fact IDs before retrying a fact-bound request. Git review routes instead use the returned immutable catalog, history, comparison, and snapshot IDs with their historical SHA; do not replace that SHA with the current semantic revision.
+`list_repositories` accepts only pagination and `get_repository` only `repositoryId`; use either discovery result's current `repositoryId` and `revision` in the other ten current-generation semantic tools. Query never substitutes a semantic revision. On `REVISION_OUTDATED`, read the returned `currentRevision`; retry a direct semantic search with that revision, and rediscover revision-scoped fact IDs before retrying a fact-bound request. Review errors are `REVIEW_NOT_FOUND`, `REVIEW_NOT_READY`, `REVIEW_FAILED`, or `REVIEW_CONTEXT_MISMATCH`; do not replace the requested review-side revision. Git review routes instead use returned immutable catalog, history, comparison, and snapshot IDs with their historical SHA; do not replace that SHA with the current semantic revision.
 
 ## Schema and UAT controls
 

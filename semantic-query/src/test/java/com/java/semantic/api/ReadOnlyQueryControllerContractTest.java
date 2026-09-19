@@ -16,11 +16,12 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 class ReadOnlyQueryControllerContractTest {
 
     @Test
-    void publishes_exactly_the_nineteen_approved_application_routes() throws Exception {
-        Class<?> controller = Class.forName("com.java.semantic.api.SemanticQueryController");
-        RequestMapping rootMapping = controller.getAnnotation(RequestMapping.class);
+    void publishes_exactly_the_thirty_approved_application_routes() throws Exception {
+        Class<?> semanticController = Class.forName("com.java.semantic.api.SemanticQueryController");
+        Class<?> reviewController = Class.forName("com.java.semantic.api.ReviewQueryController");
 
-        assertEquals(Set.of("/api/v1"), Set.copyOf(Arrays.asList(rootMapping.value())));
+        assertEquals(Set.of("/api/v1"), Set.copyOf(Arrays.asList(semanticController.getAnnotation(RequestMapping.class).value())));
+        assertEquals(Set.of("/api/v1"), Set.copyOf(Arrays.asList(reviewController.getAnnotation(RequestMapping.class).value())));
         assertEquals(Set.of(
                 "GET /repositories",
                 "GET /repositories/{repositoryId}",
@@ -40,16 +41,29 @@ class ReadOnlyQueryControllerContractTest {
                 "POST /git/file-diff",
                 "POST /git/files",
                 "POST /git/file",
-                "POST /git/search"), operationRoutes(controller));
+                "POST /git/search",
+                "GET /repositories/{repositoryId}/reviews/{reviewId}",
+                "POST /reviews/search-code",
+                "POST /reviews/fact-source",
+                "POST /reviews/entry-points",
+                "POST /reviews/api-routes",
+                "POST /reviews/event-listeners",
+                "POST /reviews/type-members",
+                "POST /reviews/method-implementations",
+                "POST /reviews/references",
+                "POST /reviews/callers",
+                "POST /reviews/callees"), operationRoutes(semanticController, reviewController));
     }
 
-    private static Set<String> operationRoutes(Class<?> controller) {
+    private static Set<String> operationRoutes(Class<?>... controllers) {
         Set<String> routes = new LinkedHashSet<>();
-        for (Method method : controller.getDeclaredMethods()) {
-            Optional.ofNullable(method.getAnnotation(GetMapping.class))
-                    .ifPresent(mapping -> Arrays.stream(mapping.value()).map(path -> "GET " + path).forEach(routes::add));
-            Optional.ofNullable(method.getAnnotation(PostMapping.class))
-                    .ifPresent(mapping -> Arrays.stream(mapping.value()).map(path -> "POST " + path).forEach(routes::add));
+        for (Class<?> controller : controllers) {
+            for (Method method : controller.getDeclaredMethods()) {
+                Optional.ofNullable(method.getAnnotation(GetMapping.class))
+                        .ifPresent(mapping -> Arrays.stream(mapping.value()).map(path -> "GET " + path).forEach(routes::add));
+                Optional.ofNullable(method.getAnnotation(PostMapping.class))
+                        .ifPresent(mapping -> Arrays.stream(mapping.value()).map(path -> "POST " + path).forEach(routes::add));
+            }
         }
         return Set.copyOf(routes);
     }

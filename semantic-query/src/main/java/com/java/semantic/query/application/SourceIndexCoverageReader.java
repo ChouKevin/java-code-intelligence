@@ -27,11 +27,11 @@ import java.util.concurrent.TimeUnit;
 import java.util.regex.Pattern;
 
 /** Reads only pre-authorized generation-file coverage rows. */
-final class SourceIndexCoverageReader {
+public final class SourceIndexCoverageReader {
     private final MongoTemplate template;
     private final Duration storageTimeout;
 
-    SourceIndexCoverageReader(MongoTemplate template, Duration storageTimeout) {
+    public SourceIndexCoverageReader(MongoTemplate template, Duration storageTimeout) {
         this.template = Objects.requireNonNull(template, "mongo template is required");
         this.storageTimeout = Objects.requireNonNull(storageTimeout, "storage timeout is required");
     }

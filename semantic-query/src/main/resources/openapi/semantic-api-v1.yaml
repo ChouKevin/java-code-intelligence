@@ -60,6 +60,28 @@ paths:
     $ref: '#/components/pathItems/GitFile'
   /api/v1/git/search:
     $ref: '#/components/pathItems/GitTextSearch'
+  /api/v1/repositories/{repositoryId}/reviews/{reviewId}:
+    $ref: '#/components/pathItems/GetReview'
+  /api/v1/reviews/search-code:
+    $ref: '#/components/pathItems/ReviewSearchCode'
+  /api/v1/reviews/fact-source:
+    $ref: '#/components/pathItems/ReviewFactSource'
+  /api/v1/reviews/entry-points:
+    $ref: '#/components/pathItems/ReviewEntryPoints'
+  /api/v1/reviews/api-routes:
+    $ref: '#/components/pathItems/ReviewApiRoutes'
+  /api/v1/reviews/event-listeners:
+    $ref: '#/components/pathItems/ReviewEventListeners'
+  /api/v1/reviews/type-members:
+    $ref: '#/components/pathItems/ReviewTypeMembers'
+  /api/v1/reviews/method-implementations:
+    $ref: '#/components/pathItems/ReviewMethodImplementations'
+  /api/v1/reviews/references:
+    $ref: '#/components/pathItems/ReviewReferences'
+  /api/v1/reviews/callers:
+    $ref: '#/components/pathItems/ReviewCallers'
+  /api/v1/reviews/callees:
+    $ref: '#/components/pathItems/ReviewCallees'
 components:
   parameters:
     RepositoryId:
@@ -280,6 +302,68 @@ components:
           '404': {$ref: '#/components/responses/NotFound'}
           '409': {$ref: '#/components/responses/RevisionOutdated'}
           '503': {$ref: '#/components/responses/IndexUnavailable'}
+    GetReview:
+      get:
+        summary: Discover safe metadata for one READY immutable review.
+        parameters: [{$ref: '#/components/parameters/RepositoryId'}, {name: reviewId, in: path, required: true, schema: {$ref: '#/components/schemas/ReviewId'}}]
+        responses:
+          '200': {description: Safe review metadata., content: {application/json: {schema: {$ref: '#/components/schemas/ReviewDetails'}}}}
+          '400': {$ref: '#/components/responses/InvalidArgument'}
+          '401': {$ref: '#/components/responses/AuthenticationRequired'}
+          '403': {$ref: '#/components/responses/AccessForbidden'}
+          '404': {$ref: '#/components/responses/NotFound'}
+          '409': {$ref: '#/components/responses/ReviewNotReady'}
+          '503': {$ref: '#/components/responses/IndexUnavailable'}
+    ReviewSearchCode:
+      post:
+        summary: Search exact indexed code on one immutable READY review side.
+        requestBody: {$ref: '#/components/requestBodies/ReviewSearchCodeRequest'}
+        responses: {'200': {description: Review-scoped search page., content: {application/json: {schema: {$ref: '#/components/schemas/ReviewSearchCodeResult'}}}}, '400': {$ref: '#/components/responses/InvalidArgument'}, '401': {$ref: '#/components/responses/AuthenticationRequired'}, '403': {$ref: '#/components/responses/AccessForbidden'}, '404': {$ref: '#/components/responses/NotFound'}, '409': {$ref: '#/components/responses/ReviewNotReady'}, '503': {$ref: '#/components/responses/IndexUnavailable'}}
+    ReviewFactSource:
+      post:
+        summary: Expand exact source on one immutable READY review side.
+        requestBody: {$ref: '#/components/requestBodies/ReviewFactSourceRequest'}
+        responses: {'200': {description: Review-scoped fact source., content: {application/json: {schema: {$ref: '#/components/schemas/ReviewFactSourceResult'}}}}, '400': {$ref: '#/components/responses/InvalidArgument'}, '401': {$ref: '#/components/responses/AuthenticationRequired'}, '403': {$ref: '#/components/responses/AccessForbidden'}, '404': {$ref: '#/components/responses/NotFound'}, '409': {$ref: '#/components/responses/ReviewNotReady'}, '503': {$ref: '#/components/responses/IndexUnavailable'}}
+    ReviewEntryPoints:
+      post:
+        summary: List entry points on one immutable READY review side.
+        requestBody: {$ref: '#/components/requestBodies/ReviewEntryPointRequest'}
+        responses: {'200': {description: Review-scoped entry point page., content: {application/json: {schema: {$ref: '#/components/schemas/ReviewEntryPointResult'}}}}, '400': {$ref: '#/components/responses/InvalidArgument'}, '401': {$ref: '#/components/responses/AuthenticationRequired'}, '403': {$ref: '#/components/responses/AccessForbidden'}, '404': {$ref: '#/components/responses/NotFound'}, '409': {$ref: '#/components/responses/ReviewNotReady'}, '503': {$ref: '#/components/responses/IndexUnavailable'}}
+    ReviewApiRoutes:
+      post:
+        summary: Find exact HTTP routes on one immutable READY review side.
+        requestBody: {$ref: '#/components/requestBodies/ReviewApiRouteRequest'}
+        responses: {'200': {description: Review-scoped route page., content: {application/json: {schema: {$ref: '#/components/schemas/ReviewEntryPointResult'}}}}, '400': {$ref: '#/components/responses/InvalidArgument'}, '401': {$ref: '#/components/responses/AuthenticationRequired'}, '403': {$ref: '#/components/responses/AccessForbidden'}, '404': {$ref: '#/components/responses/NotFound'}, '409': {$ref: '#/components/responses/ReviewNotReady'}, '503': {$ref: '#/components/responses/IndexUnavailable'}}
+    ReviewEventListeners:
+      post:
+        summary: Find exact event listeners on one immutable READY review side.
+        requestBody: {$ref: '#/components/requestBodies/ReviewEventListenerRequest'}
+        responses: {'200': {description: Review-scoped listener page., content: {application/json: {schema: {$ref: '#/components/schemas/ReviewEventListenerResult'}}}}, '400': {$ref: '#/components/responses/InvalidArgument'}, '401': {$ref: '#/components/responses/AuthenticationRequired'}, '403': {$ref: '#/components/responses/AccessForbidden'}, '404': {$ref: '#/components/responses/NotFound'}, '409': {$ref: '#/components/responses/ReviewNotReady'}, '503': {$ref: '#/components/responses/IndexUnavailable'}}
+    ReviewTypeMembers:
+      post:
+        summary: List type members on one immutable READY review side.
+        requestBody: {$ref: '#/components/requestBodies/ReviewTypeMemberRequest'}
+        responses: {'200': {description: Review-scoped member page., content: {application/json: {schema: {$ref: '#/components/schemas/ReviewTypeMemberResult'}}}}, '400': {$ref: '#/components/responses/InvalidArgument'}, '401': {$ref: '#/components/responses/AuthenticationRequired'}, '403': {$ref: '#/components/responses/AccessForbidden'}, '404': {$ref: '#/components/responses/NotFound'}, '409': {$ref: '#/components/responses/ReviewNotReady'}, '503': {$ref: '#/components/responses/IndexUnavailable'}}
+    ReviewMethodImplementations:
+      post:
+        summary: Find method implementations on one immutable READY review side.
+        requestBody: {$ref: '#/components/requestBodies/ReviewMethodRelationRequest'}
+        responses: {'200': {description: Review-scoped implementation page., content: {application/json: {schema: {$ref: '#/components/schemas/ReviewImplementationResult'}}}}, '400': {$ref: '#/components/responses/InvalidArgument'}, '401': {$ref: '#/components/responses/AuthenticationRequired'}, '403': {$ref: '#/components/responses/AccessForbidden'}, '404': {$ref: '#/components/responses/NotFound'}, '409': {$ref: '#/components/responses/ReviewNotReady'}, '503': {$ref: '#/components/responses/IndexUnavailable'}}
+    ReviewReferences:
+      post:
+        summary: Find exact references on one immutable READY review side.
+        requestBody: {$ref: '#/components/requestBodies/ReviewRelationRequest'}
+        responses: {'200': {description: Review-scoped reference page., content: {application/json: {schema: {$ref: '#/components/schemas/ReviewReferenceResult'}}}}, '400': {$ref: '#/components/responses/InvalidArgument'}, '401': {$ref: '#/components/responses/AuthenticationRequired'}, '403': {$ref: '#/components/responses/AccessForbidden'}, '404': {$ref: '#/components/responses/NotFound'}, '409': {$ref: '#/components/responses/ReviewNotReady'}, '503': {$ref: '#/components/responses/IndexUnavailable'}}
+    ReviewCallers:
+      post:
+        summary: Find direct callers on one immutable READY review side.
+        requestBody: {$ref: '#/components/requestBodies/ReviewMethodRelationRequest'}
+        responses: {'200': {description: Review-scoped caller page., content: {application/json: {schema: {$ref: '#/components/schemas/ReviewCallerResult'}}}}, '400': {$ref: '#/components/responses/InvalidArgument'}, '401': {$ref: '#/components/responses/AuthenticationRequired'}, '403': {$ref: '#/components/responses/AccessForbidden'}, '404': {$ref: '#/components/responses/NotFound'}, '409': {$ref: '#/components/responses/ReviewNotReady'}, '503': {$ref: '#/components/responses/IndexUnavailable'}}
+    ReviewCallees:
+      post:
+        summary: Find direct callees on one immutable READY review side.
+        requestBody: {$ref: '#/components/requestBodies/ReviewMethodRelationRequest'}
+        responses: {'200': {description: Review-scoped callee page., content: {application/json: {schema: {$ref: '#/components/schemas/ReviewCalleeResult'}}}}, '400': {$ref: '#/components/responses/InvalidArgument'}, '401': {$ref: '#/components/responses/AuthenticationRequired'}, '403': {$ref: '#/components/responses/AccessForbidden'}, '404': {$ref: '#/components/responses/NotFound'}, '409': {$ref: '#/components/responses/ReviewNotReady'}, '503': {$ref: '#/components/responses/IndexUnavailable'}}
   requestBodies:
     GitBranchRequest: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/GitBranchRequest'}}}}
     GitCommitRequest: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/GitCommitRequest'}}}}
@@ -296,6 +380,14 @@ components:
     TypeMemberRequest: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/TypeMemberRequest'}}}}
     MethodRelationRequest: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/MethodRelationRequest'}}}}
     RelationRequest: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/RelationRequest'}}}}
+    ReviewSearchCodeRequest: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ReviewSearchCodeRequest'}}}}
+    ReviewFactSourceRequest: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ReviewFactSourceRequest'}}}}
+    ReviewEntryPointRequest: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ReviewEntryPointRequest'}}}}
+    ReviewApiRouteRequest: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ReviewApiRouteRequest'}}}}
+    ReviewEventListenerRequest: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ReviewEventListenerRequest'}}}}
+    ReviewTypeMemberRequest: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ReviewTypeMemberRequest'}}}}
+    ReviewMethodRelationRequest: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ReviewMethodRelationRequest'}}}}
+    ReviewRelationRequest: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ReviewRelationRequest'}}}}
   responses:
     AuthenticationRequired:
       description: X-Api-Token is required for HTTP query operations.
@@ -310,6 +402,9 @@ components:
     GitEvidenceNotReady:
       description: The requested immutable Git evidence has not reached READY; retry later with the same identity.
       content: {application/json: {schema: {$ref: '#/components/schemas/SemanticQueryError'}}}
+    ReviewNotReady:
+      description: The requested review has not published immutable READY evidence; retry later with the same identity.
+      content: {application/json: {schema: {$ref: '#/components/schemas/SemanticQueryError'}}}
     RevisionOutdated:
       description: Retry only after replacing revision with the returned exact currentRevision.
       content: {application/json: {schema: {$ref: '#/components/schemas/SemanticQueryError'}}}
@@ -321,6 +416,8 @@ components:
     Revision: {type: string, minLength: 40, maxLength: 40, pattern: '^[0-9a-f]{40}$'}
     FactId: {type: string, pattern: '^[0-9a-f]{64}$'}
     GitEvidenceId: {type: string, format: uuid}
+    ReviewId: {type: string, minLength: 1}
+    ReviewSide: {type: string, enum: [A, B]}
     GitBranchRequest:
       type: object
       additionalProperties: false
@@ -762,7 +859,7 @@ components:
       additionalProperties: false
       required: [code, message, retryable]
       properties:
-        code: {type: string, enum: [INVALID_ARGUMENT, REPOSITORY_NOT_FOUND, REVISION_OUTDATED, FACT_NOT_FOUND, FACT_KIND_MISMATCH, GIT_EVIDENCE_NOT_FOUND, GIT_EVIDENCE_NOT_READY, INDEX_UNAVAILABLE]}
+        code: {type: string, enum: [INVALID_ARGUMENT, REPOSITORY_NOT_FOUND, REVIEW_NOT_FOUND, REVIEW_NOT_READY, REVIEW_FAILED, REVIEW_CONTEXT_MISMATCH, REVISION_OUTDATED, FACT_NOT_FOUND, FACT_KIND_MISMATCH, GIT_EVIDENCE_NOT_FOUND, GIT_EVIDENCE_NOT_READY, INDEX_UNAVAILABLE]}
         message: {type: string}
         retryable: {type: boolean}
         currentRevision: {$ref: '#/components/schemas/Revision'}
@@ -849,6 +946,201 @@ components:
         factId: {$ref: '#/components/schemas/FactId'}
         offset: {type: integer, minimum: 0, default: 0}
         limit: {type: integer, minimum: 1, maximum: 100, default: 20}
+    ReviewSearchCodeRequest:
+      type: object
+      additionalProperties: false
+      required: [repositoryId, reviewId, side, revision, query]
+      properties:
+        repositoryId: {$ref: '#/components/schemas/RepositoryId'}
+        reviewId: {$ref: '#/components/schemas/ReviewId'}
+        side: {$ref: '#/components/schemas/ReviewSide'}
+        revision: {$ref: '#/components/schemas/Revision'}
+        query: {type: string, minLength: 2, maxLength: 256}
+        kinds: {$ref: '#/components/schemas/SearchCodeRequest/properties/kinds'}
+        packagePrefix: {$ref: '#/components/schemas/SearchCodeRequest/properties/packagePrefix'}
+        offset: {type: integer, minimum: 0, default: 0}
+        limit: {type: integer, minimum: 1, maximum: 100, default: 20}
+    ReviewFactSourceRequest:
+      type: object
+      additionalProperties: false
+      required: [repositoryId, reviewId, side, revision, factId]
+      properties:
+        repositoryId: {$ref: '#/components/schemas/RepositoryId'}
+        reviewId: {$ref: '#/components/schemas/ReviewId'}
+        side: {$ref: '#/components/schemas/ReviewSide'}
+        revision: {$ref: '#/components/schemas/Revision'}
+        factId: {$ref: '#/components/schemas/FactId'}
+        contextLines: {type: integer, minimum: 0, maximum: 20, default: 0}
+    ReviewEntryPointRequest:
+      type: object
+      additionalProperties: false
+      required: [repositoryId, reviewId, side, revision]
+      properties:
+        repositoryId: {$ref: '#/components/schemas/RepositoryId'}
+        reviewId: {$ref: '#/components/schemas/ReviewId'}
+        side: {$ref: '#/components/schemas/ReviewSide'}
+        revision: {$ref: '#/components/schemas/Revision'}
+        kinds: {$ref: '#/components/schemas/EntryPointRequest/properties/kinds'}
+        offset: {type: integer, minimum: 0, default: 0}
+        limit: {type: integer, minimum: 1, maximum: 100, default: 20}
+    ReviewApiRouteRequest:
+      type: object
+      additionalProperties: false
+      required: [repositoryId, reviewId, side, revision, httpMethod, path]
+      properties:
+        repositoryId: {$ref: '#/components/schemas/RepositoryId'}
+        reviewId: {$ref: '#/components/schemas/ReviewId'}
+        side: {$ref: '#/components/schemas/ReviewSide'}
+        revision: {$ref: '#/components/schemas/Revision'}
+        httpMethod: {$ref: '#/components/schemas/ApiRouteRequest/properties/httpMethod'}
+        path: {type: string, minLength: 1}
+        offset: {type: integer, minimum: 0, default: 0}
+        limit: {type: integer, minimum: 1, maximum: 100, default: 20}
+    ReviewEventListenerRequest:
+      type: object
+      additionalProperties: false
+      required: [repositoryId, reviewId, side, revision, eventType]
+      properties:
+        repositoryId: {$ref: '#/components/schemas/RepositoryId'}
+        reviewId: {$ref: '#/components/schemas/ReviewId'}
+        side: {$ref: '#/components/schemas/ReviewSide'}
+        revision: {$ref: '#/components/schemas/Revision'}
+        eventType: {type: string, minLength: 1}
+        offset: {type: integer, minimum: 0, default: 0}
+        limit: {type: integer, minimum: 1, maximum: 100, default: 20}
+    ReviewTypeMemberRequest:
+      type: object
+      additionalProperties: false
+      required: [repositoryId, reviewId, side, revision, typeFactId]
+      properties:
+        repositoryId: {$ref: '#/components/schemas/RepositoryId'}
+        reviewId: {$ref: '#/components/schemas/ReviewId'}
+        side: {$ref: '#/components/schemas/ReviewSide'}
+        revision: {$ref: '#/components/schemas/Revision'}
+        typeFactId: {$ref: '#/components/schemas/FactId'}
+        kinds: {$ref: '#/components/schemas/TypeMemberRequest/properties/kinds'}
+        offset: {type: integer, minimum: 0, default: 0}
+        limit: {type: integer, minimum: 1, maximum: 100, default: 20}
+    ReviewMethodRelationRequest:
+      type: object
+      additionalProperties: false
+      required: [repositoryId, reviewId, side, revision, methodFactId]
+      properties:
+        repositoryId: {$ref: '#/components/schemas/RepositoryId'}
+        reviewId: {$ref: '#/components/schemas/ReviewId'}
+        side: {$ref: '#/components/schemas/ReviewSide'}
+        revision: {$ref: '#/components/schemas/Revision'}
+        methodFactId: {$ref: '#/components/schemas/FactId'}
+        offset: {type: integer, minimum: 0, default: 0}
+        limit: {type: integer, minimum: 1, maximum: 100, default: 20}
+    ReviewRelationRequest:
+      type: object
+      additionalProperties: false
+      required: [repositoryId, reviewId, side, revision, factId]
+      properties:
+        repositoryId: {$ref: '#/components/schemas/RepositoryId'}
+        reviewId: {$ref: '#/components/schemas/ReviewId'}
+        side: {$ref: '#/components/schemas/ReviewSide'}
+        revision: {$ref: '#/components/schemas/Revision'}
+        factId: {$ref: '#/components/schemas/FactId'}
+        offset: {type: integer, minimum: 0, default: 0}
+        limit: {type: integer, minimum: 1, maximum: 100, default: 20}
+    ReviewCoverage:
+      type: object
+      additionalProperties: false
+      required: [sourceCoverage, semanticLimitations]
+      properties:
+        sourceCoverage: {$ref: '#/components/schemas/SourceCoverage'}
+        semanticLimitations: {type: array, items: {type: string}}
+    ReviewContext:
+      type: object
+      additionalProperties: false
+      required: [repositoryId, reviewId, side, revision, generationId, coverage]
+      properties:
+        repositoryId: {$ref: '#/components/schemas/RepositoryId'}
+        reviewId: {$ref: '#/components/schemas/ReviewId'}
+        side: {$ref: '#/components/schemas/ReviewSide'}
+        revision: {$ref: '#/components/schemas/Revision'}
+        generationId: {type: string, minLength: 1}
+        coverage: {$ref: '#/components/schemas/ReviewCoverage'}
+    CapturedBaselineDetails:
+      type: object
+      additionalProperties: false
+      required: [revision, generationId, manifestDigest, capturedAt]
+      properties:
+        revision: {$ref: '#/components/schemas/Revision'}
+        generationId: {type: string}
+        manifestDigest: {type: string}
+        capturedAt: {type: string, format: date-time}
+    ReviewEndpointDetails:
+      type: object
+      additionalProperties: false
+      required: [revision, generationId, manifestDigest, analysisFingerprint, snapshotId, coverage]
+      properties:
+        revision: {$ref: '#/components/schemas/Revision'}
+        generationId: {type: string}
+        manifestDigest: {type: string}
+        analysisFingerprint: {type: string}
+        snapshotId: {type: string}
+        coverage: {$ref: '#/components/schemas/ReviewCoverage'}
+    ReviewDetails:
+      type: object
+      additionalProperties: false
+      required: [repositoryId, reviewId, comparisonType, capturedBaseline, a, b, comparisonId, publishedAt]
+      properties:
+        repositoryId: {$ref: '#/components/schemas/RepositoryId'}
+        reviewId: {$ref: '#/components/schemas/ReviewId'}
+        comparisonType: {type: string, enum: [CURRENT_TO_COMMIT]}
+        capturedBaseline: {$ref: '#/components/schemas/CapturedBaselineDetails'}
+        a: {$ref: '#/components/schemas/ReviewEndpointDetails'}
+        b: {$ref: '#/components/schemas/ReviewEndpointDetails'}
+        comparisonId: {type: string}
+        publishedAt: {type: string, format: date-time}
+    ReviewSearchCodeResult:
+      type: object
+      additionalProperties: false
+      required: [context, result]
+      properties: {context: {$ref: '#/components/schemas/ReviewContext'}, result: {$ref: '#/components/schemas/SearchCodeResult'}}
+    ReviewFactSourceResult:
+      type: object
+      additionalProperties: false
+      required: [context, result]
+      properties: {context: {$ref: '#/components/schemas/ReviewContext'}, result: {$ref: '#/components/schemas/FactSourceResult'}}
+    ReviewEntryPointResult:
+      type: object
+      additionalProperties: false
+      required: [context, result]
+      properties: {context: {$ref: '#/components/schemas/ReviewContext'}, result: {$ref: '#/components/schemas/EntryPointCollectionResult'}}
+    ReviewEventListenerResult:
+      type: object
+      additionalProperties: false
+      required: [context, result]
+      properties: {context: {$ref: '#/components/schemas/ReviewContext'}, result: {$ref: '#/components/schemas/EventListenerCollectionResult'}}
+    ReviewTypeMemberResult:
+      type: object
+      additionalProperties: false
+      required: [context, result]
+      properties: {context: {$ref: '#/components/schemas/ReviewContext'}, result: {$ref: '#/components/schemas/TypeMemberCollectionResult'}}
+    ReviewImplementationResult:
+      type: object
+      additionalProperties: false
+      required: [context, result]
+      properties: {context: {$ref: '#/components/schemas/ReviewContext'}, result: {$ref: '#/components/schemas/ImplementationCollectionResult'}}
+    ReviewReferenceResult:
+      type: object
+      additionalProperties: false
+      required: [context, result]
+      properties: {context: {$ref: '#/components/schemas/ReviewContext'}, result: {$ref: '#/components/schemas/ReferenceCollectionResult'}}
+    ReviewCallerResult:
+      type: object
+      additionalProperties: false
+      required: [context, result]
+      properties: {context: {$ref: '#/components/schemas/ReviewContext'}, result: {$ref: '#/components/schemas/CallerCollectionResult'}}
+    ReviewCalleeResult:
+      type: object
+      additionalProperties: false
+      required: [context, result]
+      properties: {context: {$ref: '#/components/schemas/ReviewContext'}, result: {$ref: '#/components/schemas/CalleeCollectionResult'}}
   securitySchemes:
     ApiToken:
       type: apiKey

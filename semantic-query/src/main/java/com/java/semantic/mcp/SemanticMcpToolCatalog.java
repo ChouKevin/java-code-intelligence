@@ -24,7 +24,18 @@ public final class SemanticMcpToolCatalog {
             tool("find_method_implementations", "Find indexed implementations or overrides of a returned method. Copy repositoryId, revision, and methodFactId exactly; page.hasMore means request another page."),
             tool("find_references", "Find exact indexed references to a returned declaration. Copy repositoryId, revision, and factId exactly; page.hasMore means request another page."),
             tool("find_callers", "Return direct one-hop callers of a returned method. Copy repositoryId, revision, and methodFactId exactly; page.hasMore means request another page."),
-            tool("find_callees", "Return direct one-hop callees of a returned method. resolutionStatus is INDEXED for internal targets, UNRESOLVED for unresolved calls, and UNINDEXED_TARGET for other typed external targets; it does not confirm external availability. Copy repositoryId, revision, and methodFactId exactly; page.hasMore means request another page."));
+            tool("find_callees", "Return direct one-hop callees of a returned method. resolutionStatus is INDEXED for internal targets, UNRESOLVED for unresolved calls, and UNINDEXED_TARGET for other typed external targets; it does not confirm external availability. Copy repositoryId, revision, and methodFactId exactly; page.hasMore means request another page."),
+            tool("get_review", "Discover one READY immutable review and its opaque A/B evidence metadata and authorized coverage."),
+            tool("review_search_code", "Search code evidence on one exact READY review side; copy repositoryId, reviewId, side, and revision exactly."),
+            tool("review_get_fact_source", "Expand one returned fact to exact indexed source on one exact READY review side."),
+            tool("review_list_entry_points", "Browse indexed entry points on one exact READY review side."),
+            tool("review_find_api_routes", "Find exact HTTP routes on one exact READY review side."),
+            tool("review_find_event_listeners", "Find listeners for one exact event type on one exact READY review side."),
+            tool("review_list_type_members", "List members of a returned type on one exact READY review side."),
+            tool("review_find_method_implementations", "Find direct implementations or overrides on one exact READY review side."),
+            tool("review_find_references", "Find exact references on one exact READY review side."),
+            tool("review_find_callers", "Find direct callers on one exact READY review side."),
+            tool("review_find_callees", "Find direct callees on one exact READY review side."));
 
     private SemanticMcpToolCatalog() {
     }
