@@ -19,6 +19,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends curl git util-l
     && rm -rf /var/lib/apt/lists/*
 COPY scripts/install-jdtls.sh /usr/local/bin/install-jdtls
 RUN /usr/local/bin/install-jdtls /opt/jdtls
+RUN curl --fail --location --silent --show-error \
+        https://repo1.maven.org/maven2/org/projectlombok/lombok/1.18.46/lombok-1.18.46.jar \
+        --output /opt/jdtls/lombok.jar \
+    && echo "01f7b1a015e33e2b62d5f5f37053306357ab1415fd181fcba7794f5d198c1126  /opt/jdtls/lombok.jar" | sha256sum --check
 ENV JDTLS_JAVA_EXECUTABLE=/opt/java/openjdk/bin/java \
     JDTLS_ISOLATION_MODE=LINUX_UID \
     JDTLS_ANALYSIS_UID=10001 \

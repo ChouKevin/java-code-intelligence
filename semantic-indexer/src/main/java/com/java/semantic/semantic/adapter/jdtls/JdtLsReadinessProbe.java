@@ -2,6 +2,8 @@ package com.java.semantic.semantic.adapter.jdtls;
 
 import com.java.semantic.config.JdtLsProperties;
 import com.java.semantic.model.repository.RepositoryId;
+import org.eclipse.lsp4j.ExecuteCommandParams;
+import org.eclipse.lsp4j.Location;
 import org.eclipse.lsp4j.MessageActionItem;
 import org.eclipse.lsp4j.MessageParams;
 import org.eclipse.lsp4j.ProgressParams;
@@ -11,6 +13,7 @@ import org.eclipse.lsp4j.SymbolInformation;
 import org.eclipse.lsp4j.WorkDoneProgressKind;
 import org.eclipse.lsp4j.WorkDoneProgressNotification;
 import org.eclipse.lsp4j.WorkspaceSymbol;
+import org.eclipse.lsp4j.WorkspaceSymbolLocation;
 import org.eclipse.lsp4j.WorkspaceSymbolParams;
 import org.eclipse.lsp4j.jsonrpc.messages.Either;
 import org.slf4j.Logger;
@@ -18,10 +21,14 @@ import org.slf4j.LoggerFactory;
 import org.springframework.util.CollectionUtils;
 
 import java.io.IOException;
+import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
@@ -41,9 +48,13 @@ public final class JdtLsReadinessProbe {
     private static final Duration DEFAULT_POLL_INTERVAL = Duration.ofMillis(500);
     private static final String SYMBOL_OPERATION = "workspace/symbol";
     private static final String BUILD_WORKSPACE_OPERATION = "java/buildWorkspace";
+    private static final String GET_ALL_PROJECTS_OPERATION = "java.project.getAll";
+    private static final String GET_PROJECT_SETTINGS_OPERATION = "java.project.getSettings";
+    private static final String SOURCE_PATHS = "org.eclipse.jdt.ls.core.sourcePaths";
     private static final String JAVA_SUFFIX = ".java";
     private static final Set<String> NON_TYPE_SOURCES = Set.of("package-info.java", "module-info.java");
-    private static final Path MAIN_SOURCE_ROOT = Path.of("src", "main", "java");
+    private static final Set<String> EXCLUDED_SOURCE_SEGMENTS =
+            Set.of("test", "fixtures", "generated", "target", "build", ".git");
     private static final int MAX_SCAN_DEPTH = 24;
     private static final String SERVICE_READY_STATUS = "ServiceReady";
     private static final String STARTED_STATUS = "Started";
@@ -80,19 +91,21 @@ public final class JdtLsReadinessProbe {
         Objects.requireNonNull(session, "session is required");
         Objects.requireNonNull(client, "client is required");
         Objects.requireNonNull(workspaceRoot, "workspaceRoot is required");
-        String sanityQuery = sanityQuery(workspaceRoot).orElseThrow(() -> startupFailure(
-                session, "working tree has no Java source to verify the import against", null));
+        List<SourceCandidate> candidates = List.of();
         long deadlineNanos = System.nanoTime() + importTimeout.toNanos();
         boolean buildCompleted = false;
         while (true) {
-            requireUsable(session);
             if (client.isImportSettled() && !buildCompleted) {
                 awaitIncrementalBuild(session);
+                candidates = sourceCandidates(session, workspaceRoot);
+                if (candidates.isEmpty()) {
+                    throw startupFailure(session, "imported projects have no safe production Java source to verify", null);
+                }
                 buildCompleted = true;
             }
             if (buildCompleted
                     && client.isImportSettled()
-                    && symbolQuerySucceeds(session, sanityQuery)
+                    && symbolQuerySucceeds(session, candidates)
                     && client.isImportSettled()) {
                 requireUsable(session);
                 if (!session.markReady()) {
@@ -109,45 +122,181 @@ public final class JdtLsReadinessProbe {
     }
 
     /**
-     * 挑一個專案自己的型別名稱作為 sanity query
-     *
-     * spike 是以 fixture 自己的 OrderCrudService 判定匯入完成;沒有可用型別就無從驗證
+     * Derives all readiness candidates from JDT LS's imported projects instead of
+     * scanning arbitrary checkout content such as fixtures or build output.
      */
-    static Optional<String> sanityQuery(Path workspaceRoot) {
-        return firstTypeName(workspaceRoot.resolve(MAIN_SOURCE_ROOT))
-                .or(() -> firstTypeName(workspaceRoot));
+    private List<SourceCandidate> sourceCandidates(JdtWorkspaceSession session, Path workspaceRoot) {
+        List<Path> importedRoots = importedProductionRoots(session, workspaceRoot);
+        List<SourceCandidate> candidates = new ArrayList<>();
+        for (Path sourceRoot : importedRoots) {
+            try (Stream<Path> paths = Files.walk(sourceRoot, MAX_SCAN_DEPTH)) {
+                List<Path> sourceFiles = paths.filter(Files::isRegularFile)
+                        .filter(this::isJavaTypeSource)
+                        .sorted()
+                        .toList();
+                for (Path sourceFile : sourceFiles) {
+                    String filename = sourceFile.getFileName().toString();
+                    candidates.add(new SourceCandidate(sourceRoot, safePath(workspaceRoot, sourceFile),
+                            filename.substring(0, filename.length() - JAVA_SUFFIX.length())));
+                }
+            } catch (IOException exception) {
+                LOGGER.warn("Scanning imported readiness source root failed: category={} exceptionType={}",
+                        "SOURCE_SCAN_FAILED", exception.getClass().getSimpleName());
+            }
+        }
+        return List.copyOf(candidates);
     }
 
-    private static Optional<String> firstTypeName(Path root) {
-        if (!Files.isDirectory(root)) {
-            return Optional.empty();
+    private List<Path> importedProductionRoots(JdtWorkspaceSession session, Path workspaceRoot) {
+        Path repositoryRoot = workspaceRoot.toAbsolutePath().normalize();
+        Object projects = executeCommand(session, GET_ALL_PROJECTS_OPERATION, List.of());
+        if (!(projects instanceof List<?> projectUris)) {
+            throw startupFailure(session, "JDT LS imported project response was not a list", null);
         }
-        try (Stream<Path> paths = Files.walk(root, MAX_SCAN_DEPTH)) {
-            return paths.filter(Files::isRegularFile)
-                    .map(path -> path.getFileName().toString())
-                    .filter(name -> name.endsWith(JAVA_SUFFIX))
-                    .filter(name -> !NON_TYPE_SOURCES.contains(name))
-                    .sorted()
-                    .findFirst()
-                    .map(name -> name.substring(0, name.length() - JAVA_SUFFIX.length()));
-        } catch (IOException exception) {
-            LOGGER.warn("Scanning for a readiness probe type failed: category={} exceptionType={}",
-                    "SOURCE_SCAN_FAILED", exception.getClass().getSimpleName());
-            return Optional.empty();
+        List<Path> roots = new ArrayList<>();
+        for (Object projectUri : projectUris) {
+            if (!(projectUri instanceof String uri) || uri.isBlank()) {
+                throw startupFailure(session, "JDT LS imported project response contained an invalid URI", null);
+            }
+            Path projectRoot = containedPath(uri, repositoryRoot, session, "project root");
+            Object settings = executeCommand(session, GET_PROJECT_SETTINGS_OPERATION, List.of(uri, List.of(SOURCE_PATHS)));
+            if (!(settings instanceof Map<?, ?> map)) {
+                throw startupFailure(session, "JDT LS project settings response was not an object", null);
+            }
+            Object sourcePaths = map.get(SOURCE_PATHS);
+            if (!(sourcePaths instanceof List<?> paths)) {
+                throw startupFailure(session, "JDT LS project settings omitted source paths", null);
+            }
+            for (Object sourcePath : paths) {
+                if (!(sourcePath instanceof String path) || path.isBlank()) {
+                    throw startupFailure(session, "JDT LS project settings contained an invalid source path", null);
+                }
+                Path sourceRoot = projectRoot.resolve(path).normalize();
+                if (isSafeProductionRoot(repositoryRoot, sourceRoot)) {
+                    roots.add(sourceRoot);
+                }
+            }
         }
+        return roots.stream().distinct().sorted().toList();
     }
 
-    private boolean symbolQuerySucceeds(JdtWorkspaceSession session, String sanityQuery) {
+    private Object executeCommand(JdtWorkspaceSession session, String command, List<Object> arguments) {
         try {
-            Either<List<? extends SymbolInformation>, List<? extends WorkspaceSymbol>> response =
-                    session.call(SYMBOL_OPERATION, server -> server.getWorkspaceService()
-                            .symbol(new WorkspaceSymbolParams(sanityQuery)));
-            return hasSymbols(response);
+            return session.call("workspace/executeCommand:" + command,
+                    server -> server.getWorkspaceService().executeCommand(new ExecuteCommandParams(command, arguments)));
         } catch (JdtWorkspaceSession.JdtRequestFailedException exception) {
-            LOGGER.debug("Readiness symbol query failed while importing: repositoryId={} exceptionType={}",
-                    session.repositoryId().value(), exception.getClass().getSimpleName());
+            throw startupFailure(session, "JDT LS imported project inspection failed", exception);
+        }
+    }
+
+    private boolean isSafeProductionRoot(Path repositoryRoot, Path sourceRoot) {
+        return sourceRoot.startsWith(repositoryRoot)
+                && Files.isDirectory(sourceRoot)
+                && !hasExcludedSegment(repositoryRoot.relativize(sourceRoot));
+    }
+
+    private boolean isJavaTypeSource(Path sourceFile) {
+        String filename = sourceFile.getFileName().toString();
+        return filename.endsWith(JAVA_SUFFIX)
+                && !NON_TYPE_SOURCES.contains(filename)
+                && !hasExcludedSegment(sourceFile);
+    }
+
+    private boolean hasExcludedSegment(Path path) {
+        for (Path segment : path) {
+            String name = segment.toString().toLowerCase(Locale.ROOT);
+            if (EXCLUDED_SOURCE_SEGMENTS.contains(name) || name.contains("generated")) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private Path containedPath(String uri, Path repositoryRoot, JdtWorkspaceSession session, String description) {
+        try {
+            Path path = Path.of(URI.create(uri)).toRealPath();
+            if (!path.startsWith(repositoryRoot)) {
+                throw startupFailure(session, "JDT LS " + description + " escaped the repository", null);
+            }
+            return path;
+        } catch (IOException | IllegalArgumentException exception) {
+            throw startupFailure(session, "JDT LS " + description + " was not a usable local path", exception);
+        }
+    }
+
+    private String safePath(Path workspaceRoot, Path sourceFile) {
+        return workspaceRoot.toAbsolutePath().normalize().relativize(sourceFile.toAbsolutePath().normalize())
+                .toString().replace('\\', '/');
+    }
+
+    private boolean symbolQuerySucceeds(JdtWorkspaceSession session, List<SourceCandidate> candidates) {
+        for (SourceCandidate candidate : candidates) {
+            try {
+                Either<List<? extends SymbolInformation>, List<? extends WorkspaceSymbol>> response =
+                        session.call(SYMBOL_OPERATION, server -> server.getWorkspaceService()
+                                .symbol(new WorkspaceSymbolParams(candidate.query())));
+                boolean included = hasIncludedSymbol(response, candidate.sourceRoot());
+                LOGGER.debug(
+                        "JDT LS readiness symbol candidate: sourcePath={} query={} responseShape={} includedSymbol={}",
+                        candidate.safePath(), candidate.query(), responseShape(response), included);
+                if (included) {
+                    return true;
+                }
+            } catch (JdtWorkspaceSession.JdtRequestFailedException exception) {
+                LOGGER.debug("Readiness symbol query failed while importing: repositoryId={} exceptionType={}",
+                        session.repositoryId().value(), exception.getClass().getSimpleName());
+            }
+        }
+        return false;
+    }
+
+    private boolean hasIncludedSymbol(
+            Either<List<? extends SymbolInformation>, List<? extends WorkspaceSymbol>> response, Path sourceRoot) {
+        if (Objects.isNull(response)) {
             return false;
         }
+        if (response.isLeft()) {
+            return response.getLeft().stream()
+                    .map(SymbolInformation::getLocation)
+                    .anyMatch(location -> hasLocationWithin(location, sourceRoot));
+        }
+        return response.getRight().stream().anyMatch(symbol -> hasWorkspaceLocationWithin(symbol, sourceRoot));
+    }
+
+    private boolean hasWorkspaceLocationWithin(WorkspaceSymbol symbol, Path sourceRoot) {
+        if (Objects.isNull(symbol) || Objects.isNull(symbol.getLocation())) {
+            return false;
+        }
+        if (symbol.getLocation().isLeft()) {
+            return hasLocationWithin(symbol.getLocation().getLeft(), sourceRoot);
+        }
+        WorkspaceSymbolLocation location = symbol.getLocation().getRight();
+        return Objects.nonNull(location) && hasUriWithin(location.getUri(), sourceRoot);
+    }
+
+    private boolean hasLocationWithin(Location location, Path sourceRoot) {
+        return Objects.nonNull(location) && hasUriWithin(location.getUri(), sourceRoot);
+    }
+
+    private boolean hasUriWithin(String uri, Path sourceRoot) {
+        try {
+            return Objects.nonNull(uri) && Path.of(URI.create(uri)).toAbsolutePath().normalize().startsWith(sourceRoot);
+        } catch (IllegalArgumentException exception) {
+            return false;
+        }
+    }
+
+    private String responseShape(
+            Either<List<? extends SymbolInformation>, List<? extends WorkspaceSymbol>> response) {
+        if (Objects.isNull(response)) {
+            return "NONE";
+        }
+        return response.isLeft()
+                ? "SYMBOL_INFORMATION[count=" + response.getLeft().size() + "]"
+                : "WORKSPACE_SYMBOL[count=" + response.getRight().size() + "]";
+    }
+
+    private record SourceCandidate(Path sourceRoot, String safePath, String query) {
     }
 
     private void awaitIncrementalBuild(JdtWorkspaceSession session) {

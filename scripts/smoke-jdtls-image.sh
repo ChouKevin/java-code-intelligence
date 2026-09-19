@@ -8,6 +8,8 @@ docker run --rm --entrypoint sh "${image_name}" -ceu '
   test -d /opt/jdtls/config_linux
   test "$(find /opt/jdtls/plugins -name "org.eclipse.equinox.launcher_*.jar" | wc -l)" -eq 1
   test -d /data/repos
+  test -f /opt/jdtls/lombok.jar
+  echo "01f7b1a015e33e2b62d5f5f37053306357ab1415fd181fcba7794f5d198c1126  /opt/jdtls/lombok.jar" | sha256sum --check
   test -d /data/jdtls
   test "$(getent passwd 10001 | cut -d: -f1)" = analysis
   test -x /usr/bin/setpriv
@@ -48,6 +50,7 @@ docker run --rm --env SYNTHETIC_PARENT_SECRET=only-for-image-smoke --entrypoint 
       -Dosgi.bundles.defaultStartLevel=4 \
       -Declipse.product=org.eclipse.jdt.ls.core.product \
       -Dlog.level=ALL \
+      -javaagent:/opt/jdtls/lombok.jar \
       --add-modules=ALL-SYSTEM \
       --add-opens java.base/java.util=ALL-UNNAMED \
       --add-opens java.base/java.lang=ALL-UNNAMED \

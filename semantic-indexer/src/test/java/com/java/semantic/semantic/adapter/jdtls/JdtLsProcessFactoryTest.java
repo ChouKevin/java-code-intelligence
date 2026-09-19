@@ -142,6 +142,39 @@ class JdtLsProcessFactoryTest {
     }
 
     @Test
+    void should_attach_the_fixed_lombok_agent_only_to_the_linux_uid_command() throws Exception {
+        Path home = JdtLsTestFixtures.createFakeHome(tempDirectory);
+        Path workspaceRoot = Files.createDirectories(tempDirectory.resolve("linux-repository"));
+        Path workspaceData = tempDirectory.resolve("linux-workspace-data");
+        TestProcess process = new TestProcess(new ByteArrayInputStream(new byte[0]));
+        AtomicReference<List<String>> capturedCommand = new AtomicReference<>();
+        JdtLsLanguageServer server = mock(JdtLsLanguageServer.class, invocation -> {
+            if ("initialize".equals(invocation.getMethod().getName())) {
+                return CompletableFuture.completedFuture(null);
+            }
+            return CALLS_REAL_METHODS.answer(invocation);
+        });
+        JdtLsProcessFactory factory = new JdtLsProcessFactory(
+                linuxUidProperties(home),
+                command -> {
+                    capturedCommand.set(List.copyOf(command));
+                    return process;
+                },
+                (client, launchedProcess) -> new JdtLsProcessFactory.Connection(
+                        server, CompletableFuture.completedFuture(null)));
+
+        factory.launch(workspaceRoot, workspaceData, mock(JdtLanguageClient.class));
+
+        assertThat(capturedCommand.get()).containsSubsequence(
+                "/usr/bin/setpriv",
+                "--clear-groups",
+                "--no-new-privs",
+                "--bounding-set=-all",
+                "/opt/java/openjdk/bin/java");
+        assertThat(capturedCommand.get()).contains("-javaagent:/opt/jdtls/lombok.jar");
+    }
+
+    @Test
     void should_declare_custom_notifications_and_accept_registration_when_client_is_inspected()
             throws Exception {
         Method statusMethod = JdtLanguageClient.class.getMethod("languageStatus", StatusReport.class);
@@ -532,6 +565,27 @@ class JdtLsProcessFactoryTest {
                 "768m");
     }
 
+
+    private JdtLsProperties linuxUidProperties(Path home) throws IOException {
+        Number uid = (Number) Files.getAttribute(tempDirectory, "unix:uid");
+        Number gid = (Number) Files.getAttribute(tempDirectory, "unix:gid");
+        return new JdtLsProperties(
+                true,
+                home,
+                tempDirectory.resolve("linux-data"),
+                Path.of("/opt/java/openjdk/bin/java"),
+                JdtLsProperties.IsolationMode.LINUX_UID,
+                uid.longValue(),
+                gid.longValue(),
+                tempDirectory,
+                Duration.ofSeconds(1),
+                Duration.ofSeconds(2),
+                Duration.ofSeconds(1),
+                1,
+                Duration.ofMinutes(1),
+                Duration.ofMinutes(1),
+                "768m");
+    }
     private DrainFailureFixture launchDrainFailureFixture(InputStream stderr) throws Exception {
         Path home = JdtLsTestFixtures.createFakeHome(tempDirectory);
         TestProcess process = new TestProcess(stderr);

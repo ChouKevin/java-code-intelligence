@@ -46,6 +46,7 @@ public final class JdtLsProcessFactory {
     private static final String LAUNCHER_SUFFIX = ".jar";
     private static final long TERMINATION_TIMEOUT_MILLIS = 100;
     private static final int STDERR_BUFFER_LINES = 200;
+    private static final String LOMBOK_JDT_AGENT = "-javaagent:/opt/jdtls/lombok.jar";
 
     private final JdtLsProperties properties;
     private final ProcessStarter processStarter;
@@ -159,7 +160,11 @@ public final class JdtLsProcessFactory {
                 "-Dosgi.bundles.defaultStartLevel=4",
                 "-Declipse.product=org.eclipse.jdt.ls.core.product",
                 "-Dlog.level=ALL",
-                "-Xmx" + properties.getMaxHeap(),
+                "-Xmx" + properties.getMaxHeap()));
+        if (properties.getIsolationMode() == JdtLsProperties.IsolationMode.LINUX_UID) {
+            command.add(LOMBOK_JDT_AGENT);
+        }
+        command.addAll(List.of(
                 "--add-modules=ALL-SYSTEM",
                 "--add-opens", "java.base/java.util=ALL-UNNAMED",
                 "--add-opens", "java.base/java.lang=ALL-UNNAMED",

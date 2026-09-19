@@ -13,9 +13,11 @@ import com.java.semantic.support.ConcurrencyTestSupport;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.eclipse.lsp4j.DidChangeConfigurationParams;
+import org.eclipse.lsp4j.ExecuteCommandParams;
 import org.eclipse.lsp4j.DidChangeWatchedFilesParams;
 import org.eclipse.lsp4j.InitializeParams;
 import org.eclipse.lsp4j.InitializeResult;
+import org.eclipse.lsp4j.Location;
 import org.eclipse.lsp4j.MessageParams;
 import org.eclipse.lsp4j.MessageType;
 import org.eclipse.lsp4j.ProgressParams;
@@ -44,6 +46,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.Map;
 import java.util.List;
 import java.util.Objects;
 import java.util.ServiceConfigurationError;
@@ -84,7 +87,30 @@ class DefaultJdtWorkspaceManagerTest {
         assertThat(session.revision()).isEqualTo(REVISION);
         assertThat(fixture.workspaceService().queries()).containsExactly(SANITY_TYPE);
         assertThat(fixture.languageServer().buildWorkspaceRequests()).containsExactly(false);
-        assertThat(fixture.languageServer().protocolCalls()).containsExactly("build", "symbol");
+        assertThat(fixture.languageServer().protocolCalls()).containsExactly(
+                "build", "command:java.project.getAll", "command:java.project.getSettings", "symbol");
+    }
+
+    @Test
+    void should_skip_an_excluded_first_candidate_and_accept_a_symbol_from_an_imported_production_root() {
+        Fixture fixture = new Fixture();
+        RepositorySnapshot snapshot = fixture.multiModuleSnapshot();
+        Path excludedType = snapshot.root().resolve("module-a/src/test/java/example/AbstractCrudService.java");
+        Path includedType = snapshot.root().resolve("module-b/src/main/java/example/IncludedService.java");
+        fixture.workspaceService().respondWith(query -> {
+            if ("AbstractCrudService".equals(query)) {
+                return CompletableFuture.completedFuture(symbolsAt(excludedType));
+            }
+            if ("IncludedService".equals(query)) {
+                return CompletableFuture.completedFuture(symbolsAt(includedType));
+            }
+            return CompletableFuture.completedFuture(Either.forRight(List.of()));
+        });
+
+        JdtWorkspaceSession session = fixture.manager().getOrStart(snapshot);
+
+        assertThat(session.status()).isEqualTo(SemanticEngineStatus.READY);
+        assertThat(fixture.workspaceService().queries()).containsExactly("IncludedService");
     }
 
     @Test
@@ -132,7 +158,8 @@ class DefaultJdtWorkspaceManagerTest {
 
         assertThat(session.status()).isEqualTo(SemanticEngineStatus.READY);
         assertThat(fixture.languageServer().buildWorkspaceRequests()).containsExactly(false);
-        assertThat(fixture.languageServer().protocolCalls()).containsExactly("build", "symbol");
+        assertThat(fixture.languageServer().protocolCalls()).containsExactly(
+                "build", "command:java.project.getAll", "command:java.project.getSettings", "symbol");
     }
 
     @Test
@@ -243,7 +270,7 @@ class DefaultJdtWorkspaceManagerTest {
             if (attempts.incrementAndGet() < 3) {
                 return CompletableFuture.completedFuture(Either.forRight(List.of()));
             }
-            return CompletableFuture.completedFuture(symbols());
+            return CompletableFuture.completedFuture(fixture.workspaceService().symbolsForImportedSource());
         });
 
         JdtWorkspaceSession session = fixture.manager().getOrStart(fixture.snapshot());
@@ -812,7 +839,7 @@ class DefaultJdtWorkspaceManagerTest {
         fixture.workspaceService().respondWith(query -> {
             importReached.countDown();
             ConcurrencyTestSupport.await(releaseImport, Duration.ofSeconds(5));
-            return CompletableFuture.completedFuture(symbols());
+            return CompletableFuture.completedFuture(fixture.workspaceService().symbolsForImportedSource());
         });
         AtomicReference<Throwable> starterFailure = new AtomicReference<>();
         AtomicReference<Throwable> shutdownFailure = new AtomicReference<>();
@@ -868,7 +895,7 @@ class DefaultJdtWorkspaceManagerTest {
         fixture.workspaceService().respondWith(query -> {
             importReached.countDown();
             ConcurrencyTestSupport.await(releaseImport, Duration.ofSeconds(5));
-            return CompletableFuture.completedFuture(symbols());
+            return CompletableFuture.completedFuture(fixture.workspaceService().symbolsForImportedSource());
         });
         Thread starter = Thread.ofPlatform().start(() -> {
             try {
@@ -959,7 +986,7 @@ class DefaultJdtWorkspaceManagerTest {
         fixture.workspaceService().respondWith(query -> {
             importReached.countDown();
             ConcurrencyTestSupport.await(releaseImport, Duration.ofSeconds(5));
-            return CompletableFuture.completedFuture(symbols());
+            return CompletableFuture.completedFuture(fixture.workspaceService().symbolsForImportedSource());
         });
         CompletableFuture<JdtWorkspaceSession> startup = new CompletableFuture<>();
         Thread starter = Thread.ofPlatform().start(() -> {
@@ -1267,9 +1294,14 @@ class DefaultJdtWorkspaceManagerTest {
         assertThat(fixture.meterRegistry().find("jdtls.workspace.peak.rss.kilobytes").gauge()).isNull();
     }
 
-    private static Either<List<? extends SymbolInformation>, List<? extends WorkspaceSymbol>> symbols() {
-        return Either.forRight(List.of(new WorkspaceSymbol()));
+    private static Either<List<? extends SymbolInformation>, List<? extends WorkspaceSymbol>> symbolsAt(Path source) {
+        Location location = new Location();
+        location.setUri(source.toUri().toString());
+        SymbolInformation symbol = new SymbolInformation();
+        symbol.setLocation(location);
+        return Either.forLeft(List.of(symbol));
     }
+
 
     private void assertRejectedBuildStatus(JdtLsBuildWorkspaceStatus status) {
         Fixture fixture = new Fixture();
@@ -1431,12 +1463,33 @@ class DefaultJdtWorkspaceManagerTest {
                 Files.createDirectories(source);
                 Files.writeString(source.resolve(SANITY_TYPE + ".java"),
                         "package com.example; public class " + SANITY_TYPE + " {}");
+                languageServer.workspaceService().clearImportedProjects();
+                languageServer.workspaceService().importedProject(root, List.of("src/main/java"));
                 return new RepositorySnapshot(repositoryId, root, REVISION);
             } catch (IOException exception) {
                 throw new IllegalStateException("fake repository failed", exception);
             }
         }
 
+        private RepositorySnapshot multiModuleSnapshot() {
+            try {
+                Path root = tempDirectory.resolve("multi-module-repository");
+                Path excluded = root.resolve("module-a/src/test/java/example/AbstractCrudService.java");
+                Path included = root.resolve("module-b/src/main/java/example/IncludedService.java");
+                Files.createDirectories(excluded.getParent());
+                Files.createDirectories(included.getParent());
+                Files.writeString(excluded, "package example; class AbstractCrudService {}");
+                Files.writeString(included, "package example; class IncludedService {}");
+                languageServer.workspaceService().clearImportedProjects();
+                languageServer.workspaceService().importedProject(
+                        root.resolve("module-a"), List.of("src/test/java"));
+                languageServer.workspaceService().importedProject(
+                        root.resolve("module-b"), List.of("src/main/java"));
+                return new RepositorySnapshot(REPOSITORY_ID, root, REVISION);
+            } catch (IOException exception) {
+                throw new IllegalStateException("multi-module fake repository failed", exception);
+            }
+        }
         private DefaultJdtWorkspaceManager manager() {
             return manager;
         }
@@ -1644,9 +1697,11 @@ class DefaultJdtWorkspaceManagerTest {
 
         private final List<String> queries = Collections.synchronizedList(new ArrayList<>());
         private final List<String> protocolCalls;
+        private final Map<String, List<String>> sourcePathsByProject =
+                new java.util.concurrent.ConcurrentHashMap<>();
         private volatile Function<String, CompletableFuture<Either<List<? extends SymbolInformation>,
                 List<? extends WorkspaceSymbol>>>> responder =
-                query -> CompletableFuture.completedFuture(symbols());
+                query -> CompletableFuture.completedFuture(symbolsForImportedSource());
 
         private FakeWorkspaceService(List<String> protocolCalls) {
             this.protocolCalls = protocolCalls;
@@ -1660,6 +1715,20 @@ class DefaultJdtWorkspaceManagerTest {
         @Override
         public void didChangeWatchedFiles(DidChangeWatchedFilesParams params) {
             // the fake server watches no files
+        }
+
+        @Override
+        public CompletableFuture<Object> executeCommand(ExecuteCommandParams params) {
+            protocolCalls.add("command:" + params.getCommand());
+            if ("java.project.getAll".equals(params.getCommand())) {
+                return CompletableFuture.completedFuture(List.copyOf(sourcePathsByProject.keySet()));
+            }
+            if ("java.project.getSettings".equals(params.getCommand())) {
+                String projectUri = (String) params.getArguments().getFirst();
+                return CompletableFuture.completedFuture(
+                        Map.of("org.eclipse.jdt.ls.core.sourcePaths", sourcePathsByProject.get(projectUri)));
+            }
+            return CompletableFuture.failedFuture(new IllegalArgumentException("unexpected JDT command"));
         }
 
         @Override
@@ -1677,6 +1746,21 @@ class DefaultJdtWorkspaceManagerTest {
         private void respondWith(Function<String, CompletableFuture<Either<List<? extends SymbolInformation>,
                 List<? extends WorkspaceSymbol>>>> responder) {
             this.responder = responder;
+        }
+
+        private void importedProject(Path projectRoot, List<String> sourcePaths) {
+            sourcePathsByProject.put(projectRoot.toUri().toString(), List.copyOf(sourcePaths));
+        }
+
+        private Either<List<? extends SymbolInformation>, List<? extends WorkspaceSymbol>> symbolsForImportedSource() {
+            Map.Entry<String, List<String>> imported = sourcePathsByProject.entrySet().stream().findFirst().orElseThrow();
+            Path projectRoot = Path.of(java.net.URI.create(imported.getKey()));
+            Path sourceRoot = projectRoot.resolve(imported.getValue().getFirst());
+            return symbolsAt(sourceRoot.resolve("Ready.java"));
+        }
+
+        private void clearImportedProjects() {
+            sourcePathsByProject.clear();
         }
     }
 
