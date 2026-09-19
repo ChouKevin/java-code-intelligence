@@ -36,4 +36,4 @@
 
 The real-JDT effective-environment integration passed with the installed language server:
 `JDTLS_HOME=/opt/jdtls mvn -pl semantic-indexer -am -Pjdtls-it -Dsurefire.failIfNoSpecifiedTests=false -Dtest=EffectiveEnvironmentJdtLsIT test`.
-It completed with 1 test, 0 failures, and 0 errors. This proves JDT LS effective classpath evidence is used rather than launcher runtime classpath for the existing multi-module/system-artifact fixture.
+It completed with 1 test, 0 failures, and 0 errors. The fixture declares distinct runtime (`slf4j-api`), provided (`junit-jupiter-api`), and test (`assertj-core`) dependencies; assertions observed all three in persisted effective JDT classpath artifacts.

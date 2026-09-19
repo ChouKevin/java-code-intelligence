@@ -63,6 +63,10 @@ class EffectiveEnvironmentJdtLsIT {
                 assertThat(second.fingerprint().inputs().projects()).allSatisfy(project ->
                         assertThat(project.classpath()).allSatisfy(artifact ->
                                 assertThat(artifact.logicalId()).doesNotStartWith("/").doesNotStartWith("file:")));
+                assertThat(Fixture.artifacts(second)).extracting(AnalysisInputs.Artifact::logicalId)
+                        .anySatisfy(id -> assertThat(id).contains("junit-jupiter-api"))
+                        .anySatisfy(id -> assertThat(id).contains("assertj-core"))
+                        .anySatisfy(id -> assertThat(id).contains("slf4j-api"));
                 SemanticCallResolution resolution = fixture.resolveBOnlyDependency(second);
                 assertThat(resolution.call()).isPresent().get().satisfies(call -> {
                     assertThat(call.target()).isPresent().get().satisfies(target -> {
@@ -198,6 +202,9 @@ class EffectiveEnvironmentJdtLsIT {
                     <dependency><groupId>example</groupId><artifactId>api</artifactId><version>1</version></dependency>
                     <dependency><groupId>example</groupId><artifactId>fixture</artifactId><version>1</version><scope>system</scope>
                     <systemPath>${project.basedir}/../libraries/fixture.jar</systemPath></dependency>
+                    <dependency><groupId>org.slf4j</groupId><artifactId>slf4j-api</artifactId><version>2.0.17</version><scope>runtime</scope></dependency>
+                    <dependency><groupId>org.junit.jupiter</groupId><artifactId>junit-jupiter-api</artifactId><version>5.14.2</version><scope>provided</scope></dependency>
+                    <dependency><groupId>org.assertj</groupId><artifactId>assertj-core</artifactId><version>3.27.7</version><scope>test</scope></dependency>
                     </dependencies></project>
                     """);
             Files.writeString(application.resolve("UseApi.java"),
