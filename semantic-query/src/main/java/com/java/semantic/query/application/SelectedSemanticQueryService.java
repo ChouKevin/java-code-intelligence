@@ -15,17 +15,19 @@ import java.util.Objects;
 /** Materializes semantic query results against one generation selected at facade admission. */
 public final class SelectedSemanticQueryService {
     private final CodeFactSearchService searchService;
-    private final CurrentSourceQueryService sourceService;
+    private final SourceSliceService sourceSliceService;
 
-    private SelectedSemanticQueryService(CodeFactSearchService searchService, CurrentSourceQueryService sourceService) {
+    private SelectedSemanticQueryService(CodeFactSearchService searchService, SourceSliceService sourceSliceService) {
         this.searchService = Objects.requireNonNull(searchService, "search service is required");
-        this.sourceService = Objects.requireNonNull(sourceService, "source service is required");
+        this.sourceSliceService = Objects.requireNonNull(sourceSliceService, "source slice service is required");
     }
 
     public static SelectedSemanticQueryService create(org.springframework.data.mongodb.core.MongoTemplate template,
                                                        CurrentGenerationSelector selector, Duration storageTimeout) {
+        CodeFactReadService factReader = new CodeFactReadService(template, selector, storageTimeout);
         CurrentSourceQueryService sourceReader = new CurrentSourceQueryService(template, selector, storageTimeout);
-        return new SelectedSemanticQueryService(new CodeFactSearchService(template, selector, storageTimeout), sourceReader);
+        return new SelectedSemanticQueryService(new CodeFactSearchService(template, selector, storageTimeout),
+                new SourceSliceService(sourceReader, factReader));
     }
 
     public SemanticQueryContract.SearchCodeResult searchCode(SelectedGeneration context, SemanticQueryContract.SearchCodeRequest request) {
@@ -37,8 +39,8 @@ public final class SelectedSemanticQueryService {
         CodeFactSearchResult result = searchService.search(selected, query);
         List<SemanticQueryContract.ProgramElement> items = new ArrayList<>();
         for (CodeFactSummary summary : result.facts()) {
-            String content = sourceService.getSource(selected, summary.location().sourceFile()).utf8Content();
-            FactSourceSlice source = new FactSourceSlice(selected, summary.location(), summary.location(), content);
+            FactSourceSlice source = sourceSliceService.factSource(selected, new com.java.semantic.model.codefact.CodeFactReadQuery(
+                    selected.repositoryId(), selected.revision(), summary.fact().id()), 0);
             items.add(SemanticResultMapper.toProgramElement(summary, source));
         }
         return SemanticResultMapper.toSearchCodeResult(result, items);

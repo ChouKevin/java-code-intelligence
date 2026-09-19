@@ -50,28 +50,37 @@ public final class CodeFactReadService {
         this.storageTimeout = Objects.requireNonNull(storageTimeout, "storage timeout is required");
     }
 
-    /** Public exact-read contract: the opaque id must have been published by a current authorized search row. */
+    /** Public exact-read contract: the opaque id must have been published by an authorized search row. */
     public CodeFactDetails get(CodeFactReadQuery query) {
         CodeFactReadQuery request = Objects.requireNonNull(query, "code fact read query is required");
-        SearchAccessPlan accessPlan = selector.searchAccessPlan(request.repositoryId().value());
-        SelectedGeneration searchGeneration = selector.select(request.repositoryId().value(), request.revision().value(),
+        SelectedGeneration context = selector.select(request.repositoryId().value(), request.revision().value(),
                 new ProjectionRequirements(EnumSet.of(ProjectionName.SEARCH)));
+        return get(context, request);
+    }
+
+    public CodeFactDetails get(SelectedGeneration context, CodeFactReadQuery query) {
+        SelectedGeneration selected = Objects.requireNonNull(context, "selected generation is required");
+        CodeFactReadQuery request = Objects.requireNonNull(query, "code fact read query is required");
+        if (!selected.repositoryId().equals(request.repositoryId()) || !selected.revision().equals(request.revision())) {
+            throw new IllegalArgumentException("query repository and revision must match the selected generation");
+        }
+        SearchAccessPlan accessPlan = selector.searchAccessPlan(request.repositoryId().value());
+        selector.requireCompatible(selected, new ProjectionRequirements(EnumSet.of(ProjectionName.SEARCH)));
         try {
-            Bson filter = accessPlan.authorized(Filters.and(Filters.eq("repoId", searchGeneration.repositoryId().value()),
-                    Filters.eq("generationId", searchGeneration.generationId().value()), Filters.eq("factId", request.factId().value())));
+            Bson filter = accessPlan.authorized(Filters.and(Filters.eq("repoId", selected.repositoryId().value()),
+                    Filters.eq("generationId", selected.generationId().value()), Filters.eq("factId", request.factId().value())));
             Document row = template.getCollection(IndexCollections.SEARCH).find(filter)
                     .maxTime(storageTimeout.toMillis(), TimeUnit.MILLISECONDS).first();
             if (Objects.isNull(row)) { throw new CodeFactNotFoundException(); }
-            SearchRow search = searchRow(row, searchGeneration);
-            SelectedGeneration current = selector.select(request.repositoryId().value(), request.revision().value(),
-                    requirementsForSearchKinds(Set.of(search.kind())));
-            CodeFactDetails details = authoritative(current, search.kind(), search.factId());
-            verifySearchRow(search, details, current);
-            selector.requireVisible(current, details.fact().identity());
+            SearchRow search = searchRow(row, selected);
+            selector.requireCompatible(selected, requirementsForSearchKinds(Set.of(search.kind())));
+            CodeFactDetails details = authoritative(selected, search.kind(), search.factId());
+            verifySearchRow(search, details, selected);
+            selector.requireVisible(selected, details.fact().identity());
             return details;
         } catch (MongoException | DataAccessException exception) {
             throw new SemanticIndexUnavailableException(exception);
-        } catch (RevisionOutdatedException | RepositoryNotFoundException | CodeFactNotFoundException | IndexContractMismatchException exception) {
+        } catch (RepositoryNotFoundException | CodeFactNotFoundException | IndexContractMismatchException exception) {
             throw exception;
         } catch (RuntimeException exception) {
             throw new IndexContractMismatchException();

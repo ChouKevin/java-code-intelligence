@@ -46,13 +46,20 @@ public final class SourceSliceService {
 
     public FactSourceSlice factSource(CodeFactReadQuery query, int contextLines) {
         CodeFactReadQuery requiredQuery = Objects.requireNonNull(query, "code fact read query is required");
+        CodeFactDetails selected = codeFactReadService.get(requiredQuery);
+        return factSource(selected.generation(), requiredQuery, contextLines);
+    }
+
+    public FactSourceSlice factSource(SelectedGeneration context, CodeFactReadQuery query, int contextLines) {
+        SelectedGeneration selected = Objects.requireNonNull(context, "selected generation is required");
+        CodeFactReadQuery requiredQuery = Objects.requireNonNull(query, "code fact read query is required");
         if (contextLines < 0 || contextLines > SemanticQueryContract.MAX_CONTEXT_LINES) {
             throw new IllegalArgumentException("context lines must be between 0 and " + SemanticQueryContract.MAX_CONTEXT_LINES);
         }
-        CodeFactDetails fact = codeFactReadService.get(requiredQuery);
+        CodeFactDetails fact = codeFactReadService.get(selected, requiredQuery);
         String content = sourceQueryService.getSource(fact).utf8Content();
         SourceRange sourceRange = expandedRange(fact.location(), content, contextLines);
-        return new FactSourceSlice(fact.generation(), sourceRange, fact.location(), content);
+        return new FactSourceSlice(selected, sourceRange, fact.location(), content);
     }
 
     private static SourceRange expandedRange(SourceRange factRange, String content, int contextLines) {
