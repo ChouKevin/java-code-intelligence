@@ -1,6 +1,7 @@
 package com.java.semantic.semantic.adapter.jdtls;
 
 import com.java.semantic.config.JdtLsProperties;
+import com.java.semantic.repository.domain.ManagedDisposableCheckout;
 import org.eclipse.lsp4j.CallHierarchyCapabilities;
 import org.eclipse.lsp4j.ClientCapabilities;
 import org.eclipse.lsp4j.DefinitionCapabilities;
@@ -82,7 +83,16 @@ public final class JdtLsProcessFactory {
     /** 啟動程序並完成 LSP initialize handshake */
     public LaunchHandle launch(Path workspaceRoot, Path workspaceData, JdtLanguageClient client)
             throws IOException, InterruptedException, ExecutionException, TimeoutException {
-        return launch(workspaceRoot, workspaceData, client, process -> { });
+        return launch(workspaceRoot, workspaceData, client, null, process -> { });
+    }
+
+    LaunchHandle launch(
+            Path workspaceRoot,
+            Path workspaceData,
+            JdtLanguageClient client,
+            ManagedDisposableCheckout managedCheckout)
+            throws IOException, InterruptedException, ExecutionException, TimeoutException {
+        return launch(workspaceRoot, workspaceData, client, managedCheckout, process -> { });
     }
 
     LaunchHandle launch(
@@ -91,9 +101,19 @@ public final class JdtLsProcessFactory {
             JdtLanguageClient client,
             Consumer<Process> processStartedObserver)
             throws IOException, InterruptedException, ExecutionException, TimeoutException {
+        return launch(workspaceRoot, workspaceData, client, null, processStartedObserver);
+    }
+
+    private LaunchHandle launch(
+            Path workspaceRoot,
+            Path workspaceData,
+            JdtLanguageClient client,
+            ManagedDisposableCheckout managedCheckout,
+            Consumer<Process> processStartedObserver)
+            throws IOException, InterruptedException, ExecutionException, TimeoutException {
         Objects.requireNonNull(processStartedObserver, "processStartedObserver is required");
         Path launcherJar = findLauncherJar();
-        Path configuration = prepareWritablePaths(workspaceRoot, workspaceData);
+        Path configuration = prepareWritablePaths(workspaceRoot, workspaceData, managedCheckout);
         List<String> command = createCommand(launcherJar, workspaceData, configuration);
         Process process = processStarter.start(command);
         log.info("phase=jdtls-process outcome=started");
@@ -182,7 +202,14 @@ public final class JdtLsProcessFactory {
         return builder.start();
     }
 
-    private Path prepareWritablePaths(Path workspaceRoot, Path workspaceData) throws IOException {
+    private Path prepareWritablePaths(
+            Path workspaceRoot,
+            Path workspaceData,
+            ManagedDisposableCheckout managedCheckout) throws IOException {
+        if (properties.getIsolationMode() == JdtLsProperties.IsolationMode.LINUX_UID) {
+            validateManagedCheckout(workspaceRoot, managedCheckout);
+            rejectSymbolicLinks(workspaceData);
+        }
         Path configuration = workspaceData.resolve("configuration").toAbsolutePath().normalize();
         if (!configuration.startsWith(workspaceData.toAbsolutePath().normalize())) {
             throw new IOException("JDT LS configuration escaped its workspace data directory");
@@ -207,6 +234,30 @@ public final class JdtLsProcessFactory {
             assignAnalysisOwner(workspaceData, analysisUser);
         }
         return configuration;
+    }
+
+    private static void validateManagedCheckout(Path workspaceRoot, ManagedDisposableCheckout managedCheckout)
+            throws IOException {
+        if (Objects.isNull(managedCheckout)) {
+            throw new IOException("LINUX_UID requires a managed disposable checkout");
+        }
+        Path root = workspaceRoot.toAbsolutePath().normalize();
+        if (!root.equals(managedCheckout.root()) || Files.isSymbolicLink(root)) {
+            throw new IOException("managed checkout root is invalid");
+        }
+        Path canonicalRoot = root.toRealPath(java.nio.file.LinkOption.NOFOLLOW_LINKS);
+        if (!canonicalRoot.equals(root)) {
+            throw new IOException("managed checkout root is not canonical");
+        }
+        rejectSymbolicLinks(root);
+    }
+
+    private static void rejectSymbolicLinks(Path root) throws IOException {
+        try (Stream<Path> paths = Files.walk(root)) {
+            if (paths.anyMatch(Files::isSymbolicLink)) {
+                throw new IOException("managed writable path contains a symbolic link");
+            }
+        }
     }
 
     private void assignAnalysisOwner(Path path, UserPrincipal analysisUser) throws IOException {

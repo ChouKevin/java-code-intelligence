@@ -40,6 +40,10 @@ public final class RepositoryRuntime {
         return workingTree;
     }
 
+    public ManagedDisposableCheckout managedCheckout() {
+        return new ManagedDisposableCheckout(workingTree);
+    }
+
     public String remoteUrl() {
         return remoteUrl;
     }

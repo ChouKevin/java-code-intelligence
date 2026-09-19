@@ -44,7 +44,7 @@ public final class ExactRepositoryCheckout implements IndexBuildService.Checkout
                 throw new RepositoryMutationException("checked out revision differs from admitted revision");
             }
             runtime.publish(actualRevision);
-            return new IndexBuildService.CheckedOutRepository(root, actualRevision);
+            return new IndexBuildService.CheckedOutRepository(root, actualRevision, runtime.managedCheckout());
         } finally {
             writeLock.unlock();
         }

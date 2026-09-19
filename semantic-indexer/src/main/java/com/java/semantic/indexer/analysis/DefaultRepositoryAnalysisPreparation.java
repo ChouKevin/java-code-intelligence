@@ -42,7 +42,8 @@ public final class DefaultRepositoryAnalysisPreparation implements RepositoryAna
         Objects.requireNonNull(target, "target is required");
         RepositorySnapshot snapshot = target.snapshot();
         WorkspaceLease lease = workspaceManager.acquire(new AnalysisWorkspaceKey(
-                snapshot.repositoryId(), snapshot.revision(), target.jobId(), target.stage()), snapshot);
+                snapshot.repositoryId(), snapshot.revision(), target.jobId(), target.stage()), snapshot,
+                target.managedCheckout());
         try {
             AnalysisInputs inputs = inspector.inspect(lease.session(), snapshot);
             AnalysisFingerprint fingerprint = AnalysisFingerprint.from(inputs);

@@ -148,6 +148,14 @@ public class DefaultJdtWorkspaceManager implements JdtWorkspaceManager, Reposito
 
     @Override
     public WorkspaceLease acquire(AnalysisWorkspaceKey key, RepositorySnapshot snapshot) {
+        return acquire(key, snapshot, null);
+    }
+
+    @Override
+    public WorkspaceLease acquire(
+            AnalysisWorkspaceKey key,
+            RepositorySnapshot snapshot,
+            com.java.semantic.repository.domain.ManagedDisposableCheckout managedCheckout) {
         Assert.notNull(key, "workspace key is required");
         Assert.notNull(snapshot, "snapshot is required");
         Assert.isTrue(key.repositoryId().equals(snapshot.repositoryId()),
@@ -159,7 +167,8 @@ public class DefaultJdtWorkspaceManager implements JdtWorkspaceManager, Reposito
         JdtLsReadinessProbe.ImportProgressClient client = readinessProbe.newClient();
         JdtWorkspaceSession session = null;
         try {
-            JdtLsProcessFactory.LaunchHandle handle = processFactory.launch(snapshot.root(), workspaceData, client);
+            JdtLsProcessFactory.LaunchHandle handle = processFactory.launch(
+                    snapshot.root(), workspaceData, client, managedCheckout);
             session = new JdtWorkspaceSession(snapshot.repositoryId(), snapshot.revision(), handle,
                     properties.getRequestTimeout(), ticker);
             readinessProbe.awaitReady(session, client, snapshot.root());

@@ -19,6 +19,7 @@ import com.java.semantic.model.index.SealedGeneration;
 import com.java.semantic.model.query.SelectedGeneration;
 import com.java.semantic.model.repository.RepositoryRevision;
 import com.java.semantic.repository.domain.RepositorySnapshot;
+import com.java.semantic.repository.domain.ManagedDisposableCheckout;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Objects;
@@ -115,7 +116,7 @@ public final class IndexBuildService {
         PreparedAnalysis preparedAnalysis = analysisPreparation.orElseThrow(
                 () -> new IllegalStateException("production index builds require prepared semantic analysis")).prepare(
                 new AnalysisTarget(new RepositorySnapshot(requiredJob.repositoryId(), checkout.root(), target.revision()),
-                        requiredJob.id().value(), "CODEBASE"));
+                        requiredJob.id().value(), "CODEBASE", checkout.managedCheckout()));
         try {
             FullIndexPlan plan = preparedAnalysis.plan();
             insertWritingManifest(requiredJob, context);
@@ -164,10 +165,17 @@ public final class IndexBuildService {
         CheckedOutRepository checkout(IndexJob job);
     }
 
-    public record CheckedOutRepository(Path root, RepositoryRevision revision) {
+    public record CheckedOutRepository(Path root, RepositoryRevision revision, ManagedDisposableCheckout managedCheckout) {
         public CheckedOutRepository {
             root = Objects.requireNonNull(root, "checkout root is required").toAbsolutePath().normalize();
             revision = Objects.requireNonNull(revision, "checkout revision is required");
+            if (Objects.nonNull(managedCheckout) && !root.equals(managedCheckout.root())) {
+                throw new IllegalArgumentException("managed checkout root must match checkout root");
+            }
+        }
+
+        public CheckedOutRepository(Path root, RepositoryRevision revision) {
+            this(root, revision, null);
         }
     }
 

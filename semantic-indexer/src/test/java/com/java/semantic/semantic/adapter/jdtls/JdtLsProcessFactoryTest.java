@@ -5,6 +5,8 @@ import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
 import com.java.semantic.config.JdtLsProperties;
+import com.java.semantic.model.repository.RepositoryId;
+import com.java.semantic.repository.domain.RepositoryRuntime;
 import org.eclipse.lsp4j.ClientCapabilities;
 import org.eclipse.lsp4j.InitializeParams;
 import org.eclipse.lsp4j.InitializeResult;
@@ -36,6 +38,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -145,7 +148,7 @@ class JdtLsProcessFactoryTest {
     void should_attach_the_fixed_lombok_agent_only_to_the_linux_uid_command() throws Exception {
         Path home = JdtLsTestFixtures.createFakeHome(tempDirectory);
         Path workspaceRoot = Files.createDirectories(tempDirectory.resolve("linux-repository"));
-        Path workspaceData = tempDirectory.resolve("linux-workspace-data");
+        Path workspaceData = Files.createDirectories(tempDirectory.resolve("linux-workspace-data"));
         TestProcess process = new TestProcess(new ByteArrayInputStream(new byte[0]));
         AtomicReference<List<String>> capturedCommand = new AtomicReference<>();
         JdtLsLanguageServer server = mock(JdtLsLanguageServer.class, invocation -> {
@@ -163,7 +166,9 @@ class JdtLsProcessFactoryTest {
                 (client, launchedProcess) -> new JdtLsProcessFactory.Connection(
                         server, CompletableFuture.completedFuture(null)));
 
-        factory.launch(workspaceRoot, workspaceData, mock(JdtLanguageClient.class));
+        factory.launch(workspaceRoot, workspaceData, mock(JdtLanguageClient.class),
+                new RepositoryRuntime(RepositoryId.of("linux-test"), "linux-test", workspaceRoot,
+                        "file:///remote/linux-test.git", "main").managedCheckout());
 
         assertThat(capturedCommand.get()).containsSubsequence(
                 "/usr/bin/setpriv",
@@ -172,6 +177,30 @@ class JdtLsProcessFactoryTest {
                 "--bounding-set=-all",
                 "/opt/java/openjdk/bin/java");
         assertThat(capturedCommand.get()).contains("-javaagent:/opt/jdtls/lombok.jar");
+    }
+
+    @Test
+    void should_reject_a_raw_linux_workspace_root_before_starting_or_changing_ownership() throws Exception {
+        Path home = JdtLsTestFixtures.createFakeHome(tempDirectory);
+        Path workspaceRoot = Files.createDirectories(tempDirectory.resolve("operator-root"));
+        Path workspaceData = Files.createDirectories(tempDirectory.resolve("operator-data"));
+        AtomicInteger starts = new AtomicInteger();
+        JdtLsProcessFactory factory = new JdtLsProcessFactory(
+                linuxUidProperties(home),
+                command -> {
+                    starts.incrementAndGet();
+                    throw new AssertionError("raw Linux root must not start JDT");
+                },
+                (client, launchedProcess) -> {
+                    throw new AssertionError("raw Linux root must not connect");
+                });
+
+        assertThatThrownBy(() -> factory.launch(workspaceRoot, workspaceData, mock(JdtLanguageClient.class)))
+                .isInstanceOf(IOException.class)
+                .hasMessage("LINUX_UID requires a managed disposable checkout");
+
+        assertThat(starts).hasValue(0);
+        assertThat(workspaceData.resolve("configuration")).doesNotExist();
     }
 
     @Test

@@ -2,6 +2,7 @@ package com.java.semantic.semantic.adapter.jdtls;
 
 import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.repository.domain.RepositorySnapshot;
+import com.java.semantic.repository.domain.ManagedDisposableCheckout;
 
 /** 管理每個儲存庫的 JDT LS 工作區生命週期 */
 public interface JdtWorkspaceManager {
@@ -18,6 +19,13 @@ public interface JdtWorkspaceManager {
      */
     default WorkspaceLease acquire(AnalysisWorkspaceKey key, RepositorySnapshot snapshot) {
         throw new UnsupportedOperationException("endpoint-private JDT workspace leases are not available");
+    }
+
+    default WorkspaceLease acquire(
+            AnalysisWorkspaceKey key,
+            RepositorySnapshot snapshot,
+            ManagedDisposableCheckout managedCheckout) {
+        return acquire(key, snapshot);
     }
 
     /** 回報工作區狀態,未啟動的儲存庫回傳 STOPPED */
