@@ -106,11 +106,11 @@ public final class DefaultRepositoryAnalysisPreparation implements RepositoryAna
         }
     }
 
-    private static List<Path> includedSourceRoots(RepositorySnapshot snapshot, AnalysisInputs inputs) {
+    static List<Path> includedSourceRoots(RepositorySnapshot snapshot, AnalysisInputs inputs) {
         List<Path> roots = new ArrayList<>();
         for (AnalysisInputs.Project project : inputs.projects()) {
             for (AnalysisInputs.Root root : project.roots()) {
-                if (root.included()) {
+                if (root.included() && containsJavaSource(snapshot.root(), root.path())) {
                     roots.add(snapshot.root().resolve(root.path()).normalize());
                 }
             }
