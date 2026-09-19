@@ -49,6 +49,32 @@ public final class JdtLsProcessFactory {
     private static final int STDERR_BUFFER_LINES = 200;
     private static final String LOMBOK_JDT_AGENT = "-javaagent:/opt/jdtls/lombok.jar";
 
+    static String launchPolicyIdentity(JdtLsProperties properties) {
+        String agentDigest = properties.getIsolationMode() == JdtLsProperties.IsolationMode.LINUX_UID
+                ? sha256(properties.getHome().resolve("lombok.jar"))
+                : "disabled";
+        return "launch-policy=v1\n"
+                + "isolation=" + properties.getIsolationMode().name() + "\n"
+                + "agent=" + (properties.getIsolationMode() == JdtLsProperties.IsolationMode.LINUX_UID
+                ? "lombok.jar:" + agentDigest : "disabled") + "\n"
+                + "jvm=-Declipse.application=org.eclipse.jdt.ls.core.id1\n"
+                + "jvm=-Dosgi.bundles.defaultStartLevel=4\n"
+                + "jvm=-Declipse.product=org.eclipse.jdt.ls.core.product\n"
+                + "jvm=-Dlog.level=ALL\n"
+                + "jvm=-Xmx" + properties.getMaxHeap() + "\n"
+                + "env=HOME:analysis-home-v1,USER:analysis\n"
+                + "cache=analysis-home-m2-v1";
+    }
+
+    private static String sha256(Path file) {
+        try {
+            return java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256")
+                    .digest(Files.readAllBytes(file)));
+        } catch (java.io.IOException | java.security.NoSuchAlgorithmException exception) {
+            throw new IllegalStateException("unable to digest configured Lombok agent", exception);
+        }
+    }
+
     private final JdtLsProperties properties;
     private final ProcessStarter processStarter;
     private final ConnectionStarter connectionStarter;

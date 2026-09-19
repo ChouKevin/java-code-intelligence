@@ -97,7 +97,8 @@ public final class JdtLsEffectiveEnvironmentInspector {
         }
         return new AnalysisInputs(IndexSchemaContract.ANALYSIS_EVIDENCE_VERSION,
                 digestText(getClass().getName()), digestDirectory(properties.getHome()),
-                digestDirectory(javaHome(properties.getJavaExecutable())), importInputsDigest(snapshot), projects);
+                digestDirectory(javaHome(properties.getJavaExecutable())),
+                importInputsDigest(snapshot, JdtLsProcessFactory.launchPolicyIdentity(properties)), projects);
     }
 
     private List<String> projectUris(JdtWorkspaceSession session) {
@@ -395,9 +396,10 @@ public final class JdtLsEffectiveEnvironmentInspector {
         return bin.getParent();
     }
 
-    private static String importInputsDigest(RepositorySnapshot snapshot) {
+    private static String importInputsDigest(RepositorySnapshot snapshot, String launchPolicyIdentity) {
         return digestText("repository=" + snapshot.repositoryId().value() + "\nrevision=" + snapshot.revision().value()
-                + "\nimport-policy=effective-jdtls-v1\nmapper-policy=xml-and-annotation");
+                + "\nimport-policy=effective-jdtls-v1\nmapper-policy=xml-and-annotation\n"
+                + launchPolicyIdentity);
     }
 
     private static Map<String, Object> objectMap(Object value, String command) {
