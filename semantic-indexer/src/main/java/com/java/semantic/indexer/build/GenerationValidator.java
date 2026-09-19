@@ -12,6 +12,8 @@ import com.java.semantic.model.index.IndexCollections;
 import com.java.semantic.model.index.IndexSchemaContract;
 import com.java.semantic.model.index.ManifestDigest;
 import com.java.semantic.model.index.ProjectionName;
+import com.java.semantic.model.index.SourceArtifactDocument;
+import com.java.semantic.model.index.SourceArtifactId;
 import com.java.semantic.model.index.RelationDocument;
 import com.java.semantic.model.index.SearchDocument;
 import com.java.semantic.model.index.SymbolDocument;
@@ -301,20 +303,74 @@ public final class GenerationValidator {
     private Map<String, Document> artifactsById(List<Document> files, List<GenerationValidationIssue> issues) {
         Map<String, Document> artifacts = new LinkedHashMap<>();
         for (Document file : files) {
-            String artifactId = sourceArtifactId(file);
-            if (Objects.isNull(artifactId)) {
-                issues.add(issue("MISSING_ARTIFACT", "generation file does not name a source artifact"));
+            String sourcePath;
+            String artifactId;
+            String contentHash;
+            try {
+                sourcePath = file.getString("sourcePath");
+                artifactId = sourceArtifactId(file);
+                contentHash = file.getString("contentHash");
+            } catch (RuntimeException exception) {
+                issues.add(issue("GENERATION_FILE_ARTIFACT_MISMATCH",
+                        "generation file does not carry readable source artifact metadata"));
                 continue;
             }
-            Document artifact = template.getCollection(IndexCollections.SOURCE_ARTIFACTS)
-                    .find(new Document("sourceArtifactId", artifactId)).first();
-            if (Objects.isNull(artifact)) {
-                issues.add(issue("MISSING_ARTIFACT", "generation file references an absent source artifact"));
-            } else {
-                artifacts.put(file.getString("sourcePath"), artifact);
+            if (Objects.isNull(sourcePath) || Objects.isNull(artifactId) || Objects.isNull(contentHash)
+                    || !artifactId.equals(contentHash) || !validSourceArtifactId(artifactId)) {
+                issues.add(issue("GENERATION_FILE_ARTIFACT_MISMATCH",
+                        "generation file does not carry one valid immutable source artifact identity"));
+                continue;
             }
+            if (artifacts.containsKey(sourcePath)) {
+                issues.add(issue("DUPLICATE_GENERATION_FILE", "generation has more than one source row for a path"));
+                continue;
+            }
+            List<Document> matched = template.getCollection(IndexCollections.SOURCE_ARTIFACTS)
+                    .find(new Document("sourceArtifactId", artifactId)).into(new ArrayList<>());
+            if (matched.isEmpty()) {
+                issues.add(issue("MISSING_ARTIFACT", "generation file references an absent source artifact"));
+                continue;
+            }
+            if (matched.size() != 1) {
+                issues.add(issue("DUPLICATE_SOURCE_ARTIFACT", "source artifact identity is not globally unique"));
+                continue;
+            }
+            Document artifact = matched.getFirst();
+            if (!validArtifact(artifactId, contentHash, artifact)) {
+                issues.add(issue("INVALID_SOURCE_ARTIFACT",
+                        "source artifact bytes, digest, identity, or line offsets do not agree"));
+                continue;
+            }
+            artifacts.put(sourcePath, artifact);
         }
         return artifacts;
+    }
+
+    private static boolean validArtifact(String expectedId, String expectedHash, Document artifact) {
+        try {
+            String storedId = artifact.getString("sourceArtifactId");
+            String storedHash = artifact.getString("contentHash");
+            String source = artifact.getString("utf8Content");
+            List<Integer> storedOffsets = artifact.getList("lineOffsets", Integer.class);
+            if (Objects.isNull(storedId) || Objects.isNull(storedHash) || Objects.isNull(source) || Objects.isNull(storedOffsets)) {
+                return false;
+            }
+            SourceArtifactDocument reconstructed = SourceArtifactDocument.create(source);
+            return expectedId.equals(storedId) && expectedHash.equals(storedHash)
+                    && expectedId.equals(reconstructed.id().value()) && expectedHash.equals(reconstructed.contentHash())
+                    && storedOffsets.equals(reconstructed.lineOffsets());
+        } catch (RuntimeException exception) {
+            return false;
+        }
+    }
+
+    private static boolean validSourceArtifactId(String value) {
+        try {
+            new SourceArtifactId(value);
+            return true;
+        } catch (RuntimeException exception) {
+            return false;
+        }
     }
 
     /** Generation files use the converter's SourceArtifactId value-object shape. */

@@ -102,6 +102,13 @@ class GenerationValidatorIT {
                                 new Document("$set", new Document("analysisFingerprint", "b".repeat(64)))), "ANALYSIS_FINGERPRINT_MISMATCH"),
                 Arguments.of("missing artifact", (java.util.function.Consumer<MongoTemplate>) template ->
                         template.getCollection(IndexCollections.SOURCE_ARTIFACTS).deleteMany(new Document()), "MISSING_ARTIFACT"),
+                Arguments.of("source artifact bytes changed with retained line layout", (java.util.function.Consumer<MongoTemplate>) template -> {
+                    Document artifact = template.getCollection(IndexCollections.SOURCE_ARTIFACTS).find().first();
+                    String replacement = artifact.getString("utf8Content").replace("Secret", "Forged");
+                    template.getCollection(IndexCollections.SOURCE_ARTIFACTS).updateOne(
+                            new Document("sourceArtifactId", artifact.getString("sourceArtifactId")),
+                            new Document("$set", new Document("utf8Content", replacement)));
+                }, "INVALID_SOURCE_ARTIFACT"),
                 Arguments.of("duplicate canonical", (java.util.function.Consumer<MongoTemplate>) template ->
                         template.getCollection(IndexCollections.SYMBOLS).insertOne(duplicateSymbol(template)), "DUPLICATE_CANONICAL"),
                 Arguments.of("dangling internal relation", (java.util.function.Consumer<MongoTemplate>) template ->

@@ -13,6 +13,7 @@ import com.java.semantic.model.git.GitEvidenceOwnership;
 import com.java.semantic.model.git.GitFileContentStatus;
 import com.java.semantic.model.git.GitPreparedComparison;
 import com.java.semantic.model.git.GitSnapshotEntry;
+import com.java.semantic.model.index.GenerationFileDocument;
 import com.java.semantic.model.index.AnalysisFingerprint;
 import com.java.semantic.model.index.AnalysisInputs;
 import com.java.semantic.model.index.GenerationId;
@@ -22,6 +23,8 @@ import com.java.semantic.model.index.ManifestDigest;
 import com.java.semantic.model.index.PublishedGenerationPointer;
 import com.java.semantic.model.index.SealedGeneration;
 import com.java.semantic.model.index.ProjectionName;
+import com.java.semantic.model.index.SourceArtifactDocument;
+import com.java.semantic.model.index.SourceIndexScope;
 import com.java.semantic.model.index.SemanticAnalysisEvidence;
 import com.java.semantic.model.query.SelectedGeneration;
 import com.java.semantic.model.repository.RepositoryId;
@@ -44,6 +47,9 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 /** Real Mongo review graph regressions driven through controlled semantic and Git preparation ports. */
 @Tag("mongo-it")
 class ReviewPreparationIT {
+    private static final String REVIEW_SOURCE_PATH = "src/ReviewSource.java";
+    private static final String REVIEW_SOURCE = "class ReviewSource { void stable() {} }\n";
+
     @Test
     void ready_manifest_published_before_the_owner_stage_cas_recovers_to_complete() {
         try (MongoDBContainer container = container()) {
@@ -91,6 +97,18 @@ class ReviewPreparationIT {
     @Test
     void altered_sealed_identity_digest_remains_unavailable_and_fails_recovery() {
         assertSemanticTamperingIsRejected("identityDigest", "e".repeat(64));
+    }
+
+    @Test
+    void altered_source_artifact_bytes_with_unchanged_line_layout_remain_unavailable_and_fail_recovery() {
+        assertPostReadyTampering((fixture, ignored) -> {
+            Document artifact = fixture.template.getCollection(IndexCollections.SOURCE_ARTIFACTS).find().first();
+            String replacement = artifact.getString("utf8Content").replace("stable", "forged");
+            assertThat(replacement).isNotEqualTo(artifact.getString("utf8Content"));
+            assertThat(fixture.template.getCollection(IndexCollections.SOURCE_ARTIFACTS).updateOne(
+                    new Document("utf8Content", artifact.getString("utf8Content")),
+                    new Document("$set", new Document("utf8Content", replacement))).getModifiedCount()).isEqualTo(1L);
+        });
     }
 
     @Test
@@ -154,12 +172,15 @@ class ReviewPreparationIT {
     }
 
     private static void assertSemanticTamperingIsRejected(String field, Object value) {
+        assertPostReadyTampering((fixture, prepared) -> fixture.template.getCollection(IndexCollections.GENERATION_MANIFESTS).updateOne(
+                new Document("generationId", prepared.captured.selected().generationId().value()), new Document("$set", new Document(field, value))));
+    }
+
+    private static void assertPostReadyTampering(Tampering tampering) {
         try (MongoDBContainer container = container()) {
             Fixture fixture = fixture(container);
             PreparedReview prepared = fixture.prepare(Selection.CAPTURED);
-            fixture.template.getCollection(IndexCollections.GENERATION_MANIFESTS).updateOne(
-                    new Document("generationId", prepared.captured.selected().generationId().value()),
-                    new Document("$set", new Document(field, value)));
+            tampering.apply(fixture, prepared);
             fixture.resetForPublishRetry(prepared);
             assertThatThrownBy(() -> fixture.reviews.publishReady(fixture.jobs.find(prepared.job.id()).orElseThrow()))
                     .isInstanceOf(ReviewPreparationException.class);
@@ -266,10 +287,10 @@ class ReviewPreparationIT {
         }
 
         private GitPreparedComparison comparison() {
-            GitSnapshotEntry entry = new GitSnapshotEntry("README.md", "100644", "1".repeat(40), GitFileContentStatus.TEXT,
-                    "review source\n".getBytes(StandardCharsets.UTF_8));
+            GitSnapshotEntry entry = new GitSnapshotEntry(REVIEW_SOURCE_PATH, "100644", "1".repeat(40), GitFileContentStatus.TEXT,
+                    REVIEW_SOURCE.getBytes(StandardCharsets.UTF_8));
             GitComparisonChange change = new GitComparisonChange("change-0", com.java.semantic.model.git.GitChangeKind.MODIFY,
-                    "README.md", "README.md", "100644", "100644", "1".repeat(40), "2".repeat(40),
+                    REVIEW_SOURCE_PATH, REVIEW_SOURCE_PATH, "100644", "100644", "1".repeat(40), "2".repeat(40),
                     "@@ -1 +1 @@\n-review source\n+review source\n", "AVAILABLE");
             return new GitPreparedComparison(CAPTURED_REVISION, REQUESTED_REVISION, GitComparisonAncestry.PREVIOUS_ANCESTOR,
                     List.of(entry), List.of(entry), List.of(change));
@@ -287,17 +308,43 @@ class ReviewPreparationIT {
                     .append("projectionVersions", projectionVersions()).append("sealedCollectionCounts", sealedCounts())
                     .append("analysisFingerprint", fingerprint.digest()).append("analysisInputs", template.getConverter().convertToMongoType(inputs))
                     .append("analysisEvidence", template.getConverter().convertToMongoType(evidence)));
+            seedSourceArtifact(generationId);
             SelectedGeneration initial = new SelectedGeneration(repositoryId, revision, generationId, digest);
-            ManifestDigest persistedDigest = new GenerationValidator(template).validatePersistedSealed(initial).identityDigest();
+            GenerationValidator.ValidationResult initialValidation = new GenerationValidator(template).validatePersistedSealed(initial);
+            ManifestDigest persistedDigest = initialValidation.identityDigest();
             template.getCollection(IndexCollections.GENERATION_MANIFESTS).updateOne(new Document("generationId", generationId.value()),
-                    new Document("$set", new Document("identityDigest", persistedDigest.value())));
-            return new SealedGeneration(new SelectedGeneration(repositoryId, revision, generationId, persistedDigest), fingerprint, evidence);
+                    new Document("$set", new Document("identityDigest", persistedDigest.value())
+                            .append("sealedCollectionCounts", new Document(initialValidation.collectionCounts()))));
+            SelectedGeneration selected = new SelectedGeneration(repositoryId, revision, generationId, persistedDigest);
+            GenerationValidator.ValidationResult validation = new GenerationValidator(template).validatePersistedSealed(selected);
+            assertThat(validation.valid()).as("seed validation issues: %s", validation.issues()).isTrue();
+            return new SealedGeneration(selected, fingerprint, evidence);
+        }
+
+        private void seedSourceArtifact(GenerationId generationId) {
+            SourceArtifactDocument artifact = SourceArtifactDocument.create(REVIEW_SOURCE);
+            if (template.getCollection(IndexCollections.SOURCE_ARTIFACTS)
+                    .countDocuments(new Document("sourceArtifactId", artifact.id().value())) == 0L) {
+                Document storedArtifact = new Document();
+                template.getConverter().write(artifact, storedArtifact);
+                storedArtifact.put("sourceArtifactId", artifact.id().value());
+                storedArtifact.put("contentHash", artifact.contentHash());
+                template.getCollection(IndexCollections.SOURCE_ARTIFACTS).insertOne(storedArtifact);
+            }
+            GenerationFileDocument source = new GenerationFileDocument(repositoryId, generationId, REVIEW_SOURCE_PATH, artifact.id(),
+                    artifact.contentHash(), "", new SourceIndexScope(false, List.of(), List.of(), List.of()));
+            Document storedSource = new Document();
+            template.getConverter().write(source, storedSource);
+            storedSource.put("repoId", repositoryId.value());
+            storedSource.put("generationId", generationId.value());
+            storedSource.put("sourcePath", REVIEW_SOURCE_PATH);
+            template.getCollection(IndexCollections.GENERATION_FILES).insertOne(storedSource);
         }
 
         private static Document sealedCounts() {
-            Document counts = new Document(IndexCollections.SOURCE_ARTIFACTS, 0L);
+            Document counts = new Document(IndexCollections.SOURCE_ARTIFACTS, 1L);
             for (ProjectionName projection : GenerationValidator.validatedCountedAndDigestedProjections()) {
-                counts.append(IndexSchemaContract.projectionCollection(projection), 0L);
+                counts.append(IndexSchemaContract.projectionCollection(projection), projection == ProjectionName.SOURCES ? 1L : 0L);
             }
             return counts;
         }
