@@ -158,6 +158,7 @@ public final class JdtLsReadinessProbe {
             if (Objects.isNull(status)) {
                 throw startupFailure(session, "incremental workspace build returned no status", null);
             }
+            session.markBuildStatus(status);
             if (status == JdtLsBuildWorkspaceStatus.FAILED) {
                 throw startupFailure(session, "incremental workspace build failed", null);
             }

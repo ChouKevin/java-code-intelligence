@@ -17,6 +17,7 @@ import org.springframework.util.Assert;
 import lombok.extern.slf4j.Slf4j;
 
 import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -61,6 +62,7 @@ public class DefaultJdtWorkspaceManager implements JdtWorkspaceManager, Reposito
     private final Map<RepositoryId, LaunchTracker> launchingProcesses = new ConcurrentHashMap<>();
     private final Map<RepositoryId, SemanticEngineStatus> transientStatuses = new ConcurrentHashMap<>();
     private final Map<RepositoryId, Meter.Id> gauges = new ConcurrentHashMap<>();
+    private final Set<OwnedWorkspaceLease> ownedLeases = ConcurrentHashMap.newKeySet();
     private final ReentrantLock lifecycleLock = new ReentrantLock();
     private final Object processRegistryLock = new Object();
     private final Duration shutdownLockWait;
@@ -144,6 +146,83 @@ public class DefaultJdtWorkspaceManager implements JdtWorkspaceManager, Reposito
         }
     }
 
+    @Override
+    public WorkspaceLease acquire(AnalysisWorkspaceKey key, RepositorySnapshot snapshot) {
+        Assert.notNull(key, "workspace key is required");
+        Assert.notNull(snapshot, "snapshot is required");
+        Assert.isTrue(key.repositoryId().equals(snapshot.repositoryId()),
+                "workspace key repository must match snapshot");
+        Assert.isTrue(key.revision().equals(snapshot.revision()),
+                "workspace key revision must match snapshot");
+        ensureActive(snapshot.repositoryId());
+        Path workspaceData = createLeaseDirectory(key);
+        JdtLsReadinessProbe.ImportProgressClient client = readinessProbe.newClient();
+        JdtWorkspaceSession session = null;
+        try {
+            JdtLsProcessFactory.LaunchHandle handle = processFactory.launch(snapshot.root(), workspaceData, client);
+            session = new JdtWorkspaceSession(snapshot.repositoryId(), snapshot.revision(), handle,
+                    properties.getRequestTimeout(), ticker);
+            readinessProbe.awaitReady(session, client, snapshot.root());
+            OwnedWorkspaceLease lease = new OwnedWorkspaceLease(session, workspaceData);
+            ownedLeases.add(lease);
+            return lease;
+        } catch (IOException | ExecutionException | TimeoutException exception) {
+            closeFailedLease(session, workspaceData);
+            throw launchFailure(snapshot.repositoryId(), "JDT LS lease launch failed", exception);
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            closeFailedLease(session, workspaceData);
+            throw launchFailure(snapshot.repositoryId(), "JDT LS lease launch was interrupted", exception);
+        } catch (RuntimeException exception) {
+            closeFailedLease(session, workspaceData);
+            throw exception;
+        }
+    }
+
+    private Path createLeaseDirectory(AnalysisWorkspaceKey key) {
+        Path root = properties.getWorkspaceDataRoot().toAbsolutePath().normalize();
+        Path containedBase = root.resolve(key.repositoryId().value()).resolve(key.revision().value())
+                .resolve(key.jobId()).resolve(key.stage()).normalize();
+        Assert.isTrue(containedBase.startsWith(root), "workspace key escaped workspace data root");
+        try {
+            Files.createDirectories(containedBase);
+            Path lease = Files.createTempDirectory(containedBase, "lease-").toRealPath();
+            Assert.isTrue(lease.startsWith(containedBase.toRealPath()),
+                    "workspace lease escaped its contained directory");
+            return lease;
+        } catch (IOException exception) {
+            throw new IllegalStateException("unable to create isolated JDT workspace lease", exception);
+        }
+    }
+
+    private void closeFailedLease(JdtWorkspaceSession session, Path workspaceData) {
+        if (Objects.nonNull(session)) {
+            try {
+                session.stop();
+            } catch (RuntimeException ignored) {
+                // The original launch or readiness failure is the observable failure.
+            }
+        }
+        deleteLeaseDirectory(workspaceData);
+    }
+
+    private void deleteLeaseDirectory(Path workspaceData) {
+        Path root = properties.getWorkspaceDataRoot().toAbsolutePath().normalize();
+        Path contained = workspaceData.toAbsolutePath().normalize();
+        Assert.isTrue(contained.startsWith(root), "refusing to delete a workspace outside the data root");
+        if (!Files.exists(contained)) {
+            return;
+        }
+        try (Stream<Path> paths = Files.walk(contained)) {
+            List<Path> descendants = paths.sorted(Comparator.reverseOrder()).toList();
+            for (Path descendant : descendants) {
+                Files.deleteIfExists(descendant);
+            }
+        } catch (IOException exception) {
+            throw new IllegalStateException("unable to remove isolated JDT workspace lease", exception);
+        }
+    }
+
     /** shutdownAll(@PreDestroy)之後不得再啟動工作區,否則會漏出一個沒有東西會去停止的 ~1 GB 程序 */
     private void ensureActive(RepositoryId repositoryId) {
         if (terminated) {
@@ -219,6 +298,9 @@ public class DefaultJdtWorkspaceManager implements JdtWorkspaceManager, Reposito
             }
             for (RepositoryId repositoryId : Set.copyOf(launchingProcesses.keySet())) {
                 stopLaunchingProcess(repositoryId, JdtWorkspaceLifecycleMetrics.EvictionTrigger.SHUTDOWN);
+            }
+            for (OwnedWorkspaceLease lease : Set.copyOf(ownedLeases)) {
+                lease.close();
             }
             transientStatuses.keySet().removeIf(repositoryId ->
                     !sessions.containsKey(repositoryId) && !launchingProcesses.containsKey(repositoryId));
@@ -968,6 +1050,44 @@ public class DefaultJdtWorkspaceManager implements JdtWorkspaceManager, Reposito
 
         JdtWorkspaceTerminationPendingException(RepositoryId repositoryId) {
             super("JDT LS process termination is still pending for repository " + repositoryId.value());
+        }
+    }
+
+    private final class OwnedWorkspaceLease implements WorkspaceLease {
+        private final JdtWorkspaceSession session;
+        private final Path workspaceData;
+        private final AtomicBoolean closed = new AtomicBoolean();
+
+        private OwnedWorkspaceLease(JdtWorkspaceSession session, Path workspaceData) {
+            this.session = Objects.requireNonNull(session, "session is required");
+            this.workspaceData = Objects.requireNonNull(workspaceData, "workspaceData is required");
+        }
+
+        @Override
+        public JdtWorkspaceSession session() {
+            if (closed.get()) {
+                throw new JdtWorkspaceSession.JdtWorkspaceClosingException("workspace lease is closed");
+            }
+            return session;
+        }
+
+        @Override
+        public void close() {
+            if (!closed.compareAndSet(false, true)) {
+                return;
+            }
+            RuntimeException stopFailure = null;
+            try {
+                session.stop();
+            } catch (RuntimeException exception) {
+                stopFailure = exception;
+            } finally {
+                ownedLeases.remove(this);
+                deleteLeaseDirectory(workspaceData);
+            }
+            if (Objects.nonNull(stopFailure)) {
+                throw stopFailure;
+            }
         }
     }
 

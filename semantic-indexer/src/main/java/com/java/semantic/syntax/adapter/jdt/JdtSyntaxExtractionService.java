@@ -52,7 +52,11 @@ public class JdtSyntaxExtractionService implements SyntaxExtractionService {
 
     @Override
     public RepositorySyntax extract(Path repositoryRoot) {
-        List<Path> sourceRoots = sourceRootLocator.sourceRootsOf(repositoryRoot);
+        return extract(repositoryRoot, sourceRootLocator.sourceRootsOf(repositoryRoot), java.util.Map.of());
+    }
+
+    public RepositorySyntax extract(
+            Path repositoryRoot, List<Path> sourceRoots, java.util.Map<String, String> effectiveCompilerOptions) {
         if (CollectionUtils.isEmpty(sourceRoots)) {
             log.warn("Syntax extraction skipped category={}", "JAVA_SOURCE_ROOTS_NOT_FOUND");
             return RepositorySyntax.empty();
@@ -68,7 +72,7 @@ public class JdtSyntaxExtractionService implements SyntaxExtractionService {
             List<SourceTypeMetadata> sourceTypes = new ArrayList<>();
             List<SourceExtractionOutcome> extractionOutcomes = new ArrayList<>();
 
-            new JdtAstParser(sourceRoots).parse(files, parsed -> {
+            new JdtAstParser(sourceRoots, effectiveCompilerOptions).parse(files, parsed -> {
                 if (hasSyntaxFailure(parsed)) {
                     extractionOutcomes.add(SourceExtractionOutcome.syntaxFailed(
                             parsed.source().repositoryRelativePath(), JDT_SYNTAX_PROBLEM));

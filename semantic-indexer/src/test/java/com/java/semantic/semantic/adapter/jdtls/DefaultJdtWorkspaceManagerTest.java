@@ -88,6 +88,29 @@ class DefaultJdtWorkspaceManagerTest {
     }
 
     @Test
+    void should_isolate_a_fresh_lease_and_reject_a_closed_or_wrong_snapshot_use() {
+        Fixture fixture = new Fixture();
+        RepositorySnapshot snapshot = fixture.snapshot();
+        AnalysisWorkspaceKey key = new AnalysisWorkspaceKey(
+                snapshot.repositoryId(), snapshot.revision(), "job-123", "A");
+
+        WorkspaceLease lease = fixture.manager().acquire(key, snapshot);
+
+        assertThat(lease.session()).isNotSameAs(fixture.manager().getOrStart(snapshot));
+        assertThatThrownBy(() -> fixture.manager().acquire(key, new RepositorySnapshot(
+                snapshot.repositoryId(), snapshot.root(), RepositoryRevision.ofSha("b".repeat(40)))))
+                .isInstanceOf(IllegalArgumentException.class);
+
+        lease.close();
+
+        assertThatThrownBy(lease::session)
+                .isInstanceOf(JdtWorkspaceSession.JdtWorkspaceClosingException.class);
+        assertThat(tempDirectory.resolve("jdtls-data").resolve(REPOSITORY_ID.value())
+                .resolve(REVISION.value()).resolve("job-123").resolve("A"))
+                .isEmptyDirectory();
+    }
+
+    @Test
     void should_not_request_an_incremental_build_before_service_ready() {
         Fixture fixture = new Fixture();
         fixture.withoutServiceReady();

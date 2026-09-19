@@ -13,6 +13,13 @@ public interface JdtWorkspaceManager {
      */
     JdtWorkspaceSession getOrStart(RepositorySnapshot snapshot);
 
+    /**
+     * Opens a fresh endpoint-private lease. The caller owns and must close it.
+     */
+    default WorkspaceLease acquire(AnalysisWorkspaceKey key, RepositorySnapshot snapshot) {
+        throw new UnsupportedOperationException("endpoint-private JDT workspace leases are not available");
+    }
+
     /** 回報工作區狀態,未啟動的儲存庫回傳 STOPPED */
     SemanticEngineStatus status(RepositoryId repositoryId);
 

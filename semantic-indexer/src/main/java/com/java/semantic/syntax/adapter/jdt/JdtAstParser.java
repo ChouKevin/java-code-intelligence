@@ -41,13 +41,20 @@ class JdtAstParser {
     private final List<Path> sourceRoots;
 
     private final JdtSourcepathPartitionResolver partitionResolver = new JdtSourcepathPartitionResolver();
+    private final Map<String, String> effectiveCompilerOptions;
 
     JdtAstParser(List<Path> sourceRoots) {
+        this(sourceRoots, Map.of());
+    }
+
+    JdtAstParser(List<Path> sourceRoots, Map<String, String> effectiveCompilerOptions) {
         this.sourceRoots = sourceRoots.stream()
                 .map(this::realPath)
                 .distinct()
                 .sorted()
                 .toList();
+        this.effectiveCompilerOptions = Map.copyOf(Objects.requireNonNull(
+                effectiveCompilerOptions, "effective compiler options are required"));
     }
 
     /** 批次解析，所有檔案共用同一組 binding 環境，跨檔案常量因此解析得出來 */
@@ -146,6 +153,7 @@ class JdtAstParser {
 
         Map<String, String> options = JavaCore.getOptions();
         JavaCore.setComplianceOptions(COMPLIANCE, options);
+        options.putAll(effectiveCompilerOptions);
         parser.setCompilerOptions(options);
 
         String[] rootEncodings = new String[sourcepathEntries.length];

@@ -12,6 +12,11 @@ semantic:
     enabled: ${JDTLS_ENABLED:true}
     home: ${JDTLS_HOME:/opt/jdtls}
     workspace-data-root: ${JDTLS_WORKSPACE_DATA_ROOT:/data/jdtls}
+    java-executable: ${JDTLS_JAVA_EXECUTABLE:/opt/java/openjdk/bin/java}
+    isolation-mode: ${JDTLS_ISOLATION_MODE:LINUX_UID}
+    analysis-uid: ${JDTLS_ANALYSIS_UID:10001}
+    analysis-gid: ${JDTLS_ANALYSIS_GID:10001}
+    analysis-home: ${JDTLS_ANALYSIS_HOME:/home/analysis}
     startup-timeout: ${JDTLS_STARTUP_TIMEOUT:180s}
     import-timeout: ${JDTLS_IMPORT_TIMEOUT:900s}
     request-timeout: ${JDTLS_REQUEST_TIMEOUT:30s}

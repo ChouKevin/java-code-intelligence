@@ -85,7 +85,7 @@ class JdtLsProcessFactoryTest {
         Path home = JdtLsTestFixtures.createFakeHome(tempDirectory);
         Path workspaceRoot = Files.createDirectories(tempDirectory.resolve("repository"));
         Path workspaceData = tempDirectory.resolve("workspace-data");
-        JdtLsProperties properties = properties(home);
+        JdtLsProperties properties = isolatedProperties(home);
         TestProcess process = new TestProcess(new ByteArrayInputStream(new byte[0]));
         AtomicReference<List<String>> capturedCommand = new AtomicReference<>();
         AtomicReference<InitializeParams> capturedInitialize = new AtomicReference<>();
@@ -114,7 +114,7 @@ class JdtLsProcessFactoryTest {
         JdtLsProcessFactory.LaunchHandle handle = factory.launch(workspaceRoot, workspaceData, client);
 
         assertThat(capturedCommand.get()).containsExactly(
-                "java",
+                "/opt/java/openjdk/bin/java",
                 "-Declipse.application=org.eclipse.jdt.ls.core.id1",
                 "-Dosgi.bundles.defaultStartLevel=4",
                 "-Declipse.product=org.eclipse.jdt.ls.core.product",
@@ -124,7 +124,7 @@ class JdtLsProcessFactoryTest {
                 "--add-opens", "java.base/java.util=ALL-UNNAMED",
                 "--add-opens", "java.base/java.lang=ALL-UNNAMED",
                 "-jar", home.resolve("plugins/org.eclipse.equinox.launcher_test.jar").toString(),
-                "-configuration", home.resolve("config_linux").toString(),
+                "-configuration", workspaceData.resolve("configuration").toString(),
                 "-data", workspaceData.toString());
         assertThat(initialized.await(1, TimeUnit.SECONDS)).isTrue();
         assertThat(handle.process()).isSameAs(process);
@@ -504,6 +504,25 @@ class JdtLsProcessFactoryTest {
                 true,
                 home,
                 tempDirectory.resolve("data"),
+                Duration.ofSeconds(1),
+                Duration.ofSeconds(2),
+                Duration.ofSeconds(1),
+                1,
+                Duration.ofMinutes(1),
+                Duration.ofMinutes(1),
+                "768m");
+    }
+
+    private JdtLsProperties isolatedProperties(Path home) {
+        return new JdtLsProperties(
+                true,
+                home,
+                tempDirectory.resolve("data"),
+                Path.of("/opt/java/openjdk/bin/java"),
+                JdtLsProperties.IsolationMode.LOCAL_TRUSTED,
+                10001,
+                10001,
+                Path.of("/home/analysis"),
                 Duration.ofSeconds(1),
                 Duration.ofSeconds(2),
                 Duration.ofSeconds(1),

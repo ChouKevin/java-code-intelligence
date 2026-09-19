@@ -109,17 +109,43 @@ public class Lsp4jJavaSemanticService implements JavaSemanticService {
     private static final Comparator<SemanticRange> INCOMING_RANGE_ORDER =
             Lsp4jJavaSemanticService::compareRanges;
 
-    private final JdtWorkspaceManager workspaceManager;
+    private final Optional<JdtWorkspaceManager> workspaceManager;
+    private final Optional<RepositorySnapshot> expectedSnapshot;
+    private final Optional<JdtWorkspaceSession> boundSession;
     private final JdtWorkspaceSourceLocator sourceLocator;
 
     public Lsp4jJavaSemanticService(JdtWorkspaceManager workspaceManager) {
-        this.workspaceManager = Objects.requireNonNull(workspaceManager, "workspaceManager is required");
+        this.workspaceManager = Optional.of(Objects.requireNonNull(workspaceManager, "workspaceManager is required"));
+        this.expectedSnapshot = Optional.empty();
+        this.boundSession = Optional.empty();
         this.sourceLocator = new JdtWorkspaceSourceLocator();
+    }
+
+    public Lsp4jJavaSemanticService(RepositorySnapshot expectedSnapshot, JdtWorkspaceSession session) {
+        this.workspaceManager = Optional.empty();
+        this.expectedSnapshot = Optional.of(Objects.requireNonNull(expectedSnapshot, "expectedSnapshot is required"));
+        this.boundSession = Optional.of(Objects.requireNonNull(session, "session is required"));
+        this.sourceLocator = new JdtWorkspaceSourceLocator();
+    }
+
+    private JdtWorkspaceSession requireSession(RepositorySnapshot snapshot) {
+        RepositorySnapshot requiredSnapshot = Objects.requireNonNull(snapshot, "snapshot is required");
+        if (boundSession.isPresent()) {
+            RepositorySnapshot boundSnapshot = expectedSnapshot.orElseThrow();
+            Assert.isTrue(boundSnapshot.equals(requiredSnapshot),
+                    "semantic service is bound to a different repository snapshot");
+            JdtWorkspaceSession session = boundSession.orElseThrow();
+            if (!session.isUsable()) {
+                throw new JdtWorkspaceSession.JdtWorkspaceClosingException("bound semantic workspace is closed");
+            }
+            return session;
+        }
+        return workspaceManager.orElseThrow().getOrStart(requiredSnapshot);
     }
 
     @Override
     public SemanticSourceClassification classifySource(RepositorySnapshot snapshot, SemanticMethod method) {
-        Assert.notNull(snapshot, "snapshot is required");
+        requireSession(snapshot);
         Assert.notNull(method, "method is required");
         return sourceLocator.classify(snapshot, method.location().uri());
     }
@@ -135,7 +161,7 @@ public class Lsp4jJavaSemanticService implements JavaSemanticService {
         Assert.notNull(snapshot, "snapshot is required");
         Assert.notNull(anchor, "anchor is required");
         String uri = sourceLocator.sourceUri(snapshot, anchor.sourceFile());
-        JdtWorkspaceSession session = workspaceManager.getOrStart(snapshot);
+        JdtWorkspaceSession session = requireSession(snapshot);
         return session.withDocumentUri(uri, () -> withOpenedDocument(session, snapshot, uri, () -> {
             ReferenceParams params = new ReferenceParams(
                     new TextDocumentIdentifier(uri),
@@ -172,7 +198,7 @@ public class Lsp4jJavaSemanticService implements JavaSemanticService {
         Assert.notNull(snapshot, "snapshot is required");
         Assert.notNull(anchor, "anchor is required");
         String uri = sourceLocator.sourceUri(snapshot, anchor.target());
-        JdtWorkspaceSession session = workspaceManager.getOrStart(snapshot);
+        JdtWorkspaceSession session = requireSession(snapshot);
         return session.withDocumentUri(uri, () -> withOpenedDocument(session, snapshot, uri, () -> {
             CallHierarchyItem item = prepareExactCallHierarchy(session, uri, anchor);
             MethodTarget target = anchor.target();
@@ -197,7 +223,7 @@ public class Lsp4jJavaSemanticService implements JavaSemanticService {
         Assert.notNull(snapshot, "snapshot is required");
         Assert.notNull(method, "method is required");
         String uri = requireLocalInvocationUri(snapshot, method.location().uri());
-        JdtWorkspaceSession session = workspaceManager.getOrStart(snapshot);
+        JdtWorkspaceSession session = requireSession(snapshot);
         Position namePosition = toPosition(method.location().selectionRange().start());
         return session.withDocumentUri(uri, () -> withOpenedDocument(session, snapshot, uri, () -> {
             Optional<CallHierarchyItem> root = prepareCallHierarchy(session, uri, namePosition, method.methodName());
@@ -232,7 +258,7 @@ public class Lsp4jJavaSemanticService implements JavaSemanticService {
         Assert.notNull(snapshot, "snapshot is required");
         Assert.notNull(callee, "callee is required");
         String uri = requireLocalInvocationUri(snapshot, callee.location().uri());
-        JdtWorkspaceSession session = workspaceManager.getOrStart(snapshot);
+        JdtWorkspaceSession session = requireSession(snapshot);
         return session.withDocumentUri(uri, () -> withOpenedDocument(session, snapshot, uri, () -> {
             Optional<CallHierarchyItem> prepared = prepareIncomingCallHierarchy(session, uri, callee);
             if (!prepared.isPresent()) {
@@ -294,7 +320,7 @@ public class Lsp4jJavaSemanticService implements JavaSemanticService {
         Assert.notNull(caller, "caller is required");
         Assert.notNull(callSite, "callSite is required");
         String uri = requireLocalInvocationUri(snapshot, caller.location().uri());
-        JdtWorkspaceSession session = workspaceManager.getOrStart(snapshot);
+        JdtWorkspaceSession session = requireSession(snapshot);
         return session.withDocumentUri(uri, () -> withOpenedDocument(session, snapshot, uri, () -> {
             Either<List<? extends Location>, List<? extends LocationLink>> response = session.call(
                     "textDocument/definition",
@@ -348,7 +374,7 @@ public class Lsp4jJavaSemanticService implements JavaSemanticService {
         Assert.notNull(snapshot, "snapshot is required");
         Assert.notNull(method, "method is required");
         String uri = requireLocalInvocationUri(snapshot, method.location().uri());
-        JdtWorkspaceSession session = workspaceManager.getOrStart(snapshot);
+        JdtWorkspaceSession session = requireSession(snapshot);
         Position namePosition = toPosition(method.location().selectionRange().start());
         return session.withDocumentUri(uri, () -> withOpenedDocument(session, snapshot, uri, () -> {
             Either<List<? extends Location>, List<? extends LocationLink>> response = session.call(

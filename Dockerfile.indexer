@@ -11,9 +11,19 @@ COPY semantic-indexer semantic-indexer
 RUN mvn --batch-mode --no-transfer-progress -pl semantic-indexer -am -Dmaven.test.skip=true package
 
 FROM eclipse-temurin:21-jdk
-RUN apt-get update && apt-get install -y --no-install-recommends curl git && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends curl git util-linux \
+    && groupadd --gid 10001 analysis \
+    && useradd --uid 10001 --gid 10001 --create-home --home-dir /home/analysis --shell /usr/sbin/nologin analysis \
+    && mkdir -p /data/repos /data/jdtls \
+    && chown -R analysis:analysis /data /home/analysis \
+    && rm -rf /var/lib/apt/lists/*
 COPY scripts/install-jdtls.sh /usr/local/bin/install-jdtls
 RUN /usr/local/bin/install-jdtls /opt/jdtls
+ENV JDTLS_JAVA_EXECUTABLE=/opt/java/openjdk/bin/java \
+    JDTLS_ISOLATION_MODE=LINUX_UID \
+    JDTLS_ANALYSIS_UID=10001 \
+    JDTLS_ANALYSIS_GID=10001 \
+    JDTLS_ANALYSIS_HOME=/home/analysis
 WORKDIR /app
 COPY --from=build /workspace/semantic-indexer/target/semantic-indexer-0.0.1-SNAPSHOT.jar /app/semantic-indexer.jar
 VOLUME ["/data/repos", "/data/jdtls"]

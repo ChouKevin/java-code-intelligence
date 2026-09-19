@@ -46,6 +46,21 @@ public final class FullIndexPlanner {
         }
     }
 
+    public FullIndexPlan plan(Path repositoryRoot, List<Path> includedSourceRoots) {
+        Path root = Objects.requireNonNull(repositoryRoot, "repository root is required").toAbsolutePath().normalize();
+        List<Path> roots = List.copyOf(Objects.requireNonNull(includedSourceRoots, "included source roots are required"))
+                .stream().map(path -> path.toAbsolutePath().normalize()).toList();
+        for (Path sourceRoot : roots) {
+            if (!sourceRoot.startsWith(root)) {
+                throw new IllegalArgumentException("included source root escaped repository root");
+            }
+        }
+        FullIndexPlan completePlan = plan(root);
+        return new FullIndexPlan(root, completePlan.sources().stream()
+                .filter(source -> roots.stream().anyMatch(rootPath -> source.path().startsWith(rootPath)))
+                .toList());
+    }
+
     private java.util.Optional<FullIndexPlan.SourceInput> toSource(Path root, Path path) {
         Path relative = root.relativize(path);
         if (!inputSelector.includes(relative) || !supportedCandidate(path)) {

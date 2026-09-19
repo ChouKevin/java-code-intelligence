@@ -22,6 +22,10 @@ import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.StandardCopyOption;
+import java.nio.file.attribute.UserPrincipal;
+import java.nio.file.attribute.UserPrincipalLookupService;
+import java.util.ArrayList;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Objects;
@@ -51,7 +55,7 @@ public final class JdtLsProcessFactory {
     /** 建立使用系統程序與標準 LSP4J launcher 的 factory */
     public JdtLsProcessFactory(JdtLsProperties properties) {
         this(properties,
-                command -> new ProcessBuilder(command).start(),
+                command -> startProcess(command, properties),
                 JdtLsProcessFactory::connect,
                 JdtLsProcessFactory::startStderrThread);
     }
@@ -88,7 +92,8 @@ public final class JdtLsProcessFactory {
             throws IOException, InterruptedException, ExecutionException, TimeoutException {
         Objects.requireNonNull(processStartedObserver, "processStartedObserver is required");
         Path launcherJar = findLauncherJar();
-        List<String> command = createCommand(launcherJar, workspaceData);
+        Path configuration = prepareWritableConfiguration(workspaceData);
+        List<String> command = createCommand(launcherJar, workspaceData, configuration);
         Process process = processStarter.start(command);
         log.info("phase=jdtls-process outcome=started");
         LaunchResources resources = new LaunchResources(process);
@@ -138,9 +143,18 @@ public final class JdtLsProcessFactory {
         }
     }
 
-    private List<String> createCommand(Path launcherJar, Path workspaceData) {
-        return List.of(
-                "java",
+    private List<String> createCommand(Path launcherJar, Path workspaceData, Path configuration) {
+        List<String> command = new ArrayList<>();
+        if (properties.getIsolationMode() == JdtLsProperties.IsolationMode.LINUX_UID) {
+            command.add("/usr/bin/setpriv");
+            command.add("--reuid=" + properties.getAnalysisUid());
+            command.add("--regid=" + properties.getAnalysisGid());
+            command.add("--clear-groups");
+            command.add("--no-new-privs");
+            command.add("--bounding-set=-all");
+        }
+        command.add(properties.getJavaExecutable().toString());
+        command.addAll(List.of(
                 "-Declipse.application=org.eclipse.jdt.ls.core.id1",
                 "-Dosgi.bundles.defaultStartLevel=4",
                 "-Declipse.product=org.eclipse.jdt.ls.core.product",
@@ -150,8 +164,47 @@ public final class JdtLsProcessFactory {
                 "--add-opens", "java.base/java.util=ALL-UNNAMED",
                 "--add-opens", "java.base/java.lang=ALL-UNNAMED",
                 "-jar", launcherJar.toString(),
-                "-configuration", properties.getHome().resolve("config_linux").toString(),
-                "-data", workspaceData.toString());
+                "-configuration", configuration.toString(),
+                "-data", workspaceData.toString()));
+        return List.copyOf(command);
+    }
+
+    private static Process startProcess(List<String> command, JdtLsProperties properties) throws IOException {
+        ProcessBuilder builder = new ProcessBuilder(command);
+        builder.environment().clear();
+        builder.environment().put("HOME", properties.getAnalysisHome().toString());
+        builder.environment().put("USER", "analysis");
+        return builder.start();
+    }
+
+    private Path prepareWritableConfiguration(Path workspaceData) throws IOException {
+        Path configuration = workspaceData.resolve("configuration").toAbsolutePath().normalize();
+        if (!configuration.startsWith(workspaceData.toAbsolutePath().normalize())) {
+            throw new IOException("JDT LS configuration escaped its workspace data directory");
+        }
+        if (!Files.exists(configuration)) {
+            Path template = properties.getHome().resolve("config_linux");
+            try (Stream<Path> paths = Files.walk(template)) {
+                for (Path source : paths.toList()) {
+                    Path destination = configuration.resolve(template.relativize(source));
+                    if (Files.isDirectory(source)) {
+                        Files.createDirectories(destination);
+                    } else {
+                        Files.copy(source, destination, StandardCopyOption.COPY_ATTRIBUTES);
+                    }
+                }
+            }
+        }
+        if (properties.getIsolationMode() == JdtLsProperties.IsolationMode.LINUX_UID) {
+            UserPrincipalLookupService lookup = workspaceData.getFileSystem().getUserPrincipalLookupService();
+            UserPrincipal analysisUser = lookup.lookupPrincipalByName(Long.toString(properties.getAnalysisUid()));
+            try (Stream<Path> paths = Files.walk(workspaceData)) {
+                for (Path path : paths.toList()) {
+                    Files.setOwner(path, analysisUser);
+                }
+            }
+        }
+        return configuration;
     }
 
     private InitializeParams createInitializeParams(Path workspaceRoot) {

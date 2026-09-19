@@ -58,6 +58,7 @@ public final class JdtWorkspaceSession {
 
     private boolean closing;
     private volatile SemanticEngineStatus status = SemanticEngineStatus.IMPORTING;
+    private volatile JdtLsBuildWorkspaceStatus buildStatus;
 
     JdtWorkspaceSession(
             RepositoryId repositoryId,
@@ -272,6 +273,14 @@ public final class JdtWorkspaceSession {
             touchLocked();
             return true;
         }
+    }
+
+    void markBuildStatus(JdtLsBuildWorkspaceStatus status) {
+        this.buildStatus = Objects.requireNonNull(status, "build status is required");
+    }
+
+    public JdtLsBuildWorkspaceStatus buildStatus() {
+        return buildStatus;
     }
 
     void invalidate() {
