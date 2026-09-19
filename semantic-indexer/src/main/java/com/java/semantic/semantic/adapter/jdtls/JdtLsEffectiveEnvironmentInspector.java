@@ -45,6 +45,7 @@ public final class JdtLsEffectiveEnvironmentInspector {
             "org.eclipse.jdt.ls.core.vm.location",
             "org.eclipse.jdt.ls.core.sourcePaths",
             "org.eclipse.jdt.ls.core.classpathEntries",
+            "org.eclipse.jdt.ls.core.outputPath",
             NATURE_IDS);
 
     private final JdtLsProperties properties;
@@ -232,6 +233,10 @@ public final class JdtLsEffectiveEnvironmentInspector {
         }
         List<Object> entries = list(value, "classpath entries");
         List<Path> outputs = new ArrayList<>();
+        Object defaultOutput = settings.get("org.eclipse.jdt.ls.core.outputPath");
+        if (defaultOutput instanceof String outputPath && !outputPath.isBlank()) {
+            outputs.add(path(outputPath));
+        }
         for (Object entry : entries) {
             Map<String, Object> classpathEntry = objectMap(entry, "classpath entry");
             Object kind = classpathEntry.get("kind");
