@@ -15,6 +15,7 @@ import com.java.semantic.semantic.domain.SemanticLocation;
 import com.java.semantic.semantic.domain.SemanticMethod;
 import com.java.semantic.semantic.domain.SemanticPosition;
 import com.java.semantic.semantic.domain.SemanticRange;
+import com.java.semantic.semantic.adapter.jdtls.Lsp4jJavaSemanticService;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.io.IOException;
 import java.io.OutputStream;
@@ -26,6 +27,7 @@ import java.util.jar.JarEntry;
 import java.util.jar.JarOutputStream;
 import javax.tools.JavaCompiler;
 import javax.tools.ToolProvider;
+import java.lang.reflect.Field;
 import org.eclipse.jgit.api.Git;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -33,6 +35,18 @@ import org.junit.jupiter.api.io.TempDir;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import org.eclipse.lsp4j.DidCloseTextDocumentParams;
+import org.eclipse.lsp4j.DidOpenTextDocumentParams;
+import org.eclipse.lsp4j.DefinitionParams;
+import org.eclipse.lsp4j.Location;
+import org.eclipse.lsp4j.LocationLink;
+import org.eclipse.lsp4j.Position;
+import org.eclipse.lsp4j.TextDocumentIdentifier;
+import org.eclipse.lsp4j.TextDocumentItem;
+import org.eclipse.lsp4j.jsonrpc.messages.Either;
+import org.eclipse.lsp4j.Hover;
+import org.eclipse.lsp4j.HoverParams;
+import org.eclipse.lsp4j.TypeDefinitionParams;
 @Tag("jdtls-it")
 class EffectiveEnvironmentJdtLsIT {
     @TempDir
@@ -67,6 +81,15 @@ class EffectiveEnvironmentJdtLsIT {
                         .anySatisfy(id -> assertThat(id).contains("junit-jupiter-api"))
                         .anySatisfy(id -> assertThat(id).contains("assertj-core"))
                         .anySatisfy(id -> assertThat(id).contains("slf4j-api"));
+                assertThat(fixture.openedDependencyHover(second,
+                        "application/src/production/java/example/app/DependencyUse.java", "LoggerFactory"))
+                        .contains("org.slf4j.LoggerFactory");
+                assertThat(fixture.openedDependencyHover(second,
+                        "application/src/production/java/example/app/DependencyUse.java", "Assertions"))
+                        .contains("org.junit.jupiter.api.Assertions");
+                assertThat(fixture.openedDependencyHover(second,
+                        "application/src/production/java/example/app/UseApi.java", "Api"))
+                        .contains("example.api.Api");
                 SemanticCallResolution resolution = fixture.resolveBOnlyDependency(second);
                 AnalysisInputs.Root testRoot = second.fingerprint().inputs().projects().stream()
                         .flatMap(project -> project.roots().stream())
@@ -201,6 +224,39 @@ class EffectiveEnvironmentJdtLsIT {
                 }
             }
             return new SemanticPosition(line, offset - lineStart);
+        }
+        private String openedDependencyHover(PreparedAnalysis analysis, String relativeSource, String typeName)
+                throws Exception {
+            Path source = repository.resolve(relativeSource);
+            String text = Files.readString(source);
+            String uri = source.toUri().toString();
+            int offset = text.indexOf(typeName) + 1;
+            SemanticPosition position = positionAt(text, offset);
+            Field field = Lsp4jJavaSemanticService.class.getDeclaredField("boundSession");
+            field.setAccessible(true);
+            JdtWorkspaceSession session = (JdtWorkspaceSession) field.get(analysis.semanticService());
+            return session.withDocumentUri(uri, () -> {
+                session.call("test:didOpen", server -> {
+                    server.getTextDocumentService().didOpen(new DidOpenTextDocumentParams(
+                            new TextDocumentItem(uri, "java", 1, text)));
+                    return java.util.concurrent.CompletableFuture.completedFuture(null);
+                });
+                try {
+                    Hover result = session.call("test:hover", server -> server.getTextDocumentService().hover(
+                            new HoverParams(new TextDocumentIdentifier(uri),
+                                    new Position(position.line(), position.character()))));
+                    if (result == null) {
+                        throw new IllegalStateException("no hover for " + typeName);
+                    }
+                    return result.toString();
+                } finally {
+                    session.call("test:didClose", server -> {
+                        server.getTextDocumentService().didClose(
+                                new DidCloseTextDocumentParams(new TextDocumentIdentifier(uri)));
+                        return java.util.concurrent.CompletableFuture.completedFuture(null);
+                    });
+                }
+            });
         }
 
         private static SemanticRange range(int line, int start, int end) {
