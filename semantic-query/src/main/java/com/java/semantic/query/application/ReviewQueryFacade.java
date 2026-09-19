@@ -185,7 +185,7 @@ public final class ReviewQueryFacade {
         sourceCoverage.issues().stream().map(SourceIndexIssue::code).forEach(limitations::add);
         for (SemanticAnalysisEvidence.Limitation limitation : evidence.limitations()) {
             if (limitation.sourcePath().isEmpty() || coverageReader.coverage(selected, accessPlan, Optional.empty(),
-                    Optional.of(limitation.sourcePath())).indexedSourceCount() > 0) {
+                    limitation.sourcePath()).indexedSourceCount() > 0) {
                 limitations.add(limitation.code());
             }
         }

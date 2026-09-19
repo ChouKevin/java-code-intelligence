@@ -115,6 +115,19 @@ class SemanticReviewJourneyIT {
                     assertThat(text(map(reviewDetails, "b"), "revision")).isEqualTo(revisionB);
                     assertThat(text(map(reviewDetails, "a"), "snapshotId")).isNotEqualTo(text(map(reviewDetails, "b"), "snapshotId"));
 
+                    Map<String, Object> searchA = reviewSearch(reviewId, "A", revisionA, "LegacyGateway", "TYPE");
+                    Map<?, ?> legacySearch = successful(post(queryBase, "/api/v1/reviews/search-code", QUERY_TOKEN, searchA), mapper);
+                    String legacyGateway = text(mapList(map(legacySearch, "result"), "items").getFirst(), "factId");
+                    Map<?, ?> legacySource = successful(post(queryBase, "/api/v1/reviews/fact-source", QUERY_TOKEN,
+                            Map.of("repositoryId", REPOSITORY_ID, "reviewId", reviewId, "side", "A", "revision", revisionA,
+                                    "factId", legacyGateway)), mapper);
+                    assertThat(text(map(map(legacySource, "result"), "source"), "code")).contains("LegacyGateway");
+                    String legacyPay = methodFact(queryBase, reviewId, "A", revisionA, "LegacyGateway", mapper);
+                    Map<?, ?> legacyCallers = successful(post(queryBase, "/api/v1/reviews/callers", QUERY_TOKEN,
+                            Map.of("repositoryId", REPOSITORY_ID, "reviewId", reviewId, "side", "A", "revision", revisionA,
+                                    "methodFactId", legacyPay)), mapper);
+                    assertThat(mapList(map(legacyCallers, "result"), "items")).isNotEmpty();
+
                     Map<String, Object> searchB = reviewSearch(reviewId, "B", revisionB, "ModernGateway", "TYPE");
                     Map<?, ?> searchResult = successful(post(queryBase, "/api/v1/reviews/search-code", QUERY_TOKEN, searchB), mapper);
                     String modernGateway = text(mapList(map(searchResult, "result"), "items").getFirst(), "factId");
@@ -122,10 +135,10 @@ class SemanticReviewJourneyIT {
                             Map.of("repositoryId", REPOSITORY_ID, "reviewId", reviewId, "side", "B", "revision", revisionB,
                                     "factId", modernGateway)), mapper);
                     assertThat(text(map(map(source, "result"), "source"), "code")).contains("ModernGateway");
-                    String pay = methodFact(queryBase, reviewId, revisionB, "ModernGateway", mapper);
+                    String modernPay = methodFact(queryBase, reviewId, "B", revisionB, "ModernGateway", mapper);
                     Map<?, ?> callers = successful(post(queryBase, "/api/v1/reviews/callers", QUERY_TOKEN,
                             Map.of("repositoryId", REPOSITORY_ID, "reviewId", reviewId, "side", "B", "revision", revisionB,
-                                    "methodFactId", pay)), mapper);
+                                    "methodFactId", modernPay)), mapper);
                     assertThat(mapList(map(callers, "result"), "items")).isNotEmpty();
 
                     String comparisonId = text(reviewDetails, "comparisonId");
@@ -137,7 +150,7 @@ class SemanticReviewJourneyIT {
                             Map.of("repositoryId", REPOSITORY_ID, "comparisonId", comparisonId, "previous", revisionA, "current", revisionB,
                                     "changeId", text(checkoutChange, "changeId"))), mapper);
                     assertThat(text(patch, "patch")).contains("LegacyGateway", "ModernGateway");
-                    assertMcpJourney(queryBase, reviewId, revisionA, revisionB, comparisonId, modernGateway, pay, mapper);
+                    assertMcpJourney(queryBase, reviewId, revisionA, revisionB, comparisonId, legacyGateway, legacyPay, modernGateway, modernPay, mapper);
                 } finally {
                     query.close();
                 }
@@ -224,20 +237,38 @@ class SemanticReviewJourneyIT {
     }
 
     private RunningProcess startQuery(Path jar, String mongoUri, int port) throws IOException {
-        return start(jar, List.of("--spring.mongodb.uri=" + mongoUri, "--server.address=127.0.0.1", "--server.port=" + port,
-                "--semantic.query.api-token=" + QUERY_TOKEN, "--semantic.query.git-evidence.allowed-repositories[0]=" + REPOSITORY_ID,
-                "--spring.main.banner-mode=off"));
+        List<String> command = command(jar, List.of("--spring.mongodb.uri=" + mongoUri, "--server.address=127.0.0.1",
+                "--server.port=" + port, "--semantic.query.api-token=" + QUERY_TOKEN,
+                "--semantic.query.git-evidence.allowed-repositories[0]=" + REPOSITORY_ID, "--spring.main.banner-mode=off"));
+        Path log = Files.createTempFile(temporaryDirectory, "semantic-review-journey-", ".log");
+        ProcessBuilder processBuilder = new ProcessBuilder(command).directory(temporaryDirectory.toFile()).redirectErrorStream(true)
+                .redirectOutput(log.toFile());
+        processBuilder.environment().clear();
+        assertColdQueryEnvironment(processBuilder.environment());
+        return new RunningProcess(processBuilder.start(), log);
     }
 
     private RunningProcess start(Path jar, List<String> arguments) throws IOException {
+        Path log = Files.createTempFile(temporaryDirectory, "semantic-review-journey-", ".log");
+        Process process = new ProcessBuilder(command(jar, arguments)).directory(temporaryDirectory.toFile()).redirectErrorStream(true)
+                .redirectOutput(log.toFile()).start();
+        return new RunningProcess(process, log);
+    }
+
+    private static List<String> command(Path jar, List<String> arguments) {
         List<String> command = new ArrayList<>();
         command.add(Path.of(System.getProperty("java.home"), "bin", "java").toString());
         command.add("-jar");
         command.add(jar.toString());
         command.addAll(arguments);
-        Path log = Files.createTempFile(temporaryDirectory, "semantic-review-journey-", ".log");
-        Process process = new ProcessBuilder(command).directory(temporaryDirectory.toFile()).redirectErrorStream(true).redirectOutput(log.toFile()).start();
-        return new RunningProcess(process, log);
+        return command;
+    }
+
+    private static void assertColdQueryEnvironment(Map<String, String> environment) {
+        assertThat(environment).doesNotContainKeys("JDTLS_HOME", "SEMANTIC_DATA_ROOT", "SEMANTIC_JDTLS_HOME",
+                "SEMANTIC_JDTLS_WORKSPACE_DATA_ROOT", "SEMANTIC_INDEXER_ADMIN_TOKEN");
+        assertThat(environment.keySet()).noneMatch(key -> key.startsWith("SEMANTIC_REPOSITORIES_")
+                || key.startsWith("SEMANTIC_ANALYSIS_"));
     }
 
     private static Map<String, Object> reviewSearch(String reviewId, String side, String revision, String query, String kind) {
@@ -245,15 +276,15 @@ class SemanticReviewJourneyIT {
                 "query", query, "kinds", List.of(kind));
     }
 
-    private String methodFact(String base, String reviewId, String revision, String owner, JsonMapper mapper) throws Exception {
+    private String methodFact(String base, String reviewId, String side, String revision, String owner, JsonMapper mapper) throws Exception {
         Map<?, ?> response = successful(post(base, "/api/v1/reviews/search-code", QUERY_TOKEN,
-                reviewSearch(reviewId, "B", revision, "pay", "METHOD")), mapper);
+                reviewSearch(reviewId, side, revision, "pay", "METHOD")), mapper);
         return mapList(map(response, "result"), "items").stream().filter(item -> String.valueOf(item.get("displayName")).contains(owner))
                 .map(item -> text(item, "factId")).findFirst().orElseThrow();
     }
 
     private void assertMcpJourney(String base, String reviewId, String revisionA, String revisionB, String comparisonId,
-                                  String modernGateway, String pay, JsonMapper mapper) {
+                                  String legacyGateway, String legacyPay, String modernGateway, String modernPay, JsonMapper mapper) {
         HttpClientStreamableHttpTransport transport = HttpClientStreamableHttpTransport.builder(base + "/mcp")
                 .jsonMapper(new JacksonMcpJsonMapper(mapper))
                 .httpRequestCustomizer((request, method, uri, body, context) -> request.header("X-Api-Token", QUERY_TOKEN)).build();
@@ -262,13 +293,21 @@ class SemanticReviewJourneyIT {
             assertThat(client.listTools().tools()).extracting(McpSchema.Tool::name).containsExactlyInAnyOrderElementsOf(TOOL_NAMES);
             Map<?, ?> review = mcpBody(client, "get_review", Map.of("repositoryId", REPOSITORY_ID, "reviewId", reviewId), mapper);
             assertThat(text(map(review, "a"), "revision")).isEqualTo(revisionA);
+            Map<?, ?> legacySearch = mcpBody(client, "review_search_code", reviewSearch(reviewId, "A", revisionA, "LegacyGateway", "TYPE"), mapper);
+            assertThat(mapList(map(legacySearch, "result"), "items")).isNotEmpty();
+            Map<?, ?> legacySource = mcpBody(client, "review_get_fact_source", Map.of("repositoryId", REPOSITORY_ID, "reviewId", reviewId,
+                    "side", "A", "revision", revisionA, "factId", legacyGateway), mapper);
+            assertThat(text(map(map(legacySource, "result"), "source"), "code")).contains("LegacyGateway");
+            Map<?, ?> legacyCallers = mcpBody(client, "review_find_callers", Map.of("repositoryId", REPOSITORY_ID, "reviewId", reviewId,
+                    "side", "A", "revision", revisionA, "methodFactId", legacyPay), mapper);
+            assertThat(mapList(map(legacyCallers, "result"), "items")).isNotEmpty();
             Map<?, ?> search = mcpBody(client, "review_search_code", reviewSearch(reviewId, "B", revisionB, "ModernGateway", "TYPE"), mapper);
             assertThat(mapList(map(search, "result"), "items")).isNotEmpty();
             Map<?, ?> source = mcpBody(client, "review_get_fact_source", Map.of("repositoryId", REPOSITORY_ID, "reviewId", reviewId,
                     "side", "B", "revision", revisionB, "factId", modernGateway), mapper);
             assertThat(text(map(map(source, "result"), "source"), "code")).contains("ModernGateway");
             Map<?, ?> callers = mcpBody(client, "review_find_callers", Map.of("repositoryId", REPOSITORY_ID, "reviewId", reviewId,
-                    "side", "B", "revision", revisionB, "methodFactId", pay), mapper);
+                    "side", "B", "revision", revisionB, "methodFactId", modernPay), mapper);
             assertThat(mapList(map(callers, "result"), "items")).isNotEmpty();
             Map<?, ?> comparison = mcpBody(client, "compare_revisions", Map.of("repositoryId", REPOSITORY_ID, "comparisonId", comparisonId,
                     "previous", revisionA, "current", revisionB), mapper);

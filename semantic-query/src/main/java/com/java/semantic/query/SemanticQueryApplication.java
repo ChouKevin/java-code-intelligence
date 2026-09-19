@@ -1,7 +1,13 @@
 package com.java.semantic.query;
 
+import com.java.semantic.model.index.SemanticAnalysisEvidence;
+import java.util.Optional;
+import org.bson.Document;
 import org.springframework.beans.factory.config.BeanPostProcessor;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
+import org.springframework.core.convert.converter.Converter;
 import org.springframework.data.mongodb.core.convert.MappingMongoConverter;
+import org.springframework.data.mongodb.core.convert.MongoCustomConversions;
 
 import com.java.semantic.query.application.CurrentGenerationSelector;
 import com.java.semantic.query.application.SelectedGenerationGuard;
@@ -172,6 +178,32 @@ public class SemanticQueryApplication {
                 return bean;
             }
         };
+    }
+
+    @Bean
+    @ConditionalOnMissingBean(MongoCustomConversions.class)
+    MongoCustomConversions queryMongoCustomConversions() {
+        return MongoCustomConversions.create(adapter -> {
+            adapter.registerConverter(new LimitationWriter());
+            adapter.registerConverter(new LimitationReader());
+        });
+    }
+
+    private static final class LimitationWriter implements Converter<SemanticAnalysisEvidence.Limitation, Document> {
+        @Override
+        public Document convert(SemanticAnalysisEvidence.Limitation limitation) {
+            Document document = new Document("code", limitation.code());
+            limitation.sourcePath().ifPresent(sourcePath -> document.append("sourcePath", sourcePath));
+            return document;
+        }
+    }
+
+    private static final class LimitationReader implements Converter<Document, SemanticAnalysisEvidence.Limitation> {
+        @Override
+        public SemanticAnalysisEvidence.Limitation convert(Document document) {
+            return new SemanticAnalysisEvidence.Limitation(document.getString("code"),
+                    Optional.ofNullable(document.get("sourcePath")).map(String.class::cast));
+        }
     }
 
 }

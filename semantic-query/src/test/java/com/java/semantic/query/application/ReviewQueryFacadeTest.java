@@ -76,9 +76,9 @@ class ReviewQueryFacadeTest {
         SourceIndexCoverageReader coverageReader = mock(SourceIndexCoverageReader.class);
         SelectedGeneration selectedA = selected("review-a", "a");
         SelectedGeneration selectedB = selected("review-b", "c");
-        SemanticAnalysisEvidence evidence = evidence(new SemanticAnalysisEvidence.Limitation("BUILD_WITH_ERROR", ""),
-                new SemanticAnalysisEvidence.Limitation("SOURCE_ALLOWED", "src/Allowed.java"),
-                new SemanticAnalysisEvidence.Limitation("SOURCE_DENIED", "src/Denied.java"));
+        SemanticAnalysisEvidence evidence = evidence(new SemanticAnalysisEvidence.Limitation("BUILD_WITH_ERROR", Optional.empty()),
+                new SemanticAnalysisEvidence.Limitation("SOURCE_ALLOWED", Optional.of("src/Allowed.java")),
+                new SemanticAnalysisEvidence.Limitation("SOURCE_DENIED", Optional.of("src/Denied.java")));
         ReviewManifestDocument manifest = mock(ReviewManifestDocument.class);
         com.java.semantic.model.review.ReviewEndpoint endpointA = endpoint(selectedA, evidence, "snapshot-a");
         com.java.semantic.model.review.ReviewEndpoint endpointB = endpoint(selectedB, evidence, "snapshot-b");

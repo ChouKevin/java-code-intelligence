@@ -117,6 +117,15 @@ class SemanticReviewJdtLsIT {
             assertThat(sameShaDetails.a().generationId()).isEqualTo(sameShaDetails.b().generationId());
             assertThat(sameShaDetails.a().snapshotId()).isNotEqualTo(sameShaDetails.b().snapshotId());
 
+            fixture.replaceEffectiveDependency();
+            ReviewManifestDocument incompatible = fixture.prepareCurrentTo(fixture.revisionB());
+            ReviewQueryContract.ReviewDetails incompatibleDetails = fixture.reviewDetails(incompatible.reviewId());
+            assertThat(incompatibleDetails.capturedBaseline().generationId()).isEqualTo(rebuiltCurrentGeneration);
+            assertThat(incompatibleDetails.a().generationId()).isNotEqualTo(rebuiltCurrentGeneration);
+            assertThat(incompatibleDetails.a().generationId()).isEqualTo(incompatibleDetails.b().generationId());
+            assertThat(incompatibleDetails.a().analysisFingerprint()).isNotEqualTo(sameShaDetails.a().analysisFingerprint());
+            assertThat(fixture.comparison(incompatible).items()).isEmpty();
+
             fixture.publishCurrent(fixture.revisionB());
             ReviewManifestDocument divergent = fixture.prepareCurrentTo(fixture.revisionC());
             assertThat(fixture.comparison(divergent).previous()).isEqualTo(fixture.revisionB());
@@ -135,6 +144,7 @@ class SemanticReviewJdtLsIT {
         private final String revisionA;
         private final String revisionB;
         private final String revisionC;
+        private final Path effectiveDependency;
         private final ConfigurableApplicationContext indexer;
         private final ConfigurableApplicationContext query;
         private final String indexerBase;
@@ -144,8 +154,9 @@ class SemanticReviewJdtLsIT {
         private final JsonMapper mapper = JsonMapper.builder().build();
 
         private SemanticReviewFixture(Path root, MongoDBContainer mongo, Git bare, Git seed, String revisionA, String revisionB,
-                                      String revisionC, ConfigurableApplicationContext indexer, ConfigurableApplicationContext query, String indexerBase,
-                                      ReviewQueryFacade reviews, SemanticQueryFacade current, MongoTemplate template) {
+                                      String revisionC, Path effectiveDependency, ConfigurableApplicationContext indexer,
+                                      ConfigurableApplicationContext query, String indexerBase, ReviewQueryFacade reviews,
+                                      SemanticQueryFacade current, MongoTemplate template) {
             this.root = root;
             this.mongo = mongo;
             this.bare = bare;
@@ -153,6 +164,7 @@ class SemanticReviewJdtLsIT {
             this.revisionA = revisionA;
             this.revisionB = revisionB;
             this.revisionC = revisionC;
+            this.effectiveDependency = effectiveDependency;
             this.indexer = indexer;
             this.query = query;
             this.indexerBase = indexerBase;
@@ -170,10 +182,12 @@ class SemanticReviewJdtLsIT {
             }
             Path remote = temporaryDirectory.resolve("semantic-review-remote.git");
             Path seedPath = temporaryDirectory.resolve("semantic-review-seed");
+            Path effectiveDependency = temporaryDirectory.resolve("effective-inputs/external-review-dependency.jar");
+            writeJar(effectiveDependency, "example.dependency.ExternalReviewDependency", "first");
             Git bare = Git.init().setBare(true).setDirectory(remote.toFile()).call();
             Git seed = Git.init().setInitialBranch("main").setDirectory(seedPath.toFile()).call();
-            String revisionA = commitA(seed, seedPath, remote);
-            String revisionB = commitB(seed, seedPath);
+            String revisionA = commitA(seed, seedPath, remote, effectiveDependency);
+            String revisionB = commitB(seed, seedPath, effectiveDependency);
             String revisionC = commitDivergent(seed, seedPath, revisionA);
             RefUpdate head = bare.getRepository().updateRef(Constants.HEAD, true);
             head.link(Constants.R_HEADS + "main");
@@ -199,8 +213,8 @@ class SemanticReviewJdtLsIT {
                                 "--semantic.query.git-evidence.allowed-repositories[0]=" + REPOSITORY_ID,
                                 "--spring.main.banner-mode=off");
                 SemanticReviewFixture fixture = new SemanticReviewFixture(temporaryDirectory, mongo, bare, seed, revisionA, revisionB,
-                        revisionC, indexer, query, indexerBase, query.getBean(ReviewQueryFacade.class), query.getBean(SemanticQueryFacade.class),
-                        query.getBean(MongoTemplate.class));
+                        revisionC, effectiveDependency, indexer, query, indexerBase, query.getBean(ReviewQueryFacade.class),
+                        query.getBean(SemanticQueryFacade.class), query.getBean(MongoTemplate.class));
                 fixture.publishCurrent(revisionA);
                 return fixture;
             } catch (Exception exception) {
@@ -299,6 +313,10 @@ class SemanticReviewJdtLsIT {
             return template.getCollection(com.java.semantic.model.index.IndexCollections.REPOSITORIES)
                     .find(new org.bson.Document("repoId", REPOSITORY_ID)).first()
                     .get("currentPointer", org.bson.Document.class).getString("generationId");
+        }
+
+        void replaceEffectiveDependency() throws IOException {
+            writeJar(effectiveDependency, "example.dependency.ExternalReviewDependency", "replacement");
         }
 
         ReviewQueryContract.ReviewDetails reviewDetails(ReviewId id) {
@@ -436,12 +454,12 @@ class SemanticReviewJdtLsIT {
             mongo.stop();
         }
 
-        private static String commitA(Git seed, Path root, Path remote) throws Exception {
-            writePom(root, "src/legacy/java", "legacy-receipt.jar");
+        private static String commitA(Git seed, Path root, Path remote, Path effectiveDependency) throws Exception {
+            writePom(root, "src/legacy/java", "legacy-receipt.jar", effectiveDependency);
             writeJar(root.resolve("lib/legacy-receipt.jar"), "example.dependency.LegacyReceiptDependency");
             write(root, "src/main/resources/.gitkeep", "");
             write(root, "src/main/java/example/Gateway.java", "package example; public interface Gateway { void pay(); }\n");
-            write(root, "src/main/java/example/Checkout.java", "package example; import example.dependency.LegacyReceiptDependency; public class Checkout { public void place() { LegacyGateway gateway = new LegacyGateway(); gateway.authorize(7); gateway.pay(); new LegacyReceiptDependency().label(); LegacyReceipt receipt = new LegacyReceipt(); } }\n");
+            write(root, "src/main/java/example/Checkout.java", "package example; import example.dependency.ExternalReviewDependency; import example.dependency.LegacyReceiptDependency; public class Checkout { public void place() { LegacyGateway gateway = new LegacyGateway(); gateway.authorize(7); gateway.pay(); new LegacyReceiptDependency().label(); new ExternalReviewDependency().label(); LegacyReceipt receipt = new LegacyReceipt(); } }\n");
             write(root, "src/main/java/example/CheckoutController.java", "package example; @RequestMapping(\"/checkout\") public class CheckoutController { @PostMapping(\"/submit\") public void submit() { new Checkout().place(); } }\n");
             write(root, "src/main/java/example/RequestMapping.java", "package example; public @interface RequestMapping { String value(); }\n");
             write(root, "src/main/java/example/PostMapping.java", "package example; public @interface PostMapping { String value(); }\n");
@@ -451,14 +469,14 @@ class SemanticReviewJdtLsIT {
             return commitAndPush(seed, remote, "legacy gateway");
         }
 
-        private static String commitB(Git seed, Path root) throws Exception {
+        private static String commitB(Git seed, Path root, Path effectiveDependency) throws Exception {
             Files.delete(root.resolve("lib/legacy-receipt.jar"));
             Files.delete(root.resolve("src/main/java/example/LegacyGateway.java"));
             Files.delete(root.resolve("src/main/java/example/LegacyReceipt.java"));
             deleteTree(root.resolve("src/legacy/java"));
-            writePom(root, "src/modern/java", "modern-receipt.jar");
+            writePom(root, "src/modern/java", "modern-receipt.jar", effectiveDependency);
             writeJar(root.resolve("lib/modern-receipt.jar"), "example.dependency.ModernReceiptDependency");
-            write(root, "src/main/java/example/Checkout.java", "package example; import example.dependency.ModernReceiptDependency; public class Checkout { public void place() { ModernGateway gateway = new ModernGateway(); gateway.authorize(\"7\"); gateway.pay(); new ModernReceiptDependency().label(); ModernReceipt receipt = new ModernReceipt(); } }\n");
+            write(root, "src/main/java/example/Checkout.java", "package example; import example.dependency.ExternalReviewDependency; import example.dependency.ModernReceiptDependency; public class Checkout { public void place() { ModernGateway gateway = new ModernGateway(); gateway.authorize(\"7\"); gateway.pay(); new ModernReceiptDependency().label(); new ExternalReviewDependency().label(); ModernReceipt receipt = new ModernReceipt(); } }\n");
             write(root, "src/main/java/example/ModernGateway.java", "package example; public class ModernGateway implements Gateway { public void pay() { } public void authorize(String amount) { pay(); } }\n");
             write(root, "src/main/java/example/ModernReceipt.java", "package example; public class ModernReceipt { }\n");
             write(root, "src/modern/java/example/ModernMarker.java", "package example; public class ModernMarker { }\n");
@@ -488,21 +506,26 @@ class SemanticReviewJdtLsIT {
             return revision;
         }
 
-        private static void writePom(Path root, String sourceRoot, String dependency) throws IOException {
+        private static void writePom(Path root, String sourceRoot, String dependency, Path effectiveDependency) throws IOException {
             write(root, "pom.xml", """
-                    <project xmlns=\"http://maven.apache.org/POM/4.0.0\">
+                    <project xmlns="http://maven.apache.org/POM/4.0.0">
                       <modelVersion>4.0.0</modelVersion>
                       <groupId>example</groupId><artifactId>semantic-review-fixture</artifactId><version>1</version>
                       <properties><maven.compiler.release>21</maven.compiler.release></properties>
                       <dependencies>
                         <dependency><groupId>example</groupId><artifactId>receipt</artifactId><version>1</version><scope>system</scope><systemPath>${project.basedir}/lib/%s</systemPath></dependency>
+                        <dependency><groupId>example</groupId><artifactId>external-review</artifactId><version>1</version><scope>system</scope><systemPath>%s</systemPath></dependency>
                       </dependencies>
                       <build><plugins><plugin><groupId>org.codehaus.mojo</groupId><artifactId>build-helper-maven-plugin</artifactId><version>3.6.1</version><executions><execution><id>custom-root</id><phase>generate-sources</phase><goals><goal>add-source</goal></goals><configuration><sources><source>%s</source></sources></configuration></execution></executions></plugin></plugins></build>
                     </project>
-                    """.formatted(dependency, sourceRoot));
+                    """.formatted(dependency, effectiveDependency, sourceRoot));
         }
 
         private static void writeJar(Path path, String className) throws IOException {
+            writeJar(path, className, className);
+        }
+
+        private static void writeJar(Path path, String className, String label) throws IOException {
             Files.createDirectories(path.getParent());
             Path scratch = Files.createTempDirectory(path.getParent(), "dependency");
             try {
@@ -511,7 +534,7 @@ class SemanticReviewJdtLsIT {
                 Files.createDirectories(source.getParent());
                 Files.writeString(source, "package " + className.substring(0, className.lastIndexOf('.'))
                         + "; public final class " + className.substring(className.lastIndexOf('.') + 1)
-                        + " { public String label() { return \"" + className + "\"; } }\n");
+                        + " { public String label() { return \"" + label + "\"; } }\n");
                 JavaCompiler compiler = ToolProvider.getSystemJavaCompiler();
                 if (compiler == null || compiler.run(null, null, null, "-d", classes.toString(), source.toString()) != 0) {
                     throw new IOException("fixture dependency compilation failed");

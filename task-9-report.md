@@ -10,10 +10,16 @@
 ## Root causes retained
 
 - Mongo analysis input compiler-option maps use dotted keys. Both Indexer and Query configure the Mongo converter key replacement, so the Indexer can persist real JDT evidence and the cold Query can read it.
-- JDT LS reports `SUCCEED`, while the persisted analysis evidence contract requires `SUCCESS`; the preparation layer normalizes it and stores non-optional limitations in a Mongo-compatible representation.
+- JDT LS reports `SUCCEED`, while the persisted analysis evidence contract requires `SUCCESS`; the preparation layer normalizes it. Schema-v3/v1 limitations retain their `Optional<String>` model contract and BSON form: global limitations omit `sourcePath`, while scoped limitations retain the canonical path string.
 - Review reuse obtains real effective JDT inputs through the existing workspace manager, so compatible equal-SHA generations are reusable while authorized rebuilds reserve a new generation.
 - Source-root validation ignores configured roots with no persisted source files and normalizes the repository root correctly, which permits real custom-root fixture evidence without weakening validation.
 - A ready review always retains distinct immutable Git snapshot IDs, including equal-SHA A-to-B reviews. It no longer requires structurally equal endpoints merely because their generations or revisions match.
+
+## Fix round 1 evidence
+
+- `SemanticAnalysisEvidenceMongoCompatibilityIT` first failed because the unversioned `String` limitation representation could not read a schema-v3/v1 absent `sourcePath`. It now passes with explicit Indexer/Query Mongo converters: absent or `null` decodes to `Optional.empty()`, scoped strings decode canonically, and the writer emits no global `sourcePath` field.
+- The real-JDT fixture now changes the bytes of a bound external system dependency after the B generation is sealed without changing that revision's Git SHA. It proves compatible equal-SHA reuse before the mutation, then proves reuse rejection, a new reserved sealed generation under a changed analysis fingerprint, and unchanged captured-baseline generation provenance after the mutation.
+- The cold external journey now reads `LegacyGateway` and `pay` source/callers on side A via HTTP and MCP alongside side-B semantic and Git evidence. Query is constructed independently after Indexer shutdown and unavailable-path moves; its process environment is cleared before start and asserted to contain no JDT, Indexer, repository, workspace, or analysis configuration.
 
 ## External limits
 

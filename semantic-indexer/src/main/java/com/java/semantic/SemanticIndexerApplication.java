@@ -2,7 +2,10 @@ package com.java.semantic;
 
 import com.java.semantic.indexer.store.IndexSchemaBootstrap;
 import com.java.semantic.indexer.store.SchemaBootstrapCommand;
+import com.java.semantic.model.index.SemanticAnalysisEvidence;
 import java.util.Arrays;
+import java.util.Optional;
+import org.bson.Document;
 import org.springframework.beans.factory.config.BeanPostProcessor;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.WebApplicationType;
@@ -14,6 +17,9 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.convert.MappingMongoConverter;
+import org.springframework.data.mongodb.core.convert.MongoCustomConversions;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
+import org.springframework.core.convert.converter.Converter;
 
 /** Indexer runs administrative index mutations only; read APIs and MCP live in semantic-query. */
 @SpringBootApplication
@@ -39,6 +45,36 @@ public class SemanticIndexerApplication {
                 return bean;
             }
         };
+    }
+
+    @Bean
+    @ConditionalOnMissingBean(MongoCustomConversions.class)
+    MongoCustomConversions indexerMongoCustomConversions() {
+        return semanticAnalysisEvidenceMongoCustomConversions();
+    }
+
+    public static MongoCustomConversions semanticAnalysisEvidenceMongoCustomConversions() {
+        return MongoCustomConversions.create(adapter -> {
+            adapter.registerConverter(new LimitationWriter());
+            adapter.registerConverter(new LimitationReader());
+        });
+    }
+
+    private static final class LimitationWriter implements Converter<SemanticAnalysisEvidence.Limitation, Document> {
+        @Override
+        public Document convert(SemanticAnalysisEvidence.Limitation limitation) {
+            Document document = new Document("code", limitation.code());
+            limitation.sourcePath().ifPresent(sourcePath -> document.append("sourcePath", sourcePath));
+            return document;
+        }
+    }
+
+    private static final class LimitationReader implements Converter<Document, SemanticAnalysisEvidence.Limitation> {
+        @Override
+        public SemanticAnalysisEvidence.Limitation convert(Document document) {
+            return new SemanticAnalysisEvidence.Limitation(document.getString("code"),
+                    Optional.ofNullable(document.get("sourcePath")).map(String.class::cast));
+        }
     }
 
     static boolean schemaBootstrapRequested(String[] args) {
