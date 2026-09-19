@@ -67,8 +67,7 @@ public final class DefaultRepositoryAnalysisPreparation implements RepositoryAna
             List<String> verifiedRoots = new ArrayList<>();
             for (AnalysisInputs.Root root : project.roots()) {
                 if (!root.included()) {
-                    limitations.add(new SemanticAnalysisEvidence.Limitation("ROOT_EXCLUDED_" + root.kind(),
-                            java.util.Optional.of(root.path())));
+                    limitations.add(new SemanticAnalysisEvidence.Limitation("ROOT_EXCLUDED_" + root.kind(), root.path()));
                     continue;
                 }
                 if (containsJavaSource(snapshot.root(), root.path())) {
@@ -79,11 +78,14 @@ public final class DefaultRepositoryAnalysisPreparation implements RepositoryAna
             projects.add(new SemanticAnalysisEvidence.ProjectProof(project.projectPath(), true, verifiedRoots));
         }
         if (session.buildStatus() == com.java.semantic.semantic.adapter.jdtls.JdtLsBuildWorkspaceStatus.WITH_ERROR) {
-            limitations.add(new SemanticAnalysisEvidence.Limitation("BUILD_WITH_ERROR", java.util.Optional.empty()));
+            limitations.add(new SemanticAnalysisEvidence.Limitation("BUILD_WITH_ERROR", ""));
         }
+        String buildStatus = session.buildStatus() == com.java.semantic.semantic.adapter.jdtls.JdtLsBuildWorkspaceStatus.SUCCEED
+                ? "SUCCESS"
+                : session.buildStatus().name();
         return new SemanticAnalysisEvidence(
                 com.java.semantic.model.index.IndexSchemaContract.ANALYSIS_EVIDENCE_VERSION,
-                fingerprint.digest(), session.buildStatus().name(), projects,
+                fingerprint.digest(), buildStatus, projects,
                 new SemanticAnalysisEvidence.ResolutionCoverage(0, 0, 0, 0, 0), limitations);
     }
 

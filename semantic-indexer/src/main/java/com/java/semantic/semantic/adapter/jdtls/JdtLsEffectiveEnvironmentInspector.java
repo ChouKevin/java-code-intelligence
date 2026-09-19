@@ -450,7 +450,8 @@ public final class JdtLsEffectiveEnvironmentInspector {
             throw new IllegalStateException("JDT LS path escaped repository");
         }
         Path relative = normalizedRoot.relativize(normalizedPath);
-        return relative.getNameCount() == 0 ? "." : relative.toString().replace('\\', '/');
+        String relativePath = relative.toString().replace('\\', '/');
+        return relativePath.isEmpty() ? "." : relativePath;
     }
 
     private static String digestPath(Path path) {

@@ -47,7 +47,10 @@ class GitReviewContextJourneyIT {
     private static final List<String> TOOL_NAMES = List.of(
             "list_repositories", "get_repository", "search_code", "get_fact_source", "list_entry_points", "find_api_routes",
             "find_event_listeners", "list_type_members", "find_method_implementations", "find_references", "find_callers", "find_callees",
-            "list_git_branches", "list_git_commits", "compare_revisions", "get_file_diff", "list_files", "read_file", "search_text");
+            "list_git_branches", "list_git_commits", "compare_revisions", "get_file_diff", "list_files", "read_file", "search_text",
+            "get_review", "review_search_code", "review_get_fact_source", "review_list_entry_points", "review_find_api_routes",
+            "review_find_event_listeners", "review_list_type_members", "review_find_method_implementations", "review_find_references",
+            "review_find_callers", "review_find_callees");
 
     @TempDir
     Path temporaryDirectory;

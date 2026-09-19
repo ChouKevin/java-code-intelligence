@@ -3,7 +3,6 @@ package com.java.semantic.model.index;
 import com.java.semantic.model.support.ModelValidation;
 import java.util.List;
 import java.util.Objects;
-import java.util.Optional;
 
 /** Evidence that a versioned analysis environment successfully produced a generation. */
 public record SemanticAnalysisEvidence(
@@ -47,12 +46,14 @@ public record SemanticAnalysisEvidence(
         }
     }
 
-    public record Limitation(String code, Optional<String> sourcePath) {
+    public record Limitation(String code, String sourcePath) {
 
         public Limitation {
             code = ModelValidation.requiredText(code, "analysis limitation code");
-            sourcePath = Objects.requireNonNull(sourcePath, "analysis limitation source path is required")
-                    .map(ModelValidation::repositoryRelativePath);
+            sourcePath = Objects.requireNonNull(sourcePath, "analysis limitation source path is required");
+            if (!sourcePath.isEmpty()) {
+                sourcePath = ModelValidation.repositoryRelativePath(sourcePath);
+            }
         }
     }
 

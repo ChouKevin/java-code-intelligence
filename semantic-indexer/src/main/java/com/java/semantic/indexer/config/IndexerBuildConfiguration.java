@@ -1,6 +1,8 @@
 package com.java.semantic.indexer.config;
 
 import com.java.semantic.config.JdtLsProperties;
+import com.java.semantic.indexer.analysis.AnalysisReuseVerifier;
+import com.java.semantic.indexer.analysis.ConservativeAnalysisReuseVerifier;
 import com.java.semantic.indexer.analysis.DefaultRepositoryAnalysisPreparation;
 import com.java.semantic.indexer.analysis.RepositoryAnalysisPreparation;
 import com.java.semantic.indexer.build.FullIndexPlanner;
@@ -19,8 +21,10 @@ import com.java.semantic.indexer.store.PublicationPort;
 import com.java.semantic.indexer.uat.NoOpPublicationGate;
 import com.java.semantic.indexer.uat.PublicationGate;
 import com.java.semantic.indexer.uat.UatPublicationGate;
+import com.java.semantic.semantic.adapter.jdtls.AnalysisWorkspaceKey;
 import com.java.semantic.semantic.adapter.jdtls.JdtLsEffectiveEnvironmentInspector;
 import com.java.semantic.semantic.adapter.jdtls.JdtWorkspaceManager;
+import com.java.semantic.semantic.adapter.jdtls.WorkspaceLease;
 import java.time.Duration;
 import java.util.Optional;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
@@ -35,9 +39,25 @@ import org.springframework.data.mongodb.core.MongoTemplate;
 public class IndexerBuildConfiguration {
     @Bean
     public RepositoryAnalysisPreparation repositoryAnalysisPreparation(
-            JdtWorkspaceManager workspaces, JdtLsProperties properties) {
-        return new DefaultRepositoryAnalysisPreparation(workspaces,
-                new JdtLsEffectiveEnvironmentInspector(properties), new FullIndexPlanner());
+            JdtWorkspaceManager workspaces, JdtLsEffectiveEnvironmentInspector inspector) {
+        return new DefaultRepositoryAnalysisPreparation(workspaces, inspector, new FullIndexPlanner());
+    }
+
+    @Bean
+    public JdtLsEffectiveEnvironmentInspector jdtLsEffectiveEnvironmentInspector(JdtLsProperties properties) {
+        return new JdtLsEffectiveEnvironmentInspector(properties);
+    }
+
+    @Bean
+    public AnalysisReuseVerifier analysisReuseVerifier(JdtWorkspaceManager workspaces, JdtLsEffectiveEnvironmentInspector inspector) {
+        return new ConservativeAnalysisReuseVerifier(target -> {
+            try (WorkspaceLease lease = workspaces.acquire(new AnalysisWorkspaceKey(target.snapshot().repositoryId(),
+                    target.snapshot().revision(), target.jobId(), target.stage()), target.snapshot())) {
+                return Optional.of(inspector.inspect(lease.session(), target.snapshot()));
+            } catch (RuntimeException exception) {
+                return Optional.empty();
+            }
+        });
     }
 
     @Bean

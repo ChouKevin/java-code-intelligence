@@ -11,6 +11,7 @@ the two test sets because later profile values overwrite the same properties.
 | Mongo integration | `mvn --batch-mode --no-transfer-progress -Pmongo-it verify` | Java 21, Maven, and Docker | Mongo storage and generation contracts, including `SourceSliceContractIT`; this profile is separate from the ordinary suite |
 | Full JDT LS profile | `JDTLS_HOME=/opt/jdtls mvn --batch-mode --no-transfer-progress -Pjdtls-it test` | Java 21, Maven, and a real JDT LS installation; some scenarios also need Docker | All scenarios tagged `jdtls-it`; a valid directory satisfies the basic prerequisite, while the existing startup checks report an incomplete installation |
 | Local fixture contract | `JDTLS_HOME=/opt/jdtls scripts/test-indexer-query-contract.sh` | Java 21, Maven, Docker, and a real JDT LS installation | Payment, order, and video fixture indexing through the exporter and temporary Mongo to a temporary Query HTTP/MCP server, followed by projection evolution; it does not use an existing deployment |
+| Semantic review journey | `JDTLS_HOME=/opt/jdtls scripts/test-semantic-review-journey.sh` | Java 21, Maven, Docker, a real JDT LS installation, and fresh locally packaged Indexer and Query jars | A disposable real-JDT A→B review: it captures A, submits only B, stops Indexer, removes the checkout and JDT workspace, then proves Query HTTP/MCP serves persisted semantic and Git evidence through a Mongo read-only credential |
 | Deployed Query profile | `mvn --batch-mode --no-transfer-progress -Pdeployed-it test` | Java 21, Maven, an available Query deployment, and the three deployment variables below | The actual deployed Query HTTP/MCP contract |
 | Fixture Maven tests | See commands below | Java 21 and Maven | Focused deterministic payment, order, and video fixture project tests |
 | Image checks | See commands below | Docker | Indexer JDT LS image smoke and Query image isolation |
@@ -78,3 +79,9 @@ The local fixture SDK journey is a disposable-service check and does not
 evaluate an LLM Agent. The deployed profile is the entry point for an existing
 Query deployment; neither profile turns an empty indexed result into a business
 conclusion.
+
+The semantic review journey is opt-in and fails if `JDTLS_HOME` or either fresh
+executable jar is absent. It deliberately does not run in the ordinary Docker-
+and JDT-free suite. Its Query process has a temporary working directory and
+receives only the Mongo read credential; it is never given an Indexer URL,
+repository checkout, source tree, or JDT LS path.

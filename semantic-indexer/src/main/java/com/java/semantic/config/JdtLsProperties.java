@@ -1,6 +1,7 @@
 package com.java.semantic.config;
 
 import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.boot.context.properties.bind.ConstructorBinding;
 import org.springframework.boot.context.properties.bind.DefaultValue;
 import org.springframework.util.Assert;
 
@@ -26,6 +27,7 @@ public record JdtLsProperties(
         @DefaultValue("1m") Duration maintenanceInterval,
         @DefaultValue("2g") String maxHeap) {
 
+    @ConstructorBinding
     public JdtLsProperties {
         Assert.notNull(javaExecutable, "javaExecutable is required");
         Assert.notNull(isolationMode, "isolationMode is required");

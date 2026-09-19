@@ -173,6 +173,29 @@ class IndexDocumentContractTest {
     }
 
     @Test
+    void permits_equal_sha_review_sides_to_reuse_one_generation_with_distinct_immutable_snapshots() {
+        RepositoryId repositoryId = new RepositoryId("orders");
+        RepositoryRevision revision = new RepositoryRevision("a".repeat(40));
+        PublishedGenerationPointer pointer = new PublishedGenerationPointer(revision, new GenerationId("generation-a"),
+                new ManifestDigest("a".repeat(64)), "job-a", Instant.parse("2026-09-19T00:00:00Z"));
+        CapturedReviewBaseline baseline = new CapturedReviewBaseline(pointer, Instant.parse("2026-09-19T00:00:00Z"));
+        ReviewEndpoint a = endpoint(repositoryId, revision, "generation-a", "a".repeat(64),
+                "00000000-0000-0000-0000-000000000001");
+        ReviewEndpoint b = endpoint(repositoryId, revision, "generation-a", "a".repeat(64),
+                "00000000-0000-0000-0000-000000000002");
+
+        ReviewManifestDocument ready = new ReviewManifestDocument(repositoryId, new ReviewId("review-1"),
+                "owner-job", 1, ReviewState.READY, ReviewComparisonType.CURRENT_TO_COMMIT, baseline,
+                revision, Optional.of(a), Optional.of(b),
+                Optional.of(new GitComparisonId("00000000-0000-0000-0000-000000000003")),
+                Instant.parse("2026-09-19T00:00:00Z"), Optional.of(Instant.parse("2026-09-19T00:01:00Z")), Optional.empty());
+
+        assertEquals(a.generation(), ready.a().orElseThrow().generation());
+        assertEquals(b.generation(), ready.b().orElseThrow().generation());
+        assertNotEquals(ready.a().orElseThrow().snapshotId(), ready.b().orElseThrow().snapshotId());
+    }
+
+    @Test
     void rejects_validated_generations_without_evidence_and_evidence_with_a_different_fingerprint() {
         AnalysisInputs inputs = new AnalysisInputs(1, "d".repeat(64), "e".repeat(64), "f".repeat(64), "1".repeat(64),
                 List.of(new AnalysisInputs.Project(".", "c".repeat(64), Map.of(), List.of(), List.of(), List.of(), List.of())));

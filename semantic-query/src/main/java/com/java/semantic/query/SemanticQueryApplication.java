@@ -1,5 +1,8 @@
 package com.java.semantic.query;
 
+import org.springframework.beans.factory.config.BeanPostProcessor;
+import org.springframework.data.mongodb.core.convert.MappingMongoConverter;
+
 import com.java.semantic.query.application.CurrentGenerationSelector;
 import com.java.semantic.query.application.SelectedGenerationGuard;
 import com.java.semantic.query.application.ReviewGenerationSelector;
@@ -156,6 +159,19 @@ public class SemanticQueryApplication {
     @Bean
     ApplicationRunner semanticIndexSchemaGate(MongoTemplate template, SemanticQueryProperties properties) {
         return arguments -> new MongoIndexSchemaVerifier(template, properties.storageTimeout()).verify();
+    }
+
+    @Bean
+    static BeanPostProcessor mongoMappingConverterConfiguration() {
+        return new BeanPostProcessor() {
+            @Override
+            public Object postProcessBeforeInitialization(Object bean, String beanName) {
+                if (bean instanceof MappingMongoConverter converter) {
+                    converter.setMapKeyDotReplacement("__dot__");
+                }
+                return bean;
+            }
+        };
     }
 
 }

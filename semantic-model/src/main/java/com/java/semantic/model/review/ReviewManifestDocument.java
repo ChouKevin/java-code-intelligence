@@ -73,7 +73,7 @@ public record ReviewManifestDocument(
 
         ModelValidation.require(endpointB.generation().selected().revision().equals(requestedRevision),
                 "review B revision must match the requested review revision");
-        requireEqualSidesAgree(endpointA, endpointB);
+        requireDistinctSnapshots(endpointA, endpointB);
     }
 
     private static void requirePreparingOrFailed(
@@ -97,13 +97,8 @@ public record ReviewManifestDocument(
                 "review endpoint repository must match review repository");
     }
 
-    private static void requireEqualSidesAgree(ReviewEndpoint a, ReviewEndpoint b) {
-        SealedGeneration generationA = a.generation();
-        SealedGeneration generationB = b.generation();
-        boolean sameRevision = generationA.selected().revision().equals(generationB.selected().revision());
-        boolean sameGeneration = generationA.selected().generationId().equals(generationB.selected().generationId());
-        if (sameRevision || sameGeneration) {
-            ModelValidation.require(a.equals(b), "equal review sides must have identical generation evidence and snapshots");
-        }
+    private static void requireDistinctSnapshots(ReviewEndpoint a, ReviewEndpoint b) {
+        ModelValidation.require(!a.snapshotId().equals(b.snapshotId()),
+                "review sides must retain distinct immutable Git snapshots");
     }
 }

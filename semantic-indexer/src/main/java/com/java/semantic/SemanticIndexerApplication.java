@@ -2,17 +2,18 @@ package com.java.semantic;
 
 import com.java.semantic.indexer.store.IndexSchemaBootstrap;
 import com.java.semantic.indexer.store.SchemaBootstrapCommand;
+import java.util.Arrays;
+import org.springframework.beans.factory.config.BeanPostProcessor;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.WebApplicationType;
 import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.builder.SpringApplicationBuilder;
+import org.springframework.context.ConfigurableApplicationContext;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.context.ConfigurableApplicationContext;
 import org.springframework.data.mongodb.core.MongoTemplate;
-
-import java.util.Arrays;
+import org.springframework.data.mongodb.core.convert.MappingMongoConverter;
 
 /** Indexer runs administrative index mutations only; read APIs and MCP live in semantic-query. */
 @SpringBootApplication
@@ -24,6 +25,20 @@ public class SemanticIndexerApplication {
             return;
         }
         SpringApplication.run(SemanticIndexerApplication.class, args);
+    }
+
+
+    @Bean
+    static BeanPostProcessor indexerMongoMappingConverterConfiguration() {
+        return new BeanPostProcessor() {
+            @Override
+            public Object postProcessBeforeInitialization(Object bean, String beanName) {
+                if (bean instanceof MappingMongoConverter converter) {
+                    converter.setMapKeyDotReplacement("__dot__");
+                }
+                return bean;
+            }
+        };
     }
 
     static boolean schemaBootstrapRequested(String[] args) {

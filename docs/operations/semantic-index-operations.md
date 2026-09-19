@@ -8,15 +8,18 @@ Send `X-Api-Token: $SEMANTIC_QUERY_API_TOKEN` on every Query HTTP request and on
 
 ## Query surface
 
-MCP exposes exactly nineteen raw tool names:
+MCP exposes exactly thirty tool names:
 
 - `list_repositories`, `get_repository`, `search_code`, `get_fact_source`
 - `list_entry_points`, `find_api_routes`, `find_event_listeners`, `list_type_members`
 - `find_method_implementations`, `find_references`, `find_callers`, `find_callees`
 - `list_git_branches`, `list_git_commits`, `compare_revisions`, `get_file_diff`
 - `list_files`, `read_file`, `search_text`
+- `get_review`, `review_search_code`, `review_get_fact_source`, `review_list_entry_points`
+- `review_find_api_routes`, `review_find_event_listeners`, `review_list_type_members`
+- `review_find_method_implementations`, `review_find_references`, `review_find_callers`, `review_find_callees`
 
-The HTTP surface has the equivalent nineteen routes:
+The HTTP surface has the equivalent thirty operations:
 
 | Operation | HTTP route |
 | --- | --- |
@@ -39,6 +42,17 @@ The HTTP surface has the equivalent nineteen routes:
 | `list_files` | `POST /api/v1/git/files` |
 | `read_file` | `POST /api/v1/git/file` |
 | `search_text` | `POST /api/v1/git/search` |
+| `get_review` | `GET /api/v1/repositories/{repositoryId}/reviews/{reviewId}` |
+| `review_search_code` | `POST /api/v1/reviews/search-code` |
+| `review_get_fact_source` | `POST /api/v1/reviews/fact-source` |
+| `review_list_entry_points` | `POST /api/v1/reviews/entry-points` |
+| `review_find_api_routes` | `POST /api/v1/reviews/api-routes` |
+| `review_find_event_listeners` | `POST /api/v1/reviews/event-listeners` |
+| `review_list_type_members` | `POST /api/v1/reviews/type-members` |
+| `review_find_method_implementations` | `POST /api/v1/reviews/method-implementations` |
+| `review_find_references` | `POST /api/v1/reviews/references` |
+| `review_find_callers` | `POST /api/v1/reviews/callers` |
+| `review_find_callees` | `POST /api/v1/reviews/callees` |
 
 ## Revision recovery
 

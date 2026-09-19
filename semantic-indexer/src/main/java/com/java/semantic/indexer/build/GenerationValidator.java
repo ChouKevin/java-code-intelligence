@@ -212,6 +212,8 @@ public final class GenerationValidator {
             Map<String, SemanticAnalysisEvidence.ProjectProof> proofs = evidence.projects().stream()
                     .collect(java.util.stream.Collectors.toMap(SemanticAnalysisEvidence.ProjectProof::projectPath,
                             java.util.function.Function.identity(), (left, right) -> left));
+            Set<String> sourcePaths = files.stream().map(file -> file.getString("sourcePath"))
+                    .filter(Objects::nonNull).collect(java.util.stream.Collectors.toSet());
             if (proofs.size() != inputs.projects().size()) {
                 issues.add(issue("ANALYSIS_PROJECT_MISMATCH", "semantic evidence does not prove every prepared project"));
             }
@@ -222,7 +224,10 @@ public final class GenerationValidator {
                     continue;
                 }
                 Set<String> includedRoots = project.roots().stream().filter(AnalysisInputs.Root::included)
-                        .map(AnalysisInputs.Root::path).collect(java.util.stream.Collectors.toSet());
+                        .map(AnalysisInputs.Root::path)
+                        .filter(root -> root.equals(".") || sourcePaths.stream().anyMatch(
+                                path -> path.equals(root) || path.startsWith(root + "/")))
+                        .collect(java.util.stream.Collectors.toSet());
                 if (!proof.verifiedSourcePaths().containsAll(includedRoots)) {
                     issues.add(issue("ANALYSIS_ROOT_MISMATCH", "semantic evidence does not prove each included root"));
                 }
@@ -231,8 +236,6 @@ public final class GenerationValidator {
                 issues.add(issue("INVALID_SEMANTIC_BUILD_STATUS",
                         "manifest semantic evidence has no successful JDT build status"));
             }
-            Set<String> sourcePaths = files.stream().map(file -> file.getString("sourcePath"))
-                    .filter(Objects::nonNull).collect(java.util.stream.Collectors.toSet());
             for (SemanticAnalysisEvidence.ProjectProof proof : evidence.projects()) {
                 for (String root : proof.verifiedSourcePaths()) {
                     if (!root.equals(".") && sourcePaths.stream().noneMatch(path -> path.equals(root) || path.startsWith(root + "/"))) {
