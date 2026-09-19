@@ -1,5 +1,20 @@
 package com.java.semantic.query.application;
 
+import com.java.semantic.model.codefact.CodeFact;
+import com.java.semantic.model.codefact.CodeFactId;
+import com.java.semantic.model.codefact.CodeFactIdentity;
+import com.java.semantic.model.codefact.CodeFactKind;
+import com.java.semantic.model.codefact.CodeFactScope;
+import com.java.semantic.model.codefact.DeclaredType;
+import com.java.semantic.model.codefact.JavaTypeIdentity;
+import com.java.semantic.model.codefact.SourceRange;
+import com.java.semantic.model.codefact.SourceTypeIdentity;
+import com.java.semantic.model.codefact.SyntaxPosition;
+import com.java.semantic.model.codefact.SyntaxRange;
+import com.java.semantic.model.index.GenerationFileDocument;
+import com.java.semantic.model.index.SourceArtifactDocument;
+import com.java.semantic.model.index.SourceIndexScope;
+import com.java.semantic.model.index.SymbolDocument;
 import com.java.semantic.model.git.GitComparisonId;
 import com.java.semantic.model.git.GitSnapshotId;
 import com.java.semantic.model.index.AnalysisFingerprint;
@@ -54,6 +69,13 @@ class ReviewSelectionContractIT extends PublishedMongoITSupport {
                     new RepositoryRevision(REVISION_A));
 
             assertThat(selected.selected().generationId().value()).isEqualTo("g-a");
+            SelectedSemanticQueryService selectedQueries = SelectedSemanticQueryService.create(template, guard(template, policy), Duration.ofSeconds(2));
+            SemanticQueryContract.SearchCodeResult result = selectedQueries.searchCode(selected.selected(),
+                    new SemanticQueryContract.SearchCodeRequest("orders", REVISION_A, "Order", java.util.Set.of(CodeFactKind.TYPE),
+                            java.util.Optional.empty(), 0, 20));
+            assertThat(result.items()).singleElement().satisfies(item -> assertThat(item.source().code()).contains("A-g-a"));
+            assertThatThrownBy(() -> selectedQueries.getFactSource(selected.selected(), new SemanticQueryContract.FactSourceRequest(
+                    "orders", REVISION_B, factId(REVISION_B), 0))).isInstanceOf(IllegalArgumentException.class);
             assertThatThrownBy(() -> selector.select(new RepositoryId("orders"), new ReviewId(REVIEW_ID), ReviewSide.A,
                     new RepositoryRevision(REVISION_B))).isInstanceOf(ReviewContextMismatchException.class);
         }
@@ -99,7 +121,47 @@ class ReviewSelectionContractIT extends PublishedMongoITSupport {
                 .append("schemaVersion", IndexSchemaContract.SCHEMA_VERSION).append("projectionVersions", projectionVersions())
                 .append("analysisFingerprint", fingerprint.digest()).append("analysisInputs", template.getConverter().convertToMongoType(inputs))
                 .append("analysisEvidence", template.getConverter().convertToMongoType(evidence)));
+        seedReadRows(template, revision, generationId);
         return new SealedGeneration(selected, fingerprint, evidence);
+    }
+
+    private static void seedReadRows(MongoTemplate template, String revision, String generationId) {
+        String path = "src/Order.java";
+        String content = "class Order { String value() { return \"" + (REVISION_A.equals(revision) ? "A-" : "B-") + generationId + "\"; } }";
+        SourceArtifactDocument artifact = SourceArtifactDocument.create(content);
+        template.getCollection("source_artifacts").insertOne(new Document("sourceArtifactId", artifact.id().value())
+                .append("contentHash", artifact.contentHash()).append("utf8Content", content));
+        GenerationFileDocument file = new GenerationFileDocument(new RepositoryId("orders"), new GenerationId(generationId), path, artifact.id(),
+                artifact.contentHash(), "", new SourceIndexScope(false, List.of(), List.of(), List.of()));
+        Document storedFile = new Document();
+        template.getConverter().write(file, storedFile);
+        storedFile.put("repoId", "orders"); storedFile.put("generationId", generationId); storedFile.put("sourcePath", path);
+        storedFile.put("extractionIssueCode", ""); storedFile.put("scopeUsable", false); storedFile.put("scopePackages", List.of());
+        storedFile.put("scopeClassKeys", List.of()); storedFile.put("scopeMethodKeys", List.of());
+        template.getCollection("generation_files").insertOne(storedFile);
+        SourceTypeIdentity type = new SourceTypeIdentity(new JavaTypeIdentity("", "Order"), path);
+        CodeFactIdentity identity = new CodeFactIdentity(new RepositoryId("orders"), new RepositoryRevision(revision), CodeFactKind.TYPE, type);
+        CodeFact fact = new CodeFact(CodeFactId.from(identity), identity);
+        SymbolDocument symbol = new SymbolDocument(new RepositoryId("orders"), new GenerationId(generationId), fact, CodeFactKind.TYPE,
+                type.fullyQualifiedName(), "Order", type.canonicalForm(), new DeclaredType(type.fullyQualifiedName()), java.util.Set.of(), List.of(),
+                artifact.id(), new SourceRange(path, new SyntaxRange(new SyntaxPosition(0, 0), new SyntaxPosition(0, content.length()))));
+        Document storedSymbol = new Document();
+        template.getConverter().write(symbol, storedSymbol);
+        CodeFactScope scope = CodeFactScope.from(identity);
+        storedSymbol.put("repoId", "orders"); storedSymbol.put("generationId", generationId); storedSymbol.put("symbolId", fact.id().value());
+        storedSymbol.put("canonical", identity.canonicalForm()); storedSymbol.put("sourcePath", path); storedSymbol.put("scopePackage", scope.packageName());
+        storedSymbol.put("scopeClass", scope.className()); storedSymbol.put("scopeMethod", ""); storedSymbol.put("scopeParameters", List.of());
+        storedSymbol.put("scopePath", scope.sourcePath().orElse(""));
+        template.getCollection("symbols").insertOne(storedSymbol);
+        template.getCollection("search").insertOne(new Document("repoId", "orders").append("generationId", generationId)
+                .append("factId", fact.id().value()).append("kind", "TYPE").append("tokens", List.of("order")).append("package", "")
+                .append("authority", "SYMBOLS").append("canonical", identity.canonicalForm()).append("scopePackage", "")
+                .append("scopeClass", "Order").append("scopeMethod", "").append("scopeParameters", List.of()).append("scopePath", path));
+    }
+
+    private static String factId(String revision) {
+        SourceTypeIdentity type = new SourceTypeIdentity(new JavaTypeIdentity("", "Order"), "src/Order.java");
+        return CodeFactId.from(new CodeFactIdentity(new RepositoryId("orders"), new RepositoryRevision(revision), CodeFactKind.TYPE, type)).value();
     }
 
     private static void seedReadyReview(MongoTemplate template, SealedGeneration a, SealedGeneration b) {

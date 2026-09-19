@@ -89,6 +89,52 @@ class GitEvidenceReadServiceIT {
     }
 
     @Test
+    void revalidates_complete_review_ownership_for_direct_and_cursor_git_evidence_reads() {
+        try (MongoDBContainer container = new MongoDBContainer(DockerImageName.parse("mongo:8.0.4"))) {
+            container.start();
+            MongoTemplate template = new MongoTemplate(MongoClients.create(container.getConnectionString()), "git_review_all_entries");
+            seedSnapshot(template, "orders");
+            String reviewId = "11111111-2222-3333-4444-555555555555";
+            markSnapshotComparisonReviewOwned(template, "orders", reviewId, "READY");
+            Document comparison = completeReviewComparison(template, "orders");
+            String comparisonId = comparison.getString("evidenceId");
+            GitEvidenceReadService service = service(template, List.of("orders"));
+            SemanticQueryContract.GitFileContent file = service.readFile(new SemanticQueryContract.GitFileReadRequest(
+                    "orders", SNAPSHOT_ID, REVISION, "src/demo.txt", Optional.empty(), 1, Optional.empty()));
+            SemanticQueryContract.GitTextSearchResult search = service.searchText(new SemanticQueryContract.GitTextSearchRequest(
+                    "orders", SNAPSHOT_ID, REVISION, "needle", Optional.of("src"), Optional.empty(), 1));
+            SemanticQueryContract.GitFileDiffResult diff = service.fileDiff(new SemanticQueryContract.GitFileDiffRequest(
+                    "orders", comparisonId, "2".repeat(40), REVISION, "change-0", Optional.empty()));
+
+            for (String state : List.of("PREPARING", "FAILED")) {
+                template.getCollection("review_manifests").updateOne(new Document("reviewId", reviewId), new Document("$set", new Document("state", state)));
+                assertThatThrownBy(() -> service.listFiles(new SemanticQueryContract.GitFileListRequest("orders", SNAPSHOT_ID, REVISION, "", 0, 20)))
+                        .isInstanceOf(GitEvidenceNotReadyException.class);
+                assertThatThrownBy(() -> service.readFile(new SemanticQueryContract.GitFileReadRequest("orders", SNAPSHOT_ID, REVISION,
+                        "src/demo.txt", Optional.empty(), 1, Optional.empty()))).isInstanceOf(GitEvidenceNotReadyException.class);
+                assertThatThrownBy(() -> service.searchText(new SemanticQueryContract.GitTextSearchRequest("orders", SNAPSHOT_ID, REVISION,
+                        "needle", Optional.of("src"), Optional.empty(), 1))).isInstanceOf(GitEvidenceNotReadyException.class);
+                assertThatThrownBy(() -> service.comparisons(new SemanticQueryContract.GitComparisonRequest("orders", comparisonId,
+                        "2".repeat(40), REVISION, 0, 20))).isInstanceOf(GitEvidenceNotReadyException.class);
+                assertThatThrownBy(() -> service.fileDiff(new SemanticQueryContract.GitFileDiffRequest("orders", comparisonId,
+                        "2".repeat(40), REVISION, "change-0", Optional.empty()))).isInstanceOf(GitEvidenceNotReadyException.class);
+                assertThatThrownBy(() -> service.readFile(new SemanticQueryContract.GitFileReadRequest("orders", SNAPSHOT_ID, REVISION,
+                        "src/demo.txt", Optional.empty(), 1, file.nextCursor()))).isInstanceOf(GitEvidenceNotReadyException.class);
+                assertThatThrownBy(() -> service.searchText(new SemanticQueryContract.GitTextSearchRequest("orders", SNAPSHOT_ID, REVISION,
+                        "needle", Optional.of("src"), search.nextCursor(), 1))).isInstanceOf(GitEvidenceNotReadyException.class);
+                assertThatThrownBy(() -> service.fileDiff(new SemanticQueryContract.GitFileDiffRequest("orders", comparisonId,
+                        "2".repeat(40), REVISION, "change-0", diff.nextCursor()))).isInstanceOf(GitEvidenceNotReadyException.class);
+            }
+            template.getCollection("review_manifests").updateOne(new Document("reviewId", reviewId), new Document("$set", new Document("state", "READY")));
+
+            assertThat(service.readFile(new SemanticQueryContract.GitFileReadRequest("orders", SNAPSHOT_ID, REVISION,
+                    "src/demo.txt", Optional.empty(), 1, file.nextCursor())).content()).isEqualTo("needle needle\n");
+            assertThat(service.fileDiff(new SemanticQueryContract.GitFileDiffRequest("orders", comparisonId, "2".repeat(40), REVISION,
+                    "change-0", diff.nextCursor())).patch()).isEqualTo("second\n");
+        }
+    }
+
+    @Test
     void reads_snapshot_files_and_text_through_checkpoint_derived_cursors() {
         try (MongoDBContainer container = new MongoDBContainer(DockerImageName.parse("mongo:8.0.4"))) {
             container.start();
@@ -1244,6 +1290,26 @@ class GitEvidenceReadServiceIT {
         SemanticAnalysisEvidence evidence = new SemanticAnalysisEvidence(IndexSchemaContract.ANALYSIS_EVIDENCE_VERSION, fingerprint.digest(),
                 "SUCCESS", List.of(), new SemanticAnalysisEvidence.ResolutionCoverage(0, 0, 0, 0, 0), List.of());
         return new SealedGeneration(selected, fingerprint, evidence);
+    }
+
+    private static Document completeReviewComparison(MongoTemplate template, String repositoryId) {
+        Document comparison = template.getCollection("git_evidence_manifests").find(new Document("repoId", repositoryId)
+                .append("kind", "COMPARISON")).first();
+        template.getCollection("git_evidence_manifests").updateOne(new Document("evidenceId", comparison.getString("evidenceId")),
+                new Document("$set", new Document("ancestry", "PREVIOUS_ANCESTOR").append("total", 1L)));
+        template.getCollection("git_comparison_changes").insertOne(new Document("repoId", repositoryId)
+                .append("comparisonId", comparison.getString("evidenceId")).append("ordinal", 0L).append("changeId", "change-0")
+                .append("kind", "MODIFY").append("oldPath", "src/demo.txt").append("newPath", "src/demo.txt")
+                .append("oldMode", "100644").append("newMode", "100644").append("oldBlobId", "2".repeat(40))
+                .append("newBlobId", "1".repeat(40)).append("diffStatus", "AVAILABLE").append("patchChunkCount", 2L)
+                .append("oldRawPath", rawPath("src/demo.txt")).append("newRawPath", rawPath("src/demo.txt"))
+                .append("oldPathKey", rawPathKey("src/demo.txt")).append("newPathKey", rawPathKey("src/demo.txt")));
+        template.getCollection("git_comparison_patches").insertMany(List.of(
+                new Document("repoId", repositoryId).append("comparisonId", comparison.getString("evidenceId")).append("changeId", "change-0")
+                        .append("ordinal", 0L).append("patch", "first\n"),
+                new Document("repoId", repositoryId).append("comparisonId", comparison.getString("evidenceId")).append("changeId", "change-0")
+                        .append("ordinal", 1L).append("patch", "second\n")));
+        return comparison;
     }
 
     private static void seedReadyComparisonOwner(MongoTemplate template, String repositoryId, String snapshotId, String revision, String ownerJobId) {
