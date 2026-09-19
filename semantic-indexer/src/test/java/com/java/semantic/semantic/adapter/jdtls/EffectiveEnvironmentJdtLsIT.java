@@ -80,7 +80,8 @@ class EffectiveEnvironmentJdtLsIT {
                 assertThat(Fixture.artifacts(second)).extracting(AnalysisInputs.Artifact::logicalId)
                         .anySatisfy(id -> assertThat(id).contains("junit-jupiter-api"))
                         .anySatisfy(id -> assertThat(id).contains("assertj-core"))
-                        .anySatisfy(id -> assertThat(id).contains("slf4j-api"));
+                        .anySatisfy(id -> assertThat(id).contains("slf4j-api"))
+                        .anySatisfy(id -> assertThat(id).contains("commons-lang3"));
                 assertThat(fixture.openedDependencyHover(second,
                         "application/src/production/java/example/app/DependencyUse.java", "LoggerFactory"))
                         .contains("org.slf4j.LoggerFactory");
@@ -297,6 +298,7 @@ class EffectiveEnvironmentJdtLsIT {
                     <dependency><groupId>example</groupId><artifactId>fixture</artifactId><version>1</version><scope>system</scope>
                     <systemPath>${project.basedir}/../libraries/fixture.jar</systemPath></dependency>
                     <dependency><groupId>org.slf4j</groupId><artifactId>slf4j-api</artifactId><version>2.0.17</version></dependency>
+                    <dependency><groupId>org.apache.commons</groupId><artifactId>commons-lang3</artifactId><version>3.18.0</version><scope>runtime</scope></dependency>
                     <dependency><groupId>org.junit.jupiter</groupId><artifactId>junit-jupiter-api</artifactId><version>5.14.2</version><scope>provided</scope></dependency>
                     <dependency><groupId>org.assertj</groupId><artifactId>assertj-core</artifactId><version>3.27.7</version><scope>test</scope></dependency>
                     </dependencies></project>

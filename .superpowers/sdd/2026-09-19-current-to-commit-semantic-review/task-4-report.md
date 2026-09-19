@@ -43,3 +43,7 @@ It completed with 1 test, 0 failures, and 0 errors. The fixture declares distinc
 ### Real-JDT binding proof
 
 `JDTLS_HOME=/opt/jdtls mvn -pl semantic-indexer -am -Pjdtls-it -Dsurefire.failIfNoSpecifiedTests=false -Dtest=EffectiveEnvironmentJdtLsIT test` completed with 1 test, 0 failures, and 0 errors. The fixture opens each source under the same `withDocumentUri` / `didOpen` / `didClose` lifecycle as the production adapter and uses an interior identifier position. Raw JDT hover identifies the runtime and provided imports as `org.slf4j.LoggerFactory` and `org.junit.jupiter.api.Assertions`, respectively, and the identical request against local `Api` identifies `example.api.Api`. These assertions are correlated with the distinct persisted runtime/provided artifact entries and the explicit excluded test root. JDT definition/type-definition returned empty for jar-backed types before hover; member-call export behavior remains honestly `UNRESOLVED` rather than treating hover as call resolution.
+
+### Maven-scope binding labels
+
+The real-JDT fixture now distinguishes four Maven-valid cases: default compile `slf4j-api` is JDT-bound through hover and present in the runtime closure; provided `junit-jupiter-api` is JDT-bound through hover; explicit runtime-only `commons-lang3` is attested only in the resolved runtime inventory; and test-only `assertj-core` is inventory-attested but has no binding claim because the test root is explicitly excluded by policy.
