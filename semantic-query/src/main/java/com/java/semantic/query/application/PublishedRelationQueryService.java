@@ -42,16 +42,39 @@ public final class PublishedRelationQueryService {
         return findByTarget(query, EnumSet.of(RelationKind.REFERENCES));
     }
 
+    public PublishedRelationResult findReferences(SelectedGeneration context, PublishedRelationQuery query) {
+        PublishedRelationQuery request = Objects.requireNonNull(query, "relation query is required");
+        return find(context, request, EnumSet.of(RelationKind.REFERENCES), "target",
+                new RelationTarget.Internal(request.target()).canonicalForm());
+    }
+
     public PublishedRelationResult findImplementations(PublishedRelationQuery query) {
         return findByTarget(query, EnumSet.of(RelationKind.IMPLEMENTS, RelationKind.OVERRIDES));
+    }
+
+    public PublishedRelationResult findImplementations(SelectedGeneration context, PublishedRelationQuery query) {
+        PublishedRelationQuery request = Objects.requireNonNull(query, "relation query is required");
+        return find(context, request, EnumSet.of(RelationKind.IMPLEMENTS, RelationKind.OVERRIDES), "target",
+                new RelationTarget.Internal(request.target()).canonicalForm());
     }
 
     public PublishedRelationResult findCallers(PublishedRelationQuery query) {
         return findByTarget(query, EnumSet.of(RelationKind.CALLS));
     }
 
+    public PublishedRelationResult findCallers(SelectedGeneration context, PublishedRelationQuery query) {
+        PublishedRelationQuery request = Objects.requireNonNull(query, "relation query is required");
+        return find(context, request, EnumSet.of(RelationKind.CALLS), "target",
+                new RelationTarget.Internal(request.target()).canonicalForm());
+    }
+
     public PublishedRelationResult findCallees(PublishedRelationQuery query) {
         return findBySource(query, EnumSet.of(RelationKind.CALLS));
+    }
+
+    public PublishedRelationResult findCallees(SelectedGeneration context, PublishedRelationQuery query) {
+        PublishedRelationQuery request = Objects.requireNonNull(query, "relation query is required");
+        return find(context, request, EnumSet.of(RelationKind.CALLS), "from", request.target().canonicalForm());
     }
 
     private PublishedRelationResult findByTarget(PublishedRelationQuery query, EnumSet<RelationKind> kinds) {
@@ -67,12 +90,26 @@ public final class PublishedRelationQueryService {
     private PublishedRelationResult find(PublishedRelationQuery query, EnumSet<RelationKind> kinds, String endpointField,
                                          String endpointValue) {
         PublishedRelationQuery request = Objects.requireNonNull(query, "relation query is required");
-        SelectedGeneration current = selectAndValidateTarget(request);
-        List<RelationDocument> visible = readRelations(current, kinds, endpointField, endpointValue);
+        SelectedGeneration context = generationSelector.selectCodeFact(request.repositoryId().value(), request.revision().value(), request.target(),
+                CurrentGenerationSelector.RELATIONS);
+        return find(context, request, kinds, endpointField, endpointValue);
+    }
+
+    private PublishedRelationResult find(SelectedGeneration context, PublishedRelationQuery query, EnumSet<RelationKind> kinds,
+                                         String endpointField, String endpointValue) {
+        SelectedGeneration selected = Objects.requireNonNull(context, "selected generation is required");
+        PublishedRelationQuery request = Objects.requireNonNull(query, "relation query is required");
+        if (!selected.repositoryId().equals(request.repositoryId()) || !selected.revision().equals(request.revision())) {
+            throw new IllegalArgumentException("query repository and revision must match the selected generation");
+        }
+        generationSelector.requireCompatible(selected, CurrentGenerationSelector.RELATIONS);
+        generationSelector.requireVisible(selected, request.target());
+        ensureSymbol(selected, request.target());
+        List<RelationDocument> visible = readRelations(selected, kinds, endpointField, endpointValue);
         int start = Math.min(request.offset(), visible.size());
         int end = Math.min(start + request.limit(), visible.size());
         List<RelationDocument> page = visible.subList(start, end);
-        return new PublishedRelationResult(current, request.target(), page,
+        return new PublishedRelationResult(selected, request.target(), page,
                 new PublishedRelationPage(request.offset(), request.limit(), page.size(), visible.size()));
     }
 
