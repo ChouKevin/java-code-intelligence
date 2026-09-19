@@ -55,13 +55,18 @@ public final class JdtLsProcessFactory {
                 : "disabled";
         return "launch-policy=v1\n"
                 + "isolation=" + properties.getIsolationMode().name() + "\n"
-                + "agent=" + (properties.getIsolationMode() == JdtLsProperties.IsolationMode.LINUX_UID
-                ? "lombok.jar:" + agentDigest : "disabled") + "\n"
+                + "privileges=" + (properties.getIsolationMode() == JdtLsProperties.IsolationMode.LINUX_UID
+                ? "setpriv:clear-groups,no-new-privs,bounding-set-none" : "none") + "\n"
                 + "jvm=-Declipse.application=org.eclipse.jdt.ls.core.id1\n"
                 + "jvm=-Dosgi.bundles.defaultStartLevel=4\n"
                 + "jvm=-Declipse.product=org.eclipse.jdt.ls.core.product\n"
                 + "jvm=-Dlog.level=ALL\n"
                 + "jvm=-Xmx" + properties.getMaxHeap() + "\n"
+                + "agent=" + (properties.getIsolationMode() == JdtLsProperties.IsolationMode.LINUX_UID
+                ? "lombok.jar:" + agentDigest : "disabled") + "\n"
+                + "jvm=--add-modules=ALL-SYSTEM\n"
+                + "jvm=--add-opens:java.base/java.util=ALL-UNNAMED\n"
+                + "jvm=--add-opens:java.base/java.lang=ALL-UNNAMED\n"
                 + "env=HOME:analysis-home-v1,USER:analysis\n"
                 + "cache=analysis-home-m2-v1";
     }

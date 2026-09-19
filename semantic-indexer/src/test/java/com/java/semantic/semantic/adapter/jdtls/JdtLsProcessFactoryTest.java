@@ -249,6 +249,26 @@ class JdtLsProcessFactoryTest {
     }
 
     @Test
+    void should_describe_the_effective_linux_launch_policy_without_local_paths() throws Exception {
+        Path home = JdtLsTestFixtures.createFakeHome(tempDirectory);
+        Files.writeString(home.resolve("lombok.jar"), "agent-bytes");
+        JdtLsProperties properties = linuxUidProperties(home);
+
+        String identity = JdtLsProcessFactory.launchPolicyIdentity(properties);
+
+        assertThat(identity).contains(
+                "isolation=LINUX_UID",
+                "jvm=--add-modules=ALL-SYSTEM",
+                "jvm=--add-opens:java.base/java.util=ALL-UNNAMED",
+                "jvm=--add-opens:java.base/java.lang=ALL-UNNAMED",
+                "agent=lombok.jar:",
+                "env=HOME:analysis-home-v1,USER:analysis",
+                "cache=analysis-home-m2-v1")
+                .doesNotContain(home.toString(), properties.getAnalysisHome().toString(),
+                        properties.getJavaExecutable().toString());
+    }
+
+    @Test
     void should_declare_custom_notifications_and_accept_registration_when_client_is_inspected()
             throws Exception {
         Method statusMethod = JdtLanguageClient.class.getMethod("languageStatus", StatusReport.class);
