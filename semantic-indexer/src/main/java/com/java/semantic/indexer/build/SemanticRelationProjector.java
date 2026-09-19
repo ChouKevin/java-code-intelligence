@@ -412,6 +412,9 @@ public final class SemanticRelationProjector {
         String invocationHead = openingParenthesis < 0 ? expression : expression.substring(0, openingParenthesis);
         int methodSeparator = Math.max(invocationHead.lastIndexOf('.'), invocationHead.lastIndexOf(':'));
         String methodName = methodSeparator < 0 ? invocationHead.trim() : invocationHead.substring(methodSeparator + 1).trim();
+        if (methodName.isBlank()) {
+            methodName = "unknownMethod";
+        }
         int arity = argumentCount(expression, openingParenthesis);
         RelationTarget target = new RelationTarget.External(new ExternalTarget.UnresolvedCall(expression, invocation.receiver(), methodName, arity));
         add(from, RelationKind.CALLS, target, occurrence, CodeFactKind.TYPE_USAGE, repositoryId, revision, generationId, artifact, documents);
