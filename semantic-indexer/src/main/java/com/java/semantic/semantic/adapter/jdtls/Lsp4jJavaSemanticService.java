@@ -149,46 +149,39 @@ public class Lsp4jJavaSemanticService implements JavaSemanticService {
     public void proveImportedRoot(RepositorySnapshot snapshot, java.nio.file.Path root) {
         JdtWorkspaceSession session = requireSession(snapshot);
         java.nio.file.Path normalizedRoot = root.toAbsolutePath().normalize();
-        String query;
+        java.nio.file.Path declarationSource;
         try (java.util.stream.Stream<java.nio.file.Path> paths = Files.walk(normalizedRoot, 12)) {
-            query = paths.filter(Files::isRegularFile)
-                    .map(java.nio.file.Path::getFileName)
-                    .map(java.nio.file.Path::toString)
-                    .filter(name -> name.endsWith(".java") && !name.equals("package-info.java"))
-                    .map(name -> name.substring(0, name.length() - ".java".length()))
+            declarationSource = paths.filter(Files::isRegularFile)
+                    .filter(path -> {
+                        String name = path.getFileName().toString();
+                        return name.endsWith(".java") && !name.equals("package-info.java");
+                    })
                     .sorted()
                     .findFirst()
                     .orElseThrow(() -> new IllegalStateException("included source root contains no Java declaration " + root));
         } catch (IOException exception) {
             throw new IllegalStateException("unable to inspect included source root " + root, exception);
         }
+        String query = declarationSource.getFileName().toString().replaceFirst("\\.java$", "");
+        String expectedUri = declarationSource.toUri().toString();
         Either<List<? extends SymbolInformation>, List<? extends WorkspaceSymbol>> symbols = session.call(
                 "workspace/symbol:root-proof",
                 server -> server.getWorkspaceService().symbol(new WorkspaceSymbolParams(query)));
         boolean proved = Objects.nonNull(symbols) && (symbols.isLeft()
-                ? symbols.getLeft().stream().map(SymbolInformation::getLocation)
-                        .anyMatch(location -> locationWithinRoot(location.getUri(), normalizedRoot))
-                : symbols.getRight().stream().anyMatch(symbol -> workspaceSymbolWithinRoot(symbol, normalizedRoot)));
+                ? symbols.getLeft().stream().anyMatch(symbol -> query.equals(symbol.getName())
+                        && expectedUri.equals(symbol.getLocation().getUri()))
+                : symbols.getRight().stream().anyMatch(symbol -> workspaceSymbolMatches(symbol, query, expectedUri)));
         if (!proved) {
             throw new IllegalStateException("JDT LS did not prove an imported declaration for " + root);
         }
     }
-
-    private static boolean workspaceSymbolWithinRoot(WorkspaceSymbol symbol, java.nio.file.Path root) {
-        if (Objects.isNull(symbol) || Objects.isNull(symbol.getLocation())) {
+    private static boolean workspaceSymbolMatches(WorkspaceSymbol symbol, String expectedName, String expectedUri) {
+        if (Objects.isNull(symbol) || !expectedName.equals(symbol.getName()) || Objects.isNull(symbol.getLocation())) {
             return false;
         }
         Either<org.eclipse.lsp4j.Location, org.eclipse.lsp4j.WorkspaceSymbolLocation> location = symbol.getLocation();
         String uri = location.isLeft() ? location.getLeft().getUri() : location.getRight().getUri();
-        return locationWithinRoot(uri, root);
-    }
-
-    private static boolean locationWithinRoot(String uri, java.nio.file.Path root) {
-        try {
-            return java.nio.file.Path.of(URI.create(uri)).toAbsolutePath().normalize().startsWith(root);
-        } catch (IllegalArgumentException exception) {
-            return false;
-        }
+        return expectedUri.equals(uri);
     }
 
     @Override
