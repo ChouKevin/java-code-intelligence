@@ -204,6 +204,21 @@ class JdtLsProcessFactoryTest {
     }
 
     @Test
+    void should_change_launch_policy_identity_when_effective_jvm_policy_changes() throws Exception {
+        Path home = JdtLsTestFixtures.createFakeHome(tempDirectory);
+        Files.writeString(home.resolve("lombok.jar"), "agent-bytes");
+        JdtLsProperties linux = linuxUidProperties(home);
+        JdtLsProperties changedHeap = new JdtLsProperties(
+                true, home, linux.getWorkspaceDataRoot(), linux.getJavaExecutable(), linux.getIsolationMode(),
+                linux.getAnalysisUid(), linux.getAnalysisGid(), linux.getAnalysisHome(), linux.getStartupTimeout(),
+                linux.getImportTimeout(), linux.getRequestTimeout(), linux.getMaxActiveWorkspaces(), linux.getIdleTimeout(),
+                linux.getMaintenanceInterval(), "1536m");
+
+        assertThat(JdtLsProcessFactory.launchPolicyIdentity(linux))
+                .isNotEqualTo(JdtLsProcessFactory.launchPolicyIdentity(changedHeap));
+    }
+
+    @Test
     void should_declare_custom_notifications_and_accept_registration_when_client_is_inspected()
             throws Exception {
         Method statusMethod = JdtLanguageClient.class.getMethod("languageStatus", StatusReport.class);
