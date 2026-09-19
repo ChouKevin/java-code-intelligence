@@ -1,12 +1,12 @@
 package com.java.semantic.model.codefact;
 
-import com.java.semantic.model.query.CurrentGeneration;
+import com.java.semantic.model.query.SelectedGeneration;
 import com.java.semantic.model.support.ModelValidation;
 
 import java.util.List;
 import java.util.Objects;
 
-public record EventListenerResult(CurrentGeneration generation, EventListenerQuery query,
+public record EventListenerResult(SelectedGeneration generation, EventListenerQuery query,
                                   List<EventListenerCandidate> candidates, long totalCount, boolean hasMore) {
 
     public EventListenerResult {

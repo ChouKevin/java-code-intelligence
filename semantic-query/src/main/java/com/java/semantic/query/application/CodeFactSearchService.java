@@ -6,7 +6,7 @@ import com.java.semantic.model.codefact.CodeFactSummary;
 import com.java.semantic.model.codefact.CodeFactKind;
 import com.java.semantic.model.codefact.CodeFactTokenizer;
 import com.java.semantic.model.index.IndexCollections;
-import com.java.semantic.model.query.CurrentGeneration;
+import com.java.semantic.model.query.SelectedGeneration;
 import com.java.semantic.query.config.SearchAccessPlan;
 import com.mongodb.MongoException;
 import com.mongodb.client.FindIterable;
@@ -42,14 +42,24 @@ public final class CodeFactSearchService {
 
     public CodeFactSearchResult search(CodeFactSearchQuery query) {
         CodeFactSearchQuery requiredQuery = Objects.requireNonNull(query, "query is required");
+        SelectedGeneration context = selector.select(requiredQuery.repositoryId().value(), requiredQuery.revision().value(),
+                CodeFactReadService.requirementsForSearchKinds(requiredQuery.kinds()));
+        return search(context, requiredQuery);
+    }
+
+    public CodeFactSearchResult search(SelectedGeneration context, CodeFactSearchQuery query) {
+        SelectedGeneration selected = Objects.requireNonNull(context, "selected generation is required");
+        CodeFactSearchQuery requiredQuery = Objects.requireNonNull(query, "query is required");
+        if (!selected.repositoryId().equals(requiredQuery.repositoryId()) || !selected.revision().equals(requiredQuery.revision())) {
+            throw new IllegalArgumentException("query repository and revision must match the selected generation");
+        }
+        selector.requireCompatible(selected, CodeFactReadService.requirementsForSearchKinds(requiredQuery.kinds()));
         SearchAccessPlan accessPlan = selector.searchAccessPlan(requiredQuery.repositoryId().value());
         requiredQuery.packagePrefix().filter(prefix -> !accessPlan.isPackageVisible(prefix))
                 .ifPresent(prefix -> { throw new RepositoryNotFoundException(); });
-        CurrentGeneration current = selector.select(requiredQuery.repositoryId().value(), requiredQuery.revision().value(),
-                CodeFactReadService.requirementsForSearchKinds(requiredQuery.kinds()));
         List<String> tokens = normalizedTokens(requiredQuery.query());
         try {
-            Bson filter = accessPlan.authorized(filter(current, requiredQuery, tokens));
+            Bson filter = accessPlan.authorized(filter(selected, requiredQuery, tokens));
             long total = template.getCollection(IndexCollections.SEARCH).countDocuments(filter,
                     new com.mongodb.client.model.CountOptions().maxTime(storageTimeout.toMillis(), TimeUnit.MILLISECONDS));
             FindIterable<Document> rows = template.getCollection(IndexCollections.SEARCH).find(filter)
@@ -57,12 +67,12 @@ public final class CodeFactSearchService {
                     .maxTime(storageTimeout.toMillis(), TimeUnit.MILLISECONDS);
             List<CodeFactSummary> facts = new ArrayList<>();
             for (Document row : rows) {
-                CodeFactSummary fact = authoritativeFact(row, current);
-                selector.requireVisible(current, fact.fact().identity());
+                CodeFactSummary fact = authoritativeFact(row, selected);
+                selector.requireVisible(selected, fact.fact().identity());
                 facts.add(fact);
             }
-            return new CodeFactSearchResult(current, requiredQuery, facts, total, requiredQuery.offset() + facts.size() < total,
-                    coverageReader.coverage(current, accessPlan, requiredQuery.packagePrefix(), java.util.Optional.empty()));
+            return new CodeFactSearchResult(selected, requiredQuery, facts, total, requiredQuery.offset() + facts.size() < total,
+                    coverageReader.coverage(selected, accessPlan, requiredQuery.packagePrefix(), java.util.Optional.empty()));
         } catch (MongoException | DataAccessException exception) {
             throw new SemanticIndexUnavailableException(exception);
         } catch (RepositoryNotFoundException | IndexContractMismatchException exception) {
@@ -72,7 +82,7 @@ public final class CodeFactSearchService {
         }
     }
 
-    private Bson filter(CurrentGeneration current, CodeFactSearchQuery query, List<String> tokens) {
+    private Bson filter(SelectedGeneration current, CodeFactSearchQuery query, List<String> tokens) {
         List<Bson> filters = new ArrayList<>();
         filters.add(Filters.eq("repoId", current.repositoryId().value()));
         filters.add(Filters.eq("generationId", current.generationId().value()));
@@ -86,7 +96,7 @@ public final class CodeFactSearchService {
         return Filters.and(filters);
     }
 
-    private CodeFactSummary authoritativeFact(Document row, CurrentGeneration current) {
+    private CodeFactSummary authoritativeFact(Document row, SelectedGeneration current) {
         com.java.semantic.model.codefact.CodeFactDetails details = codeFactReader.authoritative(row, current);
         return new CodeFactSummary(details.fact(), details.location());
     }

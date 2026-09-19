@@ -1,12 +1,12 @@
 package com.java.semantic.model.codefact;
 
-import com.java.semantic.model.query.CurrentGeneration;
+import com.java.semantic.model.query.SelectedGeneration;
 import com.java.semantic.model.support.ModelValidation;
 
 import java.util.Objects;
 
-/** Current-generation entry-point projection with code-derived route trigger fields. */
-public record PublishedEntryPoint(CurrentGeneration generation, String factId, String canonicalIdentity, EntryPointKind kind,
+/** Selected-generation entry-point projection with code-derived route trigger fields. */
+public record PublishedEntryPoint(SelectedGeneration generation, String factId, String canonicalIdentity, EntryPointKind kind,
                                   String methodCanonical, String triggerValue, String sourcePath) {
     public PublishedEntryPoint {
         generation = Objects.requireNonNull(generation, "generation is required");

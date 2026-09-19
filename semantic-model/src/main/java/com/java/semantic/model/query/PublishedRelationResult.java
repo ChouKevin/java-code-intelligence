@@ -8,7 +8,7 @@ import java.util.Objects;
 
 /** Stored relation facts returned without semantic-engine reclassification. */
 public record PublishedRelationResult(
-        CurrentGeneration generation,
+        SelectedGeneration generation,
         CodeFactIdentity target,
         List<RelationDocument> relations,
         PublishedRelationPage page) {

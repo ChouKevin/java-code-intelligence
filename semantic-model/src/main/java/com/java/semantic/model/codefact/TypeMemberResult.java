@@ -1,13 +1,13 @@
 package com.java.semantic.model.codefact;
 
-import com.java.semantic.model.query.CurrentGeneration;
+import com.java.semantic.model.query.SelectedGeneration;
 import com.java.semantic.model.index.SourceIndexCoverage;
 
 import java.util.List;
 import java.util.Objects;
 
-/** Deterministically ordered, current-generation declaration members. */
-public record TypeMemberResult(CurrentGeneration generation, TypeMemberQuery query, List<CodeFactSummary> members,
+/** Deterministically ordered, selected-generation declaration members. */
+public record TypeMemberResult(SelectedGeneration generation, TypeMemberQuery query, List<CodeFactSummary> members,
                                long totalCount, boolean hasMore, SourceIndexCoverage coverage) {
     public TypeMemberResult {
         generation = Objects.requireNonNull(generation, "generation is required");

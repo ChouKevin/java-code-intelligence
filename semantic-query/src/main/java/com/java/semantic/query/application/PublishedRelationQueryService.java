@@ -5,7 +5,7 @@ import com.java.semantic.model.codefact.RelationKind;
 import com.java.semantic.model.codefact.RelationTarget;
 import com.java.semantic.model.index.IndexCollections;
 import com.java.semantic.model.index.RelationDocument;
-import com.java.semantic.model.query.CurrentGeneration;
+import com.java.semantic.model.query.SelectedGeneration;
 import com.java.semantic.model.query.PublishedRelationPage;
 import com.java.semantic.model.query.PublishedRelationQuery;
 import com.java.semantic.model.query.PublishedRelationResult;
@@ -67,7 +67,7 @@ public final class PublishedRelationQueryService {
     private PublishedRelationResult find(PublishedRelationQuery query, EnumSet<RelationKind> kinds, String endpointField,
                                          String endpointValue) {
         PublishedRelationQuery request = Objects.requireNonNull(query, "relation query is required");
-        CurrentGeneration current = selectAndValidateTarget(request);
+        SelectedGeneration current = selectAndValidateTarget(request);
         List<RelationDocument> visible = readRelations(current, kinds, endpointField, endpointValue);
         int start = Math.min(request.offset(), visible.size());
         int end = Math.min(start + request.limit(), visible.size());
@@ -76,14 +76,14 @@ public final class PublishedRelationQueryService {
                 new PublishedRelationPage(request.offset(), request.limit(), page.size(), visible.size()));
     }
 
-    private CurrentGeneration selectAndValidateTarget(PublishedRelationQuery query) {
-        CurrentGeneration current = generationSelector.selectCodeFact(query.repositoryId().value(), query.revision().value(), query.target(),
+    private SelectedGeneration selectAndValidateTarget(PublishedRelationQuery query) {
+        SelectedGeneration current = generationSelector.selectCodeFact(query.repositoryId().value(), query.revision().value(), query.target(),
                 CurrentGenerationSelector.RELATIONS);
         ensureSymbol(current, query.target());
         return current;
     }
 
-    private List<RelationDocument> readRelations(CurrentGeneration current, EnumSet<RelationKind> kinds, String endpointField,
+    private List<RelationDocument> readRelations(SelectedGeneration current, EnumSet<RelationKind> kinds, String endpointField,
                                                  String endpointValue) {
         try {
             Bson filter = Filters.and(Filters.eq("repoId", current.repositoryId().value()),
@@ -115,11 +115,11 @@ public final class PublishedRelationQueryService {
             .thenComparingInt(relation -> relation.range().range().start().character())
             .thenComparing(relation -> relation.fact().id().value());
 
-    RelationDocument decode(Document row, CurrentGeneration current) {
+    RelationDocument decode(Document row, SelectedGeneration current) {
         return CodeFactReadService.decodeRelation(row, current, template);
     }
 
-    void ensureSymbol(CurrentGeneration current, CodeFactIdentity identity) {
+    void ensureSymbol(SelectedGeneration current, CodeFactIdentity identity) {
         try {
             Document symbol = template.getCollection(IndexCollections.SYMBOLS).find(Filters.and(
                             Filters.eq("repoId", current.repositoryId().value()),
@@ -134,7 +134,7 @@ public final class PublishedRelationQueryService {
         }
     }
 
-    boolean isVisible(CurrentGeneration current, RelationDocument relation) {
+    boolean isVisible(SelectedGeneration current, RelationDocument relation) {
         try {
             generationSelector.requireVisible(current, relation.from());
             if (relation.target() instanceof RelationTarget.Internal internalTarget) {

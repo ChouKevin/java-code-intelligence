@@ -21,7 +21,7 @@ import com.java.semantic.model.index.GenerationId;
 import com.java.semantic.model.index.ManifestDigest;
 import com.java.semantic.model.index.SourceIndexCoverage;
 import com.java.semantic.model.index.SourceIndexIssue;
-import com.java.semantic.model.query.CurrentGeneration;
+import com.java.semantic.model.query.SelectedGeneration;
 import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.model.repository.RepositoryRevision;
 import org.junit.jupiter.api.BeforeEach;
@@ -63,7 +63,7 @@ class SemanticQueryFacadeSourceTest {
     private PublishedDiscoveryQueryService discoveryQueryService;
     private PublishedEntryPointQueryService entryPointQueryService;
     private SemanticQueryFacade facade;
-    private CurrentGeneration generation;
+    private SelectedGeneration generation;
     private CodeFactIdentity relationIdentity;
 
     @BeforeEach
@@ -82,7 +82,7 @@ class SemanticQueryFacadeSourceTest {
 
     @Test
     void repository_catalog_exposes_only_id_and_current_revision() {
-        CurrentGeneration unrelated = generation("accounts-service", "2".repeat(40), "g-accounts");
+        SelectedGeneration unrelated = generation("accounts-service", "2".repeat(40), "g-accounts");
         when(repositoryService.listRepositories()).thenReturn(List.of(generation, unrelated));
 
         List<RepositoryItem> result = facade.listRepositories(new PageRequest(0, 20)).items();
@@ -170,9 +170,9 @@ class SemanticQueryFacadeSourceTest {
         return new SearchCodeRequest(REPOSITORY_ID, REVISION, "charge", Set.of(), Optional.empty(), 0, 20);
     }
 
-    private static CurrentGeneration generation(String repositoryId, String revision, String generationId) {
-        return new CurrentGeneration(new RepositoryId(repositoryId), new RepositoryRevision(revision), new GenerationId(generationId),
-                new ManifestDigest("a".repeat(64)), Instant.parse("2026-09-02T00:00:00Z"));
+    private static SelectedGeneration generation(String repositoryId, String revision, String generationId) {
+        return new SelectedGeneration(new RepositoryId(repositoryId), new RepositoryRevision(revision), new GenerationId(generationId),
+                new ManifestDigest("a".repeat(64)));
     }
 
     private static CodeFactIdentity relationIdentity() {

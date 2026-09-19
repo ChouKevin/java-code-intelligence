@@ -6,7 +6,7 @@ import com.java.semantic.model.codefact.CodeFactScope;
 import com.java.semantic.model.index.IndexCollections;
 import com.java.semantic.model.index.EntryPointDocument;
 import com.java.semantic.model.index.persistence.EntryPointPersistence;
-import com.java.semantic.model.query.CurrentGeneration;
+import com.java.semantic.model.query.SelectedGeneration;
 import com.java.semantic.query.config.SearchAccessPlan;
 import com.mongodb.MongoException;
 import com.mongodb.client.FindIterable;
@@ -50,7 +50,7 @@ public final class PublishedEntryPointQueryService {
         String requestedPath = requiredRoutePath(path);
         requirePage(offset, limit);
         SearchAccessPlan accessPlan = selector.searchAccessPlan(repositoryId);
-        CurrentGeneration current = selector.select(repositoryId, revision, CurrentGenerationSelector.ENTRY_POINTS);
+        SelectedGeneration current = selector.select(repositoryId, revision, CurrentGenerationSelector.ENTRY_POINTS);
         try {
             org.bson.conversions.Bson filter = accessPlan.authorized(Filters.and(
                     Filters.eq("repoId", current.repositoryId().value()), Filters.eq("generationId", current.generationId().value()),
@@ -100,7 +100,7 @@ public final class PublishedEntryPointQueryService {
         Set<EntryPointKind> requestedKinds = Set.copyOf(Objects.requireNonNull(kinds, "entry point kinds are required"));
         requirePage(offset, limit);
         SearchAccessPlan accessPlan = selector.searchAccessPlan(repositoryId);
-        CurrentGeneration current = selector.select(repositoryId, revision, CurrentGenerationSelector.ENTRY_POINTS);
+        SelectedGeneration current = selector.select(repositoryId, revision, CurrentGenerationSelector.ENTRY_POINTS);
         try {
             org.bson.conversions.Bson base = Filters.and(Filters.eq("repoId", current.repositoryId().value()),
                     Filters.eq("generationId", current.generationId().value()));

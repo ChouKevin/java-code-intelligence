@@ -1,12 +1,12 @@
 package com.java.semantic.model.codefact;
 
-import com.java.semantic.model.query.CurrentGeneration;
+import com.java.semantic.model.query.SelectedGeneration;
 
 import java.util.Objects;
 import java.util.Optional;
 
 /** Authorized stored-content slice; no parser-derived interpretation is added. */
-public record PublishedSourceSegment(CurrentGeneration generation, SourceRange location, String content,
+public record PublishedSourceSegment(SelectedGeneration generation, SourceRange location, String content,
                                      Optional<CodeFactIdentity> evidenceIdentity, Optional<SourceRange> nextLocation,
                                      boolean contextTruncated) {
     public PublishedSourceSegment {

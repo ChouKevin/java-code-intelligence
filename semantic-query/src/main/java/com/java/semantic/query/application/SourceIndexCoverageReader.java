@@ -5,7 +5,7 @@ import com.java.semantic.model.index.IndexCollections;
 import com.java.semantic.model.index.SourceIndexCoverage;
 import com.java.semantic.model.index.SourceIndexIssue;
 import com.java.semantic.model.index.SourceIndexScope;
-import com.java.semantic.model.query.CurrentGeneration;
+import com.java.semantic.model.query.SelectedGeneration;
 import com.java.semantic.model.support.ModelValidation;
 import com.java.semantic.query.config.SearchAccessPlan;
 import com.mongodb.MongoException;
@@ -36,9 +36,9 @@ final class SourceIndexCoverageReader {
         this.storageTimeout = Objects.requireNonNull(storageTimeout, "storage timeout is required");
     }
 
-    SourceIndexCoverage coverage(CurrentGeneration generation, SearchAccessPlan accessPlan, Optional<String> packagePrefix,
+    SourceIndexCoverage coverage(SelectedGeneration generation, SearchAccessPlan accessPlan, Optional<String> packagePrefix,
                                  Optional<String> sourcePath) {
-        CurrentGeneration current = Objects.requireNonNull(generation, "generation is required");
+        SelectedGeneration current = Objects.requireNonNull(generation, "generation is required");
         SearchAccessPlan requiredPlan = Objects.requireNonNull(accessPlan, "access plan is required");
         Optional<String> requiredPackagePrefix = Objects.requireNonNull(packagePrefix, "package prefix is required");
         Optional<String> requiredSourcePath = Objects.requireNonNull(sourcePath, "source path is required")
@@ -66,7 +66,7 @@ final class SourceIndexCoverageReader {
         }
     }
 
-    private static Bson filter(CurrentGeneration current, Optional<String> packagePrefix, Optional<String> sourcePath) {
+    private static Bson filter(SelectedGeneration current, Optional<String> packagePrefix, Optional<String> sourcePath) {
         List<Bson> predicates = new ArrayList<>();
         predicates.add(Filters.eq("repoId", current.repositoryId().value()));
         predicates.add(Filters.eq("generationId", current.generationId().value()));
@@ -76,7 +76,7 @@ final class SourceIndexCoverageReader {
         return Filters.and(predicates);
     }
 
-    private GenerationFileDocument decode(Document stored, CurrentGeneration current) {
+    private GenerationFileDocument decode(Document stored, SelectedGeneration current) {
         try {
             Document converterDocument = new Document(stored);
             converterDocument.put("generationId", new Document("value", current.generationId().value()));

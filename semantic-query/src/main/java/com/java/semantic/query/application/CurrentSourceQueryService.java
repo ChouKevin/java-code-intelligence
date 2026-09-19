@@ -10,7 +10,7 @@ import com.java.semantic.model.index.GenerationFileDocument;
 import com.java.semantic.model.index.IndexCollections;
 import com.java.semantic.model.index.SourceArtifactId;
 import com.java.semantic.model.index.SymbolDocument;
-import com.java.semantic.model.query.CurrentGeneration;
+import com.java.semantic.model.query.SelectedGeneration;
 import com.mongodb.MongoException;
 import com.mongodb.client.model.Filters;
 import org.bson.Document;
@@ -36,7 +36,7 @@ public final class CurrentSourceQueryService {
     }
 
     public PublishedSource getSource(String repositoryId, String revision, SourceTypeIdentity sourceType) {
-        CurrentGeneration current = selector.selectSource(repositoryId, revision, sourceType);
+        SelectedGeneration current = selector.selectSource(repositoryId, revision, sourceType);
         SourceTypeIdentity identity = Objects.requireNonNull(sourceType, "source type identity is required");
         try {
             requireAuthorizedCurrentSource(current, identity);
@@ -59,8 +59,8 @@ public final class CurrentSourceQueryService {
         }
     }
 
-    PublishedSource getSource(CurrentGeneration current, String sourcePath) {
-        CurrentGeneration selected = Objects.requireNonNull(current, "current generation is required");
+    PublishedSource getSource(SelectedGeneration current, String sourcePath) {
+        SelectedGeneration selected = Objects.requireNonNull(current, "selected generation is required");
         String path = com.java.semantic.model.support.ModelValidation.repositoryRelativePath(sourcePath);
         try {
             Document mapping = template.getCollection(IndexCollections.GENERATION_FILES).find(Filters.and(
@@ -83,7 +83,7 @@ public final class CurrentSourceQueryService {
 
     PublishedSource getSource(CodeFactDetails details) {
         CodeFactDetails requiredDetails = Objects.requireNonNull(details, "code fact details are required");
-        CurrentGeneration current = requiredDetails.generation();
+        SelectedGeneration current = requiredDetails.generation();
         CodeFactIdentity identity = requiredDetails.fact().identity();
         String sourcePath = requiredDetails.location().sourceFile();
         if (!current.repositoryId().equals(identity.repositoryId()) || !current.revision().equals(identity.repositoryRevision())) {
@@ -95,7 +95,7 @@ public final class CurrentSourceQueryService {
         return getSource(current, sourcePath);
     }
 
-    private void requireAuthorizedCurrentSource(CurrentGeneration current, SourceTypeIdentity identity) {
+    private void requireAuthorizedCurrentSource(SelectedGeneration current, SourceTypeIdentity identity) {
         CodeFactIdentity expectedIdentity = new CodeFactIdentity(current.repositoryId(), current.revision(), CodeFactKind.TYPE, identity);
         CodeFactId expectedId = CodeFactId.from(expectedIdentity);
         boolean foundRequestedType = false;
@@ -109,11 +109,11 @@ public final class CurrentSourceQueryService {
         if (!foundRequestedType) { throw new IndexNotReadyException(); }
     }
 
-    private void requireAllSourceSymbolsVisible(CurrentGeneration current, String sourcePath) {
+    private void requireAllSourceSymbolsVisible(SelectedGeneration current, String sourcePath) {
         authorizedSourceSymbols(current, sourcePath);
     }
 
-    private List<SymbolDocument> authorizedSourceSymbols(CurrentGeneration current, String sourcePath) {
+    private List<SymbolDocument> authorizedSourceSymbols(SelectedGeneration current, String sourcePath) {
         List<SymbolDocument> symbols = new ArrayList<>();
         try {
             for (Document stored : template.getCollection(IndexCollections.SYMBOLS).find(Filters.and(
@@ -133,7 +133,7 @@ public final class CurrentSourceQueryService {
         return List.copyOf(symbols);
     }
 
-    private SymbolDocument decodeSymbol(Document stored, CurrentGeneration current) {
+    private SymbolDocument decodeSymbol(Document stored, SelectedGeneration current) {
         try {
             Document converterDocument = new Document(stored);
             converterDocument.put("generationId", new Document("value", current.generationId().value()));
@@ -153,7 +153,7 @@ public final class CurrentSourceQueryService {
         }
     }
 
-    private GenerationFileDocument decodeGenerationFile(Document stored, CurrentGeneration current, String sourcePath) {
+    private GenerationFileDocument decodeGenerationFile(Document stored, SelectedGeneration current, String sourcePath) {
         try {
             Document converterDocument = new Document(stored);
             // Generation scope is deliberately flattened by the immutable writer; restore its value-object shape for decoding.

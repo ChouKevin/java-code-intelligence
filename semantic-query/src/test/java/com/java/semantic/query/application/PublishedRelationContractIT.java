@@ -7,7 +7,7 @@ import com.java.semantic.model.codefact.RelationTarget;
 import com.java.semantic.model.codefact.SourceRange;
 import com.java.semantic.model.codefact.SyntaxPosition;
 import com.java.semantic.model.codefact.SyntaxRange;
-import com.java.semantic.model.query.CurrentGeneration;
+import com.java.semantic.model.query.SelectedGeneration;
 import com.java.semantic.model.query.PublishedRelationQuery;
 import com.java.semantic.model.query.PublishedRelationResult;
 import com.java.semantic.model.repository.RepositoryId;
@@ -148,7 +148,7 @@ class PublishedRelationContractIT extends PublishedMongoITSupport {
             template.getCollection("relations").updateOne(new Document("from", source.canonicalForm()),
                     new Document("$set", new Document("canonical", seedRelationCanonical(source, declaration))));
             Document stored = template.getCollection("relations").find().first();
-            CurrentGeneration current = selector(template, policy()).selectCodeFact("orders", REVISION, declaration,
+            SelectedGeneration current = selector(template, policy()).selectCodeFact("orders", REVISION, declaration,
                     CurrentGenerationSelector.RELATIONS);
 
             for (Document mutation : List.of(

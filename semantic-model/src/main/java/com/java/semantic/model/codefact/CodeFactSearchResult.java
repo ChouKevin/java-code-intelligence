@@ -1,6 +1,6 @@
 package com.java.semantic.model.codefact;
 
-import com.java.semantic.model.query.CurrentGeneration;
+import com.java.semantic.model.query.SelectedGeneration;
 import com.java.semantic.model.index.SourceIndexCoverage;
 import com.java.semantic.model.support.ModelValidation;
 
@@ -9,7 +9,7 @@ import java.util.Objects;
 
 /** One page of search candidates validated against their authoritative facts. */
 public record CodeFactSearchResult(
-        CurrentGeneration generation,
+        SelectedGeneration generation,
         CodeFactSearchQuery query,
         List<CodeFactSummary> facts,
         long totalCount,

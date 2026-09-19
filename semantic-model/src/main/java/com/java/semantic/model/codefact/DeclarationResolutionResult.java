@@ -1,12 +1,12 @@
 package com.java.semantic.model.codefact;
 
-import com.java.semantic.model.query.CurrentGeneration;
+import com.java.semantic.model.query.SelectedGeneration;
 
 import java.util.Optional;
 import java.util.Objects;
 
 /** Selected declaration, when an indexed declaration matches the supplied context. */
-public record DeclarationResolutionResult(CurrentGeneration generation, Optional<CodeFactSummary> declaration) {
+public record DeclarationResolutionResult(SelectedGeneration generation, Optional<CodeFactSummary> declaration) {
 
     public DeclarationResolutionResult {
         generation = Objects.requireNonNull(generation, "generation is required");

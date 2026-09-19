@@ -9,7 +9,7 @@ import com.java.semantic.model.codefact.SourceRange;
 import com.java.semantic.model.codefact.SyntaxPosition;
 import com.java.semantic.model.codefact.SyntaxRange;
 import com.java.semantic.model.codefact.SourceSegmentQuery;
-import com.java.semantic.model.query.CurrentGeneration;
+import com.java.semantic.model.query.SelectedGeneration;
 
 import java.util.Objects;
 import java.util.Optional;
@@ -71,7 +71,7 @@ public final class SourceSliceService {
                 new SyntaxPosition(firstLine, 0), endPosition));
     }
 
-    private static PublishedSourceSegment slice(CurrentGeneration generation, SourceRange location, String content,
+    private static PublishedSourceSegment slice(SelectedGeneration generation, SourceRange location, String content,
                                                 Optional<CodeFactIdentity> evidenceIdentity, int contextLines) {
         int start = offset(content, location.range().start());
         int end = offset(content, location.range().end());

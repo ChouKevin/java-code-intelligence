@@ -13,7 +13,7 @@ import com.java.semantic.model.codefact.TypeMemberQuery;
 import com.java.semantic.model.codefact.TypeMemberResult;
 import com.java.semantic.model.index.IndexCollections;
 import com.java.semantic.model.index.SymbolDocument;
-import com.java.semantic.model.query.CurrentGeneration;
+import com.java.semantic.model.query.SelectedGeneration;
 import com.java.semantic.query.config.SearchAccessPlan;
 import com.mongodb.MongoException;
 import com.mongodb.client.FindIterable;
@@ -52,7 +52,7 @@ public final class PublishedDiscoveryQueryService {
     public DeclarationResolutionResult resolveDeclaration(DeclarationResolutionQuery query) {
         DeclarationResolutionQuery requiredQuery = Objects.requireNonNull(query, "query is required");
         SearchAccessPlan accessPlan = selector.searchAccessPlan(requiredQuery.repositoryId().value());
-        CurrentGeneration current = selector.selectSource(requiredQuery.repositoryId().value(), requiredQuery.revision().value(),
+        SelectedGeneration current = selector.selectSource(requiredQuery.repositoryId().value(), requiredQuery.revision().value(),
                 requiredQuery.context(), CurrentGenerationSelector.SYMBOLS);
         try {
             FindIterable<Document> rows = template.getCollection(IndexCollections.SYMBOLS).find(accessPlan.authorized(Filters.and(
@@ -81,7 +81,7 @@ public final class PublishedDiscoveryQueryService {
     public EventListenerResult discoverEventListeners(EventListenerQuery query) {
         EventListenerQuery requiredQuery = Objects.requireNonNull(query, "query is required");
         SearchAccessPlan accessPlan = selector.searchAccessPlan(requiredQuery.repositoryId().value());
-        CurrentGeneration current = selector.select(requiredQuery.repositoryId().value(), requiredQuery.revision().value(),
+        SelectedGeneration current = selector.select(requiredQuery.repositoryId().value(), requiredQuery.revision().value(),
                 CurrentGenerationSelector.SYMBOLS);
         try {
             org.bson.conversions.Bson filter = accessPlan.authorizedMethod(listenerFilter(current, requiredQuery));
@@ -106,14 +106,14 @@ public final class PublishedDiscoveryQueryService {
         }
     }
 
-    private static org.bson.conversions.Bson listenerFilter(CurrentGeneration current, EventListenerQuery query) {
+    private static org.bson.conversions.Bson listenerFilter(SelectedGeneration current, EventListenerQuery query) {
         return Filters.and(Filters.eq("repoId", current.repositoryId().value()), Filters.eq("generationId", current.generationId().value()),
                 Filters.eq("kind", CodeFactKind.METHOD.name()),
                 Filters.eq("fact.identity.canonicalIdentity.parameterTypes", query.eventType()),
                 Filters.in("annotations.typeName", LISTENER_ANNOTATIONS));
     }
 
-    private EventListenerCandidate listenerCandidate(Document row, SymbolDocument symbol, CurrentGeneration current, EventListenerQuery query) {
+    private EventListenerCandidate listenerCandidate(Document row, SymbolDocument symbol, SelectedGeneration current, EventListenerQuery query) {
         if (!(symbol.fact().identity().canonicalIdentity() instanceof MethodTarget target)
                 || !target.parameterTypes().contains(query.eventType()) || !hasListenerAnnotation(symbol)) {
             throw new IndexContractMismatchException();
@@ -160,7 +160,7 @@ public final class PublishedDiscoveryQueryService {
     public TypeMemberResult discoverTypeMembers(TypeMemberQuery query) {
         TypeMemberQuery requiredQuery = Objects.requireNonNull(query, "query is required");
         SearchAccessPlan accessPlan = selector.searchAccessPlan(requiredQuery.repositoryId().value());
-        CurrentGeneration current = selector.selectSource(requiredQuery.repositoryId().value(), requiredQuery.revision().value(),
+        SelectedGeneration current = selector.selectSource(requiredQuery.repositoryId().value(), requiredQuery.revision().value(),
                 requiredQuery.sourceType(), CurrentGenerationSelector.SYMBOLS);
         try {
             List<String> kinds = requiredQuery.kinds().stream().map(Enum::name).sorted().toList();

@@ -1,13 +1,13 @@
 package com.java.semantic.query.application;
 
 import com.java.semantic.model.codefact.SourceRange;
-import com.java.semantic.model.query.CurrentGeneration;
+import com.java.semantic.model.query.SelectedGeneration;
 
 import java.util.Objects;
 
 /** Application-only source materialization retaining separate displayed and authoritative ranges. */
 public record FactSourceSlice(
-        CurrentGeneration generation,
+        SelectedGeneration generation,
         SourceRange sourceRange,
         SourceRange factRange,
         String fileContent) {

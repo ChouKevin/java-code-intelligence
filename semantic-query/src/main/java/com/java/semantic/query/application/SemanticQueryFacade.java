@@ -23,7 +23,7 @@ import com.java.semantic.model.codefact.TypeMemberQuery;
 import com.java.semantic.model.codefact.TypeMemberResult;
 import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.model.repository.RepositoryRevision;
-import com.java.semantic.model.query.CurrentGeneration;
+import com.java.semantic.model.query.SelectedGeneration;
 import com.java.semantic.model.query.PublishedRelationQuery;
 import com.java.semantic.model.query.PublishedRelationResult;
 
@@ -44,6 +44,8 @@ public final class SemanticQueryFacade {
     private final PublishedEntryPointQueryService entryPointQueryService;
     private final PublishedRelationQueryService relationQueryService;
     private final GitEvidenceReadService gitEvidenceReadService;
+    private final CurrentGenerationSelector currentSelector;
+    private final SelectedSemanticQueryService selectedQueries;
 
     public SemanticQueryFacade(CurrentRepositoryQueryService repositoryQueryService, CodeFactSearchService codeFactSearchService,
                                SourceSliceService sourceSliceService, CodeFactReadService codeFactReadService,
@@ -52,6 +54,20 @@ public final class SemanticQueryFacade {
                                PublishedRelationQueryService relationQueryService) {
         this(repositoryQueryService, codeFactSearchService, sourceSliceService, codeFactReadService, discoveryQueryService,
                 entryPointQueryService, relationQueryService, null);
+    }
+
+    public SemanticQueryFacade(CurrentGenerationSelector currentSelector, SelectedSemanticQueryService selectedQueries,
+                               CurrentRepositoryQueryService repositoryQueryService) {
+        this.repositoryQueryService = Objects.requireNonNull(repositoryQueryService, "repository query service is required");
+        this.currentSelector = Objects.requireNonNull(currentSelector, "current generation selector is required");
+        this.selectedQueries = Objects.requireNonNull(selectedQueries, "selected semantic queries are required");
+        this.codeFactSearchService = null;
+        this.sourceSliceService = null;
+        this.codeFactReadService = null;
+        this.discoveryQueryService = null;
+        this.entryPointQueryService = null;
+        this.relationQueryService = null;
+        this.gitEvidenceReadService = null;
     }
 
     public SemanticQueryFacade(CurrentRepositoryQueryService repositoryQueryService, CodeFactSearchService codeFactSearchService,
@@ -67,6 +83,8 @@ public final class SemanticQueryFacade {
         this.entryPointQueryService = Objects.requireNonNull(entryPointQueryService, "entry point query service is required");
         this.relationQueryService = Objects.requireNonNull(relationQueryService, "relation query service is required");
         this.gitEvidenceReadService = gitEvidenceReadService;
+        this.currentSelector = null;
+        this.selectedQueries = null;
     }
 
     public SemanticQueryContract.GitBranchCollection listGitBranches(SemanticQueryContract.GitBranchRequest request) {
@@ -118,12 +136,17 @@ public final class SemanticQueryFacade {
 
     public SemanticQueryContract.RepositoryItem getRepository(SemanticQueryContract.RepositoryRequest request) {
         SemanticQueryContract.RepositoryRequest requiredRequest = Objects.requireNonNull(request, "repository request is required");
-        CurrentGeneration generation = repositoryQueryService.getRepository(requiredRequest.repositoryId());
+        SelectedGeneration generation = repositoryQueryService.getRepository(requiredRequest.repositoryId());
         return SemanticResultMapper.toRepositoryItem(generation);
     }
 
     public SemanticQueryContract.SearchCodeResult searchCode(SemanticQueryContract.SearchCodeRequest request) {
         SemanticQueryContract.SearchCodeRequest requiredRequest = Objects.requireNonNull(request, "search code request is required");
+        if (Objects.nonNull(selectedQueries)) {
+            SelectedGeneration context = currentSelector.select(requiredRequest.repositoryId(), requiredRequest.revision(),
+                    CurrentGenerationSelector.SEARCH_WITH_SOURCES);
+            return selectedQueries.searchCode(context, requiredRequest);
+        }
         CodeFactSearchQuery query = new CodeFactSearchQuery(new RepositoryId(requiredRequest.repositoryId()),
                 new RepositoryRevision(requiredRequest.revision()), requiredRequest.query(), requiredRequest.kinds(),
                 requiredRequest.packagePrefix(), requiredRequest.offset(), requiredRequest.limit());
@@ -254,7 +277,7 @@ public final class SemanticQueryFacade {
         return relationCollection(result, requiredRequest, items);
     }
 
-    private SemanticQueryContract.EntryPointItem toEntryPointItem(CurrentGeneration generation, String entryPointFactId) {
+    private SemanticQueryContract.EntryPointItem toEntryPointItem(SelectedGeneration generation, String entryPointFactId) {
         CodeFactDetails entryPoint = codeFactReadService.get(readQuery(generation, entryPointFactId));
         if (!(entryPoint.fact().identity().canonicalIdentity() instanceof EntryPointIdentity identity)) {
             throw new IndexContractMismatchException();
@@ -265,7 +288,7 @@ public final class SemanticQueryFacade {
                 toTrigger(identity.entryPointKind(), identity.trigger()));
     }
 
-    private CodeFactDetails readMethod(CurrentGeneration generation, MethodTarget target) {
+    private CodeFactDetails readMethod(SelectedGeneration generation, MethodTarget target) {
         CodeFactIdentity identity = new CodeFactIdentity(generation.repositoryId(), generation.revision(), CodeFactKind.METHOD, target);
         CodeFactDetails details = codeFactReadService.get(readQuery(generation, CodeFactId.from(identity).value()));
         if (details.fact().identity().kind() != CodeFactKind.METHOD) {
@@ -283,13 +306,13 @@ public final class SemanticQueryFacade {
                 target.fact().identity(), request.offset(), request.limit());
     }
 
-    private SemanticQueryContract.ProgramElement programElement(CurrentGeneration generation, CodeFactIdentity identity) {
+    private SemanticQueryContract.ProgramElement programElement(SelectedGeneration generation, CodeFactIdentity identity) {
         CodeFactDetails details = codeFactReadService.get(readQuery(generation, CodeFactId.from(identity).value()));
         FactSourceSlice source = sourceSliceService.factSource(readQuery(generation, details.fact().id().value()), 0);
         return SemanticResultMapper.toProgramElement(details, source);
     }
 
-    private SemanticQueryContract.ProgramElement callee(CurrentGeneration generation, RelationTarget target) {
+    private SemanticQueryContract.ProgramElement callee(SelectedGeneration generation, RelationTarget target) {
         if (target instanceof RelationTarget.Internal internalTarget) {
             return programElement(generation, internalTarget.identity());
         }
@@ -312,7 +335,7 @@ public final class SemanticQueryFacade {
         throw new IndexContractMismatchException();
     }
 
-    private SemanticQueryContract.RelationSite callSite(CurrentGeneration generation,
+    private SemanticQueryContract.RelationSite callSite(SelectedGeneration generation,
                                                         com.java.semantic.model.index.RelationDocument relation) {
         FactSourceSlice source = sourceSliceService.factSource(readQuery(generation, relation.fact().id().value()), 0);
         return new SemanticQueryContract.RelationSite(relation.fact().id().value(),
@@ -336,7 +359,7 @@ public final class SemanticQueryFacade {
         };
     }
 
-    private static CodeFactReadQuery readQuery(CurrentGeneration generation, String factId) {
+    private static CodeFactReadQuery readQuery(SelectedGeneration generation, String factId) {
         return readQuery(generation.repositoryId().value(), generation.revision().value(), factId);
     }
 

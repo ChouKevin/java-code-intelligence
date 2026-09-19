@@ -27,7 +27,7 @@ import com.java.semantic.model.codefact.TypeMemberResult;
 import com.java.semantic.model.index.GenerationId;
 import com.java.semantic.model.index.ManifestDigest;
 import com.java.semantic.model.index.SourceIndexCoverage;
-import com.java.semantic.model.query.CurrentGeneration;
+import com.java.semantic.model.query.SelectedGeneration;
 import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.model.repository.RepositoryRevision;
 import java.time.Instant;
@@ -54,7 +54,7 @@ class SemanticQueryFacadeDiscoveryTest {
 
     @Test
     void lists_type_members_from_an_opaque_type_fact_id() {
-        CurrentGeneration generation = generation();
+        SelectedGeneration generation = generation();
         CodeFactIdentity typeIdentity = new CodeFactIdentity(new RepositoryId(REPOSITORY), new RepositoryRevision(REVISION),
                 CodeFactKind.TYPE, TYPE);
         CodeFactDetails type = new CodeFactDetails(generation, new CodeFact(CodeFactId.from(typeIdentity), typeIdentity), range(), List.of());
@@ -83,7 +83,7 @@ class SemanticQueryFacadeDiscoveryTest {
 
     @Test
     void rejects_a_method_fact_id_when_listing_type_members() {
-        CurrentGeneration generation = generation();
+        SelectedGeneration generation = generation();
         CodeFactIdentity methodIdentity = new CodeFactIdentity(new RepositoryId(REPOSITORY), new RepositoryRevision(REVISION),
                 CodeFactKind.METHOD, new MethodTarget(TYPE, "pay", List.of()));
         CodeFactDetails method = new CodeFactDetails(generation, new CodeFact(CodeFactId.from(methodIdentity), methodIdentity), range(), List.of());
@@ -101,7 +101,7 @@ class SemanticQueryFacadeDiscoveryTest {
 
     @Test
     void omitted_member_kinds_expand_to_all_supported_kinds_in_one_public_result() {
-        CurrentGeneration generation = generation();
+        SelectedGeneration generation = generation();
         CodeFactIdentity typeIdentity = new CodeFactIdentity(new RepositoryId(REPOSITORY), new RepositoryRevision(REVISION),
                 CodeFactKind.TYPE, TYPE);
         List<CodeFactSummary> members = List.of(
@@ -135,7 +135,7 @@ class SemanticQueryFacadeDiscoveryTest {
 
     @Test
     void lists_filtered_entry_points_with_trigger_shape_and_page_metadata() {
-        CurrentGeneration generation = generation();
+        SelectedGeneration generation = generation();
         MethodTarget target = new MethodTarget(TYPE, "pay", List.of());
         EntryPointIdentity entryPointIdentity = new EntryPointIdentity(EntryPointKind.HTTP, target,
                 new EntryPointTrigger(java.util.Optional.of("POST"), java.util.Optional.of("/payments"), java.util.Optional.empty(), java.util.Optional.empty()));
@@ -168,7 +168,7 @@ class SemanticQueryFacadeDiscoveryTest {
 
     @Test
     void preserves_the_exact_fully_qualified_event_type() {
-        CurrentGeneration generation = generation();
+        SelectedGeneration generation = generation();
         MethodTarget target = new MethodTarget(TYPE, "pay", List.of());
         CodeFactIdentity methodFact = new CodeFactIdentity(new RepositoryId(REPOSITORY), new RepositoryRevision(REVISION),
                 CodeFactKind.METHOD, target);
@@ -203,7 +203,7 @@ class SemanticQueryFacadeDiscoveryTest {
                 discovery, entryPoints, mock(PublishedRelationQueryService.class));
     }
 
-    private static CodeFactDetails details(CurrentGeneration generation, CodeFactIdentity identity) {
+    private static CodeFactDetails details(SelectedGeneration generation, CodeFactIdentity identity) {
         return new CodeFactDetails(generation, new CodeFact(CodeFactId.from(identity), identity), range(), List.of());
     }
 
@@ -212,9 +212,9 @@ class SemanticQueryFacadeDiscoveryTest {
         return new CodeFactSummary(new CodeFact(CodeFactId.from(factIdentity), factIdentity), range());
     }
 
-    private static CurrentGeneration generation() {
-        return new CurrentGeneration(new RepositoryId(REPOSITORY), new RepositoryRevision(REVISION), new GenerationId("g1"),
-                new ManifestDigest("a".repeat(64)), Instant.parse("2026-09-02T00:00:00Z"));
+    private static SelectedGeneration generation() {
+        return new SelectedGeneration(new RepositoryId(REPOSITORY), new RepositoryRevision(REVISION), new GenerationId("g1"),
+                new ManifestDigest("a".repeat(64)));
     }
 
     private static SourceRange range() {

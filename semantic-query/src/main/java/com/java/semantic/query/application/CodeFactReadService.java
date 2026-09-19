@@ -18,7 +18,7 @@ import com.java.semantic.model.index.RelationDocument;
 import com.java.semantic.model.index.SourceArtifactId;
 import com.java.semantic.model.index.SymbolDocument;
 import com.java.semantic.model.index.persistence.EntryPointPersistence;
-import com.java.semantic.model.query.CurrentGeneration;
+import com.java.semantic.model.query.SelectedGeneration;
 import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.query.config.SearchAccessPlan;
 import com.mongodb.MongoException;
@@ -54,7 +54,7 @@ public final class CodeFactReadService {
     public CodeFactDetails get(CodeFactReadQuery query) {
         CodeFactReadQuery request = Objects.requireNonNull(query, "code fact read query is required");
         SearchAccessPlan accessPlan = selector.searchAccessPlan(request.repositoryId().value());
-        CurrentGeneration searchGeneration = selector.select(request.repositoryId().value(), request.revision().value(),
+        SelectedGeneration searchGeneration = selector.select(request.repositoryId().value(), request.revision().value(),
                 new ProjectionRequirements(EnumSet.of(ProjectionName.SEARCH)));
         try {
             Bson filter = accessPlan.authorized(Filters.and(Filters.eq("repoId", searchGeneration.repositoryId().value()),
@@ -63,7 +63,7 @@ public final class CodeFactReadService {
                     .maxTime(storageTimeout.toMillis(), TimeUnit.MILLISECONDS).first();
             if (Objects.isNull(row)) { throw new CodeFactNotFoundException(); }
             SearchRow search = searchRow(row, searchGeneration);
-            CurrentGeneration current = selector.select(request.repositoryId().value(), request.revision().value(),
+            SelectedGeneration current = selector.select(request.repositoryId().value(), request.revision().value(),
                     requirementsForSearchKinds(Set.of(search.kind())));
             CodeFactDetails details = authoritative(current, search.kind(), search.factId());
             verifySearchRow(search, details, current);
@@ -81,7 +81,7 @@ public final class CodeFactReadService {
     /** Internal exact-identity helper for source slices that have not yet been handed a search hit. */
     CodeFactDetails get(String repositoryId, String revision, CodeFactIdentity identity) {
         CodeFactIdentity expectedIdentity = Objects.requireNonNull(identity, "code fact identity is required");
-        CurrentGeneration current = selector.selectCodeFact(repositoryId, revision, expectedIdentity);
+        SelectedGeneration current = selector.selectCodeFact(repositoryId, revision, expectedIdentity);
         try {
             CodeFactDetails details = authoritative(current, expectedIdentity.kind(), CodeFactId.from(expectedIdentity));
             if (!expectedIdentity.equals(details.fact().identity())) { throw new IndexContractMismatchException(); }
@@ -95,8 +95,8 @@ public final class CodeFactReadService {
         }
     }
 
-    CodeFactDetails authoritative(Document row, CurrentGeneration current) {
-        CurrentGeneration selected = Objects.requireNonNull(current, "current generation is required");
+    CodeFactDetails authoritative(Document row, SelectedGeneration current) {
+        SelectedGeneration selected = Objects.requireNonNull(current, "selected generation is required");
         try {
             SearchRow search = searchRow(row, selected);
             CodeFactDetails details = authoritative(selected, search.kind(), search.factId());
@@ -119,7 +119,7 @@ public final class CodeFactReadService {
         return new ProjectionRequirements(projections);
     }
 
-    private CodeFactDetails authoritative(CurrentGeneration current, CodeFactKind kind, CodeFactId id) {
+    private CodeFactDetails authoritative(SelectedGeneration current, CodeFactKind kind, CodeFactId id) {
         return switch (authorityFor(kind)) {
             case SYMBOLS -> symbol(current, id);
             case RELATIONS -> relation(current, id);
@@ -128,7 +128,7 @@ public final class CodeFactReadService {
         };
     }
 
-    private CodeFactDetails symbol(CurrentGeneration current, CodeFactId id) {
+    private CodeFactDetails symbol(SelectedGeneration current, CodeFactId id) {
         Document document = template.getCollection(IndexCollections.SYMBOLS).find(Filters.and(
                 Filters.eq("repoId", current.repositoryId().value()), Filters.eq("generationId", current.generationId().value()),
                 Filters.eq("symbolId", id.value()))).maxTime(storageTimeout.toMillis(), TimeUnit.MILLISECONDS).first();
@@ -138,7 +138,7 @@ public final class CodeFactReadService {
         return new CodeFactDetails(current, symbol.fact(), symbol.range(), symbol.annotations());
     }
 
-    private CodeFactDetails relation(CurrentGeneration current, CodeFactId id) {
+    private CodeFactDetails relation(SelectedGeneration current, CodeFactId id) {
         Document document = template.getCollection(IndexCollections.RELATIONS).find(Filters.and(
                 Filters.eq("repoId", current.repositoryId().value()), Filters.eq("generationId", current.generationId().value()),
                 Filters.eq("relationId", id.value()))).maxTime(storageTimeout.toMillis(), TimeUnit.MILLISECONDS).first();
@@ -148,7 +148,7 @@ public final class CodeFactReadService {
         return new CodeFactDetails(current, relation.fact(), relation.range(), List.of());
     }
 
-    private CodeFactDetails entryPoint(CurrentGeneration current, CodeFactId id) {
+    private CodeFactDetails entryPoint(SelectedGeneration current, CodeFactId id) {
         Document document = template.getCollection(IndexCollections.ENTRY_POINTS).find(Filters.and(
                 Filters.eq("repoId", current.repositoryId().value()), Filters.eq("generationId", current.generationId().value()),
                 Filters.eq("entryPointId", id.value()))).maxTime(storageTimeout.toMillis(), TimeUnit.MILLISECONDS).first();
@@ -158,7 +158,7 @@ public final class CodeFactReadService {
         return new CodeFactDetails(current, entryPoint.fact(), entryPoint.range(), List.of());
     }
 
-    private static SearchRow searchRow(Document row, CurrentGeneration current) {
+    private static SearchRow searchRow(Document row, SelectedGeneration current) {
         Document stored = Objects.requireNonNull(row, "search row is required");
         if (!current.repositoryId().value().equals(requiredText(stored, "repoId"))
                 || !current.generationId().value().equals(requiredText(stored, "generationId"))) { throw new IndexContractMismatchException(); }
@@ -175,7 +175,7 @@ public final class CodeFactReadService {
         }
     }
 
-    private static void verifySearchRow(SearchRow row, CodeFactDetails details, CurrentGeneration current) {
+    private static void verifySearchRow(SearchRow row, CodeFactDetails details, SelectedGeneration current) {
         CodeFact fact = details.fact();
         if (!current.repositoryId().equals(fact.identity().repositoryId()) || !current.revision().equals(fact.identity().repositoryRevision())
                 || !row.factId().equals(fact.id()) || row.kind() != fact.identity().kind()
@@ -183,7 +183,7 @@ public final class CodeFactReadService {
                 || row.authority() != authorityFor(fact.identity().kind())) { throw new IndexContractMismatchException(); }
     }
 
-    static SymbolDocument decode(Document stored, CurrentGeneration current, MongoTemplate template) {
+    static SymbolDocument decode(Document stored, SelectedGeneration current, MongoTemplate template) {
         try {
             Document converted = new Document(stored);
             converted.put("generationId", new Document("value", current.generationId().value()));
@@ -202,7 +202,7 @@ public final class CodeFactReadService {
         }
     }
 
-    static RelationDocument decodeRelation(Document stored, CurrentGeneration current, MongoTemplate template) {
+    static RelationDocument decodeRelation(Document stored, SelectedGeneration current, MongoTemplate template) {
         try {
             CodeFact fact = template.getConverter().read(CodeFact.class, stored.get("fact", Document.class));
             SourceArtifactId artifactId = template.getConverter().read(SourceArtifactId.class, stored.get("sourceArtifactId", Document.class));
@@ -228,7 +228,7 @@ public final class CodeFactReadService {
         }
     }
 
-    static EntryPointDocument decodeEntryPoint(Document stored, CurrentGeneration current, MongoTemplate template) {
+    static EntryPointDocument decodeEntryPoint(Document stored, SelectedGeneration current, MongoTemplate template) {
         try {
             EntryPointPersistence persisted = template.getConverter().read(EntryPointPersistence.class, stored);
             EntryPointDocument entryPoint = persisted.toModel();

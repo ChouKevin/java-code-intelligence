@@ -1,13 +1,13 @@
 package com.java.semantic.model.codefact;
 
-import com.java.semantic.model.query.CurrentGeneration;
+import com.java.semantic.model.query.SelectedGeneration;
 
 import java.util.List;
 import java.util.Objects;
 
 /** Authoritative exact fact payload, deliberately excluding graph and business interpretation. */
 public record CodeFactDetails(
-        CurrentGeneration generation,
+        SelectedGeneration generation,
         CodeFact fact,
         SourceRange location,
         List<AnnotationFact> annotations) {

@@ -18,7 +18,7 @@ import com.java.semantic.model.codefact.SyntaxPosition;
 import com.java.semantic.model.codefact.SyntaxRange;
 import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.model.repository.RepositoryRevision;
-import com.java.semantic.model.query.CurrentGeneration;
+import com.java.semantic.model.query.SelectedGeneration;
 import com.java.semantic.model.index.GenerationId;
 import com.java.semantic.model.index.ManifestDigest;
 import com.java.semantic.model.index.RelationDocument;
@@ -225,9 +225,9 @@ class SemanticQueryFacadeRelationTest {
                 "src/main/java/example/orders/" + className + ".java");
     }
 
-    private static CurrentGeneration generation() {
-        return new CurrentGeneration(new RepositoryId(REPOSITORY), new RepositoryRevision(REVISION), new GenerationId("g1"),
-                new ManifestDigest("a".repeat(64)), Instant.parse("2026-09-02T00:00:00Z"));
+    private static SelectedGeneration generation() {
+        return new SelectedGeneration(new RepositoryId(REPOSITORY), new RepositoryRevision(REVISION), new GenerationId("g1"),
+                new ManifestDigest("a".repeat(64)));
     }
 
     private static SourceRange range() {

@@ -5,7 +5,7 @@ import com.java.semantic.model.codefact.CodeFactIdentity;
 import com.java.semantic.model.codefact.CodeFact;
 import com.java.semantic.model.index.IndexCollections;
 import com.java.semantic.model.index.SymbolDocument;
-import com.java.semantic.model.query.CurrentGeneration;
+import com.java.semantic.model.query.SelectedGeneration;
 import com.mongodb.MongoException;
 import com.mongodb.client.model.Filters;
 import org.bson.Document;
@@ -29,7 +29,7 @@ public final class CurrentSymbolQueryService {
     }
 
     public CurrentSymbol getSymbol(String repositoryId, String revision, CodeFactIdentity identity) {
-        CurrentGeneration current = selector.selectCodeFact(repositoryId, revision, identity);
+        SelectedGeneration current = selector.selectCodeFact(repositoryId, revision, identity);
         CodeFactIdentity requestedIdentity = Objects.requireNonNull(identity, "code fact identity is required");
         CodeFactId symbolId = CodeFactId.from(requestedIdentity);
         try {
@@ -55,7 +55,7 @@ public final class CurrentSymbolQueryService {
         }
     }
 
-    private SymbolDocument decodeSymbol(Document stored, CurrentGeneration current) {
+    private SymbolDocument decodeSymbol(Document stored, SelectedGeneration current) {
         try {
             Document converterDocument = new Document(stored);
             converterDocument.put("generationId", new Document("value", current.generationId().value()));
