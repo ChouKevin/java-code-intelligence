@@ -77,7 +77,7 @@ public final class JdtLsEffectiveEnvironmentInspector {
                 settings = merge(settings, profileSettings);
             }
             ExecuteCommandParams classpathCommand = new ExecuteCommandParams(
-                    GET_CLASSPATHS, new ArrayList<>(List.of(projectUri, "{\"scope\":\"runtime\"}")));
+                    GET_CLASSPATHS, new ArrayList<>(List.of(projectUri, "{\"scope\":\"test\"}")));
             Map<String, Object> classpaths = objectMap(command(session, classpathCommand), GET_CLASSPATHS);
             assertClasspathProjectRoot(classpaths, projectRoot, snapshot.root());
             importedProjects.add(new ImportedProject(projectRoot, settings,

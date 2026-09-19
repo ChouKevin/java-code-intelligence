@@ -85,9 +85,8 @@ class IndexBuildServiceTest {
         when(preparedAnalysis.semanticService()).thenReturn(boundSemanticService);
         when(incrementalBuilder.assemble(any(), any(), any())).thenReturn(new IncrementalGenerationBuilder.BuildSelection(
                 false, mock(com.java.semantic.indexer.incremental.IncrementalIndexPlan.class), preparedPlan));
-        when(exporter.export(job.repositoryId(), target.revision(), target.generationId(), preparedPlan)).thenReturn(List.of());
-        when(exporter.export(job.repositoryId(), target.revision(), target.generationId(), preparedPlan, boundSemanticService))
-                .thenReturn(List.of());
+        when(exporter.export(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.eq(preparedAnalysis)))
+                .thenReturn(new RepositoryIndexExport(List.of(), mock(com.java.semantic.model.index.SemanticAnalysisEvidence.class)));
         when(validator.validate(any(), org.mockito.ArgumentMatchers.eq(target.revision()),
                 org.mockito.ArgumentMatchers.eq(target.revision()))).thenReturn(validation);
         when(jobs.prepareBuildPublication(job, digest)).thenReturn(Optional.of(intent));
@@ -103,7 +102,7 @@ class IndexBuildServiceTest {
         assertThat(targetCaptor.getValue().snapshot().revision()).isEqualTo(target.revision());
         assertThat(targetCaptor.getValue().jobId()).isEqualTo(job.id().value());
         assertThat(targetCaptor.getValue().stage()).isEqualTo("CODEBASE");
-        verify(exporter).export(job.repositoryId(), target.revision(), target.generationId(), preparedPlan, boundSemanticService);
+        verify(exporter).export(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.eq(preparedAnalysis));
         verifyNoInteractions(planner);
     }
 
@@ -147,7 +146,8 @@ class IndexBuildServiceTest {
         when(planner.plan(checkout.root())).thenReturn(plan);
         when(incrementalBuilder.assemble(org.mockito.ArgumentMatchers.eq(job), org.mockito.ArgumentMatchers.any(),
                 org.mockito.ArgumentMatchers.eq(plan))).thenReturn(selection);
-        when(exporter.export(job.repositoryId(), target.revision(), target.generationId(), plan)).thenReturn(List.of());
+        when(exporter.export(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any()))
+                .thenReturn(new RepositoryIndexExport(List.of(), mock(com.java.semantic.model.index.SemanticAnalysisEvidence.class)));
         when(validator.validate(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.eq(target.revision()),
                 org.mockito.ArgumentMatchers.eq(target.revision()))).thenReturn(result);
         when(jobs.prepareBuildPublication(job, digest)).thenReturn(Optional.of(intent));

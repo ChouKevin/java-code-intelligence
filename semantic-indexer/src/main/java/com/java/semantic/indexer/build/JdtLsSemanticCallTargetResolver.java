@@ -3,9 +3,9 @@ package com.java.semantic.indexer.build;
 import com.java.semantic.model.codefact.MethodTarget;
 import com.java.semantic.model.codefact.SyntaxPosition;
 import com.java.semantic.model.codefact.SyntaxRange;
+import com.java.semantic.model.index.SemanticAnalysisEvidence;
 import com.java.semantic.repository.domain.RepositorySnapshot;
 import com.java.semantic.semantic.domain.JavaSemanticService;
-import com.java.semantic.semantic.domain.SemanticCall;
 import com.java.semantic.semantic.domain.SemanticCallResolution;
 import com.java.semantic.semantic.domain.SemanticCallResolutionStatus;
 import com.java.semantic.semantic.domain.SemanticCallSite;
@@ -14,23 +14,17 @@ import com.java.semantic.semantic.domain.SemanticMethod;
 import com.java.semantic.semantic.domain.SemanticPosition;
 import com.java.semantic.semantic.domain.SemanticRange;
 import com.java.semantic.semantic.domain.SemanticSourceClassification;
-import com.java.semantic.syntax.domain.InvocationTarget;
 import com.java.semantic.syntax.domain.SourceMethodMetadata;
 import com.java.semantic.syntax.domain.SyntaxInvocation;
-import java.util.Optional;
+import java.util.Objects;
 
-/** Uses the adapter-neutral semantic contract to enrich Indexer call projections. */
+/** Uses the adapter-neutral semantic contract to enrich one prepared export. */
 public final class JdtLsSemanticCallTargetResolver implements SemanticCallTargetResolver {
     private final JavaSemanticService semanticService;
-    private final ThreadLocal<ResolutionAccounting> accounting = ThreadLocal.withInitial(ResolutionAccounting::new);
+    private final ResolutionAccounting accounting = new ResolutionAccounting();
 
     public JdtLsSemanticCallTargetResolver(JavaSemanticService semanticService) {
-        this.semanticService = java.util.Objects.requireNonNull(semanticService, "semantic service is required");
-    }
-
-    @Override
-    public void beginExport() {
-        accounting.set(new ResolutionAccounting());
+        this.semanticService = Objects.requireNonNull(semanticService, "semantic service is required");
     }
 
     @Override
@@ -42,44 +36,21 @@ public final class JdtLsSemanticCallTargetResolver implements SemanticCallTarget
     }
 
     @Override
-    public Optional<InvocationTarget> resolve(RepositorySnapshot snapshot, SourceMethodMetadata caller, SyntaxInvocation invocation) {
-        return resolve(snapshot, caller, invocation, false);
-    }
-
-    @Override
-    public Optional<InvocationTarget> resolve(RepositorySnapshot snapshot, SourceMethodMetadata caller,
-                                              SyntaxInvocation invocation, boolean localTargetExpected) {
-        if (localTargetExpected) {
-            accounting.get().expectedLocal++;
-        }
-        SemanticCallResolution resolution = semanticService.resolveCallResolutionAt(snapshot, semanticMethod(snapshot, caller),
+    public SemanticCallResolution resolve(RepositorySnapshot snapshot, SourceMethodMetadata caller,
+                                          SyntaxInvocation invocation, boolean localTargetExpected) {
+        SemanticCallResolution response = semanticService.resolveCallResolutionAt(snapshot, semanticMethod(snapshot, caller),
                 new SemanticCallSite(range(invocation.range()), position(invocation.resolutionAnchor())));
-        if (resolution.status() != SemanticCallResolutionStatus.RESOLVED) {
-            return invocation.resolvedTarget();
-        }
-        SemanticCall call = resolution.call().orElseThrow();
-        Optional<InvocationTarget> resolved = call.target().map(target -> new InvocationTarget(target.packageName(),
-                target.className(), target.methodName(), target.parameterTypes()));
-        if (resolved.isPresent()) {
-            if (localTargetExpected) {
-                accounting.get().resolvedLocal++;
-            }
-            return resolved;
-        }
-        return invocation.resolvedTarget();
+        SemanticCallResolution resolution = response.status() == SemanticCallResolutionStatus.RESOLVED
+                && response.call().orElseThrow().target().isEmpty()
+                ? SemanticCallResolution.unresolved()
+                : response;
+        accounting.record(resolution);
+        return resolution;
     }
 
     @Override
-    public void requireSemanticResolution() {
-        ResolutionAccounting exportAccounting = accounting.get();
-        if (exportAccounting.expectedLocal > 0 && exportAccounting.resolvedLocal == 0) {
-            throw new IllegalStateException("JDT LS did not resolve any export call site");
-        }
-    }
-
-    @Override
-    public void endExport() {
-        accounting.remove();
+    public SemanticAnalysisEvidence.ResolutionCoverage snapshot() {
+        return accounting.snapshot();
     }
 
     private static SemanticMethod semanticMethod(RepositorySnapshot snapshot, SourceMethodMetadata caller) {
@@ -102,7 +73,28 @@ public final class JdtLsSemanticCallTargetResolver implements SemanticCallTarget
     }
 
     private static final class ResolutionAccounting {
-        private int expectedLocal;
-        private int resolvedLocal;
+        private long attempted;
+        private long resolved;
+        private long unresolved;
+        private long ambiguous;
+        private long external;
+
+        private void record(SemanticCallResolution resolution) {
+            attempted++;
+            if (resolution.status() == SemanticCallResolutionStatus.RESOLVED) {
+                resolved++;
+                if (resolution.call().orElseThrow().external()) {
+                    external++;
+                }
+            } else if (resolution.status() == SemanticCallResolutionStatus.UNRESOLVED) {
+                unresolved++;
+            } else {
+                ambiguous++;
+            }
+        }
+
+        private SemanticAnalysisEvidence.ResolutionCoverage snapshot() {
+            return new SemanticAnalysisEvidence.ResolutionCoverage(attempted, resolved, unresolved, ambiguous, external);
+        }
     }
 }

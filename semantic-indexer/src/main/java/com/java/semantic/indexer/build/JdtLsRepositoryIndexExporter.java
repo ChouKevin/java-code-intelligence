@@ -1,109 +1,126 @@
 package com.java.semantic.indexer.build;
 
-import com.java.semantic.model.index.GenerationId;
+import com.java.semantic.indexer.analysis.PreparedAnalysis;
+import com.java.semantic.indexer.store.GenerationWriteContext;
 import com.java.semantic.model.index.EntryPointDocument;
 import com.java.semantic.model.index.RelationDocument;
 import com.java.semantic.model.index.SearchDocument;
+import com.java.semantic.model.index.SemanticAnalysisEvidence;
+import com.java.semantic.model.index.GenerationId;
 import com.java.semantic.model.index.SourceArtifactDocument;
-import com.java.semantic.model.index.SymbolDocument;
 import com.java.semantic.model.index.SourceIndexIssue;
 import com.java.semantic.model.index.SourceIndexScope;
+import com.java.semantic.model.index.SymbolDocument;
 import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.model.repository.RepositoryRevision;
 import com.java.semantic.repository.domain.RepositorySnapshot;
 import com.java.semantic.semantic.domain.JavaSemanticService;
 import com.java.semantic.syntax.adapter.jdt.JdtSyntaxExtractionService;
 import com.java.semantic.syntax.domain.RepositorySyntax;
-import com.java.semantic.syntax.domain.SourceMethodMetadata;
 import com.java.semantic.syntax.domain.SourceExtractionStatus;
+import com.java.semantic.syntax.domain.SourceMethodMetadata;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.NoSuchFileException;
 import java.util.ArrayList;
 import java.util.Comparator;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.LinkedHashMap;
 
-/** Production exporter: syntax extraction stays in Indexer and model documents contain no JDT/LSP types. */
+/** Production exporter: every export is bound to a prepared semantic lease. */
 public final class JdtLsRepositoryIndexExporter implements RepositoryIndexExporter {
     private final JdtSyntaxExtractionService syntaxExtractionService;
     private final SyntaxSymbolProjector symbolProjector;
     private final SemanticRelationProjector relationProjector;
+    public static JdtLsRepositoryIndexExporter production() {
+        return new JdtLsRepositoryIndexExporter(new JdtSyntaxExtractionService(), new SyntaxSymbolProjector(),
+                new SemanticRelationProjector(), new EntryPointProjector(), new SearchProjector());
+    }
+
     private final EntryPointProjector entryPointProjector;
     private final SearchProjector searchProjector;
-    private final SemanticCallTargetResolver semanticCallTargetResolver;
 
-    public JdtLsRepositoryIndexExporter() {
-        this(new JdtSyntaxExtractionService(), new SyntaxSymbolProjector(), new SemanticRelationProjector(),
-                new EntryPointProjector(), new SearchProjector(), SemanticCallTargetResolver.syntaxOnly());
-    }
-
-    /** Production constructor: call projection is backed by the ready JDT LS workspace. */
-    public JdtLsRepositoryIndexExporter(JavaSemanticService semanticService) {
-        this(new JdtSyntaxExtractionService(), new SyntaxSymbolProjector(), new SemanticRelationProjector(),
-                new EntryPointProjector(), new SearchProjector(), new JdtLsSemanticCallTargetResolver(semanticService));
-    }
-
-    JdtLsRepositoryIndexExporter(JdtSyntaxExtractionService syntaxExtractionService, SyntaxSymbolProjector symbolProjector,
-                                 SemanticRelationProjector relationProjector, EntryPointProjector entryPointProjector,
-                                 SearchProjector searchProjector, SemanticCallTargetResolver semanticCallTargetResolver) {
+    public JdtLsRepositoryIndexExporter(JdtSyntaxExtractionService syntaxExtractionService, SyntaxSymbolProjector symbolProjector,
+                                        SemanticRelationProjector relationProjector, EntryPointProjector entryPointProjector,
+                                        SearchProjector searchProjector) {
         this.syntaxExtractionService = Objects.requireNonNull(syntaxExtractionService, "syntax extraction service is required");
         this.symbolProjector = Objects.requireNonNull(symbolProjector, "symbol projector is required");
         this.relationProjector = Objects.requireNonNull(relationProjector, "relation projector is required");
         this.entryPointProjector = Objects.requireNonNull(entryPointProjector, "entry point projector is required");
         this.searchProjector = Objects.requireNonNull(searchProjector, "search projector is required");
-        this.semanticCallTargetResolver = Objects.requireNonNull(semanticCallTargetResolver, "semantic call target resolver is required");
     }
+    /** Test-only syntax projector; it cannot return semantic evidence or seal a generation. */
+    JdtLsRepositoryIndexExporter() {
+        this(new JdtSyntaxExtractionService(), new SyntaxSymbolProjector(), new SemanticRelationProjector(),
+                new EntryPointProjector(), new SearchProjector());
+    }
+
+    /** Test-only compatibility constructor. Production callers must use {@link #export(GenerationWriteContext, PreparedAnalysis)}. */
+    JdtLsRepositoryIndexExporter(JavaSemanticService semanticService) {
+        this();
+    }
+
+    /** Test-only compatibility constructor. */
+    JdtLsRepositoryIndexExporter(JdtSyntaxExtractionService syntaxExtractionService, SyntaxSymbolProjector symbolProjector,
+                                 SemanticRelationProjector relationProjector, EntryPointProjector entryPointProjector,
+                                 SearchProjector searchProjector, SemanticCallTargetResolver resolver) {
+        this(syntaxExtractionService, symbolProjector, relationProjector, entryPointProjector, searchProjector);
+    }
+
+    List<SourceIndexBatch> export(RepositoryId repositoryId, RepositoryRevision revision, GenerationId generationId,
+                                  FullIndexPlan plan) {
+        throw new UnsupportedOperationException("test-only syntax export must use an explicit syntax projector");
+    }
+
+    List<SourceIndexBatch> export(RepositoryId repositoryId, RepositoryRevision revision, GenerationId generationId,
+                                  FullIndexPlan plan, JavaSemanticService semanticService) {
+        throw new UnsupportedOperationException("test-only semantic export must use prepared analysis");
+    }
+
 
     @Override
-    public List<SourceIndexBatch> export(RepositoryId repositoryId, RepositoryRevision revision, GenerationId generationId,
-                                         FullIndexPlan plan) {
-        return export(repositoryId, revision, generationId, plan, semanticCallTargetResolver);
-    }
-
-    @Override
-    public List<SourceIndexBatch> export(RepositoryId repositoryId, RepositoryRevision revision, GenerationId generationId,
-                                         FullIndexPlan plan, JavaSemanticService semanticService) {
-        return export(repositoryId, revision, generationId, plan, new JdtLsSemanticCallTargetResolver(semanticService));
-    }
-
-    private List<SourceIndexBatch> export(RepositoryId repositoryId, RepositoryRevision revision, GenerationId generationId,
-                                          FullIndexPlan plan, SemanticCallTargetResolver resolver) {
-        resolver.beginExport();
-        try {
-            validatePlannedSources(plan, "before syntax extraction");
-            RepositorySyntax syntax = plan.importedInputs()
-                    ? syntaxExtractionService.extract(plan.repositoryRoot(), plan.sourceRoots(),
-                            plan.effectiveCompilerOptions())
-                    : syntaxExtractionService.extract(plan.repositoryRoot());
-            validatePlannedSources(plan, "after syntax extraction");
-            Map<String, Optional<SourceIndexIssue>> extractionIssues = extractionIssues(syntax);
-            RepositorySnapshot snapshot = new RepositorySnapshot(repositoryId, plan.repositoryRoot(), revision);
-            semanticWorkspaceProbe(syntax).ifPresent(method -> resolver.verifySemanticWorkspace(snapshot, method));
-            List<SourceIndexBatch> batches = plan.sources().stream().flatMap(source -> {
-            List<SymbolDocument> symbols = new ArrayList<>(symbolProjector.project(
-                    repositoryId, revision, generationId, syntax, source.sourcePath(), source.contentArtifact()));
-            symbols.addAll(symbolProjector.projectMapperStatements(repositoryId, revision, generationId, syntax,
-                    source.sourcePath(), source.contentArtifact()));
-            symbols = symbols.stream().sorted(java.util.Comparator.comparing(document -> document.fact().id().value())).toList();
-            List<RelationDocument> relations = relationProjector.project(repositoryId, revision, generationId,
-                    syntax, source.sourcePath(), source.contentArtifact(), plan.repositoryRoot(), snapshot, resolver);
-            List<EntryPointDocument> entryPoints = entryPointProjector.project(repositoryId, revision,
-                    generationId, syntax, source.sourcePath());
+    public RepositoryIndexExport export(GenerationWriteContext context, PreparedAnalysis analysis) {
+        GenerationWriteContext requiredContext = Objects.requireNonNull(context, "generation write context is required");
+        PreparedAnalysis prepared = Objects.requireNonNull(analysis, "prepared analysis is required");
+        RepositorySnapshot snapshot = prepared.snapshot();
+        if (!requiredContext.repositoryId().equals(snapshot.repositoryId())) {
+            throw new IllegalArgumentException("prepared analysis repository differs from generation context");
+        }
+        prepared.verifyUnchangedInputs();
+        FullIndexPlan plan = prepared.plan();
+        SemanticCallTargetResolver resolver = new JdtLsSemanticCallTargetResolver(prepared.semanticService());
+        validatePlannedSources(plan, "before syntax extraction");
+        RepositorySyntax syntax = plan.importedInputs()
+                ? syntaxExtractionService.extract(plan.repositoryRoot(), plan.sourceRoots(), plan.effectiveCompilerOptions())
+                : syntaxExtractionService.extract(plan.repositoryRoot());
+        validatePlannedSources(plan, "after syntax extraction");
+        Map<String, Optional<SourceIndexIssue>> extractionIssues = extractionIssues(syntax);
+        semanticWorkspaceProbe(syntax).ifPresent(method -> resolver.verifySemanticWorkspace(snapshot, method));
+        List<SourceIndexBatch> batches = plan.sources().stream().flatMap(source -> {
+            List<SymbolDocument> symbols = new ArrayList<>(symbolProjector.project(snapshot.repositoryId(), snapshot.revision(),
+                    requiredContext.generationId(), syntax, source.sourcePath(), source.contentArtifact()));
+            symbols.addAll(symbolProjector.projectMapperStatements(snapshot.repositoryId(), snapshot.revision(),
+                    requiredContext.generationId(), syntax, source.sourcePath(), source.contentArtifact()));
+            symbols = symbols.stream().sorted(Comparator.comparing(document -> document.fact().id().value())).toList();
+            List<RelationDocument> relations = relationProjector.project(snapshot.repositoryId(), snapshot.revision(),
+                    requiredContext.generationId(), syntax, source.sourcePath(), source.contentArtifact(), plan.repositoryRoot(),
+                    snapshot, resolver);
+            List<EntryPointDocument> entryPoints = entryPointProjector.project(snapshot.repositoryId(), snapshot.revision(),
+                    requiredContext.generationId(), syntax, source.sourcePath());
             SourceIndexScope sourceScope = SourceIndexScope.from(symbols);
-            return split(repositoryId, generationId, source.sourcePath(), source.contentArtifact(),
+            return split(snapshot.repositoryId(), requiredContext.generationId(), source.sourcePath(), source.contentArtifact(),
                     extractionIssues.getOrDefault(source.sourcePath(), Optional.empty()), sourceScope, symbols, relations, entryPoints,
                     searchProjector.project(symbols, relations, entryPoints)).stream();
-            }).toList();
-            resolver.requireSemanticResolution();
-            return batches;
-        } finally {
-            resolver.endExport();
-        }
+        }).toList();
+        prepared.verifyUnchangedInputs();
+        SemanticAnalysisEvidence readiness = prepared.readinessEvidence();
+        SemanticAnalysisEvidence evidence = new SemanticAnalysisEvidence(readiness.contractVersion(), readiness.fingerprintDigest(),
+                readiness.buildStatus(), readiness.projects(), resolver.snapshot(), readiness.limitations());
+        return new RepositoryIndexExport(batches, evidence);
     }
 
     private static void validatePlannedSources(FullIndexPlan plan, String boundary) {

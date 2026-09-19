@@ -1,7 +1,12 @@
 package com.java.semantic.indexer.build;
 
+import com.java.semantic.indexer.analysis.PreparedAnalysis;
+import com.java.semantic.indexer.store.GenerationWriteContext;
+import com.java.semantic.model.index.AnalysisFingerprint;
+import com.java.semantic.model.index.AnalysisInputs;
 import com.java.semantic.model.index.GenerationId;
-import com.java.semantic.model.index.SourceArtifactDocument;
+import com.java.semantic.model.index.IndexSchemaContract;
+import com.java.semantic.model.index.SemanticAnalysisEvidence;
 import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.model.repository.RepositoryRevision;
 import com.java.semantic.repository.domain.RepositorySnapshot;
@@ -20,20 +25,14 @@ import com.java.semantic.semantic.domain.SemanticReferenceAnchor;
 import com.java.semantic.semantic.domain.SemanticReferenceLocation;
 import com.java.semantic.semantic.domain.SemanticResolutionOrigin;
 import com.java.semantic.semantic.domain.SemanticSourceClassification;
-import com.java.semantic.syntax.adapter.jdt.JdtSyntaxExtractionService;
-import com.java.semantic.syntax.domain.RepositorySyntax;
+import com.java.semantic.model.codefact.ExternalTarget;
+import com.java.semantic.model.codefact.RelationTarget;
 import java.io.IOException;
-import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.concurrent.CyclicBarrier;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
-import org.eclipse.jdt.core.JavaCore;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -46,176 +45,106 @@ class JdtLsRepositoryIndexExporterSemanticSessionTest {
     Path repository;
 
     @Test
-    void exports_methods_without_invocations_after_proving_the_semantic_workspace_is_available() throws IOException {
-        writeSource("package sample; class NoCalls { void work() { } }");
-        RecordingSemanticService semanticService = new RecordingSemanticService(false);
-
-        new JdtLsRepositoryIndexExporter(semanticService).export(new RepositoryId("no-calls"), revision(),
-                new GenerationId("no-calls-generation"), new FullIndexPlanner().plan(repository));
-
-        assertThat(semanticService.workspaceChecks()).isPositive();
-    }
-
-    @Test
-    void exports_only_the_prepared_custom_root_with_its_effective_compiler_options() throws IOException {
-        writeSource("package sample; class DefaultRoot { }");
-        Path customRoot = Files.createDirectories(repository.resolve("src/production/java"));
-        Path customSource = customRoot.resolve("sample/Configured.java");
-        Files.createDirectories(customSource.getParent());
-        String source = "package sample; public record Configured(String value) { }\n";
-        Files.writeString(customSource, source);
-        FullIndexPlan plan = new FullIndexPlan(repository, List.of(new FullIndexPlan.SourceInput(
-                "src/production/java/sample/Configured.java", customSource, SourceArtifactDocument.create(source))),
-                List.of(customRoot), Map.of(
-                JavaCore.COMPILER_SOURCE, JavaCore.VERSION_1_8,
-                JavaCore.COMPILER_COMPLIANCE, JavaCore.VERSION_1_8,
-                JavaCore.COMPILER_CODEGEN_TARGET_PLATFORM, JavaCore.VERSION_1_8));
-
-        List<SourceIndexBatch> batches = new JdtLsRepositoryIndexExporter().export(new RepositoryId("prepared-plan"), revision(),
-                new GenerationId("prepared-plan-generation"), plan);
-
-        assertThat(batches).singleElement().satisfies(batch -> {
-            assertThat(batch.sourcePath()).isEqualTo("src/production/java/sample/Configured.java");
-            assertThat(batch.extractionIssue()).hasValueSatisfying(issue ->
-                    assertThat(issue.code()).isEqualTo("JDT_SYNTAX_PROBLEM"));
-        });
-    }
-
-    @Test
-    void prepared_export_uses_the_supplied_bound_semantic_service_instead_of_its_legacy_service() throws IOException {
-        writeSource("package sample; class Calls { void work() { helper(); } void helper() { } }");
-        RecordingSemanticService legacyService = new RecordingSemanticService(false);
-        RecordingSemanticService boundService = new RecordingSemanticService(true);
-        JdtLsRepositoryIndexExporter exporter = new JdtLsRepositoryIndexExporter(legacyService);
-
-        exporter.export(new RepositoryId("prepared"), revision(), new GenerationId("prepared-generation"),
-                new FullIndexPlanner().plan(repository), boundService);
-
-        assertThat(boundService.workspaceChecks()).isPositive();
-        assertThat(legacyService.workspaceChecks()).isZero();
-    }
-
-    @Test
-    void does_not_reuse_a_previous_exports_semantic_resolution_when_the_next_export_is_unresolved() throws IOException {
-        writeSource("package sample; class Calls { void work() { helper(); } void helper() { } }");
-        JdtLsRepositoryIndexExporter exporter = new JdtLsRepositoryIndexExporter(new RecordingSemanticService(true));
-
-        exporter.export(new RepositoryId("resolved"), revision(), new GenerationId("resolved-generation"),
-                new FullIndexPlanner().plan(repository));
-
-        assertThatThrownBy(() -> exporter.export(new RepositoryId("unresolved"), revision(), new GenerationId("unresolved-generation"),
-                new FullIndexPlanner().plan(repository)))
-                .isInstanceOf(IllegalStateException.class)
-                .hasMessage("JDT LS did not resolve any export call site");
-    }
-
-    @Test
-    void isolates_simultaneous_exports_on_the_same_exporter_instance() throws Exception {
-        Path resolvedRepository = repository.resolve("resolved");
-        Path unresolvedRepository = repository.resolve("unresolved");
-        writeSource(resolvedRepository, "package sample; class Calls { void work() { helper(); } void helper() { } }");
-        writeSource(unresolvedRepository, "package sample; class Calls { void work() { helper(); } void helper() { } }");
-        JdtLsRepositoryIndexExporter exporter = new JdtLsRepositoryIndexExporter(new RecordingSemanticService(true,
-                new CyclicBarrier(2)));
-
-        try (ExecutorService executor = Executors.newFixedThreadPool(2)) {
-            Future<List<SourceIndexBatch>> resolved = executor.submit(() -> exporter.export(new RepositoryId("resolved"), revision(),
-                    new GenerationId("resolved-generation"), new FullIndexPlanner().plan(resolvedRepository)));
-            Future<List<SourceIndexBatch>> unresolved = executor.submit(() -> exporter.export(new RepositoryId("unresolved"), revision(),
-                    new GenerationId("unresolved-generation"), new FullIndexPlanner().plan(unresolvedRepository)));
-
-            assertThat(resolved.get()).isNotEmpty();
-            assertThatThrownBy(unresolved::get).hasCauseInstanceOf(IllegalStateException.class)
-                    .hasRootCauseMessage("JDT LS did not resolve any export call site");
-        }
-    }
-
-    @Test
-    void rejects_a_plan_when_a_source_changes_before_syntax_extraction() throws IOException {
-        writeSource("package sample; class Calls { void work() { } }");
+    void preserves_a_semantically_unresolved_call_when_syntax_supplies_an_internal_target() throws IOException {
+        writeSource("package sample; class Calls { void work() { resolved(); unresolved(); } void resolved() { } void unresolved() { } }");
+        RepositoryId repositoryId = new RepositoryId("mixed");
         FullIndexPlan plan = new FullIndexPlanner().plan(repository);
-        writeSource("package sample; class Calls { void changed() { } }");
+        RepositoryIndexExport export = JdtLsRepositoryIndexExporter.production().export(
+                new GenerationWriteContext(repositoryId, new GenerationId("mixed-generation"), "mixed-job"),
+                prepared(repositoryId, plan, new RecordingSemanticService(true)));
 
-        assertThatThrownBy(() -> new JdtLsRepositoryIndexExporter().export(new RepositoryId("changed-before"), revision(),
-                new GenerationId("changed-before-generation"), plan))
-                .isInstanceOf(IllegalStateException.class)
-                .hasMessage("planned source content changed before syntax extraction: src/main/java/sample/Calls.java");
+        long unresolvedCalls = export.batches().stream().flatMap(batch -> batch.relations().stream())
+                .filter(relation -> relation.target() instanceof RelationTarget.External external
+                        && external.target() instanceof ExternalTarget.UnresolvedCall).count();
+        assertThat(unresolvedCalls).isEqualTo(1L);
+        assertThat(export.analysisEvidence().resolution().unresolved()).isEqualTo(1L);
+        assertThat(export.analysisEvidence().resolution().resolved()).isEqualTo(1L);
     }
 
     @Test
-    void rejects_a_plan_when_a_source_changes_during_syntax_extraction() throws IOException {
+    void rejects_no_invocation_export_when_the_real_declaration_probe_is_unavailable() throws IOException {
         writeSource("package sample; class Calls { void work() { } }");
+        RepositoryId repositoryId = new RepositoryId("no-calls");
         FullIndexPlan plan = new FullIndexPlanner().plan(repository);
-        Path source = repository.resolve("src/main/java/sample/Calls.java");
-        JdtLsRepositoryIndexExporter exporter = new JdtLsRepositoryIndexExporter(
-                new MutatingSyntaxExtractionService(source), new SyntaxSymbolProjector(), new SemanticRelationProjector(),
-                new EntryPointProjector(), new SearchProjector(), SemanticCallTargetResolver.syntaxOnly());
 
-        assertThatThrownBy(() -> exporter.export(new RepositoryId("changed-during"), revision(),
-                new GenerationId("changed-during-generation"), plan))
+        assertThatThrownBy(() -> JdtLsRepositoryIndexExporter.production().export(
+                new GenerationWriteContext(repositoryId, new GenerationId("no-calls-generation"), "no-calls-job"),
+                prepared(repositoryId, plan, new RecordingSemanticService(false))))
                 .isInstanceOf(IllegalStateException.class)
-                .hasMessage("planned source content changed after syntax extraction: src/main/java/sample/Calls.java");
+                .hasMessage("JDT LS did not classify an owned export declaration as repository-local");
     }
 
     private void writeSource(String source) throws IOException {
-        writeSource(repository, source);
-    }
-
-    private static void writeSource(Path root, String source) throws IOException {
-        Path file = root.resolve("src/main/java/sample/Calls.java");
+        Path file = repository.resolve("src/main/java/sample/Calls.java");
         Files.createDirectories(file.getParent());
         Files.writeString(file, source);
+    }
+
+    private PreparedAnalysis prepared(RepositoryId repositoryId, FullIndexPlan plan, JavaSemanticService semanticService) {
+        RepositorySnapshot snapshot = new RepositorySnapshot(repositoryId, repository, revision());
+        AnalysisInputs inputs = new AnalysisInputs(IndexSchemaContract.ANALYSIS_EVIDENCE_VERSION, digest(), digest(), digest(), digest(),
+                List.of(new AnalysisInputs.Project(".", digest(), Map.of(), List.of(),
+                        List.of(new AnalysisInputs.Root("src/main/java", "MAIN", true, List.of())), List.of(), List.of())));
+        AnalysisFingerprint fingerprint = AnalysisFingerprint.from(inputs);
+        SemanticAnalysisEvidence evidence = new SemanticAnalysisEvidence(IndexSchemaContract.ANALYSIS_EVIDENCE_VERSION,
+                fingerprint.digest(), "READY", List.of(new SemanticAnalysisEvidence.ProjectProof(".", true,
+                List.of("src/main/java"))), new SemanticAnalysisEvidence.ResolutionCoverage(0, 0, 0, 0, 0), List.of());
+        return new PreparedAnalysis() {
+            @Override
+            public RepositorySnapshot snapshot() {
+                return snapshot;
+            }
+
+            @Override
+            public FullIndexPlan plan() {
+                return plan;
+            }
+
+            @Override
+            public AnalysisFingerprint fingerprint() {
+                return fingerprint;
+            }
+
+            @Override
+            public SemanticAnalysisEvidence readinessEvidence() {
+                return evidence;
+            }
+
+            @Override
+            public JavaSemanticService semanticService() {
+                return semanticService;
+            }
+
+            @Override
+            public void verifyUnchangedInputs() {
+            }
+
+            @Override
+            public void close() {
+            }
+        };
     }
 
     private static RepositoryRevision revision() {
         return new RepositoryRevision("a".repeat(40));
     }
 
-    private static final class MutatingSyntaxExtractionService extends JdtSyntaxExtractionService {
-        private final Path source;
-
-        private MutatingSyntaxExtractionService(Path source) {
-            this.source = source;
-        }
-
-        @Override
-        public RepositorySyntax extract(Path repositoryRoot) {
-            RepositorySyntax syntax = super.extract(repositoryRoot);
-            try {
-                Files.writeString(source, "package sample; class Calls { void changed() { } }");
-            } catch (IOException exception) {
-                throw new UncheckedIOException(exception);
-            }
-            return syntax;
-        }
+    private static String digest() {
+        return "a".repeat(64);
     }
 
     private static final class RecordingSemanticService implements JavaSemanticService {
-        private final boolean resolveFirstRepository;
-        private final Optional<CyclicBarrier> resolutionBarrier;
-        private int workspaceChecks;
+        private final boolean available;
+        private int resolutions;
 
-        private RecordingSemanticService(boolean resolveFirstRepository) {
-            this(resolveFirstRepository, Optional.empty());
-        }
-
-        private RecordingSemanticService(boolean resolveFirstRepository, CyclicBarrier resolutionBarrier) {
-            this(resolveFirstRepository, Optional.of(resolutionBarrier));
-        }
-
-        private RecordingSemanticService(boolean resolveFirstRepository, Optional<CyclicBarrier> resolutionBarrier) {
-            this.resolveFirstRepository = resolveFirstRepository;
-            this.resolutionBarrier = resolutionBarrier;
-        }
-
-        int workspaceChecks() {
-            return workspaceChecks;
+        private RecordingSemanticService(boolean available) {
+            this.available = available;
         }
 
         @Override
         public SemanticSourceClassification classifySource(RepositorySnapshot snapshot, SemanticMethod method) {
-            workspaceChecks++;
-            return new SemanticSourceClassification.LocalSource("src/main/java/sample/Calls.java");
+            return available ? new SemanticSourceClassification.LocalSource("src/main/java/sample/Calls.java")
+                    : SemanticSourceClassification.UnprovableUri.INSTANCE;
         }
 
         @Override
@@ -231,14 +160,14 @@ class JdtLsRepositoryIndexExporterSemanticSessionTest {
         @Override
         public SemanticCallResolution resolveCallResolutionAt(RepositorySnapshot snapshot, SemanticMethod caller,
                                                                SemanticCallSite callSite) {
-            resolutionBarrier.ifPresent(RecordingSemanticService::awaitBothExports);
-            if (!resolveFirstRepository || "unresolved".equals(snapshot.repositoryId().value())) {
+            resolutions++;
+            if (resolutions == 2) {
                 return SemanticCallResolution.unresolved();
             }
             SemanticRange range = new SemanticRange(new SemanticPosition(0, 0), new SemanticPosition(0, 1));
-            SemanticMethod target = new SemanticMethod(caller.packageName(), caller.className(), "helper", List.of(), "void",
+            SemanticMethod target = new SemanticMethod(caller.packageName(), caller.className(), "resolved", List.of(), "void",
                     new SemanticLocation(snapshot.root().resolve("src/main/java/sample/Calls.java").toUri().toString(), range, range));
-            return SemanticCallResolution.resolved(new SemanticCall(Optional.of(target), "sample.Calls.helper()", List.of(), false,
+            return SemanticCallResolution.resolved(new SemanticCall(Optional.of(target), "sample.Calls.resolved()", List.of(), false,
                     SemanticResolutionOrigin.DEFINITION_FALLBACK));
         }
 
@@ -255,14 +184,6 @@ class JdtLsRepositoryIndexExporterSemanticSessionTest {
         @Override
         public SemanticImplementationResult implementations(RepositorySnapshot snapshot, SemanticMethod method) {
             return new SemanticImplementationResult(List.of(), List.of());
-        }
-
-        private static void awaitBothExports(CyclicBarrier barrier) {
-            try {
-                barrier.await();
-            } catch (Exception exception) {
-                throw new IllegalStateException("semantic export concurrency synchronization failed", exception);
-            }
         }
     }
 }

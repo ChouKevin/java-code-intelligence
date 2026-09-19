@@ -40,8 +40,8 @@ class InternalReferencesJdtLsIT {
         Path home = JdtLsHomeRequirement.requireHome(System.getenv("JDTLS_HOME"));
         Path root = copyFixture();
         DefaultJdtWorkspaceManager manager = manager(properties(home));
-        Lsp4jJavaSemanticService service = new Lsp4jJavaSemanticService(manager);
         RepositorySnapshot snapshot = new RepositorySnapshot(REPOSITORY_ID, root, REVISION);
+        Lsp4jJavaSemanticService service = new Lsp4jJavaSemanticService(snapshot, manager.getOrStart(snapshot));
         SemanticReferenceAnchor anchor = new SemanticReferenceAnchor(
                 WORKER_SOURCE, new SemanticPosition(2, 17));
 

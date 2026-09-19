@@ -19,6 +19,8 @@ import com.java.semantic.model.index.RelationDocument;
 import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.model.repository.RepositoryRevision;
 import com.java.semantic.repository.domain.RepositorySnapshot;
+import com.java.semantic.semantic.domain.SemanticCallResolution;
+import com.java.semantic.semantic.domain.SemanticCallResolutionStatus;
 import com.java.semantic.syntax.domain.InvocationTarget;
 import com.java.semantic.syntax.domain.AnnotationEvidence;
 import com.java.semantic.syntax.domain.RepositorySyntax;
@@ -130,11 +132,15 @@ public final class SemanticRelationProjector {
                 overrideRelations(metadata, method, from, typesByName, owned, repositoryId, revision, generationId, artifact, documents);
                 method.invocations().forEach(invocation -> {
                     SourceRange invocationLocation = new SourceRange(method.declarationLocation().sourceFile(), invocation.range());
-                    Optional<InvocationTarget> resolvedTarget = semanticCallTargetResolver.resolve(snapshot, method, invocation,
+                    SemanticCallResolution resolution = semanticCallTargetResolver.resolve(snapshot, method, invocation,
                             localTargetExpected(typesByName, invocation));
+                    Optional<InvocationTarget> resolvedTarget = resolution.status() == SemanticCallResolutionStatus.RESOLVED
+                            ? resolution.call().orElseThrow().target().map(target -> new InvocationTarget(target.packageName(),
+                            target.className(), target.methodName(), target.parameterTypes()))
+                            : Optional.empty();
                     if (resolvedTarget.isPresent()) {
-                        InvocationTarget target = resolvedTarget.orElseThrow();
-                        addCall(from, target, invocationLocation, repositoryId, revision, generationId, typesByName, artifact, documents);
+                        addCall(from, resolvedTarget.orElseThrow(), invocationLocation, repositoryId, revision, generationId,
+                                typesByName, artifact, documents);
                     } else {
                         addUnresolvedCall(from, invocation, invocationLocation, repositoryId, revision, generationId, artifact, documents);
                     }

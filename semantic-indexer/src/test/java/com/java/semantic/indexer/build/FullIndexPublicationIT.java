@@ -110,8 +110,9 @@ class FullIndexPublicationIT {
             seedPreviousPointer(template);
             MongoIndexJobStore store = new MongoIndexJobStore(template);
             IndexJob job = claimedJob(store);
-            RepositoryIndexExporter exporter = (repositoryId, requestedRevision, generationId, plan) ->
-                    List.of(mutation.apply(validBatch(repositoryId, requestedRevision, generationId)));
+            RepositoryIndexExporter exporter = (context, analysis) ->
+                    new RepositoryIndexExport(List.of(mutation.apply(validBatch(context.repositoryId(), analysis.snapshot().revision(),
+                            context.generationId()))), analysis.readinessEvidence());
             IndexBuildService service = service(template, store, exporter, checkout(scenario, revision()));
 
             assertThatThrownBy(() -> service.build(job)).isInstanceOf(RuntimeException.class)
@@ -155,9 +156,9 @@ class FullIndexPublicationIT {
             seedPreviousPointer(template);
             MongoIndexJobStore store = new MongoIndexJobStore(template);
             IndexJob job = claimedJob(store);
-            RepositoryIndexExporter exporter = (repositoryId, requestedRevision, generationId, plan) -> {
-                return List.of(validBatch(repositoryId, requestedRevision, generationId));
-            };
+            RepositoryIndexExporter exporter = (context, analysis) ->
+                    new RepositoryIndexExport(List.of(validBatch(context.repositoryId(), analysis.snapshot().revision(),
+                            context.generationId())), analysis.readinessEvidence());
             IndexBuildService.CheckedOutRepository checkout = checkout("success", revision());
             IndexBuildService service = service(template, store, exporter, ignored -> checkout);
             service.build(job);
@@ -314,7 +315,8 @@ class FullIndexPublicationIT {
                                              IndexBuildService.CheckoutResolver checkoutResolver, PublicationGate publicationGate) {
         return new IndexBuildService(new FullIndexPlanner(), exporter, new MongoGenerationWriter(template),
                 new SourceIndexBatchDocumentMapper(template.getConverter()), new GenerationValidator(template),
-                checkoutResolver, incrementalBuilder(template), store, new MongoPublicationWriter(template), publicationGate);
+                checkoutResolver, incrementalBuilder(template), store, new MongoPublicationWriter(template), publicationGate,
+                target -> TestPreparedAnalysis.forSnapshot(target.snapshot(), new FullIndexPlanner().plan(target.snapshot().root())));
     }
 
     private static IncrementalGenerationBuilder incrementalBuilder(MongoTemplate template) {
@@ -341,9 +343,10 @@ class FullIndexPublicationIT {
     }
 
     private static RepositoryIndexExporter exporter(MongoTemplate template, Consumer<MongoTemplate> mutation) {
-        return (repositoryId, requestedRevision, generationId, plan) -> {
+        return (context, analysis) -> {
             mutation.accept(template);
-            return List.of(validBatch(repositoryId, requestedRevision, generationId));
+            return new RepositoryIndexExport(List.of(validBatch(context.repositoryId(), analysis.snapshot().revision(),
+                    context.generationId())), analysis.readinessEvidence());
         };
     }
 

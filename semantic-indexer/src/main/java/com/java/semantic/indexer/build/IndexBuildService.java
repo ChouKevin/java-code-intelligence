@@ -98,20 +98,21 @@ public final class IndexBuildService {
         if (!target.revision().equals(checkout.revision())) {
             throw new GenerationValidationException("CHECKOUT_CHANGED");
         }
-        Optional<PreparedAnalysis> preparedAnalysis = analysisPreparation.map(preparation -> preparation.prepare(
+        PreparedAnalysis preparedAnalysis = analysisPreparation.orElseThrow(
+                () -> new IllegalStateException("production index builds require prepared semantic analysis")).prepare(
                 new AnalysisTarget(new RepositorySnapshot(job.repositoryId(), checkout.root(), target.revision()),
-                        job.id().value(), "CODEBASE")));
+                        job.id().value(), "CODEBASE"));
         try {
-            FullIndexPlan plan = preparedAnalysis.map(PreparedAnalysis::plan)
-                    .orElseGet(() -> planner.plan(checkout.root()));
+            FullIndexPlan plan = preparedAnalysis.plan();
             insertWritingManifest(job, context);
-            FullIndexPlan exportPlan = incrementalBuilder.assemble(job, context, plan).exportPlan();
-            List<SourceIndexBatch> batches = preparedAnalysis
-                    .map(analysis -> exporter.export(job.repositoryId(), target.revision(), target.generationId(), exportPlan,
-                            analysis.semanticService()))
-                    .orElseGet(() -> exporter.export(job.repositoryId(), target.revision(), target.generationId(), exportPlan));
+            FullIndexPlan exportPlan = incrementalBuilder.assemble(job, context, plan, preparedAnalysis.fingerprint()).exportPlan();
+            if (!exportPlan.equals(plan)) {
+                throw new IllegalStateException("incremental export requires compatible prepared analysis inputs");
+            }
+            RepositoryIndexExport export = exporter.export(context, preparedAnalysis);
+            generationWriter.recordAnalysis(context, preparedAnalysis.fingerprint(), export.analysisEvidence());
             MongoIndexBatchWriter writer = new MongoIndexBatchWriter(generationWriter, context, documentMapper);
-            for (SourceIndexBatch batch : batches) {
+            for (SourceIndexBatch batch : export.batches()) {
                 writer.write(batch);
             }
             CheckedOutRepository latestCheckout = checkedOutRepository.checkout(job);
@@ -127,7 +128,7 @@ public final class IndexBuildService {
             return jobs.prepareBuildPublication(job, result.identityDigest())
                     .orElseThrow(() -> new IllegalStateException("publication precondition failed"));
         } finally {
-            preparedAnalysis.ifPresent(PreparedAnalysis::close);
+            preparedAnalysis.close();
         }
     }
 

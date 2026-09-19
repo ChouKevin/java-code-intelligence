@@ -82,7 +82,7 @@ class GenerationValidatorIT {
                     new Document("repoId", "orders").append("generationId", "g1").append("factId", "late-fact")
                             .append("canonical", "late-canonical"));
 
-            assertThat(result.valid()).isTrue();
+            assertThat(result.valid()).as("validation issues: %s", result.issues()).isTrue();
             assertThatThrownBy(() -> new MongoGenerationWriter(template).writeBatch(lease(), "late#0", List.of(lateSearch)))
                     .isInstanceOf(IllegalStateException.class).hasMessageContaining("registration failed closed");
             assertThat(template.getCollection(IndexCollections.SEARCH).countDocuments()).isEqualTo(searchBefore);
@@ -94,6 +94,12 @@ class GenerationValidatorIT {
 
     private static Stream<Arguments> invalidGenerationMutations() {
         return Stream.of(
+                Arguments.of("missing semantic evidence", (java.util.function.Consumer<MongoTemplate>) template ->
+                        template.getCollection(IndexCollections.GENERATION_MANIFESTS).updateOne(new Document("generationId", "g1"),
+                                new Document("$unset", new Document("analysisEvidence", ""))), "MISSING_ANALYSIS_EVIDENCE"),
+                Arguments.of("mismatched semantic fingerprint", (java.util.function.Consumer<MongoTemplate>) template ->
+                        template.getCollection(IndexCollections.GENERATION_MANIFESTS).updateOne(new Document("generationId", "g1"),
+                                new Document("$set", new Document("analysisFingerprint", "b".repeat(64)))), "ANALYSIS_FINGERPRINT_MISMATCH"),
                 Arguments.of("missing artifact", (java.util.function.Consumer<MongoTemplate>) template ->
                         template.getCollection(IndexCollections.SOURCE_ARTIFACTS).deleteMany(new Document()), "MISSING_ARTIFACT"),
                 Arguments.of("duplicate canonical", (java.util.function.Consumer<MongoTemplate>) template ->
@@ -168,9 +174,12 @@ class GenerationValidatorIT {
         template.getCollection(IndexCollections.GENERATION_MANIFESTS).insertOne(new Document("repoId", "orders").append("generationId", "g1")
                 .append("sourceRevision", revision().value()).append("ownerJobId", "job-1")
                 .append("writeState", "WRITING").append("writeEpoch", 0L)
-                .append("schemaVersion", 2).append("projectionVersions", projectionVersions()).append("identityDigest", "0".repeat(64))
+                .append("schemaVersion", IndexSchemaContract.SCHEMA_VERSION).append("projectionVersions", projectionVersions()).append("identityDigest", "0".repeat(64))
                 .append("outstandingBatches", List.of()).append("acknowledgedBatches", List.of())
                 .append("failedOrAmbiguousBatches", List.of()));
+        TestPreparedAnalysis analysis = TestPreparedAnalysis.forSnapshot(new com.java.semantic.repository.domain.RepositorySnapshot(
+                RepositoryId.of("orders"), java.nio.file.Path.of("."), revision()), new FullIndexPlan(java.nio.file.Path.of("."), List.of()));
+        new MongoGenerationWriter(template).recordAnalysis(lease(), analysis.fingerprint(), analysis.readinessEvidence());
         SourceIndexBatch batch = FullIndexPublicationIT.validBatch(RepositoryId.of("orders"), revision(), new GenerationId("g1"));
         new MongoIndexBatchWriter(new MongoGenerationWriter(template), lease(),
                 new SourceIndexBatchDocumentMapper(template.getConverter())).write(batch);

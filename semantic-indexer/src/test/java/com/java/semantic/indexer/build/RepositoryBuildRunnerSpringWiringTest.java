@@ -69,8 +69,7 @@ class RepositoryBuildRunnerSpringWiringTest {
         JdtWorkspaceManager workspaces = mock(JdtWorkspaceManager.class);
         RepositoryBuildScopeFactory factory = new RepositoryBuildScopeFactory(checkout, template,
                 mock(IndexJobStore.class), mock(PublicationPort.class), new NoOpPublicationGate(),
-                mock(JavaSemanticService.class), workspaces, mock(com.java.semantic.indexer.analysis.RepositoryAnalysisPreparation.class),
-                root -> git);
+                workspaces, mock(com.java.semantic.indexer.analysis.RepositoryAnalysisPreparation.class), root -> git);
 
         RepositoryBuildRunner.BuildScope scope = factory.open(job());
         scope.close();
@@ -88,8 +87,7 @@ class RepositoryBuildRunnerSpringWiringTest {
         JdtWorkspaceManager workspaces = mock(JdtWorkspaceManager.class);
         RepositoryBuildScopeFactory factory = new RepositoryBuildScopeFactory(checkout, mongoTemplate(),
                 mock(IndexJobStore.class), mock(PublicationPort.class), new NoOpPublicationGate(),
-                mock(JavaSemanticService.class), workspaces, mock(com.java.semantic.indexer.analysis.RepositoryAnalysisPreparation.class),
-                root -> git);
+                workspaces, mock(com.java.semantic.indexer.analysis.RepositoryAnalysisPreparation.class), root -> git);
 
         assertThatThrownBy(() -> new RepositoryBuildRunner(factory).run(job()))
                 .isInstanceOf(RuntimeException.class);

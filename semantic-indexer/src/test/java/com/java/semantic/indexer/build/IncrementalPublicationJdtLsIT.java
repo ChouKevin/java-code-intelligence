@@ -48,8 +48,9 @@ class IncrementalPublicationJdtLsIT {
         DefaultJdtWorkspaceManager manager = manager(jdtLsHome);
         try {
             RepositoryRevision firstRevision = new RepositoryRevision("a".repeat(40));
-            manager.getOrStart(new RepositorySnapshot(repositoryId, root, firstRevision));
-            JdtLsRepositoryIndexExporter exporter = new JdtLsRepositoryIndexExporter(new Lsp4jJavaSemanticService(manager));
+            RepositorySnapshot firstSnapshot = new RepositorySnapshot(repositoryId, root, firstRevision);
+            JdtLsRepositoryIndexExporter exporter = new JdtLsRepositoryIndexExporter(
+                    new Lsp4jJavaSemanticService(firstSnapshot, manager.getOrStart(firstSnapshot)));
             FullIndexPlan firstPlan = new FullIndexPlanner().plan(root);
             assertThat(exporter.export(repositoryId, firstRevision, new GenerationId("g1"), firstPlan)).isNotEmpty();
 

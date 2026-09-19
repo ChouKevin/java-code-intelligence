@@ -1,6 +1,9 @@
 package com.java.semantic.indexer.store;
 
 import com.java.semantic.model.index.GenerationWriteState;
+import com.java.semantic.model.index.AnalysisFingerprint;
+import com.java.semantic.model.index.SemanticAnalysisEvidence;
+import com.java.semantic.model.index.IndexCollections;
 import com.java.semantic.model.index.IndexSchemaContract;
 import com.java.semantic.model.index.IndexSchemaContract.ImmutablePayloadCollectionSpec;
 import com.java.semantic.model.index.IndexSchemaContract.PayloadScope;
@@ -46,6 +49,27 @@ public final class MongoGenerationWriter {
             throw new SemanticIndexUnavailableException("SEMANTIC_INDEX_UNAVAILABLE", exception);
         }
     }
+    /** Records the prepared inputs and the evidence produced by its exact export before validation can begin. */
+    public void recordAnalysis(GenerationWriteContext context, AnalysisFingerprint fingerprint,
+                               SemanticAnalysisEvidence evidence) {
+        Objects.requireNonNull(context, "generation write context is required");
+        AnalysisFingerprint requiredFingerprint = Objects.requireNonNull(fingerprint, "analysis fingerprint is required");
+        SemanticAnalysisEvidence requiredEvidence = Objects.requireNonNull(evidence, "semantic analysis evidence is required");
+        if (!requiredFingerprint.digest().equals(requiredEvidence.fingerprintDigest())) {
+            throw new IllegalArgumentException("analysis evidence fingerprint differs from prepared analysis");
+        }
+        verifyRunningBuild(context);
+        Document fields = new Document("analysisFingerprint", requiredFingerprint.digest())
+                .append("analysisInputs", template.getConverter().convertToMongoType(requiredFingerprint.inputs()))
+                .append("analysisEvidence", template.getConverter().convertToMongoType(requiredEvidence));
+        long changed = template.getCollection(IndexCollections.GENERATION_MANIFESTS).updateOne(
+                ownedWritingManifest(context).append("analysisFingerprint", new Document("$exists", false)),
+                new Document("$set", fields)).getModifiedCount();
+        if (changed != 1L) {
+            throw new IllegalStateException("analysis evidence recording lost generation ownership");
+        }
+    }
+
 
     public void writeBatch(GenerationWriteContext context, String batchId, List<StoredDocument> documents) {
         Objects.requireNonNull(context, "generation write context is required");

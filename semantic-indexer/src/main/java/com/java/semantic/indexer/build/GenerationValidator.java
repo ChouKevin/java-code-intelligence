@@ -1,6 +1,9 @@
 package com.java.semantic.indexer.build;
 
 import com.java.semantic.indexer.store.GenerationWriteContext;
+import com.java.semantic.model.index.AnalysisFingerprint;
+import com.java.semantic.model.index.AnalysisInputs;
+import com.java.semantic.model.index.SemanticAnalysisEvidence;
 import com.java.semantic.indexer.store.MongoIndexDefinitionMatcher;
 import com.java.semantic.model.codefact.CodeFactKind;
 import com.java.semantic.model.index.EntryPointDocument;
@@ -85,6 +88,7 @@ public final class GenerationValidator {
         List<Document> entryPoints = persistedProjections.get(ProjectionName.ENTRY_POINTS);
         List<Document> search = persistedProjections.get(ProjectionName.SEARCH);
         Map<String, Document> artifacts = artifactsById(files, issues);
+        validateAnalysisEvidence(manifest, files, issues);
         validateCanonicalIdentities(symbols, issues);
         validateRelations(symbols, relations, issues);
         validateEntryPoints(symbols, entryPoints, issues);
@@ -95,7 +99,7 @@ public final class GenerationValidator {
         validateSearchCoverage(projections, search, issues);
         validateOwnership(context, issues);
         Map<String, Long> counts = collectionCounts(persistedProjections, artifacts);
-        ManifestDigest digest = digest(persistedProjections);
+        ManifestDigest digest = digest(persistedProjections, manifest);
         return new ValidationResult(digest, counts, issues);
     }
 
@@ -124,6 +128,61 @@ public final class GenerationValidator {
             throw new IllegalStateException("generation validation record lost its job ownership");
         }
     }
+    private void validateAnalysisEvidence(Document manifest, List<Document> files, List<GenerationValidationIssue> issues) {
+        Document inputsDocument = manifest.get("analysisInputs", Document.class);
+        Document evidenceDocument = manifest.get("analysisEvidence", Document.class);
+        String storedFingerprint = manifest.getString("analysisFingerprint");
+        if (Objects.isNull(inputsDocument) || Objects.isNull(evidenceDocument) || Objects.isNull(storedFingerprint)) {
+            issues.add(issue("MISSING_ANALYSIS_EVIDENCE", "manifest has no prepared semantic analysis evidence"));
+            return;
+        }
+        try {
+            AnalysisInputs inputs = template.getConverter().read(AnalysisInputs.class, inputsDocument);
+            SemanticAnalysisEvidence evidence = template.getConverter().read(SemanticAnalysisEvidence.class, evidenceDocument);
+            if (!AnalysisFingerprint.from(inputs).digest().equals(storedFingerprint)
+                    || !storedFingerprint.equals(evidence.fingerprintDigest())) {
+                issues.add(issue("ANALYSIS_FINGERPRINT_MISMATCH", "prepared inputs and export evidence have different fingerprints"));
+            }
+            SemanticAnalysisEvidence.ResolutionCoverage coverage = evidence.resolution();
+            if (coverage.attempted() != coverage.resolved() + coverage.unresolved() + coverage.ambiguous()
+                    || coverage.external() > coverage.resolved()) {
+                issues.add(issue("INVALID_RESOLUTION_ACCOUNTING", "semantic resolution accounting is inconsistent"));
+            }
+            Map<String, SemanticAnalysisEvidence.ProjectProof> proofs = evidence.projects().stream()
+                    .collect(java.util.stream.Collectors.toMap(SemanticAnalysisEvidence.ProjectProof::projectPath,
+                            java.util.function.Function.identity(), (left, right) -> left));
+            if (proofs.size() != inputs.projects().size()) {
+                issues.add(issue("ANALYSIS_PROJECT_MISMATCH", "semantic evidence does not prove every prepared project"));
+            }
+            for (AnalysisInputs.Project project : inputs.projects()) {
+                SemanticAnalysisEvidence.ProjectProof proof = proofs.get(project.projectPath());
+                if (Objects.isNull(proof) || !proof.imported()) {
+                    issues.add(issue("ANALYSIS_PROJECT_MISMATCH", "prepared project is absent from semantic evidence"));
+                    continue;
+                }
+                Set<String> includedRoots = project.roots().stream().filter(AnalysisInputs.Root::included)
+                        .map(AnalysisInputs.Root::path).collect(java.util.stream.Collectors.toSet());
+                if (!proof.verifiedSourcePaths().containsAll(includedRoots)) {
+                    issues.add(issue("ANALYSIS_ROOT_MISMATCH", "semantic evidence does not prove each included root"));
+                }
+            }
+            if (evidence.buildStatus().equals("SYNTAX_ONLY")) {
+                issues.add(issue("SYNTAX_ONLY_ANALYSIS", "syntax-only evidence cannot seal a semantic generation"));
+            }
+            Set<String> sourcePaths = files.stream().map(file -> file.getString("sourcePath"))
+                    .filter(Objects::nonNull).collect(java.util.stream.Collectors.toSet());
+            for (SemanticAnalysisEvidence.ProjectProof proof : evidence.projects()) {
+                for (String root : proof.verifiedSourcePaths()) {
+                    if (!root.equals(".") && sourcePaths.stream().noneMatch(path -> path.equals(root) || path.startsWith(root + "/"))) {
+                        issues.add(issue("ANALYSIS_SOURCE_MISMATCH", "verified semantic root has no persisted source"));
+                    }
+                }
+            }
+        } catch (RuntimeException exception) {
+            issues.add(issue("INVALID_ANALYSIS_EVIDENCE", "manifest semantic evidence cannot be reconstructed"));
+        }
+    }
+
 
     private void validateManifest(Document manifest, RepositoryRevision requestedRevision, List<GenerationValidationIssue> issues) {
         if (!requestedRevision.value().equals(manifest.getString("sourceRevision"))) {
@@ -504,12 +563,17 @@ public final class GenerationValidator {
         return Map.copyOf(counts);
     }
 
-    private static ManifestDigest digest(Map<ProjectionName, List<Document>> projections) {
+    private static ManifestDigest digest(Map<ProjectionName, List<Document>> projections, Document manifest) {
         List<String> identities = new ArrayList<>();
         for (ValidatedProjection projection : VALIDATION_DISPATCH) {
             addIdentities(identities, IndexSchemaContract.projectionCollection(projection.name()),
                     projections.get(projection.name()), projection.identityField());
         }
+        identities.add("analysisFingerprint|" + Objects.toString(manifest.getString("analysisFingerprint"), ""));
+        Document inputs = manifest.get("analysisInputs", Document.class);
+        Document evidence = manifest.get("analysisEvidence", Document.class);
+        identities.add("analysisInputs|" + (Objects.nonNull(inputs) ? inputs.toJson() : ""));
+        identities.add("analysisEvidence|" + (Objects.nonNull(evidence) ? evidence.toJson() : ""));
         identities.sort(Comparator.naturalOrder());
         try {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");

@@ -62,8 +62,8 @@ class GenericLimitationJdtLsIT {
         Path root = copyFixture();
         JdtLsProperties properties = properties(home);
         DefaultJdtWorkspaceManager manager = manager(properties);
-        Lsp4jJavaSemanticService service = new Lsp4jJavaSemanticService(manager);
         RepositorySnapshot snapshot = new RepositorySnapshot(REPOSITORY_ID, root, REVISION);
+        Lsp4jJavaSemanticService service = new Lsp4jJavaSemanticService(snapshot, manager.getOrStart(snapshot));
 
         try {
             SemanticMethod processOrder = resolveExactMethod(

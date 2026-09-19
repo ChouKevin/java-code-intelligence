@@ -426,8 +426,9 @@ class FixtureFullIndexJdtLsIT {
         RepositoryId repositoryId = new RepositoryId(repositoryName);
         RepositoryRevision revision = new RepositoryRevision(revisionValue);
         GenerationId generationId = new GenerationId(generationValue);
-        manager.getOrStart(new RepositorySnapshot(repositoryId, repositoryRoot, revision));
-        List<SourceIndexBatch> batches = new JdtLsRepositoryIndexExporter(new Lsp4jJavaSemanticService(manager)).export(repositoryId, revision, generationId,
+        RepositorySnapshot snapshot = new RepositorySnapshot(repositoryId, repositoryRoot, revision);
+        List<SourceIndexBatch> batches = new JdtLsRepositoryIndexExporter(
+                new Lsp4jJavaSemanticService(snapshot, manager.getOrStart(snapshot))).export(repositoryId, revision, generationId,
                 new FullIndexPlanner().plan(repositoryRoot));
         seedWritableGeneration(template, repositoryId, revision, generationId);
         GenerationWriteContext lease = new GenerationWriteContext(repositoryId, generationId, generationValue + "-job");

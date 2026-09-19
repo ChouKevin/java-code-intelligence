@@ -17,7 +17,6 @@ import com.java.semantic.indexer.uat.PublicationGate;
 import com.java.semantic.indexer.uat.UatPublicationGate;
 import com.java.semantic.semantic.adapter.jdtls.JdtLsEffectiveEnvironmentInspector;
 import com.java.semantic.semantic.adapter.jdtls.JdtWorkspaceManager;
-import com.java.semantic.semantic.domain.JavaSemanticService;
 import java.time.Duration;
 import java.util.Optional;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
@@ -41,11 +40,10 @@ public class IndexerBuildConfiguration {
     public RepositoryBuildRunner.BuildScopeFactory repositoryBuildScopeFactory(ExactRepositoryCheckout checkout,
                                                                                  MongoTemplate template, IndexJobStore jobs,
                                                                                  PublicationPort publication, PublicationGate publicationGate,
-                                                                                 JavaSemanticService semanticService,
                                                                                  JdtWorkspaceManager workspaces,
                                                                                  RepositoryAnalysisPreparation analysisPreparation) {
-        return new RepositoryBuildScopeFactory(checkout, template, jobs, publication, publicationGate, semanticService,
-                workspaces, analysisPreparation);
+        return new RepositoryBuildScopeFactory(checkout, template, jobs, publication, publicationGate, workspaces,
+                analysisPreparation);
     }
 
     @Bean

@@ -54,8 +54,8 @@ class CallSiteResolutionJdtLsIT {
         Path home = JdtLsHomeRequirement.requireHome(System.getenv("JDTLS_HOME"));
         Path root = copyFixture();
         DefaultJdtWorkspaceManager manager = manager(properties(home));
-        Lsp4jJavaSemanticService service = new Lsp4jJavaSemanticService(manager);
         RepositorySnapshot snapshot = new RepositorySnapshot(REPOSITORY_ID, root, REVISION);
+        Lsp4jJavaSemanticService service = new Lsp4jJavaSemanticService(snapshot, manager.getOrStart(snapshot));
 
         try {
             SemanticMethod exercise = resolveExactMethod(
@@ -120,8 +120,8 @@ class CallSiteResolutionJdtLsIT {
         Path home = JdtLsHomeRequirement.requireHome(System.getenv("JDTLS_HOME"));
         Path root = copyFixture();
         DefaultJdtWorkspaceManager manager = manager(properties(home));
-        Lsp4jJavaSemanticService service = new Lsp4jJavaSemanticService(manager);
         RepositorySnapshot snapshot = new RepositorySnapshot(REPOSITORY_ID, root, REVISION);
+        Lsp4jJavaSemanticService service = new Lsp4jJavaSemanticService(snapshot, manager.getOrStart(snapshot));
         SemanticCallGraphBuilder builder = new SemanticCallGraphBuilder(service, new SpringImplementationSelector());
 
         try {

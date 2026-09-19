@@ -53,7 +53,6 @@ import org.eclipse.jdt.core.dom.ASTParser;
 import org.eclipse.jdt.core.dom.CompilationUnit;
 import org.eclipse.jdt.core.dom.PackageDeclaration;
 import org.eclipse.lsp4j.jsonrpc.messages.Either;
-import org.springframework.stereotype.Service;
 import org.springframework.util.Assert;
 import org.springframework.util.CollectionUtils;
 import org.springframework.util.StringUtils;
@@ -82,7 +81,6 @@ import java.util.regex.Pattern;
  *
  * 所有 LSP4J 型別在此轉為 domain record,絕不外洩;位置一律以零基處理
  */
-@Service
 @Slf4j
 public class Lsp4jJavaSemanticService implements JavaSemanticService {
 
@@ -111,38 +109,24 @@ public class Lsp4jJavaSemanticService implements JavaSemanticService {
     private static final Comparator<SemanticRange> INCOMING_RANGE_ORDER =
             Lsp4jJavaSemanticService::compareRanges;
 
-    private final Optional<JdtWorkspaceManager> workspaceManager;
-    private final Optional<RepositorySnapshot> expectedSnapshot;
-    private final Optional<JdtWorkspaceSession> boundSession;
+    private final RepositorySnapshot expectedSnapshot;
+    private final JdtWorkspaceSession boundSession;
     private final JdtWorkspaceSourceLocator sourceLocator;
 
-    public Lsp4jJavaSemanticService(JdtWorkspaceManager workspaceManager) {
-        this.workspaceManager = Optional.of(Objects.requireNonNull(workspaceManager, "workspaceManager is required"));
-        this.expectedSnapshot = Optional.empty();
-        this.boundSession = Optional.empty();
-        this.sourceLocator = new JdtWorkspaceSourceLocator();
-    }
-
     public Lsp4jJavaSemanticService(RepositorySnapshot expectedSnapshot, JdtWorkspaceSession session) {
-        this.workspaceManager = Optional.empty();
-        this.expectedSnapshot = Optional.of(Objects.requireNonNull(expectedSnapshot, "expectedSnapshot is required"));
-        this.boundSession = Optional.of(Objects.requireNonNull(session, "session is required"));
+        this.expectedSnapshot = Objects.requireNonNull(expectedSnapshot, "expectedSnapshot is required");
+        this.boundSession = Objects.requireNonNull(session, "session is required");
         this.sourceLocator = new JdtWorkspaceSourceLocator();
     }
 
     private JdtWorkspaceSession requireSession(RepositorySnapshot snapshot) {
         RepositorySnapshot requiredSnapshot = Objects.requireNonNull(snapshot, "snapshot is required");
-        if (boundSession.isPresent()) {
-            RepositorySnapshot boundSnapshot = expectedSnapshot.orElseThrow();
-            Assert.isTrue(boundSnapshot.equals(requiredSnapshot),
-                    "semantic service is bound to a different repository snapshot");
-            JdtWorkspaceSession session = boundSession.orElseThrow();
-            if (!session.isUsable()) {
-                throw new JdtWorkspaceSession.JdtWorkspaceClosingException("bound semantic workspace is closed");
-            }
-            return session;
+        Assert.isTrue(expectedSnapshot.equals(requiredSnapshot),
+                "semantic service is bound to a different repository snapshot");
+        if (!boundSession.isUsable()) {
+            throw new JdtWorkspaceSession.JdtWorkspaceClosingException("bound semantic workspace is closed");
         }
-        return workspaceManager.orElseThrow().getOrStart(requiredSnapshot);
+        return boundSession;
     }
 
     /** Proves an imported declaration is visible through this precise leased semantic session. */

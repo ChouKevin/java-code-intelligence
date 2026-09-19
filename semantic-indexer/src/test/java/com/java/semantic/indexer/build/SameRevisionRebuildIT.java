@@ -42,8 +42,9 @@ class SameRevisionRebuildIT {
             new IndexSchemaBootstrap(template).bootstrap();
             String revision = "a".repeat(40);
             MongoIndexJobStore store = new MongoIndexJobStore(template);
-            RepositoryIndexExporter exporter = (repositoryId, requestedRevision, generationId, plan) ->
-                    List.of(FullIndexPublicationIT.validBatch(repositoryId, requestedRevision, generationId));
+            RepositoryIndexExporter exporter = (context, analysis) -> new RepositoryIndexExport(
+                    List.of(FullIndexPublicationIT.validBatch(context.repositoryId(), analysis.snapshot().revision(),
+                            context.generationId())), analysis.readinessEvidence());
             Path checkout = Files.createDirectories(temporaryDirectory.resolve("checkout"));
             IndexBuildService service = FullIndexPublicationIT.service(template, store, exporter,
                     ignored -> new IndexBuildService.CheckedOutRepository(checkout,

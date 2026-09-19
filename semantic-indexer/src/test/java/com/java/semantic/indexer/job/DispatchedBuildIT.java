@@ -120,8 +120,7 @@ class DispatchedBuildIT {
         DefaultRepositoryAnalysisPreparation preparation = new DefaultRepositoryAnalysisPreparation(workspaces,
                 new JdtLsEffectiveEnvironmentInspector(jdtLsProperties), new FullIndexPlanner());
         RepositoryBuildScopeFactory scopes = new RepositoryBuildScopeFactory(checkout, template, jobs,
-                new MongoPublicationWriter(template), new NoOpPublicationGate(), new Lsp4jJavaSemanticService(workspaces),
-                workspaces, preparation);
+                new MongoPublicationWriter(template), new NoOpPublicationGate(), workspaces, preparation);
         return new BuildHarness(new RepositoryBuildRunner(scopes), workspaces);
     }
 

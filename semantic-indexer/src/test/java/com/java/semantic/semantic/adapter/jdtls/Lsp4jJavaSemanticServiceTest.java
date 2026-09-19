@@ -110,8 +110,8 @@ class Lsp4jJavaSemanticServiceTest {
     @BeforeEach
     void setUp() {
         server = new FakeLanguageServer();
-        service = new Lsp4jJavaSemanticService(new FakeWorkspaceManager(session(server)));
         snapshot = new RepositorySnapshot(REPOSITORY_ID, root, REVISION);
+        service = new Lsp4jJavaSemanticService(snapshot, session(server));
     }
 
     @Test
@@ -178,10 +178,10 @@ class Lsp4jJavaSemanticServiceTest {
     }
 
     @Test
-    void should_normalize_workspace_not_ready_failure_at_public_adapter_boundary() throws IOException {
-        RuntimeException failure =
-                new DefaultJdtWorkspaceManager.JdtWorkspaceManagerStoppedException(REPOSITORY_ID);
-        service = new Lsp4jJavaSemanticService(new FakeWorkspaceManager(failure));
+    void should_reject_a_closed_bound_session_at_the_public_adapter_boundary() throws IOException {
+        JdtWorkspaceSession closedSession = session(server);
+        closedSession.rejectNewWork();
+        service = new Lsp4jJavaSemanticService(snapshot, closedSession);
 
         SemanticMethod method = methodAt(sourceFile("OrderService"), 1, 0);
 
@@ -307,7 +307,7 @@ class Lsp4jJavaSemanticServiceTest {
         SemanticMethod callee = methodAt(calleeUri, 10, 16);
         server.prepareItems = List.of(incomingCallItem("processOrder(Order) : void", calleeUri, 10, 16));
         server.hangIncomingCalls = true;
-        service = new Lsp4jJavaSemanticService(new FakeWorkspaceManager(session(server, Duration.ofMillis(50))));
+        service = new Lsp4jJavaSemanticService(snapshot, session(server, Duration.ofMillis(50)));
 
         assertThatThrownBy(() -> service.incomingCalls(snapshot, callee))
                 .isExactlyInstanceOf(SemanticRequestTimeoutException.class);
@@ -514,8 +514,7 @@ class Lsp4jJavaSemanticServiceTest {
         server.outgoingCalls = List.of(
                 outgoing(callItem("work() : void", targetUri, 4, 8)));
         server.hangingDocumentSymbolUris.add(targetUri);
-        service = new Lsp4jJavaSemanticService(
-                new FakeWorkspaceManager(session(server, Duration.ofMillis(50))));
+        service = new Lsp4jJavaSemanticService(snapshot, session(server, Duration.ofMillis(50)));
         int outputStart = output.getAll().length();
 
         Throwable failure = catchThrowable(() -> service.outgoingCalls(snapshot, caller));
@@ -836,7 +835,7 @@ class Lsp4jJavaSemanticServiceTest {
     @Test
     void should_reject_forged_external_methods_before_starting_a_workspace() {
         FakeWorkspaceManager manager = new FakeWorkspaceManager(session(server));
-        service = new Lsp4jJavaSemanticService(manager);
+        service = new Lsp4jJavaSemanticService(snapshot, session(server));
         SemanticMethod forged = methodAt("jdt://contents/java.lang.String.class", 1, 1);
         SemanticCallSite callSite = new SemanticCallSite(
                 semanticRange(2, 4, 2, 9), new SemanticPosition(2, 4));
@@ -858,7 +857,7 @@ class Lsp4jJavaSemanticServiceTest {
     @Test
     void should_invalidate_the_session_and_release_the_uri_lock_when_did_close_fails() throws IOException {
         JdtWorkspaceSession currentSession = session(server);
-        service = new Lsp4jJavaSemanticService(new FakeWorkspaceManager(currentSession));
+        service = new Lsp4jJavaSemanticService(snapshot, currentSession);
         String uri = sourceFile("OrderCrudService");
         SemanticMethod method = methodAt(uri, 10, 16);
         server.prepareItems = List.of(callItem("processOrder(Order) : void", uri, 10, 16));
@@ -875,7 +874,7 @@ class Lsp4jJavaSemanticServiceTest {
     @Test
     void should_preserve_the_primary_query_failure_when_did_close_also_fails() throws IOException {
         JdtWorkspaceSession currentSession = session(server);
-        service = new Lsp4jJavaSemanticService(new FakeWorkspaceManager(currentSession));
+        service = new Lsp4jJavaSemanticService(snapshot, currentSession);
         String uri = sourceFile("OrderCrudService");
         SemanticMethod method = methodAt(uri, 10, 16);
         server.prepareFailure = new IllegalStateException("PRIMARY_QUERY_FAILURE");
@@ -891,7 +890,7 @@ class Lsp4jJavaSemanticServiceTest {
     @Test
     void should_preserve_fatal_query_errors_when_did_close_raises_an_error() throws IOException {
         JdtWorkspaceSession currentSession = session(server);
-        service = new Lsp4jJavaSemanticService(new FakeWorkspaceManager(currentSession));
+        service = new Lsp4jJavaSemanticService(snapshot, currentSession);
         String uri = sourceFile("OrderCrudService");
         SemanticMethod method = methodAt(uri, 10, 16);
         OutOfMemoryError primary = new OutOfMemoryError("PRIMARY_FATAL");
@@ -909,7 +908,7 @@ class Lsp4jJavaSemanticServiceTest {
     @Test
     void should_invalidate_the_session_when_did_close_raises_an_error() throws IOException {
         JdtWorkspaceSession currentSession = session(server);
-        service = new Lsp4jJavaSemanticService(new FakeWorkspaceManager(currentSession));
+        service = new Lsp4jJavaSemanticService(snapshot, currentSession);
         String uri = sourceFile("OrderCrudService");
         SemanticMethod method = methodAt(uri, 10, 16);
         server.prepareItems = List.of(callItem("processOrder(Order) : void", uri, 10, 16));
@@ -924,7 +923,7 @@ class Lsp4jJavaSemanticServiceTest {
     @Test
     void should_serialize_same_uri_document_lifecycles_until_the_first_call_closes() throws Exception {
         JdtWorkspaceSession currentSession = session(server);
-        service = new Lsp4jJavaSemanticService(new FakeWorkspaceManager(currentSession));
+        service = new Lsp4jJavaSemanticService(snapshot, currentSession);
         String uri = sourceFile("OrderCrudService");
         SemanticMethod method = methodAt(uri, 10, 16);
         server.prepareItems = List.of(callItem("processOrder(Order) : void", uri, 10, 16));
@@ -955,7 +954,7 @@ class Lsp4jJavaSemanticServiceTest {
     @Test
     void should_serialize_real_path_aliases_under_one_canonical_document_uri() throws Exception {
         JdtWorkspaceSession currentSession = session(server);
-        service = new Lsp4jJavaSemanticService(new FakeWorkspaceManager(currentSession));
+        service = new Lsp4jJavaSemanticService(snapshot, currentSession);
         String uri = sourceFile("OrderCrudService");
         Path alias = root.resolve("src/main/java/com/example/generic/OrderCrudServiceAlias.java");
         Files.createSymbolicLink(alias, Path.of(URI.create(uri)));
@@ -1120,8 +1119,7 @@ class Lsp4jJavaSemanticServiceTest {
         SemanticMethod method = methodAt(interfaceUri, 4, 9);
         server.implementationResponse = Either.forLeft(List.of(location(implUri, 8, 16, 8, 22)));
         server.hangingDocumentSymbolUris.add(implUri);
-        service = new Lsp4jJavaSemanticService(
-                new FakeWorkspaceManager(session(server, Duration.ofMillis(50))));
+        service = new Lsp4jJavaSemanticService(snapshot, session(server, Duration.ofMillis(50)));
 
         Throwable failure = catchThrowable(() -> service.implementations(snapshot, method));
 
@@ -1514,6 +1512,11 @@ class Lsp4jJavaSemanticServiceTest {
         @Override
         public void destroy() {
             // 測試不需要
+        }
+
+        @Override
+        public boolean isAlive() {
+            return true;
         }
     }
 }

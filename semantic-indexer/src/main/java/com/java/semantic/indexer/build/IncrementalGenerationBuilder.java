@@ -1,6 +1,7 @@
 package com.java.semantic.indexer.build;
 
 import com.java.semantic.indexer.incremental.IncrementalIndexPlan;
+import com.java.semantic.model.index.AnalysisFingerprint;
 import com.java.semantic.indexer.incremental.IncrementalIndexPlanner;
 import com.java.semantic.indexer.job.IndexJob;
 import com.java.semantic.indexer.store.GenerationWriteContext;
@@ -38,17 +39,27 @@ public final class IncrementalGenerationBuilder {
     }
 
     /** Uses the selected checkout inventory as the sole source set for planning and full-fallback selection. */
+    /** Test-only planning entry point without attested inputs always fails closed to a full build. */
     public BuildSelection assemble(IndexJob job, GenerationWriteContext lease, FullIndexPlan selectedRevisionPlan) {
+        FullIndexPlan completePlan = Objects.requireNonNull(selectedRevisionPlan, "selected revision plan is required");
+        List<String> selectedPaths = completePlan.sources().stream().map(FullIndexPlan.SourceInput::sourcePath).sorted().toList();
+        return BuildSelection.full(fullPlan(selectedPaths, "MISSING_ANALYSIS_FINGERPRINT"), completePlan);
+    }
+
+    /** Reuses a parent only when its sealed semantic inputs exactly equal this prepared analysis. */
+    public BuildSelection assemble(IndexJob job, GenerationWriteContext lease, FullIndexPlan selectedRevisionPlan,
+                                   AnalysisFingerprint fingerprint) {
         Objects.requireNonNull(job, "job is required");
         Objects.requireNonNull(lease, "generation lease is required");
         FullIndexPlan completePlan = Objects.requireNonNull(selectedRevisionPlan, "selected revision plan is required");
+        AnalysisFingerprint requiredFingerprint = Objects.requireNonNull(fingerprint, "analysis fingerprint is required");
         List<String> selectedPaths = completePlan.sources().stream().map(FullIndexPlan.SourceInput::sourcePath).sorted().toList();
         if (job.rebuild()) {
             return BuildSelection.full(fullPlan(selectedPaths, "EXPLICIT_REBUILD"), completePlan);
         }
-        Optional<Parent> parent = compatibleParent(job);
+        Optional<Parent> parent = compatibleParent(job, requiredFingerprint.digest());
         if (parent.isEmpty()) {
-            return BuildSelection.full(fullPlan(selectedPaths, "PARENT_CONTRACT_MISMATCH"), completePlan);
+            return BuildSelection.full(fullPlan(selectedPaths, "PARENT_ANALYSIS_MISMATCH"), completePlan);
         }
         Parent current = parent.orElseThrow();
         com.java.semantic.model.repository.RepositoryRevision targetRevision = job.target().orElseThrow().revision();
@@ -115,7 +126,7 @@ public final class IncrementalGenerationBuilder {
         }
     }
 
-    private Optional<Parent> compatibleParent(IndexJob job) {
+    private Optional<Parent> compatibleParent(IndexJob job, String fingerprintDigest) {
         Document claimedJob = template.getCollection(IndexCollections.INDEX_JOBS).find(new Document("jobId", job.id().value())
                 .append("repoId", job.repositoryId().value()).append("active", true).append("phase", "RUNNING")).first();
         if (Objects.isNull(claimedJob)) {
@@ -133,7 +144,8 @@ public final class IncrementalGenerationBuilder {
         }
         Document manifest = template.getCollection(IndexCollections.GENERATION_MANIFESTS).find(new Document("repoId", job.repositoryId().value())
                 .append("generationId", parentGeneration).append("sourceRevision", parentRevision)
-                .append("identityDigest", parentDigest).append("writeState", "SEALED_VALID")).first();
+                .append("identityDigest", parentDigest).append("analysisFingerprint", fingerprintDigest)
+                .append("writeState", "SEALED_VALID")).first();
         if (!compatible(manifest)) {
             return Optional.empty();
         }
