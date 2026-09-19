@@ -2,6 +2,8 @@ package com.java.semantic.query.application;
 
 import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.model.repository.RepositoryRevision;
+import java.util.List;
+
 import org.junit.jupiter.api.Test;
 
 import java.util.Optional;
@@ -41,5 +43,18 @@ class SemanticQueryErrorMapperTest {
         assertTrue(contract.retryable());
         assertFalse(contract.message().contains("mongo"));
         assertEquals(Optional.empty(), contract.currentRevision());
+    }
+
+    @Test
+    void maps_review_lifecycle_and_context_failures_to_stable_errors() {
+        List<SemanticQueryError> errors = List.of(
+                mapper.map(new ReviewNotFoundException()),
+                mapper.map(new ReviewNotReadyException()),
+                mapper.map(new ReviewFailedException()),
+                mapper.map(new ReviewContextMismatchException()));
+
+        assertEquals(List.of("REVIEW_NOT_FOUND", "REVIEW_NOT_READY", "REVIEW_FAILED", "REVIEW_CONTEXT_MISMATCH"),
+                errors.stream().map(SemanticQueryError::code).toList());
+        assertEquals(List.of(false, true, false, false), errors.stream().map(SemanticQueryError::retryable).toList());
     }
 }

@@ -334,7 +334,7 @@ public final class GitEvidenceReadService {
             GitSnapshotId siblingSnapshotId = requestedPrevious ? currentSnapshotId : previousSnapshotId;
             RepositoryRevision siblingRevision = requestedPrevious ? current : previous;
             requireReadySiblingSnapshot(repositoryId, siblingSnapshotId, siblingRevision, ownerJobId, ownership);
-            authorizeReviewMembership(repositoryId, ownership, new GitComparisonId(requiredText(parent, "evidenceId")), previousSnapshotId,
+            authorizeReviewMembership(repositoryId, ownership, ownerJobId, new GitComparisonId(requiredText(parent, "evidenceId")), previousSnapshotId,
                     currentSnapshotId, previous, current);
         } catch (IllegalArgumentException exception) {
             throw new IndexContractMismatchException();
@@ -1087,24 +1087,24 @@ public final class GitEvidenceReadService {
 
     private Document comparisonManifest(RepositoryId repositoryId, GitEvidenceId comparisonId) {
         Document manifest = ready(findManifest(repositoryId, comparisonId), "COMPARISON");
+        String ownerJobId = requiredText(manifest, "ownerJobId");
         GitSnapshotId previousSnapshotId = new GitSnapshotId(requiredText(manifest, "previousSnapshotId"));
         GitSnapshotId currentSnapshotId = new GitSnapshotId(requiredText(manifest, "currentSnapshotId"));
         RepositoryRevision previous = new RepositoryRevision(requiredText(manifest, "previous"));
         RepositoryRevision current = new RepositoryRevision(requiredText(manifest, "current"));
         GitEvidenceOwnership ownership = ownership(manifest);
-        Document previousSnapshot = readySnapshot(repositoryId, previousSnapshotId, previous);
-        Document currentSnapshot = readySnapshot(repositoryId, currentSnapshotId, current);
-        if (!ownership.equals(ownership(previousSnapshot)) || !ownership.equals(ownership(currentSnapshot))) {
-            throw new IndexContractMismatchException();
-        }
-        authorizeReviewMembership(repositoryId, ownership, new GitComparisonId(requiredText(manifest, "evidenceId")), previousSnapshotId,
+        Document previousSnapshot = readySnapshot(repositoryId, previousSnapshotId, previous, ownerJobId, ownership);
+        Document currentSnapshot = readySnapshot(repositoryId, currentSnapshotId, current, ownerJobId, ownership);
+        authorizeReviewMembership(repositoryId, ownership, ownerJobId, new GitComparisonId(requiredText(manifest, "evidenceId")), previousSnapshotId,
                 currentSnapshotId, previous, current);
         return manifest;
     }
 
-    private Document readySnapshot(RepositoryId repositoryId, GitSnapshotId snapshotId, RepositoryRevision revision) {
+    private Document readySnapshot(RepositoryId repositoryId, GitSnapshotId snapshotId, RepositoryRevision revision, String ownerJobId,
+                                   GitEvidenceOwnership ownership) {
         Document snapshot = ready(findManifest(repositoryId, new GitEvidenceId(snapshotId.value())), "SNAPSHOT");
-        if (!revision.value().equals(requiredText(snapshot, "revision"))) {
+        if (!revision.value().equals(requiredText(snapshot, "revision")) || !ownerJobId.equals(requiredText(snapshot, "ownerJobId"))
+                || !ownership.equals(ownership(snapshot))) {
             throw new IndexContractMismatchException();
         }
         return snapshot;
@@ -1135,10 +1135,14 @@ public final class GitEvidenceReadService {
         throw new IndexContractMismatchException();
     }
 
-    private void authorizeReviewMembership(RepositoryId repositoryId, GitEvidenceOwnership ownership, GitComparisonId comparisonId,
-                                           GitSnapshotId previousSnapshotId, GitSnapshotId currentSnapshotId,
+    private void authorizeReviewMembership(RepositoryId repositoryId, GitEvidenceOwnership ownership, String ownerJobId,
+                                           GitComparisonId comparisonId, GitSnapshotId previousSnapshotId, GitSnapshotId currentSnapshotId,
                                            RepositoryRevision previous, RepositoryRevision current) {
         try {
+            if (ownership.scope() == GitPublicationScope.REVIEW
+                    && !ownerJobId.equals(reviews.requireReady(repositoryId, ownership.reviewId().orElseThrow()).ownerJobId())) {
+                throw new IndexContractMismatchException();
+            }
             reviews.requireGitMembership(repositoryId, ownership, comparisonId, previousSnapshotId, currentSnapshotId, previous, current);
         } catch (ReviewNotReadyException | ReviewFailedException exception) {
             throw new GitEvidenceNotReadyException();

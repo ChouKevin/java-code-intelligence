@@ -1,6 +1,15 @@
 package com.java.semantic.query.application;
 
 import com.java.semantic.query.config.ConfiguredReadPolicy;
+import com.java.semantic.model.index.AnalysisFingerprint;
+import com.java.semantic.model.index.AnalysisInputs;
+import com.java.semantic.model.index.GenerationId;
+import com.java.semantic.model.index.ManifestDigest;
+import com.java.semantic.model.index.SealedGeneration;
+import com.java.semantic.model.index.SemanticAnalysisEvidence;
+import com.java.semantic.model.query.SelectedGeneration;
+import com.java.semantic.model.repository.RepositoryId;
+import com.java.semantic.model.repository.RepositoryRevision;
 import com.java.semantic.query.config.GitEvidenceProperties;
 import com.java.semantic.query.config.ReadPolicyProperties;
 import com.java.semantic.model.index.IndexSchemaContract;
@@ -57,6 +66,25 @@ class GitEvidenceReadServiceIT {
             assertThatThrownBy(() -> service.searchText(new SemanticQueryContract.GitTextSearchRequest(
                     "orders", SNAPSHOT_ID, REVISION, "needle", Optional.empty(), Optional.empty(), 1)))
                     .isInstanceOf(GitEvidenceNotReadyException.class);
+        }
+    }
+
+    @Test
+    void rejects_ready_review_owned_comparison_when_a_snapshot_owner_is_mutated() {
+        try (MongoDBContainer container = new MongoDBContainer(DockerImageName.parse("mongo:8.0.4"))) {
+            container.start();
+            MongoTemplate template = new MongoTemplate(MongoClients.create(container.getConnectionString()), "git_review_owner_mutation");
+            seedSnapshot(template, "orders");
+            markSnapshotComparisonReviewOwned(template, "orders", "11111111-2222-3333-4444-555555555555", "READY");
+            GitEvidenceReadService service = service(template, List.of("orders"));
+            Document parent = template.getCollection("git_evidence_manifests").find(new Document("kind", "COMPARISON")).first();
+            assertThat(service.listFiles(new SemanticQueryContract.GitFileListRequest("orders", SNAPSHOT_ID, REVISION, "", 0, 20)).items())
+                    .isNotEmpty();
+            template.getCollection("git_evidence_manifests").updateOne(new Document("evidenceId", parent.getString("previousSnapshotId")),
+                    new Document("$set", new Document("ownerJobId", "mutated-owner")));
+
+            assertThatThrownBy(() -> service.listFiles(new SemanticQueryContract.GitFileListRequest("orders", SNAPSHOT_ID, REVISION, "", 0, 20)))
+                    .isInstanceOf(IndexContractMismatchException.class);
         }
     }
 
@@ -1188,8 +1216,34 @@ class GitEvidenceReadServiceIT {
     private static void markSnapshotComparisonReviewOwned(MongoTemplate template, String repositoryId, String reviewId, String reviewState) {
         template.getCollection("git_evidence_manifests").updateMany(new Document("repoId", repositoryId), new Document("$set",
                 new Document("gitEvidenceVersion", 2).append("scope", "REVIEW").append("reviewId", reviewId)));
+        Document comparison = template.getCollection("git_evidence_manifests").find(new Document("repoId", repositoryId)
+                .append("kind", "COMPARISON")).first();
+        SealedGeneration a = sealed("2".repeat(40), "review-a", "a".repeat(64));
+        SealedGeneration b = sealed(REVISION, "review-b", "b".repeat(64));
+        Document aEndpoint = new Document("generation", template.getConverter().convertToMongoType(a))
+                .append("snapshotId", comparison.getString("previousSnapshotId"));
+        Document bEndpoint = new Document("generation", template.getConverter().convertToMongoType(b))
+                .append("snapshotId", comparison.getString("currentSnapshotId"));
+        Date now = new Date();
         template.getCollection("review_manifests").insertOne(new Document("repoId", repositoryId).append("reviewId", reviewId)
-                .append("state", reviewState));
+                .append("ownerJobId", "job-snapshot").append("reviewContractVersion", IndexSchemaContract.REVIEW_MANIFEST_VERSION)
+                .append("state", reviewState).append("comparisonType", "CURRENT_TO_COMMIT")
+                .append("capturedBaseline", new Document("pointer", new Document("revision", "2".repeat(40)).append("generationId", "review-a")
+                        .append("manifestDigest", "a".repeat(64)).append("committedJobId", "job-snapshot").append("publishedAt", now))
+                        .append("capturedAt", now))
+                .append("requestedRevision", REVISION).append("a", aEndpoint).append("b", bEndpoint)
+                .append("comparisonId", comparison.getString("evidenceId")).append("createdAt", now).append("publishedAt", now));
+    }
+
+    private static SealedGeneration sealed(String revision, String generationId, String digest) {
+        SelectedGeneration selected = new SelectedGeneration(new RepositoryId("orders"), new RepositoryRevision(revision),
+                new GenerationId(generationId), new ManifestDigest(digest));
+        AnalysisInputs inputs = new AnalysisInputs(IndexSchemaContract.ANALYSIS_EVIDENCE_VERSION, "e".repeat(64), "e".repeat(64),
+                "e".repeat(64), "e".repeat(64), List.of());
+        AnalysisFingerprint fingerprint = AnalysisFingerprint.from(inputs);
+        SemanticAnalysisEvidence evidence = new SemanticAnalysisEvidence(IndexSchemaContract.ANALYSIS_EVIDENCE_VERSION, fingerprint.digest(),
+                "SUCCESS", List.of(), new SemanticAnalysisEvidence.ResolutionCoverage(0, 0, 0, 0, 0), List.of());
+        return new SealedGeneration(selected, fingerprint, evidence);
     }
 
     private static void seedReadyComparisonOwner(MongoTemplate template, String repositoryId, String snapshotId, String revision, String ownerJobId) {
@@ -1355,13 +1409,15 @@ class GitEvidenceReadServiceIT {
 
     private static void seedComparison(MongoTemplate template, String repositoryId, String state) {
         String current = "2".repeat(40);
+        String ownerJobId = "comparison-job";
         template.getCollection("git_evidence_manifests").insertMany(List.of(
                 new Document("repoId", repositoryId).append("evidenceId", "dddddddd-dddd-dddd-dddd-dddddddddddd").append("kind", "SNAPSHOT")
-                        .append("state", "READY").append("gitEvidenceVersion", 1).append("revision", REVISION),
+                        .append("state", "READY").append("gitEvidenceVersion", 1).append("ownerJobId", ownerJobId).append("revision", REVISION),
                 new Document("repoId", repositoryId).append("evidenceId", "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee").append("kind", "SNAPSHOT")
-                        .append("state", "READY").append("gitEvidenceVersion", 1).append("revision", current),
+                        .append("state", "READY").append("gitEvidenceVersion", 1).append("ownerJobId", ownerJobId).append("revision", current),
                 new Document("repoId", repositoryId).append("evidenceId", COMPARISON_ID).append("kind", "COMPARISON").append("state", state)
-                        .append("gitEvidenceVersion", 1).append("previous", REVISION).append("current", current).append("previousSnapshotId", "dddddddd-dddd-dddd-dddd-dddddddddddd")
+                        .append("gitEvidenceVersion", 1).append("ownerJobId", ownerJobId).append("previous", REVISION).append("current", current)
+                        .append("previousSnapshotId", "dddddddd-dddd-dddd-dddd-dddddddddddd")
                         .append("currentSnapshotId", "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee").append("ancestry", "PREVIOUS_ANCESTOR").append("total", 1L)));
         template.getCollection("git_comparison_changes").insertOne(new Document("repoId", repositoryId).append("comparisonId", COMPARISON_ID)
                 .append("ordinal", 0L).append("changeId", "change-0").append("kind", "MODIFY").append("oldPath", "README.md")

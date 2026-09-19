@@ -59,6 +59,33 @@ class ReviewSelectionContractIT extends PublishedMongoITSupport {
         }
     }
 
+    @Test
+    void exposes_review_lifecycle_only_after_repository_visibility_and_rejects_malformed_ready_membership() {
+        try (MongoDBContainer container = new MongoDBContainer("mongo:8.0.4")) {
+            container.start();
+            MongoTemplate template = new MongoTemplate(MongoClients.create(container.getConnectionString()), "review_lifecycle");
+            ReviewManifestReadService reader = new ReviewManifestReadService(template, policy(), Duration.ofSeconds(2));
+            RepositoryId repository = new RepositoryId("orders");
+            ReviewId review = new ReviewId(REVIEW_ID);
+
+            assertThatThrownBy(() -> reader.requireReady(repository, review)).isInstanceOf(ReviewNotFoundException.class);
+            template.getCollection("index_jobs").insertOne(new Document("repoId", "orders").append("operation", "REVIEW")
+                    .append("review", new Document("reviewId", REVIEW_ID)).append("phase", "PREPARING"));
+            assertThatThrownBy(() -> reader.requireReady(repository, review)).isInstanceOf(ReviewNotReadyException.class);
+            template.getCollection("index_jobs").updateOne(new Document("repoId", "orders"), new Document("$set", new Document("phase", "FAILED")));
+            assertThatThrownBy(() -> reader.requireReady(repository, review)).isInstanceOf(ReviewFailedException.class);
+            template.getCollection("review_manifests").insertOne(new Document("repoId", "orders").append("reviewId", REVIEW_ID)
+                    .append("state", "UNKNOWN"));
+            assertThatThrownBy(() -> reader.requireReady(repository, review)).isInstanceOf(IndexContractMismatchException.class);
+            template.getCollection("review_manifests").updateOne(new Document("repoId", "orders"), new Document("$set", new Document("state", "READY")));
+            assertThatThrownBy(() -> reader.requireReady(repository, review)).isInstanceOf(IndexContractMismatchException.class);
+            ReviewManifestReadService denied = new ReviewManifestReadService(template,
+                    new ConfiguredReadPolicy(new com.java.semantic.query.config.ReadPolicyProperties(List.of("orders"), List.of(), List.of(), List.of())),
+                    Duration.ofSeconds(2));
+            assertThatThrownBy(() -> denied.requireReady(repository, review)).isInstanceOf(RepositoryNotFoundException.class);
+        }
+    }
+
     private static SealedGeneration seedGeneration(MongoTemplate template, String revision, String generationId, String digest) {
         SelectedGeneration selected = new SelectedGeneration(new RepositoryId("orders"), new RepositoryRevision(revision),
                 new GenerationId(generationId), new ManifestDigest(digest));

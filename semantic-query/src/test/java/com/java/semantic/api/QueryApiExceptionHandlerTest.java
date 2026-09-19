@@ -4,6 +4,10 @@ import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.model.repository.RepositoryRevision;
 import com.java.semantic.query.application.CodeFactNotFoundException;
 import com.java.semantic.query.application.RevisionOutdatedException;
+import com.java.semantic.query.application.ReviewContextMismatchException;
+import com.java.semantic.query.application.ReviewFailedException;
+import com.java.semantic.query.application.ReviewNotFoundException;
+import com.java.semantic.query.application.ReviewNotReadyException;
 import com.java.semantic.query.application.SemanticQueryError;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
@@ -34,5 +38,15 @@ class QueryApiExceptionHandlerTest {
         assertEquals(HttpStatus.NOT_FOUND, response.getStatusCode());
         assertEquals(new SemanticQueryError("FACT_NOT_FOUND", "The requested fact was not found.", false, Optional.empty()),
                 response.getBody());
+    }
+
+    @Test
+    void maps_review_lifecycle_and_context_failures_to_their_public_statuses() {
+        QueryApiExceptionHandler handler = new QueryApiExceptionHandler();
+
+        assertEquals(HttpStatus.NOT_FOUND, handler.failure(new ReviewNotFoundException()).getStatusCode());
+        assertEquals(HttpStatus.CONFLICT, handler.failure(new ReviewNotReadyException()).getStatusCode());
+        assertEquals(HttpStatus.CONFLICT, handler.failure(new ReviewFailedException()).getStatusCode());
+        assertEquals(HttpStatus.BAD_REQUEST, handler.failure(new ReviewContextMismatchException()).getStatusCode());
     }
 }
