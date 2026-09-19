@@ -1,16 +1,25 @@
 package com.java.semantic.model.git;
 
+import com.java.semantic.model.index.IndexSchemaContract;
 import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.model.repository.RepositoryRevision;
 import com.java.semantic.model.support.ModelValidation;
-
 import java.time.Instant;
 import java.util.Objects;
 
-public record GitHistoryManifest(GitEvidenceId historyId, GitEvidenceId catalogId, RepositoryId repositoryId,
-                                 String branch, RepositoryRevision revision, Instant preparedAt,
-                                 GitEvidenceState state, int gitEvidenceVersion, long total) {
-    public static final int VERSION = 1;
+public record GitHistoryManifest(
+        GitEvidenceId historyId,
+        GitEvidenceId catalogId,
+        RepositoryId repositoryId,
+        String branch,
+        RepositoryRevision revision,
+        Instant preparedAt,
+        GitEvidenceState state,
+        int gitEvidenceVersion,
+        long total,
+        GitEvidenceOwnership ownership) {
+
+    public static final int VERSION = IndexSchemaContract.GIT_EVIDENCE_VERSION;
 
     public GitHistoryManifest {
         historyId = Objects.requireNonNull(historyId, "history id is required");
@@ -20,8 +29,9 @@ public record GitHistoryManifest(GitEvidenceId historyId, GitEvidenceId catalogI
         revision = Objects.requireNonNull(revision, "history revision is required");
         preparedAt = Objects.requireNonNull(preparedAt, "history preparation time is required");
         state = Objects.requireNonNull(state, "history state is required");
-        if (gitEvidenceVersion != VERSION || total < 0) {
-            throw new IllegalArgumentException("invalid git history manifest");
+        ownership = Objects.requireNonNull(ownership, "history ownership is required");
+        if (gitEvidenceVersion != VERSION || total < 0 || ownership.scope() != GitPublicationScope.STANDALONE) {
+            throw new IllegalArgumentException("invalid standalone git history manifest");
         }
     }
 }

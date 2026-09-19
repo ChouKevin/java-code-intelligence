@@ -4,6 +4,7 @@ import com.java.semantic.indexer.store.GitEvidencePublicationStore;
 import com.java.semantic.indexer.store.IndexSchemaMaintenanceRequiredException;
 import com.java.semantic.model.git.GitCatalogManifest;
 import com.java.semantic.model.git.GitEvidenceId;
+import com.java.semantic.model.git.GitEvidenceOwnership;
 import com.java.semantic.model.git.GitEvidenceState;
 import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.repository.application.RepositoryRuntimeRegistry;
@@ -34,7 +35,7 @@ class GitEvidenceJobHandlerTest {
         IndexJob job = new IndexJob(IndexJobId.create(), repositoryId, Optional.empty(), IndexJobPhase.RUNNING, true,
                 Optional.empty(), false, IndexJobOperation.GIT_REFS, Optional.of(GitEvidenceJob.refs()));
         GitCatalogManifest manifest = new GitCatalogManifest(GitEvidenceId.create(), repositoryId, Instant.parse("2026-09-15T00:00:00Z"),
-                GitEvidenceState.PREPARING, GitCatalogManifest.VERSION);
+                GitEvidenceState.PREPARING, GitCatalogManifest.VERSION, GitEvidenceOwnership.standalone());
         when(repositories.get(repositoryId)).thenReturn(runtime);
         when(git.isCloned(runtime.workingTree())).thenReturn(false);
         when(evidence.beginCatalog(org.mockito.ArgumentMatchers.eq(job), org.mockito.ArgumentMatchers.any(Instant.class))).thenReturn(manifest);

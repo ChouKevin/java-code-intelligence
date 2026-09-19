@@ -8,6 +8,7 @@ import com.java.semantic.indexer.store.GenerationWriteContext;
 import com.java.semantic.indexer.store.MongoGenerationWriter;
 import com.java.semantic.model.index.GenerationId;
 import com.java.semantic.model.index.IndexCollections;
+import com.java.semantic.model.index.IndexSchemaContract;
 import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.model.repository.RepositoryRevision;
 import com.mongodb.client.MongoClients;
@@ -207,8 +208,9 @@ class GenerationValidatorIT {
     }
 
     private static List<Document> projectionVersions() {
-        return List.of(new Document("name", "SOURCES").append("version", 2), new Document("name", "SYMBOLS").append("version", 2),
-                new Document("name", "RELATIONS").append("version", 2), new Document("name", "ENTRY_POINTS").append("version", 2),
-                new Document("name", "SEARCH").append("version", 2));
+        return IndexSchemaContract.requiredProjectionVersions().entrySet().stream()
+                .sorted(java.util.Map.Entry.comparingByKey())
+                .map(entry -> new Document("name", entry.getKey()).append("version", entry.getValue()))
+                .toList();
     }
 }

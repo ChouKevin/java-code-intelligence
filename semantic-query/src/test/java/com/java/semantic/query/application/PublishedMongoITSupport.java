@@ -64,9 +64,10 @@ abstract class PublishedMongoITSupport {
         template.getCollection("generation_manifests").insertOne(new Document("repoId", repositoryId).append("sourceRevision", REVISION)
                 .append("generationId", "g1").append("identityDigest", DIGEST).append("writeState", "SEALED_VALID")
                 .append("schemaVersion", IndexSchemaContract.SCHEMA_VERSION)
-                .append("projectionVersions", List.of(new Document("name", "SOURCES").append("version", 2),
-                        new Document("name", "SYMBOLS").append("version", 2), new Document("name", "RELATIONS").append("version", 2),
-                        new Document("name", "ENTRY_POINTS").append("version", 2), new Document("name", "SEARCH").append("version", 2))));
+                .append("projectionVersions", IndexSchemaContract.requiredProjectionVersions().entrySet().stream()
+                        .sorted(java.util.Map.Entry.comparingByKey())
+                        .map(entry -> new Document("name", entry.getKey()).append("version", entry.getValue()))
+                        .toList()));
     }
 
     static CodeFactIdentity methodIdentity(String packageName, String className, String methodName, String sourcePath) {

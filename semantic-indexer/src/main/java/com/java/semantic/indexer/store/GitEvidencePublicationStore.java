@@ -6,6 +6,7 @@ import com.java.semantic.model.git.GitBranch;
 import com.java.semantic.model.git.GitCatalogManifest;
 import com.java.semantic.model.git.GitCommit;
 import com.java.semantic.model.git.GitEvidenceId;
+import com.java.semantic.model.git.GitEvidenceOwnership;
 import com.java.semantic.model.git.GitEvidenceState;
 import com.java.semantic.model.git.GitHistoryManifest;
 import com.java.semantic.model.git.GitPreparedComparison;
@@ -57,7 +58,8 @@ public final class GitEvidencePublicationStore {
     public GitCatalogManifest beginCatalog(IndexJob job, Instant observedAt) {
         verifySchemaBeforeEvidence();
         GitEvidenceId id = GitEvidenceId.create();
-        GitCatalogManifest manifest = new GitCatalogManifest(id, job.repositoryId(), observedAt, GitEvidenceState.PREPARING, GitCatalogManifest.VERSION);
+        GitCatalogManifest manifest = new GitCatalogManifest(id, job.repositoryId(), observedAt, GitEvidenceState.PREPARING,
+                GitCatalogManifest.VERSION, GitEvidenceOwnership.standalone());
         template.getCollection(IndexCollections.GIT_EVIDENCE_MANIFESTS).insertOne(new Document("repoId", job.repositoryId().value())
                 .append("evidenceId", id.value()).append("kind", "CATALOG").append("state", "PREPARING")
                 .append("gitEvidenceVersion", GitCatalogManifest.VERSION).append("observedAt", java.util.Date.from(observedAt))
@@ -70,7 +72,7 @@ public final class GitEvidencePublicationStore {
         verifySchemaBeforeEvidence();
         GitEvidenceId id = GitEvidenceId.create();
         GitHistoryManifest manifest = new GitHistoryManifest(id, catalogId, job.repositoryId(), branch, revision, preparedAt,
-                GitEvidenceState.PREPARING, GitHistoryManifest.VERSION, 0L);
+                GitEvidenceState.PREPARING, GitHistoryManifest.VERSION, 0L, GitEvidenceOwnership.standalone());
         template.getCollection(IndexCollections.GIT_EVIDENCE_MANIFESTS).insertOne(new Document("repoId", job.repositoryId().value())
                 .append("evidenceId", id.value()).append("kind", "HISTORY").append("state", "PREPARING")
                 .append("gitEvidenceVersion", GitHistoryManifest.VERSION).append("catalogId", catalogId.value()).append("branch", branch)

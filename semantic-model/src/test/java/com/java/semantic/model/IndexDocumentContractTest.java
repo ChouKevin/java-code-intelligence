@@ -41,6 +41,20 @@ import com.java.semantic.model.index.SourceArtifactId;
 import com.java.semantic.model.index.SymbolDocument;
 import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.model.repository.RepositoryRevision;
+import com.java.semantic.model.git.GitComparisonId;
+import com.java.semantic.model.git.GitSnapshotId;
+import com.java.semantic.model.index.AnalysisFingerprint;
+import com.java.semantic.model.index.AnalysisInputs;
+import com.java.semantic.model.index.PublishedGenerationPointer;
+import com.java.semantic.model.index.SemanticAnalysisEvidence;
+import com.java.semantic.model.index.SealedGeneration;
+import com.java.semantic.model.query.SelectedGeneration;
+import com.java.semantic.model.review.CapturedReviewBaseline;
+import com.java.semantic.model.review.ReviewComparisonType;
+import com.java.semantic.model.review.ReviewEndpoint;
+import com.java.semantic.model.review.ReviewId;
+import com.java.semantic.model.review.ReviewManifestDocument;
+import com.java.semantic.model.review.ReviewState;
 import java.time.Instant;
 import java.util.List;
 import java.util.LinkedHashMap;
@@ -135,9 +149,28 @@ class IndexDocumentContractTest {
 
     @Test
     void requires_the_canonical_relations_projection_version() {
-        assertEquals(2, IndexSchemaContract.requiredProjectionVersions().get(ProjectionName.RELATIONS.name()));
+        assertEquals(3, IndexSchemaContract.requiredProjectionVersions().get(ProjectionName.RELATIONS.name()));
     }
 
+
+    @Test
+    void rejects_a_ready_review_when_its_a_endpoint_differs_from_the_captured_baseline_revision() {
+        RepositoryId repositoryId = new RepositoryId("orders");
+        RepositoryRevision capturedRevision = new RepositoryRevision("a".repeat(40));
+        PublishedGenerationPointer pointer = new PublishedGenerationPointer(capturedRevision, new GenerationId("generation-a"),
+                new ManifestDigest("a".repeat(64)), "job-a", Instant.parse("2026-09-19T00:00:00Z"));
+        CapturedReviewBaseline baseline = new CapturedReviewBaseline(pointer, Instant.parse("2026-09-19T00:00:00Z"));
+        ReviewEndpoint a = endpoint(repositoryId, new RepositoryRevision("c".repeat(40)), "generation-a", "a".repeat(64),
+                "00000000-0000-0000-0000-000000000001");
+        ReviewEndpoint b = endpoint(repositoryId, new RepositoryRevision("b".repeat(40)), "generation-b", "b".repeat(64),
+                "00000000-0000-0000-0000-000000000002");
+
+        assertThrows(IllegalArgumentException.class, () -> new ReviewManifestDocument(repositoryId, new ReviewId("review-1"),
+                "owner-job", 1, ReviewState.READY, ReviewComparisonType.CURRENT_TO_COMMIT, baseline,
+                new RepositoryRevision("b".repeat(40)), Optional.of(a), Optional.of(b),
+                Optional.of(new GitComparisonId("00000000-0000-0000-0000-000000000003")),
+                Instant.parse("2026-09-19T00:00:00Z"), Optional.of(Instant.parse("2026-09-19T00:01:00Z")), Optional.empty()));
+    }
     @Test
     void schema_index_keys_preserve_compound_order_without_exposing_mutable_contract_state() {
         IndexSchemaContract.IndexSpec index = IndexSchemaContract.collections().stream()
@@ -301,6 +334,22 @@ class IndexDocumentContractTest {
                 entryPointFact(EntryPointKind.HTTP, mq), EntryPointKind.HTTP, method, mq));
     }
 
+    private static ReviewEndpoint endpoint(
+            RepositoryId repositoryId,
+            RepositoryRevision revision,
+            String generationId,
+            String manifestDigest,
+            String snapshotId) {
+        AnalysisInputs inputs = new AnalysisInputs(1, "d".repeat(64), "e".repeat(64), "f".repeat(64), "1".repeat(64),
+                List.of(new AnalysisInputs.Project(".", "c".repeat(64), Map.of(), List.of(), List.of(), List.of(), List.of())));
+        AnalysisFingerprint fingerprint = AnalysisFingerprint.from(inputs);
+        SemanticAnalysisEvidence evidence = new SemanticAnalysisEvidence(1, fingerprint.digest(), "SUCCESS", List.of(),
+                new SemanticAnalysisEvidence.ResolutionCoverage(0, 0, 0, 0, 0), List.of());
+        SelectedGeneration selected = new SelectedGeneration(repositoryId, revision, new GenerationId(generationId),
+                new ManifestDigest(manifestDigest));
+        return new ReviewEndpoint(new SealedGeneration(selected, fingerprint, evidence), new GitSnapshotId(snapshotId));
+    }
+
     private static SearchDocument searchDocument(
             RepositoryId repositoryId,
             CodeFactId factId,
@@ -395,6 +444,11 @@ class IndexDocumentContractTest {
     }
 
     private static GenerationManifestDocument manifest(Map<String, Long> counts) {
+        AnalysisInputs inputs = new AnalysisInputs(1, "d".repeat(64), "e".repeat(64), "f".repeat(64), "1".repeat(64),
+                List.of(new AnalysisInputs.Project(".", "c".repeat(64), Map.of(), List.of(), List.of(), List.of(), List.of())));
+        AnalysisFingerprint fingerprint = AnalysisFingerprint.from(inputs);
+        SemanticAnalysisEvidence evidence = new SemanticAnalysisEvidence(1, fingerprint.digest(), "SUCCESS", List.of(),
+                new SemanticAnalysisEvidence.ResolutionCoverage(0, 0, 0, 0, 0), List.of());
         return new GenerationManifestDocument(
                 new RepositoryId("orders"),
                 new RepositoryRevision("a".repeat(40)),
@@ -402,11 +456,16 @@ class IndexDocumentContractTest {
                 "job-1",
                 GenerationWriteState.SEALED_VALID,
                 1,
-                new IndexSchemaVersion(1),
-                List.of(new ProjectionVersion(ProjectionName.SYMBOLS, 1)),
+                new IndexSchemaVersion(IndexSchemaContract.SCHEMA_VERSION),
+                IndexSchemaContract.requiredProjectionVersions().entrySet().stream()
+                        .sorted(Map.Entry.comparingByKey())
+                        .map(entry -> new ProjectionVersion(ProjectionName.valueOf(entry.getKey()), entry.getValue()))
+                        .toList(),
                 counts,
                 new ManifestDigest("b".repeat(64)),
                 Optional.of("valid"),
-                Optional.of(Instant.parse("2026-08-23T00:00:00Z")));
+                Optional.of(Instant.parse("2026-08-23T00:00:00Z")),
+                fingerprint,
+                Optional.of(evidence));
     }
 }

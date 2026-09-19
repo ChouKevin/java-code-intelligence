@@ -1,6 +1,7 @@
 package com.java.semantic.indexer.store;
 
 import com.java.semantic.model.index.IndexSchemaContract;
+import com.java.semantic.model.index.IndexCollections;
 import com.java.semantic.indexer.job.GitEvidenceJob;
 import com.java.semantic.indexer.job.GitEvidenceJobHandler;
 import com.java.semantic.indexer.job.IndexJob;
@@ -60,6 +61,22 @@ class IndexSchemaBootstrapIT {
                 assertThat(index.get("key", Document.class)).containsExactlyEntriesOf(new Document("repoId", 1).append("kind", 1).append("ownerJobId", 1));
                 assertThat(index.getBoolean("unique", false)).isFalse();
             });
+        }
+    }
+
+    @Test
+    void rejects_duplicate_review_ids_within_a_repository_but_allows_the_same_review_id_in_another_repository() {
+        try (MongoDBContainer container = MongoSchemaTestSupport.container()) {
+            org.springframework.data.mongodb.core.MongoTemplate template = MongoSchemaTestSupport.template(container);
+            new IndexSchemaBootstrap(template).bootstrap();
+            com.mongodb.client.MongoCollection<Document> manifests = template.getCollection(IndexCollections.REVIEW_MANIFESTS);
+
+            manifests.insertOne(new Document("repoId", "orders").append("reviewId", "review-1"));
+
+            assertThatThrownBy(() -> manifests.insertOne(new Document("repoId", "orders").append("reviewId", "review-1")))
+                    .isInstanceOf(com.mongodb.MongoWriteException.class);
+            assertThatCode(() -> manifests.insertOne(new Document("repoId", "billing").append("reviewId", "review-1")))
+                    .doesNotThrowAnyException();
         }
     }
 

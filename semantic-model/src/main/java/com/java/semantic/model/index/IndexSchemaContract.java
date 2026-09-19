@@ -14,14 +14,18 @@ import java.util.stream.Collectors;
 /** Framework-neutral Mongo collection and index contract. */
 public final class IndexSchemaContract {
 
-    public static final int SCHEMA_VERSION = 2;
+    public static final int SCHEMA_VERSION = 3;
+    public static final int ANALYSIS_EVIDENCE_VERSION = 1;
+    public static final int REVIEW_MANIFEST_VERSION = 1;
+    public static final int GIT_EVIDENCE_VERSION = 2;
+    public static final int PERSISTED_JOB_VERSION = 2;
     /** Typed projection contract consumed by exporters, validators, and Query release checks. */
     private static final List<ProjectionSpec> PROJECTIONS = List.of(
-            projection(ProjectionName.SOURCES, 2, IndexCollections.GENERATION_FILES),
-            projection(ProjectionName.SYMBOLS, 2, IndexCollections.SYMBOLS),
-            projection(ProjectionName.RELATIONS, 2, IndexCollections.RELATIONS),
-            projection(ProjectionName.ENTRY_POINTS, 2, IndexCollections.ENTRY_POINTS),
-            projection(ProjectionName.SEARCH, 2, IndexCollections.SEARCH));
+            projection(ProjectionName.SOURCES, 3, IndexCollections.GENERATION_FILES),
+            projection(ProjectionName.SYMBOLS, 3, IndexCollections.SYMBOLS),
+            projection(ProjectionName.RELATIONS, 3, IndexCollections.RELATIONS),
+            projection(ProjectionName.ENTRY_POINTS, 3, IndexCollections.ENTRY_POINTS),
+            projection(ProjectionName.SEARCH, 3, IndexCollections.SEARCH));
     private static final Map<String, Integer> REQUIRED_PROJECTION_VERSIONS = PROJECTIONS.stream()
             .collect(Collectors.toUnmodifiableMap(specification -> specification.name().name(), ProjectionSpec::version));
     private static final List<ImmutablePayloadCollectionSpec> IMMUTABLE_PAYLOAD_COLLECTIONS = List.of(
@@ -34,14 +38,19 @@ public final class IndexSchemaContract {
 
     private static final List<CollectionSpec> COLLECTIONS = List.of(
             collection(IndexCollections.REPOSITORIES, index("repository_id_unique", keys("repoId", 1), true, Map.of())),
-            collection(IndexCollections.GENERATION_MANIFESTS, index("repository_generation_unique", keys("repoId", 1, "generationId", 1), true, Map.of())),
+            collection(IndexCollections.GENERATION_MANIFESTS,
+                    index("repository_generation_unique", keys("repoId", 1, "generationId", 1), true, Map.of()),
+                    index("sealed_generation_reuse", keys("repoId", 1, "sourceRevision", 1, "analysisFingerprint.digest", 1,
+                            "writeState", 1), false, Map.of("writeState", GenerationWriteState.SEALED_VALID.name()))),
             collection(IndexCollections.INDEX_JOBS, index("job_id_unique", keys("jobId", 1), true, Map.of()),
                     index("one_active_job_per_repository", keys("repoId", 1), true, Map.of("active", true)),
                     index("accepted_job_queue", keys("active", 1, "phase", 1, "createdAt", 1, "jobId", 1), false,
                             Map.of("active", true, "phase", "ACCEPTED"))),
+            collection(IndexCollections.REVIEW_MANIFESTS,
+                    index("review_manifest_unique", keys("repoId", 1, "reviewId", 1), true, Map.of()),
+                    index("review_manifest_owner_lookup", keys("repoId", 1, "ownerJobId", 1), false, Map.of())),
             collection(IndexCollections.GENERATION_FILES, index("generation_file_unique", keys("repoId", 1, "generationId", 1, "sourcePath", 1), true, Map.of())),
-            collection(IndexCollections.SOURCE_ARTIFACTS, index("source_artifact_id_unique", keys("sourceArtifactId", 1), true, Map.of()),
-                    index("content_hash_unique", keys("contentHash", 1), true, Map.of())),
+            collection(IndexCollections.SOURCE_ARTIFACTS, index("source_artifact_id_unique", keys("sourceArtifactId", 1), true, Map.of())),
             collection(IndexCollections.SYMBOLS, index("symbol_unique", keys("repoId", 1, "generationId", 1, "symbolId", 1), true, Map.of()),
                     index("symbol_canonical", keys("repoId", 1, "generationId", 1, "canonical", 1), false, Map.of()),
                     index("symbol_owner_name_source", keys("repoId", 1, "generationId", 1, "scopePackage", 1, "scopeClass", 1, "scopeMethod", 1, "scopeParameters", 1, "owner", 1, "name", 1, "sourcePath", 1), false, Map.of())),

@@ -8,6 +8,7 @@ public final class IndexCollections {
     public static final String REPOSITORIES = "repositories";
     public static final String GENERATION_MANIFESTS = "generation_manifests";
     public static final String INDEX_JOBS = "index_jobs";
+    public static final String REVIEW_MANIFESTS = "review_manifests";
     public static final String GENERATION_FILES = "generation_files";
     public static final String SOURCE_ARTIFACTS = "source_artifacts";
     public static final String SYMBOLS = "symbols";

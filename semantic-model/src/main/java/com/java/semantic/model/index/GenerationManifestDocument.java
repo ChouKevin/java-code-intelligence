@@ -22,7 +22,9 @@ public record GenerationManifestDocument(
         Map<String, Long> sealedCollectionCounts,
         ManifestDigest identityDigest,
         Optional<String> validationResult,
-        Optional<Instant> validatedAt) {
+        Optional<Instant> validatedAt,
+        AnalysisFingerprint analysisFingerprint,
+        Optional<SemanticAnalysisEvidence> analysisEvidence) {
 
     public GenerationManifestDocument {
         repositoryId = Objects.requireNonNull(repositoryId, "repository id is required");
@@ -37,9 +39,19 @@ public record GenerationManifestDocument(
         identityDigest = Objects.requireNonNull(identityDigest, "identity digest is required");
         validationResult = Objects.requireNonNull(validationResult, "validation result is required");
         validatedAt = Objects.requireNonNull(validatedAt, "validation time is required");
+        analysisFingerprint = Objects.requireNonNull(analysisFingerprint, "analysis fingerprint is required");
+        analysisEvidence = Objects.requireNonNull(analysisEvidence, "analysis evidence is required");
+        if (analysisEvidence.isPresent()) {
+            ModelValidation.require(analysisFingerprint.digest().equals(analysisEvidence.orElseThrow().fingerprintDigest()),
+                    "analysis evidence fingerprint must match analysis fingerprint");
+        }
         ModelValidation.require(!projectionVersions.isEmpty(), "projection versions must not be empty");
         for (Long count : sealedCollectionCounts.values()) {
             ModelValidation.require(count >= 0, "sealed collection count must not be negative");
+        }
+        if (writeState == GenerationWriteState.SEALED_VALID) {
+            ModelValidation.require(analysisEvidence.isPresent(),
+                    "sealed valid generation requires semantic analysis evidence");
         }
     }
 }
