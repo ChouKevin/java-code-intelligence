@@ -9,6 +9,7 @@ import com.java.semantic.indexer.job.IndexJobStore;
 import com.java.semantic.indexer.job.ReviewJobPayload;
 import com.java.semantic.indexer.job.ReviewPreparationStage;
 import com.java.semantic.model.index.AnalysisFingerprint;
+import com.java.semantic.model.index.AnalysisInputs;
 import com.java.semantic.model.index.IndexCollections;
 import com.java.semantic.model.index.SealedGeneration;
 import com.java.semantic.model.index.SemanticAnalysisEvidence;
@@ -67,15 +68,22 @@ public final class ReviewPreparationService {
                 .append("generationId", payload.baseline().pointer().generationId().value())
                 .append("identityDigest", payload.baseline().pointer().manifestDigest().value())
                 .append("writeState", "SEALED_VALID")).first();
-        if (Objects.isNull(manifest) || Objects.isNull(manifest.get("analysisFingerprint", Document.class))
-                || Objects.isNull(manifest.get("analysisEvidence", Document.class))) {
+        Document inputs = Objects.isNull(manifest) ? null : manifest.get("analysisInputs", Document.class);
+        String storedFingerprint = Objects.isNull(manifest) ? null : manifest.getString("analysisFingerprint");
+        Document evidence = Objects.isNull(manifest) ? null : manifest.get("analysisEvidence", Document.class);
+        if (Objects.isNull(inputs) || Objects.isNull(storedFingerprint) || Objects.isNull(evidence)) {
             throw new ReviewPreparationException(IndexFailureCategory.REVIEW_EVIDENCE_MISMATCH,
                     "captured review baseline is no longer a complete sealed generation");
         }
+        AnalysisFingerprint fingerprint = AnalysisFingerprint.from(template.getConverter().read(AnalysisInputs.class, inputs));
+        SemanticAnalysisEvidence analysisEvidence = template.getConverter().read(SemanticAnalysisEvidence.class, evidence);
+        if (!fingerprint.digest().equals(storedFingerprint) || !analysisEvidence.fingerprintDigest().equals(storedFingerprint)) {
+            throw new ReviewPreparationException(IndexFailureCategory.REVIEW_EVIDENCE_MISMATCH,
+                    "captured review baseline has inconsistent semantic analysis evidence");
+        }
         return new SealedGeneration(new SelectedGeneration(job.repositoryId(), payload.baseline().pointer().revision(),
                 payload.baseline().pointer().generationId(), payload.baseline().pointer().manifestDigest()),
-                template.getConverter().read(AnalysisFingerprint.class, manifest.get("analysisFingerprint", Document.class)),
-                template.getConverter().read(SemanticAnalysisEvidence.class, manifest.get("analysisEvidence", Document.class)));
+                fingerprint, analysisEvidence);
     }
 
     private static boolean sameRevision(SealedGeneration a, IndexJob activeB) {
