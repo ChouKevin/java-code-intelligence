@@ -78,7 +78,7 @@ Docker image verification is recorded below; no formatter, linter, project-wide 
 
 - Task 4 still owns the complete production caller cutover. The legacy manager-based semantic service constructor, singleton wiring, and auto-start path remain deliberately for unmigrated callers as prescribed.
 - The image smoke script was changed and executed after a targeted image build; see the post-commit correction evidence below.
-- Per-root declaration/symbol proofs are fail-honest limitations until Task 4 feeds the bound semantic service through each extracted root. No synthetic root success is persisted.
+- Each included nonempty source root is now proved by a leased, snapshot-bound JDT workspace-symbol declaration query. A missing declaration fails preparation rather than persisting a successful empty proof.
 
 ## Post-commit image smoke correction
 
@@ -93,3 +93,21 @@ bash scripts/smoke-jdtls-image.sh semantic-indexer:review-task3
 ```
 
 Its restricted JDT launch completed the initialize/shutdown exchange while preserving the UID 10001, bounded-capability, and synthetic-parent-secret checks. The focused manager/process command was rerun after the factory change: `72` tests, `0` failures, `0` errors, `BUILD SUCCESS`.
+
+## Re-review correction evidence
+
+The inspector now rejects omitted `org.eclipse.jdt.ls.core.sourcePaths`, `classpaths`, and `modulepaths`; explicitly present empty lists remain valid. It requests the complete local JDT Core compiler-option key set and carries the attested selected roots and effective compiler options in `FullIndexPlan`, which the exporter supplies to active AST extraction.
+
+Only paths reported as JDT classpath `CPE_PROJECT` outputs are recorded as `PROJECT_EDGE`; all other repository-contained artifacts are byte-digested as ordinary classpath/modulepath entries.
+
+The per-root declaration proof is performed through `Lsp4jJavaSemanticService(snapshot, session)` and therefore rejects a closed lease or a mismatched snapshot before the JDT request can execute.
+
+After these changes, focused verification completed:
+
+```sh
+JDTLS_HOME=/opt/jdtls .superpowers/sdd/2026-09-19-current-to-commit-semantic-review/tools/apache-maven-3.9.11/bin/mvn --batch-mode --no-transfer-progress -pl semantic-indexer -am -Dtest=DefaultJdtWorkspaceManagerTest,JdtLsProcessFactoryTest -Dsurefire.failIfNoSpecifiedTests=false test
+# Tests run: 72, Failures: 0, Errors: 0, Skipped: 0; BUILD SUCCESS
+
+JDTLS_HOME=/opt/jdtls .superpowers/sdd/2026-09-19-current-to-commit-semantic-review/tools/apache-maven-3.9.11/bin/mvn --batch-mode --no-transfer-progress -pl semantic-indexer -am -Pjdtls-it -Dtest=EffectiveEnvironmentJdtLsIT -Dsurefire.failIfNoSpecifiedTests=false test
+# Tests run: 1, Failures: 0, Errors: 0, Skipped: 0; BUILD SUCCESS
+```

@@ -47,6 +47,11 @@ public final class FullIndexPlanner {
     }
 
     public FullIndexPlan plan(Path repositoryRoot, List<Path> includedSourceRoots) {
+        return plan(repositoryRoot, includedSourceRoots, java.util.Map.of());
+    }
+
+    public FullIndexPlan plan(Path repositoryRoot, List<Path> includedSourceRoots,
+                              java.util.Map<String, String> effectiveCompilerOptions) {
         Path root = Objects.requireNonNull(repositoryRoot, "repository root is required").toAbsolutePath().normalize();
         List<Path> roots = List.copyOf(Objects.requireNonNull(includedSourceRoots, "included source roots are required"))
                 .stream().map(path -> path.toAbsolutePath().normalize()).toList();
@@ -58,7 +63,7 @@ public final class FullIndexPlanner {
         FullIndexPlan completePlan = plan(root);
         return new FullIndexPlan(root, completePlan.sources().stream()
                 .filter(source -> roots.stream().anyMatch(rootPath -> source.path().startsWith(rootPath)))
-                .toList());
+                .toList(), roots, effectiveCompilerOptions);
     }
 
     private java.util.Optional<FullIndexPlan.SourceInput> toSource(Path root, Path path) {

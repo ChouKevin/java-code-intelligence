@@ -115,6 +115,25 @@ class Lsp4jJavaSemanticServiceTest {
     }
 
     @Test
+    void should_reject_mismatched_snapshots_and_closed_bound_leases_before_semantic_work() {
+        JdtWorkspaceSession boundSession = session(server);
+        Lsp4jJavaSemanticService boundService = new Lsp4jJavaSemanticService(snapshot, boundSession);
+        SemanticMethod method = methodAt(root.resolve("src/main/java/com/example/generic/OrderService.java").toUri().toString(), 0, 0);
+        RepositorySnapshot otherSnapshot = new RepositorySnapshot(REPOSITORY_ID, root,
+                RepositoryRevision.ofSha("b".repeat(40)));
+
+        assertThatThrownBy(() -> boundService.classifySource(otherSnapshot, method))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("different repository snapshot");
+
+        boundSession.rejectNewWork();
+
+        assertThatThrownBy(() -> boundService.classifySource(snapshot, method))
+                .isInstanceOf(JdtWorkspaceSession.JdtWorkspaceClosingException.class)
+                .hasMessageContaining("closed");
+    }
+
+    @Test
     void should_find_references_at_identifier_and_return_only_classified_domain_locations() throws IOException {
         String sourceFile = "src/main/java/com/example/generic/OrderService.java";
         writeClassFile("com/example/generic/OrderService.java", PACKAGE, "OrderService");

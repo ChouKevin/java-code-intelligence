@@ -20,6 +20,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import org.eclipse.jdt.core.JavaCore;
 import org.eclipse.lsp4j.ExecuteCommandParams;
 import org.springframework.util.Assert;
 
@@ -68,7 +69,7 @@ public final class JdtLsEffectiveEnvironmentInspector {
         for (String projectUri : projectUris) {
             Path projectRoot = containedProjectRoot(projectUri, snapshot.root());
             Map<String, Object> settings = objectMap(command(session, new ExecuteCommandParams(
-                    GET_SETTINGS, List.of(projectUri, SETTINGS))), GET_SETTINGS);
+                    GET_SETTINGS, List.of(projectUri, settingsKeys()))), GET_SETTINGS);
             if (isMavenProject(settings)) {
                 Map<String, Object> profileSettings = objectMap(command(session, new ExecuteCommandParams(
                         GET_SETTINGS, List.of(projectUri, List.of(SELECTED_PROFILES)))), GET_SETTINGS);
@@ -78,11 +79,15 @@ public final class JdtLsEffectiveEnvironmentInspector {
                     GET_CLASSPATHS, new ArrayList<>(List.of(projectUri, "{\"scope\":\"runtime\"}")));
             Map<String, Object> classpaths = objectMap(command(session, classpathCommand), GET_CLASSPATHS);
             assertClasspathProjectRoot(classpaths, projectRoot, snapshot.root());
+            List<String> sourcePaths = requiredStringList(settings, "org.eclipse.jdt.ls.core.sourcePaths");
+            List<String> classpathEntries = requiredStringList(classpaths, "classpaths");
+            List<String> modulepathEntries = requiredStringList(classpaths, "modulepaths");
+            List<Path> projectEdges = projectOutputPaths(settings);
             projects.add(new AnalysisInputs.Project(relative(snapshot.root(), projectRoot),
                     projectJdkDigest(settings), compilerOptions(settings), selectedProfiles(settings),
-                    roots(snapshot.root(), projectRoot, stringList(settings.get("org.eclipse.jdt.ls.core.sourcePaths"))),
-                    artifacts(snapshot, stringList(classpaths.get("classpaths")), "CLASSPATH"),
-                    artifacts(snapshot, stringList(classpaths.get("modulepaths")), "MODULEPATH")));
+                    roots(snapshot.root(), projectRoot, sourcePaths),
+                    artifacts(snapshot, classpathEntries, "CLASSPATH", projectEdges),
+                    artifacts(snapshot, modulepathEntries, "MODULEPATH", projectEdges)));
         }
         return new AnalysisInputs(IndexSchemaContract.ANALYSIS_EVIDENCE_VERSION,
                 digestText(getClass().getName()), digestDirectory(properties.getHome()),
@@ -122,13 +127,10 @@ public final class JdtLsEffectiveEnvironmentInspector {
 
     private Map<String, String> compilerOptions(Map<String, Object> settings) {
         Map<String, String> options = new LinkedHashMap<>();
-        for (String key : SETTINGS) {
-            if (!key.startsWith("org.eclipse.jdt.core.compiler.")) {
-                continue;
-            }
-            Object value = settings.get(key);
-            if (value instanceof String text && !text.isBlank()) {
-                options.put(key, text);
+        for (Map.Entry<String, Object> entry : settings.entrySet()) {
+            if (entry.getKey().startsWith("org.eclipse.jdt.core.compiler.")
+                    && entry.getValue() instanceof String value && !value.isBlank()) {
+                options.put(entry.getKey(), value);
             }
         }
         options.put("analysis.m2e.selectedProfiles.applicability",
@@ -148,6 +150,12 @@ public final class JdtLsEffectiveEnvironmentInspector {
             return List.of(profiles.split(",", -1));
         }
         return stringList(selected);
+    }
+
+    private List<String> settingsKeys() {
+        java.util.TreeSet<String> keys = new java.util.TreeSet<>(SETTINGS);
+        keys.addAll(JavaCore.getOptions().keySet());
+        return List.copyOf(keys);
     }
 
     private boolean isMavenProject(Map<String, Object> settings) {
@@ -201,11 +209,11 @@ public final class JdtLsEffectiveEnvironmentInspector {
     }
 
     private List<AnalysisInputs.Artifact> artifacts(
-            RepositorySnapshot snapshot, List<String> entries, String kind) {
+            RepositorySnapshot snapshot, List<String> entries, String kind, List<Path> projectEdges) {
         List<AnalysisInputs.Artifact> artifacts = new ArrayList<>();
         for (int ordinal = 0; ordinal < entries.size(); ordinal++) {
             Path artifact = path(entries.get(ordinal));
-            if (artifact.startsWith(snapshot.root().toAbsolutePath().normalize())) {
+            if (projectEdges.contains(artifact)) {
                 artifacts.add(new AnalysisInputs.Artifact(ordinal,
                         "project:" + relative(snapshot.root(), artifact), "PROJECT_EDGE",
                         digestText("project-edge:" + snapshot.revision().value()), 0));
@@ -215,6 +223,28 @@ public final class JdtLsEffectiveEnvironmentInspector {
             }
         }
         return List.copyOf(artifacts);
+    }
+
+    private List<Path> projectOutputPaths(Map<String, Object> settings) {
+        Object value = settings.get("org.eclipse.jdt.ls.core.classpathEntries");
+        if (Objects.isNull(value)) {
+            throw new IllegalStateException("JDT LS settings omitted classpath entries");
+        }
+        List<Object> entries = list(value, "classpath entries");
+        List<Path> outputs = new ArrayList<>();
+        for (Object entry : entries) {
+            Map<String, Object> classpathEntry = objectMap(entry, "classpath entry");
+            Object kind = classpathEntry.get("kind");
+            Object output = classpathEntry.get("output");
+            if (isProjectEntry(kind) && output instanceof String outputPath && !outputPath.isBlank()) {
+                outputs.add(path(outputPath));
+            }
+        }
+        return List.copyOf(outputs);
+    }
+
+    private static boolean isProjectEntry(Object kind) {
+        return "3".equals(String.valueOf(kind)) || "3.0".equals(String.valueOf(kind));
     }
 
     private static String logicalArtifactId(Path artifact) {
@@ -322,6 +352,13 @@ public final class JdtLsEffectiveEnvironmentInspector {
             result.add(text);
         }
         return List.copyOf(result);
+    }
+
+    private static List<String> requiredStringList(Map<String, Object> response, String field) {
+        if (!response.containsKey(field)) {
+            throw new IllegalStateException("JDT LS response omitted required " + field);
+        }
+        return stringList(response.get(field));
     }
 
     private static List<Object> list(Object value, String command) {

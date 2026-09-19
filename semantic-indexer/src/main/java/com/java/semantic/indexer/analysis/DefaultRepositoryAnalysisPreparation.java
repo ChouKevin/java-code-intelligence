@@ -43,10 +43,12 @@ public final class DefaultRepositoryAnalysisPreparation implements RepositoryAna
         try {
             AnalysisInputs inputs = inspector.inspect(lease.session(), snapshot);
             AnalysisFingerprint fingerprint = AnalysisFingerprint.from(inputs);
-            FullIndexPlan plan = planner.plan(snapshot.root(), includedSourceRoots(snapshot, inputs));
+            FullIndexPlan plan = planner.plan(snapshot.root(), includedSourceRoots(snapshot, inputs),
+                    effectiveCompilerOptions(inputs));
+            Lsp4jJavaSemanticService semanticService = new Lsp4jJavaSemanticService(snapshot, lease.session());
             return new LeasePreparedAnalysis(snapshot, plan, fingerprint, readinessEvidence(
-                    snapshot, inputs, fingerprint, lease.session()),
-                    new Lsp4jJavaSemanticService(snapshot, lease.session()), inspector, lease);
+                    snapshot, inputs, fingerprint, semanticService, lease.session()),
+                    semanticService, inspector, lease);
         } catch (RuntimeException exception) {
             lease.close();
             throw exception;
@@ -57,6 +59,7 @@ public final class DefaultRepositoryAnalysisPreparation implements RepositoryAna
             RepositorySnapshot snapshot,
             AnalysisInputs inputs,
             AnalysisFingerprint fingerprint,
+            Lsp4jJavaSemanticService semanticService,
             JdtWorkspaceSession session) {
         List<SemanticAnalysisEvidence.ProjectProof> projects = new ArrayList<>();
         List<SemanticAnalysisEvidence.Limitation> limitations = new ArrayList<>();
@@ -69,8 +72,8 @@ public final class DefaultRepositoryAnalysisPreparation implements RepositoryAna
                     continue;
                 }
                 if (containsJavaSource(snapshot.root(), root.path())) {
-                    limitations.add(new SemanticAnalysisEvidence.Limitation("ROOT_SYMBOL_PROOF_UNAVAILABLE",
-                            java.util.Optional.of(root.path())));
+                    semanticService.proveImportedRoot(snapshot, snapshot.root().resolve(root.path()));
+                    verifiedRoots.add(root.path());
                 }
             }
             projects.add(new SemanticAnalysisEvidence.ProjectProof(project.projectPath(), true, verifiedRoots));
@@ -107,6 +110,19 @@ public final class DefaultRepositoryAnalysisPreparation implements RepositoryAna
             }
         }
         return List.copyOf(roots);
+    }
+
+    private static java.util.Map<String, String> effectiveCompilerOptions(AnalysisInputs inputs) {
+        java.util.Map<String, String> options = new java.util.TreeMap<>();
+        for (AnalysisInputs.Project project : inputs.projects()) {
+            for (java.util.Map.Entry<String, String> option : project.compilerOptions().entrySet()) {
+                String existing = options.putIfAbsent(option.getKey(), option.getValue());
+                if (existing != null && !existing.equals(option.getValue())) {
+                    throw new IllegalStateException("included projects disagree on compiler option " + option.getKey());
+                }
+            }
+        }
+        return java.util.Map.copyOf(options);
     }
 
     private static final class LeasePreparedAnalysis implements PreparedAnalysis {
