@@ -28,6 +28,12 @@ and its import as untrusted input: the configured analysis child runs with the
 restricted `analysis` UID in the published Indexer image and must not receive
 unrelated VM secrets.
 
+For the published Indexer image, mount the two declared durable paths separately:
+`/data/repos` for the disposable managed checkout and `/data/jdtls` for JDT LS
+lease data. Do not mount only their `/data` parent: the image declares each
+child as a volume, so Docker otherwise creates anonymous child volumes that
+hide the parent mount.
+
 Mongo and Indexer admin must bind only to the private management interface or
 private container network. Do not publish MongoDB or `/index/**` on a public
 address. Query may be exposed only through the approved ingress. For a direct
