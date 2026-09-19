@@ -36,6 +36,6 @@
 
 The real-JDT effective-environment integration passed with the installed language server:
 `JDTLS_HOME=/opt/jdtls mvn -pl semantic-indexer -am -Pjdtls-it -Dsurefire.failIfNoSpecifiedTests=false -Dtest=EffectiveEnvironmentJdtLsIT test`.
-It completed with 1 test, 0 failures, and 0 errors. The fixture declares distinct runtime (`slf4j-api`), provided (`junit-jupiter-api`), and test (`assertj-core`) dependencies; assertions observed all three in persisted effective JDT classpath artifacts.
+It completed with 1 test, 0 failures, and 0 errors. The fixture declares distinct runtime (`slf4j-api`), provided (`junit-jupiter-api`), and test (`assertj-core`) dependencies; assertions observed all three in persisted effective JDT classpath artifacts. The fixture also supplies a test source and asserts the current policy marks its root excluded with the explicit `test` reason, so it does not claim test-only binding is required for the production export roots.
 
 - `GenerationValidatorCanonicalDigestTest` verifies that input/evidence project, root, proof, limitation, and map insertion-order permutations produce the same sealed digest (1 test, 0 failures/errors).
