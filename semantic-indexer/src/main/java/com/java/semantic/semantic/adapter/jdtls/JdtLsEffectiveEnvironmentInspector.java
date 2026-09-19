@@ -354,8 +354,8 @@ public final class JdtLsEffectiveEnvironmentInspector {
         return List.copyOf(result);
     }
 
-    private static List<String> requiredStringList(Map<String, Object> response, String field) {
-        if (!response.containsKey(field)) {
+    static List<String> requiredStringList(Map<String, Object> response, String field) {
+        if (!response.containsKey(field) || Objects.isNull(response.get(field))) {
             throw new IllegalStateException("JDT LS response omitted required " + field);
         }
         return stringList(response.get(field));

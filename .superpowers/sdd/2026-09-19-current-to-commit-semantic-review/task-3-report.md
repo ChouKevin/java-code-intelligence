@@ -111,3 +111,14 @@ JDTLS_HOME=/opt/jdtls .superpowers/sdd/2026-09-19-current-to-commit-semantic-rev
 JDTLS_HOME=/opt/jdtls .superpowers/sdd/2026-09-19-current-to-commit-semantic-review/tools/apache-maven-3.9.11/bin/mvn --batch-mode --no-transfer-progress -pl semantic-indexer -am -Pjdtls-it -Dtest=EffectiveEnvironmentJdtLsIT -Dsurefire.failIfNoSpecifiedTests=false test
 # Tests run: 1, Failures: 0, Errors: 0, Skipped: 0; BUILD SUCCESS
 ```
+
+## Second re-review focused evidence
+
+`requiredStringList` now rejects omitted and JSON-null values and accepts only actual lists; explicit empty lists remain valid. The focused contract test exercises each required source-path, classpath, and modulepath field for missing, null, wrong-type, and empty-list behavior.
+
+The exporter again validates all planned source contents after syntax extraction, preserving the mutation/TOCTOU boundary.
+
+```sh
+JDTLS_HOME=/opt/jdtls .superpowers/sdd/2026-09-19-current-to-commit-semantic-review/tools/apache-maven-3.9.11/bin/mvn --batch-mode --no-transfer-progress -pl semantic-indexer -am -Dtest=JdtLsEffectiveEnvironmentInspectorTest,JdtLsRepositoryIndexExporterSemanticSessionTest -Dsurefire.failIfNoSpecifiedTests=false test
+# Tests run: 6, Failures: 0, Errors: 0, Skipped: 0; BUILD SUCCESS
+```
