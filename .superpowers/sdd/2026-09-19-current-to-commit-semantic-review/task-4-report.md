@@ -31,3 +31,9 @@
 - Sealing accepts only JDT `SUCCESS` or `WITH_ERROR` evidence status. Identity canonicalizes analysis document keys and unordered project/root/proof/limitation collections instead of BSON `toJson()`.
 - `mvn -pl semantic-indexer -am -Dsurefire.failIfNoSpecifiedTests=false -Dtest=IndexBuildServiceTest,IndexProjectionContractTest,SemanticRelationProjectorFrameworkEvidenceTest,JdtLsRepositoryIndexExporterSemanticSessionTest test`: 16 tests, 0 failures/errors.
 - `mvn -pl semantic-indexer -am -Pmongo-it -Dsurefire.failIfNoSpecifiedTests=false -Dtest=GenerationValidatorIT,FullIndexPublicationIT test`: 39 tests, 0 failures/errors.
+
+### Real-JDT limitation
+
+The P11 integration command was attempted with the `jdtls-it` profile:
+`mvn -pl semantic-indexer -am -Pjdtls-it -Dsurefire.failIfNoSpecifiedTests=false -Dtest=EffectiveEnvironmentJdtLsIT test`.
+It failed before fixture setup because `JDTLS_HOME` is not configured in this environment. No real-JDT completion claim is made.
