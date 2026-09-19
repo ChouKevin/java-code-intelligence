@@ -13,6 +13,18 @@ public final class SemanticQueryErrorMapper {
         if (exception instanceof RepositoryNotFoundException) {
             return new SemanticQueryError("REPOSITORY_NOT_FOUND", "The requested repository was not found.", false, Optional.empty());
         }
+        if (exception instanceof ReviewNotFoundException) {
+            return new SemanticQueryError("REVIEW_NOT_FOUND", "The requested review was not found.", false, Optional.empty());
+        }
+        if (exception instanceof ReviewNotReadyException) {
+            return new SemanticQueryError("REVIEW_NOT_READY", "The requested review is not ready.", true, Optional.empty());
+        }
+        if (exception instanceof ReviewFailedException) {
+            return new SemanticQueryError("REVIEW_FAILED", "The requested review failed.", false, Optional.empty());
+        }
+        if (exception instanceof ReviewContextMismatchException) {
+            return new SemanticQueryError("REVIEW_CONTEXT_MISMATCH", "The review context does not match immutable membership.", false, Optional.empty());
+        }
         if (exception instanceof GitEvidenceNotFoundException) {
             return new SemanticQueryError("GIT_EVIDENCE_NOT_FOUND", "The requested Git evidence was not found.", false, Optional.empty());
         }

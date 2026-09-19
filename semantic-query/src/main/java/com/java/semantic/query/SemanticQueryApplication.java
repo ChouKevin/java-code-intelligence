@@ -2,6 +2,8 @@ package com.java.semantic.query;
 
 import com.java.semantic.query.application.CurrentGenerationSelector;
 import com.java.semantic.query.application.SelectedGenerationGuard;
+import com.java.semantic.query.application.ReviewGenerationSelector;
+import com.java.semantic.query.application.ReviewManifestReadService;
 import com.java.semantic.query.application.GitEvidenceReadService;
 import com.java.semantic.query.application.CurrentRepositoryQueryService;
 import com.java.semantic.query.application.CurrentSourceQueryService;
@@ -49,6 +51,17 @@ public class SemanticQueryApplication {
     SelectedGenerationGuard selectedGenerationGuard(MongoTemplate template, ConfiguredReadPolicy policy,
                                                    SemanticQueryProperties properties) {
         return new SelectedGenerationGuard(template, policy, properties.storageTimeout());
+    }
+
+    @Bean
+    ReviewManifestReadService reviewManifestReadService(MongoTemplate template, ConfiguredReadPolicy policy,
+                                                        SemanticQueryProperties properties) {
+        return new ReviewManifestReadService(template, policy, properties.storageTimeout());
+    }
+
+    @Bean
+    ReviewGenerationSelector reviewGenerationSelector(ReviewManifestReadService reviews, SelectedGenerationGuard guard) {
+        return new ReviewGenerationSelector(reviews, guard);
     }
 
     @Bean
@@ -116,12 +129,16 @@ public class SemanticQueryApplication {
     @Bean
     SemanticQueryFacade semanticQueryFacade(CurrentGenerationSelector selector,
                                             SelectedSemanticQueryService selectedQueries,
-                                            CurrentRepositoryQueryService repositoryQueryService, MongoTemplate template,
-                                            ConfiguredReadPolicy policy, SemanticQueryProperties properties) {
-        return new SemanticQueryFacade(selector, selectedQueries, repositoryQueryService,
-                new GitEvidenceReadService(template, policy, properties.storageTimeout()));
+                                            CurrentRepositoryQueryService repositoryQueryService,
+                                            GitEvidenceReadService gitEvidenceReadService) {
+        return new SemanticQueryFacade(selector, selectedQueries, repositoryQueryService, gitEvidenceReadService);
     }
 
+    @Bean
+    GitEvidenceReadService gitEvidenceReadService(MongoTemplate template, ConfiguredReadPolicy policy,
+                                                  SemanticQueryProperties properties, ReviewManifestReadService reviews) {
+        return new GitEvidenceReadService(template, policy, properties.storageTimeout(), reviews);
+    }
     @Bean
     ApplicationRunner semanticIndexSchemaGate(MongoTemplate template, SemanticQueryProperties properties) {
         return arguments -> new MongoIndexSchemaVerifier(template, properties.storageTimeout()).verify();

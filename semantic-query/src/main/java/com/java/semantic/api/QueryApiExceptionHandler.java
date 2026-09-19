@@ -11,6 +11,10 @@ import com.java.semantic.query.application.InvalidCodeFactQueryException;
 import com.java.semantic.query.application.RepositoryNotFoundException;
 import com.java.semantic.query.application.RevisionOutdatedException;
 import com.java.semantic.query.application.SemanticIndexUnavailableException;
+import com.java.semantic.query.application.ReviewContextMismatchException;
+import com.java.semantic.query.application.ReviewFailedException;
+import com.java.semantic.query.application.ReviewNotFoundException;
+import com.java.semantic.query.application.ReviewNotReadyException;
 import com.java.semantic.query.application.SemanticQueryError;
 import com.java.semantic.query.application.SemanticQueryErrorMapper;
 import jakarta.validation.ConstraintViolationException;
@@ -38,7 +42,9 @@ public final class QueryApiExceptionHandler {
         this.errorMapper = java.util.Objects.requireNonNull(errorMapper, "semantic query error mapper is required");
     }
 
-    @ExceptionHandler({RevisionOutdatedException.class, RepositoryNotFoundException.class, GitEvidenceNotFoundException.class, GitEvidenceNotReadyException.class, CodeFactNotFoundException.class,
+    @ExceptionHandler({RevisionOutdatedException.class, RepositoryNotFoundException.class, ReviewNotFoundException.class,
+            ReviewNotReadyException.class, ReviewFailedException.class, ReviewContextMismatchException.class,
+            GitEvidenceNotFoundException.class, GitEvidenceNotReadyException.class, CodeFactNotFoundException.class,
             CodeFactKindMismatchException.class, IndexNotReadyException.class, IndexContractMismatchException.class,
             SemanticIndexUnavailableException.class, InvalidCodeFactQueryException.class,
             CodeFactKindUnsupportedException.class, IllegalArgumentException.class})
@@ -56,10 +62,10 @@ public final class QueryApiExceptionHandler {
 
     private static HttpStatus status(SemanticQueryError error) {
         return switch (error.code()) {
-            case "REPOSITORY_NOT_FOUND", "FACT_NOT_FOUND", "GIT_EVIDENCE_NOT_FOUND" -> HttpStatus.NOT_FOUND;
-            case "REVISION_OUTDATED", "GIT_EVIDENCE_NOT_READY" -> HttpStatus.CONFLICT;
+            case "REPOSITORY_NOT_FOUND", "REVIEW_NOT_FOUND", "FACT_NOT_FOUND", "GIT_EVIDENCE_NOT_FOUND" -> HttpStatus.NOT_FOUND;
+            case "REVISION_OUTDATED", "REVIEW_NOT_READY", "REVIEW_FAILED", "GIT_EVIDENCE_NOT_READY" -> HttpStatus.CONFLICT;
             case "INDEX_UNAVAILABLE" -> HttpStatus.SERVICE_UNAVAILABLE;
-            case "INVALID_ARGUMENT", "FACT_KIND_MISMATCH" -> HttpStatus.BAD_REQUEST;
+            case "INVALID_ARGUMENT", "FACT_KIND_MISMATCH", "REVIEW_CONTEXT_MISMATCH" -> HttpStatus.BAD_REQUEST;
             default -> throw new IllegalArgumentException("unknown Semantic Query error code");
         };
     }

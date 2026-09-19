@@ -41,6 +41,26 @@ class GitEvidenceReadServiceIT {
     private static final String ALTERNATE_REVISION = "2".repeat(40);
 
     @Test
+    void denies_review_owned_snapshot_evidence_while_its_review_is_preparing() {
+        try (MongoDBContainer container = new MongoDBContainer(DockerImageName.parse("mongo:8.0.4"))) {
+            container.start();
+            MongoTemplate template = new MongoTemplate(MongoClients.create(container.getConnectionString()), "git_review_owner_gate");
+            seedSnapshot(template, "orders");
+            markSnapshotComparisonReviewOwned(template, "orders", "review-owner-gate", "PREPARING");
+            GitEvidenceReadService service = service(template, List.of("orders"));
+
+            assertThatThrownBy(() -> service.listFiles(new SemanticQueryContract.GitFileListRequest(
+                    "orders", SNAPSHOT_ID, REVISION, "", 0, 20))).isInstanceOf(GitEvidenceNotReadyException.class);
+            assertThatThrownBy(() -> service.readFile(new SemanticQueryContract.GitFileReadRequest(
+                    "orders", SNAPSHOT_ID, REVISION, "src/demo.txt", Optional.empty(), 1, Optional.empty())))
+                    .isInstanceOf(GitEvidenceNotReadyException.class);
+            assertThatThrownBy(() -> service.searchText(new SemanticQueryContract.GitTextSearchRequest(
+                    "orders", SNAPSHOT_ID, REVISION, "needle", Optional.empty(), Optional.empty(), 1)))
+                    .isInstanceOf(GitEvidenceNotReadyException.class);
+        }
+    }
+
+    @Test
     void reads_snapshot_files_and_text_through_checkpoint_derived_cursors() {
         try (MongoDBContainer container = new MongoDBContainer(DockerImageName.parse("mongo:8.0.4"))) {
             container.start();
@@ -1163,6 +1183,13 @@ class GitEvidenceReadServiceIT {
             insertTextSnapshotFile(template, repositoryId, 7L + index, "src/nohit/NoHit" + index + ".java", noHit);
         }
         seedReadyComparisonOwner(template, repositoryId, SNAPSHOT_ID, REVISION, "job-replay");
+    }
+
+    private static void markSnapshotComparisonReviewOwned(MongoTemplate template, String repositoryId, String reviewId, String reviewState) {
+        template.getCollection("git_evidence_manifests").updateMany(new Document("repoId", repositoryId), new Document("$set",
+                new Document("gitEvidenceVersion", 2).append("scope", "REVIEW").append("reviewId", reviewId)));
+        template.getCollection("review_manifests").insertOne(new Document("repoId", repositoryId).append("reviewId", reviewId)
+                .append("state", reviewState));
     }
 
     private static void seedReadyComparisonOwner(MongoTemplate template, String repositoryId, String snapshotId, String revision, String ownerJobId) {
