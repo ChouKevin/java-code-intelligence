@@ -46,14 +46,24 @@ public final class PublishedEntryPointQueryService {
 
     public PublishedEntryPointResult findRoutes(String repositoryId, String revision, String httpMethod, String path,
                                                 int offset, int limit) {
+        SelectedGeneration context = selector.select(repositoryId, revision, CurrentGenerationSelector.ENTRY_POINTS);
+        return findRoutes(context, repositoryId, revision, httpMethod, path, offset, limit);
+    }
+
+    public PublishedEntryPointResult findRoutes(SelectedGeneration context, String repositoryId, String revision, String httpMethod,
+                                                String path, int offset, int limit) {
+        SelectedGeneration selected = Objects.requireNonNull(context, "selected generation is required");
         String requestedMethod = requiredHttpMethod(httpMethod);
         String requestedPath = requiredRoutePath(path);
         requirePage(offset, limit);
+        if (!selected.repositoryId().value().equals(repositoryId) || !selected.revision().value().equals(revision)) {
+            throw new IllegalArgumentException("request repository and revision must match the selected generation");
+        }
+        selector.requireCompatible(selected, CurrentGenerationSelector.ENTRY_POINTS);
         SearchAccessPlan accessPlan = selector.searchAccessPlan(repositoryId);
-        SelectedGeneration current = selector.select(repositoryId, revision, CurrentGenerationSelector.ENTRY_POINTS);
         try {
             org.bson.conversions.Bson filter = accessPlan.authorized(Filters.and(
-                    Filters.eq("repoId", current.repositoryId().value()), Filters.eq("generationId", current.generationId().value()),
+                    Filters.eq("repoId", selected.repositoryId().value()), Filters.eq("generationId", selected.generationId().value()),
                     Filters.eq("path", requestedPath), Filters.in("httpMethod", matchingMethods(requestedMethod))));
             long total = template.getCollection(IndexCollections.ENTRY_POINTS).countDocuments(filter,
                     new com.mongodb.client.model.CountOptions().maxTime(storageTimeout.toMillis(), TimeUnit.MILLISECONDS));
@@ -63,25 +73,21 @@ public final class PublishedEntryPointQueryService {
             List<PublishedEntryPoint> result = new ArrayList<>();
             for (Document row : rows) {
                 EntryPointDocument entryPoint = template.getConverter().read(EntryPointPersistence.class, row).toModel();
-                if (!current.repositoryId().equals(entryPoint.repositoryId()) || !current.generationId().equals(entryPoint.generationId())
+                if (!selected.repositoryId().equals(entryPoint.repositoryId()) || !selected.generationId().equals(entryPoint.generationId())
                         || entryPoint.kind() != EntryPointKind.HTTP || !matchingMethods(requestedMethod).contains(entryPoint.trigger().httpMethod().orElse(""))
                         || !requestedPath.equals(entryPoint.trigger().httpPath().orElse(""))
                         || !entryPoint.fact().id().value().equals(required(row, "entryPointId"))
                         || !entryPoint.fact().identity().canonicalForm().equals(required(row, "canonical"))) { throw new IndexContractMismatchException(); }
-                selector.requireVisible(current, entryPoint.fact().identity());
-                if (!CodeFactScope.from(entryPoint.fact().identity()).equals(flattenedScope(row))) {
-                    throw new IndexContractMismatchException();
-                }
-                result.add(new PublishedEntryPoint(current, entryPoint.fact().id().value(), entryPoint.fact().identity().canonicalForm(),
+                selector.requireVisible(selected, entryPoint.fact().identity());
+                if (!CodeFactScope.from(entryPoint.fact().identity()).equals(flattenedScope(row))) { throw new IndexContractMismatchException(); }
+                result.add(new PublishedEntryPoint(selected, entryPoint.fact().id().value(), entryPoint.fact().identity().canonicalForm(),
                         entryPoint.kind(), entryPoint.method().canonicalForm(), entryPoint.trigger().httpPath().orElseThrow(IndexContractMismatchException::new),
                         entryPoint.range().sourceFile()));
             }
-            return new PublishedEntryPointResult(current, result, total, offset + result.size() < total);
+            return new PublishedEntryPointResult(selected, result, total, offset + result.size() < total);
         } catch (MongoException | DataAccessException exception) {
             throw new SemanticIndexUnavailableException(exception);
-        } catch (IndexContractMismatchException exception) {
-            throw exception;
-        } catch (RepositoryNotFoundException exception) {
+        } catch (IndexContractMismatchException | RepositoryNotFoundException exception) {
             throw exception;
         } catch (RuntimeException exception) {
             throw new IndexContractMismatchException();
