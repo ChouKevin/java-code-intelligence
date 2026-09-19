@@ -4,6 +4,8 @@ import com.java.semantic.indexer.store.GitEvidencePublicationStore;
 import com.java.semantic.model.git.GitCatalogManifest;
 import com.java.semantic.model.git.GitHistoryManifest;
 import com.java.semantic.model.repository.RepositoryRevision;
+import com.java.semantic.model.git.GitEvidenceOwnership;
+import com.java.semantic.model.git.GitPublicationScope;
 import com.java.semantic.model.git.GitPreparedComparison;
 import com.java.semantic.repository.application.RepositoryRuntimeRegistry;
 import com.java.semantic.repository.domain.RepositoryRuntime;
@@ -47,6 +49,33 @@ public final class GitEvidenceJobHandler {
         }
     }
 
+    public void prepareReview(IndexJob job) {
+        IndexJob requiredJob = Objects.requireNonNull(job, "review job is required");
+        if (requiredJob.operation() != IndexJobOperation.REVIEW) {
+            throw new IllegalArgumentException("review Git evidence requires a REVIEW job");
+        }
+        ReviewJobPayload payload = requiredJob.review().orElseThrow(() -> new IllegalArgumentException("review payload is required"));
+        RepositoryRuntime runtime = repositories.get(requiredJob.repositoryId());
+        runtime.lock().writeLock().lock();
+        try {
+            if (!git.isCloned(runtime.workingTree())) {
+                git.clone(runtime.workingTree(), runtime.remoteUrl());
+            }
+            git.fetch(runtime.workingTree());
+            RepositoryRevision previous = payload.baseline().pointer().revision();
+            RepositoryRevision current = payload.requestedRevision();
+            git.verifyComparisonEndpoints(runtime.workingTree(), previous, current);
+            GitPreparedComparison comparison = git.prepareComparison(runtime.workingTree(), previous, current);
+            evidence.publishComparison(requiredJob, comparison, Instant.now(),
+                    new GitEvidenceOwnership(GitPublicationScope.REVIEW, java.util.Optional.of(payload.reviewId())));
+        } catch (RuntimeException exception) {
+            evidence.fail(requiredJob);
+            throw exception;
+        } finally {
+            runtime.lock().writeLock().unlock();
+        }
+    }
+
     private void refs(IndexJob job, RepositoryRuntime runtime) {
         if (!git.isCloned(runtime.workingTree())) {
             git.clone(runtime.workingTree(), runtime.remoteUrl());
@@ -82,6 +111,6 @@ public final class GitEvidenceJobHandler {
         git.fetch(runtime.workingTree());
         git.verifyComparisonEndpoints(runtime.workingTree(), previous, current);
         GitPreparedComparison comparison = git.prepareComparison(runtime.workingTree(), previous, current);
-        evidence.publishComparison(job, comparison, Instant.now());
+        evidence.publishComparison(job, comparison, Instant.now(), GitEvidenceOwnership.standalone());
     }
 }

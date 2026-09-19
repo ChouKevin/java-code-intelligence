@@ -2,6 +2,8 @@ package com.java.semantic.indexer.job;
 
 import com.java.semantic.indexer.build.IndexBuildService;
 import com.java.semantic.indexer.build.RepositoryBuildRunner;
+import com.java.semantic.indexer.review.ReviewPreparationException;
+import com.java.semantic.indexer.review.ReviewPreparationService;
 import com.java.semantic.indexer.store.PublicationPort;
 import com.java.semantic.model.index.RollbackGenerationCommand;
 import java.util.Objects;
@@ -14,19 +16,27 @@ public final class IndexJobExecutor {
     private final PublicationPort publication;
     private final Optional<ResetJobHandler> resetHandler;
     private final Optional<GitEvidenceJobHandler> gitEvidenceHandler;
+    private final Optional<ReviewPreparationService> reviewPreparationService;
 
     public IndexJobExecutor(IndexJobStore jobs, RepositoryBuildRunner buildRunner, PublicationPort publication,
                             Optional<ResetJobHandler> resetHandler) {
-        this(jobs, buildRunner, publication, resetHandler, Optional.empty());
+        this(jobs, buildRunner, publication, resetHandler, Optional.empty(), Optional.empty());
     }
 
     public IndexJobExecutor(IndexJobStore jobs, RepositoryBuildRunner buildRunner, PublicationPort publication,
                             Optional<ResetJobHandler> resetHandler, Optional<GitEvidenceJobHandler> gitEvidenceHandler) {
+        this(jobs, buildRunner, publication, resetHandler, gitEvidenceHandler, Optional.empty());
+    }
+
+    public IndexJobExecutor(IndexJobStore jobs, RepositoryBuildRunner buildRunner, PublicationPort publication,
+                            Optional<ResetJobHandler> resetHandler, Optional<GitEvidenceJobHandler> gitEvidenceHandler,
+                            Optional<ReviewPreparationService> reviewPreparationService) {
         this.jobs = Objects.requireNonNull(jobs, "jobs is required");
         this.buildRunner = Objects.requireNonNull(buildRunner, "build runner is required");
         this.publication = Objects.requireNonNull(publication, "publication is required");
         this.resetHandler = Objects.requireNonNull(resetHandler, "reset handler is required");
         this.gitEvidenceHandler = Objects.requireNonNull(gitEvidenceHandler, "git evidence handler is required");
+        this.reviewPreparationService = Objects.requireNonNull(reviewPreparationService, "review preparation service is required");
     }
 
     public void execute(IndexJob job) {
@@ -47,7 +57,7 @@ public final class IndexJobExecutor {
     private void executeOperation(IndexJob job) {
         switch (job.operation()) {
             case BUILD -> buildRunner.run(job);
-            case REVIEW -> throw new IllegalStateException("REVIEW requires review preparation orchestration");
+            case REVIEW -> reviewPreparationService.orElseThrow(() -> new IllegalStateException("review preparation service is not registered")).prepare(job);
             case ROLLBACK -> rollback(job);
             case RESET -> resetHandler.orElseThrow(() -> new IllegalStateException("RESET handler is not registered")).reset(job);
             case GIT_REFS, GIT_HISTORY, GIT_COMPARISON -> gitEvidenceHandler.orElseThrow(() -> new IllegalStateException("Git evidence handler is not registered")).prepare(job);
@@ -63,6 +73,9 @@ public final class IndexJobExecutor {
             return;
         }
         if (jobs.gitEvidenceReady(job)) {
+            return;
+        }
+        if (jobs.reviewReady(job)) {
             return;
         }
         jobs.fail(job.id(), IndexFailureCategory.WORKER_INTERRUPTED);
@@ -94,6 +107,9 @@ public final class IndexJobExecutor {
     }
 
     private static IndexFailureCategory category(RuntimeException exception) {
+        if (exception instanceof ReviewPreparationException reviewPreparationException) {
+            return reviewPreparationException.category();
+        }
         if (exception instanceof com.java.semantic.indexer.store.PublicationConflictException) {
             return IndexFailureCategory.PUBLICATION_CONFLICT;
         }

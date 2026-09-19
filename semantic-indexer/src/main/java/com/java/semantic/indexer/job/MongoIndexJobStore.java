@@ -1,6 +1,7 @@
 package com.java.semantic.indexer.job;
 
 import com.java.semantic.indexer.store.PublicationConflictException;
+import com.java.semantic.indexer.review.ReviewBaselineUnavailableException;
 import com.java.semantic.model.index.GenerationId;
 import com.java.semantic.model.index.IndexCollections;
 import com.java.semantic.model.index.IndexSchemaContract;
@@ -32,6 +33,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.time.Instant;
+import java.util.UUID;
 
 /** Durable single-process job queue. Repository documents contain pointers only. */
 @Component
@@ -127,6 +130,69 @@ public final class MongoIndexJobStore implements IndexJobStore {
     @Override
     public IndexJob admitGitComparison(RepositoryId repositoryId, RepositoryRevision previous, RepositoryRevision current) {
         return insertGitJob(repositoryId, IndexJobOperation.GIT_COMPARISON, GitEvidenceJob.comparison(previous, current));
+    }
+
+    @Override
+    public IndexJob admitReview(RepositoryId repositoryId, RepositoryRevision revision) {
+        RepositoryId requiredRepositoryId = Objects.requireNonNull(repositoryId, "repository id is required");
+        RepositoryRevision requiredRevision = Objects.requireNonNull(revision, "requested review revision is required");
+        PublishedGenerationPointer baseline = publicationState(requiredRepositoryId).flatMap(IndexPublicationState::currentPointer)
+                .orElseThrow(() -> new ReviewBaselineUnavailableException(requiredRepositoryId));
+        Instant capturedAt = Instant.now();
+        IndexJobId jobId = IndexJobId.create();
+        long aGeneration = nextGeneration(requiredRepositoryId);
+        long bGeneration = aGeneration + 1L;
+        String suffix = jobId.value().replace("-", "");
+        IndexJobTarget a = new IndexJobTarget(baseline.revision(), new GenerationId("g-" + suffix + "-a"), aGeneration);
+        IndexJobTarget b = new IndexJobTarget(requiredRevision, new GenerationId("g-" + suffix + "-b"), bGeneration);
+        Document review = new Document("reviewId", UUID.randomUUID().toString())
+                .append("baseline", new Document("pointer", pointerDocument(baseline)).append("capturedAt", Date.from(capturedAt)))
+                .append("requestedRevision", requiredRevision.value())
+                .append("reservedTargets", new Document("a", targetDocument(a)).append("b", targetDocument(b)))
+                .append("stage", ReviewPreparationStage.PREPARING_A.name());
+        Document job = new Document(JOB_ID, jobId.value()).append(REPOSITORY_ID, requiredRepositoryId.value()).append(ACTIVE, true)
+                .append("phase", IndexJobPhase.ACCEPTED.name()).append("operation", IndexJobOperation.REVIEW.name()).append("rebuild", false)
+                .append("generationHighWatermark", bGeneration).append("jobVersion", IndexSchemaContract.PERSISTED_JOB_VERSION)
+                .append("review", review).append("createdAt", Date.from(capturedAt));
+        insert(job, requiredRepositoryId);
+        return from(job);
+    }
+
+    @Override
+    public IndexJob beginReviewValidation(IndexJobId jobId) {
+        IndexJobId requiredJobId = Objects.requireNonNull(jobId, "job id is required");
+        Document filter = new Document(JOB_ID, requiredJobId.value()).append(ACTIVE, true).append("phase", IndexJobPhase.RUNNING.name())
+                .append("operation", IndexJobOperation.REVIEW.name()).append("review.stage", ReviewPreparationStage.PREPARING_GIT.name())
+                .append("review.a", new Document("$exists", true)).append("review.b", new Document("$exists", true))
+                .append("review.comparisonId", new Document("$exists", true)).append("review.previousSnapshotId", new Document("$exists", true))
+                .append("review.currentSnapshotId", new Document("$exists", true));
+        Document updated = template.getCollection(IndexCollections.INDEX_JOBS).findOneAndUpdate(filter,
+                Updates.set("review.stage", ReviewPreparationStage.VALIDATING.name()),
+                new FindOneAndUpdateOptions().returnDocument(ReturnDocument.AFTER));
+        if (Objects.isNull(updated)) {
+            throw new IllegalStateException("review validation requires complete prepared evidence");
+        }
+        return from(updated);
+    }
+
+    @Override
+    public IndexJob recordReviewReady(IndexJobId jobId) {
+        IndexJobId requiredJobId = Objects.requireNonNull(jobId, "job id is required");
+        Document running = template.getCollection(IndexCollections.INDEX_JOBS).find(new Document(JOB_ID, requiredJobId.value())
+                .append(ACTIVE, true).append("phase", IndexJobPhase.RUNNING.name()).append("operation", IndexJobOperation.REVIEW.name())
+                .append("review.stage", ReviewPreparationStage.VALIDATING.name())).first();
+        if (Objects.isNull(running) || !reviewManifestReady(running)) {
+            throw new IllegalStateException("review ready transition requires a complete ready manifest");
+        }
+        Document updated = template.getCollection(IndexCollections.INDEX_JOBS).findOneAndUpdate(new Document(JOB_ID, requiredJobId.value())
+                        .append(ACTIVE, true).append("phase", IndexJobPhase.RUNNING.name()).append("operation", IndexJobOperation.REVIEW.name())
+                        .append("review.stage", ReviewPreparationStage.VALIDATING.name()),
+                Updates.set("review.stage", ReviewPreparationStage.READY.name()),
+                new FindOneAndUpdateOptions().returnDocument(ReturnDocument.AFTER));
+        if (Objects.isNull(updated)) {
+            throw new IllegalStateException("review ready transition lost ownership");
+        }
+        return from(updated);
     }
 
     @Override
@@ -228,12 +294,23 @@ public final class MongoIndexJobStore implements IndexJobStore {
         for (Document repository : template.getCollection(IndexCollections.REPOSITORIES).find()) {
             reconcileCommitted(RepositoryId.of(repository.getString(REPOSITORY_ID)));
         }
+        reconcileReadyReviews();
         reconcileReadyGitJobs();
     }
 
     @Override
     public void failUnreconciledRunningJobs() {
         reconcileReadyGitJobs();
+        reconcileReadyReviews();
+        for (Document reviewJob : template.getCollection(IndexCollections.INDEX_JOBS).find(new Document(ACTIVE, true)
+                .append("phase", IndexJobPhase.RUNNING.name()).append("operation", IndexJobOperation.REVIEW.name()))) {
+            String ownerJobId = reviewJob.getString(JOB_ID);
+            template.getCollection(IndexCollections.REVIEW_MANIFESTS).updateMany(new Document(REPOSITORY_ID, reviewJob.getString(REPOSITORY_ID))
+                            .append("ownerJobId", ownerJobId).append("state", "PREPARING"),
+                    Updates.combine(Updates.set("state", "FAILED"), Updates.set("failureCategory", IndexFailureCategory.WORKER_INTERRUPTED.name())));
+            template.getCollection(IndexCollections.GIT_EVIDENCE_MANIFESTS).updateMany(new Document(REPOSITORY_ID, reviewJob.getString(REPOSITORY_ID))
+                    .append("ownerJobId", ownerJobId).append("state", "PREPARING"), Updates.set("state", "FAILED"));
+        }
         template.getCollection(IndexCollections.INDEX_JOBS).updateMany(new Document(ACTIVE, true).append("phase", IndexJobPhase.RUNNING.name()),
                 new Document("$set", new Document(ACTIVE, false).append("phase", IndexJobPhase.FAILED.name())
                         .append("failureCategory", IndexFailureCategory.WORKER_INTERRUPTED.name())));
@@ -346,6 +423,17 @@ public final class MongoIndexJobStore implements IndexJobStore {
         return readySnapshots == 2L;
     }
 
+    @Override
+    public boolean reviewReady(IndexJob job) {
+        if (job.operation() != IndexJobOperation.REVIEW) {
+            return false;
+        }
+        Document document = template.getCollection(IndexCollections.INDEX_JOBS).find(new Document(JOB_ID, job.id().value())
+                .append(REPOSITORY_ID, job.repositoryId().value()).append(ACTIVE, true).append("phase", IndexJobPhase.RUNNING.name())
+                .append("operation", IndexJobOperation.REVIEW.name()).append("review.stage", ReviewPreparationStage.READY.name())).first();
+        return Objects.nonNull(document) && reviewManifestReady(document);
+    }
+
     private IndexJob insertBuild(RepositoryId repositoryId, RepositoryRevision revision, boolean rebuild,
                                  Optional<PublishedGenerationPointer> expectedParent) {
         IndexJobId jobId = IndexJobId.create();
@@ -378,6 +466,27 @@ public final class MongoIndexJobStore implements IndexJobStore {
                 terminal(new IndexJobId(job.getString(JOB_ID)), IndexJobPhase.COMPLETE, Optional.empty());
             }
         }
+    }
+
+    private void reconcileReadyReviews() {
+        for (Document job : template.getCollection(IndexCollections.INDEX_JOBS).find(new Document(ACTIVE, true)
+                .append("phase", IndexJobPhase.RUNNING.name()).append("operation", IndexJobOperation.REVIEW.name())
+                .append("review.stage", ReviewPreparationStage.READY.name()))) {
+            if (reviewManifestReady(job)) {
+                terminal(new IndexJobId(job.getString(JOB_ID)), IndexJobPhase.COMPLETE, Optional.empty());
+            }
+        }
+    }
+    private boolean reviewManifestReady(Document job) {
+        Document payload = job.get("review", Document.class);
+        if (Objects.isNull(payload)) {
+            return false;
+        }
+        Document manifest = template.getCollection(IndexCollections.REVIEW_MANIFESTS).find(new Document(REPOSITORY_ID, job.getString(REPOSITORY_ID))
+                .append("reviewId", payload.getString("reviewId")).append("ownerJobId", job.getString(JOB_ID)).append("state", "READY")).first();
+        return Objects.nonNull(manifest) && Objects.nonNull(payload.get("a", Document.class))
+                && Objects.nonNull(payload.get("b", Document.class)) && Objects.nonNull(payload.getString("comparisonId"))
+                && Objects.nonNull(payload.getString("previousSnapshotId")) && Objects.nonNull(payload.getString("currentSnapshotId"));
     }
 
     private IndexJob insertNoWork(RepositoryId repositoryId) {

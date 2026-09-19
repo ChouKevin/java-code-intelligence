@@ -130,45 +130,55 @@ public final class GitEvidencePublicationStore {
     }
 
     /** Publishes full immutable snapshots first, then makes their direct comparison visible last. */
-    public void publishComparison(IndexJob job, GitPreparedComparison comparison, Instant preparedAt) {
+    public ComparisonPublication publishComparison(IndexJob job, GitPreparedComparison comparison, Instant preparedAt,
+                                                   GitEvidenceOwnership ownership) {
         verifySchemaBeforeEvidence();
+        IndexJob requiredJob = Objects.requireNonNull(job, "job is required");
+        GitEvidenceOwnership requiredOwnership = Objects.requireNonNull(ownership, "Git evidence ownership is required");
         GitComparisonId comparisonId = GitComparisonId.create();
         GitSnapshotId previousSnapshot = GitSnapshotId.create();
         GitSnapshotId currentSnapshot = GitSnapshotId.create();
-        template.getCollection(IndexCollections.GIT_EVIDENCE_MANIFESTS).insertOne(new Document("repoId", job.repositoryId().value())
-                .append("evidenceId", comparisonId.value()).append("kind", "COMPARISON").append("state", "PREPARING").append("gitEvidenceVersion", 1)
-                .append("previous", comparison.previous().value()).append("current", comparison.current().value()).append("previousSnapshotId", previousSnapshot.value())
-                .append("currentSnapshotId", currentSnapshot.value()).append("ancestry", comparison.ancestry().name()).append("preparedAt", java.util.Date.from(preparedAt))
-                .append("ownerJobId", job.id().value()).append("total", (long) comparison.changes().size()));
-        bindComparison(job, comparisonId, previousSnapshot, currentSnapshot);
-        publishSnapshot(job, previousSnapshot, comparison.previous().value(), comparison.previousEntries(), preparedAt);
-        publishSnapshot(job, currentSnapshot, comparison.current().value(), comparison.currentEntries(), preparedAt);
+        bindComparison(requiredJob, comparisonId, previousSnapshot, currentSnapshot, requiredOwnership);
+        Document comparisonManifest = ownershipDocument(new Document("repoId", requiredJob.repositoryId().value())
+                .append("evidenceId", comparisonId.value()).append("kind", "COMPARISON").append("state", "PREPARING")
+                .append("gitEvidenceVersion", com.java.semantic.model.index.IndexSchemaContract.GIT_EVIDENCE_VERSION)
+                .append("previous", comparison.previous().value()).append("current", comparison.current().value())
+                .append("previousSnapshotId", previousSnapshot.value()).append("currentSnapshotId", currentSnapshot.value())
+                .append("ancestry", comparison.ancestry().name()).append("preparedAt", java.util.Date.from(preparedAt))
+                .append("ownerJobId", requiredJob.id().value()).append("total", (long) comparison.changes().size()), requiredOwnership);
+        template.getCollection(IndexCollections.GIT_EVIDENCE_MANIFESTS).insertOne(comparisonManifest);
+        publishSnapshot(requiredJob, previousSnapshot, comparison.previous().value(), comparison.previousEntries(), preparedAt, requiredOwnership);
+        publishSnapshot(requiredJob, currentSnapshot, comparison.current().value(), comparison.currentEntries(), preparedAt, requiredOwnership);
         long ordinal = 0L;
         for (GitComparisonChange change : comparison.changes()) {
-            template.getCollection(IndexCollections.GIT_COMPARISON_CHANGES).insertOne(new Document("repoId", job.repositoryId().value())
+            template.getCollection(IndexCollections.GIT_COMPARISON_CHANGES).insertOne(new Document("repoId", requiredJob.repositoryId().value())
                     .append("comparisonId", comparisonId.value()).append("ordinal", ordinal).append("changeId", change.changeId()).append("kind", change.kind().name())
                     .append("oldPath", change.oldPath()).append("newPath", change.newPath()).append("oldRawPath", change.oldRawPath())
                     .append("newRawPath", change.newRawPath()).append("oldPathKey", pathKey(change.oldRawPath())).append("newPathKey", pathKey(change.newRawPath()))
                     .append("oldMode", change.oldMode()).append("newMode", change.newMode())
                     .append("oldBlobId", change.oldBlobId()).append("newBlobId", change.newBlobId()).append("diffStatus", change.diffStatus())
                     .append("patchChunkCount", (long) change.patchChunks().size()));
-            appendPatchChunks(job.repositoryId(), comparisonId, change);
+            appendPatchChunks(requiredJob.repositoryId(), comparisonId, change);
             ordinal++;
         }
-        validateComparisonPublication(job.repositoryId(), comparisonId, previousSnapshot, currentSnapshot, comparison);
-        markReady(job.repositoryId(), new GitEvidenceId(comparisonId.value()));
+        validateComparisonPublication(requiredJob.repositoryId(), comparisonId, previousSnapshot, currentSnapshot, comparison);
+        markReady(requiredJob.repositoryId(), new GitEvidenceId(comparisonId.value()));
+        return new ComparisonPublication(comparisonId, previousSnapshot, currentSnapshot);
     }
 
-    private void publishSnapshot(IndexJob job, GitSnapshotId snapshotId, String revision, List<GitSnapshotEntry> entries, Instant preparedAt) {
+    private void publishSnapshot(IndexJob job, GitSnapshotId snapshotId, String revision, List<GitSnapshotEntry> entries,
+                                 Instant preparedAt, GitEvidenceOwnership ownership) {
         EvidenceLimits limits = evidenceLimits();
         long totalText = 0L;
         long textEntries = 0L;
-        template.getCollection(IndexCollections.GIT_EVIDENCE_MANIFESTS).insertOne(new Document("repoId", job.repositoryId().value()).append("evidenceId", snapshotId.value())
-                .append("kind", "SNAPSHOT").append("state", "PREPARING").append("gitEvidenceVersion", 1).append("revision", revision)
+        Document snapshotManifest = ownershipDocument(new Document("repoId", job.repositoryId().value()).append("evidenceId", snapshotId.value())
+                .append("kind", "SNAPSHOT").append("state", "PREPARING")
+                .append("gitEvidenceVersion", com.java.semantic.model.index.IndexSchemaContract.GIT_EVIDENCE_VERSION).append("revision", revision)
                 .append("preparedAt", java.util.Date.from(preparedAt)).append("ownerJobId", job.id().value()).append("total", (long) entries.size())
                 .append("contentDigest", emptyDigest()).append("fileTextBytesLimit", limits.fileTextBytes())
                 .append("snapshotTextBytesLimit", limits.snapshotTextBytes()).append("contentCoverage", new Document("textBytes", 0L)
-                        .append("textEntries", 0L).append("entryCount", (long) entries.size())));
+                        .append("textEntries", 0L).append("entryCount", (long) entries.size())), ownership);
+        template.getCollection(IndexCollections.GIT_EVIDENCE_MANIFESTS).insertOne(snapshotManifest);
         long ordinal = 0L;
         String digest = emptyDigest();
         for (GitSnapshotEntry entry : entries) {
@@ -549,11 +559,33 @@ public final class GitEvidencePublicationStore {
                 Filters.eq("repoId", job.repositoryId().value()), Filters.eq("active", true)), Updates.set("gitEvidence.evidenceId", evidenceId.value()));
     }
 
-    private void bindComparison(IndexJob job, GitComparisonId comparisonId, GitSnapshotId previousSnapshot, GitSnapshotId currentSnapshot) {
-        template.getCollection(IndexCollections.INDEX_JOBS).updateOne(Filters.and(Filters.eq("jobId", job.id().value()),
-                Filters.eq("repoId", job.repositoryId().value()), Filters.eq("active", true)), Updates.combine(
-                Updates.set("gitEvidence.evidenceId", comparisonId.value()), Updates.set("gitEvidence.previousSnapshotId", previousSnapshot.value()),
-                Updates.set("gitEvidence.currentSnapshotId", currentSnapshot.value())));
+    private void bindComparison(IndexJob job, GitComparisonId comparisonId, GitSnapshotId previousSnapshot, GitSnapshotId currentSnapshot,
+                                GitEvidenceOwnership ownership) {
+        if (ownership.scope().name().equals("STANDALONE")) {
+            template.getCollection(IndexCollections.INDEX_JOBS).updateOne(Filters.and(Filters.eq("jobId", job.id().value()),
+                    Filters.eq("repoId", job.repositoryId().value()), Filters.eq("active", true)), Updates.combine(
+                    Updates.set("gitEvidence.evidenceId", comparisonId.value()), Updates.set("gitEvidence.previousSnapshotId", previousSnapshot.value()),
+                    Updates.set("gitEvidence.currentSnapshotId", currentSnapshot.value())));
+            return;
+        }
+        String reviewId = ownership.reviewId().orElseThrow().value();
+        long modified = template.getCollection(IndexCollections.INDEX_JOBS).updateOne(Filters.and(Filters.eq("jobId", job.id().value()),
+                        Filters.eq("repoId", job.repositoryId().value()), Filters.eq("active", true), Filters.eq("phase", "RUNNING"),
+                        Filters.eq("operation", "REVIEW"), Filters.eq("review.stage", "PREPARING_GIT"), Filters.eq("review.reviewId", reviewId),
+                        Filters.exists("review.comparisonId", false), Filters.exists("review.previousSnapshotId", false),
+                        Filters.exists("review.currentSnapshotId", false)),
+                Updates.combine(Updates.set("review.comparisonId", comparisonId.value()),
+                        Updates.set("review.previousSnapshotId", previousSnapshot.value()), Updates.set("review.currentSnapshotId", currentSnapshot.value())))
+                .getModifiedCount();
+        if (modified != 1L) {
+            throw new PublicationConflictException();
+        }
+    }
+
+    private static Document ownershipDocument(Document manifest, GitEvidenceOwnership ownership) {
+        manifest.append("scope", ownership.scope().name());
+        ownership.reviewId().ifPresent(reviewId -> manifest.append("reviewId", reviewId.value()));
+        return manifest;
     }
 
     private void markReady(RepositoryId repositoryId, GitEvidenceId evidenceId) {
@@ -679,4 +711,9 @@ public final class GitEvidencePublicationStore {
             throw new IllegalStateException("SHA-256 is unavailable", exception);
         }
     }
+    public record ComparisonPublication(GitComparisonId comparisonId, GitSnapshotId previousSnapshotId,
+                                        GitSnapshotId currentSnapshotId) {
+    }
+
 }
+

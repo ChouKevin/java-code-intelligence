@@ -27,7 +27,7 @@ class IndexerOpenApiContractTest {
         assertThat(jobResponse).contains("enum: [ACCEPTED, RUNNING, COMPLETE, FAILED]");
         assertThat(jobStatus).contains("required: [jobId, repositoryId, operation, phase, active, gitEvidence]");
         assertThat(jobStatus).contains("target: { $ref: '#/components/schemas/IndexJobTarget', nullable: true }");
-        assertThat(jobStatus).contains("operation: { type: string, enum: [BUILD, ROLLBACK, RESET, NO_WORK, GIT_REFS, GIT_HISTORY, GIT_COMPARISON] }");
+        assertThat(jobStatus).contains("operation: { type: string, enum: [BUILD, ROLLBACK, RESET, NO_WORK, GIT_REFS, GIT_HISTORY, GIT_COMPARISON, REVIEW] }");
         assertThat(jobStatus).contains("phase: { type: string, enum: [ACCEPTED, RUNNING, COMPLETE, FAILED] }");
 
         assertThat(jobResponse).doesNotContain("revision: {", "generationId: {", "generation: {");
@@ -46,13 +46,21 @@ class IndexerOpenApiContractTest {
         assertThat(schema(document, "GitComparisonIndexRequest")).contains("additionalProperties: false", "required: [previous, current]");
         assertThat(schema(document, "GitEvidenceResult")).contains("comparisonId: { type: string, nullable: true, format: uuid }",
                 "previousSnapshotId: { type: string, nullable: true, format: uuid }", "currentSnapshotId: { type: string, nullable: true, format: uuid }");
+        assertThat(document).contains("/index/repositories/{repoId}/reviews:", "operationId: prepareRepositoryCurrentToCommitReview",
+                "$ref: '#/components/schemas/ReviewIndexRequest'");
+        assertThat(schema(document, "ReviewIndexRequest")).contains("additionalProperties: false", "required: [revision]");
+        assertThat(schema(document, "ReviewJob")).contains("capturedBaseline: { $ref: '#/components/schemas/GenerationPointer' }",
+                "stage: { type: string, enum: [PREPARING_A, BUILDING_A, PREPARING_B, BUILDING_B, PREPARING_GIT, VALIDATING, READY] }");
 
         assertThat(recordComponentNames(IndexRepositoryController.IndexJobResponse.class))
-                .containsExactly("jobId", "repositoryId", "target", "phase", "failureCategory");
+                .containsExactly("jobId", "repositoryId", "target", "phase", "failureCategory", "review");
         assertThat(recordComponentNames(IndexRepositoryController.IndexJobStatusResponse.class))
-                .containsExactly("jobId", "repositoryId", "target", "operation", "phase", "active", "failureCategory", "currentPointer", "gitEvidence");
+                .containsExactly("jobId", "repositoryId", "target", "operation", "phase", "active", "failureCategory", "currentPointer", "gitEvidence", "review");
         assertThat(recordComponentNames(IndexRepositoryController.GitEvidenceResultResponse.class))
                 .containsExactly("evidenceId", "branch", "revision", "comparisonId", "previousSnapshotId", "currentSnapshotId");
+        assertThat(recordComponentNames(IndexRepositoryController.ReviewJobResponse.class))
+                .containsExactly("reviewId", "capturedBaseline", "requestedRevision", "stage", "aGenerationId", "bGenerationId",
+                        "comparisonId", "previousSnapshotId", "currentSnapshotId");
     }
 
     private static String openApi() throws IOException {

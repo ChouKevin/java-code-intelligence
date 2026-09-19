@@ -23,8 +23,11 @@ public interface IndexJobStore {
     IndexJob admitGitHistory(RepositoryId repositoryId, GitEvidenceId catalogId, String branch, RepositoryRevision revision);
 
     IndexJob admitGitComparison(RepositoryId repositoryId, RepositoryRevision previous, RepositoryRevision current);
+    IndexJob admitReview(RepositoryId repositoryId, RepositoryRevision revision);
     IndexJob activateReviewTarget(IndexJobId jobId, ReviewSide side);
     IndexJob recordReviewSide(IndexJobId jobId, ReviewSide side, SealedGeneration generation);
+    IndexJob beginReviewValidation(IndexJobId jobId);
+    IndexJob recordReviewReady(IndexJobId jobId);
     Optional<IndexJob> find(IndexJobId jobId);
     Optional<IndexJob> startNextAccepted();
     boolean complete(IndexJobId jobId);
@@ -36,5 +39,6 @@ public interface IndexJobStore {
     Optional<IndexPublicationState> publicationState(RepositoryId repositoryId);
     Optional<RollbackGenerationCommand> rollbackCommand(IndexJob job);
     Optional<IndexPublicationIntent> prepareBuildPublication(IndexJob job, ManifestDigest sealedManifestDigest);
+    boolean reviewReady(IndexJob job);
     boolean gitEvidenceReady(IndexJob job);
 }

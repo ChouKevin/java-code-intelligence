@@ -29,7 +29,10 @@ public final class UatRepositoryResetService {
     private static final String UAT_DATABASE = "semantic_uat";
     private static final List<String> REPOSITORY_COLLECTIONS = List.of(
             IndexCollections.GENERATION_MANIFESTS, IndexCollections.GENERATION_FILES, IndexCollections.SYMBOLS,
-            IndexCollections.RELATIONS, IndexCollections.ENTRY_POINTS, IndexCollections.SEARCH);
+            IndexCollections.RELATIONS, IndexCollections.ENTRY_POINTS, IndexCollections.SEARCH, IndexCollections.REVIEW_MANIFESTS,
+            IndexCollections.GIT_EVIDENCE_MANIFESTS, IndexCollections.GIT_BRANCHES, IndexCollections.GIT_COMMITS,
+            IndexCollections.GIT_SNAPSHOT_FILES, IndexCollections.GIT_SNAPSHOT_CHUNKS, IndexCollections.GIT_COMPARISON_CHANGES,
+            IndexCollections.GIT_COMPARISON_PATCHES);
     private final MongoTemplate template;
     private final IndexJobStore jobs;
     private final RepositoryProperties repositories;

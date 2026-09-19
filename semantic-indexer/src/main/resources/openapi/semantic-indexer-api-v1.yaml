@@ -95,6 +95,22 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/RepositoryNotFound' }
         '409': { $ref: '#/components/responses/IndexConflict' }
+  /index/repositories/{repoId}/reviews:
+    post:
+      operationId: prepareRepositoryCurrentToCommitReview
+      parameters: [ { $ref: '#/components/parameters/RepositoryId' } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ReviewIndexRequest' }
+      responses:
+        '202': { $ref: '#/components/responses/IndexJobAccepted' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/RepositoryNotFound' }
+        '409': { $ref: '#/components/responses/IndexConflict' }
   /index/repositories/{repoId}/publication:
     get:
       operationId: getRepositoryPublication
@@ -272,7 +288,10 @@ components:
         failureCategory:
           type: string
           nullable: true
-          enum: [WORKER_INTERRUPTED, SOURCE_UNAVAILABLE, SCHEMA_REBUILD_REQUIRED, PUBLICATION_CONFLICT, VALIDATION_FAILED]
+          enum: [WORKER_INTERRUPTED, SOURCE_UNAVAILABLE, SCHEMA_REBUILD_REQUIRED, PUBLICATION_CONFLICT, VALIDATION_FAILED, ANALYSIS_UNAVAILABLE, REVIEW_EVIDENCE_MISMATCH, REVIEW_BASELINE_UNAVAILABLE]
+        review:
+          allOf: [{ $ref: '#/components/schemas/ReviewJob' }]
+          nullable: true
     PublicationCycle:
       type: object
       additionalProperties: false
@@ -287,18 +306,21 @@ components:
         jobId: { type: string }
         repositoryId: { type: string }
         target: { $ref: '#/components/schemas/IndexJobTarget', nullable: true }
-        operation: { type: string, enum: [BUILD, ROLLBACK, RESET, NO_WORK, GIT_REFS, GIT_HISTORY, GIT_COMPARISON] }
+        operation: { type: string, enum: [BUILD, ROLLBACK, RESET, NO_WORK, GIT_REFS, GIT_HISTORY, GIT_COMPARISON, REVIEW] }
         phase: { type: string, enum: [ACCEPTED, RUNNING, COMPLETE, FAILED] }
         active: { type: boolean }
         failureCategory:
           type: string
           nullable: true
-          enum: [WORKER_INTERRUPTED, SOURCE_UNAVAILABLE, SCHEMA_REBUILD_REQUIRED, PUBLICATION_CONFLICT, VALIDATION_FAILED]
+          enum: [WORKER_INTERRUPTED, SOURCE_UNAVAILABLE, SCHEMA_REBUILD_REQUIRED, PUBLICATION_CONFLICT, VALIDATION_FAILED, ANALYSIS_UNAVAILABLE, REVIEW_EVIDENCE_MISMATCH, REVIEW_BASELINE_UNAVAILABLE]
         currentPointer:
           allOf: [{ $ref: '#/components/schemas/GenerationPointer' }]
           nullable: true
         gitEvidence:
           allOf: [{ $ref: '#/components/schemas/GitEvidenceResult' }]
+          nullable: true
+        review:
+          allOf: [{ $ref: '#/components/schemas/ReviewJob' }]
           nullable: true
     IndexPublicationResponse:
       type: object
@@ -324,6 +346,26 @@ components:
         target: { type: object, nullable: true }
         candidates: { type: array, items: { type: object } }
         requestId: { type: string }
+    ReviewIndexRequest:
+      type: object
+      additionalProperties: false
+      required: [revision]
+      properties:
+        revision: { type: string, pattern: '^[0-9a-f]{40}$' }
+    ReviewJob:
+      type: object
+      additionalProperties: false
+      required: [reviewId, capturedBaseline, requestedRevision, stage]
+      properties:
+        reviewId: { type: string, format: uuid }
+        capturedBaseline: { $ref: '#/components/schemas/GenerationPointer' }
+        requestedRevision: { type: string, pattern: '^[0-9a-f]{40}$' }
+        stage: { type: string, enum: [PREPARING_A, BUILDING_A, PREPARING_B, BUILDING_B, PREPARING_GIT, VALIDATING, READY] }
+        aGenerationId: { type: string, nullable: true }
+        bGenerationId: { type: string, nullable: true }
+        comparisonId: { type: string, format: uuid, nullable: true }
+        previousSnapshotId: { type: string, format: uuid, nullable: true }
+        currentSnapshotId: { type: string, format: uuid, nullable: true }
     GitHistoryIndexRequest:
       type: object
       additionalProperties: false

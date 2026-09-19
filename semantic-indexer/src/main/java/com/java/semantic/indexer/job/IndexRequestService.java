@@ -83,6 +83,11 @@ public final class IndexRequestService {
         return jobs.admitGitComparison(repositoryId, RepositoryRevision.ofSha(previous), RepositoryRevision.ofSha(current));
     }
 
+    public IndexJob review(RepositoryId repositoryId, RepositoryRevision revision) {
+        repositories.get(repositoryId);
+        return jobs.admitReview(repositoryId, revision);
+    }
+
     private IndexJob admit(RepositoryId repositoryId, RepositoryRevision revision, boolean rebuild) {
         jobs.reconcileCommitted(repositoryId);
         return jobs.admit(repositoryId, revision, rebuild);

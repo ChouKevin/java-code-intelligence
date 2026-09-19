@@ -189,9 +189,13 @@ class IndexJobExecutorTest {
     }
 
     private static IndexJob runningJob(IndexJobOperation operation) {
+        RepositoryRevision revision = new RepositoryRevision("a".repeat(40));
+        if (operation == IndexJobOperation.GIT_COMPARISON) {
+            return new IndexJob(new IndexJobId("job-1"), RepositoryId.of("orders"), Optional.empty(), IndexJobPhase.RUNNING, true,
+                    Optional.empty(), false, operation, Optional.of(GitEvidenceJob.comparison(revision, new RepositoryRevision("b".repeat(40)))));
+        }
         return new IndexJob(new IndexJobId("job-1"), RepositoryId.of("orders"), Optional.of(new IndexJobTarget(
-                new RepositoryRevision("a".repeat(40)), new GenerationId("g-1"), 1L)), IndexJobPhase.RUNNING, true,
-                Optional.empty(), false, operation);
+                revision, new GenerationId("g-1"), 1L)), IndexJobPhase.RUNNING, true, Optional.empty(), false, operation);
     }
 
     private static IndexJob runningResetJob() {

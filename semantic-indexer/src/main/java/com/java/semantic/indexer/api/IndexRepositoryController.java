@@ -62,6 +62,11 @@ public final class IndexRepositoryController {
         return accepted(requests.prepareGitComparison(RepositoryId.of(repoId), request.previous(), request.current()));
     }
 
+    @PostMapping("/reviews")
+    public ResponseEntity<IndexJobResponse> review(@PathVariable String repoId, @Valid @RequestBody ReviewIndexRequest request) {
+        return accepted(requests.review(RepositoryId.of(repoId), com.java.semantic.model.repository.RepositoryRevision.ofSha(request.revision())));
+    }
+
     @PostMapping("/rebuild")
     public ResponseEntity<IndexJobResponse> rebuild(@PathVariable String repoId, @Valid @RequestBody RebuildIndexRequest request) {
         return accepted(requests.rebuild(RepositoryId.of(repoId), Objects.requireNonNull(request, "rebuild request is required")
@@ -98,32 +103,49 @@ public final class IndexRepositoryController {
     }
 
     public record IndexJobResponse(String jobId, String repositoryId, IndexJobTargetResponse target, String phase,
-                                   String failureCategory) {
+                                   String failureCategory, ReviewJobResponse review) {
         public static IndexJobResponse from(IndexJob job) {
-            return new IndexJobResponse(job.id().value(), job.repositoryId().value(), job.target().map(IndexJobTargetResponse::from).orElse(null), // cs-allow
-                    job.phase().name(), job.failureCategory().map(Enum::name).orElse(null)); // cs-allow
+            return new IndexJobResponse(job.id().value(), job.repositoryId().value(), job.target().map(IndexJobTargetResponse::from).orElse(null),
+                    job.phase().name(), job.failureCategory().map(Enum::name).orElse(null),
+                    job.review().map(ReviewJobResponse::from).orElse(null));
         }
     }
 
     public record IndexJobStatusResponse(String jobId, String repositoryId, IndexJobTargetResponse target,
                                          String operation, String phase, boolean active, String failureCategory,
-                                         GenerationPointerResponse currentPointer, GitEvidenceResultResponse gitEvidence) {
+                                         GenerationPointerResponse currentPointer, GitEvidenceResultResponse gitEvidence,
+                                         ReviewJobResponse review) {
         static IndexJobStatusResponse from(IndexJob job, Optional<PublishedGenerationPointer> currentPointer) {
-            return new IndexJobStatusResponse(job.id().value(), job.repositoryId().value(), job.target().map(IndexJobTargetResponse::from).orElse(null), // cs-allow
+            return new IndexJobStatusResponse(job.id().value(), job.repositoryId().value(), job.target().map(IndexJobTargetResponse::from).orElse(null),
                     job.operation().name(), job.phase().name(), job.active(),
-                    job.failureCategory().map(Enum::name).orElse(null), // cs-allow
-                    currentPointer.map(GenerationPointerResponse::from).orElse(null), // cs-allow
-                    job.gitEvidence().flatMap(payload -> payload.evidenceId().map(id -> new GitEvidenceResultResponse(id.value(), payload.branch().orElse(null), // cs-allow
-                            payload.revision().map(com.java.semantic.model.repository.RepositoryRevision::value).orElse(null), // cs-allow
-                            payload.previousRevision().isPresent() ? id.value() : null, // cs-allow
-                            payload.previousSnapshotId().map(com.java.semantic.model.git.GitSnapshotId::value).orElse(null), // cs-allow
-                            payload.currentSnapshotId().map(com.java.semantic.model.git.GitSnapshotId::value).orElse(null)))) // cs-allow
-                            .orElse(null)); // cs-allow
+                    job.failureCategory().map(Enum::name).orElse(null),
+                    currentPointer.map(GenerationPointerResponse::from).orElse(null),
+                    job.gitEvidence().flatMap(payload -> payload.evidenceId().map(id -> new GitEvidenceResultResponse(id.value(), payload.branch().orElse(null),
+                            payload.revision().map(com.java.semantic.model.repository.RepositoryRevision::value).orElse(null),
+                            payload.previousRevision().isPresent() ? id.value() : null,
+                            payload.previousSnapshotId().map(com.java.semantic.model.git.GitSnapshotId::value).orElse(null),
+                            payload.currentSnapshotId().map(com.java.semantic.model.git.GitSnapshotId::value).orElse(null))))
+                            .orElse(null),
+                    job.review().map(ReviewJobResponse::from).orElse(null));
         }
     }
 
     public record GitEvidenceResultResponse(String evidenceId, String branch, String revision, String comparisonId,
                                             String previousSnapshotId, String currentSnapshotId) { }
+
+    public record ReviewJobResponse(String reviewId, GenerationPointerResponse capturedBaseline, String requestedRevision,
+                                    String stage, String aGenerationId, String bGenerationId, String comparisonId,
+                                    String previousSnapshotId, String currentSnapshotId) {
+        static ReviewJobResponse from(com.java.semantic.indexer.job.ReviewJobPayload review) {
+            return new ReviewJobResponse(review.reviewId().value(), GenerationPointerResponse.from(review.baseline().pointer()),
+                    review.requestedRevision().value(), review.stage().name(),
+                    review.a().map(generation -> generation.selected().generationId().value()).orElse(null),
+                    review.b().map(generation -> generation.selected().generationId().value()).orElse(null),
+                    review.comparisonId().map(com.java.semantic.model.git.GitComparisonId::value).orElse(null),
+                    review.previousSnapshotId().map(com.java.semantic.model.git.GitSnapshotId::value).orElse(null),
+                    review.currentSnapshotId().map(com.java.semantic.model.git.GitSnapshotId::value).orElse(null));
+        }
+    }
 
     public record IndexJobTargetResponse(String revision, String generationId, long generation) {
         static IndexJobTargetResponse from(com.java.semantic.indexer.job.IndexJobTarget target) {

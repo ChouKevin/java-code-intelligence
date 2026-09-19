@@ -32,6 +32,34 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 @Tag("mongo-it")
 class MongoIndexJobStoreIT {
     @Test
+    void review_admission_captures_the_current_pointer_once_and_refuses_missing_baselines_without_a_job() {
+        try (MongoDBContainer container = container()) {
+            MongoTemplate template = template(container);
+            MongoIndexJobStore store = store(template);
+            RepositoryId repositoryId = RepositoryId.of("orders");
+            PublishedGenerationPointer currentC = pointer("c", "g-current-c", "job-current-c");
+            PublishedGenerationPointer currentD = pointer("d", "g-current-d", "job-current-d");
+            seedPublished(template, repositoryId.value(), currentC, true, IndexSchemaContract.SCHEMA_VERSION);
+
+            IndexJob accepted = store.admitReview(repositoryId, revision("e"));
+            template.getCollection(IndexCollections.REPOSITORIES).updateOne(new Document("repoId", repositoryId.value()),
+                    new Document("$set", new Document("currentPointer", pointerDocument(currentD))));
+
+            assertThat(accepted.operation()).isEqualTo(IndexJobOperation.REVIEW);
+            assertThat(accepted.review().orElseThrow().baseline().pointer()).isEqualTo(currentC);
+            assertThat(accepted.review().orElseThrow().requestedRevision()).isEqualTo(revision("e"));
+            assertThat(store.find(accepted.id()).orElseThrow().review().orElseThrow().baseline().pointer()).isEqualTo(currentC);
+            assertThatThrownBy(() -> store.admitReview(repositoryId, revision("f")))
+                    .isInstanceOf(IndexJobAlreadyActiveException.class);
+
+            RepositoryId missing = RepositoryId.of("missing");
+            assertThatThrownBy(() -> store.admitReview(missing, revision("e")))
+                    .isInstanceOf(com.java.semantic.indexer.review.ReviewBaselineUnavailableException.class);
+            assertThat(template.getCollection(IndexCollections.INDEX_JOBS).countDocuments(new Document("repoId", missing.value()))).isZero();
+        }
+    }
+
+    @Test
     void admits_one_active_job_per_repository_and_independent_repositories() {
         try (MongoDBContainer container = container()) {
             MongoIndexJobStore store = store(container);

@@ -13,6 +13,7 @@ import com.java.semantic.model.git.GitPreparedComparison;
 import com.java.semantic.model.git.GitSnapshotEntry;
 import com.java.semantic.model.git.GitFileContentStatus;
 import com.java.semantic.model.git.GitComparisonId;
+import com.java.semantic.model.git.GitEvidenceOwnership;
 import com.java.semantic.model.git.GitSnapshotId;
 import com.java.semantic.model.index.IndexCollections;
 import com.java.semantic.model.repository.RepositoryId;
@@ -46,7 +47,8 @@ class GitComparisonPublicationIT {
                     "4".repeat(40), "", "UNAVAILABLE");
 
             new GitEvidencePublicationStore(template).publishComparison(job, new GitPreparedComparison(previous, current,
-                    GitComparisonAncestry.PREVIOUS_ANCESTOR, List.of(text), List.of(text, binary), List.of(change)), Instant.now());
+                    GitComparisonAncestry.PREVIOUS_ANCESTOR, List.of(text), List.of(text, binary), List.of(change)), Instant.now(),
+                    GitEvidenceOwnership.standalone());
 
             assertThat(template.getCollection(IndexCollections.GIT_EVIDENCE_MANIFESTS)
                     .countDocuments(new org.bson.Document("state", "READY"))).isEqualTo(3L);
@@ -71,7 +73,7 @@ class GitComparisonPublicationIT {
             GitPreparedComparison prepared = new GitPreparedComparison(previous, current, GitComparisonAncestry.PREVIOUS_ANCESTOR,
                     List.of(entry), List.of(entry), List.of(change));
             GitEvidencePublicationStore store = new GitEvidencePublicationStore(template);
-            store.publishComparison(job, prepared, Instant.now());
+            store.publishComparison(job, prepared, Instant.now(), GitEvidenceOwnership.standalone());
             org.bson.Document manifest = template.getCollection(IndexCollections.GIT_EVIDENCE_MANIFESTS)
                     .find(new org.bson.Document("kind", "COMPARISON")).first();
             GitComparisonId comparisonId = new GitComparisonId(manifest.getString("evidenceId"));
@@ -118,7 +120,7 @@ class GitComparisonPublicationIT {
             GitPreparedComparison prepared = new GitPreparedComparison(previous, current, GitComparisonAncestry.PREVIOUS_ANCESTOR,
                     List.of(entry), List.of(entry), List.of(change));
             GitEvidencePublicationStore store = new GitEvidencePublicationStore(template);
-            store.publishComparison(job, prepared, Instant.now());
+            store.publishComparison(job, prepared, Instant.now(), GitEvidenceOwnership.standalone());
             org.bson.Document manifest = template.getCollection(IndexCollections.GIT_EVIDENCE_MANIFESTS)
                     .find(new org.bson.Document("kind", "COMPARISON")).first();
             GitComparisonId comparisonId = new GitComparisonId(manifest.getString("evidenceId"));
@@ -155,7 +157,8 @@ class GitComparisonPublicationIT {
             GitPreparedComparison prepared = new GitPreparedComparison(previous, current, GitComparisonAncestry.SAME,
                     List.of(text), List.of(text), List.of());
 
-            new GitEvidencePublicationStore(template, properties).publishComparison(comparisonJob(repository, previous, current), prepared, Instant.now());
+            new GitEvidencePublicationStore(template, properties).publishComparison(comparisonJob(repository, previous, current), prepared,
+                    Instant.now(), GitEvidenceOwnership.standalone());
             properties.setGitEvidenceFileTextBytes(32L);
             properties.setGitEvidenceSnapshotTextBytes(64L);
 
@@ -188,7 +191,8 @@ class GitComparisonPublicationIT {
                     "100644", "3".repeat(40), "4".repeat(40), patchChunks, "AVAILABLE");
 
             new GitEvidencePublicationStore(template).publishComparison(comparisonJob(repository, previous, current), new GitPreparedComparison(previous,
-                    current, GitComparisonAncestry.PREVIOUS_ANCESTOR, List.of(entry), List.of(entry), List.of(change)), Instant.now());
+                    current, GitComparisonAncestry.PREVIOUS_ANCESTOR, List.of(entry), List.of(entry), List.of(change)), Instant.now(),
+                    GitEvidenceOwnership.standalone());
 
             List<org.bson.Document> chunks = template.getCollection(IndexCollections.GIT_COMPARISON_PATCHES)
                     .find(new org.bson.Document("changeId", change.changeId())).sort(new org.bson.Document("ordinal", 1)).into(new java.util.ArrayList<>());

@@ -1,6 +1,7 @@
 package com.java.semantic.indexer.api;
 
 import com.java.semantic.indexer.job.IndexJobAlreadyActiveException;
+import com.java.semantic.indexer.review.ReviewBaselineUnavailableException;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -15,6 +16,13 @@ public final class IndexerApiExceptionHandler {
     @ExceptionHandler(IndexJobAlreadyActiveException.class)
     public ResponseEntity<ApiError> activeJob(IndexJobAlreadyActiveException exception) {
         ApiError error = new ApiError("REPOSITORY_ACTIVE", exception.getMessage(), exception.repositoryId().value(),
+                List.of(), UUID.randomUUID().toString());
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(error);
+    }
+
+    @ExceptionHandler(ReviewBaselineUnavailableException.class)
+    public ResponseEntity<ApiError> reviewBaseline(ReviewBaselineUnavailableException exception) {
+        ApiError error = new ApiError("REVIEW_BASELINE_UNAVAILABLE", exception.getMessage(), exception.repositoryId().value(),
                 List.of(), UUID.randomUUID().toString());
         return ResponseEntity.status(HttpStatus.CONFLICT).body(error);
     }
