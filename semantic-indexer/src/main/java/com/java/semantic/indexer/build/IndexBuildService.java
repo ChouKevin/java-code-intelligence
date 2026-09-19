@@ -106,7 +106,10 @@ public final class IndexBuildService {
                     .orElseGet(() -> planner.plan(checkout.root()));
             insertWritingManifest(job, context);
             FullIndexPlan exportPlan = incrementalBuilder.assemble(job, context, plan).exportPlan();
-            List<SourceIndexBatch> batches = exporter.export(job.repositoryId(), target.revision(), target.generationId(), exportPlan);
+            List<SourceIndexBatch> batches = preparedAnalysis
+                    .map(analysis -> exporter.export(job.repositoryId(), target.revision(), target.generationId(), exportPlan,
+                            analysis.semanticService()))
+                    .orElseGet(() -> exporter.export(job.repositoryId(), target.revision(), target.generationId(), exportPlan));
             MongoIndexBatchWriter writer = new MongoIndexBatchWriter(generationWriter, context, documentMapper);
             for (SourceIndexBatch batch : batches) {
                 writer.write(batch);

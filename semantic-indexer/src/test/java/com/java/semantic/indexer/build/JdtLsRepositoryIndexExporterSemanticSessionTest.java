@@ -82,6 +82,20 @@ class JdtLsRepositoryIndexExporterSemanticSessionTest {
     }
 
     @Test
+    void prepared_export_uses_the_supplied_bound_semantic_service_instead_of_its_legacy_service() throws IOException {
+        writeSource("package sample; class Calls { void work() { helper(); } void helper() { } }");
+        RecordingSemanticService legacyService = new RecordingSemanticService(false);
+        RecordingSemanticService boundService = new RecordingSemanticService(true);
+        JdtLsRepositoryIndexExporter exporter = new JdtLsRepositoryIndexExporter(legacyService);
+
+        exporter.export(new RepositoryId("prepared"), revision(), new GenerationId("prepared-generation"),
+                new FullIndexPlanner().plan(repository), boundService);
+
+        assertThat(boundService.workspaceChecks()).isPositive();
+        assertThat(legacyService.workspaceChecks()).isZero();
+    }
+
+    @Test
     void does_not_reuse_a_previous_exports_semantic_resolution_when_the_next_export_is_unresolved() throws IOException {
         writeSource("package sample; class Calls { void work() { helper(); } void helper() { } }");
         JdtLsRepositoryIndexExporter exporter = new JdtLsRepositoryIndexExporter(new RecordingSemanticService(true));

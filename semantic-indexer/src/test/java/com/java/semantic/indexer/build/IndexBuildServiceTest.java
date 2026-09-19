@@ -19,6 +19,7 @@ import com.java.semantic.model.index.ManifestDigest;
 import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.model.repository.RepositoryRevision;
 import com.java.semantic.repository.application.RepositoryMutationException;
+import com.java.semantic.semantic.domain.JavaSemanticService;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
@@ -65,6 +66,7 @@ class IndexBuildServiceTest {
                 List.of(checkout.root().resolve("src/production/java")),
                 Map.of("org.eclipse.jdt.core.compiler.source", "17"));
         PreparedAnalysis preparedAnalysis = mock(PreparedAnalysis.class);
+        JavaSemanticService boundSemanticService = mock(JavaSemanticService.class);
         RepositoryAnalysisPreparation preparation = mock(RepositoryAnalysisPreparation.class);
         FullIndexPlanner planner = mock(FullIndexPlanner.class);
         RepositoryIndexExporter exporter = mock(RepositoryIndexExporter.class);
@@ -80,9 +82,12 @@ class IndexBuildServiceTest {
                 target.revision(), target.generationId(), digest, Optional.empty(), Optional.empty(), Optional.empty());
         when(preparation.prepare(any())).thenReturn(preparedAnalysis);
         when(preparedAnalysis.plan()).thenReturn(preparedPlan);
+        when(preparedAnalysis.semanticService()).thenReturn(boundSemanticService);
         when(incrementalBuilder.assemble(any(), any(), any())).thenReturn(new IncrementalGenerationBuilder.BuildSelection(
                 false, mock(com.java.semantic.indexer.incremental.IncrementalIndexPlan.class), preparedPlan));
         when(exporter.export(job.repositoryId(), target.revision(), target.generationId(), preparedPlan)).thenReturn(List.of());
+        when(exporter.export(job.repositoryId(), target.revision(), target.generationId(), preparedPlan, boundSemanticService))
+                .thenReturn(List.of());
         when(validator.validate(any(), org.mockito.ArgumentMatchers.eq(target.revision()),
                 org.mockito.ArgumentMatchers.eq(target.revision()))).thenReturn(validation);
         when(jobs.prepareBuildPublication(job, digest)).thenReturn(Optional.of(intent));
@@ -98,7 +103,7 @@ class IndexBuildServiceTest {
         assertThat(targetCaptor.getValue().snapshot().revision()).isEqualTo(target.revision());
         assertThat(targetCaptor.getValue().jobId()).isEqualTo(job.id().value());
         assertThat(targetCaptor.getValue().stage()).isEqualTo("CODEBASE");
-        verify(exporter).export(job.repositoryId(), target.revision(), target.generationId(), preparedPlan);
+        verify(exporter).export(job.repositoryId(), target.revision(), target.generationId(), preparedPlan, boundSemanticService);
         verifyNoInteractions(planner);
     }
 

@@ -170,3 +170,42 @@ The Maven test lifecycle compiled all affected production and test sources; no f
 - Non-project files and directories continue through `digestPath`/`byteLength`, including deterministic directory inventory handling.
 - The active production path uses the prepared plan; only intentionally legacy two-argument plans retain root discovery for unmigrated callers. The Task 4 manager constructor/singleton remains untouched.
 - Prepared leases span export and close in `finally`; post-extraction source revalidation remains in the exporter.
+
+## Bound prepared-export correction
+
+### RED
+
+The prepared-plan test was extended to require the exporter overload receiving `PreparedAnalysis.semanticService()`. Before the correction, `IndexBuildService` invoked the four-argument exporter path instead:
+
+```sh
+JDTLS_HOME=/opt/jdtls .superpowers/sdd/2026-09-19-current-to-commit-semantic-review/tools/apache-maven-3.9.11/bin/mvn --batch-mode --no-transfer-progress -pl semantic-indexer -am -Dtest=IndexBuildServiceTest -Dsurefire.failIfNoSpecifiedTests=false test
+# FAIL: exports_the_prepared_plan_without_rediscovering_checkout_sources
+# Actual invocation: repositoryIndexExporter.export(..., preparedPlan)
+# Wanted invocation: repositoryIndexExporter.export(..., preparedPlan, boundSemanticService)
+# Tests run: 3, Failures: 1, Errors: 0
+```
+
+### GREEN
+
+`IndexBuildService` now supplies `PreparedAnalysis.semanticService()` to prepared exports while that analysis lease remains open. `JdtLsRepositoryIndexExporter` constructs its semantic resolver from that supplied service for the complete workspace probe and call-target-resolution lifecycle; its legacy four-argument path remains for unmigrated Task 4 callers.
+
+The focused exporter test creates a failing constructor-injected legacy service and a resolving supplied service. A prepared export completes with the supplied service’s workspace check and zero legacy-service checks.
+
+```sh
+JDTLS_HOME=/opt/jdtls .superpowers/sdd/2026-09-19-current-to-commit-semantic-review/tools/apache-maven-3.9.11/bin/mvn --batch-mode --no-transfer-progress -pl semantic-indexer -am -Dtest=IndexBuildServiceTest,JdtLsRepositoryIndexExporterSemanticSessionTest -Dsurefire.failIfNoSpecifiedTests=false test
+# Tests run: 10, Failures: 0, Errors: 0, Skipped: 0; BUILD SUCCESS
+
+JDTLS_HOME=/opt/jdtls .superpowers/sdd/2026-09-19-current-to-commit-semantic-review/tools/apache-maven-3.9.11/bin/mvn --batch-mode --no-transfer-progress -pl semantic-indexer -am -Pjdtls-it -Dtest=EffectiveEnvironmentJdtLsIT -Dsurefire.failIfNoSpecifiedTests=false test
+# Tests run: 1, Failures: 0, Errors: 0, Skipped: 0; BUILD SUCCESS
+```
+
+### Files changed
+
+- `.superpowers/sdd/2026-09-19-current-to-commit-semantic-review/task-3-report.md`
+- `semantic-indexer/src/main/java/com/java/semantic/indexer/build/{RepositoryIndexExporter.java,IndexBuildService.java,JdtLsRepositoryIndexExporter.java}`
+- `semantic-indexer/src/test/java/com/java/semantic/indexer/build/{IndexBuildServiceTest.java,JdtLsRepositoryIndexExporterSemanticSessionTest.java}`
+
+### Self-review
+
+- The prepared path selects exactly one bound service, uses it for all exporter semantic calls, and closes its lease only after export returns or fails.
+- The injected legacy JDT service remains available only to the legacy exporter overload, preserving Task 4’s assigned cutover boundary.

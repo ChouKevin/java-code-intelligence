@@ -62,7 +62,18 @@ public final class JdtLsRepositoryIndexExporter implements RepositoryIndexExport
     @Override
     public List<SourceIndexBatch> export(RepositoryId repositoryId, RepositoryRevision revision, GenerationId generationId,
                                          FullIndexPlan plan) {
-        semanticCallTargetResolver.beginExport();
+        return export(repositoryId, revision, generationId, plan, semanticCallTargetResolver);
+    }
+
+    @Override
+    public List<SourceIndexBatch> export(RepositoryId repositoryId, RepositoryRevision revision, GenerationId generationId,
+                                         FullIndexPlan plan, JavaSemanticService semanticService) {
+        return export(repositoryId, revision, generationId, plan, new JdtLsSemanticCallTargetResolver(semanticService));
+    }
+
+    private List<SourceIndexBatch> export(RepositoryId repositoryId, RepositoryRevision revision, GenerationId generationId,
+                                          FullIndexPlan plan, SemanticCallTargetResolver resolver) {
+        resolver.beginExport();
         try {
             validatePlannedSources(plan, "before syntax extraction");
             RepositorySyntax syntax = plan.importedInputs()
@@ -72,7 +83,7 @@ public final class JdtLsRepositoryIndexExporter implements RepositoryIndexExport
             validatePlannedSources(plan, "after syntax extraction");
             Map<String, Optional<SourceIndexIssue>> extractionIssues = extractionIssues(syntax);
             RepositorySnapshot snapshot = new RepositorySnapshot(repositoryId, plan.repositoryRoot(), revision);
-            semanticWorkspaceProbe(syntax).ifPresent(method -> semanticCallTargetResolver.verifySemanticWorkspace(snapshot, method));
+            semanticWorkspaceProbe(syntax).ifPresent(method -> resolver.verifySemanticWorkspace(snapshot, method));
             List<SourceIndexBatch> batches = plan.sources().stream().flatMap(source -> {
             List<SymbolDocument> symbols = new ArrayList<>(symbolProjector.project(
                     repositoryId, revision, generationId, syntax, source.sourcePath(), source.contentArtifact()));
@@ -80,7 +91,7 @@ public final class JdtLsRepositoryIndexExporter implements RepositoryIndexExport
                     source.sourcePath(), source.contentArtifact()));
             symbols = symbols.stream().sorted(java.util.Comparator.comparing(document -> document.fact().id().value())).toList();
             List<RelationDocument> relations = relationProjector.project(repositoryId, revision, generationId,
-                    syntax, source.sourcePath(), source.contentArtifact(), plan.repositoryRoot(), snapshot, semanticCallTargetResolver);
+                    syntax, source.sourcePath(), source.contentArtifact(), plan.repositoryRoot(), snapshot, resolver);
             List<EntryPointDocument> entryPoints = entryPointProjector.project(repositoryId, revision,
                     generationId, syntax, source.sourcePath());
             SourceIndexScope sourceScope = SourceIndexScope.from(symbols);
@@ -88,10 +99,10 @@ public final class JdtLsRepositoryIndexExporter implements RepositoryIndexExport
                     extractionIssues.getOrDefault(source.sourcePath(), Optional.empty()), sourceScope, symbols, relations, entryPoints,
                     searchProjector.project(symbols, relations, entryPoints)).stream();
             }).toList();
-            semanticCallTargetResolver.requireSemanticResolution();
+            resolver.requireSemanticResolution();
             return batches;
         } finally {
-            semanticCallTargetResolver.endExport();
+            resolver.endExport();
         }
     }
 
