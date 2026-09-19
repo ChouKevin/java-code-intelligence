@@ -38,6 +38,11 @@ public final class JdtLsSemanticCallTargetResolver implements SemanticCallTarget
     @Override
     public SemanticCallResolution resolve(RepositorySnapshot snapshot, SourceMethodMetadata caller,
                                           SyntaxInvocation invocation, boolean localTargetExpected) {
+        if (caller.analysisTarget().target().isEmpty()) {
+            SemanticCallResolution unresolved = SemanticCallResolution.unresolved();
+            accounting.record(unresolved);
+            return unresolved;
+        }
         SemanticCallResolution response = semanticService.resolveCallResolutionAt(snapshot, semanticMethod(snapshot, caller),
                 new SemanticCallSite(range(invocation.range()), position(invocation.resolutionAnchor())));
         SemanticCallResolution resolution = response.status() == SemanticCallResolutionStatus.RESOLVED
