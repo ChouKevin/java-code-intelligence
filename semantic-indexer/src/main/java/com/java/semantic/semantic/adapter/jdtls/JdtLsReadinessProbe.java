@@ -136,7 +136,8 @@ public final class JdtLsReadinessProbe {
                         .toList();
                 for (Path sourceFile : sourceFiles) {
                     String filename = sourceFile.getFileName().toString();
-                    candidates.add(new SourceCandidate(sourceRoot, safePath(workspaceRoot, sourceFile),
+                    candidates.add(new SourceCandidate(sourceRoot, sourceFile.toRealPath(),
+                            safePath(workspaceRoot, sourceFile),
                             filename.substring(0, filename.length() - JAVA_SUFFIX.length())));
                 }
             } catch (IOException exception) {
@@ -167,13 +168,10 @@ public final class JdtLsReadinessProbe {
             if (!(sourcePaths instanceof List<?> paths)) {
                 throw startupFailure(session, "JDT LS project settings omitted source paths", null);
             }
-            for (Object sourcePath : paths) {
-                if (!(sourcePath instanceof String path) || path.isBlank()) {
-                    throw startupFailure(session, "JDT LS project settings contained an invalid source path", null);
-                }
-                Path sourceRoot = projectRoot.resolve(path).normalize();
-                if (isSafeProductionRoot(repositoryRoot, sourceRoot)) {
-                    roots.add(sourceRoot);
+            for (ImportedSourceRootPolicy.Root root : ImportedSourceRootPolicy.inventory(
+                    repositoryRoot, projectRoot, stringPaths(paths, session))) {
+                if (root.analysisRoot().included()) {
+                    roots.add(root.path());
                 }
             }
         }
@@ -189,10 +187,15 @@ public final class JdtLsReadinessProbe {
         }
     }
 
-    private boolean isSafeProductionRoot(Path repositoryRoot, Path sourceRoot) {
-        return sourceRoot.startsWith(repositoryRoot)
-                && Files.isDirectory(sourceRoot)
-                && !hasExcludedSegment(repositoryRoot.relativize(sourceRoot));
+    private List<String> stringPaths(List<?> sourcePaths, JdtWorkspaceSession session) {
+        List<String> paths = new ArrayList<>();
+        for (Object sourcePath : sourcePaths) {
+            if (!(sourcePath instanceof String path) || path.isBlank()) {
+                throw startupFailure(session, "JDT LS project settings contained an invalid source path", null);
+            }
+            paths.add(path);
+        }
+        return List.copyOf(paths);
     }
 
     private boolean isJavaTypeSource(Path sourceFile) {
@@ -235,7 +238,7 @@ public final class JdtLsReadinessProbe {
                 Either<List<? extends SymbolInformation>, List<? extends WorkspaceSymbol>> response =
                         session.call(SYMBOL_OPERATION, server -> server.getWorkspaceService()
                                 .symbol(new WorkspaceSymbolParams(candidate.query())));
-                boolean included = hasIncludedSymbol(response, candidate.sourceRoot());
+                boolean included = hasIncludedSymbol(response, candidate);
                 LOGGER.debug(
                         "JDT LS readiness symbol candidate: sourcePath={} query={} responseShape={} includedSymbol={}",
                         candidate.safePath(), candidate.query(), responseShape(response), included);
@@ -251,37 +254,38 @@ public final class JdtLsReadinessProbe {
     }
 
     private boolean hasIncludedSymbol(
-            Either<List<? extends SymbolInformation>, List<? extends WorkspaceSymbol>> response, Path sourceRoot) {
+            Either<List<? extends SymbolInformation>, List<? extends WorkspaceSymbol>> response, SourceCandidate candidate) {
         if (Objects.isNull(response)) {
             return false;
         }
         if (response.isLeft()) {
             return response.getLeft().stream()
-                    .map(SymbolInformation::getLocation)
-                    .anyMatch(location -> hasLocationWithin(location, sourceRoot));
+                    .anyMatch(symbol -> candidate.query().equals(symbol.getName())
+                            && hasLocationAt(symbol.getLocation(), candidate.sourceFile()));
         }
-        return response.getRight().stream().anyMatch(symbol -> hasWorkspaceLocationWithin(symbol, sourceRoot));
+        return response.getRight().stream().anyMatch(symbol -> candidate.query().equals(symbol.getName())
+                && hasWorkspaceLocationAt(symbol, candidate.sourceFile()));
     }
 
-    private boolean hasWorkspaceLocationWithin(WorkspaceSymbol symbol, Path sourceRoot) {
+    private boolean hasWorkspaceLocationAt(WorkspaceSymbol symbol, Path sourceFile) {
         if (Objects.isNull(symbol) || Objects.isNull(symbol.getLocation())) {
             return false;
         }
         if (symbol.getLocation().isLeft()) {
-            return hasLocationWithin(symbol.getLocation().getLeft(), sourceRoot);
+            return hasLocationAt(symbol.getLocation().getLeft(), sourceFile);
         }
         WorkspaceSymbolLocation location = symbol.getLocation().getRight();
-        return Objects.nonNull(location) && hasUriWithin(location.getUri(), sourceRoot);
+        return Objects.nonNull(location) && hasUriAt(location.getUri(), sourceFile);
     }
 
-    private boolean hasLocationWithin(Location location, Path sourceRoot) {
-        return Objects.nonNull(location) && hasUriWithin(location.getUri(), sourceRoot);
+    private boolean hasLocationAt(Location location, Path sourceFile) {
+        return Objects.nonNull(location) && hasUriAt(location.getUri(), sourceFile);
     }
 
-    private boolean hasUriWithin(String uri, Path sourceRoot) {
+    private boolean hasUriAt(String uri, Path sourceFile) {
         try {
-            return Objects.nonNull(uri) && Path.of(URI.create(uri)).toAbsolutePath().normalize().startsWith(sourceRoot);
-        } catch (IllegalArgumentException exception) {
+            return Objects.nonNull(uri) && Path.of(URI.create(uri)).toRealPath().equals(sourceFile);
+        } catch (IOException | IllegalArgumentException exception) {
             return false;
         }
     }
@@ -296,9 +300,8 @@ public final class JdtLsReadinessProbe {
                 : "WORKSPACE_SYMBOL[count=" + response.getRight().size() + "]";
     }
 
-    private record SourceCandidate(Path sourceRoot, String safePath, String query) {
+    private record SourceCandidate(Path sourceRoot, Path sourceFile, String safePath, String query) {
     }
-
     private void awaitIncrementalBuild(JdtWorkspaceSession session) {
         try {
             JdtLsBuildWorkspaceStatus status = session.call(

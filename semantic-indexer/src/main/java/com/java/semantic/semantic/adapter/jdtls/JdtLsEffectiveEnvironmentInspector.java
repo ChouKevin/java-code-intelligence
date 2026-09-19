@@ -188,31 +188,9 @@ public final class JdtLsEffectiveEnvironmentInspector {
 
     private List<AnalysisInputs.Root> roots(
             Path repositoryRoot, Path projectRoot, List<String> sourcePaths) {
-        List<AnalysisInputs.Root> roots = new ArrayList<>();
-        for (String sourcePath : sourcePaths) {
-            Path candidate = projectRoot.resolve(sourcePath).normalize();
-            boolean contained = candidate.startsWith(repositoryRoot.toAbsolutePath().normalize());
-            String relative = contained ? relative(repositoryRoot, candidate) : relative(repositoryRoot, projectRoot);
-            boolean test = sourcePath.contains("/test/") || sourcePath.startsWith("src/test/");
-            boolean generated = sourcePath.contains("generated");
-            roots.add(new AnalysisInputs.Root(relative, "SOURCE", contained && !test && !generated,
-                    exclusions(test, generated, contained)));
-        }
-        return List.copyOf(roots);
-    }
-
-    private List<String> exclusions(boolean test, boolean generated, boolean contained) {
-        List<String> exclusions = new ArrayList<>();
-        if (test) {
-            exclusions.add("test");
-        }
-        if (generated) {
-            exclusions.add("generated");
-        }
-        if (!contained) {
-            exclusions.add("outside-repository");
-        }
-        return List.copyOf(exclusions);
+        return ImportedSourceRootPolicy.inventory(repositoryRoot, projectRoot, sourcePaths).stream()
+                .map(ImportedSourceRootPolicy.Root::analysisRoot)
+                .toList();
     }
 
     private List<AnalysisInputs.Artifact> artifacts(

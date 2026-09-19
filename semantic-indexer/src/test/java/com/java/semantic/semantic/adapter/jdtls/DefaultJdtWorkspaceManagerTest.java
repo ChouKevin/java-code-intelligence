@@ -114,6 +114,30 @@ class DefaultJdtWorkspaceManagerTest {
     }
 
     @Test
+    void should_reject_a_symbol_at_the_candidate_file_when_its_declaration_identity_differs() {
+        Fixture fixture = new Fixture();
+        Path candidate = fixture.snapshot().root().resolve("src/main/java/com/example/" + SANITY_TYPE + ".java");
+        fixture.workspaceService().respondWith(
+                query -> CompletableFuture.completedFuture(symbolsAt(candidate, "DifferentDeclaration")));
+
+        assertThatThrownBy(() -> fixture.manager().getOrStart(fixture.snapshot()))
+                .isInstanceOf(JdtLsReadinessProbe.JdtWorkspaceStartupException.class);
+    }
+
+    @Test
+    void should_reject_a_same_named_symbol_from_a_different_source_file() throws IOException {
+        Fixture fixture = new Fixture();
+        RepositorySnapshot snapshot = fixture.snapshot();
+        Path collision = snapshot.root().resolve("src/other/java/com/other/" + SANITY_TYPE + ".java");
+        Files.createDirectories(collision.getParent());
+        Files.writeString(collision, "package com.other; public class " + SANITY_TYPE + " {}");
+        fixture.workspaceService().respondWith(query -> CompletableFuture.completedFuture(symbolsAt(collision)));
+
+        assertThatThrownBy(() -> fixture.manager().getOrStart(snapshot))
+                .isInstanceOf(JdtLsReadinessProbe.JdtWorkspaceStartupException.class);
+    }
+
+    @Test
     void should_isolate_a_fresh_lease_and_reject_a_closed_or_wrong_snapshot_use() {
         Fixture fixture = new Fixture();
         RepositorySnapshot snapshot = fixture.snapshot();
@@ -1295,9 +1319,14 @@ class DefaultJdtWorkspaceManagerTest {
     }
 
     private static Either<List<? extends SymbolInformation>, List<? extends WorkspaceSymbol>> symbolsAt(Path source) {
+        return symbolsAt(source, source.getFileName().toString().replaceFirst("\\.java$", ""));
+    }
+
+    private static Either<List<? extends SymbolInformation>, List<? extends WorkspaceSymbol>> symbolsAt(Path source, String declaration) {
         Location location = new Location();
         location.setUri(source.toUri().toString());
         SymbolInformation symbol = new SymbolInformation();
+        symbol.setName(declaration);
         symbol.setLocation(location);
         return Either.forLeft(List.of(symbol));
     }
@@ -1756,7 +1785,7 @@ class DefaultJdtWorkspaceManagerTest {
             Map.Entry<String, List<String>> imported = sourcePathsByProject.entrySet().stream().findFirst().orElseThrow();
             Path projectRoot = Path.of(java.net.URI.create(imported.getKey()));
             Path sourceRoot = projectRoot.resolve(imported.getValue().getFirst());
-            return symbolsAt(sourceRoot.resolve("Ready.java"));
+            return symbolsAt(sourceRoot.resolve("com/example/" + SANITY_TYPE + ".java"));
         }
 
         private void clearImportedProjects() {
