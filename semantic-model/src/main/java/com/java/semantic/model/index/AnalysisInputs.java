@@ -82,7 +82,8 @@ public record AnalysisInputs(
     private static boolean isLocalArtifactLocation(String value) {
         boolean windowsDrive = value.length() >= 3 && Character.isLetter(value.charAt(0))
                 && value.charAt(1) == ':' && (value.charAt(2) == '/' || value.charAt(2) == '\\');
-        return value.startsWith("/") || value.startsWith("\\") || value.startsWith("file:") || windowsDrive;
+        boolean localFileUri = value.length() >= 5 && value.regionMatches(true, 0, "file:", 0, 5);
+        return value.startsWith("/") || value.startsWith("\\") || localFileUri || windowsDrive;
     }
 
     private static String projectPath(String value) {

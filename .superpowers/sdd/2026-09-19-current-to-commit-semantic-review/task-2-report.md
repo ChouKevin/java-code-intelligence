@@ -199,3 +199,38 @@ BUILD SUCCESS
   explicit while preserving ordinary WRITING staged optionality before
   validation. No persistence state abstraction or decoder was added.
 - The implementation uses explicit Java types and no direct null comparison.
+
+## Fix round 2: case-insensitive local file URI rejection
+
+### RED
+
+Extended `AnalysisFingerprintTest` with uppercase `FILE:///home/agent/cache.jar`
+and mixed-case `FiLe:///home/agent/cache.jar` artifact logical IDs. Before the
+fix, the focused command failed exactly because both forms were accepted:
+
+```bash
+.superpowers/sdd/2026-09-19-current-to-commit-semantic-review/tools/apache-maven-3.9.11/bin/mvn \
+  --batch-mode --no-transfer-progress -pl semantic-model \
+  -Dtest=AnalysisFingerprintTest,IndexDocumentContractTest test
+```
+
+Result: 30 tests run, 2 failures (`AnalysisFingerprintTest` parameter rows 4
+and 5), both reporting that `IllegalArgumentException` was not thrown.
+
+### GREEN
+
+The same command passed after using `String.regionMatches(true, ...)` for the
+ASCII `file:` scheme check:
+
+```text
+Tests run: 30, Failures: 0, Errors: 0, Skipped: 0
+BUILD SUCCESS
+```
+
+### Self-review
+
+`regionMatches(true, ...)` avoids locale-sensitive lowercasing while matching
+the URI scheme case-insensitively. POSIX, Windows-drive, backslash-rooted/UNC,
+lowercase, uppercase, and mixed-case local file identifiers are all rejected
+before fingerprint canonicalization. The changed SEARCH comment now accurately
+names v3.

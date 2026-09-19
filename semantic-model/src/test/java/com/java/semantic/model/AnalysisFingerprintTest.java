@@ -34,7 +34,8 @@ class AnalysisFingerprintTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"/home/agent/.m2/cache.jar", "C:\\Users\\agent\\cache.jar", "file:///home/agent/cache.jar"})
+    @ValueSource(strings = {"/home/agent/.m2/cache.jar", "C:\\Users\\agent\\cache.jar", "file:///home/agent/cache.jar",
+            "FILE:///home/agent/cache.jar", "FiLe:///home/agent/cache.jar"})
     void rejects_local_artifact_identifiers(String logicalId) {
         assertThrows(IllegalArgumentException.class,
                 () -> new AnalysisInputs.Artifact(0, logicalId, "JAR", "a".repeat(64), 10L));
