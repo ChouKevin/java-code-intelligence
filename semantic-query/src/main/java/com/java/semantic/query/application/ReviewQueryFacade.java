@@ -4,6 +4,7 @@ import com.java.semantic.model.index.ProjectionRequirements;
 import com.java.semantic.model.index.SealedGeneration;
 import com.java.semantic.model.index.SourceIndexCoverage;
 import com.java.semantic.model.index.SourceIndexIssue;
+import com.java.semantic.model.index.SemanticAnalysisEvidence;
 import com.java.semantic.model.query.SelectedGeneration;
 import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.model.repository.RepositoryRevision;
@@ -12,6 +13,7 @@ import com.java.semantic.model.review.ReviewEndpoint;
 import com.java.semantic.model.review.ReviewId;
 import com.java.semantic.model.review.ReviewManifestDocument;
 import com.java.semantic.model.review.ReviewSide;
+import com.java.semantic.query.config.SearchAccessPlan;
 
 import java.util.List;
 import java.util.Objects;
@@ -160,24 +162,36 @@ public final class ReviewQueryFacade {
     private ReviewQueryContract.ReviewContext context(ReviewSelection selection) {
         SelectedGeneration selected = selection.selected();
         return new ReviewQueryContract.ReviewContext(selected.repositoryId().value(), selection.manifest().reviewId().value(), selection.side(),
-                selected.revision().value(), selected.generationId().value(), coverage(selected));
+                selected.revision().value(), selected.generationId().value(), coverage(selection));
     }
 
     private ReviewQueryContract.ReviewEndpointDetails endpointDetails(ReviewEndpoint endpoint, SelectedGeneration selected) {
         SealedGeneration generation = endpoint.generation();
         return new ReviewQueryContract.ReviewEndpointDetails(selected.revision().value(), selected.generationId().value(),
-                selected.manifestDigest().value(), generation.fingerprint().digest(), endpoint.snapshotId().value(), coverage(selected));
+                selected.manifestDigest().value(), generation.fingerprint().digest(), endpoint.snapshotId().value(),
+                coverage(selected, generation.analysisEvidence()));
     }
 
     private ReviewQueryContract.ReviewCoverage coverage(ReviewSelection selection) {
-        return coverage(selection.selected());
+        ReviewEndpoint endpoint = selection.side() == ReviewSide.A ? selection.manifest().a().orElseThrow(IndexContractMismatchException::new)
+                : selection.manifest().b().orElseThrow(IndexContractMismatchException::new);
+        return coverage(selection.selected(), endpoint.generation().analysisEvidence());
     }
 
-    private ReviewQueryContract.ReviewCoverage coverage(SelectedGeneration selected) {
-        SourceIndexCoverage sourceCoverage = coverageReader.coverage(selected, guard.searchAccessPlan(selected.repositoryId().value()),
-                Optional.empty(), Optional.empty());
+    private ReviewQueryContract.ReviewCoverage coverage(SelectedGeneration selected, SemanticAnalysisEvidence evidence) {
+        SearchAccessPlan accessPlan = guard.searchAccessPlan(selected.repositoryId().value());
+        SourceIndexCoverage sourceCoverage = coverageReader.coverage(selected, accessPlan, Optional.empty(), Optional.empty());
+        java.util.SortedSet<String> limitations = new java.util.TreeSet<>();
+        sourceCoverage.issues().stream().map(SourceIndexIssue::code).forEach(limitations::add);
+        for (SemanticAnalysisEvidence.Limitation limitation : evidence.limitations()) {
+            if (limitation.sourcePath().isEmpty() || coverageReader.coverage(selected, accessPlan, Optional.empty(),
+                    limitation.sourcePath()).indexedSourceCount() > 0) {
+                limitations.add(limitation.code());
+            }
+        }
+        List<String> limitationCodes = List.copyOf(limitations);
         List<String> issueCodes = sourceCoverage.issues().stream().map(SourceIndexIssue::code).distinct().toList();
         return new ReviewQueryContract.ReviewCoverage(new SemanticQueryContract.SourceCoverage(sourceCoverage.indexedSourceCount(),
-                sourceCoverage.issues().size(), issueCodes), issueCodes);
+                sourceCoverage.issues().size(), issueCodes), limitationCodes);
     }
 }
