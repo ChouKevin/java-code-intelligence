@@ -34,6 +34,19 @@ class DefaultRepositoryAnalysisPreparationTest {
         assertThat(options)
                 .containsEntry("org.eclipse.jdt.core.compiler.compliance", "21")
                 .doesNotContainKey(PROCESS_ANNOTATIONS);
+        assertThat(inputs.projects()).extracting(AnalysisInputs.Project::compilerOptions)
+                .containsExactly(
+                        Map.of("org.eclipse.jdt.core.compiler.compliance", "21", PROCESS_ANNOTATIONS, "enabled"),
+                        Map.of("org.eclipse.jdt.core.compiler.compliance", "21", PROCESS_ANNOTATIONS, "disabled"));
+        AnalysisInputs changed = new AnalysisInputs(
+                IndexSchemaContract.ANALYSIS_EVIDENCE_VERSION,
+                DIGEST,
+                DIGEST,
+                DIGEST,
+                DIGEST,
+                List.of(project("application", "disabled"), project("query", "disabled")));
+        assertThat(com.java.semantic.model.index.AnalysisFingerprint.from(inputs))
+                .isNotEqualTo(com.java.semantic.model.index.AnalysisFingerprint.from(changed));
     }
 
     @Test
