@@ -16,6 +16,7 @@ import com.java.semantic.model.index.RelationDocument;
 import com.java.semantic.model.index.SearchDocument;
 import com.java.semantic.model.index.SymbolDocument;
 import com.java.semantic.model.repository.RepositoryRevision;
+import com.java.semantic.model.query.SelectedGeneration;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.model.FindOneAndUpdateOptions;
 import com.mongodb.client.model.Filters;
@@ -83,7 +84,44 @@ public final class GenerationValidator {
         }
         validateOwnership(context, issues);
         validateRequiredIndexes(issues);
+        return validatePersistedGraph(context, requestedRevision, manifest, issues, true);
+    }
 
+    /**
+     * Revalidates a sealed generation from its persisted graph before that graph is reused by another workflow.
+     * The check deliberately shares the same projection, evidence, accounting, count, and identity computation
+     * that seals a build generation.
+     */
+    public ValidationResult validatePersistedSealed(SelectedGeneration selected) {
+        Objects.requireNonNull(selected, "selected generation is required");
+        List<GenerationValidationIssue> issues = new ArrayList<>();
+        Document manifest = template.getCollection(IndexCollections.GENERATION_MANIFESTS).find(new Document("repoId",
+                selected.repositoryId().value()).append("generationId", selected.generationId().value())
+                .append("sourceRevision", selected.revision().value()).append("writeState", "SEALED_VALID")).first();
+        if (Objects.isNull(manifest)) {
+            issues.add(issue("MISSING_SEALED_MANIFEST", "selected generation is not a sealed persisted manifest"));
+            return new ValidationResult(new ManifestDigest("0".repeat(64)), Map.of(), issues);
+        }
+        String ownerJobId = manifest.getString("ownerJobId");
+        if (Objects.isNull(ownerJobId)) {
+            issues.add(issue("MISSING_SEALED_OWNER", "sealed generation has no owner"));
+            return new ValidationResult(new ManifestDigest("0".repeat(64)), Map.of(), issues);
+        }
+        GenerationWriteContext context = new GenerationWriteContext(selected.repositoryId(), selected.generationId(), ownerJobId);
+        validateManifest(manifest, selected.revision(), issues);
+        validateRequiredIndexes(issues);
+        ValidationResult result = validatePersistedGraph(context, selected.revision(), manifest, issues, false);
+        if (!selected.manifestDigest().value().equals(manifest.getString("identityDigest"))
+                || !selected.manifestDigest().equals(result.identityDigest())) {
+            issues.add(issue("SEALED_IDENTITY_MISMATCH", "sealed manifest identity does not match its persisted graph"));
+        }
+        validateSealedCollectionCounts(manifest, result.collectionCounts(), issues);
+        return new ValidationResult(result.identityDigest(), result.collectionCounts(), issues);
+    }
+
+    private ValidationResult validatePersistedGraph(GenerationWriteContext context, RepositoryRevision requestedRevision,
+                                                    Document manifest, List<GenerationValidationIssue> issues,
+                                                    boolean requireActiveOwner) {
         Map<ProjectionName, List<Document>> persistedProjections = projectionDocuments(context);
         List<Document> files = persistedProjections.get(ProjectionName.SOURCES);
         List<Document> symbols = persistedProjections.get(ProjectionName.SYMBOLS);
@@ -100,10 +138,28 @@ public final class GenerationValidator {
                 issues);
         validateProjectionArtifacts(files, projections.symbols(), projections.relations(), issues);
         validateSearchCoverage(projections, search, issues);
-        validateOwnership(context, issues);
+        if (requireActiveOwner) {
+            validateOwnership(context, issues);
+        }
         Map<String, Long> counts = collectionCounts(persistedProjections, artifacts);
         ManifestDigest digest = digest(persistedProjections, manifest);
         return new ValidationResult(digest, counts, issues);
+    }
+
+    private static void validateSealedCollectionCounts(Document manifest, Map<String, Long> counts,
+                                                       List<GenerationValidationIssue> issues) {
+        Document sealedCounts = manifest.get("sealedCollectionCounts", Document.class);
+        if (Objects.isNull(sealedCounts) || !sealedCounts.keySet().equals(counts.keySet())) {
+            issues.add(issue("SEALED_COUNT_MISMATCH", "sealed collection counts are absent or incomplete"));
+            return;
+        }
+        for (Map.Entry<String, Long> expected : counts.entrySet()) {
+            Number actual = sealedCounts.get(expected.getKey(), Number.class);
+            if (Objects.isNull(actual) || actual.longValue() != expected.getValue()) {
+                issues.add(issue("SEALED_COUNT_MISMATCH", "sealed collection counts differ from persisted projections"));
+                return;
+            }
+        }
     }
 
     /** Keys of the production dispatch that reads, validates, counts, and digests persisted projections. */

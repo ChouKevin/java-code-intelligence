@@ -1,5 +1,6 @@
 package com.java.semantic.indexer.review;
 
+import com.java.semantic.indexer.build.GenerationValidator;
 import com.java.semantic.indexer.job.IndexFailureCategory;
 import com.java.semantic.indexer.job.IndexJob;
 import com.java.semantic.indexer.job.IndexJobOperation;
@@ -29,15 +30,21 @@ import org.springframework.beans.factory.annotation.Autowired;
 public final class ReviewReadinessValidator {
     private final MongoTemplate template;
     private final GitEvidencePublicationStore gitEvidence;
+    private final GenerationValidator generations;
 
     public ReviewReadinessValidator(MongoTemplate template) {
-        this(template, new GitEvidencePublicationStore(template));
+        this(template, new GitEvidencePublicationStore(template), new GenerationValidator(template));
     }
 
     @Autowired
     public ReviewReadinessValidator(MongoTemplate template, GitEvidencePublicationStore gitEvidence) {
+        this(template, gitEvidence, new GenerationValidator(template));
+    }
+
+    ReviewReadinessValidator(MongoTemplate template, GitEvidencePublicationStore gitEvidence, GenerationValidator generations) {
         this.template = Objects.requireNonNull(template, "mongo template is required");
         this.gitEvidence = Objects.requireNonNull(gitEvidence, "Git evidence store is required");
+        this.generations = Objects.requireNonNull(generations, "generation validator is required");
     }
 
     public ReviewManifestDocument validateReadyCandidate(IndexJob job) {
@@ -97,6 +104,9 @@ public final class ReviewReadinessValidator {
                 .append("analysisEvidence", new Document("$exists", true))).first();
         if (Objects.isNull(manifest) || !requiredProjections(manifest)) {
             throw mismatch("review generation is not a complete sealed semantic generation");
+        }
+        if (!generations.validatePersistedSealed(generation.selected()).valid()) {
+            throw mismatch("review generation persisted semantic graph does not match its sealed identity");
         }
         List<Document> sources = template.getCollection(IndexCollections.GENERATION_FILES).find(new Document("repoId", job.repositoryId().value())
                 .append("generationId", generation.selected().generationId().value())).into(new java.util.ArrayList<>());

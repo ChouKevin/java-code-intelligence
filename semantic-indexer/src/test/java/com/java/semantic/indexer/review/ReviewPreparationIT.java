@@ -1,5 +1,6 @@
 package com.java.semantic.indexer.review;
 
+import com.java.semantic.indexer.build.GenerationValidator;
 import com.java.semantic.indexer.job.IndexJob;
 import com.java.semantic.indexer.job.IndexJobPhase;
 import com.java.semantic.indexer.job.IndexJobTarget;
@@ -20,6 +21,7 @@ import com.java.semantic.model.index.IndexSchemaContract;
 import com.java.semantic.model.index.ManifestDigest;
 import com.java.semantic.model.index.PublishedGenerationPointer;
 import com.java.semantic.model.index.SealedGeneration;
+import com.java.semantic.model.index.ProjectionName;
 import com.java.semantic.model.index.SemanticAnalysisEvidence;
 import com.java.semantic.model.query.SelectedGeneration;
 import com.java.semantic.model.repository.RepositoryId;
@@ -29,7 +31,6 @@ import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.Date;
 import java.util.List;
-import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
 import org.bson.Document;
 import org.junit.jupiter.api.Tag;
@@ -74,6 +75,22 @@ class ReviewPreparationIT {
 
             assertThat(fixture.jobs.find(prepared.job.id()).orElseThrow().phase()).isEqualTo(IndexJobPhase.FAILED);
         }
+    }
+
+    @Test
+    void altered_analysis_inputs_remain_unavailable_and_fail_recovery_even_when_the_stored_fingerprint_is_unchanged() {
+        assertSemanticTamperingIsRejected("analysisInputs.analyzerDigest", "f".repeat(64));
+    }
+
+    @Test
+    void altered_analysis_project_proof_remains_unavailable_and_fails_recovery() {
+        assertSemanticTamperingIsRejected("analysisEvidence.projects", List.of(new Document("projectPath", "forged")
+                .append("imported", true).append("verifiedSourcePaths", List.of())));
+    }
+
+    @Test
+    void altered_sealed_identity_digest_remains_unavailable_and_fails_recovery() {
+        assertSemanticTamperingIsRejected("identityDigest", "e".repeat(64));
     }
 
     @Test
@@ -136,6 +153,26 @@ class ReviewPreparationIT {
         }
     }
 
+    private static void assertSemanticTamperingIsRejected(String field, Object value) {
+        try (MongoDBContainer container = container()) {
+            Fixture fixture = fixture(container);
+            PreparedReview prepared = fixture.prepare(Selection.CAPTURED);
+            fixture.template.getCollection(IndexCollections.GENERATION_MANIFESTS).updateOne(
+                    new Document("generationId", prepared.captured.selected().generationId().value()),
+                    new Document("$set", new Document(field, value)));
+            fixture.resetForPublishRetry(prepared);
+            assertThatThrownBy(() -> fixture.reviews.publishReady(fixture.jobs.find(prepared.job.id()).orElseThrow()))
+                    .isInstanceOf(ReviewPreparationException.class);
+            assertThat(fixture.reviewState(prepared.reviewId())).isEqualTo("PREPARING");
+            assertThatThrownBy(() -> fixture.reviews.findReady(fixture.repositoryId, prepared.reviewId()))
+                    .isInstanceOf(IllegalStateException.class);
+            fixture.jobs.reconcileCommittedJobs();
+            fixture.jobs.failUnreconciledRunningJobs();
+
+            assertThat(fixture.jobs.find(prepared.job.id()).orElseThrow().phase()).isEqualTo(IndexJobPhase.FAILED);
+        }
+    }
+
     private static MongoDBContainer container() {
         MongoDBContainer container = new MongoDBContainer("mongo:8.0.4");
         container.start();
@@ -166,8 +203,6 @@ class ReviewPreparationIT {
         private final MongoIndexJobStore jobs;
         private final ReviewPublicationStore reviews;
         private final RepositoryId repositoryId = RepositoryId.of("orders");
-        private final PublishedGenerationPointer capturedPointer = new PublishedGenerationPointer(CAPTURED_REVISION,
-                new GenerationId("g-captured"), CAPTURED_DIGEST, "captured-owner", Instant.parse("2026-09-19T00:00:00Z"));
         private final PublishedGenerationPointer movedCurrent = new PublishedGenerationPointer(new RepositoryRevision("c".repeat(40)),
                 new GenerationId("g-moved"), new ManifestDigest("c".repeat(64)), "moved-owner", Instant.parse("2026-09-19T00:01:00Z"));
         private final SealedGeneration captured;
@@ -178,8 +213,11 @@ class ReviewPreparationIT {
             this.template = template;
             this.jobs = new MongoIndexJobStore(template);
             this.reviews = new ReviewPublicationStore(template, new ReviewReadinessValidator(template), jobs);
-            captured = seedGeneration(CAPTURED_REVISION, capturedPointer.generationId(), CAPTURED_DIGEST, "captured-owner");
+            captured = seedGeneration(CAPTURED_REVISION, new GenerationId("g-captured"), CAPTURED_DIGEST, "captured-owner");
             alternateA = seedGeneration(CAPTURED_REVISION, new GenerationId("g-alternate"), new ManifestDigest("d".repeat(64)), "alternate-owner");
+            PublishedGenerationPointer capturedPointer = new PublishedGenerationPointer(captured.selected().revision(),
+                    captured.selected().generationId(), captured.selected().manifestDigest(), "captured-owner",
+                    Instant.parse("2026-09-19T00:00:00Z"));
             template.getCollection(IndexCollections.REPOSITORIES).insertOne(new Document("repoId", repositoryId.value())
                     .append("currentPointer", pointer(capturedPointer)));
         }
@@ -239,19 +277,29 @@ class ReviewPreparationIT {
 
         private SealedGeneration seedGeneration(RepositoryRevision revision, GenerationId generationId, ManifestDigest digest, String ownerJobId) {
             AnalysisInputs inputs = new AnalysisInputs(IndexSchemaContract.ANALYSIS_EVIDENCE_VERSION, "e".repeat(64), "e".repeat(64),
-                    "e".repeat(64), "e".repeat(64), List.of(new AnalysisInputs.Project("project", "e".repeat(64), Map.of(), List.of(),
-                    List.of(new AnalysisInputs.Root("src", "MAIN", true, List.of())), List.of(), List.of())));
+                    "e".repeat(64), "e".repeat(64), List.of());
             AnalysisFingerprint fingerprint = AnalysisFingerprint.from(inputs);
             SemanticAnalysisEvidence evidence = new SemanticAnalysisEvidence(IndexSchemaContract.ANALYSIS_EVIDENCE_VERSION, fingerprint.digest(), "SUCCESS",
-                    List.of(new SemanticAnalysisEvidence.ProjectProof("project", true, List.of("src"))),
-                    new SemanticAnalysisEvidence.ResolutionCoverage(0, 0, 0, 0, 0), List.of());
+                    List.of(), new SemanticAnalysisEvidence.ResolutionCoverage(0, 0, 0, 0, 0), List.of());
             template.getCollection(IndexCollections.GENERATION_MANIFESTS).insertOne(new Document("repoId", repositoryId.value())
                     .append("sourceRevision", revision.value()).append("generationId", generationId.value()).append("identityDigest", digest.value())
                     .append("ownerJobId", ownerJobId).append("writeState", "SEALED_VALID").append("schemaVersion", IndexSchemaContract.SCHEMA_VERSION)
-                    .append("projectionVersions", projectionVersions()).append("analysisFingerprint", fingerprint.digest())
-                    .append("analysisInputs", template.getConverter().convertToMongoType(inputs))
+                    .append("projectionVersions", projectionVersions()).append("sealedCollectionCounts", sealedCounts())
+                    .append("analysisFingerprint", fingerprint.digest()).append("analysisInputs", template.getConverter().convertToMongoType(inputs))
                     .append("analysisEvidence", template.getConverter().convertToMongoType(evidence)));
-            return new SealedGeneration(new SelectedGeneration(repositoryId, revision, generationId, digest), fingerprint, evidence);
+            SelectedGeneration initial = new SelectedGeneration(repositoryId, revision, generationId, digest);
+            ManifestDigest persistedDigest = new GenerationValidator(template).validatePersistedSealed(initial).identityDigest();
+            template.getCollection(IndexCollections.GENERATION_MANIFESTS).updateOne(new Document("generationId", generationId.value()),
+                    new Document("$set", new Document("identityDigest", persistedDigest.value())));
+            return new SealedGeneration(new SelectedGeneration(repositoryId, revision, generationId, persistedDigest), fingerprint, evidence);
+        }
+
+        private static Document sealedCounts() {
+            Document counts = new Document(IndexCollections.SOURCE_ARTIFACTS, 0L);
+            for (ProjectionName projection : GenerationValidator.validatedCountedAndDigestedProjections()) {
+                counts.append(IndexSchemaContract.projectionCollection(projection), 0L);
+            }
+            return counts;
         }
 
         private String reviewState(com.java.semantic.model.review.ReviewId reviewId) {
