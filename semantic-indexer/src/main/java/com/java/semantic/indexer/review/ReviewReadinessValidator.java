@@ -42,11 +42,27 @@ public final class ReviewReadinessValidator {
 
     public ReviewManifestDocument validateReadyCandidate(IndexJob job) {
         IndexJob requiredJob = Objects.requireNonNull(job, "review job is required");
-        if (requiredJob.operation() != IndexJobOperation.REVIEW || !requiredJob.active()
-                || requiredJob.phase() != IndexJobPhase.RUNNING) {
+        if (!requiredJob.active() || requiredJob.phase() != IndexJobPhase.RUNNING) {
             throw mismatch("review readiness requires its active running owner");
         }
-        ReviewJobPayload payload = requiredJob.review().orElseThrow(() -> mismatch("review payload is required"));
+        return validateGraph(requiredJob);
+    }
+
+    /** Rechecks an already published manifest owner without treating post-publication completion as corruption. */
+    public ReviewManifestDocument validatePublishedReady(IndexJob job) {
+        IndexJob requiredJob = Objects.requireNonNull(job, "review job is required");
+        if ((requiredJob.phase() != IndexJobPhase.RUNNING || !requiredJob.active())
+                && (requiredJob.phase() != IndexJobPhase.COMPLETE || requiredJob.active())) {
+            throw mismatch("published review owner is not reconcilable");
+        }
+        return validateGraph(requiredJob);
+    }
+
+    private ReviewManifestDocument validateGraph(IndexJob job) {
+        if (job.operation() != IndexJobOperation.REVIEW) {
+            throw mismatch("review readiness requires a REVIEW owner");
+        }
+        ReviewJobPayload payload = job.review().orElseThrow(() -> mismatch("review payload is required"));
         if ((payload.stage() != ReviewPreparationStage.VALIDATING && payload.stage() != ReviewPreparationStage.READY)
                 || payload.a().isEmpty() || payload.b().isEmpty() || payload.comparisonId().isEmpty()
                 || payload.previousSnapshotId().isEmpty() || payload.currentSnapshotId().isEmpty()) {
@@ -58,15 +74,13 @@ public final class ReviewReadinessValidator {
         GitSnapshotId previousSnapshotId = payload.previousSnapshotId().orElseThrow();
         GitSnapshotId currentSnapshotId = payload.currentSnapshotId().orElseThrow();
         if (!a.selected().revision().equals(payload.baseline().pointer().revision())
-                || !a.selected().generationId().equals(payload.baseline().pointer().generationId())
-                || !a.selected().manifestDigest().equals(payload.baseline().pointer().manifestDigest())
                 || !b.selected().revision().equals(payload.requestedRevision())) {
             throw mismatch("review sides do not match their admitted immutable revisions");
         }
-        validateGeneration(requiredJob, a, previousSnapshotId);
-        validateGeneration(requiredJob, b, currentSnapshotId);
-        validateGit(requiredJob, payload, comparisonId, previousSnapshotId, currentSnapshotId);
-        return new ReviewManifestDocument(requiredJob.repositoryId(), payload.reviewId(), requiredJob.id().value(),
+        validateGeneration(job, a, previousSnapshotId);
+        validateGeneration(job, b, currentSnapshotId);
+        validateGit(job, payload, comparisonId, previousSnapshotId, currentSnapshotId);
+        return new ReviewManifestDocument(job.repositoryId(), payload.reviewId(), job.id().value(),
                 IndexSchemaContract.REVIEW_MANIFEST_VERSION, ReviewState.READY, ReviewComparisonType.CURRENT_TO_COMMIT,
                 payload.baseline(), payload.requestedRevision(),
                 java.util.Optional.of(new ReviewEndpoint(a, previousSnapshotId)), java.util.Optional.of(new ReviewEndpoint(b, currentSnapshotId)),

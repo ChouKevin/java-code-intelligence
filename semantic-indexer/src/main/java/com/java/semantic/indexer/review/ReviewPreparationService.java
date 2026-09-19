@@ -1,28 +1,24 @@
 package com.java.semantic.indexer.review;
 
-import com.java.semantic.indexer.analysis.AnalysisReuseVerifier;
-import com.java.semantic.indexer.analysis.AnalysisTarget;
-import com.java.semantic.indexer.build.RepositoryBuildRunner;
-import com.java.semantic.indexer.job.GitEvidenceJobHandler;
 import com.java.semantic.indexer.job.IndexFailureCategory;
 import com.java.semantic.indexer.job.IndexJob;
 import com.java.semantic.indexer.job.IndexJobOperation;
 import com.java.semantic.indexer.job.IndexJobStore;
 import com.java.semantic.indexer.job.ReviewJobPayload;
 import com.java.semantic.indexer.job.ReviewPreparationStage;
-import com.java.semantic.indexer.repository.ExactRepositoryCheckout;
 import com.java.semantic.model.index.AnalysisFingerprint;
 import com.java.semantic.model.index.AnalysisInputs;
 import com.java.semantic.model.index.GenerationId;
-import com.java.semantic.model.index.ManifestDigest;
 import com.java.semantic.model.index.IndexCollections;
+import com.java.semantic.model.index.ManifestDigest;
 import com.java.semantic.model.index.SealedGeneration;
 import com.java.semantic.model.index.SemanticAnalysisEvidence;
 import com.java.semantic.model.query.SelectedGeneration;
-import com.java.semantic.model.review.ReviewSide;
 import com.java.semantic.model.repository.RepositoryRevision;
+import com.java.semantic.model.review.ReviewSide;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Objects;
-import com.java.semantic.repository.domain.RepositorySnapshot;
 import org.bson.Document;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.stereotype.Service;
@@ -31,23 +27,18 @@ import org.springframework.stereotype.Service;
 @Service
 public final class ReviewPreparationService {
     private final IndexJobStore jobs;
-    private final RepositoryBuildRunner buildRunner;
-    private final GitEvidenceJobHandler gitEvidence;
+    private final ReviewEndpointPreparationPort endpointPreparation;
+    private final ReviewGitEvidencePort reviewGitEvidence;
     private final ReviewPublicationStore reviews;
     private final MongoTemplate template;
-    private final ExactRepositoryCheckout checkout;
-    private final AnalysisReuseVerifier reuseVerifier;
 
-    public ReviewPreparationService(IndexJobStore jobs, RepositoryBuildRunner buildRunner, GitEvidenceJobHandler gitEvidence,
-                                    ReviewPublicationStore reviews, MongoTemplate template, ExactRepositoryCheckout checkout,
-                                    AnalysisReuseVerifier reuseVerifier) {
+    public ReviewPreparationService(IndexJobStore jobs, ReviewEndpointPreparationPort endpointPreparation,
+                                    ReviewGitEvidencePort reviewGitEvidence, ReviewPublicationStore reviews, MongoTemplate template) {
         this.jobs = Objects.requireNonNull(jobs, "job store is required");
-        this.buildRunner = Objects.requireNonNull(buildRunner, "build runner is required");
-        this.gitEvidence = Objects.requireNonNull(gitEvidence, "Git evidence handler is required");
+        this.endpointPreparation = Objects.requireNonNull(endpointPreparation, "endpoint preparation is required");
+        this.reviewGitEvidence = Objects.requireNonNull(reviewGitEvidence, "review Git evidence is required");
         this.reviews = Objects.requireNonNull(reviews, "review publication store is required");
         this.template = Objects.requireNonNull(template, "mongo template is required");
-        this.checkout = Objects.requireNonNull(checkout, "exact checkout is required");
-        this.reuseVerifier = Objects.requireNonNull(reuseVerifier, "analysis reuse verifier is required");
     }
 
     public void prepare(IndexJob job) {
@@ -55,12 +46,12 @@ public final class ReviewPreparationService {
         try {
             reviews.begin(running);
             IndexJob activeA = jobs.activateReviewTarget(running.id(), ReviewSide.A);
-            SealedGeneration a = prepareSide(activeA, sealedCapturedBaseline(activeA), "A");
+            SealedGeneration a = prepareSide(activeA, ReviewSide.A, sealedCapturedBaseline(activeA));
             IndexJob afterA = jobs.recordReviewSide(activeA.id(), ReviewSide.A, a);
             IndexJob activeB = jobs.activateReviewTarget(afterA.id(), ReviewSide.B);
-            SealedGeneration b = prepareSide(activeB, sameRevision(a, activeB) ? a : null, "B");
+            SealedGeneration b = prepareSide(activeB, ReviewSide.B, sameRevision(a, activeB) ? a : null);
             IndexJob afterB = jobs.recordReviewSide(activeB.id(), ReviewSide.B, b);
-            gitEvidence.prepareReview(afterB);
+            reviewGitEvidence.prepare(afterB);
             IndexJob validating = jobs.beginReviewValidation(afterB.id());
             reviews.publishReady(validating);
             jobs.recordReviewReady(validating.id());
@@ -76,7 +67,6 @@ public final class ReviewPreparationService {
     private SealedGeneration sealedCapturedBaseline(IndexJob job) {
         ReviewJobPayload payload = job.review().orElseThrow(() -> new IllegalStateException("review payload is required"));
         Document manifest = template.getCollection(IndexCollections.GENERATION_MANIFESTS).find(new Document("repoId", job.repositoryId().value())
-
                 .append("sourceRevision", payload.baseline().pointer().revision().value())
                 .append("generationId", payload.baseline().pointer().generationId().value())
                 .append("identityDigest", payload.baseline().pointer().manifestDigest().value())
@@ -98,28 +88,27 @@ public final class ReviewPreparationService {
                 payload.baseline().pointer().generationId(), payload.baseline().pointer().manifestDigest()),
                 fingerprint, analysisEvidence);
     }
-    private SealedGeneration prepareSide(IndexJob job, SealedGeneration candidate, String stage) {
-        com.java.semantic.indexer.build.IndexBuildService.CheckedOutRepository checkedOut = checkout.checkout(job);
-        AnalysisTarget target = new AnalysisTarget(new RepositorySnapshot(job.repositoryId(), checkedOut.root(), checkedOut.revision()),
-                job.id().value(), stage);
-        if (candidate != null && reuseVerifier.matches(candidate, target)) {
-            return candidate;
+
+    private SealedGeneration prepareSide(IndexJob job, ReviewSide side, SealedGeneration preferredCandidate) {
+        List<SealedGeneration> candidates = new ArrayList<>();
+        if (Objects.nonNull(preferredCandidate)) {
+            candidates.add(preferredCandidate);
         }
         for (SealedGeneration alternate : sealedCandidates(job)) {
-            if ((candidate == null || !candidate.selected().equals(alternate.selected())) && reuseVerifier.matches(alternate, target)) {
-                return alternate;
+            if (candidates.stream().noneMatch(candidate -> candidate.selected().equals(alternate.selected()))) {
+                candidates.add(alternate);
             }
         }
-        return buildRunner.seal(job);
+        return endpointPreparation.prepare(job, side, candidates);
     }
 
     private static boolean sameRevision(SealedGeneration a, IndexJob activeB) {
         return a.selected().revision().equals(activeB.target().orElseThrow().revision());
     }
 
-    private java.util.List<SealedGeneration> sealedCandidates(IndexJob job) {
+    private List<SealedGeneration> sealedCandidates(IndexJob job) {
         com.java.semantic.indexer.job.IndexJobTarget target = job.target().orElseThrow();
-        java.util.List<SealedGeneration> candidates = new java.util.ArrayList<>();
+        List<SealedGeneration> candidates = new ArrayList<>();
         template.getCollection(IndexCollections.GENERATION_MANIFESTS).find(new Document("repoId", job.repositoryId().value())
                 .append("sourceRevision", target.revision().value()).append("writeState", "SEALED_VALID"))
                 .forEach(manifest -> {
@@ -129,7 +118,7 @@ public final class ReviewPreparationService {
                         // Incomplete foreign generations are never reuse candidates.
                     }
                 });
-        return java.util.List.copyOf(candidates);
+        return List.copyOf(candidates);
     }
 
     private SealedGeneration sealedFromManifest(com.java.semantic.model.repository.RepositoryId repositoryId,

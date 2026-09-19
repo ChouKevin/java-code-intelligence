@@ -2,7 +2,9 @@ package com.java.semantic.indexer.review;
 
 import com.java.semantic.indexer.job.IndexFailureCategory;
 import com.java.semantic.indexer.job.IndexJob;
+import com.java.semantic.indexer.job.IndexJobId;
 import com.java.semantic.indexer.job.IndexJobOperation;
+import com.java.semantic.indexer.job.IndexJobStore;
 import com.java.semantic.model.index.IndexCollections;
 import com.java.semantic.model.index.IndexSchemaContract;
 import com.java.semantic.model.index.SealedGeneration;
@@ -25,10 +27,12 @@ import org.springframework.stereotype.Component;
 public final class ReviewPublicationStore {
     private final MongoTemplate template;
     private final ReviewReadinessValidator readiness;
+    private final IndexJobStore jobs;
 
-    public ReviewPublicationStore(MongoTemplate template, ReviewReadinessValidator readiness) {
+    public ReviewPublicationStore(MongoTemplate template, ReviewReadinessValidator readiness, IndexJobStore jobs) {
         this.template = Objects.requireNonNull(template, "mongo template is required");
         this.readiness = Objects.requireNonNull(readiness, "review readiness validator is required");
+        this.jobs = Objects.requireNonNull(jobs, "job store is required");
     }
 
     public ReviewManifestDocument begin(IndexJob job) {
@@ -74,8 +78,19 @@ public final class ReviewPublicationStore {
         if (Objects.isNull(document)) {
             throw new IllegalStateException("ready review was not found");
         }
-        ReviewManifestDocument manifest = fromReady(document);
-        if (!manifest.repositoryId().equals(requiredRepository) || !manifest.reviewId().equals(requiredReview)) {
+        ReviewManifestDocument manifest;
+        try {
+            manifest = fromReady(document);
+        } catch (RuntimeException exception) {
+            throw new IllegalStateException("ready review membership is malformed", exception);
+        }
+        IndexJob owner = jobs.find(new IndexJobId(manifest.ownerJobId()))
+                .orElseThrow(() -> new IllegalStateException("ready review owner was not found"));
+        ReviewManifestDocument verified = readiness.validatePublishedReady(owner);
+        if (!manifest.repositoryId().equals(requiredRepository) || !manifest.reviewId().equals(requiredReview)
+                || !manifest.ownerJobId().equals(verified.ownerJobId()) || !manifest.capturedBaseline().equals(verified.capturedBaseline())
+                || !manifest.requestedRevision().equals(verified.requestedRevision()) || !manifest.a().equals(verified.a())
+                || !manifest.b().equals(verified.b()) || !manifest.comparisonId().equals(verified.comparisonId())) {
             throw new IllegalStateException("ready review membership is incompatible");
         }
         return manifest;

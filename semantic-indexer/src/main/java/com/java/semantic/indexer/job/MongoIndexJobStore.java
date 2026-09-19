@@ -471,10 +471,22 @@ public final class MongoIndexJobStore implements IndexJobStore {
     private void reconcileReadyReviews() {
         for (Document job : template.getCollection(IndexCollections.INDEX_JOBS).find(new Document(ACTIVE, true)
                 .append("phase", IndexJobPhase.RUNNING.name()).append("operation", IndexJobOperation.REVIEW.name())
-                .append("review.stage", ReviewPreparationStage.READY.name()))) {
-            if (reviewManifestReady(job)) {
-                terminal(new IndexJobId(job.getString(JOB_ID)), IndexJobPhase.COMPLETE, Optional.empty());
+                .append("review.stage", new Document("$in", List.of(ReviewPreparationStage.VALIDATING.name(), ReviewPreparationStage.READY.name()))))) {
+            if (!reviewManifestReady(job)) {
+                continue;
             }
+            IndexJobId jobId = new IndexJobId(job.getString(JOB_ID));
+            Document review = Objects.requireNonNull(job.get("review", Document.class), "review payload is required");
+            if (ReviewPreparationStage.VALIDATING.name().equals(review.getString("stage"))) {
+                long markedReady = template.getCollection(IndexCollections.INDEX_JOBS).updateOne(new Document(JOB_ID, jobId.value())
+                                .append(ACTIVE, true).append("phase", IndexJobPhase.RUNNING.name())
+                                .append("operation", IndexJobOperation.REVIEW.name()).append("review.stage", ReviewPreparationStage.VALIDATING.name()),
+                        Updates.set("review.stage", ReviewPreparationStage.READY.name())).getModifiedCount();
+                if (markedReady != 1L) {
+                    continue;
+                }
+            }
+            terminal(jobId, IndexJobPhase.COMPLETE, Optional.empty());
         }
     }
     private boolean reviewManifestReady(Document job) {

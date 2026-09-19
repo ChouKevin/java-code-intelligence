@@ -70,9 +70,7 @@ public record ReviewManifestDocument(
         validateEndpoint(repositoryId, endpointB);
         ModelValidation.require(endpointA.generation().selected().revision().equals(capturedBaseline.pointer().revision()),
                 "review A revision must match the captured baseline revision");
-        ModelValidation.require(endpointA.generation().selected().generationId().equals(capturedBaseline.pointer().generationId())
-                        && endpointA.generation().selected().manifestDigest().equals(capturedBaseline.pointer().manifestDigest()),
-                "review A generation must match the captured baseline pointer");
+
         ModelValidation.require(endpointB.generation().selected().revision().equals(requestedRevision),
                 "review B revision must match the requested review revision");
         requireEqualSidesAgree(endpointA, endpointB);

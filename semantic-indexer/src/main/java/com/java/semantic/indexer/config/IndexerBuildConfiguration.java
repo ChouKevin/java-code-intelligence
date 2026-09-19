@@ -12,6 +12,9 @@ import com.java.semantic.indexer.job.IndexJobProperties;
 import com.java.semantic.indexer.job.IndexJobStore;
 import com.java.semantic.indexer.repository.ExactRepositoryCheckout;
 import com.java.semantic.indexer.review.ReviewPreparationService;
+import com.java.semantic.indexer.review.DefaultReviewEndpointPreparation;
+import com.java.semantic.indexer.review.ReviewEndpointPreparationPort;
+import com.java.semantic.indexer.review.ReviewGitEvidencePort;
 import com.java.semantic.indexer.store.PublicationPort;
 import com.java.semantic.indexer.uat.NoOpPublicationGate;
 import com.java.semantic.indexer.uat.PublicationGate;
@@ -50,6 +53,18 @@ public class IndexerBuildConfiguration {
     @Bean
     public RepositoryBuildRunner repositoryBuildRunner(RepositoryBuildRunner.BuildScopeFactory buildScopeFactory) {
         return new RepositoryBuildRunner(buildScopeFactory);
+    }
+
+    @Bean
+    public ReviewEndpointPreparationPort reviewEndpointPreparationPort(ExactRepositoryCheckout checkout,
+                                                                         RepositoryBuildRunner buildRunner,
+                                                                         com.java.semantic.indexer.analysis.AnalysisReuseVerifier reuseVerifier) {
+        return new DefaultReviewEndpointPreparation(checkout, buildRunner, reuseVerifier);
+    }
+
+    @Bean
+    public ReviewGitEvidencePort reviewGitEvidencePort(GitEvidenceJobHandler gitEvidence) {
+        return gitEvidence::prepareReview;
     }
 
     @Bean
