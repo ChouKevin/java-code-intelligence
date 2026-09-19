@@ -14,6 +14,8 @@ import com.java.semantic.model.git.GitSnapshotEntry;
 import com.java.semantic.model.git.GitSnapshotId;
 import com.java.semantic.model.git.GitComparisonId;
 import com.java.semantic.model.git.GitComparisonChange;
+import com.java.semantic.model.git.GitChangeKind;
+import com.java.semantic.model.git.GitFileContentStatus;
 import com.java.semantic.model.index.IndexCollections;
 import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.model.repository.RepositoryRevision;
@@ -145,10 +147,12 @@ public final class GitEvidencePublicationStore {
                 .append("previous", comparison.previous().value()).append("current", comparison.current().value())
                 .append("previousSnapshotId", previousSnapshot.value()).append("currentSnapshotId", currentSnapshot.value())
                 .append("ancestry", comparison.ancestry().name()).append("preparedAt", java.util.Date.from(preparedAt))
-                .append("ownerJobId", requiredJob.id().value()).append("total", (long) comparison.changes().size()), requiredOwnership);
+                .append("ownerJobId", requiredJob.id().value()).append("total", (long) comparison.changes().size())
+                .append("contentDigest", emptyDigest()), requiredOwnership);
         template.getCollection(IndexCollections.GIT_EVIDENCE_MANIFESTS).insertOne(comparisonManifest);
         publishSnapshot(requiredJob, previousSnapshot, comparison.previous().value(), comparison.previousEntries(), preparedAt, requiredOwnership);
         publishSnapshot(requiredJob, currentSnapshot, comparison.current().value(), comparison.currentEntries(), preparedAt, requiredOwnership);
+        String comparisonDigest = emptyDigest();
         long ordinal = 0L;
         for (GitComparisonChange change : comparison.changes()) {
             template.getCollection(IndexCollections.GIT_COMPARISON_CHANGES).insertOne(new Document("repoId", requiredJob.repositoryId().value())
@@ -159,9 +163,11 @@ public final class GitEvidencePublicationStore {
                     .append("oldBlobId", change.oldBlobId()).append("newBlobId", change.newBlobId()).append("diffStatus", change.diffStatus())
                     .append("patchChunkCount", (long) change.patchChunks().size()));
             appendPatchChunks(requiredJob.repositoryId(), comparisonId, change);
+            comparisonDigest = digest(comparisonDigest, comparisonRow(ordinal, change));
             ordinal++;
         }
         validateComparisonPublication(requiredJob.repositoryId(), comparisonId, previousSnapshot, currentSnapshot, comparison);
+        setContentDigest(requiredJob.repositoryId(), new GitEvidenceId(comparisonId.value()), comparisonDigest);
         markReady(requiredJob.repositoryId(), new GitEvidenceId(comparisonId.value()));
         return new ComparisonPublication(comparisonId, previousSnapshot, currentSnapshot);
     }
@@ -228,6 +234,91 @@ public final class GitEvidencePublicationStore {
         validateReadySnapshot(repositoryId, previousSnapshot, expected.previous().value(), expected.previousEntries());
         validateReadySnapshot(repositoryId, currentSnapshot, expected.current().value(), expected.currentEntries());
         validateChanges(repositoryId, comparisonId, expected.changes());
+    }
+
+    /** Recomputes persisted READY review evidence before its semantic review manifest becomes visible. */
+    public void validateReadyReviewComparison(RepositoryId repositoryId, GitComparisonId comparisonId,
+                                               GitSnapshotId previousSnapshot, GitSnapshotId currentSnapshot) {
+        Document manifest = template.getCollection(IndexCollections.GIT_EVIDENCE_MANIFESTS).find(Filters.and(
+                Filters.eq("repoId", repositoryId.value()), Filters.eq("evidenceId", comparisonId.value()),
+                Filters.eq("kind", "COMPARISON"), Filters.eq("state", "READY"),
+                Filters.eq("previousSnapshotId", previousSnapshot.value()), Filters.eq("currentSnapshotId", currentSnapshot.value()))).first();
+        if (Objects.isNull(manifest) || Objects.isNull(manifest.getString("previous")) || Objects.isNull(manifest.getString("current"))
+                || Objects.isNull(manifest.getString("ancestry"))) {
+            throw new PublicationConflictException();
+        }
+        List<GitSnapshotEntry> previousEntries = storedSnapshotEntries(repositoryId, previousSnapshot);
+        List<GitSnapshotEntry> currentEntries = storedSnapshotEntries(repositoryId, currentSnapshot);
+        validateReadySnapshot(repositoryId, previousSnapshot, manifest.getString("previous"), previousEntries);
+        validateReadySnapshot(repositoryId, currentSnapshot, manifest.getString("current"), currentEntries);
+        List<GitComparisonChange> changes = storedChanges(repositoryId, comparisonId);
+        validateChanges(repositoryId, comparisonId, changes);
+        String digest = emptyDigest();
+        for (int ordinal = 0; ordinal < changes.size(); ordinal++) {
+            digest = digest(digest, comparisonRow(ordinal, changes.get(ordinal)));
+        }
+        if (!numberEquals(manifest, "total", changes.size()) || !digest.equals(manifest.getString("contentDigest"))) {
+            throw new PublicationConflictException();
+        }
+    }
+
+    private List<GitSnapshotEntry> storedSnapshotEntries(RepositoryId repositoryId, GitSnapshotId snapshotId) {
+        List<GitSnapshotEntry> entries = new ArrayList<>();
+        long ordinal = 0L;
+        for (Document file : template.getCollection(IndexCollections.GIT_SNAPSHOT_FILES).find(Filters.and(
+                Filters.eq("repoId", repositoryId.value()), Filters.eq("snapshotId", snapshotId.value())))
+                .sort(com.mongodb.client.model.Sorts.ascending("ordinal"))) {
+            Number storedOrdinal = file.get("ordinal", Number.class);
+            Number length = file.get("byteLength", Number.class);
+            Optional<byte[]> rawPath = binaryBytes(file.get("rawPath"));
+            if (Objects.isNull(storedOrdinal) || storedOrdinal.longValue() != ordinal || Objects.isNull(length) || rawPath.isEmpty()) {
+                throw new PublicationConflictException();
+            }
+            byte[] bytes = storedSnapshotBytes(repositoryId, snapshotId, rawPath.get());
+            entries.add(new GitSnapshotEntry(file.getString("path"), file.getString("mode"), file.getString("blobId"),
+                    GitFileContentStatus.valueOf(file.getString("contentStatus")), length.longValue(), bytes, rawPath.get()));
+            ordinal++;
+        }
+        return List.copyOf(entries);
+    }
+
+    private byte[] storedSnapshotBytes(RepositoryId repositoryId, GitSnapshotId snapshotId, byte[] rawPath) {
+        List<Document> chunks = new ArrayList<>();
+        template.getCollection(IndexCollections.GIT_SNAPSHOT_CHUNKS).find(Filters.and(Filters.eq("repoId", repositoryId.value()),
+                Filters.eq("snapshotId", snapshotId.value()), Filters.eq("pathKey", pathKey(rawPath))))
+                .sort(com.mongodb.client.model.Sorts.ascending("ordinal")).into(chunks);
+        byte[] bytes = new byte[0];
+        for (Document chunk : chunks) {
+            byte[] part = binaryBytes(chunk.get("bytes")).orElseThrow(PublicationConflictException::new);
+            byte[] next = Arrays.copyOf(bytes, bytes.length + part.length);
+            System.arraycopy(part, 0, next, bytes.length, part.length);
+            bytes = next;
+        }
+        return bytes;
+    }
+
+    private List<GitComparisonChange> storedChanges(RepositoryId repositoryId, GitComparisonId comparisonId) {
+        List<GitComparisonChange> changes = new ArrayList<>();
+        long ordinal = 0L;
+        for (Document row : template.getCollection(IndexCollections.GIT_COMPARISON_CHANGES).find(Filters.and(
+                Filters.eq("repoId", repositoryId.value()), Filters.eq("comparisonId", comparisonId.value())))
+                .sort(com.mongodb.client.model.Sorts.ascending("ordinal"))) {
+            Number storedOrdinal = row.get("ordinal", Number.class);
+            if (Objects.isNull(storedOrdinal) || storedOrdinal.longValue() != ordinal) {
+                throw new PublicationConflictException();
+            }
+            List<String> patches = template.getCollection(IndexCollections.GIT_COMPARISON_PATCHES).find(Filters.and(
+                    Filters.eq("repoId", repositoryId.value()), Filters.eq("comparisonId", comparisonId.value()),
+                    Filters.eq("changeId", row.getString("changeId")))).sort(com.mongodb.client.model.Sorts.ascending("ordinal"))
+                    .map(chunk -> chunk.getString("patch")).into(new ArrayList<>());
+            changes.add(new GitComparisonChange(row.getString("changeId"), GitChangeKind.valueOf(row.getString("kind")),
+                    row.getString("oldPath"), row.getString("newPath"), row.getString("oldMode"), row.getString("newMode"),
+                    row.getString("oldBlobId"), row.getString("newBlobId"), patches, row.getString("diffStatus"),
+                    binaryBytes(row.get("oldRawPath")).orElseThrow(PublicationConflictException::new),
+                    binaryBytes(row.get("newRawPath")).orElseThrow(PublicationConflictException::new)));
+            ordinal++;
+        }
+        return List.copyOf(changes);
     }
 
     private void appendPatchChunks(RepositoryId repositoryId, GitComparisonId comparisonId, GitComparisonChange change) {
@@ -611,6 +702,7 @@ public final class GitEvidencePublicationStore {
         Document manifest = template.getCollection(IndexCollections.GIT_EVIDENCE_MANIFESTS).find(Filters.and(
                 Filters.eq("repoId", repositoryId.value()), Filters.eq("evidenceId", evidenceId.value()),
                 Filters.eq("state", "PREPARING"))).first();
+
         if (Objects.isNull(manifest)) {
             throw new PublicationConflictException();
         }
@@ -701,6 +793,13 @@ public final class GitEvidencePublicationStore {
 
     private static String historyRow(long ordinal, String revision, List<String> parents, String subject, long committedAt) {
         return ordinal + "\\u0000" + revision + "\\u0000" + String.join("\\u0001", parents) + "\\u0000" + subject + "\\u0000" + committedAt;
+    }
+    private static String comparisonRow(long ordinal, GitComparisonChange change) {
+        return ordinal + "\\u0000" + change.changeId() + "\\u0000" + change.kind().name() + "\\u0000"
+                + change.oldPath() + "\\u0000" + change.newPath() + "\\u0000" + change.oldMode() + "\\u0000"
+                + change.newMode() + "\\u0000" + change.oldBlobId() + "\\u0000" + change.newBlobId() + "\\u0000"
+                + change.diffStatus() + "\\u0000" + java.util.HexFormat.of().formatHex(change.oldRawPath()) + "\\u0000"
+                + java.util.HexFormat.of().formatHex(change.newRawPath()) + "\\u0000" + String.join("\\u0001", change.patchChunks());
     }
 
     private static String digest(String previous, String row) {

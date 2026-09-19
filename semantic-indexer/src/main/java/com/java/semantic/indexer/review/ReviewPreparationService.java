@@ -13,11 +13,14 @@ import com.java.semantic.indexer.job.ReviewPreparationStage;
 import com.java.semantic.indexer.repository.ExactRepositoryCheckout;
 import com.java.semantic.model.index.AnalysisFingerprint;
 import com.java.semantic.model.index.AnalysisInputs;
+import com.java.semantic.model.index.GenerationId;
+import com.java.semantic.model.index.ManifestDigest;
 import com.java.semantic.model.index.IndexCollections;
 import com.java.semantic.model.index.SealedGeneration;
 import com.java.semantic.model.index.SemanticAnalysisEvidence;
 import com.java.semantic.model.query.SelectedGeneration;
 import com.java.semantic.model.review.ReviewSide;
+import com.java.semantic.model.repository.RepositoryRevision;
 import java.util.Objects;
 import com.java.semantic.repository.domain.RepositorySnapshot;
 import org.bson.Document;
@@ -102,11 +105,48 @@ public final class ReviewPreparationService {
         if (candidate != null && reuseVerifier.matches(candidate, target)) {
             return candidate;
         }
+        for (SealedGeneration alternate : sealedCandidates(job)) {
+            if ((candidate == null || !candidate.selected().equals(alternate.selected())) && reuseVerifier.matches(alternate, target)) {
+                return alternate;
+            }
+        }
         return buildRunner.seal(job);
     }
 
     private static boolean sameRevision(SealedGeneration a, IndexJob activeB) {
         return a.selected().revision().equals(activeB.target().orElseThrow().revision());
+    }
+
+    private java.util.List<SealedGeneration> sealedCandidates(IndexJob job) {
+        com.java.semantic.indexer.job.IndexJobTarget target = job.target().orElseThrow();
+        java.util.List<SealedGeneration> candidates = new java.util.ArrayList<>();
+        template.getCollection(IndexCollections.GENERATION_MANIFESTS).find(new Document("repoId", job.repositoryId().value())
+                .append("sourceRevision", target.revision().value()).append("writeState", "SEALED_VALID"))
+                .forEach(manifest -> {
+                    try {
+                        candidates.add(sealedFromManifest(job.repositoryId(), target.revision(), manifest));
+                    } catch (RuntimeException ignored) {
+                        // Incomplete foreign generations are never reuse candidates.
+                    }
+                });
+        return java.util.List.copyOf(candidates);
+    }
+
+    private SealedGeneration sealedFromManifest(com.java.semantic.model.repository.RepositoryId repositoryId,
+                                                RepositoryRevision revision, Document manifest) {
+        Document inputs = manifest.get("analysisInputs", Document.class);
+        String storedFingerprint = manifest.getString("analysisFingerprint");
+        Document evidence = manifest.get("analysisEvidence", Document.class);
+        if (Objects.isNull(inputs) || Objects.isNull(storedFingerprint) || Objects.isNull(evidence)) {
+            throw new IllegalArgumentException("sealed generation has incomplete analysis evidence");
+        }
+        AnalysisFingerprint fingerprint = AnalysisFingerprint.from(template.getConverter().read(AnalysisInputs.class, inputs));
+        SemanticAnalysisEvidence analysisEvidence = template.getConverter().read(SemanticAnalysisEvidence.class, evidence);
+        if (!fingerprint.digest().equals(storedFingerprint) || !analysisEvidence.fingerprintDigest().equals(storedFingerprint)) {
+            throw new IllegalArgumentException("sealed generation analysis evidence is inconsistent");
+        }
+        return new SealedGeneration(new SelectedGeneration(repositoryId, revision, new GenerationId(manifest.getString("generationId")),
+                new ManifestDigest(manifest.getString("identityDigest"))), fingerprint, analysisEvidence);
     }
 
     private static IndexJob requireRunningReview(IndexJob job) {

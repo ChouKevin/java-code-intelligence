@@ -6,6 +6,7 @@ import com.java.semantic.indexer.job.IndexJobOperation;
 import com.java.semantic.indexer.job.IndexJobPhase;
 import com.java.semantic.indexer.job.ReviewJobPayload;
 import com.java.semantic.indexer.job.ReviewPreparationStage;
+import com.java.semantic.indexer.store.GitEvidencePublicationStore;
 import com.java.semantic.model.git.GitComparisonId;
 import com.java.semantic.model.git.GitSnapshotId;
 import com.java.semantic.model.index.IndexCollections;
@@ -21,14 +22,22 @@ import java.util.Objects;
 import org.bson.Document;
 import org.springframework.stereotype.Component;
 import org.springframework.data.mongodb.core.MongoTemplate;
+import org.springframework.beans.factory.annotation.Autowired;
 
 /** Validates every persisted semantic and Git member before immutable review publication. */
 @Component
 public final class ReviewReadinessValidator {
     private final MongoTemplate template;
+    private final GitEvidencePublicationStore gitEvidence;
 
     public ReviewReadinessValidator(MongoTemplate template) {
+        this(template, new GitEvidencePublicationStore(template));
+    }
+
+    @Autowired
+    public ReviewReadinessValidator(MongoTemplate template, GitEvidencePublicationStore gitEvidence) {
         this.template = Objects.requireNonNull(template, "mongo template is required");
+        this.gitEvidence = Objects.requireNonNull(gitEvidence, "Git evidence store is required");
     }
 
     public ReviewManifestDocument validateReadyCandidate(IndexJob job) {
@@ -98,6 +107,11 @@ public final class ReviewReadinessValidator {
         }
         validateSnapshot(job, payload.reviewId().value(), previousSnapshotId, payload.baseline().pointer().revision().value());
         validateSnapshot(job, payload.reviewId().value(), currentSnapshotId, payload.requestedRevision().value());
+        try {
+            gitEvidence.validateReadyReviewComparison(job.repositoryId(), comparisonId, previousSnapshotId, currentSnapshotId);
+        } catch (RuntimeException exception) {
+            throw mismatch("review Git evidence rows or chunks do not match their READY manifest");
+        }
     }
 
     private void validateSnapshot(IndexJob job, String reviewId, GitSnapshotId snapshotId, String revision) {
