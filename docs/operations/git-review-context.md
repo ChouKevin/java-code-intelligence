@@ -6,10 +6,11 @@ moves. It does not change a semantic generation pointer.
 
 Run Indexer and Query with separate identities. The Indexer identity may submit
 jobs under `/index/**`; the Query identity may only read Query HTTP and `/mcp`.
-Keep `semantic.query.git-evidence.allowed-repositories` empty until
-an administrator has explicitly approved whole-repository source evidence. A
+Keep `semantic.query.git-evidence.allowed-repositories` empty until an
+administrator has explicitly approved whole-repository source evidence. A
 repository with a forbidden repository, package, class, or method rule remains
-denied for every Git-evidence operation.
+denied for every Git-evidence operation. Query has only Mongo read access; it
+never clones, fetches, opens a checkout, or starts Indexer to serve Git evidence.
 
 ## Prepare immutable evidence
 
@@ -46,9 +47,29 @@ only READY evidence, so an owned pending ID returns retryable
 READY manifests are retained manually until an operator performs data maintenance:
 there is no automatic TTL or garbage collection.
 
-The persisted Git evidence schema is `gitEvidenceVersion: 1`. Apply the additive
-bootstrap before Indexer publication, and keep the returned IDs while operating
-the matching Query release.
+The schema-3 release uses `gitEvidenceVersion: 2`. Apply the schema bootstrap
+before Indexer publication, then rebuild/reprepare evidence as required by
+[tool-data-evolution.md](tool-data-evolution.md). Version-2 data is not decoded
+as schema 3 and bootstrap is maintenance-only; runtime Indexer uses its writer
+role and Query uses a separate reader role.
+
+## Review-owned comparison evidence
+
+Do not use the standalone comparison endpoint to claim a semantic review was
+prepared. A private review submission accepts one B SHA, captures the current A
+once, and its single dispatcher job prepares the direct A → B comparison with
+the two semantic endpoints. The job's `review` status supplies `reviewId`,
+`comparisonId`, `previousSnapshotId`, and `currentSnapshotId` only when it is
+READY.
+
+`get_review` returns those immutable IDs to an authorized Query client. The
+ordinary `compare_revisions`, `get_file_diff`, `list_files`, `read_file`, and
+`search_text` tools still use their exact returned IDs and SHAs, but review-owned
+rows also require the owning review manifest to be READY and owned by the same
+job. IDs from a PREPARING or FAILED review cannot bypass the gate. A direct A → B
+comparison is not a PR merge-base diff, even when B is an ancestor or diverges.
+Each comparison stores its own eligible snapshot text; semantic generation reuse
+does not deduplicate it.
 
 ## Read through HTTP or MCP
 

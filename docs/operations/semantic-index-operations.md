@@ -59,3 +59,33 @@ The HTTP surface has the equivalent thirty operations:
 `list_repositories` accepts pagination only and returns each visible repository's current identity and revision. `get_repository` accepts only `repositoryId` and returns the current identity and revision for that repository. Copy those returned values into the other ten semantic repository-scoped requests.
 
 Query does not silently read an older or newer semantic revision. One of the other ten semantic requests with a stale revision returns `REVISION_OUTDATED` and includes `currentRevision`. Read that value and retry the same semantic operation with the replacement revision. A stale semantic request is not retryable without changing its revision. Git review operations are historical: retain their returned immutable catalog, history, comparison, and snapshot IDs with the exact requested historical SHA rather than replacing it with the current semantic revision.
+
+## READY review operation
+
+`POST /index/repositories/{repositoryId}/reviews` is a private Indexer-admin
+operation, not a Query operation. Its body contains one exact lowercase
+40-character B SHA. The `202` response captures the then-current A pointer once
+and supplies `jobId`, `reviewId`, `CURRENT_TO_COMMIT`, A, and B. Poll
+`GET /index/repositories/{repositoryId}/jobs/{jobId}` until `phase` is
+`COMPLETE` and the review stage is `READY`; a waiting-client timeout means resume
+that poll, never submit the same review again automatically.
+
+`get_review` is the only public review discovery operation. It returns immutable
+A/B revisions, side generation identities, comparison ID, and snapshot IDs after
+the review is READY. Use those values unchanged. The ten side operations are
+`review_search_code`, `review_get_fact_source`, `review_list_entry_points`,
+`review_find_api_routes`, `review_find_event_listeners`,
+`review_list_type_members`, `review_find_method_implementations`,
+`review_find_references`, `review_find_callers`, and `review_find_callees`.
+Every side request requires `repositoryId`, `reviewId`, `side`, and its exact
+side `revision`; Query rejects a mismatch rather than selecting current.
+
+Review direction is direct A → B for `CURRENT_TO_COMMIT`, not a PR-diff claim or
+a merge-base result. Query exposes neither PREPARING/FAILED review semantic data
+nor review-owned Git snapshots/comparisons until the owner/READY membership gate
+passes. A known Git ID is not a bypass. Unknown/denied, preparing, failed, and
+wrong-context requests map respectively to `REVIEW_NOT_FOUND`,
+`REVIEW_NOT_READY`, `REVIEW_FAILED`, and `REVIEW_CONTEXT_MISMATCH`.
+
+See [Semantic review deployment and operation](semantic-review.md) for private
+networking, release order, OMP evidence workflow, and retention.

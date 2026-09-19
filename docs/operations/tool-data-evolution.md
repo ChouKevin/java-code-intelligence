@@ -61,3 +61,29 @@ compatible generation; schema rollback remains a separate, non-destructive
 maintenance operation. Retain a READY review's generations, snapshots, and
 comparison as a graph; cleanup is manual and must first account for active jobs
 and review references.
+
+## Operational release controls
+
+Use a dedicated schema-maintenance Mongo identity only for the bootstrap command:
+
+```bash
+java -jar semantic-indexer/target/semantic-indexer-0.0.1-SNAPSHOT.jar \
+  --semantic.schema-bootstrap=true
+```
+
+It is not a runtime worker. Runtime Indexer uses the writer identity; Query uses
+a separate reader identity and must not receive schema-maintenance, writer, Git,
+checkout, source, or JDT permissions. Close admissions before step 2 and reopen
+them only after Query is deployed against verified compatible data.
+
+The backup in step 3 is coherent only when it includes repository pointers, index
+jobs, generation manifests and every referenced projection/source payload, Git
+evidence, review manifests, and their referenced generations/comparison/snapshots.
+Restore and cleanup preserve a READY review as that whole graph. Before manual
+cleanup, check active jobs and every review reference; there is no TTL, automatic
+GC, or safe single-member deletion.
+
+Each Git comparison continues to write its own eligible snapshot text. A semantic
+generation reused for A or B does not deduplicate the comparison's previous or
+current snapshot. Retention capacity must account for that duplication until a
+separately designed storage contract changes it.

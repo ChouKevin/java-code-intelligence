@@ -1,11 +1,19 @@
 # Java Code Intelligence
 
-Java Code Intelligence builds a semantic index before query traffic arrives. It has two independently deployable applications:
+Java Code Intelligence builds a semantic index before query traffic arrives. It
+contains two independently deployable applications and one shared model module:
 
-- **Indexer** accepts private admin commands, checks out an exact Git commit, runs JDT LS, and publishes immutable MongoDB generations.
-- **Query** reads the current sealed generation through HTTP and MCP. It has no Git checkout, source fallback, JGit, JDT, JDT LS, or model dependency.
+- **Indexer** accepts private administrator commands, checks out exact Git
+  commits, runs JDT LS, and seals/publishes immutable MongoDB generations.
+- **Query** reads MongoDB only through HTTP and MCP. Current-generation calls
+  use only the current sealed generation; separately prepared READY reviews can
+  read their immutable A/B membership. Query has no Git checkout, source
+  fallback, JGit, JDT, JDT LS, or Indexer control.
+- **Model** defines framework-neutral identities, facts, relations, repository
+  values, and persisted index contracts.
 
-There is no LLM, chat, prompt, embedding, or vector model inside this service.
+There is no LLM, chat, prompt, embedding, vector model, review service, or
+findings store in this repository. OMP is an external evidence client.
 
 ## Where changes belong
 
@@ -14,18 +22,18 @@ There is no LLM, chat, prompt, embedding, or vector model inside this service.
 | Code-fact identities, relations, or persisted schema | `semantic-model/` |
 | Git checkout, JDT LS, extraction, indexing, or publication | `semantic-indexer/` |
 | Mongo reads, HTTP queries, MCP tools, or query security | `semantic-query/` |
-| Deterministic source used by UAT | `semantic-indexer/fixtures/uat/` |
+| Deterministic UAT source | `semantic-indexer/fixtures/uat/` |
 
-Keep Query independent from Git and JDT LS, and keep the shared model independent
-from Spring and storage libraries. HTTP and MCP operations must use the same Query
-application facade and response contract. Coding-agent guidance is in
-[AGENTS.md](AGENTS.md).
+Keep Query independent from Git and JDT LS, and Model independent from Spring
+and storage libraries. HTTP and MCP use the same Query facade and result
+contract. Coding-agent guidance is in [AGENTS.md](AGENTS.md).
 
-## Index flow
+## Index and review flow
 
-An Indexer request resolves a branch, tag, or full SHA to a reachable lowercase 40-character commit and stores a job. The HTTP request never runs a build or reset inline. One `index-job-dispatcher` thread polls the oldest `ACCEPTED` job, marks it `RUNNING`, and executes one job at a time.
-
-The only poll setting is:
+An Indexer request resolves a branch, tag, or full SHA to a reachable lowercase
+40-character commit and stores a job. The HTTP request never runs a build or
+reset inline. One `index-job-dispatcher` thread polls the oldest `ACCEPTED` job,
+marks it `RUNNING`, and executes one job at a time. Its only poll setting is:
 
 ```yaml
 semantic:
@@ -33,79 +41,102 @@ semantic:
     poll-delay: 1s
 ```
 
-A build checks out only its stored commit, removes untracked and ignored checkout content, runs the exporter, validates the new generation, seals it, and changes the repository pointer with an expected-parent compare-and-set. Query reads only that pointer and its sealed generation. Every successful source response includes the published repository revision.
+A normal build checks out only its stored commit, removes untracked and ignored
+checkout content, runs the exporter, validates a generation, seals it, and
+changes the repository pointer with expected-parent compare-and-set. Query
+reads only that pointer. Every successful source response identifies the
+published repository revision.
 
-Git review evidence is a separate, historical capability. An administrator can prepare an immutable remote-branch catalog and then a history for one catalog-pinned branch head through the same one-job dispatcher. These jobs never alter the semantic current pointer. Query remains Mongo-only and exposes only READY evidence to repositories listed in `semantic.query.git-evidence.allowed-repositories`; the allowlist is empty by default.
+A review is not a PR diff and is not an arbitrary historical-generation API.
+The private administrator submits one exact B commit to
+`POST /index/repositories/{repoId}/reviews`. Admission captures the then-current
+published A pointer once and returns `202`, `jobId`, `reviewId`, captured A, B,
+and `CURRENT_TO_COMMIT`. The one dispatcher serially prepares both semantic
+endpoints and direct A → B Git evidence. Only a complete immutable READY review
+is visible; it never moves current. B may be ancestor, descendant, equal, or
+divergent, so callers must not describe the direct comparison as a PR-only
+change set.
 
-Job failures use stable categories: `WORKER_INTERRUPTED`, `SOURCE_UNAVAILABLE`, `SCHEMA_REBUILD_REQUIRED`, `PUBLICATION_CONFLICT`, and `VALIDATION_FAILED`. Retry means submitting a new job; the dispatcher does not retry automatically.
+A job failure is one of `WORKER_INTERRUPTED`, `SOURCE_UNAVAILABLE`,
+`SCHEMA_REBUILD_REQUIRED`, `PUBLICATION_CONFLICT`, `VALIDATION_FAILED`,
+`ANALYSIS_UNAVAILABLE`, or `REVIEW_EVIDENCE_MISMATCH`. Retry means a new
+administrator request. The dispatcher does not retry automatically. At startup
+it reconciles a fully published target to `COMPLETE`; otherwise a leftover
+`RUNNING` job becomes `WORKER_INTERRUPTED`. It does not resume a half-prepared
+review or a client timeout.
 
-At startup, Indexer first completes any `RUNNING` job whose target was already published, then marks all other leftover `RUNNING` jobs as `WORKER_INTERRUPTED`. Polling begins after application startup is ready. Shutdown stops new polling and interrupts current dispatcher work; a restart applies the same recovery rules.
+## Query contract
+
+Authenticate every Query HTTP request and `/mcp` request with
+`X-Api-Token: $SEMANTIC_QUERY_API_TOKEN`. Query needs only a Mongo read role;
+Indexer has a different admin token, Mongo writer role, read-only Git
+credential, checkouts, and JDT workspaces. See
+[Semantic review deployment and operation](docs/operations/semantic-review.md)
+for the single-VM topology, secret-file references, TLS, release, retention,
+and OMP workflow.
+
+MCP exposes thirty raw tool names:
+
+- Current discovery/evidence: `list_repositories`, `get_repository`,
+  `search_code`, `get_fact_source`, `list_entry_points`, `find_api_routes`,
+  `find_event_listeners`, `list_type_members`, `find_method_implementations`,
+  `find_references`, `find_callers`, `find_callees`
+- Historical Git evidence: `list_git_branches`, `list_git_commits`,
+  `compare_revisions`, `get_file_diff`, `list_files`, `read_file`,
+  `search_text`
+- READY-review discovery/side evidence: `get_review`, `review_search_code`,
+  `review_get_fact_source`, `review_list_entry_points`,
+  `review_find_api_routes`, `review_find_event_listeners`,
+  `review_list_type_members`, `review_find_method_implementations`,
+  `review_find_references`, `review_find_callers`, `review_find_callees`
+
+The matching HTTP routes are documented in
+[Semantic Query Operations](docs/operations/semantic-index-operations.md).
+Current discovery returns the exact `repositoryId`/`revision` for the ten
+current semantic tools. A stale request returns `REVISION_OUTDATED` with
+`currentRevision`; rediscover fact IDs before a fact-bound retry.
+
+Use `get_review` to discover READY A/B revisions, side generation/snapshot IDs,
+and comparison ID. Send `repositoryId`, `reviewId`, `side`, and exact side
+`revision` to every `review_` semantic tool. Review-owned Git IDs pass the same
+READY owner gate. Query never replaces side identity with current, exposes an
+arbitrary generation ID, or starts Indexer to recover missing evidence.
+
+Git evidence is Mongo-only and source-visible only for explicit
+`semantic.query.git-evidence.allowed-repositories`; the allowlist is empty by
+default. Existing repository/package/class/method/source/fact policies remain
+fail-closed.
+
+## Schema 3 and retention
+
+The persisted release is schema version 3. Schema-2 data is not decoded as
+schema 3: there is no compatibility decoder, default, or handwritten migration.
+Drain admissions, settle active jobs, back up coherent pointers/jobs/manifests/
+payloads/Git evidence/review graphs, bootstrap schema 3 with maintenance
+credentials, rebuild approved current generations, reprepare Git evidence as
+needed, verify, deploy Query, then reopen admissions.
+
+A READY review retains its manifest, both generations, comparison, and
+snapshots as one graph. There is no TTL, automatic garbage collection, or
+snapshot-text deduplication: each comparison duplicates eligible text in its
+own snapshots even when a semantic generation is reused. Manual cleanup checks
+active jobs and all review references first. The complete procedure is in
+[Tool projection data evolution](docs/operations/tool-data-evolution.md).
 
 ## Build and verification
 
-Requirements: Java 21, Maven 3.9+, Docker for Mongo and image checks, and JDT LS for Indexer smoke and end-to-end fixture checks.
-
-See [Testing and verification](docs/operations/testing.md) for the complete entry-point matrix, prerequisites, and CI selection responsibilities.
+Requirements: Java 21, Maven 3.9+, Docker for Mongo and image checks, and JDT
+LS for Indexer smoke/end-to-end fixture checks. Run commands from the reactor
+root:
 
 ```bash
 mvn --batch-mode --no-transfer-progress test
 mvn --batch-mode --no-transfer-progress -Pmongo-it verify
-mvn --batch-mode --no-transfer-progress -f semantic-indexer/fixtures/uat/payment-service/pom.xml test
-mvn --batch-mode --no-transfer-progress -f semantic-indexer/fixtures/uat/order-service/pom.xml test
-mvn --batch-mode --no-transfer-progress -f semantic-indexer/fixtures/uat/video-service/pom.xml test
-docker build -f Dockerfile.indexer -t java-semantic-indexer:uat .
-docker build -f Dockerfile.query -t java-semantic-query:uat .
-scripts/smoke-jdtls-image.sh java-semantic-indexer:uat
-scripts/test-query-image.sh java-semantic-query:uat
 JDTLS_HOME=/opt/jdtls scripts/test-indexer-query-contract.sh
+JDTLS_HOME=/opt/jdtls scripts/test-semantic-review-journey.sh
 ```
 
-See [Offline Index Operations](docs/operations/offline-index.md) for deployment and recovery details. For the opt-in JDT LS/Mongo fixture MCP journey and the limits of its Agent evidence, see [MCP Agent Acceptance](docs/operations/mcp-agent-acceptance.md).
-
-## Credentials and endpoints
-
-Use separate identities. `SEMANTIC_INDEXER_ADMIN_TOKEN` protects `/index/**`; `SEMANTIC_QUERY_API_TOKEN` protects Query HTTP and MCP. Indexer receives read-only Git credentials and a Mongo write role. Query receives only a Mongo read role and must not receive Git or JDT credentials.
-
-```bash
-# Indexer
-export SEMANTIC_MONGODB_URI='mongodb://index-writer:...@mongo/semantic?tls=true'
-export SEMANTIC_INDEXER_ADMIN_TOKEN='<indexer-admin-token>'
-export JDTLS_HOME=/opt/jdtls
-export GIT_USERNAME='<read-only-git-user>'
-export GIT_TOKEN='<read-only-git-token>'
-
-# Query
-export SEMANTIC_MONGODB_URI='mongodb://query-reader:...@mongo/semantic?tls=true'
-export SEMANTIC_QUERY_API_TOKEN='<query-read-token>'
-```
-
-Configure every repository with a Git `url` and `defaultBranch`. Indexer admin endpoints under `/index/repositories/{repoId}` accept asynchronous `ensure`, `sync`, `checkout`, `rebuild`, and `rollback` commands. `list_repositories` accepts pagination only, and `get_repository` accepts only `repositoryId`; both discover the current semantic repository identity and revision. The other ten current-generation semantic Query tools consume that returned `repositoryId` and current semantic `revision`; a request for a previous semantic revision returns `REVISION_OUTDATED` with the current revision. Review discovery instead returns two immutable READY sides; every review-side operation requires the returned `repositoryId`, `reviewId`, `side`, and exact side `revision`.
-
-## Query contract
-
-Query starts without an online JDT LS or an Indexer process. It reads only sealed MongoDB generations: the current published pointer for current-generation operations and immutable READY review membership for review operations. Authenticate every Query HTTP request and every `/mcp` request with `X-Api-Token: $SEMANTIC_QUERY_API_TOKEN`.
-
-The MCP endpoint is `/mcp` and publishes exactly thirty raw tool names:
-
-- Current-generation discovery and semantic evidence: `list_repositories`, `get_repository`, `search_code`, `get_fact_source`, `list_entry_points`, `find_api_routes`, `find_event_listeners`, `list_type_members`, `find_method_implementations`, `find_references`, `find_callers`, `find_callees`
-- Historical Git evidence: `list_git_branches`, `list_git_commits`, `compare_revisions`, `get_file_diff`, `list_files`, `read_file`, `search_text`
-- Immutable review discovery and side evidence: `get_review`, `review_search_code`, `review_get_fact_source`, `review_list_entry_points`, `review_find_api_routes`, `review_find_event_listeners`, `review_list_type_members`, `review_find_method_implementations`, `review_find_references`, `review_find_callers`, `review_find_callees`
-
-The matching HTTP routes are:
-
-- `GET /api/v1/repositories` and `GET /api/v1/repositories/{repositoryId}`
-- `POST /api/v1/search-code`, `/api/v1/fact-source`, `/api/v1/entry-points`, `/api/v1/api-routes`, `/api/v1/event-listeners`, `/api/v1/type-members`, `/api/v1/method-implementations`, `/api/v1/references`, `/api/v1/callers`, `/api/v1/callees`
-- `POST /api/v1/git/branches`, `/api/v1/git/commits`, `/api/v1/git/comparisons`, `/api/v1/git/file-diff`, `/api/v1/git/files`, `/api/v1/git/file`, `/api/v1/git/search`
-- `GET /api/v1/repositories/{repositoryId}/reviews/{reviewId}` and `POST /api/v1/reviews/search-code`, `/api/v1/reviews/fact-source`, `/api/v1/reviews/entry-points`, `/api/v1/reviews/api-routes`, `/api/v1/reviews/event-listeners`, `/api/v1/reviews/type-members`, `/api/v1/reviews/method-implementations`, `/api/v1/reviews/references`, `/api/v1/reviews/callers`, `/api/v1/reviews/callees`
-
-Current-generation semantic calls select only the current published pointer and never substitute a revision. Review calls select only immutable READY membership: use `get_review` to discover safe opaque A/B metadata, then send exact `repositoryId`, `reviewId`, `side`, and side `revision`. Each review-side result repeats that context and filtered source coverage; it does not expose persistence models, local paths, or artifact inventories. Neither current nor review tools accept generation IDs or natural-language/generative input.
-
-Git branch responses pin their immutable `catalogId`; history responses require the returned `historyId` and exact revision. Comparisons return their immutable comparison and snapshot IDs; files, reads, and searches use the matching snapshot ID and SHA. A pending evidence ID returns `GIT_EVIDENCE_NOT_READY`, while unavailable or cross-repository evidence is not disclosed. See [Git review context operations](docs/operations/git-review-context.md) for preparation, continuation, coverage, retention, and release order.
-
-`list_repositories` accepts only pagination and `get_repository` only `repositoryId`; use either discovery result's current `repositoryId` and `revision` in the other ten current-generation semantic tools. Query never substitutes a semantic revision. On `REVISION_OUTDATED`, read the returned `currentRevision`; retry a direct semantic search with that revision, and rediscover revision-scoped fact IDs before retrying a fact-bound request. Review errors are `REVIEW_NOT_FOUND`, `REVIEW_NOT_READY`, `REVIEW_FAILED`, or `REVIEW_CONTEXT_MISMATCH`; do not replace the requested review-side revision. Git review routes instead use returned immutable catalog, history, comparison, and snapshot IDs with their historical SHA; do not replace that SHA with the current semantic revision.
-
-## Schema and UAT controls
-
-The persisted index contract is schema version 2. It has no distributed-ownership state or compatibility decoder. A database created by an older schema must be rebuilt through the schema-maintenance and repository-rebuild flow before the new Query is deployed.
-
-The `uat` Spring profile adds an in-memory pre-publication gate and repository-scoped `RESET` job endpoints. They use the normal dispatcher and admin token, require the `semantic_uat` database, and are absent outside the UAT profile. Production publication is immediate.
+See [Testing and verification](docs/operations/testing.md) for entry-point
+scope. The scripted local journey is not an OMP/model or remote VM/TLS
+acceptance claim; the required actual-client record is described in
+[MCP Agent Acceptance](docs/operations/mcp-agent-acceptance.md).

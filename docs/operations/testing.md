@@ -85,3 +85,21 @@ executable jar is absent. It deliberately does not run in the ordinary Docker-
 and JDT-free suite. Its Query process has a temporary working directory and
 receives only the Mongo read credential; it is never given an Indexer URL,
 repository checkout, source tree, or JDT LS path.
+
+## Actual OMP and deployment acceptance
+
+The semantic-review journey is Task 9 scripted local evidence. It proves a
+disposable real-JDT A/B flow and a cold Mongo-only Query process; it does not run
+OMP, validate an actual VM hostname/certificate, or exercise private deployment
+credentials. An actual OMP acceptance requires a separately prepared local
+Indexer/Mongo/Query environment using an actual committed approved repository,
+one captured-A/single-B review submission, a persistent cold Query reader, and
+sanitized external-client evidence. A remote deployment additionally requires
+the approved VM, private Mongo/admin path, safe credential distribution, Query
+TLS certificate and hostname validation, and its real OMP client configuration.
+
+`SEMANTIC_API_TOKEN` belongs to the deployed acceptance client invocation shown
+above. The Query server itself reads `SEMANTIC_QUERY_API_TOKEN`; keep client and
+server configuration names distinct even when a deployment provisions equal
+values. The full operation sequence and what to record are in
+[Semantic review deployment and operation](semantic-review.md).

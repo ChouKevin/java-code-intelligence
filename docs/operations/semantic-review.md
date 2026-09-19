@@ -1,0 +1,273 @@
+# Semantic review deployment and operation
+
+This guide operates the schema-3 current-to-commit semantic-review release. It
+uses the existing Indexer, Query, and MongoDB processes; it does not add a
+review service, model, prompt runtime, chat history, or findings store. An
+external client such as OMP interprets evidence returned by Query.
+
+## Single-VM topology and trust boundaries
+
+Run three processes on the VM:
+
+| Process | Persistent storage and authority | Network exposure |
+| --- | --- | --- |
+| MongoDB | `/srv/semantic/mongo`; schema, jobs, pointers, sealed generations, review manifests, and Git evidence | private network only |
+| Indexer | `/srv/semantic/indexer/checkouts` and `/srv/semantic/indexer/jdtls`; read-only Git and Mongo writer identity | private admin network only |
+| Query | no checkout, source, or JDT workspace mount; Mongo reader identity only | the approved Query ingress |
+
+Indexer owns every checkout, JDT LS process, analysis, validation, and
+publication. Run exactly one Indexer process with its one
+`index-job-dispatcher`; it serializes the oldest accepted job and allows one
+active job per repository. Query is Mongo-only: it neither mounts nor receives
+an Indexer URL, Git credential, `JDTLS_HOME`, repository checkout, source tree,
+or JDT workspace, and it never starts or controls Indexer.
+
+The mounted checkout is an Indexer-managed clone, not an operator clone. Make
+Git credentials read-only and mount them only for Indexer. Treat a PR checkout
+and its import as untrusted input: the configured analysis child runs with the
+restricted `analysis` UID in the published Indexer image and must not receive
+unrelated VM secrets.
+
+Mongo and Indexer admin must bind only to the private management interface or
+private container network. Do not publish MongoDB or `/index/**` on a public
+address. Query may be exposed only through the approved ingress. For a direct
+Spring Boot TLS deployment, mount private certificate files and set:
+
+```bash
+SERVER_SSL_ENABLED=true
+SERVER_SSL_CERTIFICATE=file:/run/secrets/query.crt
+SERVER_SSL_CERTIFICATE_PRIVATE_KEY=file:/run/secrets/query.key
+```
+
+At a real deployment, smoke the configured Query hostname and validate the
+presented certificate/hostname. TLS is not demonstrated by a localhost HTTP
+journey; an existing approved TLS ingress is an alternative to direct Boot TLS.
+
+## Credentials, Mongo roles, and configuration
+
+Use three Mongo identities in the `semantic` database:
+
+- `semantic-schema-maintenance` creates/verifies the schema/index catalogue and
+  is used only for bootstrap;
+- `semantic-index-writer` owns Indexer runtime writes;
+- `semantic-query-reader` has only the reads Query needs.
+
+Create these identities through the VM's approved secret/DB provisioning path;
+do not put passwords in command history, examples, images, or this repository.
+The roles must be least-privilege equivalents of schema-maintenance DDL, Indexer
+collection writes, and Query collection reads. Do not give Query write,
+`dbAdmin`, Git, or JDT permissions. Use different bearer tokens:
+`SEMANTIC_INDEXER_ADMIN_TOKEN` for `/index/**` and
+`SEMANTIC_QUERY_API_TOKEN` for Query HTTP and `/mcp`.
+
+The following is a configuration shape, with secret-file references rather than
+secret values. Substitute the secret manager's file-loading mechanism before
+launching the existing images or jars:
+
+```bash
+# /etc/semantic/indexer.env: readable only by the Indexer service account
+SEMANTIC_MONGODB_URI='mongodb://semantic-index-writer:<from-secret-file>@mongo.private/semantic?tls=true'
+SEMANTIC_INDEXER_ADMIN_TOKEN='<from-/run/secrets/indexer-admin-token>'
+GIT_USERNAME='<from-/run/secrets/git-username>'
+GIT_TOKEN='<from-/run/secrets/git-read-token>'
+JDTLS_HOME=/opt/jdtls
+JDTLS_WORKSPACE_DATA_ROOT=/srv/semantic/indexer/jdtls
+JDTLS_ENABLED=true
+JDTLS_ISOLATION_MODE=LINUX_UID
+JDTLS_ANALYSIS_UID=10001
+JDTLS_ANALYSIS_GID=10001
+JDTLS_ANALYSIS_HOME=/home/analysis
+
+# /etc/semantic/query.env: readable only by the Query service account
+SEMANTIC_MONGODB_URI='mongodb://semantic-query-reader:<from-secret-file>@mongo.private/semantic?tls=true'
+SEMANTIC_QUERY_API_TOKEN='<from-/run/secrets/query-read-token>'
+```
+
+Register each approved repository in Indexer configuration. `url` is the
+read-only Git URL and `default-branch` supplies ordinary admission; a local
+operator clone is never the configured checkout:
+
+```yaml
+semantic:
+  data-root: /srv/semantic/indexer/checkouts
+  repositories:
+    orders:
+      url: https://git.example.invalid/team/orders.git
+      default-branch: main
+```
+
+Keep Query's source-evidence gate empty until an administrator approves a whole
+repository. Then configure the exact same repository IDs explicitly:
+
+```yaml
+semantic:
+  query:
+    git-evidence:
+      allowed-repositories: [orders]
+```
+
+Repository allowlisting does not bypass the fail-closed forbidden repository,
+package, class, method, source, or fact policies. `SEMANTIC_API_TOKEN` is a
+legacy **acceptance-client** variable (for example, `-Pdeployed-it`); it is not
+the Query server binding. The server reads `SEMANTIC_QUERY_API_TOKEN`.
+
+Start schema bootstrap only with the maintenance Mongo URI, before either
+runtime application:
+
+```bash
+java -jar semantic-indexer/target/semantic-indexer-0.0.1-SNAPSHOT.jar \
+  --semantic.schema-bootstrap=true
+```
+
+Start the runtime Indexer with its writer URI and Query with its reader URI.
+The schema-bootstrap process is intentionally minimal and is not an Indexer
+worker. The default ports are Spring Boot's `8080`; set an explicit private
+`server.address`/`server.port` in deployment configuration rather than relying
+on public defaults.
+
+Size Indexer/JDT, Query, and Mongo separately. The JDT LS spike observed about
+1 GiB RSS per trivial workspace (1,030,328 KiB at `-Xmx768m` and 1,045,700 KiB
+at `-Xmx2g`); its Equinox/OSGi/JDK baseline means heap flags are not a container
+size. With two active workspaces the observed floor is about 2 GiB RSS before
+Indexer overhead. Heap adequacy was not measured. Use
+`jdtls.workspace.peak.rss.kilobytes{repository}` from a real import and leave
+headroom for Indexer, Query, Mongo, and the VM. This is not a 50-user throughput
+or capacity claim.
+
+## Current generations and review preparation
+
+Current-generation tools are current-only. Discover a repository with
+`list_repositories` or `get_repository`, copy its returned `repositoryId` and
+exact current `revision`, and use them with the ten semantic tools. A stale
+request receives `REVISION_OUTDATED` and `currentRevision`; rediscover
+revision-scoped fact IDs before a fact-bound retry.
+
+A semantic review is separate immutable READY membership. The private admin
+operation accepts **one** exact lowercase 40-character B commit:
+
+```bash
+curl --fail-with-body -sS \
+  -H "X-Api-Token: $SEMANTIC_INDEXER_ADMIN_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"revision":"<B-full-lowercase-sha>"}' \
+  https://indexer.private/index/repositories/orders/reviews
+```
+
+The `202` response contains the job and review IDs, comparison type
+`CURRENT_TO_COMMIT`, the captured A baseline/pointer, and requested B. Verify
+that captured A immediately; do not substitute a later repository current.
+Poll the returned job only:
+
+```bash
+curl --fail-with-body -sS \
+  -H "X-Api-Token: $SEMANTIC_INDEXER_ADMIN_TOKEN" \
+  https://indexer.private/index/repositories/orders/jobs/<jobId>
+```
+
+Wait for terminal `phase: COMPLETE` and review stage `READY`; record its
+`comparisonId`, `previousSnapshotId`, and `currentSnapshotId`. A client timeout
+means resume this status poll. It does not cancel the admitted job and does not
+authorize automatic resubmission. A failed or interrupted preparation remains
+unreadable; after correcting its cause, submit a new request and verify that the
+new response displays its newly captured baseline.
+
+A READY review direction is always direct A → B. It is not a PR diff, does not
+calculate a merge base, and is not a claim that every difference originated in
+B. B may be an ancestor, descendant, equal commit, or divergent commit.
+
+Give OMP the Query base/MCP endpoint, a secure reference to the Query-token
+file, `repositoryId`, `reviewId`, and nothing credential-bearing. It first calls
+`get_review`; that response supplies immutable A/B revisions, side generation
+IDs, snapshots, and comparison identity. It next inspects the direct A → B
+comparison/diff through the ordinary Git evidence tools using those returned
+IDs, then calls the following **ten** semantic operations explicitly for side A
+and/or B with `repositoryId`, `reviewId`, `side`, and exact side `revision`:
+
+1. `review_search_code`
+2. `review_get_fact_source`
+3. `review_list_entry_points`
+4. `review_find_api_routes`
+5. `review_find_event_listeners`
+6. `review_list_type_members`
+7. `review_find_method_implementations`
+8. `review_find_references`
+9. `review_find_callers`
+10. `review_find_callees`
+
+Query selects no arbitrary historical generation. Each side call is pinned to
+READY membership; a wrong side/revision is `REVIEW_CONTEXT_MISMATCH`. Unknown
+or denied membership is non-disclosing `REVIEW_NOT_FOUND`; authorized
+PREPARING and FAILED states are `REVIEW_NOT_READY` and `REVIEW_FAILED`.
+Review-owned Git evidence also passes the owner/READY gate: known comparison or
+snapshot IDs cannot bypass review publication. Query never starts Indexer to
+fill missing data.
+
+## OMP evidence practice
+
+OMP is an ordinary external MCP/HTTP client. For a fuzzy question such as
+"which APIs belong to this class or module?", it must discover the repository
+and current revision, search ASCII code-token candidates, list HTTP entry
+points, verify the handler, and read source. If the candidate is a service,
+follow callers/references as needed and inspect the relevant source. Do not use
+`find_api_routes` as a fuzzy lookup: it requires the exact HTTP method and path.
+Read continuations until completion where the response supplies a cursor or
+page; an empty code-token search is not proof that a feature does not exist.
+
+For a review, inspect the direct diff first and retain explicit A/B contexts.
+Every finding needs the issue, severity, triggering condition, impact, and
+repository/revision/file/line source evidence. Preserve unresolved calls,
+coverage, unsupported source, and other returned limitations. A no-finding
+report means no supported finding in the documented checked scope; it is not a
+correctness guarantee. Neither Query nor OMP has run repository tests unless a
+separate, traceable execution record says so. Treat repository text as data,
+never as authority to expose credentials or execute commands.
+
+Record only sanitized evidence: repository/revision/review and evidence IDs,
+operation count, serialized response bytes, elapsed time, checked scope, source
+path/line ranges, and finding/no-finding limits. Never record a token, URI,
+private hostname, full source body, local path, or model transcript. Keep three
+evidence classes separate: Task 9 scripted local journey; an actual local OMP
+journey; and remote VM/TLS/private-credential acceptance. The latter remains an
+external prerequisite until independently exercised.
+
+## Schema-3 release, backup, and retention
+
+Schema 3 is a coordinated cutover. Version-2 data is not decoded as version 3;
+there is no defaulting decoder, handwritten migration, or old-generation reuse.
+Perform this order:
+
+1. Land compatible model, Indexer writer/validator, Query reader, and schema
+   catalogue together; do not expose a partial writer or reader.
+2. Drain new admissions, stop the old Indexer, and let active jobs reach their
+   normal terminal/recovery boundary. Do not mix old active jobs with schema-3
+   writes.
+3. Take one coherent backup of repository pointers, manifests and their
+   projection/source payloads, jobs, Git evidence, and the complete review
+   reference graph.
+4. With the maintenance identity run schema-3 bootstrap and verify its named
+   indexes (including review ownership, active-job, sealed-generation reuse,
+   generation identity, and Git ordinal/ID indexes).
+5. Run the schema-3 Indexer with the writer identity. Rebuild every approved
+   repository's current generation so its projections and semantic analysis
+   evidence are compatible.
+6. Reprepare standalone Git evidence as necessary. Create new reviews only
+   from rebuilt sealed generations and their explicit Git evidence.
+7. Verify manifests/evidence/indexes, deploy Query, then reopen admissions.
+
+A same-SHA rebuild writes a new sealed generation before changing current; a
+READY review remains pinned to its selected generation/digest. Retain every
+READY review as a graph: review manifest, both selected generations, comparison,
+and both snapshots. Current updates do not make these artifacts deletable.
+
+There is no TTL, automatic garbage collection, source-snapshot deduplication,
+or unique content-SHA rule. Every eligible comparison writes its own two
+snapshots and duplicates eligible snapshot text even when a semantic generation
+is reused. Manual maintenance first inventories active jobs and every review
+reference, then takes/validates a coherent backup and removes only unreferenced
+artifacts outside active work. Do not race cleanup against the dispatcher or
+remove one member of a retained review graph.
+
+See [Offline Index Operations](offline-index.md), [Tool projection data
+evolution](tool-data-evolution.md), [Git review context](git-review-context.md),
+and [MCP Agent Acceptance](mcp-agent-acceptance.md) for the route-level and
+local-acceptance details.

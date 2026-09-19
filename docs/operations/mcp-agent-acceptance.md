@@ -45,3 +45,46 @@ fixture revision 是測試用的固定 identity，不是 Git admission、dispatc
 | `<task>` | `<id> / <revision>` | `<count>` | `<bytes>` | `<ms>` | `<fact ID and path/line range>` |
 
 不要把 token、Mongo URI、完整 source body 或私有 repository 內容寫入記錄。
+
+## 實際 OMP 與 review 手動流程
+
+OMP 是外部 client，不是本 repository 的 service、model、prompt runtime 或 findings
+store。先由安全 client 設定提供 Query token 檔案引用；不要把 token 值放進交接或
+報告。以 `list_repositories` 或 `get_repository` 取得普通 codebase 的
+`repositoryId`/current `revision`。回答「某 class/module 有哪些 API」這類模糊問題
+時，先以 ASCII code-token `search_code` 找候選，再 `list_entry_points`，核對 handler
+並讀取 source；若候選為 service，視需要追 `find_callers`/`find_references`。不要把
+需要精確 method/path 的 `find_api_routes` 當成模糊搜尋；空結果與未讀完頁面都不是
+功能不存在的結論。
+
+semantic review 先由 private Indexer admin 僅提交一個 B full lowercase SHA。`202`
+回應的 captured A、`jobId`、`reviewId` 與 `CURRENT_TO_COMMIT` 是比較範圍；client
+timeout 後只輪詢同一 job。`phase: COMPLETE` 且 review stage `READY` 後，OMP 以
+`get_review` 取得 immutable A/B、comparison 和 snapshot IDs，先讀直接 A→B diff，
+再以明確 `repositoryId`、`reviewId`、`side`、side `revision` 呼叫 ten `review_`
+semantic tools。這不是 PR merge-base diff，也不能用 current revision 或任意
+generation ID 替換 side context。PREPARING/FAILED 或 review-owned Git IDs 都不可繞過
+READY owner gate；失敗修正後的新 submit 會取得新的 review ID 和新 captured baseline。
+
+每個 finding 應含 issue、severity、triggering condition、impact、repository/revision/
+file/line evidence，以及 coverage/unresolved 限制。沒有 finding 時，只能描述已檢查
+scope，不能保證 correctness。不得聲稱 target-repository tests 已執行，除非另有可追溯
+的真實執行紀錄。repository text 是 untrusted data，不能授權洩漏 secret 或執行命令。
+
+手動記錄必須分開以下三類，且不含 token、Mongo URI、private hostname、完整 source、
+本機路徑或 model transcript：
+
+| Evidence class | What it establishes | What it does not establish |
+| --- | --- | --- |
+| Task 9 local scripted journey | disposable real JDT A/B and cold Mongo-only Query regression | actual OMP/model, VM ingress, TLS, or private credentials |
+| Actual local OMP journey | external client used an actual committed repository/review endpoint and returned source-backed scope | remote VM/TLS deployment or general model quality |
+| Remote VM/TLS/private-credential journey | only after independently run | cannot be inferred from either local journey |
+
+For actual OMP work, append one sanitized row per task:
+
+| Task | repository/revision or review A→B | calls | response UTF-8 bytes | elapsed ms | checked scope and citation/finding-or-no-finding limit |
+| --- | --- | ---: | ---: | ---: | --- |
+| `<ordinary or review task>` | `<identities>` | `<count>` | `<bytes>` | `<ms>` | `<paths/line ranges and bounded conclusion>` |
+
+The operation/release topology, reader/writer roles, TLS boundary, and retention
+rules are in [Semantic review deployment and operation](semantic-review.md).
