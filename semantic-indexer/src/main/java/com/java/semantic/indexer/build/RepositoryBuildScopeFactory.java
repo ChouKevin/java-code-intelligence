@@ -61,14 +61,14 @@ public final class RepositoryBuildScopeFactory implements RepositoryBuildRunner.
         IndexBuildService.CheckedOutRepository selectedCheckout = checkout.checkout(requiredJob);
         Git git = gitResources.open(selectedCheckout.root());
         try {
-            return new JobBuildScope(requiredJob, buildService(git), workspaces, git);
+            return new JobBuildScope(requiredJob, buildService(git, selectedCheckout), workspaces, git);
         } catch (RuntimeException exception) {
             closeAfterFailedOpen(git, requiredJob.repositoryId());
             throw exception;
         }
     }
 
-    private IndexBuildService buildService(Git git) {
+    private IndexBuildService buildService(Git git, IndexBuildService.CheckedOutRepository selectedCheckout) {
         MongoGenerationWriter generationWriter = new MongoGenerationWriter(template);
         SourceIndexBatchDocumentMapper documentMapper = new SourceIndexBatchDocumentMapper(template.getConverter());
         IncrementalIndexPlanner incrementalPlanner = new IncrementalIndexPlanner(
@@ -77,7 +77,7 @@ public final class RepositoryBuildScopeFactory implements RepositoryBuildRunner.
         IncrementalGenerationBuilder incrementalBuilder = new IncrementalGenerationBuilder(template, incrementalPlanner,
                 new ParentGenerationCopier(template, generationWriter));
         return new IndexBuildService(new FullIndexPlanner(), JdtLsRepositoryIndexExporter.production(),
-                generationWriter, documentMapper, new GenerationValidator(template), checkout, incrementalBuilder, jobs, publication,
+                generationWriter, documentMapper, new GenerationValidator(template), ignored -> selectedCheckout, incrementalBuilder, jobs, publication,
                 publicationGate, analysisPreparation);
     }
 
@@ -126,6 +126,11 @@ public final class RepositoryBuildScopeFactory implements RepositoryBuildRunner.
         @Override
         public void build() {
             buildService.build(job);
+        }
+
+        @Override
+        public com.java.semantic.model.index.SealedGeneration seal() {
+            return buildService.seal(job);
         }
 
         @Override

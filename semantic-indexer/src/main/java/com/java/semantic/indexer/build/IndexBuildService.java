@@ -6,6 +6,7 @@ import com.java.semantic.indexer.analysis.RepositoryAnalysisPreparation;
 import com.java.semantic.indexer.job.IndexJob;
 import com.java.semantic.indexer.job.IndexJobStore;
 import com.java.semantic.indexer.job.IndexJobTarget;
+import com.java.semantic.indexer.job.IndexJobOperation;
 import com.java.semantic.indexer.job.IndexPublicationIntent;
 import com.java.semantic.indexer.store.GenerationWriteContext;
 import com.java.semantic.indexer.store.MongoGenerationWriter;
@@ -14,6 +15,8 @@ import com.java.semantic.indexer.uat.PublicationGate;
 import com.java.semantic.model.index.PublishGenerationCommand;
 import com.java.semantic.model.index.GenerationWriteState;
 import com.java.semantic.model.index.IndexSchemaContract;
+import com.java.semantic.model.index.SealedGeneration;
+import com.java.semantic.model.query.SelectedGeneration;
 import com.java.semantic.model.repository.RepositoryRevision;
 import com.java.semantic.repository.domain.RepositorySnapshot;
 import java.nio.file.Path;
@@ -75,37 +78,48 @@ public final class IndexBuildService {
         this.analysisPreparation = Objects.requireNonNull(analysisPreparation, "analysis preparation is required");
     }
 
-    /** Executes checkout, planning, export, validation, sealing, and pointer publication. */
+    /** Seals a normal BUILD generation and only then publishes its current-pointer intent. */
     public void build(IndexJob job) {
-        Objects.requireNonNull(job, "job is required");
+        IndexJob requiredJob = Objects.requireNonNull(job, "job is required");
+        if (requiredJob.operation() != IndexJobOperation.BUILD) {
+            throw new IllegalArgumentException("current publication requires BUILD");
+        }
         IndexPublicationIntent intent;
         try {
-            intent = buildSealedGeneration(job);
+            SealedGeneration sealed = seal(requiredJob);
+            intent = jobs.prepareBuildPublication(requiredJob, sealed.selected().manifestDigest())
+                    .orElseThrow(() -> new IllegalStateException("publication precondition failed"));
         } catch (RuntimeException exception) {
             publicationGate.abortPublication();
             throw exception;
         }
         publicationGate.awaitPublication();
-        publication.publish(new PublishGenerationCommand(job.repositoryId(), intent.targetRevision(), intent.targetGenerationId(),
-                job.id().value(), intent.expectedParent(), intent.targetManifestDigest()));
+        publication.publish(new PublishGenerationCommand(requiredJob.repositoryId(), intent.targetRevision(), intent.targetGenerationId(),
+                requiredJob.id().value(), intent.expectedParent(), intent.targetManifestDigest()));
     }
 
-    private IndexPublicationIntent buildSealedGeneration(IndexJob job) {
-        IndexJobTarget target = job.target().orElseThrow(() -> new IllegalArgumentException("BUILD requires a target"));
-        GenerationWriteContext context = new GenerationWriteContext(job.repositoryId(), target.generationId(), job.id().value());
+    /** Executes one fixed-target build through immutable generation sealing without pointer publication. */
+    public SealedGeneration seal(IndexJob job) {
+        IndexJob requiredJob = Objects.requireNonNull(job, "job is required");
+        if (requiredJob.operation() != IndexJobOperation.BUILD
+                && requiredJob.operation() != IndexJobOperation.REVIEW) {
+            throw new IllegalArgumentException("generation sealing requires BUILD or REVIEW");
+        }
+        IndexJobTarget target = requiredJob.target().orElseThrow(() -> new IllegalArgumentException("generation sealing requires a target"));
+        GenerationWriteContext context = new GenerationWriteContext(requiredJob.repositoryId(), target.generationId(), requiredJob.id().value());
         generationWriter.verifySchemaBeforeGeneration();
-        CheckedOutRepository checkout = checkedOutRepository.checkout(job);
+        CheckedOutRepository checkout = checkedOutRepository.checkout(requiredJob);
         if (!target.revision().equals(checkout.revision())) {
             throw new GenerationValidationException("CHECKOUT_CHANGED");
         }
         PreparedAnalysis preparedAnalysis = analysisPreparation.orElseThrow(
                 () -> new IllegalStateException("production index builds require prepared semantic analysis")).prepare(
-                new AnalysisTarget(new RepositorySnapshot(job.repositoryId(), checkout.root(), target.revision()),
-                        job.id().value(), "CODEBASE"));
+                new AnalysisTarget(new RepositorySnapshot(requiredJob.repositoryId(), checkout.root(), target.revision()),
+                        requiredJob.id().value(), "CODEBASE"));
         try {
             FullIndexPlan plan = preparedAnalysis.plan();
-            insertWritingManifest(job, context);
-            FullIndexPlan exportPlan = incrementalBuilder.assemble(job, context, plan, preparedAnalysis.fingerprint()).exportPlan();
+            insertWritingManifest(requiredJob, context);
+            FullIndexPlan exportPlan = incrementalBuilder.assemble(requiredJob, context, plan, preparedAnalysis.fingerprint()).exportPlan();
             PreparedAnalysis exportAnalysis = preparedAnalysis.forExportPlan(exportPlan);
             RepositoryIndexExport export = exporter.export(context, exportAnalysis);
             generationWriter.recordAnalysis(context, preparedAnalysis.fingerprint(), export.analysisEvidence());
@@ -113,18 +127,17 @@ public final class IndexBuildService {
             for (SourceIndexBatch batch : export.batches()) {
                 writer.write(batch);
             }
-            CheckedOutRepository latestCheckout = checkedOutRepository.checkout(job);
-            if (!checkout.root().equals(latestCheckout.root())) {
-                throw new GenerationValidationException("CHECKOUT_ROOT_CHANGED");
-            }
-            GenerationValidator.ValidationResult result = validator.validate(context, target.revision(), latestCheckout.revision());
+            preparedAnalysis.verifyUnchangedInputs();
+            GenerationValidator.ValidationResult result = validator.validate(context, target.revision(), checkout.revision());
             if (!result.valid()) {
                 throw new GenerationValidationException(result.issues().getFirst().code());
             }
             validator.recordValid(context, result);
             generationWriter.seal(context, result.identityDigest().value());
-            return jobs.prepareBuildPublication(job, result.identityDigest())
-                    .orElseThrow(() -> new IllegalStateException("publication precondition failed"));
+            return new SealedGeneration(
+                    new SelectedGeneration(requiredJob.repositoryId(), target.revision(),
+                            target.generationId(), result.identityDigest()),
+                    preparedAnalysis.fingerprint(), export.analysisEvidence());
         } finally {
             preparedAnalysis.close();
         }

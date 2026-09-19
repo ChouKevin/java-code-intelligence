@@ -6,6 +6,8 @@ import com.java.semantic.model.index.RollbackGenerationCommand;
 import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.model.repository.RepositoryRevision;
 import com.java.semantic.model.git.GitEvidenceId;
+import com.java.semantic.model.index.SealedGeneration;
+import com.java.semantic.model.review.ReviewSide;
 
 import java.util.Optional;
 
@@ -21,6 +23,8 @@ public interface IndexJobStore {
     IndexJob admitGitHistory(RepositoryId repositoryId, GitEvidenceId catalogId, String branch, RepositoryRevision revision);
 
     IndexJob admitGitComparison(RepositoryId repositoryId, RepositoryRevision previous, RepositoryRevision current);
+    IndexJob activateReviewTarget(IndexJobId jobId, ReviewSide side);
+    IndexJob recordReviewSide(IndexJobId jobId, ReviewSide side, SealedGeneration generation);
     Optional<IndexJob> find(IndexJobId jobId);
     Optional<IndexJob> startNextAccepted();
     boolean complete(IndexJobId jobId);

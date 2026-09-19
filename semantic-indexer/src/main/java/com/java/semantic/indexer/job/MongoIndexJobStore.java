@@ -10,7 +10,12 @@ import com.java.semantic.model.index.RollbackGenerationCommand;
 import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.model.repository.RepositoryRevision;
 import com.java.semantic.model.git.GitEvidenceId;
+import com.java.semantic.model.git.GitComparisonId;
 import com.java.semantic.model.git.GitSnapshotId;
+import com.java.semantic.model.index.SealedGeneration;
+import com.java.semantic.model.review.CapturedReviewBaseline;
+import com.java.semantic.model.review.ReviewId;
+import com.java.semantic.model.review.ReviewSide;
 import com.mongodb.DuplicateKeyException;
 import com.mongodb.ErrorCategory;
 import com.mongodb.MongoWriteException;
@@ -104,7 +109,7 @@ public final class MongoIndexJobStore implements IndexJobStore {
         IndexJobId jobId = IndexJobId.create();
         Document job = new Document(JOB_ID, jobId.value()).append(REPOSITORY_ID, repositoryId.value()).append(ACTIVE, true)
                 .append("phase", IndexJobPhase.ACCEPTED.name()).append("operation", IndexJobOperation.RESET.name())
-                .append("rebuild", false).append("createdAt", new Date());
+                .append("rebuild", false).append("jobVersion", IndexSchemaContract.PERSISTED_JOB_VERSION).append("createdAt", new Date());
         insert(job, repositoryId);
         return from(job);
     }
@@ -125,9 +130,72 @@ public final class MongoIndexJobStore implements IndexJobStore {
     }
 
     @Override
+    public IndexJob activateReviewTarget(IndexJobId jobId, ReviewSide side) {
+        IndexJobId requiredJobId = Objects.requireNonNull(jobId, "job id is required");
+        ReviewSide requiredSide = Objects.requireNonNull(side, "review side is required");
+        ReviewPreparationStage preparing = requiredSide == ReviewSide.A ? ReviewPreparationStage.PREPARING_A : ReviewPreparationStage.PREPARING_B;
+        ReviewPreparationStage building = requiredSide == ReviewSide.A ? ReviewPreparationStage.BUILDING_A : ReviewPreparationStage.BUILDING_B;
+        Document candidate = template.getCollection(IndexCollections.INDEX_JOBS).find(new Document(JOB_ID, requiredJobId.value())).first();
+        if (Objects.isNull(candidate)) {
+            throw new IllegalStateException("review target activation requires a persisted review");
+        }
+        Document review = Objects.requireNonNull(candidate.get("review", Document.class), "review payload is required");
+        Document reservedTargets = Objects.requireNonNull(review.get("reservedTargets", Document.class), "reserved targets are required");
+        IndexJobTarget target = targetFrom(Objects.requireNonNull(reservedTargets.get(requiredSide == ReviewSide.A ? "a" : "b", Document.class),
+                "reserved target is required"));
+        Document filter = new Document(JOB_ID, requiredJobId.value()).append(ACTIVE, true).append("phase", IndexJobPhase.RUNNING.name())
+                .append("operation", IndexJobOperation.REVIEW.name()).append("review.stage", preparing.name())
+                .append("target", new Document("$exists", false))
+                .append("$expr", new Document("$and", List.of(noBatches("outstandingBatches"), noBatches("failedOrAmbiguousBatches"))));
+        Document update = new Document("$set", new Document("target", targetDocument(target)).append("review.stage", building.name()));
+        Document activated = template.getCollection(IndexCollections.INDEX_JOBS).findOneAndUpdate(filter, update,
+                new FindOneAndUpdateOptions().returnDocument(ReturnDocument.AFTER));
+        if (Objects.isNull(activated)) {
+            throw new IllegalStateException("review target activation lost its preparation ownership");
+        }
+        return from(activated);
+    }
+
+    @Override
+    public IndexJob recordReviewSide(IndexJobId jobId, ReviewSide side, SealedGeneration generation) {
+        IndexJobId requiredJobId = Objects.requireNonNull(jobId, "job id is required");
+        ReviewSide requiredSide = Objects.requireNonNull(side, "review side is required");
+        SealedGeneration requiredGeneration = Objects.requireNonNull(generation, "sealed generation is required");
+        Document running = template.getCollection(IndexCollections.INDEX_JOBS).find(new Document(JOB_ID, requiredJobId.value())
+                .append(ACTIVE, true).append("phase", IndexJobPhase.RUNNING.name()).append("operation", IndexJobOperation.REVIEW.name())).first();
+        if (Objects.isNull(running)) {
+            throw new IllegalStateException("review side record requires an active running review");
+        }
+        ReviewJobPayload payload = reviewFrom(Objects.requireNonNull(running.get("review", Document.class), "review payload is required"));
+        ReviewPreparationStage building = requiredSide == ReviewSide.A ? ReviewPreparationStage.BUILDING_A : ReviewPreparationStage.BUILDING_B;
+        ReviewPreparationStage next = requiredSide == ReviewSide.A ? ReviewPreparationStage.PREPARING_B : ReviewPreparationStage.PREPARING_GIT;
+        IndexJobTarget target = payload.reservedTargets().target(requiredSide);
+        if (payload.stage() != building || !target.equals(targetFrom(Objects.requireNonNull(running.get("target", Document.class), "active target is required")))
+                || !requiredGeneration.selected().repositoryId().equals(RepositoryId.of(running.getString(REPOSITORY_ID)))
+                || !requiredGeneration.selected().revision().equals(target.revision())) {
+            throw new IllegalStateException("review side record does not match its fixed active target");
+        }
+        requireCompatibleReviewGeneration(running, requiredGeneration, target);
+        String sideField = requiredSide == ReviewSide.A ? "a" : "b";
+        Document filter = new Document(JOB_ID, requiredJobId.value()).append(ACTIVE, true).append("phase", IndexJobPhase.RUNNING.name())
+                .append("operation", IndexJobOperation.REVIEW.name()).append("review.stage", building.name())
+                .append("target", targetDocument(target))
+                .append("$expr", new Document("$and", List.of(noBatches("outstandingBatches"), noBatches("failedOrAmbiguousBatches"))));
+        Document update = new Document("$set", new Document("review." + sideField, template.getConverter().convertToMongoType(requiredGeneration))
+                .append("review.stage", next.name()))
+                .append("$unset", new Document("target", "").append("outstandingBatches", "").append("acknowledgedBatches", ""));
+        Document recorded = template.getCollection(IndexCollections.INDEX_JOBS).findOneAndUpdate(filter, update,
+                new FindOneAndUpdateOptions().returnDocument(ReturnDocument.AFTER));
+        if (Objects.isNull(recorded)) {
+            throw new IllegalStateException("review side record lost its build ownership");
+        }
+        return from(recorded);
+    }
+
+    @Override
     public Optional<IndexJob> find(IndexJobId jobId) {
         return Optional.ofNullable(template.getCollection(IndexCollections.INDEX_JOBS).find(new Document(JOB_ID, jobId.value())).first())
-                .map(MongoIndexJobStore::from);
+                .map(this::from);
     }
 
     @Override
@@ -137,7 +205,7 @@ public final class MongoIndexJobStore implements IndexJobStore {
                 Updates.set("phase", IndexJobPhase.RUNNING.name()),
                 new FindOneAndUpdateOptions().sort(new Document("createdAt", 1).append(JOB_ID, 1))
                         .returnDocument(ReturnDocument.AFTER));
-        return Optional.ofNullable(started).map(MongoIndexJobStore::from);
+        return Optional.ofNullable(started).map(this::from);
     }
 
     @Override
@@ -187,7 +255,7 @@ public final class MongoIndexJobStore implements IndexJobStore {
         Document completed = template.getCollection(IndexCollections.INDEX_JOBS).findOneAndUpdate(activeRunningFilter(repositoryId, committedJobId),
                 new Document("$set", new Document(ACTIVE, false).append("phase", IndexJobPhase.COMPLETE.name())),
                 new FindOneAndUpdateOptions().returnDocument(ReturnDocument.AFTER));
-        return Optional.ofNullable(completed).map(MongoIndexJobStore::from);
+        return Optional.ofNullable(completed).map(this::from);
     }
 
     @Override
@@ -293,6 +361,7 @@ public final class MongoIndexJobStore implements IndexJobStore {
         IndexJobId jobId = IndexJobId.create();
         Document job = new Document(JOB_ID, jobId.value()).append(REPOSITORY_ID, repositoryId.value()).append(ACTIVE, true)
                 .append("phase", IndexJobPhase.ACCEPTED.name()).append("operation", operation.name()).append("rebuild", false)
+                .append("jobVersion", IndexSchemaContract.PERSISTED_JOB_VERSION)
                 .append("gitEvidence", gitEvidenceDocument(payload)).append("createdAt", new Date());
         insert(job, repositoryId);
         return from(job);
@@ -314,7 +383,8 @@ public final class MongoIndexJobStore implements IndexJobStore {
     private IndexJob insertNoWork(RepositoryId repositoryId) {
         IndexJobId jobId = IndexJobId.create();
         Document job = new Document(JOB_ID, jobId.value()).append(REPOSITORY_ID, repositoryId.value()).append(ACTIVE, false)
-                .append("phase", IndexJobPhase.COMPLETE.name()).append("operation", IndexJobOperation.NO_WORK.name()).append("createdAt", new Date());
+                .append("phase", IndexJobPhase.COMPLETE.name()).append("operation", IndexJobOperation.NO_WORK.name())
+                .append("jobVersion", IndexSchemaContract.PERSISTED_JOB_VERSION).append("createdAt", new Date());
         template.getCollection(IndexCollections.INDEX_JOBS).insertOne(job);
         return from(job);
     }
@@ -322,7 +392,9 @@ public final class MongoIndexJobStore implements IndexJobStore {
     private static Document targetDocument(IndexJobId jobId, RepositoryId repositoryId, IndexJobTarget target,
                                            IndexJobOperation operation, boolean rebuild) {
         return new Document(JOB_ID, jobId.value()).append(REPOSITORY_ID, repositoryId.value()).append("target", targetDocument(target)).append(ACTIVE, true)
-                .append("phase", IndexJobPhase.ACCEPTED.name()).append("operation", operation.name()).append("rebuild", rebuild).append("createdAt", new Date());
+                .append("phase", IndexJobPhase.ACCEPTED.name()).append("operation", operation.name()).append("rebuild", rebuild)
+                .append("generationHighWatermark", target.generation()).append("jobVersion", IndexSchemaContract.PERSISTED_JOB_VERSION)
+                .append("createdAt", new Date());
     }
 
     private static Document gitEvidenceDocument(GitEvidenceJob payload) {
@@ -355,17 +427,17 @@ public final class MongoIndexJobStore implements IndexJobStore {
     }
 
     private long nextGeneration(RepositoryId repositoryId) {
-        Document maximum = template.getCollection(IndexCollections.INDEX_JOBS).find(new Document(REPOSITORY_ID, repositoryId.value()))
-                .sort(new Document("target.generation", -1)).limit(1).first();
+        Document maximum = template.getCollection(IndexCollections.INDEX_JOBS).find(new Document(REPOSITORY_ID, repositoryId.value())
+                        .append("generationHighWatermark", new Document("$exists", true)))
+                .sort(new Document("generationHighWatermark", -1)).limit(1).first();
         if (Objects.isNull(maximum)) {
             return 1L;
         }
-        Document target = maximum.get("target", Document.class);
-        if (Objects.isNull(target)) {
-            return 1L;
+        Number generation = maximum.get("generationHighWatermark", Number.class);
+        if (Objects.isNull(generation)) {
+            throw new IllegalStateException("persisted job has no generation high-watermark");
         }
-        Number generation = target.get("generation", Number.class);
-        return Objects.isNull(generation) ? 1L : generation.longValue() + 1L;
+        return generation.longValue() + 1L;
     }
 
     private static boolean hasRequiredProjections(Document manifest) {
@@ -514,11 +586,15 @@ public final class MongoIndexJobStore implements IndexJobStore {
                 parent, current, rollback);
     }
 
-    private static IndexJob from(Document document) {
+    private IndexJob from(Document document) {
+        Number jobVersion = document.get("jobVersion", Number.class);
+        if (Objects.isNull(jobVersion) || jobVersion.intValue() != IndexSchemaContract.PERSISTED_JOB_VERSION) {
+            throw new IllegalArgumentException("unsupported persisted index job contract");
+        }
         IndexJobOperation operation = IndexJobOperation.valueOf(document.getString("operation"));
         Optional<IndexJobTarget> target = Optional.empty();
-        if (operation == IndexJobOperation.BUILD || operation == IndexJobOperation.ROLLBACK) {
-            target = Optional.of(targetFrom(Objects.requireNonNull(document.get("target", Document.class), "target document is required")));
+        if (operation == IndexJobOperation.BUILD || operation == IndexJobOperation.ROLLBACK || operation == IndexJobOperation.REVIEW) {
+            target = Optional.ofNullable(document.get("target", Document.class)).map(MongoIndexJobStore::targetFrom);
         }
         Optional<GitEvidenceJob> gitEvidence = Optional.empty();
         if (operation == IndexJobOperation.GIT_REFS || operation == IndexJobOperation.GIT_HISTORY || operation == IndexJobOperation.GIT_COMPARISON) {
@@ -532,9 +608,51 @@ public final class MongoIndexJobStore implements IndexJobStore {
             Optional<GitSnapshotId> currentSnapshotId = Optional.ofNullable(payload.getString("currentSnapshotId")).map(GitSnapshotId::new);
             gitEvidence = Optional.of(new GitEvidenceJob(catalogId, branch, revision, evidenceId, previousRevision, previousSnapshotId, currentSnapshotId));
         }
+        Optional<ReviewJobPayload> review = operation == IndexJobOperation.REVIEW
+                ? Optional.of(reviewFrom(Objects.requireNonNull(document.get("review", Document.class), "review payload is required")))
+                : Optional.empty();
         return new IndexJob(new IndexJobId(document.getString(JOB_ID)), RepositoryId.of(document.getString(REPOSITORY_ID)), target,
                 IndexJobPhase.valueOf(document.getString("phase")), Boolean.TRUE.equals(document.getBoolean(ACTIVE)),
-                Optional.ofNullable(document.getString("failureCategory")).map(IndexFailureCategory::valueOf), Boolean.TRUE.equals(document.getBoolean("rebuild")), operation, gitEvidence);
+                Optional.ofNullable(document.getString("failureCategory")).map(IndexFailureCategory::valueOf), Boolean.TRUE.equals(document.getBoolean("rebuild")),
+                operation, gitEvidence, review);
+    }
+
+    private ReviewJobPayload reviewFrom(Document payload) {
+        Document baselineDocument = Objects.requireNonNull(payload.get("baseline", Document.class), "review baseline is required");
+        CapturedReviewBaseline baseline = new CapturedReviewBaseline(pointerFrom(Objects.requireNonNull(baselineDocument.get("pointer", Document.class),
+                "review baseline pointer is required")), Objects.requireNonNull(baselineDocument.getDate("capturedAt"), "review baseline time is required").toInstant());
+        Document reserved = Objects.requireNonNull(payload.get("reservedTargets", Document.class), "reserved review targets are required");
+        Optional<SealedGeneration> a = sealedGeneration(payload, "a");
+        Optional<SealedGeneration> b = sealedGeneration(payload, "b");
+        return new ReviewJobPayload(new ReviewId(payload.getString("reviewId")), baseline, new RepositoryRevision(payload.getString("requestedRevision")),
+                new ReviewBuildTargets(targetFrom(Objects.requireNonNull(reserved.get("a", Document.class), "reserved A target is required")),
+                        targetFrom(Objects.requireNonNull(reserved.get("b", Document.class), "reserved B target is required"))),
+                ReviewPreparationStage.valueOf(payload.getString("stage")), a, b,
+                Optional.ofNullable(payload.getString("comparisonId")).map(GitComparisonId::new),
+                Optional.ofNullable(payload.getString("previousSnapshotId")).map(GitSnapshotId::new),
+                Optional.ofNullable(payload.getString("currentSnapshotId")).map(GitSnapshotId::new));
+    }
+
+    private Optional<SealedGeneration> sealedGeneration(Document payload, String side) {
+        return Optional.ofNullable(payload.get(side, Document.class)).map(document -> template.getConverter().read(SealedGeneration.class, document));
+    }
+
+    private void requireCompatibleReviewGeneration(Document job, SealedGeneration generation, IndexJobTarget target) {
+        Document manifest = template.getCollection(IndexCollections.GENERATION_MANIFESTS).find(new Document(REPOSITORY_ID, job.getString(REPOSITORY_ID))
+                .append("generationId", generation.selected().generationId().value()).append("sourceRevision", target.revision().value())
+                .append("identityDigest", generation.selected().manifestDigest().value()).append("writeState", "SEALED_VALID")).first();
+        if (Objects.isNull(manifest) || !hasRequiredProjections(manifest)
+                || Objects.isNull(manifest.getString("analysisFingerprint")) || Objects.isNull(manifest.get("analysisEvidence", Document.class))) {
+            throw new IllegalStateException("review side requires a compatible sealed generation");
+        }
+        String owner = manifest.getString("ownerJobId");
+        if (generation.selected().generationId().equals(target.generationId()) && !job.getString(JOB_ID).equals(owner)) {
+            throw new IllegalStateException("reserved review generation has a different owner");
+        }
+    }
+
+    private static Document noBatches(String field) {
+        return new Document("$eq", List.of(new Document("$size", new Document("$ifNull", List.of("$" + field, List.of()))), 0));
     }
 
     private static IndexJobTarget targetFrom(Document document) {

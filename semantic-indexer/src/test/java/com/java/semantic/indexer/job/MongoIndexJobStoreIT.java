@@ -127,6 +127,50 @@ class MongoIndexJobStoreIT {
     }
 
     @Test
+    void rejects_jobs_without_the_current_persisted_job_contract_version() {
+        try (MongoDBContainer container = container()) {
+            MongoTemplate template = template(container);
+            MongoIndexJobStore store = store(template);
+            IndexJob admitted = store.admit(RepositoryId.of("orders"), revision("a"), false);
+            template.getCollection(IndexCollections.INDEX_JOBS).updateOne(new Document("jobId", admitted.id().value()),
+                    new Document("$unset", new Document("jobVersion", "")));
+
+            assertThatThrownBy(() -> store.find(admitted.id()))
+                    .isInstanceOf(IllegalArgumentException.class);
+            template.getCollection(IndexCollections.INDEX_JOBS).updateOne(new Document("jobId", admitted.id().value()),
+                    new Document("$set", new Document("jobVersion", IndexSchemaContract.PERSISTED_JOB_VERSION)));
+            assertThat(store.find(admitted.id())).contains(admitted);
+            template.getCollection(IndexCollections.INDEX_JOBS).updateOne(new Document("jobId", admitted.id().value()),
+                    new Document("$set", new Document("jobVersion", 1)));
+
+            assertThatThrownBy(() -> store.find(admitted.id()))
+                    .isInstanceOf(IllegalArgumentException.class);
+        }
+    }
+
+    @Test
+    void activates_only_reserved_review_targets_and_never_reuses_their_ordinals() {
+        try (MongoDBContainer container = container()) {
+            MongoTemplate template = template(container);
+            MongoIndexJobStore store = store(template);
+            String jobId = "review-job";
+            template.getCollection(IndexCollections.INDEX_JOBS).insertOne(reviewJob(jobId));
+
+            IndexJob activeA = store.activateReviewTarget(new IndexJobId(jobId), com.java.semantic.model.review.ReviewSide.A);
+
+            assertThat(activeA.target()).contains(new IndexJobTarget(revision("a"), new com.java.semantic.model.index.GenerationId("g-a"), 5L));
+            assertThat(activeA.review().orElseThrow().stage()).isEqualTo(ReviewPreparationStage.BUILDING_A);
+            assertThatThrownBy(() -> store.activateReviewTarget(activeA.id(), com.java.semantic.model.review.ReviewSide.B))
+                    .isInstanceOf(IllegalStateException.class);
+            assertThat(store.complete(activeA.id())).isTrue();
+
+            IndexJob laterBuild = store.admit(RepositoryId.of("orders"), revision("c"), false);
+
+            assertThat(laterBuild.target().orElseThrow().generation()).isEqualTo(7L);
+        }
+    }
+
+    @Test
     void ensure_returns_inactive_targetless_no_work_only_for_an_exact_current_generation() {
         try (MongoDBContainer container = container()) {
             MongoTemplate template = template(container);
@@ -282,6 +326,20 @@ class MongoIndexJobStoreIT {
             assertThatThrownBy(() -> new MongoPublicationWriter(template).publish(buildCommand(running, intent)))
                     .isInstanceOf(PublicationConflictException.class);
         }
+    }
+
+    private static Document reviewJob(String jobId) {
+        Document pointer = pointerDocument(pointer("a", "g-baseline", "baseline-job"));
+        Document a = new Document("revision", revision("a").value()).append("generationId", "g-a").append("generation", 5L);
+        Document b = new Document("revision", revision("b").value()).append("generationId", "g-b").append("generation", 6L);
+        Document review = new Document("reviewId", "review-1")
+                .append("baseline", new Document("pointer", pointer).append("capturedAt", Date.from(Instant.parse("2026-09-19T00:00:00Z"))))
+                .append("requestedRevision", revision("b").value()).append("reservedTargets", new Document("a", a).append("b", b))
+                .append("stage", ReviewPreparationStage.PREPARING_A.name());
+        return new Document("jobId", jobId).append("repoId", "orders").append("active", true)
+                .append("phase", IndexJobPhase.RUNNING.name()).append("operation", IndexJobOperation.REVIEW.name()).append("rebuild", false)
+                .append("jobVersion", IndexSchemaContract.PERSISTED_JOB_VERSION).append("generationHighWatermark", 6L)
+                .append("review", review).append("createdAt", new Date());
     }
 
     private static MongoDBContainer container() {

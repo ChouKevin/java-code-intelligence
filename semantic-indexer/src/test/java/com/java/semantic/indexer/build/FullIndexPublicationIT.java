@@ -127,23 +127,24 @@ class FullIndexPublicationIT {
     }
 
     @Test
-    void changed_checkout_never_seals_or_publishes() throws Exception {
+    void builds_from_one_fixed_checkout_without_reentering_repository_mutation() throws Exception {
         try (MongoDBContainer container = new MongoDBContainer("mongo:8.0.4")) {
             container.start();
             MongoTemplate template = template(container);
             seedPreviousPointer(template);
             MongoIndexJobStore store = new MongoIndexJobStore(template);
             IndexJob job = claimedJob(store);
-            Path root = checkout("changed-checkout", revision()).root();
+            Path root = checkout("fixed-checkout", revision()).root();
             java.util.concurrent.atomic.AtomicInteger calls = new java.util.concurrent.atomic.AtomicInteger();
-            IndexBuildService service = service(template, store, exporter(template, ignored -> { }), ignored ->
-                    new IndexBuildService.CheckedOutRepository(root, calls.getAndIncrement() == 0 ? revision() : revision("b")));
+            IndexBuildService service = service(template, store, exporter(template, ignored -> { }), ignored -> {
+                calls.incrementAndGet();
+                return new IndexBuildService.CheckedOutRepository(root, revision());
+            });
 
-            assertThatThrownBy(() -> service.build(job)).isInstanceOf(RuntimeException.class).hasMessageContaining("CHECKOUT_CHANGED")
-                    .satisfies(FullIndexPublicationIT::assertSafeMessage);
+            service.build(job);
 
-            assertPreviousPointer(template);
-            assertThat(manifest(template, target(job)).getString("writeState")).isEqualTo(GenerationWriteState.WRITING.name());
+            assertThat(calls.get()).isEqualTo(1);
+            assertThat(manifest(template, target(job)).getString("writeState")).isEqualTo(GenerationWriteState.SEALED_VALID.name());
             assertThat(store.find(job.id()).orElseThrow().phase()).isEqualTo(IndexJobPhase.RUNNING);
         }
     }

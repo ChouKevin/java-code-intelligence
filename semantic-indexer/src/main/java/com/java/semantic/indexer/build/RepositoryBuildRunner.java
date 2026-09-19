@@ -12,9 +12,16 @@ public final class RepositoryBuildRunner {
     }
 
     public void run(IndexJob job) {
-        Objects.requireNonNull(job, "job is required");
-        try (BuildScope scope = Objects.requireNonNull(scopes.open(job), "build scope is required")) {
+        IndexJob requiredJob = Objects.requireNonNull(job, "job is required");
+        try (BuildScope scope = Objects.requireNonNull(scopes.open(requiredJob), "build scope is required")) {
             scope.build();
+        }
+    }
+
+    public com.java.semantic.model.index.SealedGeneration seal(IndexJob job) {
+        IndexJob requiredJob = Objects.requireNonNull(job, "job is required");
+        try (BuildScope scope = Objects.requireNonNull(scopes.open(requiredJob), "build scope is required")) {
+            return scope.seal();
         }
     }
 
@@ -25,6 +32,8 @@ public final class RepositoryBuildRunner {
 
     public interface BuildScope extends AutoCloseable {
         void build();
+
+        com.java.semantic.model.index.SealedGeneration seal();
 
         @Override
         void close();

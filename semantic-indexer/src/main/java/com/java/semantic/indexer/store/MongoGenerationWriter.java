@@ -23,12 +23,14 @@ import java.util.Optional;
 public final class MongoGenerationWriter {
     private final MongoTemplate template;
     private final BatchRegistrationGate batchRegistrationGate;
+    private final GenerationBuildOwnership ownership;
 
     public MongoGenerationWriter(MongoTemplate template) { this(template, () -> { }); }
 
     MongoGenerationWriter(MongoTemplate template, BatchRegistrationGate batchRegistrationGate) {
         this.template = Objects.requireNonNull(template, "mongo template is required");
         this.batchRegistrationGate = Objects.requireNonNull(batchRegistrationGate, "batch registration gate is required");
+        ownership = new GenerationBuildOwnership(template);
     }
 
     /** Fails before checkout or exporter invocation when an administrator has not installed the current contract. */
@@ -122,13 +124,8 @@ public final class MongoGenerationWriter {
     }
 
     private void verifyRunningBuild(GenerationWriteContext context) {
-        Document query = new Document("jobId", context.jobId()).append("repoId", context.repositoryId().value())
-                .append("target.generationId", context.generationId().value()).append("operation", "BUILD")
-                .append("phase", "RUNNING").append("active", true);
         try {
-            if (Optional.ofNullable(template.getCollection("index_jobs").find(query).first()).isEmpty()) {
-                throw new IllegalStateException("index job is not an active running build");
-            }
+            ownership.require(context);
         } catch (DataAccessResourceFailureException exception) {
             throw new SemanticIndexUnavailableException("SEMANTIC_INDEX_UNAVAILABLE", exception);
         } catch (MongoException exception) {
@@ -138,10 +135,9 @@ public final class MongoGenerationWriter {
 
     private void markOutstanding(GenerationWriteContext context, String batchId) {
         try {
-            long matched = template.getCollection("index_jobs").updateOne(Filters.and(Filters.eq("jobId", context.jobId()),
-                            Filters.eq("repoId", context.repositoryId().value()), Filters.eq("target.generationId", context.generationId().value()),
-                            Filters.eq("operation", "BUILD"), Filters.eq("phase", "RUNNING"), Filters.eq("active", true),
-                            Filters.ne("outstandingBatches", batchId), Filters.ne("acknowledgedBatches", batchId)),
+            long matched = template.getCollection("index_jobs").updateOne(ownership.activeFilter(context)
+                            .append("outstandingBatches", new Document("$ne", batchId))
+                            .append("acknowledgedBatches", new Document("$ne", batchId)),
                     Updates.addToSet("outstandingBatches", batchId)).getModifiedCount();
             if (matched != 1L) { throw new IllegalStateException("index job batch registration failed closed"); }
         } catch (MongoException exception) {
@@ -180,10 +176,8 @@ public final class MongoGenerationWriter {
     }
 
     private void acknowledgeBatch(GenerationWriteContext context, String batchId) {
-        long jobChanged = template.getCollection("index_jobs").updateOne(Filters.and(Filters.eq("jobId", context.jobId()),
-                        Filters.eq("repoId", context.repositoryId().value()), Filters.eq("target.generationId", context.generationId().value()),
-                        Filters.eq("operation", "BUILD"), Filters.eq("phase", "RUNNING"), Filters.eq("active", true),
-                        Filters.eq("outstandingBatches", batchId)),
+        long jobChanged = template.getCollection("index_jobs").updateOne(ownership.activeFilter(context)
+                        .append("outstandingBatches", batchId),
                 Updates.combine(Updates.pull("outstandingBatches", batchId), Updates.addToSet("acknowledgedBatches", batchId))).getModifiedCount();
         if (jobChanged != 1L) { throw new IllegalStateException("index job batch acknowledgement failed closed"); }
         long manifestChanged = template.getCollection("generation_manifests").updateOne(ownedWritingManifest(context)
@@ -194,9 +188,7 @@ public final class MongoGenerationWriter {
 
     private void failGeneration(GenerationWriteContext context, String batchId) {
         try {
-            long jobChanged = template.getCollection("index_jobs").updateOne(Filters.and(Filters.eq("jobId", context.jobId()),
-                            Filters.eq("repoId", context.repositoryId().value()), Filters.eq("target.generationId", context.generationId().value()),
-                            Filters.eq("operation", "BUILD"), Filters.eq("phase", "RUNNING"), Filters.eq("active", true)),
+            long jobChanged = template.getCollection("index_jobs").updateOne(ownership.activeFilter(context),
                     Updates.addToSet("failedOrAmbiguousBatches", batchId)).getModifiedCount();
             long manifestChanged = template.getCollection("generation_manifests").updateOne(ownedWritingManifest(context),
                     Updates.combine(Updates.addToSet("failedOrAmbiguousBatches", batchId), Updates.set("writeState", GenerationWriteState.FAILED.name()))).getModifiedCount();

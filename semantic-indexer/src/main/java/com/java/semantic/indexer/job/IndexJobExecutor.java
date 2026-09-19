@@ -47,6 +47,7 @@ public final class IndexJobExecutor {
     private void executeOperation(IndexJob job) {
         switch (job.operation()) {
             case BUILD -> buildRunner.run(job);
+            case REVIEW -> throw new IllegalStateException("REVIEW requires review preparation orchestration");
             case ROLLBACK -> rollback(job);
             case RESET -> resetHandler.orElseThrow(() -> new IllegalStateException("RESET handler is not registered")).reset(job);
             case GIT_REFS, GIT_HISTORY, GIT_COMPARISON -> gitEvidenceHandler.orElseThrow(() -> new IllegalStateException("Git evidence handler is not registered")).prepare(job);

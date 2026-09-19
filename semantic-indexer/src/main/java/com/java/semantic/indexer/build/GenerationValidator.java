@@ -1,6 +1,7 @@
 package com.java.semantic.indexer.build;
 
 import com.java.semantic.indexer.store.GenerationWriteContext;
+import com.java.semantic.indexer.store.GenerationBuildOwnership;
 import com.java.semantic.model.index.AnalysisFingerprint;
 import com.java.semantic.model.index.AnalysisInputs;
 import com.java.semantic.model.index.SemanticAnalysisEvidence;
@@ -48,10 +49,12 @@ public final class GenerationValidator {
 
     private final MongoTemplate template;
     private final SourceIndexBatchDocumentMapper projectionMapper;
+    private final GenerationBuildOwnership ownership;
 
     public GenerationValidator(MongoTemplate template) {
         this.template = Objects.requireNonNull(template, "mongo template is required");
         projectionMapper = new SourceIndexBatchDocumentMapper(template.getConverter());
+        ownership = new GenerationBuildOwnership(template);
     }
 
     public ValidationResult validate(GenerationWriteContext context, RepositoryRevision requestedRevision,
@@ -205,10 +208,12 @@ public final class GenerationValidator {
     }
 
     private boolean runningBuildOwns(GenerationWriteContext context) {
-        Document jobFilter = new Document("jobId", context.jobId()).append("repoId", context.repositoryId().value())
-                .append("operation", "BUILD").append("phase", "RUNNING").append("active", true)
-                .append("target.generationId", context.generationId().value());
-        return Objects.nonNull(template.getCollection(IndexCollections.INDEX_JOBS).find(jobFilter).first());
+        try {
+            ownership.require(context);
+            return true;
+        } catch (IllegalStateException exception) {
+            return false;
+        }
     }
 
     private Document freezeForValidation(GenerationWriteContext context) {

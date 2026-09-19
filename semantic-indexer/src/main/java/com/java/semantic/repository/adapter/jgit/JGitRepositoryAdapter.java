@@ -51,6 +51,7 @@ import java.util.Collection;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.List;
+import java.util.Set;
 import java.time.Instant;
 import java.util.function.Consumer;
 import java.io.ByteArrayOutputStream;
@@ -131,7 +132,8 @@ public class JGitRepositoryAdapter implements GitRepositoryPort {
     public void checkoutDetached(Path workingTree, RepositoryRevision revision) {
         try (Git git = Git.open(workingTree.toFile())) {
             git.checkout().setName(revision.value()).setForced(true).call();
-            git.clean().setForce(true).setCleanDirectories(true).setIgnore(false).call();
+            git.clean().setForce(true).setCleanDirectories(true).setIgnore(false)
+                    .setPaths(Set.of("target", "build", ".classpath", ".factorypath", ".project", ".settings")).call();
             detachHead(git, revision);
         } catch (RepositoryMutationException exception) {
             throw exception;

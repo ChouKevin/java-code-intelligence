@@ -39,11 +39,35 @@ class RepositoryBuildRunnerTest {
         assertThat(closed).isTrue();
     }
 
+    @Test
+    void seals_in_an_owned_scope_without_publishing_and_closes_the_scope() {
+        AtomicBoolean closed = new AtomicBoolean();
+        com.java.semantic.model.index.SealedGeneration sealed = org.mockito.Mockito.mock(com.java.semantic.model.index.SealedGeneration.class);
+        RepositoryBuildRunner runner = new RepositoryBuildRunner(job -> scope(() -> { }, () -> closed.set(true), sealed));
+
+        assertThat(runner.seal(job())).isSameAs(sealed);
+
+        assertThat(closed).isTrue();
+    }
+
     private static RepositoryBuildRunner.BuildScope scope(Runnable build, Runnable close) {
+        return scope(build, close, null);
+    }
+
+    private static RepositoryBuildRunner.BuildScope scope(Runnable build, Runnable close,
+                                                           com.java.semantic.model.index.SealedGeneration sealed) {
         return new RepositoryBuildRunner.BuildScope() {
             @Override
             public void build() {
                 build.run();
+            }
+
+            @Override
+            public com.java.semantic.model.index.SealedGeneration seal() {
+                if (sealed == null) { // cs-allow
+                    throw new UnsupportedOperationException("seal was not configured");
+                }
+                return sealed;
             }
 
             @Override
