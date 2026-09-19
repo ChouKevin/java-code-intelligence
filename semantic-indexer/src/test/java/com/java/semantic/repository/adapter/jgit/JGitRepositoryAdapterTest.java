@@ -77,33 +77,41 @@ class JGitRepositoryAdapterTest {
     }
 
     @Test
-    void should_remove_untracked_and_ignored_source_artifacts_when_checking_out_an_exact_revision()
-            throws Exception {
+    void restores_the_exact_tracked_tree_and_removes_only_indexer_owned_build_output() throws Exception {
         try (RemoteFixture fixture = createRemote()) {
             Files.writeString(fixture.seedRoot().resolve(".gitignore"), "ignored/\n");
             fixture.seed().add().addFilepattern(".gitignore").call();
             fixture.seed().commit()
-                    .setMessage("ignore generated sources")
+                    .setMessage("ignore operator files")
                     .setAuthor("Test", "test@example.com")
                     .setCommitter("Test", "test@example.com")
                     .call();
             pushBranch(fixture.seed(), "main");
 
             JGitRepositoryAdapter adapter = new JGitRepositoryAdapter(new RepositoryProperties());
-            Path clone = tempDirectory.resolve("clone-with-contaminants");
+            Path clone = tempDirectory.resolve("clone-with-build-output");
             RepositoryRevision revision = RepositoryRevision.ofSha(
                     fixture.seed().getRepository().resolve("refs/heads/main").getName());
             adapter.clone(clone, fixture.remote().toUri().toString());
-            Files.writeString(clone.resolve("untracked.java"), "class Untracked {}\n");
+            Files.writeString(clone.resolve("sample.txt"), "modified");
+            Files.writeString(clone.resolve("untracked.java"), "class Operator {}\n");
             Path ignoredDirectory = clone.resolve("ignored");
             Files.createDirectories(ignoredDirectory);
             Files.writeString(ignoredDirectory.resolve("Ignored.java"), "class Ignored {}\n");
+            Files.createDirectories(clone.resolve("target"));
+            Files.writeString(clone.resolve("target/Indexer.class"), "generated");
+            Files.createDirectories(clone.resolve("build"));
+            Files.writeString(clone.resolve("build/Indexer.class"), "generated");
+            Files.writeString(clone.resolve(".project"), "indexer import metadata");
 
             adapter.checkoutDetached(clone, revision);
 
-            assertThat(Files.exists(clone.resolve("untracked.java"))).isFalse();
-            assertThat(Files.exists(ignoredDirectory.resolve("Ignored.java"))).isFalse();
             assertThat(Files.readString(clone.resolve("sample.txt"))).isEqualTo("initial");
+            assertThat(Files.exists(clone.resolve("target/Indexer.class"))).isFalse();
+            assertThat(Files.exists(clone.resolve("build/Indexer.class"))).isFalse();
+            assertThat(Files.exists(clone.resolve(".project"))).isFalse();
+            assertThat(Files.readString(clone.resolve("untracked.java"))).isEqualTo("class Operator {}\n");
+            assertThat(Files.readString(ignoredDirectory.resolve("Ignored.java"))).isEqualTo("class Ignored {}\n");
         }
     }
 
