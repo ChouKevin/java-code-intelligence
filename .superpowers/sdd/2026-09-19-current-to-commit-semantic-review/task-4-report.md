@@ -23,3 +23,11 @@
 - Checked analysis fingerprint/evidence are both persisted before batch writes and are included in manifest digest material.
 - Checked incremental parent selection requires the exact persisted fingerprint, preventing reuse from an unrelated current parent.
 - Scoped verification was used as requested; formatters, linters, and project-wide suites were not run.
+
+## Review follow-up
+
+- Removed exporter compatibility constructors and throwing legacy overloads. Syntax projection tests use explicit test-only projection; prepared/context export is the only production path.
+- Incremental assembly narrows a complete lease-bound preparation to the selected export plan, retaining complete attestation while exporting only reanalyzed sources.
+- Sealing accepts only JDT `SUCCESS` or `WITH_ERROR` evidence status. Identity canonicalizes analysis document keys and unordered project/root/proof/limitation collections instead of BSON `toJson()`.
+- `mvn -pl semantic-indexer -am -Dsurefire.failIfNoSpecifiedTests=false -Dtest=IndexBuildServiceTest,IndexProjectionContractTest,SemanticRelationProjectorFrameworkEvidenceTest,JdtLsRepositoryIndexExporterSemanticSessionTest test`: 16 tests, 0 failures/errors.
+- `mvn -pl semantic-indexer -am -Pmongo-it -Dsurefire.failIfNoSpecifiedTests=false -Dtest=GenerationValidatorIT,FullIndexPublicationIT test`: 39 tests, 0 failures/errors.

@@ -106,10 +106,8 @@ public final class IndexBuildService {
             FullIndexPlan plan = preparedAnalysis.plan();
             insertWritingManifest(job, context);
             FullIndexPlan exportPlan = incrementalBuilder.assemble(job, context, plan, preparedAnalysis.fingerprint()).exportPlan();
-            if (!exportPlan.equals(plan)) {
-                throw new IllegalStateException("incremental export requires compatible prepared analysis inputs");
-            }
-            RepositoryIndexExport export = exporter.export(context, preparedAnalysis);
+            PreparedAnalysis exportAnalysis = preparedAnalysis.forExportPlan(exportPlan);
+            RepositoryIndexExport export = exporter.export(context, exportAnalysis);
             generationWriter.recordAnalysis(context, preparedAnalysis.fingerprint(), export.analysisEvidence());
             MongoIndexBatchWriter writer = new MongoIndexBatchWriter(generationWriter, context, documentMapper);
             for (SourceIndexBatch batch : export.batches()) {

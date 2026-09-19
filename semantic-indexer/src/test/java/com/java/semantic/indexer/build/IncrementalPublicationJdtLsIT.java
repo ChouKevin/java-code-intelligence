@@ -3,6 +3,7 @@ package com.java.semantic.indexer.build;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.java.semantic.config.JdtLsProperties;
+import com.java.semantic.indexer.store.GenerationWriteContext;
 import com.java.semantic.indexer.incremental.ChangedSource;
 import com.java.semantic.indexer.incremental.IncrementalIndexPlan;
 import com.java.semantic.indexer.incremental.IncrementalIndexPlanner;
@@ -48,24 +49,19 @@ class IncrementalPublicationJdtLsIT {
         DefaultJdtWorkspaceManager manager = manager(jdtLsHome);
         try {
             RepositoryRevision firstRevision = new RepositoryRevision("a".repeat(40));
-            RepositorySnapshot firstSnapshot = new RepositorySnapshot(repositoryId, root, firstRevision);
-            JdtLsRepositoryIndexExporter exporter = new JdtLsRepositoryIndexExporter(
-                    new Lsp4jJavaSemanticService(firstSnapshot, manager.getOrStart(firstSnapshot)));
             FullIndexPlan firstPlan = new FullIndexPlanner().plan(root);
-            assertThat(exporter.export(repositoryId, firstRevision, new GenerationId("g1"), firstPlan)).isNotEmpty();
+            assertThat(export(manager, repositoryId, root, firstRevision, new GenerationId("g1"), firstPlan)).isNotEmpty();
 
             Files.writeString(source, "package demo; public class Sample { int value() { return 2; } }");
             RepositoryRevision bodyRevision = new RepositoryRevision("b".repeat(40));
-            manager.getOrStart(new RepositorySnapshot(repositoryId, root, bodyRevision));
             FullIndexPlan bodyPlan = new FullIndexPlanner().plan(root);
-            assertThat(exporter.export(repositoryId, bodyRevision, new GenerationId("g2"), bodyPlan))
+            assertThat(export(manager, repositoryId, root, bodyRevision, new GenerationId("g2"), bodyPlan))
                     .flatMap(SourceIndexBatch::symbols).extracting(document -> document.name()).contains("value");
 
             Files.writeString(source, "package demo; public class Sample { String value() { return \"two\"; } }");
             RepositoryRevision signatureRevision = new RepositoryRevision("c".repeat(40));
-            manager.getOrStart(new RepositorySnapshot(repositoryId, root, signatureRevision));
             FullIndexPlan signaturePlan = new FullIndexPlanner().plan(root);
-            assertThat(exporter.export(repositoryId, signatureRevision, new GenerationId("g3"), signaturePlan))
+            assertThat(export(manager, repositoryId, root, signatureRevision, new GenerationId("g3"), signaturePlan))
                     .flatMap(SourceIndexBatch::symbols).extracting(document -> document.signature()).contains("demo.Sample#value()");
 
             IncrementalIndexPlan deletePlan = planner(ChangedSource.delete("src/main/java/demo/Sample.java", "class Sample {}"), noModules())
@@ -82,6 +78,19 @@ class IncrementalPublicationJdtLsIT {
         } finally {
             manager.shutdownAll();
         }
+    }
+
+    private static List<SourceIndexBatch> export(
+            DefaultJdtWorkspaceManager manager,
+            RepositoryId repositoryId,
+            Path root,
+            RepositoryRevision revision,
+            GenerationId generationId,
+            FullIndexPlan plan) {
+        RepositorySnapshot snapshot = new RepositorySnapshot(repositoryId, root, revision);
+        GenerationWriteContext context = new GenerationWriteContext(repositoryId, generationId, generationId.value() + "-job");
+        return JdtLsRepositoryIndexExporter.production().export(context, TestPreparedAnalysis.forSession(snapshot, plan,
+                new Lsp4jJavaSemanticService(snapshot, manager.getOrStart(snapshot)))).batches();
     }
 
     private static IncrementalIndexPlanner planner(ChangedSource changedSource, ModuleLocator moduleLocator) {

@@ -224,7 +224,7 @@ class SemanticRelationProjectorFrameworkEvidenceTest {
     }
 
     private List<SourceIndexBatch> exportBatches() {
-        return new JdtLsRepositoryIndexExporter().export(new RepositoryId("framework-evidence"),
+        return new TestSyntaxRepositoryIndexExporter().export(new RepositoryId("framework-evidence"),
                 new RepositoryRevision("a".repeat(40)), new GenerationId("framework-generation"),
                 new FullIndexPlanner().plan(repository));
     }

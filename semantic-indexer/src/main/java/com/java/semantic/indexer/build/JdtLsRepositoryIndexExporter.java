@@ -12,9 +12,7 @@ import com.java.semantic.model.index.SourceIndexIssue;
 import com.java.semantic.model.index.SourceIndexScope;
 import com.java.semantic.model.index.SymbolDocument;
 import com.java.semantic.model.repository.RepositoryId;
-import com.java.semantic.model.repository.RepositoryRevision;
 import com.java.semantic.repository.domain.RepositorySnapshot;
-import com.java.semantic.semantic.domain.JavaSemanticService;
 import com.java.semantic.syntax.adapter.jdt.JdtSyntaxExtractionService;
 import com.java.semantic.syntax.domain.RepositorySyntax;
 import com.java.semantic.syntax.domain.SourceExtractionStatus;
@@ -52,33 +50,6 @@ public final class JdtLsRepositoryIndexExporter implements RepositoryIndexExport
         this.relationProjector = Objects.requireNonNull(relationProjector, "relation projector is required");
         this.entryPointProjector = Objects.requireNonNull(entryPointProjector, "entry point projector is required");
         this.searchProjector = Objects.requireNonNull(searchProjector, "search projector is required");
-    }
-    /** Test-only syntax projector; it cannot return semantic evidence or seal a generation. */
-    JdtLsRepositoryIndexExporter() {
-        this(new JdtSyntaxExtractionService(), new SyntaxSymbolProjector(), new SemanticRelationProjector(),
-                new EntryPointProjector(), new SearchProjector());
-    }
-
-    /** Test-only compatibility constructor. Production callers must use {@link #export(GenerationWriteContext, PreparedAnalysis)}. */
-    JdtLsRepositoryIndexExporter(JavaSemanticService semanticService) {
-        this();
-    }
-
-    /** Test-only compatibility constructor. */
-    JdtLsRepositoryIndexExporter(JdtSyntaxExtractionService syntaxExtractionService, SyntaxSymbolProjector symbolProjector,
-                                 SemanticRelationProjector relationProjector, EntryPointProjector entryPointProjector,
-                                 SearchProjector searchProjector, SemanticCallTargetResolver resolver) {
-        this(syntaxExtractionService, symbolProjector, relationProjector, entryPointProjector, searchProjector);
-    }
-
-    List<SourceIndexBatch> export(RepositoryId repositoryId, RepositoryRevision revision, GenerationId generationId,
-                                  FullIndexPlan plan) {
-        throw new UnsupportedOperationException("test-only syntax export must use an explicit syntax projector");
-    }
-
-    List<SourceIndexBatch> export(RepositoryId repositoryId, RepositoryRevision revision, GenerationId generationId,
-                                  FullIndexPlan plan, JavaSemanticService semanticService) {
-        throw new UnsupportedOperationException("test-only semantic export must use prepared analysis");
     }
 
 

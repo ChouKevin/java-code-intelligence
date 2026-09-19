@@ -427,11 +427,12 @@ class FixtureFullIndexJdtLsIT {
         RepositoryRevision revision = new RepositoryRevision(revisionValue);
         GenerationId generationId = new GenerationId(generationValue);
         RepositorySnapshot snapshot = new RepositorySnapshot(repositoryId, repositoryRoot, revision);
-        List<SourceIndexBatch> batches = new JdtLsRepositoryIndexExporter(
-                new Lsp4jJavaSemanticService(snapshot, manager.getOrStart(snapshot))).export(repositoryId, revision, generationId,
-                new FullIndexPlanner().plan(repositoryRoot));
-        seedWritableGeneration(template, repositoryId, revision, generationId);
+        FullIndexPlan plan = new FullIndexPlanner().plan(repositoryRoot);
         GenerationWriteContext lease = new GenerationWriteContext(repositoryId, generationId, generationValue + "-job");
+        List<SourceIndexBatch> batches = JdtLsRepositoryIndexExporter.production().export(lease,
+                TestPreparedAnalysis.forSession(snapshot, plan,
+                        new Lsp4jJavaSemanticService(snapshot, manager.getOrStart(snapshot)))).batches();
+        seedWritableGeneration(template, repositoryId, revision, generationId);
         MongoIndexBatchWriter writer = new MongoIndexBatchWriter(new MongoGenerationWriter(template), lease,
                 new SourceIndexBatchDocumentMapper(template.getConverter()));
         batches.forEach(writer::write);

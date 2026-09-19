@@ -166,8 +166,9 @@ public final class GenerationValidator {
                     issues.add(issue("ANALYSIS_ROOT_MISMATCH", "semantic evidence does not prove each included root"));
                 }
             }
-            if (evidence.buildStatus().equals("SYNTAX_ONLY")) {
-                issues.add(issue("SYNTAX_ONLY_ANALYSIS", "syntax-only evidence cannot seal a semantic generation"));
+            if (!Set.of("SUCCESS", "WITH_ERROR").contains(evidence.buildStatus())) {
+                issues.add(issue("INVALID_SEMANTIC_BUILD_STATUS",
+                        "manifest semantic evidence has no successful JDT build status"));
             }
             Set<String> sourcePaths = files.stream().map(file -> file.getString("sourcePath"))
                     .filter(Objects::nonNull).collect(java.util.stream.Collectors.toSet());
@@ -572,8 +573,8 @@ public final class GenerationValidator {
         identities.add("analysisFingerprint|" + Objects.toString(manifest.getString("analysisFingerprint"), ""));
         Document inputs = manifest.get("analysisInputs", Document.class);
         Document evidence = manifest.get("analysisEvidence", Document.class);
-        identities.add("analysisInputs|" + (Objects.nonNull(inputs) ? inputs.toJson() : ""));
-        identities.add("analysisEvidence|" + (Objects.nonNull(evidence) ? evidence.toJson() : ""));
+        identities.add("analysisInputs|" + canonicalAnalysisValue(inputs, "analysisInputs"));
+        identities.add("analysisEvidence|" + canonicalAnalysisValue(evidence, "analysisEvidence"));
         identities.sort(Comparator.naturalOrder());
         try {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
@@ -585,6 +586,31 @@ public final class GenerationValidator {
         } catch (NoSuchAlgorithmException exception) {
             throw new IllegalStateException("SHA-256 must be available", exception);
         }
+    }
+
+    private static String canonicalAnalysisValue(Object value, String field) {
+        if (Objects.isNull(value)) {
+            return "null";
+        }
+        if (value instanceof Document document) {
+            return canonicalAnalysisValue(new LinkedHashMap<>(document), field);
+        }
+        if (value instanceof Map<?, ?> map) {
+            return map.entrySet().stream()
+                    .map(entry -> Map.entry(String.valueOf(entry.getKey()),
+                            canonicalAnalysisValue(entry.getValue(), String.valueOf(entry.getKey()))))
+                    .sorted(Map.Entry.comparingByKey())
+                    .map(entry -> entry.getKey() + "=" + entry.getValue())
+                    .collect(java.util.stream.Collectors.joining(",", "{", "}"));
+        }
+        if (value instanceof List<?> list) {
+            List<String> values = list.stream().map(item -> canonicalAnalysisValue(item, field)).toList();
+            if (Set.of("projects", "roots", "verifiedSourcePaths", "limitations").contains(field)) {
+                values = values.stream().sorted().toList();
+            }
+            return values.stream().collect(java.util.stream.Collectors.joining(",", "[", "]"));
+        }
+        return String.valueOf(value);
     }
 
     private static void addIdentities(List<String> identities, String collection, List<Document> documents, String field) {

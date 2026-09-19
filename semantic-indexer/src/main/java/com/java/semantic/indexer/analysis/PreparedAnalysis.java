@@ -20,6 +20,14 @@ public interface PreparedAnalysis extends AutoCloseable {
 
     void verifyUnchangedInputs();
 
+    /** Narrows export work while retaining the complete preparation's attestation and lease. */
+    default PreparedAnalysis forExportPlan(FullIndexPlan exportPlan) {
+        if (plan().equals(exportPlan)) {
+            return this;
+        }
+        return new PreparedAnalysisView(this, exportPlan);
+    }
+
     @Override
     void close();
 }

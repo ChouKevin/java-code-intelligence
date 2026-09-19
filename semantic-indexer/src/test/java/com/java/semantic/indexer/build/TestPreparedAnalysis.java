@@ -16,19 +16,26 @@ final class TestPreparedAnalysis implements PreparedAnalysis {
     private final FullIndexPlan plan;
     private final AnalysisFingerprint fingerprint;
     private final SemanticAnalysisEvidence evidence;
+    private final JavaSemanticService semanticService;
 
     static TestPreparedAnalysis forSnapshot(RepositorySnapshot snapshot, FullIndexPlan plan) {
-        return new TestPreparedAnalysis(snapshot, plan);
+        return new TestPreparedAnalysis(snapshot, plan, null);
     }
 
-    private TestPreparedAnalysis(RepositorySnapshot snapshot, FullIndexPlan plan) {
+    static TestPreparedAnalysis forSession(
+            RepositorySnapshot snapshot, FullIndexPlan plan, JavaSemanticService semanticService) {
+        return new TestPreparedAnalysis(snapshot, plan, semanticService);
+    }
+
+    private TestPreparedAnalysis(RepositorySnapshot snapshot, FullIndexPlan plan, JavaSemanticService semanticService) {
         this.snapshot = snapshot;
         this.plan = plan;
+        this.semanticService = semanticService;
         AnalysisInputs inputs = new AnalysisInputs(IndexSchemaContract.ANALYSIS_EVIDENCE_VERSION, DIGEST, DIGEST, DIGEST, DIGEST,
                 List.of(new AnalysisInputs.Project("project", DIGEST, Map.of(), List.of(),
                         List.of(new AnalysisInputs.Root("src", "MAIN", true, List.of())), List.of(), List.of())));
         fingerprint = AnalysisFingerprint.from(inputs);
-        evidence = new SemanticAnalysisEvidence(IndexSchemaContract.ANALYSIS_EVIDENCE_VERSION, fingerprint.digest(), "READY",
+        evidence = new SemanticAnalysisEvidence(IndexSchemaContract.ANALYSIS_EVIDENCE_VERSION, fingerprint.digest(), "SUCCESS",
                 List.of(new SemanticAnalysisEvidence.ProjectProof("project", true, List.of("src"))),
                 new SemanticAnalysisEvidence.ResolutionCoverage(0, 0, 0, 0, 0), List.of());
     }
@@ -37,7 +44,12 @@ final class TestPreparedAnalysis implements PreparedAnalysis {
     @Override public FullIndexPlan plan() { return plan; }
     @Override public AnalysisFingerprint fingerprint() { return fingerprint; }
     @Override public SemanticAnalysisEvidence readinessEvidence() { return evidence; }
-    @Override public JavaSemanticService semanticService() { throw new UnsupportedOperationException("test exporter does not use semantic service"); }
+    @Override public JavaSemanticService semanticService() {
+        if (semanticService == null) {
+            throw new UnsupportedOperationException("test exporter does not use semantic service");
+        }
+        return semanticService;
+    }
     @Override public void verifyUnchangedInputs() { }
     @Override public void close() { }
 }

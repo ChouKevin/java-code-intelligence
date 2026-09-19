@@ -83,8 +83,12 @@ class IndexBuildServiceTest {
         when(preparation.prepare(any())).thenReturn(preparedAnalysis);
         when(preparedAnalysis.plan()).thenReturn(preparedPlan);
         when(preparedAnalysis.semanticService()).thenReturn(boundSemanticService);
-        when(incrementalBuilder.assemble(any(), any(), any())).thenReturn(new IncrementalGenerationBuilder.BuildSelection(
-                false, mock(com.java.semantic.indexer.incremental.IncrementalIndexPlan.class), preparedPlan));
+        com.java.semantic.model.index.AnalysisFingerprint fingerprint = mock(com.java.semantic.model.index.AnalysisFingerprint.class);
+        when(preparedAnalysis.fingerprint()).thenReturn(fingerprint);
+        when(preparedAnalysis.forExportPlan(preparedPlan)).thenReturn(preparedAnalysis);
+        when(incrementalBuilder.assemble(any(), any(), any(), org.mockito.ArgumentMatchers.eq(fingerprint)))
+                .thenReturn(new IncrementalGenerationBuilder.BuildSelection(
+                        false, mock(com.java.semantic.indexer.incremental.IncrementalIndexPlan.class), preparedPlan));
         when(exporter.export(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.eq(preparedAnalysis)))
                 .thenReturn(new RepositoryIndexExport(List.of(), mock(com.java.semantic.model.index.SemanticAnalysisEvidence.class)));
         when(validator.validate(any(), org.mockito.ArgumentMatchers.eq(target.revision()),
@@ -138,6 +142,13 @@ class IndexBuildServiceTest {
         IncrementalGenerationBuilder.BuildSelection selection = new IncrementalGenerationBuilder.BuildSelection(false,
                 mock(com.java.semantic.indexer.incremental.IncrementalIndexPlan.class), plan);
         ManifestDigest digest = new ManifestDigest("1".repeat(64));
+        RepositoryAnalysisPreparation preparation = mock(RepositoryAnalysisPreparation.class);
+        PreparedAnalysis preparedAnalysis = mock(PreparedAnalysis.class);
+        com.java.semantic.model.index.AnalysisFingerprint fingerprint = mock(com.java.semantic.model.index.AnalysisFingerprint.class);
+        when(preparation.prepare(any())).thenReturn(preparedAnalysis);
+        when(preparedAnalysis.plan()).thenReturn(plan);
+        when(preparedAnalysis.fingerprint()).thenReturn(fingerprint);
+        when(preparedAnalysis.forExportPlan(plan)).thenReturn(preparedAnalysis);
         GenerationValidator.ValidationResult result = new GenerationValidator.ValidationResult(digest, Map.of(), List.of());
         IndexJobTarget target = job.target().orElseThrow();
         IndexPublicationIntent intent = new IndexPublicationIntent(job.id(), IndexJobOperation.BUILD, job.repositoryId(),
@@ -145,14 +156,14 @@ class IndexBuildServiceTest {
         IndexBuildService.CheckedOutRepository checkout = new IndexBuildService.CheckedOutRepository(Path.of("."), target.revision());
         when(planner.plan(checkout.root())).thenReturn(plan);
         when(incrementalBuilder.assemble(org.mockito.ArgumentMatchers.eq(job), org.mockito.ArgumentMatchers.any(),
-                org.mockito.ArgumentMatchers.eq(plan))).thenReturn(selection);
+                org.mockito.ArgumentMatchers.eq(plan), org.mockito.ArgumentMatchers.eq(fingerprint))).thenReturn(selection);
         when(exporter.export(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any()))
                 .thenReturn(new RepositoryIndexExport(List.of(), mock(com.java.semantic.model.index.SemanticAnalysisEvidence.class)));
         when(validator.validate(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.eq(target.revision()),
                 org.mockito.ArgumentMatchers.eq(target.revision()))).thenReturn(result);
         when(jobs.prepareBuildPublication(job, digest)).thenReturn(Optional.of(intent));
         return new IndexBuildService(planner, exporter, generationWriter, mapper, validator, ignored -> checkout,
-                incrementalBuilder, jobs, publication, gate);
+                incrementalBuilder, jobs, publication, gate, preparation);
     }
 
     private static IndexJob job() {
