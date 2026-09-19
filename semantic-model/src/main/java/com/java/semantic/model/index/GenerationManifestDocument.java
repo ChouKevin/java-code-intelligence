@@ -49,9 +49,10 @@ public record GenerationManifestDocument(
         for (Long count : sealedCollectionCounts.values()) {
             ModelValidation.require(count >= 0, "sealed collection count must not be negative");
         }
-        if (writeState == GenerationWriteState.SEALED_VALID) {
+        boolean validated = validationResult.filter("VALID"::equals).isPresent();
+        if (validated || writeState == GenerationWriteState.SEALED_VALID) {
             ModelValidation.require(analysisEvidence.isPresent(),
-                    "sealed valid generation requires semantic analysis evidence");
+                    "validated generation requires semantic analysis evidence");
         }
     }
 }

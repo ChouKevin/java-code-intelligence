@@ -148,3 +148,54 @@ calculation including analysis evidence are owned by Task 4. Review admission,
 preparation, READY publication BSON, comparison/snapshot version-2 BSON, and
 strict review/Git read decoding are intentionally left to their assigned later
 tasks. No compatibility path was added for pre-schema-3 data.
+
+## Fix round 1: analysis evidence and local identity boundaries
+
+### Findings addressed
+
+- A `WRITING` manifest whose `validationResult` was `VALID` could omit analysis
+  evidence. Evidence is now mandatory immediately at `VALID` and remains
+  mandatory for `SEALED_VALID`; present evidence must still match the required
+  analysis fingerprint digest.
+- Artifact logical IDs could contain local POSIX paths, Windows absolute paths,
+  or local `file:` URIs and therefore enter the fingerprint. The model now
+  rejects those local locations before canonicalization while retaining opaque
+  logical identifiers such as Maven coordinates and project edges.
+- Updated the stale `SEARCH v2` schema comment to `SEARCH v3`.
+
+### RED
+
+```bash
+.superpowers/sdd/2026-09-19-current-to-commit-semantic-review/tools/apache-maven-3.9.11/bin/mvn \
+  --batch-mode --no-transfer-progress -pl semantic-model \
+  -Dtest=AnalysisFingerprintTest,IndexDocumentContractTest test
+```
+
+Observed behavioral failures:
+
+- All three local artifact forms (`/home/...`, `C:\\Users\\...`, and
+  `file:///home/...`) were accepted.
+- A `WRITING` generation with `validationResult=VALID` and no analysis evidence
+  was accepted.
+
+The test suite reported 4 failures across 28 tests. The pre-existing mismatched
+evidence assertion was retained and protects the digest-consistency invariant.
+
+### GREEN
+
+The same focused command passed after the model changes:
+
+```text
+Tests run: 28, Failures: 0, Errors: 0, Skipped: 0
+BUILD SUCCESS
+```
+
+### Fix-round self-review
+
+- The new artifact guard is evaluated before `AnalysisFingerprint` can serialize
+  `logicalId`; it rejects POSIX-rooted, backslash-rooted/UNC, drive-rooted, and
+  `file:` local forms without changing valid logical identifier semantics.
+- `validationResult.filter("VALID"::equals)` makes the validated boundary
+  explicit while preserving ordinary WRITING staged optionality before
+  validation. No persistence state abstraction or decoder was added.
+- The implementation uses explicit Java types and no direct null comparison.

@@ -72,9 +72,17 @@ public record AnalysisInputs(
             ModelValidation.require(ordinal >= 0, "artifact ordinal must not be negative");
             logicalId = ModelValidation.requiredText(logicalId, "artifact logical id");
             kind = ModelValidation.requiredText(kind, "artifact kind");
+            ModelValidation.require(!isLocalArtifactLocation(logicalId),
+                    "artifact logical id must not contain a local filesystem location");
             contentDigest = ModelValidation.sha256(contentDigest, "artifact content digest");
             ModelValidation.require(byteLength >= 0, "artifact byte length must not be negative");
         }
+    }
+
+    private static boolean isLocalArtifactLocation(String value) {
+        boolean windowsDrive = value.length() >= 3 && Character.isLetter(value.charAt(0))
+                && value.charAt(1) == ':' && (value.charAt(2) == '/' || value.charAt(2) == '\\');
+        return value.startsWith("/") || value.startsWith("\\") || value.startsWith("file:") || windowsDrive;
     }
 
     private static String projectPath(String value) {

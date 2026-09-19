@@ -2,6 +2,7 @@ package com.java.semantic.model;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import com.java.semantic.model.index.AnalysisFingerprint;
 import com.java.semantic.model.index.AnalysisInputs;
@@ -9,6 +10,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 class AnalysisFingerprintTest {
 
@@ -28,6 +31,13 @@ class AnalysisFingerprintTest {
 
         assertNotEquals(AnalysisFingerprint.from(left).digest(), AnalysisFingerprint.from(right).digest());
         assertEquals(AnalysisFingerprint.from(left).digest(), AnalysisFingerprint.from(sameSemantics).digest());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"/home/agent/.m2/cache.jar", "C:\\Users\\agent\\cache.jar", "file:///home/agent/cache.jar"})
+    void rejects_local_artifact_identifiers(String logicalId) {
+        assertThrows(IllegalArgumentException.class,
+                () -> new AnalysisInputs.Artifact(0, logicalId, "JAR", "a".repeat(64), 10L));
     }
 
     private static AnalysisInputs inputs(AnalysisInputs.Project project) {

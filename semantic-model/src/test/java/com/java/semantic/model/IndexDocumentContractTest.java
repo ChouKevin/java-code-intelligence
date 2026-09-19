@@ -171,6 +171,21 @@ class IndexDocumentContractTest {
                 Optional.of(new GitComparisonId("00000000-0000-0000-0000-000000000003")),
                 Instant.parse("2026-09-19T00:00:00Z"), Optional.of(Instant.parse("2026-09-19T00:01:00Z")), Optional.empty()));
     }
+
+    @Test
+    void rejects_validated_generations_without_evidence_and_evidence_with_a_different_fingerprint() {
+        AnalysisInputs inputs = new AnalysisInputs(1, "d".repeat(64), "e".repeat(64), "f".repeat(64), "1".repeat(64),
+                List.of(new AnalysisInputs.Project(".", "c".repeat(64), Map.of(), List.of(), List.of(), List.of(), List.of())));
+        AnalysisFingerprint fingerprint = AnalysisFingerprint.from(inputs);
+        SemanticAnalysisEvidence mismatched = new SemanticAnalysisEvidence(1, "0".repeat(64), "SUCCESS", List.of(),
+                new SemanticAnalysisEvidence.ResolutionCoverage(0, 0, 0, 0, 0), List.of());
+
+        assertThrows(IllegalArgumentException.class,
+                () -> stagedManifest(fingerprint, Optional.empty(), Optional.of("VALID")));
+        assertThrows(IllegalArgumentException.class,
+                () -> stagedManifest(fingerprint, Optional.of(mismatched), Optional.empty()));
+    }
+
     @Test
     void schema_index_keys_preserve_compound_order_without_exposing_mutable_contract_state() {
         IndexSchemaContract.IndexSpec index = IndexSchemaContract.collections().stream()
@@ -441,6 +456,30 @@ class IndexDocumentContractTest {
 
     private static RepositoryRevision revision(String hexadecimalCharacter) {
         return new RepositoryRevision(hexadecimalCharacter.repeat(40));
+    }
+
+    private static GenerationManifestDocument stagedManifest(
+            AnalysisFingerprint fingerprint,
+            Optional<SemanticAnalysisEvidence> evidence,
+            Optional<String> validationResult) {
+        return new GenerationManifestDocument(
+                new RepositoryId("orders"),
+                new RepositoryRevision("a".repeat(40)),
+                new GenerationId("generation-1"),
+                "job-1",
+                GenerationWriteState.WRITING,
+                1,
+                new IndexSchemaVersion(IndexSchemaContract.SCHEMA_VERSION),
+                IndexSchemaContract.requiredProjectionVersions().entrySet().stream()
+                        .sorted(Map.Entry.comparingByKey())
+                        .map(entry -> new ProjectionVersion(ProjectionName.valueOf(entry.getKey()), entry.getValue()))
+                        .toList(),
+                Map.of(),
+                new ManifestDigest("b".repeat(64)),
+                validationResult,
+                Optional.of(Instant.parse("2026-08-23T00:00:00Z")),
+                fingerprint,
+                evidence);
     }
 
     private static GenerationManifestDocument manifest(Map<String, Long> counts) {
