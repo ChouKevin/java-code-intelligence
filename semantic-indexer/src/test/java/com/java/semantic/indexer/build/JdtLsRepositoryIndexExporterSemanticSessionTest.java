@@ -1,8 +1,7 @@
 package com.java.semantic.indexer.build;
 
-import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
-
+import com.java.semantic.model.index.GenerationId;
+import com.java.semantic.model.index.SourceArtifactDocument;
 import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.model.repository.RepositoryRevision;
 import com.java.semantic.repository.domain.RepositorySnapshot;
@@ -21,7 +20,6 @@ import com.java.semantic.semantic.domain.SemanticReferenceAnchor;
 import com.java.semantic.semantic.domain.SemanticReferenceLocation;
 import com.java.semantic.semantic.domain.SemanticResolutionOrigin;
 import com.java.semantic.semantic.domain.SemanticSourceClassification;
-import com.java.semantic.model.index.GenerationId;
 import com.java.semantic.syntax.adapter.jdt.JdtSyntaxExtractionService;
 import com.java.semantic.syntax.domain.RepositorySyntax;
 import java.io.IOException;
@@ -29,13 +27,18 @@ import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.CyclicBarrier;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import org.eclipse.jdt.core.JavaCore;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class JdtLsRepositoryIndexExporterSemanticSessionTest {
 
@@ -51,6 +54,31 @@ class JdtLsRepositoryIndexExporterSemanticSessionTest {
                 new GenerationId("no-calls-generation"), new FullIndexPlanner().plan(repository));
 
         assertThat(semanticService.workspaceChecks()).isPositive();
+    }
+
+    @Test
+    void exports_only_the_prepared_custom_root_with_its_effective_compiler_options() throws IOException {
+        writeSource("package sample; class DefaultRoot { }");
+        Path customRoot = Files.createDirectories(repository.resolve("src/production/java"));
+        Path customSource = customRoot.resolve("sample/Configured.java");
+        Files.createDirectories(customSource.getParent());
+        String source = "package sample; public record Configured(String value) { }\n";
+        Files.writeString(customSource, source);
+        FullIndexPlan plan = new FullIndexPlan(repository, List.of(new FullIndexPlan.SourceInput(
+                "src/production/java/sample/Configured.java", customSource, SourceArtifactDocument.create(source))),
+                List.of(customRoot), Map.of(
+                JavaCore.COMPILER_SOURCE, JavaCore.VERSION_1_8,
+                JavaCore.COMPILER_COMPLIANCE, JavaCore.VERSION_1_8,
+                JavaCore.COMPILER_CODEGEN_TARGET_PLATFORM, JavaCore.VERSION_1_8));
+
+        List<SourceIndexBatch> batches = new JdtLsRepositoryIndexExporter().export(new RepositoryId("prepared-plan"), revision(),
+                new GenerationId("prepared-plan-generation"), plan);
+
+        assertThat(batches).singleElement().satisfies(batch -> {
+            assertThat(batch.sourcePath()).isEqualTo("src/production/java/sample/Configured.java");
+            assertThat(batch.extractionIssue()).hasValueSatisfying(issue ->
+                    assertThat(issue.code()).isEqualTo("JDT_SYNTAX_PROBLEM"));
+        });
     }
 
     @Test

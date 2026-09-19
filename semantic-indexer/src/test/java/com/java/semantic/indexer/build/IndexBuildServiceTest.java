@@ -1,5 +1,7 @@
 package com.java.semantic.indexer.build;
 
+import com.java.semantic.indexer.analysis.PreparedAnalysis;
+import com.java.semantic.indexer.analysis.RepositoryAnalysisPreparation;
 import com.java.semantic.indexer.job.IndexJob;
 import com.java.semantic.indexer.job.IndexJobId;
 import com.java.semantic.indexer.job.IndexJobPhase;
@@ -24,9 +26,12 @@ import java.util.Map;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 class IndexBuildServiceTest {
@@ -48,6 +53,53 @@ class IndexBuildServiceTest {
                 .isInstanceOf(RepositoryMutationException.class)
                 .hasMessageContaining("checkout failed");
         verify(gate).abortPublication();
+    }
+
+    @Test
+    void exports_the_prepared_plan_without_rediscovering_checkout_sources() {
+        IndexJob job = job();
+        IndexJobTarget target = job.target().orElseThrow();
+        IndexBuildService.CheckedOutRepository checkout = new IndexBuildService.CheckedOutRepository(
+                Path.of("prepared-checkout"), target.revision());
+        FullIndexPlan preparedPlan = new FullIndexPlan(checkout.root(), List.of(),
+                List.of(checkout.root().resolve("src/production/java")),
+                Map.of("org.eclipse.jdt.core.compiler.source", "17"));
+        PreparedAnalysis preparedAnalysis = mock(PreparedAnalysis.class);
+        RepositoryAnalysisPreparation preparation = mock(RepositoryAnalysisPreparation.class);
+        FullIndexPlanner planner = mock(FullIndexPlanner.class);
+        RepositoryIndexExporter exporter = mock(RepositoryIndexExporter.class);
+        IncrementalGenerationBuilder incrementalBuilder = mock(IncrementalGenerationBuilder.class);
+        MongoGenerationWriter generationWriter = mock(MongoGenerationWriter.class);
+        GenerationValidator validator = mock(GenerationValidator.class);
+        IndexJobStore jobs = mock(IndexJobStore.class);
+        PublicationPort publication = mock(PublicationPort.class);
+        PublicationGate gate = mock(PublicationGate.class);
+        ManifestDigest digest = new ManifestDigest("1".repeat(64));
+        GenerationValidator.ValidationResult validation = new GenerationValidator.ValidationResult(digest, Map.of(), List.of());
+        IndexPublicationIntent intent = new IndexPublicationIntent(job.id(), IndexJobOperation.BUILD, job.repositoryId(),
+                target.revision(), target.generationId(), digest, Optional.empty(), Optional.empty(), Optional.empty());
+        when(preparation.prepare(any())).thenReturn(preparedAnalysis);
+        when(preparedAnalysis.plan()).thenReturn(preparedPlan);
+        when(incrementalBuilder.assemble(any(), any(), any())).thenReturn(new IncrementalGenerationBuilder.BuildSelection(
+                false, mock(com.java.semantic.indexer.incremental.IncrementalIndexPlan.class), preparedPlan));
+        when(exporter.export(job.repositoryId(), target.revision(), target.generationId(), preparedPlan)).thenReturn(List.of());
+        when(validator.validate(any(), org.mockito.ArgumentMatchers.eq(target.revision()),
+                org.mockito.ArgumentMatchers.eq(target.revision()))).thenReturn(validation);
+        when(jobs.prepareBuildPublication(job, digest)).thenReturn(Optional.of(intent));
+        IndexBuildService service = new IndexBuildService(planner, exporter, generationWriter, mock(SourceIndexBatchDocumentMapper.class),
+                validator, ignored -> checkout, incrementalBuilder, jobs, publication, gate, preparation);
+
+        service.build(job);
+
+        org.mockito.ArgumentCaptor<com.java.semantic.indexer.analysis.AnalysisTarget> targetCaptor =
+                org.mockito.ArgumentCaptor.forClass(com.java.semantic.indexer.analysis.AnalysisTarget.class);
+        verify(preparation).prepare(targetCaptor.capture());
+        assertThat(targetCaptor.getValue().snapshot().root()).isEqualTo(checkout.root());
+        assertThat(targetCaptor.getValue().snapshot().revision()).isEqualTo(target.revision());
+        assertThat(targetCaptor.getValue().jobId()).isEqualTo(job.id().value());
+        assertThat(targetCaptor.getValue().stage()).isEqualTo("CODEBASE");
+        verify(exporter).export(job.repositoryId(), target.revision(), target.generationId(), preparedPlan);
+        verifyNoInteractions(planner);
     }
 
     @Test

@@ -186,7 +186,8 @@ public final class IncrementalGenerationBuilder {
     private static FullIndexPlan subset(FullIndexPlan completePlan, List<String> sourcePaths) {
         java.util.Set<String> selected = java.util.Set.copyOf(sourcePaths);
         return new FullIndexPlan(completePlan.repositoryRoot(), completePlan.sources().stream()
-                .filter(source -> selected.contains(source.sourcePath())).toList());
+                .filter(source -> selected.contains(source.sourcePath())).toList(),
+                completePlan.sourceRoots(), completePlan.effectiveCompilerOptions(), completePlan.importedInputs());
     }
 
     public record BuildSelection(boolean incremental, IncrementalIndexPlan plan, FullIndexPlan exportPlan) {

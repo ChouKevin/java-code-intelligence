@@ -65,10 +65,10 @@ public final class JdtLsRepositoryIndexExporter implements RepositoryIndexExport
         semanticCallTargetResolver.beginExport();
         try {
             validatePlannedSources(plan, "before syntax extraction");
-            RepositorySyntax syntax = plan.sourceRoots().isEmpty()
-                    ? syntaxExtractionService.extract(plan.repositoryRoot())
-                    : syntaxExtractionService.extract(plan.repositoryRoot(), plan.sourceRoots(),
-                            plan.effectiveCompilerOptions());
+            RepositorySyntax syntax = plan.importedInputs()
+                    ? syntaxExtractionService.extract(plan.repositoryRoot(), plan.sourceRoots(),
+                            plan.effectiveCompilerOptions())
+                    : syntaxExtractionService.extract(plan.repositoryRoot());
             validatePlannedSources(plan, "after syntax extraction");
             Map<String, Optional<SourceIndexIssue>> extractionIssues = extractionIssues(syntax);
             RepositorySnapshot snapshot = new RepositorySnapshot(repositoryId, plan.repositoryRoot(), revision);

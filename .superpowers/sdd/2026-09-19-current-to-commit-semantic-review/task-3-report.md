@@ -122,3 +122,51 @@ The exporter again validates all planned source contents after syntax extraction
 JDTLS_HOME=/opt/jdtls .superpowers/sdd/2026-09-19-current-to-commit-semantic-review/tools/apache-maven-3.9.11/bin/mvn --batch-mode --no-transfer-progress -pl semantic-indexer -am -Dtest=JdtLsEffectiveEnvironmentInspectorTest,JdtLsRepositoryIndexExporterSemanticSessionTest -Dsurefire.failIfNoSpecifiedTests=false test
 # Tests run: 6, Failures: 0, Errors: 0, Skipped: 0; BUILD SUCCESS
 ```
+
+## Final integration correction evidence
+
+### RED
+
+The focused `IndexBuildService` regression was added after introducing its prepared-analysis constructor boundary. Before the service consumed that boundary, the test failed because the active build never invoked the supplied preparation:
+
+```sh
+JDTLS_HOME=/opt/jdtls .superpowers/sdd/2026-09-19-current-to-commit-semantic-review/tools/apache-maven-3.9.11/bin/mvn --batch-mode --no-transfer-progress -pl semantic-indexer -am -Dtest=IndexBuildServiceTest -Dsurefire.failIfNoSpecifiedTests=false test
+# FAIL: exports_the_prepared_plan_without_rediscovering_checkout_sources
+# Wanted but not invoked: repositoryAnalysisPreparation.prepare(...)
+# Tests run: 3, Failures: 1, Errors: 0
+```
+
+The existing plan-aware exporter behavior was characterized by the new custom-root/source-8 `record` assertion rather than a second artificial RED: its focused test was already green before this correction. The effective-environment fixture was expanded from one Maven module/external JAR to a two-module reactor plus an in-repository JAR; it passed after the project-output mapping was made explicit.
+
+### GREEN
+
+`IndexBuildService` now acquires `PreparedAnalysis` for `CODEBASE`, exports its exact plan while the lease remains owned, and closes it afterward. The production scope factory receives the same preparation from Spring. A plan records whether its roots/options came from imported inputs, so an explicit empty imported root inventory is never interpreted as an invitation to rediscover roots; incremental subsets preserve that flag, roots, and compiler options.
+
+The inspector first records every imported project’s default output and CPE_SOURCE per-entry outputs, then only turns a runtime entry into `PROJECT_EDGE` when that entry belongs to a CPE_PROJECT reference to one of those imported projects. An in-repository system JAR consequently remains a `CLASSPATH` artifact with SHA-256 content digest and byte length.
+
+The real-JDT fixture now creates `api` and `application` Maven modules, a repository-contained `libraries/fixture.jar`, and A/B API/source changes. It asserts `api/target/classes` is a revision-tied project edge, the JAR is not an edge and changes digest, and `second.semanticService()` resolves `UseApi.bOnly(7)` to the B-only local `example.api.Api.bOnly(int): int` target.
+
+```sh
+JDTLS_HOME=/opt/jdtls .superpowers/sdd/2026-09-19-current-to-commit-semantic-review/tools/apache-maven-3.9.11/bin/mvn --batch-mode --no-transfer-progress -pl semantic-indexer -am -Dtest=IndexBuildServiceTest,JdtLsRepositoryIndexExporterSemanticSessionTest,RepositoryBuildRunnerSpringWiringTest,JdtLsEffectiveEnvironmentInspectorTest -Dsurefire.failIfNoSpecifiedTests=false test
+# Tests run: 14, Failures: 0, Errors: 0, Skipped: 0; BUILD SUCCESS
+
+JDTLS_HOME=/opt/jdtls .superpowers/sdd/2026-09-19-current-to-commit-semantic-review/tools/apache-maven-3.9.11/bin/mvn --batch-mode --no-transfer-progress -pl semantic-indexer -am -Pjdtls-it -Dtest=EffectiveEnvironmentJdtLsIT -Dsurefire.failIfNoSpecifiedTests=false test
+# Tests run: 1, Failures: 0, Errors: 0, Skipped: 0; BUILD SUCCESS
+```
+
+The Maven test lifecycle compiled all affected production and test sources; no formatter, linter, project-wide suite, Docker, or Mongo suite was run.
+
+### Files changed
+
+- `.superpowers/sdd/2026-09-19-current-to-commit-semantic-review/task-3-report.md`
+- `semantic-indexer/src/main/java/com/java/semantic/indexer/{build/FullIndexPlan.java,build/IncrementalGenerationBuilder.java,build/IndexBuildService.java,build/JdtLsRepositoryIndexExporter.java,build/RepositoryBuildScopeFactory.java,config/IndexerBuildConfiguration.java}`
+- `semantic-indexer/src/main/java/com/java/semantic/semantic/adapter/jdtls/JdtLsEffectiveEnvironmentInspector.java`
+- `semantic-indexer/src/test/java/com/java/semantic/indexer/{build/IndexBuildServiceTest.java,build/JdtLsRepositoryIndexExporterSemanticSessionTest.java,build/RepositoryBuildRunnerSpringWiringTest.java,job/DispatchedBuildIT.java}`
+- `semantic-indexer/src/test/java/com/java/semantic/semantic/adapter/jdtls/EffectiveEnvironmentJdtLsIT.java`
+
+### Self-review
+
+- The runtime edge decision is exact-output equality after a declared CPE_PROJECT reference; it no longer classifies arbitrary repository-contained paths as edges.
+- Non-project files and directories continue through `digestPath`/`byteLength`, including deterministic directory inventory handling.
+- The active production path uses the prepared plan; only intentionally legacy two-argument plans retain root discovery for unmigrated callers. The Task 4 manager constructor/singleton remains untouched.
+- Prepared leases span export and close in `finally`; post-extraction source revalidation remains in the exporter.

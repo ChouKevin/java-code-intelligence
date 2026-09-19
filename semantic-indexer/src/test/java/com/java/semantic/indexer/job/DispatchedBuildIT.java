@@ -3,6 +3,8 @@ package com.java.semantic.indexer.job;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.java.semantic.config.JdtLsProperties;
+import com.java.semantic.indexer.analysis.DefaultRepositoryAnalysisPreparation;
+import com.java.semantic.indexer.build.FullIndexPlanner;
 import com.java.semantic.indexer.build.RepositoryBuildRunner;
 import com.java.semantic.indexer.build.RepositoryBuildScopeFactory;
 import com.java.semantic.indexer.repository.ExactRepositoryCheckout;
@@ -16,6 +18,7 @@ import com.java.semantic.repository.adapter.jgit.JGitRepositoryAdapter;
 import com.java.semantic.repository.application.RepositoryRuntimeRegistry;
 import com.java.semantic.repository.config.RepositoryProperties;
 import com.java.semantic.semantic.adapter.jdtls.DefaultJdtWorkspaceManager;
+import com.java.semantic.semantic.adapter.jdtls.JdtLsEffectiveEnvironmentInspector;
 import com.java.semantic.semantic.adapter.jdtls.JdtLsHomeRequirement;
 import com.java.semantic.semantic.adapter.jdtls.JdtLsProcessFactory;
 import com.java.semantic.semantic.adapter.jdtls.JdtLsReadinessProbe;
@@ -112,9 +115,13 @@ class DispatchedBuildIT {
         properties.setRepositories(Map.of(repositoryId.value(), repository));
         JGitRepositoryAdapter git = new JGitRepositoryAdapter(properties);
         ExactRepositoryCheckout checkout = new ExactRepositoryCheckout(new RepositoryRuntimeRegistry(properties), git);
-        DefaultJdtWorkspaceManager workspaces = workspaceManager(jdtLsHome);
+        JdtLsProperties jdtLsProperties = jdtLsProperties(jdtLsHome);
+        DefaultJdtWorkspaceManager workspaces = workspaceManager(jdtLsProperties);
+        DefaultRepositoryAnalysisPreparation preparation = new DefaultRepositoryAnalysisPreparation(workspaces,
+                new JdtLsEffectiveEnvironmentInspector(jdtLsProperties), new FullIndexPlanner());
         RepositoryBuildScopeFactory scopes = new RepositoryBuildScopeFactory(checkout, template, jobs,
-                new MongoPublicationWriter(template), new NoOpPublicationGate(), new Lsp4jJavaSemanticService(workspaces), workspaces);
+                new MongoPublicationWriter(template), new NoOpPublicationGate(), new Lsp4jJavaSemanticService(workspaces),
+                workspaces, preparation);
         return new BuildHarness(new RepositoryBuildRunner(scopes), workspaces);
     }
 
@@ -144,9 +151,12 @@ class DispatchedBuildIT {
         return artifact.getString("utf8Content");
     }
 
-    private DefaultJdtWorkspaceManager workspaceManager(Path home) {
-        JdtLsProperties properties = new JdtLsProperties(true, home, temporaryDirectory.resolve("workspace"), Duration.ofSeconds(180),
+    private JdtLsProperties jdtLsProperties(Path home) {
+        return new JdtLsProperties(true, home, temporaryDirectory.resolve("workspace"), Duration.ofSeconds(180),
                 Duration.ofSeconds(600), Duration.ofSeconds(60), 1, Duration.ofMinutes(30), Duration.ofMinutes(1), "2g");
+    }
+
+    private static DefaultJdtWorkspaceManager workspaceManager(JdtLsProperties properties) {
         SimpleMeterRegistry metrics = new SimpleMeterRegistry();
         return new DefaultJdtWorkspaceManager(new JdtLsProcessFactory(properties), new JdtLsReadinessProbe(properties), properties,
                 metrics, System::nanoTime, new JdtWorkspaceLifecycleMetrics(metrics));

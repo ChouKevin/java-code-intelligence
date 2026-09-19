@@ -1,5 +1,6 @@
 package com.java.semantic.indexer.build;
 
+import com.java.semantic.indexer.analysis.RepositoryAnalysisPreparation;
 import com.java.semantic.indexer.incremental.IncrementalIndexPlanner;
 import com.java.semantic.indexer.incremental.JGitRevisionDiffAdapter;
 import com.java.semantic.indexer.incremental.ModuleLocator;
@@ -32,18 +33,21 @@ public final class RepositoryBuildScopeFactory implements RepositoryBuildRunner.
     private final PublicationGate publicationGate;
     private final JavaSemanticService semanticService;
     private final JdtWorkspaceManager workspaces;
+    private final RepositoryAnalysisPreparation analysisPreparation;
     private final GitResourceFactory gitResources;
 
     public RepositoryBuildScopeFactory(IndexBuildService.CheckoutResolver checkout, MongoTemplate template,
                                        IndexJobStore jobs, PublicationPort publication, PublicationGate publicationGate,
-                                       JavaSemanticService semanticService, JdtWorkspaceManager workspaces) {
-        this(checkout, template, jobs, publication, publicationGate, semanticService, workspaces, RepositoryBuildScopeFactory::openGit);
+                                       JavaSemanticService semanticService, JdtWorkspaceManager workspaces,
+                                       RepositoryAnalysisPreparation analysisPreparation) {
+        this(checkout, template, jobs, publication, publicationGate, semanticService, workspaces, analysisPreparation,
+                RepositoryBuildScopeFactory::openGit);
     }
 
     RepositoryBuildScopeFactory(IndexBuildService.CheckoutResolver checkout, MongoTemplate template,
                                 IndexJobStore jobs, PublicationPort publication, PublicationGate publicationGate,
                                 JavaSemanticService semanticService, JdtWorkspaceManager workspaces,
-                                GitResourceFactory gitResources) {
+                                RepositoryAnalysisPreparation analysisPreparation, GitResourceFactory gitResources) {
         this.checkout = Objects.requireNonNull(checkout, "checkout is required");
         this.template = Objects.requireNonNull(template, "mongo template is required");
         this.jobs = Objects.requireNonNull(jobs, "jobs is required");
@@ -51,6 +55,7 @@ public final class RepositoryBuildScopeFactory implements RepositoryBuildRunner.
         this.publicationGate = Objects.requireNonNull(publicationGate, "publication gate is required");
         this.semanticService = Objects.requireNonNull(semanticService, "semantic service is required");
         this.workspaces = Objects.requireNonNull(workspaces, "JDT workspaces are required");
+        this.analysisPreparation = Objects.requireNonNull(analysisPreparation, "analysis preparation is required");
         this.gitResources = Objects.requireNonNull(gitResources, "Git resources are required");
     }
 
@@ -76,7 +81,8 @@ public final class RepositoryBuildScopeFactory implements RepositoryBuildRunner.
         IncrementalGenerationBuilder incrementalBuilder = new IncrementalGenerationBuilder(template, incrementalPlanner,
                 new ParentGenerationCopier(template, generationWriter));
         return new IndexBuildService(new FullIndexPlanner(), new JdtLsRepositoryIndexExporter(semanticService),
-                generationWriter, documentMapper, new GenerationValidator(template), checkout, incrementalBuilder, jobs, publication, publicationGate);
+                generationWriter, documentMapper, new GenerationValidator(template), checkout, incrementalBuilder, jobs, publication,
+                publicationGate, analysisPreparation);
     }
 
     /**

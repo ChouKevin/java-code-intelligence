@@ -9,20 +9,25 @@ import com.java.semantic.model.index.AnalysisInputs;
 import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.model.repository.RepositoryRevision;
 import com.java.semantic.repository.domain.RepositorySnapshot;
+import com.java.semantic.semantic.domain.SemanticCallResolution;
+import com.java.semantic.semantic.domain.SemanticCallSite;
+import com.java.semantic.semantic.domain.SemanticLocation;
+import com.java.semantic.semantic.domain.SemanticMethod;
+import com.java.semantic.semantic.domain.SemanticPosition;
+import com.java.semantic.semantic.domain.SemanticRange;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.io.IOException;
 import java.io.OutputStream;
-import java.net.URI;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.List;
 import java.util.jar.JarEntry;
 import java.util.jar.JarOutputStream;
 import javax.tools.JavaCompiler;
 import javax.tools.ToolProvider;
-import org.junit.jupiter.api.Tag;
 import org.eclipse.jgit.api.Git;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -34,32 +39,48 @@ class EffectiveEnvironmentJdtLsIT {
     Path temporaryDirectory;
 
     @Test
-    void should_attest_changed_external_dependency_bytes_in_a_fresh_b_lease() throws Exception {
+    void attests_reactor_outputs_and_in_repository_artifacts_then_resolves_b_only_module_api() throws Exception {
         Path home = JdtLsHomeRequirement.requireHome(System.getenv("JDTLS_HOME"));
         try (Fixture fixture = new Fixture(home, temporaryDirectory)) {
-            String firstDigest;
+            String firstDependencyDigest;
+            String firstProjectEdgeDigest;
             try (PreparedAnalysis first = fixture.prepare("A")) {
-                firstDigest = fixture.observedDependencyDigest(first);
                 assertThat(first.plan().sources()).anySatisfy(input ->
-                        assertThat(input.sourcePath()).contains("src/production/java"));
+                        assertThat(input.sourcePath()).contains("application/src/production/java"));
+                firstDependencyDigest = fixture.inRepositoryArtifact(first).contentDigest();
+                assertThat(fixture.inRepositoryArtifact(first).byteLength()).isPositive();
+                firstProjectEdgeDigest = fixture.projectEdge(first).contentDigest();
+                assertThat(fixture.projectEdge(first).byteLength()).isZero();
             }
 
             fixture.replaceDependencyBytes("B");
             fixture.commitRevisionB();
 
             try (PreparedAnalysis second = fixture.prepare("B")) {
-                assertThat(fixture.observedDependencyDigest(second)).isNotEqualTo(firstDigest);
+                assertThat(fixture.inRepositoryArtifact(second).contentDigest()).isNotEqualTo(firstDependencyDigest);
+                assertThat(fixture.projectEdge(second).contentDigest()).isNotEqualTo(firstProjectEdgeDigest);
                 assertThat(second.snapshot().revision().value()).isEqualTo(fixture.revisionB());
                 assertThat(second.fingerprint().inputs().projects()).allSatisfy(project ->
                         assertThat(project.classpath()).allSatisfy(artifact ->
                                 assertThat(artifact.logicalId()).doesNotStartWith("/").doesNotStartWith("file:")));
+                SemanticCallResolution resolution = fixture.resolveBOnlyDependency(second);
+                assertThat(resolution.call()).isPresent().get().satisfies(call -> {
+                    assertThat(call.target()).isPresent().get().satisfies(target -> {
+                        assertThat(target.packageName()).isEqualTo("example.api");
+                        assertThat(target.className()).isEqualTo("Api");
+                        assertThat(target.methodName()).isEqualTo("bOnly");
+                        assertThat(target.parameterTypes()).containsExactly("int");
+                        assertThat(target.returnType()).isEqualTo("int");
+                    });
+                    assertThat(call.rawSignature()).contains("bOnly").contains("int");
+                });
             }
         }
     }
 
     private static final class Fixture implements AutoCloseable {
         private final Path repository;
-        private final Path dependencies;
+        private final Path compilationScratch;
         private final Git git;
         private final DefaultJdtWorkspaceManager manager;
         private final DefaultRepositoryAnalysisPreparation preparation;
@@ -67,7 +88,7 @@ class EffectiveEnvironmentJdtLsIT {
 
         private Fixture(Path home, Path temporaryDirectory) throws Exception {
             repository = Files.createDirectories(temporaryDirectory.resolve("repository"));
-            dependencies = Files.createDirectories(temporaryDirectory.resolve("dependencies"));
+            compilationScratch = Files.createDirectories(temporaryDirectory.resolve("compilation-scratch"));
             writeRepository();
             writeDependency("A");
             git = Git.init().setDirectory(repository.toFile()).call();
@@ -96,8 +117,10 @@ class EffectiveEnvironmentJdtLsIT {
         }
 
         private void commitRevisionB() throws Exception {
-            Path source = repository.resolve("application/src/production/java/example/app/UseApi.java");
-            Files.writeString(source, "package example.app; import example.dep.Api; public class UseApi { public String b() { return Api.value(); } }\n");
+            Files.writeString(repository.resolve("api/src/main/java/example/api/Api.java"),
+                    "package example.api; public final class Api { public static int bOnly(int value) { return value + 1; } }\n");
+            Files.writeString(repository.resolve("application/src/production/java/example/app/UseApi.java"),
+                    "package example.app; import example.api.Api; public class UseApi { public int b() { return Api.bOnly(7); } }\n");
             git.add().addFilepattern(".").call();
             revisionB = git.commit().setMessage("B").setAuthor("test", "test@example.invalid").call().getName();
         }
@@ -106,11 +129,40 @@ class EffectiveEnvironmentJdtLsIT {
             return revisionB;
         }
 
-        private String observedDependencyDigest(PreparedAnalysis analysis) {
+        private AnalysisInputs.Artifact projectEdge(PreparedAnalysis analysis) {
+            return artifacts(analysis).stream().filter(artifact -> artifact.kind().equals("PROJECT_EDGE"))
+                    .filter(artifact -> artifact.logicalId().contains("api/target/classes"))
+                    .findFirst().orElseThrow();
+        }
+
+        private AnalysisInputs.Artifact inRepositoryArtifact(PreparedAnalysis analysis) {
+            return artifacts(analysis).stream().filter(artifact -> artifact.kind().equals("CLASSPATH"))
+                    .filter(artifact -> artifact.logicalId().startsWith("library:sha256:"))
+                    .findFirst().orElseThrow();
+        }
+
+        private static List<AnalysisInputs.Artifact> artifacts(PreparedAnalysis analysis) {
             return analysis.fingerprint().inputs().projects().stream()
-                    .flatMap(project -> project.classpath().stream())
-                    .filter(artifact -> artifact.kind().equals("CLASSPATH"))
-                    .findFirst().orElseThrow().contentDigest();
+                    .flatMap(project -> java.util.stream.Stream.concat(project.classpath().stream(), project.modulepath().stream()))
+                    .toList();
+        }
+
+        private SemanticCallResolution resolveBOnlyDependency(PreparedAnalysis analysis) throws IOException {
+            Path source = repository.resolve("application/src/production/java/example/app/UseApi.java");
+            String content = Files.readString(source);
+            int methodOffset = content.indexOf(" b()");
+            int invocationOffset = content.indexOf("bOnly");
+            SemanticRange methodRange = range(0, methodOffset + 1, content.length());
+            SemanticRange selectionRange = range(0, methodOffset + 1, methodOffset + 2);
+            SemanticMethod caller = new SemanticMethod("example.app", "UseApi", "b", List.of(), "int",
+                    new SemanticLocation(source.toUri().toString(), methodRange, selectionRange));
+            SemanticRange invocationRange = range(0, invocationOffset, invocationOffset + "bOnly".length());
+            return analysis.semanticService().resolveCallResolutionAt(analysis.snapshot(), caller,
+                    new SemanticCallSite(invocationRange, new SemanticPosition(0, invocationOffset)));
+        }
+
+        private static SemanticRange range(int line, int start, int end) {
+            return new SemanticRange(new SemanticPosition(line, start), new SemanticPosition(line, end));
         }
 
         private RepositorySnapshot snapshot() {
@@ -126,35 +178,48 @@ class EffectiveEnvironmentJdtLsIT {
             Files.writeString(repository.resolve("pom.xml"), """
                     <project xmlns="http://maven.apache.org/POM/4.0.0"><modelVersion>4.0.0</modelVersion>
                     <groupId>example</groupId><artifactId>root</artifactId><version>1</version><packaging>pom</packaging>
-                    <modules><module>application</module></modules></project>
+                    <properties><maven.compiler.release>17</maven.compiler.release></properties>
+                    <modules><module>api</module><module>application</module></modules></project>
                     """);
-            Path module = Files.createDirectories(repository.resolve("application/src/production/java/example/app"));
+            Path api = Files.createDirectories(repository.resolve("api/src/main/java/example/api"));
+            Files.writeString(repository.resolve("api/pom.xml"), """
+                    <project xmlns="http://maven.apache.org/POM/4.0.0"><modelVersion>4.0.0</modelVersion>
+                    <parent><groupId>example</groupId><artifactId>root</artifactId><version>1</version></parent><artifactId>api</artifactId>
+                    </project>
+                    """);
+            Files.writeString(api.resolve("Api.java"),
+                    "package example.api; public final class Api { public static String aOnly() { return \"A\"; } }\n");
+            Path application = Files.createDirectories(repository.resolve("application/src/production/java/example/app"));
+            Files.createDirectories(repository.resolve("libraries"));
             Files.writeString(repository.resolve("application/pom.xml"), """
                     <project xmlns="http://maven.apache.org/POM/4.0.0"><modelVersion>4.0.0</modelVersion>
                     <parent><groupId>example</groupId><artifactId>root</artifactId><version>1</version></parent><artifactId>application</artifactId>
-                    <build><sourceDirectory>src/production/java</sourceDirectory></build><dependencies><dependency>
-                    <groupId>example</groupId><artifactId>api</artifactId><version>1</version><scope>system</scope>
-                    <systemPath>${project.basedir}/../../dependencies/api.jar</systemPath></dependency></dependencies></project>
+                    <build><sourceDirectory>src/production/java</sourceDirectory></build><dependencies>
+                    <dependency><groupId>example</groupId><artifactId>api</artifactId><version>1</version></dependency>
+                    <dependency><groupId>example</groupId><artifactId>fixture</artifactId><version>1</version><scope>system</scope>
+                    <systemPath>${project.basedir}/../libraries/fixture.jar</systemPath></dependency>
+                    </dependencies></project>
                     """);
-            Files.writeString(module.resolve("UseApi.java"),
-                    "package example.app; import example.dep.Api; public class UseApi { public String a() { return Api.value(); } }\n");
+            Files.writeString(application.resolve("UseApi.java"),
+                    "package example.app; import example.api.Api; public class UseApi { public String a() { return Api.aOnly(); } }\n");
         }
 
         private void writeDependency(String value) throws Exception {
-            Path source = Files.createTempDirectory(dependencies, "source-");
-            Path packageRoot = Files.createDirectories(source.resolve("example/dep"));
-            Path api = packageRoot.resolve("Api.java");
-            Files.writeString(api, "package example.dep; public final class Api { public static String value() { return \"" + value + "\"; } }\n");
+            Path source = Files.createTempDirectory(compilationScratch, "source-");
+            Path packageRoot = Files.createDirectories(source.resolve("example/fixture"));
+            Path api = packageRoot.resolve("Artifact.java");
+            Files.writeString(api, "package example.fixture; public final class Artifact { public static String value() { return \""
+                    + value + "\"; } }\n");
             Path classes = Files.createDirectories(source.resolve("classes"));
             JavaCompiler compiler = ToolProvider.getSystemJavaCompiler();
             assertThat(compiler).isNotNull();
             assertThat(compiler.run(null, null, null, "-d", classes.toString(), api.toString())).isZero();
-            try (OutputStream output = Files.newOutputStream(dependencies.resolve("api.jar"));
+            try (OutputStream output = Files.newOutputStream(repository.resolve("libraries/fixture.jar"));
                     JarOutputStream jar = new JarOutputStream(output)) {
-                JarEntry entry = new JarEntry("example/dep/Api.class");
+                JarEntry entry = new JarEntry("example/fixture/Artifact.class");
                 entry.setTime(0);
                 jar.putNextEntry(entry);
-                jar.write(Files.readAllBytes(classes.resolve("example/dep/Api.class")));
+                jar.write(Files.readAllBytes(classes.resolve("example/fixture/Artifact.class")));
                 jar.closeEntry();
             }
         }

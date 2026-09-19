@@ -1,5 +1,6 @@
 package com.java.semantic.indexer.build;
 
+import com.java.semantic.config.JdtLsProperties;
 import com.java.semantic.indexer.config.IndexerBuildConfiguration;
 import com.java.semantic.indexer.incremental.ChangedSource;
 import com.java.semantic.indexer.incremental.IncrementalIndexPlan;
@@ -19,6 +20,7 @@ import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.model.repository.RepositoryRevision;
 import com.java.semantic.semantic.adapter.jdtls.JdtWorkspaceManager;
 import com.java.semantic.semantic.domain.JavaSemanticService;
+import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -43,7 +45,10 @@ class RepositoryBuildRunnerSpringWiringTest {
             .withBean(IndexJobStore.class, () -> mock(IndexJobStore.class))
             .withBean(PublicationPort.class, () -> mock(PublicationPort.class))
             .withBean(JavaSemanticService.class, () -> mock(JavaSemanticService.class))
-            .withBean(JdtWorkspaceManager.class, () -> mock(JdtWorkspaceManager.class));
+            .withBean(JdtWorkspaceManager.class, () -> mock(JdtWorkspaceManager.class))
+            .withBean(JdtLsProperties.class, () -> new JdtLsProperties(true, java.nio.file.Path.of("/opt/jdtls"),
+                    java.nio.file.Path.of("workspace"), Duration.ofSeconds(1), Duration.ofSeconds(1),
+                    Duration.ofSeconds(1), 1, Duration.ofMinutes(1), Duration.ofMinutes(1), "1g"));
 
     @Test
     void registers_a_real_job_scoped_build_factory_and_runner() {
@@ -64,7 +69,7 @@ class RepositoryBuildRunnerSpringWiringTest {
         JdtWorkspaceManager workspaces = mock(JdtWorkspaceManager.class);
         RepositoryBuildScopeFactory factory = new RepositoryBuildScopeFactory(checkout, template,
                 mock(IndexJobStore.class), mock(PublicationPort.class), new NoOpPublicationGate(),
-                mock(JavaSemanticService.class), workspaces,
+                mock(JavaSemanticService.class), workspaces, mock(com.java.semantic.indexer.analysis.RepositoryAnalysisPreparation.class),
                 root -> git);
 
         RepositoryBuildRunner.BuildScope scope = factory.open(job());
@@ -83,7 +88,7 @@ class RepositoryBuildRunnerSpringWiringTest {
         JdtWorkspaceManager workspaces = mock(JdtWorkspaceManager.class);
         RepositoryBuildScopeFactory factory = new RepositoryBuildScopeFactory(checkout, mongoTemplate(),
                 mock(IndexJobStore.class), mock(PublicationPort.class), new NoOpPublicationGate(),
-                mock(JavaSemanticService.class), workspaces,
+                mock(JavaSemanticService.class), workspaces, mock(com.java.semantic.indexer.analysis.RepositoryAnalysisPreparation.class),
                 root -> git);
 
         assertThatThrownBy(() -> new RepositoryBuildRunner(factory).run(job()))

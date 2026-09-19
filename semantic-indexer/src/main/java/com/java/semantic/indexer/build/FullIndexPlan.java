@@ -8,7 +8,7 @@ import java.util.Objects;
 
 /** Immutable, deterministic set of source inputs for one complete generation. */
 public record FullIndexPlan(Path repositoryRoot, List<SourceInput> sources, List<Path> sourceRoots,
-                            Map<String, String> effectiveCompilerOptions) {
+                            Map<String, String> effectiveCompilerOptions, boolean importedInputs) {
 
     public FullIndexPlan {
         repositoryRoot = Objects.requireNonNull(repositoryRoot, "repository root is required").toAbsolutePath().normalize();
@@ -19,7 +19,13 @@ public record FullIndexPlan(Path repositoryRoot, List<SourceInput> sources, List
     }
 
     public FullIndexPlan(Path repositoryRoot, List<SourceInput> sources) {
-        this(repositoryRoot, sources, List.of(), Map.of());
+        this(repositoryRoot, sources, List.of(), Map.of(), false);
+    }
+
+    /** Imported plans retain their exact root inventory even when that inventory is explicitly empty. */
+    public FullIndexPlan(Path repositoryRoot, List<SourceInput> sources, List<Path> sourceRoots,
+                         Map<String, String> effectiveCompilerOptions) {
+        this(repositoryRoot, sources, sourceRoots, effectiveCompilerOptions, true);
     }
 
     public record SourceInput(String sourcePath, Path path, SourceArtifactDocument contentArtifact) {

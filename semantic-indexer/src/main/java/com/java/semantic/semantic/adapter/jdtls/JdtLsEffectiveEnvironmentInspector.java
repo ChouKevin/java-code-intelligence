@@ -19,7 +19,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Set;
+import org.eclipse.jdt.core.IClasspathEntry;
 import org.eclipse.jdt.core.JavaCore;
 import org.eclipse.lsp4j.ExecuteCommandParams;
 import org.springframework.util.Assert;
@@ -66,7 +66,7 @@ public final class JdtLsEffectiveEnvironmentInspector {
         if (projectUris.isEmpty()) {
             throw new IllegalStateException("JDT LS reported no imported Java projects");
         }
-        List<AnalysisInputs.Project> projects = new ArrayList<>();
+        List<ImportedProject> importedProjects = new ArrayList<>();
         for (String projectUri : projectUris) {
             Path projectRoot = containedProjectRoot(projectUri, snapshot.root());
             Map<String, Object> settings = objectMap(command(session, new ExecuteCommandParams(
@@ -80,15 +80,20 @@ public final class JdtLsEffectiveEnvironmentInspector {
                     GET_CLASSPATHS, new ArrayList<>(List.of(projectUri, "{\"scope\":\"runtime\"}")));
             Map<String, Object> classpaths = objectMap(command(session, classpathCommand), GET_CLASSPATHS);
             assertClasspathProjectRoot(classpaths, projectRoot, snapshot.root());
-            List<String> sourcePaths = requiredStringList(settings, "org.eclipse.jdt.ls.core.sourcePaths");
-            List<String> classpathEntries = requiredStringList(classpaths, "classpaths");
-            List<String> modulepathEntries = requiredStringList(classpaths, "modulepaths");
-            List<Path> projectEdges = projectOutputPaths(settings);
-            projects.add(new AnalysisInputs.Project(relative(snapshot.root(), projectRoot),
-                    projectJdkDigest(settings), compilerOptions(settings), selectedProfiles(settings),
-                    roots(snapshot.root(), projectRoot, sourcePaths),
-                    artifacts(snapshot, classpathEntries, "CLASSPATH", projectEdges),
-                    artifacts(snapshot, modulepathEntries, "MODULEPATH", projectEdges)));
+            importedProjects.add(new ImportedProject(projectRoot, settings,
+                    requiredStringList(settings, "org.eclipse.jdt.ls.core.sourcePaths"),
+                    requiredStringList(classpaths, "classpaths"),
+                    requiredStringList(classpaths, "modulepaths")));
+        }
+        Map<String, List<Path>> importedOutputs = importedOutputPaths(importedProjects);
+        List<AnalysisInputs.Project> projects = new ArrayList<>();
+        for (ImportedProject project : importedProjects) {
+            List<Path> referencedOutputs = referencedProjectOutputs(project.settings(), importedOutputs);
+            projects.add(new AnalysisInputs.Project(relative(snapshot.root(), project.root()),
+                    projectJdkDigest(project.settings()), compilerOptions(project.settings()), selectedProfiles(project.settings()),
+                    roots(snapshot.root(), project.root(), project.sourcePaths()),
+                    artifacts(snapshot, project.classpaths(), "CLASSPATH", referencedOutputs),
+                    artifacts(snapshot, project.modulepaths(), "MODULEPATH", referencedOutputs)));
         }
         return new AnalysisInputs(IndexSchemaContract.ANALYSIS_EVIDENCE_VERSION,
                 digestText(getClass().getName()), digestDirectory(properties.getHome()),
@@ -210,11 +215,11 @@ public final class JdtLsEffectiveEnvironmentInspector {
     }
 
     private List<AnalysisInputs.Artifact> artifacts(
-            RepositorySnapshot snapshot, List<String> entries, String kind, List<Path> projectEdges) {
+            RepositorySnapshot snapshot, List<String> entries, String kind, List<Path> referencedProjectOutputs) {
         List<AnalysisInputs.Artifact> artifacts = new ArrayList<>();
         for (int ordinal = 0; ordinal < entries.size(); ordinal++) {
             Path artifact = path(entries.get(ordinal));
-            if (projectEdges.contains(artifact)) {
+            if (referencedProjectOutputs.contains(artifact)) {
                 artifacts.add(new AnalysisInputs.Artifact(ordinal,
                         "project:" + relative(snapshot.root(), artifact), "PROJECT_EDGE",
                         digestText("project-edge:" + snapshot.revision().value()), 0));
@@ -226,30 +231,95 @@ public final class JdtLsEffectiveEnvironmentInspector {
         return List.copyOf(artifacts);
     }
 
-    private List<Path> projectOutputPaths(Map<String, Object> settings) {
+    private static Map<String, List<Path>> importedOutputPaths(List<ImportedProject> projects) {
+        Map<String, List<Path>> outputs = new LinkedHashMap<>();
+        for (ImportedProject project : projects) {
+            String reference = projectReference(project.root());
+            if (outputs.put(reference, projectOutputPaths(project.settings())) != null) {
+                throw new IllegalStateException("JDT LS imported duplicate project reference " + reference);
+            }
+        }
+        return Map.copyOf(outputs);
+    }
+
+    private static List<Path> referencedProjectOutputs(Map<String, Object> settings, Map<String, List<Path>> importedOutputs) {
         Object value = settings.get("org.eclipse.jdt.ls.core.classpathEntries");
         if (Objects.isNull(value)) {
             throw new IllegalStateException("JDT LS settings omitted classpath entries");
         }
-        List<Object> entries = list(value, "classpath entries");
+        List<Path> outputs = new ArrayList<>();
+        for (Object entry : list(value, "classpath entries")) {
+            Map<String, Object> classpathEntry = objectMap(entry, "classpath entry");
+            if (!classpathKind(classpathEntry.get("kind"), IClasspathEntry.CPE_PROJECT)) {
+                continue;
+            }
+            Object rawReference = classpathEntry.get("path");
+            if (!(rawReference instanceof String reference) || reference.isBlank()) {
+                throw new IllegalStateException("JDT LS project classpath entry omitted path");
+            }
+            outputs.addAll(importedOutputs.getOrDefault(projectReference(reference), List.of()));
+        }
+        return List.copyOf(outputs.stream().distinct().toList());
+    }
+
+    private static List<Path> projectOutputPaths(Map<String, Object> settings) {
+        Object value = settings.get("org.eclipse.jdt.ls.core.classpathEntries");
+        if (Objects.isNull(value)) {
+            throw new IllegalStateException("JDT LS settings omitted classpath entries");
+        }
         List<Path> outputs = new ArrayList<>();
         Object defaultOutput = settings.get("org.eclipse.jdt.ls.core.outputPath");
         if (defaultOutput instanceof String outputPath && !outputPath.isBlank()) {
             outputs.add(path(outputPath));
         }
-        for (Object entry : entries) {
+        for (Object entry : list(value, "classpath entries")) {
             Map<String, Object> classpathEntry = objectMap(entry, "classpath entry");
-            Object kind = classpathEntry.get("kind");
             Object output = classpathEntry.get("output");
-            if (isProjectEntry(kind) && output instanceof String outputPath && !outputPath.isBlank()) {
+            if (classpathKind(classpathEntry.get("kind"), IClasspathEntry.CPE_SOURCE)
+                    && output instanceof String outputPath && !outputPath.isBlank()) {
                 outputs.add(path(outputPath));
             }
         }
-        return List.copyOf(outputs);
+        return List.copyOf(outputs.stream().distinct().toList());
     }
 
-    private static boolean isProjectEntry(Object kind) {
-        return "3".equals(String.valueOf(kind)) || "3.0".equals(String.valueOf(kind));
+    private static boolean classpathKind(Object value, int expected) {
+        if (value instanceof Number number) {
+            return number.intValue() == expected;
+        }
+        String kind = String.valueOf(value);
+        return String.valueOf(expected).equals(kind) || (expected + ".0").equals(kind);
+    }
+
+    private static String projectReference(Path root) {
+        Path name = root.getFileName();
+        if (Objects.isNull(name)) {
+            throw new IllegalStateException("JDT LS project root had no project reference");
+        }
+        return projectReference(name.toString());
+    }
+
+    private static String projectReference(String value) {
+        String reference = value.startsWith("/") ? value.substring(1) : value;
+        if (reference.isBlank() || reference.contains("/")) {
+            throw new IllegalStateException("JDT LS project reference was invalid");
+        }
+        return reference;
+    }
+
+    private record ImportedProject(
+            Path root,
+            Map<String, Object> settings,
+            List<String> sourcePaths,
+            List<String> classpaths,
+            List<String> modulepaths) {
+        private ImportedProject {
+            root = Objects.requireNonNull(root, "project root is required");
+            settings = Map.copyOf(Objects.requireNonNull(settings, "project settings are required"));
+            sourcePaths = List.copyOf(Objects.requireNonNull(sourcePaths, "project source paths are required"));
+            classpaths = List.copyOf(Objects.requireNonNull(classpaths, "project classpaths are required"));
+            modulepaths = List.copyOf(Objects.requireNonNull(modulepaths, "project modulepaths are required"));
+        }
     }
 
     private static String logicalArtifactId(Path artifact) {
