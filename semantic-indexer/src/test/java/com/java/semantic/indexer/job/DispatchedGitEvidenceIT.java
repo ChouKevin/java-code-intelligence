@@ -8,6 +8,7 @@ import com.java.semantic.indexer.store.PublicationPort;
 import com.java.semantic.model.index.IndexCollections;
 import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.model.repository.RepositoryRevision;
+import com.java.semantic.query.application.CurrentGenerationSelector;
 import com.java.semantic.query.application.GitEvidenceReadService;
 import com.java.semantic.query.application.CodeFactReadService;
 import com.java.semantic.query.application.CodeFactSearchService;
@@ -18,6 +19,7 @@ import com.java.semantic.query.application.PublishedRelationQueryService;
 import com.java.semantic.query.application.SemanticQueryContract;
 import com.java.semantic.query.application.SemanticQueryFacade;
 import com.java.semantic.query.application.SourceSliceService;
+import com.java.semantic.query.application.SelectedSemanticQueryService;
 import com.java.semantic.api.QueryApiExceptionHandler;
 import com.java.semantic.api.SemanticQueryController;
 import com.java.semantic.query.config.ConfiguredReadPolicy;
@@ -178,9 +180,13 @@ class DispatchedGitEvidenceIT {
     }
 
     private static MockMvc httpReader(GitEvidenceReadService reader) {
-        SemanticQueryFacade facade = new SemanticQueryFacade(mock(CurrentRepositoryQueryService.class), mock(CodeFactSearchService.class),
-                mock(SourceSliceService.class), mock(CodeFactReadService.class), mock(PublishedDiscoveryQueryService.class),
-                mock(PublishedEntryPointQueryService.class), mock(PublishedRelationQueryService.class), reader);
+        CurrentGenerationSelector selector = mock(CurrentGenerationSelector.class);
+        SelectedSemanticQueryService selected = new SelectedSemanticQueryService(
+                mock(CodeFactSearchService.class), mock(SourceSliceService.class), mock(CodeFactReadService.class),
+                mock(PublishedDiscoveryQueryService.class), mock(PublishedEntryPointQueryService.class),
+                mock(PublishedRelationQueryService.class));
+        SemanticQueryFacade facade = new SemanticQueryFacade(selector, selected,
+                mock(CurrentRepositoryQueryService.class), reader);
         return standaloneSetup(new SemanticQueryController(facade)).setControllerAdvice(new QueryApiExceptionHandler()).build();
     }
 
