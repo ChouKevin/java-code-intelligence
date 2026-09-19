@@ -68,6 +68,11 @@ class EffectiveEnvironmentJdtLsIT {
                         .anySatisfy(id -> assertThat(id).contains("assertj-core"))
                         .anySatisfy(id -> assertThat(id).contains("slf4j-api"));
                 SemanticCallResolution resolution = fixture.resolveBOnlyDependency(second);
+                AnalysisInputs.Root testRoot = second.fingerprint().inputs().projects().stream()
+                        .flatMap(project -> project.roots().stream())
+                        .filter(root -> root.path().contains("src/test/java")).findFirst().orElseThrow();
+                assertThat(testRoot.included()).isFalse();
+                assertThat(testRoot.exclusions()).contains("test");
                 assertThat(resolution.call()).isPresent().get().satisfies(call -> {
                     assertThat(call.target()).isPresent().get().satisfies(target -> {
                         assertThat(target.packageName()).isEqualTo("example.api");
@@ -81,6 +86,7 @@ class EffectiveEnvironmentJdtLsIT {
             }
         }
     }
+
 
     private static final class Fixture implements AutoCloseable {
         private final Path repository;
@@ -165,6 +171,38 @@ class EffectiveEnvironmentJdtLsIT {
                     new SemanticCallSite(invocationRange, new SemanticPosition(0, invocationOffset)));
         }
 
+        private SemanticCallResolution resolveDependency(
+                PreparedAnalysis analysis, String className, String callerMethod, String invocation) throws IOException {
+            Path source = repository.resolve("application/src/production/java/example/app/" + className + ".java");
+            String content = Files.readString(source);
+            int methodOffset = content.indexOf(" " + callerMethod + "()");
+            int invocationOffset = content.indexOf(invocation);
+            SemanticPosition methodStart = positionAt(content, methodOffset + 1);
+            SemanticPosition methodEnd = positionAt(content, content.length());
+            SemanticRange methodRange = new SemanticRange(methodStart, methodEnd);
+            SemanticRange selectionRange = new SemanticRange(methodStart,
+                    new SemanticPosition(methodStart.line(), methodStart.character() + callerMethod.length()));
+            SemanticMethod caller = new SemanticMethod("example.app", className, callerMethod, List.of(), "void",
+                    new SemanticLocation(source.toUri().toString(), methodRange, selectionRange));
+            SemanticPosition invocationStart = positionAt(content, invocationOffset);
+            SemanticRange invocationRange = new SemanticRange(invocationStart,
+                    new SemanticPosition(invocationStart.line(), invocationStart.character() + invocation.length()));
+            return analysis.semanticService().resolveCallResolutionAt(analysis.snapshot(), caller,
+                    new SemanticCallSite(invocationRange, invocationStart));
+        }
+
+        private static SemanticPosition positionAt(String source, int offset) {
+            int line = 0;
+            int lineStart = 0;
+            for (int index = 0; index < offset; index++) {
+                if (source.charAt(index) == '\n') {
+                    line++;
+                    lineStart = index + 1;
+                }
+            }
+            return new SemanticPosition(line, offset - lineStart);
+        }
+
         private static SemanticRange range(int line, int start, int end) {
             return new SemanticRange(new SemanticPosition(line, start), new SemanticPosition(line, end));
         }
@@ -202,13 +240,28 @@ class EffectiveEnvironmentJdtLsIT {
                     <dependency><groupId>example</groupId><artifactId>api</artifactId><version>1</version></dependency>
                     <dependency><groupId>example</groupId><artifactId>fixture</artifactId><version>1</version><scope>system</scope>
                     <systemPath>${project.basedir}/../libraries/fixture.jar</systemPath></dependency>
-                    <dependency><groupId>org.slf4j</groupId><artifactId>slf4j-api</artifactId><version>2.0.17</version><scope>runtime</scope></dependency>
+                    <dependency><groupId>org.slf4j</groupId><artifactId>slf4j-api</artifactId><version>2.0.17</version></dependency>
                     <dependency><groupId>org.junit.jupiter</groupId><artifactId>junit-jupiter-api</artifactId><version>5.14.2</version><scope>provided</scope></dependency>
                     <dependency><groupId>org.assertj</groupId><artifactId>assertj-core</artifactId><version>3.27.7</version><scope>test</scope></dependency>
                     </dependencies></project>
                     """);
             Files.writeString(application.resolve("UseApi.java"),
                     "package example.app; import example.api.Api; public class UseApi { public String a() { return Api.aOnly(); } }\n");
+            Files.writeString(application.resolve("DependencyUse.java"), """
+                    package example.app;
+                    import org.junit.jupiter.api.Assertions;
+                    import org.slf4j.LoggerFactory;
+                    public class DependencyUse {
+                        void runtime() { LoggerFactory.getLogger("dependency"); }
+                        void provided() { Assertions.assertTrue(true); }
+                    }
+                    """);
+            Path testSource = Files.createDirectories(repository.resolve("application/src/test/java/example/app"));
+            Files.writeString(testSource.resolve("DependencyUseTest.java"), """
+                    package example.app;
+                    import static org.assertj.core.api.Assertions.assertThat;
+                    class DependencyUseTest { void testOnly() { assertThat(true).isTrue(); } }
+                    """);
         }
 
         private void writeDependency(String value) throws Exception {
