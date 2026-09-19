@@ -59,7 +59,8 @@ public class RepositoryRuntimeRegistry {
                 displayName,
                 workingTree,
                 config.getUrl(),
-                config.getDefaultBranch());
+                config.getDefaultBranch(),
+                dataRoot);
     }
 
     private Path resolveWorkingTree(

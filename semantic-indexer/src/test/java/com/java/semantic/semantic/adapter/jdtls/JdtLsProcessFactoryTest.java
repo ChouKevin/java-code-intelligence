@@ -204,6 +204,36 @@ class JdtLsProcessFactoryTest {
     }
 
     @Test
+    void should_reject_an_escaping_managed_checkout_symlink_before_configuration_or_process_start() throws Exception {
+        Path home = JdtLsTestFixtures.createFakeHome(tempDirectory);
+        Path managedParent = Files.createDirectories(tempDirectory.resolve("managed"));
+        Path outside = Files.createDirectories(tempDirectory.resolve("operator-root"));
+        Path workspaceRoot = managedParent.resolve("checkout");
+        Files.createSymbolicLink(workspaceRoot, outside);
+        Path workspaceData = Files.createDirectories(tempDirectory.resolve("operator-data"));
+        AtomicInteger starts = new AtomicInteger();
+        JdtLsProcessFactory factory = new JdtLsProcessFactory(
+                linuxUidProperties(home),
+                command -> {
+                    starts.incrementAndGet();
+                    throw new AssertionError("escaping checkout must not start JDT");
+                },
+                (client, launchedProcess) -> {
+                    throw new AssertionError("escaping checkout must not connect");
+                });
+        RepositoryRuntime runtime = new RepositoryRuntime(RepositoryId.of("linux-test"), "linux-test", workspaceRoot,
+                "file:///remote/linux-test.git", "main", managedParent);
+
+        assertThatThrownBy(() -> factory.launch(workspaceRoot, workspaceData, mock(JdtLanguageClient.class),
+                runtime.managedCheckout()))
+                .isInstanceOf(IOException.class)
+                .hasMessage("managed checkout root is invalid");
+
+        assertThat(starts).hasValue(0);
+        assertThat(workspaceData.resolve("configuration")).doesNotExist();
+    }
+
+    @Test
     void should_change_launch_policy_identity_when_effective_jvm_policy_changes() throws Exception {
         Path home = JdtLsTestFixtures.createFakeHome(tempDirectory);
         Files.writeString(home.resolve("lombok.jar"), "agent-bytes");

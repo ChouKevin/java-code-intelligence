@@ -268,14 +268,29 @@ public final class JdtLsProcessFactory {
             throw new IOException("LINUX_UID requires a managed disposable checkout");
         }
         Path root = workspaceRoot.toAbsolutePath().normalize();
-        if (!root.equals(managedCheckout.root()) || Files.isSymbolicLink(root)) {
+        Path managedParent = managedCheckout.managedParent();
+        if (!root.equals(managedCheckout.root()) || !root.startsWith(managedParent)
+                || Files.isSymbolicLink(root) || Files.isSymbolicLink(managedParent)
+                || hasSymbolicLinkBetween(managedParent, root)) {
             throw new IOException("managed checkout root is invalid");
         }
+        Path canonicalParent = managedParent.toRealPath(java.nio.file.LinkOption.NOFOLLOW_LINKS);
         Path canonicalRoot = root.toRealPath(java.nio.file.LinkOption.NOFOLLOW_LINKS);
-        if (!canonicalRoot.equals(root)) {
+        if (!canonicalRoot.startsWith(canonicalParent) || !canonicalRoot.equals(root)) {
             throw new IOException("managed checkout root is not canonical");
         }
         rejectSymbolicLinks(root);
+    }
+
+    private static boolean hasSymbolicLinkBetween(Path parent, Path child) {
+        Path current = parent;
+        for (Path segment : parent.relativize(child)) {
+            current = current.resolve(segment);
+            if (Files.isSymbolicLink(current)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static void rejectSymbolicLinks(Path root) throws IOException {
