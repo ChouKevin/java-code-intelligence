@@ -32,8 +32,8 @@
 - `mvn -pl semantic-indexer -am -Dsurefire.failIfNoSpecifiedTests=false -Dtest=IndexBuildServiceTest,IndexProjectionContractTest,SemanticRelationProjectorFrameworkEvidenceTest,JdtLsRepositoryIndexExporterSemanticSessionTest test`: 16 tests, 0 failures/errors.
 - `mvn -pl semantic-indexer -am -Pmongo-it -Dsurefire.failIfNoSpecifiedTests=false -Dtest=GenerationValidatorIT,FullIndexPublicationIT test`: 39 tests, 0 failures/errors.
 
-### Real-JDT limitation
+### Real-JDT environment evidence
 
-The P11 integration command was attempted with the `jdtls-it` profile:
-`mvn -pl semantic-indexer -am -Pjdtls-it -Dsurefire.failIfNoSpecifiedTests=false -Dtest=EffectiveEnvironmentJdtLsIT test`.
-It failed before fixture setup because `JDTLS_HOME` is not configured in this environment. No real-JDT completion claim is made.
+The real-JDT effective-environment integration passed with the installed language server:
+`JDTLS_HOME=/opt/jdtls mvn -pl semantic-indexer -am -Pjdtls-it -Dsurefire.failIfNoSpecifiedTests=false -Dtest=EffectiveEnvironmentJdtLsIT test`.
+It completed with 1 test, 0 failures, and 0 errors. This proves JDT LS effective classpath evidence is used rather than launcher runtime classpath for the existing multi-module/system-artifact fixture.
