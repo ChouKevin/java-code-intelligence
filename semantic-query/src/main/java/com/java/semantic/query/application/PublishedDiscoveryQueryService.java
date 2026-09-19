@@ -33,7 +33,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
-/** Mongo-only declaration and event-listener discovery over selected current symbols. */
+/** Mongo-only declaration and event-listener discovery over selected-generation symbols. */
 public final class PublishedDiscoveryQueryService {
     private static final Set<String> LISTENER_ANNOTATIONS = Set.of("org.springframework.context.event.EventListener",
             "org.springframework.transaction.event.TransactionalEventListener", "EventListener", "TransactionalEventListener");

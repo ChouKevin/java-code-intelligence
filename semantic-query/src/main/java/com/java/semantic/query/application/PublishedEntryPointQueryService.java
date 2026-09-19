@@ -26,7 +26,7 @@ import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Pattern;
 
-/** Authorized current-generation entry-point and route lookup reader. */
+/** Authorized entry-point and route lookup reader over a selected generation. */
 public final class PublishedEntryPointQueryService {
     private static final Pattern HTTP_METHOD = Pattern.compile("^[A-Z]+$");
     private final MongoTemplate template;

@@ -7,7 +7,7 @@ import java.util.Objects;
 
 public record PublishedSource(SelectedGeneration generation, String sourcePath, String utf8Content) {
     public PublishedSource {
-        generation = Objects.requireNonNull(generation, "current generation is required");
+        generation = Objects.requireNonNull(generation, "selected generation is required");
         sourcePath = ModelValidation.requiredText(sourcePath, "source path");
         utf8Content = Objects.requireNonNull(utf8Content, "source content is required");
     }

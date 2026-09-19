@@ -5,7 +5,7 @@ import com.java.semantic.model.query.SelectedGeneration;
 import java.util.List;
 import java.util.Objects;
 
-/** One deterministic page of authorized entry points from a current generation. */
+/** One deterministic page of authorized entry points from a selected generation. */
 public record PublishedEntryPointResult(SelectedGeneration generation, List<PublishedEntryPoint> entryPoints,
                                         long totalCount, boolean hasMore) {
     public PublishedEntryPointResult {

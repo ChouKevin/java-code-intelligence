@@ -30,7 +30,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.TimeUnit;
 
-/** The sole policy boundary for every generation-backed query read. */
+/** Facade-admission selector for current repository pointers; {@link SelectedGenerationGuard} validates selected-read policy and projections. */
 public final class CurrentGenerationSelector {
     private final MongoTemplate template;
     private final SelectedGenerationGuard guard;
