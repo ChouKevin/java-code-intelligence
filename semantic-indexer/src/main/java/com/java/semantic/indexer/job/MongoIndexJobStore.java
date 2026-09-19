@@ -483,10 +483,20 @@ public final class MongoIndexJobStore implements IndexJobStore {
             return false;
         }
         Document manifest = template.getCollection(IndexCollections.REVIEW_MANIFESTS).find(new Document(REPOSITORY_ID, job.getString(REPOSITORY_ID))
-                .append("reviewId", payload.getString("reviewId")).append("ownerJobId", job.getString(JOB_ID)).append("state", "READY")).first();
-        return Objects.nonNull(manifest) && Objects.nonNull(payload.get("a", Document.class))
-                && Objects.nonNull(payload.get("b", Document.class)) && Objects.nonNull(payload.getString("comparisonId"))
-                && Objects.nonNull(payload.getString("previousSnapshotId")) && Objects.nonNull(payload.getString("currentSnapshotId"));
+                .append("reviewId", payload.getString("reviewId")).append("ownerJobId", job.getString(JOB_ID)).append("state", "READY")
+                .append("comparisonId", payload.getString("comparisonId")).append("a.snapshotId", payload.getString("previousSnapshotId"))
+                .append("b.snapshotId", payload.getString("currentSnapshotId"))).first();
+        if (Objects.isNull(manifest) || Objects.isNull(payload.get("a", Document.class))
+                || Objects.isNull(payload.get("b", Document.class)) || Objects.isNull(payload.getString("comparisonId"))
+                || Objects.isNull(payload.getString("previousSnapshotId")) || Objects.isNull(payload.getString("currentSnapshotId"))) {
+            return false;
+        }
+        try {
+            new com.java.semantic.indexer.review.ReviewReadinessValidator(template).validateReadyCandidate(from(job));
+            return true;
+        } catch (com.java.semantic.indexer.review.ReviewPreparationException exception) {
+            return false;
+        }
     }
 
     private IndexJob insertNoWork(RepositoryId repositoryId) {

@@ -38,8 +38,9 @@ public final class ReviewReadinessValidator {
             throw mismatch("review readiness requires its active running owner");
         }
         ReviewJobPayload payload = requiredJob.review().orElseThrow(() -> mismatch("review payload is required"));
-        if (payload.stage() != ReviewPreparationStage.VALIDATING || payload.a().isEmpty() || payload.b().isEmpty()
-                || payload.comparisonId().isEmpty() || payload.previousSnapshotId().isEmpty() || payload.currentSnapshotId().isEmpty()) {
+        if ((payload.stage() != ReviewPreparationStage.VALIDATING && payload.stage() != ReviewPreparationStage.READY)
+                || payload.a().isEmpty() || payload.b().isEmpty() || payload.comparisonId().isEmpty()
+                || payload.previousSnapshotId().isEmpty() || payload.currentSnapshotId().isEmpty()) {
             throw mismatch("review readiness requires both sealed sides and all Git identities");
         }
         SealedGeneration a = payload.a().orElseThrow();
