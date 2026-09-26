@@ -7,11 +7,13 @@ import com.java.semantic.model.repository.RepositoryRevision;
 import com.java.semantic.model.git.GitEvidenceOwnership;
 import com.java.semantic.model.git.GitPublicationScope;
 import com.java.semantic.model.git.GitPreparedComparison;
+import com.java.semantic.repository.application.RepositoryMutationException;
 import com.java.semantic.repository.application.RepositoryRuntimeRegistry;
 import com.java.semantic.repository.domain.RepositoryRuntime;
 import com.java.semantic.repository.port.GitRepositoryPort;
 import org.springframework.stereotype.Component;
 
+import java.io.IOException;
 import java.time.Instant;
 import java.util.Objects;
 
@@ -34,6 +36,7 @@ public final class GitEvidenceJobHandler {
         try {
             evidence.verifySchemaBeforeEvidence();
             try {
+                validateCheckout(runtime);
                 switch (job.operation()) {
                     case GIT_REFS -> refs(job, runtime);
                     case GIT_HISTORY -> history(job, runtime);
@@ -58,6 +61,7 @@ public final class GitEvidenceJobHandler {
         RepositoryRuntime runtime = repositories.get(requiredJob.repositoryId());
         runtime.lock().writeLock().lock();
         try {
+            validateCheckout(runtime);
             if (!git.isCloned(runtime.workingTree())) {
                 git.clone(runtime.workingTree(), runtime.remoteUrl());
             }
@@ -73,6 +77,14 @@ public final class GitEvidenceJobHandler {
             throw exception;
         } finally {
             runtime.lock().writeLock().unlock();
+        }
+    }
+
+    private void validateCheckout(RepositoryRuntime runtime) {
+        try {
+            runtime.managedCheckout().validate(runtime.workingTree());
+        } catch (IOException exception) {
+            throw new RepositoryMutationException("managed Git evidence checkout boundary is invalid", exception);
         }
     }
 
