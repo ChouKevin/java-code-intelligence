@@ -148,34 +148,52 @@ exact current `revision`, and use them with the ten semantic tools. A stale
 request receives `REVISION_OUTDATED` and `currentRevision`; rediscover
 revision-scoped fact IDs before a fact-bound retry.
 
-A semantic review is separate immutable READY membership. The private admin
-operation accepts **one** exact lowercase 40-character B commit:
-
+A captured-current semantic review is separate immutable READY membership.
+For a review of B against the published A, use **only**
+`POST /index/repositories/{repositoryId}/reviews` with the exact lowercase
+40-character B SHA. Do not admit B via ordinary `/ensure`, `/sync`, `/checkout`,
+or `/rebuild`: those are BUILD operations and may publish B as current.
+Read and retain the current A pointer (revision, generation ID, and digest)
+before admission. The private review admin request is:
 ```bash
-curl --fail-with-body -sS \
+curl --fail-with-body -sS -i \
   -H "X-Api-Token: $SEMANTIC_INDEXER_ADMIN_TOKEN" \
   -H 'Content-Type: application/json' \
   -d '{"revision":"<B-full-lowercase-sha>"}' \
   https://indexer.private/index/repositories/orders/reviews
 ```
 
-The `202` response contains the job and review IDs, comparison type
-`CURRENT_TO_COMMIT`, the captured A baseline/pointer, and requested B. Verify
-that captured A immediately; do not substitute a later repository current.
-Poll the returned job only:
+Require HTTP `202` with a nonempty `jobId`, `review.reviewId`,
+`review.comparisonType: CURRENT_TO_COMMIT`,
+`review.capturedBaseline` equal to the recorded A pointer, and
+`review.requestedRevision` equal to exact B. A response without review
+provenance is **not** review admission, even if it names B. Immediately
+GET the returned job, before any long poll:
 
 ```bash
 curl --fail-with-body -sS \
   -H "X-Api-Token: $SEMANTIC_INDEXER_ADMIN_TOKEN" \
-  https://indexer.private/index/repositories/orders/jobs/<jobId>
+  'https://indexer.private/index/repositories/orders/jobs/<jobId>'
 ```
 
-Wait for terminal `phase: COMPLETE` and review stage `READY`; record its
-`comparisonId`, `previousSnapshotId`, and `currentSnapshotId`. A client timeout
-means resume this status poll. It does not cancel the admitted job and does not
-authorize automatic resubmission. A failed or interrupted preparation remains
-unreadable; after correcting its cause, submit a new request and verify that the
-new response displays its newly captured baseline.
+Check that status has the same `jobId`, `operation: REVIEW`, the same
+`review.reviewId`, `review.comparisonType: CURRENT_TO_COMMIT`,
+`review.capturedBaseline` matching A, `review.requestedRevision` matching B,
+and initial review preparation (`phase: RUNNING`, `review.stage: PREPARING_A`
+or `BUILDING_A`). Also require `currentPointer` still equals A. If the job
+is `operation: BUILD`, the review
+ID/provenance is missing or differs, or current moves from A, **stop**:
+record an admission incident, do not interpret BUILD progress or publication
+as review progress, and do not ask OMP to review it.
+
+Only after these checks, poll this same job for terminal `phase: COMPLETE`
+and review stage `READY`; record its `comparisonId`, `previousSnapshotId`,
+and `currentSnapshotId`. A client outage or timeout means resume reading this
+job's status, never automatically resubmit or resume an interrupted job.
+An interrupted standalone BUILD that has not published B is reconciled at
+startup as `FAILED/WORKER_INTERRUPTED`, not retried and not published as B;
+confirm current remains A. After correcting the cause, an explicit review
+is a **new** request with a new job/review ID and newly captured baseline.
 
 A READY review direction is always direct A → B. It is not a PR diff, does not
 calculate a merge base, and is not a claim that every difference originated in

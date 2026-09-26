@@ -93,10 +93,13 @@ disposable real-JDT A/B flow and a cold Mongo-only Query process; it does not ru
 OMP, validate an actual VM hostname/certificate, or exercise private deployment
 credentials. An actual OMP acceptance requires a separately prepared local
 Indexer/Mongo/Query environment using an actual committed approved repository,
-one captured-A/single-B review submission, a persistent cold Query reader, and
-sanitized external-client evidence. A remote deployment additionally requires
-the approved VM, private Mongo/admin path, safe credential distribution, Query
-TLS certificate and hostname validation, and its real OMP client configuration.
+one captured-A/single-B review submission **through the review endpoint rather
+than ordinary BUILD admission**, immediate typed admission/status and unchanged-
+current checks, a persistent cold Query reader, and sanitized external-client
+evidence. See the [canonical review admission and stop procedure](semantic-review.md#current-generations-and-review-preparation).
+A remote deployment additionally requires the approved VM, private Mongo/admin
+path, safe credential distribution, Query TLS certificate and hostname
+validation, and its real OMP client configuration.
 
 `SEMANTIC_API_TOKEN` belongs to the deployed acceptance client invocation shown
 above. The Query server itself reads `SEMANTIC_QUERY_API_TOKEN`; keep client and

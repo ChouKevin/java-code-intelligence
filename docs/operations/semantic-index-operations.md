@@ -62,13 +62,15 @@ Query does not silently read an older or newer semantic revision. One of the oth
 
 ## READY review operation
 
-`POST /index/repositories/{repositoryId}/reviews` is a private Indexer-admin
-operation, not a Query operation. Its body contains one exact lowercase
-40-character B SHA. The `202` response captures the then-current A pointer once
-and supplies `jobId`, `reviewId`, `CURRENT_TO_COMMIT`, A, and B. Poll
-`GET /index/repositories/{repositoryId}/jobs/{jobId}` until `phase` is
-`COMPLETE` and the review stage is `READY`; a waiting-client timeout means resume
-that poll, never submit the same review again automatically.
+`POST /index/repositories/{repositoryId}/reviews` is the **only** admission
+route for a captured-current review, not a Query operation. An ordinary BUILD
+of B is not a review and can move current. Submit one exact lowercase
+40-character B SHA, then immediately check the typed `202` review identity
+and persisted `operation: REVIEW`/captured A/current-pointer postconditions
+before long polling. An absent review ID, BUILD operation, or moved current
+is an incident, not review progress. A client outage does not authorize
+automatic retry. Follow the [review admission and stop procedure](semantic-review.md#current-generations-and-review-preparation)
+for the complete checks and recovery boundary.
 
 `get_review` is the only public review discovery operation. It returns immutable
 A/B revisions, side generation identities, comparison ID, and snapshot IDs after

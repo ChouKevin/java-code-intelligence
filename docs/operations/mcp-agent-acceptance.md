@@ -57,14 +57,19 @@ store。先由安全 client 設定提供 Query token 檔案引用；不要把 to
 需要精確 method/path 的 `find_api_routes` 當成模糊搜尋；空結果與未讀完頁面都不是
 功能不存在的結論。
 
-semantic review 先由 private Indexer admin 僅提交一個 B full lowercase SHA。`202`
-回應的 captured A、`jobId`、`reviewId` 與 `CURRENT_TO_COMMIT` 是比較範圍；client
-timeout 後只輪詢同一 job。`phase: COMPLETE` 且 review stage `READY` 後，OMP 以
-`get_review` 取得 immutable A/B、comparison 和 snapshot IDs，先讀直接 A→B diff，
-再以明確 `repositoryId`、`reviewId`、`side`、side `revision` 呼叫 ten `review_`
-semantic tools。這不是 PR merge-base diff，也不能用 current revision 或任意
-generation ID 替換 side context。PREPARING/FAILED 或 review-owned Git IDs 都不可繞過
-READY owner gate；失敗修正後的新 submit 會取得新的 review ID 和新 captured baseline。
+semantic review 只能由 private Indexer admin 的
+`POST /index/repositories/{repositoryId}/reviews` 提交一個精確的 B full lowercase
+SHA，不能先用普通 BUILD admission 建立 B。`202` 與立即讀取的 job status 必須通過
+[review admission/postcondition checks](semantic-review.md#current-generations-and-review-preparation)：
+同一 review ID、captured A、B，`operation: REVIEW`，並確認 current 未移動；
+缺少 provenance、`operation: BUILD` 或 current 改變都必須停止並記錄 incident。
+client outage 只能讀取原 job，不能自動重送。`phase: COMPLETE` 且 review stage
+`READY` 後，OMP 以 `get_review` 取得 immutable A/B、comparison 和 snapshot IDs，
+先讀直接 A→B diff，再以明確 `repositoryId`、`reviewId`、`side`、side `revision`
+呼叫 ten `review_` semantic tools。這不是 PR merge-base diff，也不能用 current
+revision 或任意 generation ID 替換 side context。PREPARING/FAILED 或 review-owned
+Git IDs 都不可繞過 READY owner gate；修正後的新 submit 是新的 review ID 與新
+captured baseline。
 
 每個 finding 應含 issue、severity、triggering condition、impact、repository/revision/
 file/line evidence，以及 coverage/unresolved 限制。沒有 finding 時，只能描述已檢查
