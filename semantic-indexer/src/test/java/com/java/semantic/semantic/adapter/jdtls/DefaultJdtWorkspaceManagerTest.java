@@ -1715,8 +1715,16 @@ class DefaultJdtWorkspaceManagerTest {
                             true, home, workspaceDataRoot, Path.of("java"), isolationMode,
                             10001, 10001, tempDirectory, Duration.ofSeconds(2), Duration.ofMillis(300),
                             requestTimeout, maxActiveWorkspaces, Duration.ofMinutes(30), Duration.ofMinutes(1), "2g");
+            // These tests cover manager path admission, not real UID ownership.
+            // Keep LINUX_UID on the manager and LOCAL_TRUSTED on its fake launch factory.
+            JdtLsProperties factoryProperties = isolationMode == JdtLsProperties.IsolationMode.LINUX_UID
+                    ? new JdtLsProperties(
+                            true, home, workspaceDataRoot, Duration.ofSeconds(2),
+                            Duration.ofMillis(300), requestTimeout, maxActiveWorkspaces,
+                            Duration.ofMinutes(30), Duration.ofMinutes(1), "2g")
+                    : properties;
             JdtLsProcessFactory factory = new JdtLsProcessFactory(
-                    properties,
+                    factoryProperties,
                     command -> {
                         if (Objects.nonNull(processStartFailure)) {
                             throw processStartFailure;
