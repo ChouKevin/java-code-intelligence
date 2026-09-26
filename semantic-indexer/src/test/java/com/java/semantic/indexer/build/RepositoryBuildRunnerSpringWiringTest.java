@@ -14,6 +14,7 @@ import com.java.semantic.indexer.job.IndexJobPhase;
 import com.java.semantic.indexer.job.IndexJobStore;
 import com.java.semantic.indexer.job.IndexJobTarget;
 import com.java.semantic.indexer.repository.ExactRepositoryCheckout;
+import com.java.semantic.indexer.review.ReviewPreparationService;
 import com.java.semantic.indexer.store.PublicationPort;
 import com.java.semantic.indexer.uat.NoOpPublicationGate;
 import com.java.semantic.model.index.GenerationId;
@@ -45,6 +46,7 @@ class RepositoryBuildRunnerSpringWiringTest {
             .withBean(MongoTemplate.class, () -> mongoTemplate())
             .withBean(IndexJobStore.class, () -> mock(IndexJobStore.class))
             .withBean(GitEvidenceJobHandler.class, () -> mock(GitEvidenceJobHandler.class))
+            .withBean(ReviewPreparationService.class, () -> mock(ReviewPreparationService.class))
             .withBean(PublicationPort.class, () -> mock(PublicationPort.class))
             .withBean(JavaSemanticService.class, () -> mock(JavaSemanticService.class))
             .withBean(JdtWorkspaceManager.class, () -> mock(JdtWorkspaceManager.class))
