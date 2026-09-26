@@ -27,9 +27,10 @@ docker run --rm --entrypoint sh "${image_name}" -ceu '
   printf "class TrackedSource { }\n" > "$checkout/src/TrackedSource.java"
   chown -R 10001:10001 "$checkout/src"
   chown -R 0:0 "$checkout/.git"
-  chown 0:0 "$checkout"
-  chmod 755 "$checkout"
+  chown 0:10001 "$checkout"
+  chmod 1770 "$checkout"
   chmod 755 "$probe"
+  test "$(stat -c "%u:%g:%a" "$checkout")" = "0:10001:1770"
   if setpriv --reuid=10001 --regid=10001 --clear-groups --no-new-privs --bounding-set=-all \
       mv "$checkout/.git" "$checkout/.git.attacker"; then
     echo "analysis UID renamed checkout Git metadata" >&2
@@ -52,6 +53,11 @@ docker run --rm --entrypoint sh "${image_name}" -ceu '
     exit 1
   fi
   if setpriv --reuid=10001 --regid=10001 --clear-groups --no-new-privs --bounding-set=-all \
+      mv "$probe" "$probe.attacker"; then
+    echo "analysis UID renamed the managed checkout parent" >&2
+    exit 1
+  fi
+  if setpriv --reuid=10001 --regid=10001 --clear-groups --no-new-privs --bounding-set=-all \
       mv /data/repos /data/repos.attacker; then
     echo "analysis UID renamed the managed repository parent" >&2
     exit 1
@@ -61,11 +67,16 @@ docker run --rm --entrypoint sh "${image_name}" -ceu '
     echo "analysis UID renamed the data root" >&2
     exit 1
   fi
-  if setpriv --reuid=10001 --regid=10001 --clear-groups --no-new-privs --bounding-set=-all \
-      touch "$checkout/analysis-root-write-probe"; then
-    echo "analysis UID wrote the managed checkout root" >&2
-    exit 1
-  fi
+  setpriv --reuid=10001 --regid=10001 --clear-groups --no-new-privs --bounding-set=-all \
+    touch "$checkout/.project"
+  setpriv --reuid=10001 --regid=10001 --clear-groups --no-new-privs --bounding-set=-all \
+    mkdir "$checkout/.settings"
+  test "$(stat -c "%u:%g" "$checkout/.project")" = "10001:10001"
+  test "$(stat -c "%u:%g" "$checkout/.settings")" = "10001:10001"
+  setpriv --reuid=10001 --regid=10001 --clear-groups --no-new-privs --bounding-set=-all \
+    rm "$checkout/.project"
+  setpriv --reuid=10001 --regid=10001 --clear-groups --no-new-privs --bounding-set=-all \
+    rmdir "$checkout/.settings"
   printf "class TrackedSource { int analysisEdit; }\n" | \
     setpriv --reuid=10001 --regid=10001 --clear-groups --no-new-privs --bounding-set=-all \
       tee "$checkout/src/TrackedSource.java" >/dev/null
@@ -317,6 +328,8 @@ public final class CheckoutSecurityProbe {
                     "file:///unused/security-probe.git");
             git.getRepository().getConfig().save();
         }
+        Files.setAttribute(checkout, "unix:gid", ANALYSIS_GID, LinkOption.NOFOLLOW_LINKS);
+        setMode(checkout, 01770);
         return checkout;
     }
 

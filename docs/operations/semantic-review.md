@@ -55,12 +55,15 @@ and the analysis UID cannot write them; `/data/jdtls` alone is analysis-owned.
 Do not recursively transfer `/data` or `/data/repos` to `analysis`. Before JDT
 LS starts, every canonical directory from `/` through the checkout root must
 have an authority chain that prevents analysis from replacing the next entry.
-The checkout root stays application-owned and non-writable by analysis, as do
-`.git` and all its authoritative control entries. Only ordinary tracked
+Fresh checkout roots are application-owned, owned by the configured analysis
+group, and use sticky group-writable/traversable mode `01770`. This permits
+ordinary Maven project metadata creation while the sticky bit protects the
+application-owned `.git` entry. `.git` and all authoritative control entries
+remain application-owned and analysis-nonwritable. Only ordinary tracked
 worktree entries (including symlinks) are made analysis-owned; symlink targets
-are not followed. The image smoke script proves UID 10001 can edit tracked
-source content while it cannot write or rename the checkout root, `.git`,
-`/data/repos`, or `/data`.
+are not followed. The image smoke script proves UID 10001 can create project
+metadata and edit tracked source content while it cannot replace `.git`,
+modify or rename its controls, or replace the checkout or any ancestor.
 
 Mongo and Indexer admin must bind only to the private management interface or
 private container network. Do not publish MongoDB or `/index/**` on a public

@@ -22,6 +22,7 @@ import org.eclipse.jgit.lib.ObjectInserter;
 import org.eclipse.jgit.lib.PersonIdent;
 import org.eclipse.jgit.lib.TreeFormatter;
 import org.eclipse.jgit.revwalk.RevCommit;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -36,6 +37,11 @@ class JGitRepositoryAdapterComparisonTest {
 
     @TempDir
     Path repositoryDirectory;
+
+    @BeforeEach
+    void prepareManagedCheckoutRoot() throws Exception {
+        JdtLsTestProperties.prepareSafeCheckoutRoot(repositoryDirectory);
+    }
 
     @Test
     void captures_complete_trees_and_marks_binary_invalid_and_oversized_content_unavailable() throws Exception {

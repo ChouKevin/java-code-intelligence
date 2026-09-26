@@ -102,6 +102,9 @@ public final class JGitWorktreeRepository {
             long applicationUid,
             boolean requireNonWritable) throws IOException {
         boolean linuxUid = properties.getIsolationMode() == JdtLsProperties.IsolationMode.LINUX_UID;
+        if (linuxUid && requireNonWritable) {
+            validateDirectoryEntryBoundary(root, gitDirectory, properties);
+        }
         try (Stream<Path> entries = Files.walk(gitDirectory)) {
             Iterator<Path> iterator = entries.iterator();
             while (iterator.hasNext()) {
@@ -166,13 +169,20 @@ public final class JGitWorktreeRepository {
         }
         Path root = Objects.requireNonNull(workingTree, "working tree is required").toAbsolutePath().normalize();
         long applicationUid = applicationUid(policy);
-        Path protectedDirectory = Files.exists(root, LinkOption.NOFOLLOW_LINKS) ? root : root.getParent();
-        if (Objects.isNull(protectedDirectory)) {
-            throw new IOException("managed checkout has no trusted parent");
+        if (Files.exists(root, LinkOption.NOFOLLOW_LINKS)) {
+            requireCanonicalDirectory(root, "managed checkout authority");
+            validateAuthorityDirectoryChain(root, policy);
+            requireApplicationOwned(root, applicationUid);
+            requireSafeCheckoutRoot(root, policy);
+        } else {
+            Path parent = root.getParent();
+            if (Objects.isNull(parent)) {
+                throw new IOException("managed checkout has no trusted parent");
+            }
+            requireCanonicalDirectory(parent, "managed checkout authority");
+            validateAuthorityDirectoryChain(parent, policy);
+            requireApplicationOwnedNonWritable(parent, applicationUid, policy);
         }
-        requireCanonicalDirectory(protectedDirectory, "managed checkout authority");
-        validateAuthorityDirectoryChain(protectedDirectory, policy);
-        requireApplicationOwnedNonWritable(protectedDirectory, applicationUid, policy);
     }
 
     public static void validateNewCheckoutDestination(Path workingTree, JdtLsProperties properties)
@@ -220,7 +230,8 @@ public final class JGitWorktreeRepository {
                 setUnixMode(entry, unixMode(entry) & ~0022);
             }
         }
-        setUnixMode(root, (unixMode(root) & 01000) | 0755);
+        setUnixGroup(root, policy.getAnalysisGid());
+        setUnixMode(root, 01770);
         validateExistingCheckout(root, policy);
     }
 
@@ -242,7 +253,8 @@ public final class JGitWorktreeRepository {
         if (policy.getIsolationMode() == JdtLsProperties.IsolationMode.LINUX_UID) {
             applicationUid = applicationUid(policy);
             validateAuthorityDirectoryChain(root, policy);
-            requireApplicationOwnedNonWritable(root, applicationUid, policy);
+            requireApplicationOwned(root, applicationUid);
+            requireSafeCheckoutRoot(root, policy);
         }
         validateControlMetadata(root, gitDirectory, policy, applicationUid, true);
     }
@@ -311,6 +323,13 @@ public final class JGitWorktreeRepository {
         }
     }
 
+    private static void requireSafeCheckoutRoot(Path root, JdtLsProperties properties) throws IOException {
+        if (unixLong(root, "gid") != properties.getAnalysisGid()
+                || (unixMode(root) & 017777) != 01770) {
+            throw new IOException("managed checkout root has an unsafe owner, group, or permission layout");
+        }
+    }
+
     private static boolean analysisCanWrite(Path path, JdtLsProperties properties) throws IOException {
         long analysisUid = properties.getAnalysisUid();
         if (analysisUid == 0) {
@@ -370,5 +389,14 @@ public final class JGitWorktreeRepository {
             throw new IOException("LINUX_UID requires supported unix mode attributes for managed paths", exception);
         }
     }
+
+    private static void setUnixGroup(Path path, long groupId) throws IOException {
+        try {
+            Files.setAttribute(path, "unix:gid", groupId, LinkOption.NOFOLLOW_LINKS);
+        } catch (IllegalArgumentException | UnsupportedOperationException exception) {
+            throw new IOException("LINUX_UID requires supported unix group attributes for managed paths", exception);
+        }
+    }
+
 
 }

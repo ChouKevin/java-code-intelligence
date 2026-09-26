@@ -11,6 +11,7 @@ import com.java.semantic.model.repository.RepositoryRevision;
 import com.java.semantic.repository.domain.RepositoryRuntime;
 import com.java.semantic.repository.domain.RepositorySnapshot;
 import com.java.semantic.support.ConcurrencyTestSupport;
+import com.java.semantic.support.JdtLsTestProperties;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.eclipse.lsp4j.DidChangeConfigurationParams;
@@ -258,6 +259,26 @@ class DefaultJdtWorkspaceManagerTest {
             assertThat(leaseBase).isDirectory();
             assertThat(fixture.startedCommands()).hasSize(1);
         }
+    }
+
+    @Test
+    void linux_uid_rejects_a_nonsticky_checkout_root_before_creating_a_lease() throws IOException {
+        Path dataRoot = tempDirectory.resolve("nonsticky-root-data");
+        Path workspaceRoot = dataRoot.resolve("jdtls");
+        Path checkoutRoot = dataRoot.resolve("repos/orders");
+        Fixture fixture = new Fixture(JdtLsProperties.IsolationMode.LINUX_UID, workspaceRoot);
+        RepositorySnapshot snapshot = fixture.snapshotAt(REPOSITORY_ID, checkoutRoot);
+        AnalysisWorkspaceKey key = new AnalysisWorkspaceKey(
+                snapshot.repositoryId(), snapshot.revision(), "job-123", "A");
+        RepositoryRuntime runtime = new RepositoryRuntime(snapshot.repositoryId(), "test", checkoutRoot,
+                "file:///remote/test.git", "main", checkoutRoot.getParent());
+        Files.setAttribute(checkoutRoot, "unix:mode", 0755);
+
+        assertThatThrownBy(() -> fixture.manager().acquire(key, snapshot, runtime.managedCheckout()))
+                .isInstanceOf(IllegalStateException.class);
+        assertThat((int) Files.getAttribute(checkoutRoot, "unix:mode") & 017777).isEqualTo(0755);
+        assertThat(workspaceRoot).doesNotExist();
+        assertThat(fixture.startedCommands()).isEmpty();
     }
 
     @Test
@@ -1640,6 +1661,7 @@ class DefaultJdtWorkspaceManagerTest {
         private final AtomicReference<FakeProcess> process = new AtomicReference<>();
         private final MutableTicker ticker = new MutableTicker();
         private final DefaultJdtWorkspaceManager manager;
+        private final boolean linuxUid;
 
         private volatile String stderr = "";
         private volatile Supplier<InputStream> stderrSupplier = this::newStderr;
@@ -1700,6 +1722,7 @@ class DefaultJdtWorkspaceManagerTest {
                 Runnable launchCompletionWaitObserver,
                 JdtLsProperties.IsolationMode isolationMode,
                 Path workspaceDataRoot) {
+            this.linuxUid = isolationMode == JdtLsProperties.IsolationMode.LINUX_UID;
             Path home;
             try {
                 home = JdtLsTestFixtures.createFakeHome(tempDirectory);
@@ -1713,8 +1736,9 @@ class DefaultJdtWorkspaceManagerTest {
                             Duration.ofMinutes(30), Duration.ofMinutes(1), "2g")
                     : new JdtLsProperties(
                             true, home, workspaceDataRoot, Path.of("java"), isolationMode,
-                            10001, 10001, tempDirectory, Duration.ofSeconds(2), Duration.ofMillis(300),
-                            requestTimeout, maxActiveWorkspaces, Duration.ofMinutes(30), Duration.ofMinutes(1), "2g");
+                            10001, JdtLsTestProperties.linuxUid().getAnalysisGid(), tempDirectory,
+                            Duration.ofSeconds(2), Duration.ofMillis(300), requestTimeout, maxActiveWorkspaces,
+                            Duration.ofMinutes(30), Duration.ofMinutes(1), "2g");
             // These tests cover manager path admission, not real UID ownership.
             // Keep LINUX_UID on the manager and LOCAL_TRUSTED on its fake launch factory.
             JdtLsProperties factoryProperties = isolationMode == JdtLsProperties.IsolationMode.LINUX_UID
@@ -1775,6 +1799,9 @@ class DefaultJdtWorkspaceManagerTest {
             try {
                 Path source = root.resolve("src/main/java/com/example");
                 Files.createDirectories(source);
+                if (linuxUid) {
+                    JdtLsTestProperties.prepareSafeCheckoutRoot(root);
+                }
                 Files.writeString(source.resolve(SANITY_TYPE + ".java"),
                         "package com.example; public class " + SANITY_TYPE + " {}");
                 languageServer.workspaceService().clearImportedProjects();

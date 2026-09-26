@@ -26,6 +26,7 @@ class JGitEvidenceHistoryAdapterTest {
 
     @Test
     void streams_exact_reachable_commits_with_full_parent_shas_in_stable_order() throws Exception {
+        JdtLsTestProperties.prepareSafeCheckoutRoot(repositoryRoot);
         try (Git git = Git.init().setDirectory(repositoryRoot.toFile()).call()) {
             Files.writeString(repositoryRoot.resolve("Evidence.java"), "class Evidence { }");
             git.add().addFilepattern(".").call();

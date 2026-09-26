@@ -1,5 +1,6 @@
 package com.java.semantic.repository.adapter.jgit;
 
+import com.java.semantic.config.JdtLsProperties;
 import com.java.semantic.indexer.job.IndexJob;
 import com.java.semantic.indexer.job.IndexJobId;
 import com.java.semantic.indexer.job.IndexJobOperation;
@@ -296,6 +297,63 @@ class JGitRepositoryAdapterTest {
     }
 
     @Test
+    void rejects_unsafe_checkout_root_layouts_without_mutating_git_control_data() throws Exception {
+        requirePosixFileSystem();
+        try (RemoteFixture fixture = createRemote("unsafe-root")) {
+            JGitRepositoryAdapter adapter = adapter();
+            Path checkout = tempDirectory.resolve("checkout-with-unsafe-root");
+            adapter.clone(checkout, fixture.remote().toUri().toString());
+            Path config = checkout.resolve(".git/config");
+            byte[] originalConfig = Files.readAllBytes(config);
+            ObjectId originalRemoteTip;
+            try (Git local = Git.open(checkout.toFile())) {
+                originalRemoteTip = local.getRepository().resolve("refs/remotes/origin/main");
+            }
+            assertThat(Files.getAttribute(checkout, "unix:gid"))
+                    .isEqualTo(JdtLsTestProperties.linuxUid().getAnalysisGid());
+            assertThat((int) Files.getAttribute(checkout, "unix:mode") & 017777).isEqualTo(01770);
+
+            for (int unsafeMode : new int[] {0755, 0770, 01777}) {
+                Files.setAttribute(checkout, "unix:mode", unsafeMode);
+                assertThatThrownBy(() -> adapter.fetch(checkout, fixture.remote().toUri().toString()))
+                        .isInstanceOf(RepositoryMutationException.class);
+                assertThat((int) Files.getAttribute(checkout, "unix:mode") & 017777).isEqualTo(unsafeMode);
+                assertThat(Files.readAllBytes(config)).containsExactly(originalConfig);
+                try (Git local = Git.open(checkout.toFile())) {
+                    assertThat(local.getRepository().resolve("refs/remotes/origin/main"))
+                            .isEqualTo(originalRemoteTip);
+                }
+            }
+
+            Files.setAttribute(checkout, "unix:mode", 01770);
+            JdtLsProperties policy = JdtLsTestProperties.linuxUid();
+            JdtLsProperties wrongGroupPolicy = new JdtLsProperties(
+                    policy.enabled(),
+                    policy.home(),
+                    policy.workspaceDataRoot(),
+                    policy.javaExecutable(),
+                    policy.isolationMode(),
+                    policy.analysisUid(),
+                    policy.analysisGid() + 1,
+                    policy.analysisHome(),
+                    policy.startupTimeout(),
+                    policy.importTimeout(),
+                    policy.requestTimeout(),
+                    policy.maxActiveWorkspaces(),
+                    policy.idleTimeout(),
+                    policy.maintenanceInterval(),
+                    policy.maxHeap());
+            JGitRepositoryAdapter wrongGroupAdapter = new JGitRepositoryAdapter(
+                    new RepositoryProperties(), wrongGroupPolicy);
+
+            assertThatThrownBy(() -> wrongGroupAdapter.fetch(checkout, fixture.remote().toUri().toString()))
+                    .isInstanceOf(RepositoryMutationException.class);
+            assertThat(Files.getAttribute(checkout, "unix:gid")).isEqualTo(policy.analysisGid());
+            assertThat(Files.readAllBytes(config)).containsExactly(originalConfig);
+        }
+    }
+
+    @Test
     void rejects_git_file_indirection_before_fetch_mutates_the_external_repository() throws Exception {
         try (RemoteFixture remote = createRemote("gitdir-source")) {
             Path externalWorkTree = tempDirectory.resolve("external-worktree");
@@ -307,6 +365,7 @@ class JGitRepositoryAdapterTest {
                         .call();
             }
             Path redirectedWorkTree = Files.createDirectories(tempDirectory.resolve("redirected-worktree"));
+            JdtLsTestProperties.prepareSafeCheckoutRoot(redirectedWorkTree);
             Files.writeString(redirectedWorkTree.resolve(".git"),
                     "gitdir: " + externalWorkTree.resolve(".git").toAbsolutePath() + System.lineSeparator());
             try (Git external = Git.open(externalWorkTree.toFile())) {
@@ -384,6 +443,8 @@ class JGitRepositoryAdapterTest {
     @Test
     void rejects_malformed_git_config_as_repository_mutation_failure() throws Exception {
         Path checkout = tempDirectory.resolve("checkout-with-malformed-config");
+        Files.createDirectories(checkout);
+        JdtLsTestProperties.prepareSafeCheckoutRoot(checkout);
         try (Git git = Git.init().setDirectory(checkout.toFile()).call()) {
             Path config = git.getRepository().getDirectory().toPath().resolve("config");
             Files.writeString(config, "[core\n");
