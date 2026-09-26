@@ -32,12 +32,13 @@ class ExactRepositoryCheckoutTest {
     Path temporaryDirectory;
 
     @Test
-    void checks_out_the_admitted_revision_after_the_default_branch_moves() {
+    void checks_out_the_admitted_revision_after_the_default_branch_moves() throws IOException {
         RepositoryId repositoryId = RepositoryId.of("orders");
         RepositoryRevision admittedRevision = RepositoryRevision.ofSha("a".repeat(40));
         RepositoryRevision movedBranchRevision = RepositoryRevision.ofSha("b".repeat(40));
         RepositoryRuntimeRegistry registry = registry(repositoryId);
         Path root = registry.get(repositoryId).workingTree();
+        Files.createDirectories(root.getParent());
         GitRepositoryPort git = mock(GitRepositoryPort.class);
         when(git.isCloned(root)).thenReturn(true);
         when(git.resolveRemoteRef("https://example.test/orders.git", "main")).thenReturn(movedBranchRevision);
@@ -54,11 +55,12 @@ class ExactRepositoryCheckoutTest {
     }
 
     @Test
-    void clones_when_the_repository_working_tree_is_absent() {
+    void clones_when_the_repository_working_tree_is_absent() throws IOException {
         RepositoryId repositoryId = RepositoryId.of("orders");
         RepositoryRevision admittedRevision = RepositoryRevision.ofSha("a".repeat(40));
         RepositoryRuntimeRegistry registry = registry(repositoryId);
         Path root = registry.get(repositoryId).workingTree();
+        Files.createDirectories(root.getParent());
         GitRepositoryPort git = mock(GitRepositoryPort.class);
         when(git.isCloned(root)).thenReturn(false);
         when(git.currentRevision(root)).thenReturn(admittedRevision);
@@ -72,11 +74,12 @@ class ExactRepositoryCheckoutTest {
     }
 
     @Test
-    void rejects_the_checkout_when_head_does_not_match_the_admitted_revision() {
+    void rejects_the_checkout_when_head_does_not_match_the_admitted_revision() throws IOException {
         RepositoryId repositoryId = RepositoryId.of("orders");
         RepositoryRevision admittedRevision = RepositoryRevision.ofSha("a".repeat(40));
         RepositoryRuntimeRegistry registry = registry(repositoryId);
         Path root = registry.get(repositoryId).workingTree();
+        Files.createDirectories(root.getParent());
         GitRepositoryPort git = mock(GitRepositoryPort.class);
         when(git.isCloned(root)).thenReturn(true);
         when(git.currentRevision(root)).thenReturn(RepositoryRevision.ofSha("b".repeat(40)));
@@ -84,6 +87,36 @@ class ExactRepositoryCheckoutTest {
 
         assertThatThrownBy(() -> checkout.checkout(job(repositoryId, admittedRevision)))
                 .hasMessageContaining("checked out revision differs");
+    }
+
+    @Test
+    void rejects_missing_managed_parent_without_creating_it_or_calling_git() {
+        RepositoryId repositoryId = RepositoryId.of("orders");
+        RepositoryRuntimeRegistry registry = registry(repositoryId);
+        Path root = registry.get(repositoryId).workingTree();
+        GitRepositoryPort git = mock(GitRepositoryPort.class);
+
+        assertThatThrownBy(() -> new ExactRepositoryCheckout(registry, git)
+                .checkout(job(repositoryId, RepositoryRevision.ofSha("a".repeat(40)))))
+                .isInstanceOf(IllegalStateException.class);
+        assertThat(root.getParent()).doesNotExist();
+        assertThat(root).doesNotExist();
+        org.mockito.Mockito.verifyNoInteractions(git);
+    }
+
+    @Test
+    void rejects_non_directory_managed_parent_without_calling_git() throws IOException {
+        RepositoryId repositoryId = RepositoryId.of("orders");
+        RepositoryRuntimeRegistry registry = registry(repositoryId);
+        Path root = registry.get(repositoryId).workingTree();
+        Files.writeString(root.getParent(), "occupied");
+        GitRepositoryPort git = mock(GitRepositoryPort.class);
+
+        assertThatThrownBy(() -> new ExactRepositoryCheckout(registry, git)
+                .checkout(job(repositoryId, RepositoryRevision.ofSha("a".repeat(40)))))
+                .isInstanceOf(IllegalStateException.class);
+        assertThat(root.getParent()).hasContent("occupied");
+        org.mockito.Mockito.verifyNoInteractions(git);
     }
 
     @Test

@@ -32,9 +32,9 @@ public final class ManagedDisposableCheckout {
             throw new IOException("managed checkout root is invalid");
         }
         validateAncestors(checkout);
-        if (Files.exists(managedParent, LinkOption.NOFOLLOW_LINKS)
-                && !managedParent.toRealPath().equals(managedParent)) {
-            throw new IOException("managed checkout parent changed");
+        if (!Files.isDirectory(managedParent, LinkOption.NOFOLLOW_LINKS)
+                || !managedParent.toRealPath().equals(managedParent)) {
+            throw new IOException("managed checkout parent must be a real canonical directory");
         }
         if (Files.exists(checkout, LinkOption.NOFOLLOW_LINKS)) {
             try (Stream<Path> tree = Files.walk(checkout)) {

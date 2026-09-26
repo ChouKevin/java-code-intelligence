@@ -162,6 +162,19 @@ class DefaultJdtWorkspaceManagerTest {
     }
 
     @Test
+    void should_reject_linux_uid_lease_without_managed_checkout_before_creating_workspace_data() {
+        Fixture fixture = new Fixture(JdtLsProperties.IsolationMode.LINUX_UID);
+        RepositorySnapshot snapshot = fixture.snapshot();
+        AnalysisWorkspaceKey key = new AnalysisWorkspaceKey(
+                snapshot.repositoryId(), snapshot.revision(), "job-123", "A");
+
+        assertThatThrownBy(() -> fixture.manager().acquire(key, snapshot))
+                .isInstanceOf(IllegalStateException.class);
+        assertThat(tempDirectory.resolve("jdtls-data")).doesNotExist();
+        assertThat(fixture.startedCommands()).isEmpty();
+    }
+
+    @Test
     void should_reject_symlinked_workspace_data_ancestor_without_creating_a_lease_or_starting_a_process()
             throws IOException {
         Fixture fixture = new Fixture();
@@ -1445,6 +1458,9 @@ class DefaultJdtWorkspaceManagerTest {
         private Fixture() {
             this(Duration.ofMillis(200));
         }
+        private Fixture(JdtLsProperties.IsolationMode isolationMode) {
+            this(Duration.ofMillis(200), Duration.ofSeconds(5), 1, () -> { }, isolationMode);
+        }
 
         private Fixture(Duration requestTimeout) {
             this(requestTimeout, Duration.ofSeconds(5));
@@ -1463,23 +1479,31 @@ class DefaultJdtWorkspaceManagerTest {
                 Duration shutdownLockWait,
                 int maxActiveWorkspaces,
                 Runnable launchCompletionWaitObserver) {
+            this(requestTimeout, shutdownLockWait, maxActiveWorkspaces, launchCompletionWaitObserver,
+                    JdtLsProperties.IsolationMode.LOCAL_TRUSTED);
+        }
+
+        private Fixture(
+                Duration requestTimeout,
+                Duration shutdownLockWait,
+                int maxActiveWorkspaces,
+                Runnable launchCompletionWaitObserver,
+                JdtLsProperties.IsolationMode isolationMode) {
             Path home;
             try {
                 home = JdtLsTestFixtures.createFakeHome(tempDirectory);
             } catch (IOException exception) {
                 throw new IllegalStateException("fake JDT LS home failed", exception);
             }
-            JdtLsProperties properties = new JdtLsProperties(
-                    true,
-                    home,
-                    tempDirectory.resolve("jdtls-data"),
-                    Duration.ofSeconds(2),
-                    Duration.ofMillis(300),
-                    requestTimeout,
-                    maxActiveWorkspaces,
-                    Duration.ofMinutes(30),
-                    Duration.ofMinutes(1),
-                    "2g");
+            JdtLsProperties properties = isolationMode == JdtLsProperties.IsolationMode.LOCAL_TRUSTED
+                    ? new JdtLsProperties(
+                            true, home, tempDirectory.resolve("jdtls-data"), Duration.ofSeconds(2),
+                            Duration.ofMillis(300), requestTimeout, maxActiveWorkspaces,
+                            Duration.ofMinutes(30), Duration.ofMinutes(1), "2g")
+                    : new JdtLsProperties(
+                            true, home, tempDirectory.resolve("jdtls-data"), Path.of("java"), isolationMode,
+                            10001, 10001, tempDirectory, Duration.ofSeconds(2), Duration.ofMillis(300),
+                            requestTimeout, maxActiveWorkspaces, Duration.ofMinutes(30), Duration.ofMinutes(1), "2g");
             JdtLsProcessFactory factory = new JdtLsProcessFactory(
                     properties,
                     command -> {

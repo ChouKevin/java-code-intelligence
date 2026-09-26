@@ -164,6 +164,10 @@ public class DefaultJdtWorkspaceManager implements JdtWorkspaceManager, Reposito
         Assert.isTrue(key.revision().equals(snapshot.revision()),
                 "workspace key revision must match snapshot");
         ensureActive(snapshot.repositoryId());
+        if (properties.getIsolationMode() == JdtLsProperties.IsolationMode.LINUX_UID
+                && Objects.isNull(managedCheckout)) {
+            throw new IllegalStateException("LINUX_UID requires a managed disposable checkout");
+        }
         if (Objects.nonNull(managedCheckout)) {
             try {
                 managedCheckout.validate(snapshot.root());
