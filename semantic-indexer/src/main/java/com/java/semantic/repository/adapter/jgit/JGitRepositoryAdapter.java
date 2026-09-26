@@ -101,7 +101,7 @@ public class JGitRepositoryAdapter implements GitRepositoryPort {
             fetchRemote(git, remoteUrl);
         } catch (RepositoryMutationException exception) {
             throw exception;
-        } catch (IOException | GitAPIException | RuntimeException exception) {
+        } catch (GitAPIException | RuntimeException exception) {
             throw new RepositoryMutationException("fetch failed", exception);
         }
     }
