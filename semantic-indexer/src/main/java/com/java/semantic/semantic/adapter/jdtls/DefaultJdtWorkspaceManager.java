@@ -5,6 +5,7 @@ import com.java.semantic.repository.application.RepositoryMutationException;
 import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.model.repository.RepositoryRevision;
 import com.java.semantic.repository.domain.RepositorySnapshot;
+import com.java.semantic.repository.domain.ManagedDisposableCheckout;
 import com.java.semantic.repository.port.RepositoryMutationListener;
 import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.Meter;
@@ -163,6 +164,13 @@ public class DefaultJdtWorkspaceManager implements JdtWorkspaceManager, Reposito
         Assert.isTrue(key.revision().equals(snapshot.revision()),
                 "workspace key revision must match snapshot");
         ensureActive(snapshot.repositoryId());
+        if (Objects.nonNull(managedCheckout)) {
+            try {
+                managedCheckout.validate(snapshot.root());
+            } catch (IOException exception) {
+                throw new IllegalStateException("managed checkout boundary is invalid", exception);
+            }
+        }
         Path workspaceData = createLeaseDirectory(key);
         JdtLsReadinessProbe.ImportProgressClient client = readinessProbe.newClient();
         JdtWorkspaceSession session = null;
@@ -193,6 +201,11 @@ public class DefaultJdtWorkspaceManager implements JdtWorkspaceManager, Reposito
         Path containedBase = root.resolve(key.repositoryId().value()).resolve(key.revision().value())
                 .resolve(key.jobId()).resolve(key.stage()).normalize();
         Assert.isTrue(containedBase.startsWith(root), "workspace key escaped workspace data root");
+        try {
+            ManagedDisposableCheckout.validateAncestors(containedBase);
+        } catch (IOException exception) {
+            throw new IllegalStateException("workspace data boundary is invalid", exception);
+        }
         try {
             Files.createDirectories(containedBase);
             Path lease = Files.createTempDirectory(containedBase, "lease-").toRealPath();

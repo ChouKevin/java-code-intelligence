@@ -14,6 +14,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Path;
+import java.nio.file.Files;
+import java.io.IOException;
 import java.util.Map;
 import java.util.Optional;
 
@@ -82,6 +84,77 @@ class ExactRepositoryCheckoutTest {
 
         assertThatThrownBy(() -> checkout.checkout(job(repositoryId, admittedRevision)))
                 .hasMessageContaining("checked out revision differs");
+    }
+
+    @Test
+    void rejects_symlinked_checkout_before_git_mutates_outside_tree() throws IOException {
+        RepositoryId repositoryId = RepositoryId.of("orders");
+        RepositoryRuntimeRegistry registry = registry(repositoryId);
+        Path root = registry.get(repositoryId).workingTree();
+        Path outside = Files.createDirectories(temporaryDirectory.resolve("outside"));
+        Files.createDirectories(root.getParent());
+        Files.createSymbolicLink(root, outside);
+        GitRepositoryPort git = mock(GitRepositoryPort.class);
+
+        assertThatThrownBy(() -> new ExactRepositoryCheckout(registry, git)
+                .checkout(job(repositoryId, RepositoryRevision.ofSha("a".repeat(40)))))
+                .isInstanceOf(IllegalStateException.class);
+        org.mockito.Mockito.verifyNoInteractions(git);
+        assertThat(outside).isEmptyDirectory();
+    }
+
+    @Test
+    void rejects_symlink_above_configured_parent_before_git_mutates_outside_tree() throws IOException {
+        RepositoryId repositoryId = RepositoryId.of("orders");
+        Path outside = Files.createDirectories(temporaryDirectory.resolve("outside"));
+        Path link = temporaryDirectory.resolve("alias");
+        Files.createSymbolicLink(link, outside);
+        RepositoryProperties properties = new RepositoryProperties();
+        properties.setDataRoot(link.resolve("repos").toString());
+        RepositoryProperties.RepositoryConfig config = new RepositoryProperties.RepositoryConfig();
+        config.setUrl("https://example.test/orders.git");
+        config.setDefaultBranch("main");
+        properties.setRepositories(Map.of(repositoryId.value(), config));
+        RepositoryRuntimeRegistry registry = new RepositoryRuntimeRegistry(properties);
+        GitRepositoryPort git = mock(GitRepositoryPort.class);
+
+        assertThatThrownBy(() -> new ExactRepositoryCheckout(registry, git)
+                .checkout(job(repositoryId, RepositoryRevision.ofSha("a".repeat(40)))))
+                .isInstanceOf(IllegalStateException.class);
+        org.mockito.Mockito.verifyNoInteractions(git);
+        assertThat(outside).isEmptyDirectory();
+    }
+
+    @Test
+    void rejects_existing_checkout_tree_with_symlink_before_git() throws IOException {
+        RepositoryId repositoryId = RepositoryId.of("orders");
+        RepositoryRuntimeRegistry registry = registry(repositoryId);
+        Path root = Files.createDirectories(registry.get(repositoryId).workingTree());
+        Path outside = Files.createDirectories(temporaryDirectory.resolve("outside"));
+        Files.createSymbolicLink(root.resolve("outside-link"), outside);
+        GitRepositoryPort git = mock(GitRepositoryPort.class);
+
+        assertThatThrownBy(() -> new ExactRepositoryCheckout(registry, git)
+                .checkout(job(repositoryId, RepositoryRevision.ofSha("a".repeat(40)))))
+                .isInstanceOf(IllegalStateException.class);
+        org.mockito.Mockito.verifyNoInteractions(git);
+        assertThat(outside).isEmptyDirectory();
+    }
+
+    @Test
+    void accepts_existing_contained_checkout_tree() throws IOException {
+        RepositoryId repositoryId = RepositoryId.of("orders");
+        RepositoryRuntimeRegistry registry = registry(repositoryId);
+        Path root = Files.createDirectories(registry.get(repositoryId).workingTree());
+        Files.writeString(root.resolve("pom.xml"), "<project/>");
+        RepositoryRevision revision = RepositoryRevision.ofSha("a".repeat(40));
+        GitRepositoryPort git = mock(GitRepositoryPort.class);
+        when(git.isCloned(root)).thenReturn(true);
+        when(git.currentRevision(root)).thenReturn(revision);
+
+        assertThat(new ExactRepositoryCheckout(registry, git).checkout(job(repositoryId, revision)).root())
+                .isEqualTo(root);
+        verify(git).fetch(root);
     }
 
     private RepositoryRuntimeRegistry registry(RepositoryId repositoryId) {

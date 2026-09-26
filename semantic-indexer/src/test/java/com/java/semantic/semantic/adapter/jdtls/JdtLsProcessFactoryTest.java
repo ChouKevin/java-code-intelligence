@@ -145,7 +145,7 @@ class JdtLsProcessFactoryTest {
     }
 
     @Test
-    void should_attach_the_fixed_lombok_agent_only_to_the_linux_uid_command() throws Exception {
+    void should_attach_the_configured_lombok_agent_only_to_the_linux_uid_command() throws Exception {
         Path home = JdtLsTestFixtures.createFakeHome(tempDirectory);
         Path workspaceRoot = Files.createDirectories(tempDirectory.resolve("linux-repository"));
         Path workspaceData = Files.createDirectories(tempDirectory.resolve("linux-workspace-data"));
@@ -176,7 +176,7 @@ class JdtLsProcessFactoryTest {
                 "--no-new-privs",
                 "--bounding-set=-all",
                 "/opt/java/openjdk/bin/java");
-        assertThat(capturedCommand.get()).contains("-javaagent:/opt/jdtls/lombok.jar");
+        assertThat(capturedCommand.get()).contains("-javaagent:" + home.resolve("lombok.jar"));
     }
 
     @Test
@@ -234,6 +234,33 @@ class JdtLsProcessFactoryTest {
     }
 
     @Test
+    void should_reject_symlink_above_managed_parent_before_configuration_or_process_start() throws Exception {
+        Path home = JdtLsTestFixtures.createFakeHome(tempDirectory);
+        Path outside = Files.createDirectories(tempDirectory.resolve("outside"));
+        Path alias = tempDirectory.resolve("alias");
+        Files.createSymbolicLink(alias, outside);
+        Path parent = alias.resolve("managed");
+        Path root = parent.resolve("checkout");
+        Path data = Files.createDirectories(tempDirectory.resolve("workspace-data"));
+        AtomicInteger starts = new AtomicInteger();
+        JdtLsProcessFactory factory = new JdtLsProcessFactory(linuxUidProperties(home),
+                command -> {
+                    starts.incrementAndGet();
+                    throw new AssertionError("invalid managed root must not start");
+                }, (client, process) -> {
+                    throw new AssertionError("invalid managed root must not connect");
+                });
+        RepositoryRuntime runtime = new RepositoryRuntime(RepositoryId.of("linux-test"), "linux-test", root,
+                "file:///remote/linux-test.git", "main", parent);
+
+        assertThatThrownBy(() -> factory.launch(root, data, mock(JdtLanguageClient.class), runtime.managedCheckout()))
+                .isInstanceOf(IOException.class);
+        assertThat(starts).hasValue(0);
+        assertThat(data.resolve("configuration")).doesNotExist();
+        assertThat(outside).isEmptyDirectory();
+    }
+
+    @Test
     void should_change_launch_policy_identity_when_effective_jvm_policy_changes() throws Exception {
         Path home = JdtLsTestFixtures.createFakeHome(tempDirectory);
         Files.writeString(home.resolve("lombok.jar"), "agent-bytes");
@@ -246,6 +273,21 @@ class JdtLsProcessFactoryTest {
 
         assertThat(JdtLsProcessFactory.launchPolicyIdentity(linux))
                 .isNotEqualTo(JdtLsProcessFactory.launchPolicyIdentity(changedHeap));
+    }
+
+    @Test
+    void should_fingerprint_the_bytes_of_the_agent_in_the_actual_command() throws Exception {
+        Path home = JdtLsTestFixtures.createFakeHome(tempDirectory.resolve("alternate-home"));
+        Path agent = home.resolve("lombok.jar");
+        Files.writeString(agent, "first-agent");
+        JdtLsProperties properties = linuxUidProperties(home);
+        String firstIdentity = JdtLsProcessFactory.launchPolicyIdentity(properties);
+        assertThat(firstIdentity).contains("agent=lombok.jar:bceeffb028143706cd24edc7ea7a0c3a02b82c1c592396ccf11ed98ec03d394e")
+                .doesNotContain(home.toString());
+        Files.writeString(agent, "second-agent");
+
+        assertThat(JdtLsProcessFactory.launchPolicyIdentity(properties)).isNotEqualTo(firstIdentity)
+                .doesNotContain(home.toString());
     }
 
     @Test

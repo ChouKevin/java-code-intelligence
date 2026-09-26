@@ -8,6 +8,7 @@ import com.java.semantic.config.JdtLsProperties;
 import com.java.semantic.repository.application.RepositoryMutationException;
 import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.model.repository.RepositoryRevision;
+import com.java.semantic.repository.domain.RepositoryRuntime;
 import com.java.semantic.repository.domain.RepositorySnapshot;
 import com.java.semantic.support.ConcurrencyTestSupport;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -158,6 +159,44 @@ class DefaultJdtWorkspaceManagerTest {
         assertThat(tempDirectory.resolve("jdtls-data").resolve(REPOSITORY_ID.value())
                 .resolve(REVISION.value()).resolve("job-123").resolve("A"))
                 .isEmptyDirectory();
+    }
+
+    @Test
+    void should_reject_symlinked_workspace_data_ancestor_without_creating_a_lease_or_starting_a_process()
+            throws IOException {
+        Fixture fixture = new Fixture();
+        RepositorySnapshot snapshot = fixture.snapshot();
+        Path outside = Files.createDirectories(tempDirectory.resolve("outside"));
+        Path linkedRoot = tempDirectory.resolve("jdtls-data");
+        Files.createSymbolicLink(linkedRoot, outside);
+        AnalysisWorkspaceKey key = new AnalysisWorkspaceKey(
+                snapshot.repositoryId(), snapshot.revision(), "job-123", "A");
+
+        assertThatThrownBy(() -> fixture.manager().acquire(key, snapshot))
+                .isInstanceOf(IllegalStateException.class);
+        assertThat(outside).isEmptyDirectory();
+        assertThat(fixture.startedCommands()).isEmpty();
+    }
+
+    @Test
+    void should_reject_a_managed_checkout_symlink_before_creating_a_lease() throws IOException {
+        Fixture fixture = new Fixture();
+        RepositorySnapshot snapshot = fixture.snapshot();
+        Path outside = Files.createDirectories(tempDirectory.resolve("other-repository"));
+        Path alias = tempDirectory.resolve("managed");
+        Files.createSymbolicLink(alias, outside);
+        Path root = alias.resolve("checkout");
+        RepositorySnapshot linked = new RepositorySnapshot(snapshot.repositoryId(), root, snapshot.revision());
+        RepositoryRuntime runtime = new RepositoryRuntime(snapshot.repositoryId(), "test", root,
+                "file:///remote/test.git", "main", alias);
+        AnalysisWorkspaceKey key = new AnalysisWorkspaceKey(
+                snapshot.repositoryId(), snapshot.revision(), "job-123", "A");
+
+        assertThatThrownBy(() -> fixture.manager().acquire(key, linked, runtime.managedCheckout()))
+                .isInstanceOf(IllegalStateException.class);
+        assertThat(tempDirectory.resolve("jdtls-data")).doesNotExist();
+        assertThat(fixture.startedCommands()).isEmpty();
+        assertThat(outside).isEmptyDirectory();
     }
 
     @Test

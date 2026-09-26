@@ -47,11 +47,10 @@ public final class JdtLsProcessFactory {
     private static final String LAUNCHER_SUFFIX = ".jar";
     private static final long TERMINATION_TIMEOUT_MILLIS = 100;
     private static final int STDERR_BUFFER_LINES = 200;
-    private static final String LOMBOK_JDT_AGENT = "-javaagent:/opt/jdtls/lombok.jar";
 
     static String launchPolicyIdentity(JdtLsProperties properties) {
         String agentDigest = properties.getIsolationMode() == JdtLsProperties.IsolationMode.LINUX_UID
-                ? sha256(properties.getHome().resolve("lombok.jar"))
+                ? sha256(lombokAgent(properties))
                 : "disabled";
         return "launch-policy=v1\n"
                 + "isolation=" + properties.getIsolationMode().name() + "\n"
@@ -71,11 +70,20 @@ public final class JdtLsProcessFactory {
                 + "cache=analysis-home-m2-v1";
     }
 
+    private static Path lombokAgent(JdtLsProperties properties) {
+        return properties.getHome().resolve("lombok.jar");
+    }
+
     private static String sha256(Path file) {
-        try {
-            return java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256")
-                    .digest(Files.readAllBytes(file)));
-        } catch (java.io.IOException | java.security.NoSuchAlgorithmException exception) {
+        try (InputStream input = Files.newInputStream(file)) {
+            java.security.MessageDigest digest = java.security.MessageDigest.getInstance("SHA-256");
+            byte[] buffer = new byte[8192];
+            int count;
+            while ((count = input.read(buffer)) != -1) {
+                digest.update(buffer, 0, count);
+            }
+            return java.util.HexFormat.of().formatHex(digest.digest());
+        } catch (IOException | java.security.NoSuchAlgorithmException exception) {
             throw new IllegalStateException("unable to digest configured Lombok agent", exception);
         }
     }
@@ -213,7 +221,7 @@ public final class JdtLsProcessFactory {
                 "-Dlog.level=ALL",
                 "-Xmx" + properties.getMaxHeap()));
         if (properties.getIsolationMode() == JdtLsProperties.IsolationMode.LINUX_UID) {
-            command.add(LOMBOK_JDT_AGENT);
+            command.add("-javaagent:" + lombokAgent(properties));
         }
         command.addAll(List.of(
                 "--add-modules=ALL-SYSTEM",
@@ -237,8 +245,12 @@ public final class JdtLsProcessFactory {
             Path workspaceRoot,
             Path workspaceData,
             ManagedDisposableCheckout managedCheckout) throws IOException {
-        if (properties.getIsolationMode() == JdtLsProperties.IsolationMode.LINUX_UID) {
+        ManagedDisposableCheckout.validateAncestors(workspaceData);
+        if (properties.getIsolationMode() == JdtLsProperties.IsolationMode.LINUX_UID
+                || Objects.nonNull(managedCheckout)) {
             validateManagedCheckout(workspaceRoot, managedCheckout);
+        }
+        if (Files.exists(workspaceData)) {
             rejectSymbolicLinks(workspaceData);
         }
         Path configuration = workspaceData.resolve("configuration").toAbsolutePath().normalize();
@@ -267,35 +279,17 @@ public final class JdtLsProcessFactory {
         return configuration;
     }
 
+
     private static void validateManagedCheckout(Path workspaceRoot, ManagedDisposableCheckout managedCheckout)
             throws IOException {
         if (Objects.isNull(managedCheckout)) {
             throw new IOException("LINUX_UID requires a managed disposable checkout");
         }
-        Path root = workspaceRoot.toAbsolutePath().normalize();
-        Path managedParent = managedCheckout.managedParent();
-        if (!root.equals(managedCheckout.root()) || !root.startsWith(managedParent)
-                || Files.isSymbolicLink(root) || Files.isSymbolicLink(managedParent)
-                || hasSymbolicLinkBetween(managedParent, root)) {
-            throw new IOException("managed checkout root is invalid");
+        try {
+            managedCheckout.validate(workspaceRoot);
+        } catch (IOException exception) {
+            throw new IOException("managed checkout root is invalid", exception);
         }
-        Path canonicalParent = managedParent.toRealPath(java.nio.file.LinkOption.NOFOLLOW_LINKS);
-        Path canonicalRoot = root.toRealPath(java.nio.file.LinkOption.NOFOLLOW_LINKS);
-        if (!canonicalRoot.startsWith(canonicalParent) || !canonicalRoot.equals(root)) {
-            throw new IOException("managed checkout root is not canonical");
-        }
-        rejectSymbolicLinks(root);
-    }
-
-    private static boolean hasSymbolicLinkBetween(Path parent, Path child) {
-        Path current = parent;
-        for (Path segment : parent.relativize(child)) {
-            current = current.resolve(segment);
-            if (Files.isSymbolicLink(current)) {
-                return true;
-            }
-        }
-        return false;
     }
 
     private static void rejectSymbolicLinks(Path root) throws IOException {

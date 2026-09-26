@@ -9,6 +9,7 @@ import com.java.semantic.repository.domain.RepositoryRuntime;
 import com.java.semantic.repository.port.GitRepositoryPort;
 import org.springframework.stereotype.Component;
 
+import java.io.IOException;
 import java.nio.file.Path;
 import java.util.Objects;
 import java.util.concurrent.locks.Lock;
@@ -32,6 +33,11 @@ public final class ExactRepositoryCheckout implements IndexBuildService.Checkout
         writeLock.lock();
         try {
             Path root = runtime.workingTree().toAbsolutePath().normalize();
+            try {
+                runtime.managedCheckout().validate(root);
+            } catch (IOException exception) {
+                throw new IllegalStateException("managed checkout boundary is invalid", exception);
+            }
             if (git.isCloned(root)) {
                 git.fetch(root);
             } else {
