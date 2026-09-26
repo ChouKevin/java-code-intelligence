@@ -27,6 +27,21 @@ public final class ManagedDisposableCheckout {
     }
 
     public void validate(Path candidate) throws IOException {
+        Path checkout = validateBoundaryPath(candidate);
+        if (Files.exists(checkout, LinkOption.NOFOLLOW_LINKS)) {
+            try (Stream<Path> tree = Files.walk(checkout)) {
+                if (tree.anyMatch(Files::isSymbolicLink)) {
+                    throw new IOException("managed checkout tree contains a symbolic link");
+                }
+            }
+        }
+    }
+
+    public void validateBoundary(Path candidate) throws IOException {
+        validateBoundaryPath(candidate);
+    }
+
+    private Path validateBoundaryPath(Path candidate) throws IOException {
         Path checkout = candidate.toAbsolutePath().normalize();
         if (!checkout.equals(root) || !managedParent.equals(checkout.getParent())) {
             throw new IOException("managed checkout root is invalid");
@@ -36,13 +51,7 @@ public final class ManagedDisposableCheckout {
                 || !managedParent.toRealPath().equals(managedParent)) {
             throw new IOException("managed checkout parent must be a real canonical directory");
         }
-        if (Files.exists(checkout, LinkOption.NOFOLLOW_LINKS)) {
-            try (Stream<Path> tree = Files.walk(checkout)) {
-                if (tree.anyMatch(Files::isSymbolicLink)) {
-                    throw new IOException("managed checkout tree contains a symbolic link");
-                }
-            }
-        }
+        return checkout;
     }
 
     public static void validateAncestors(Path candidate) throws IOException {

@@ -82,7 +82,7 @@ public final class GitEvidenceJobHandler {
 
     private void validateCheckout(RepositoryRuntime runtime) {
         try {
-            runtime.managedCheckout().validate(runtime.workingTree());
+            runtime.managedCheckout().validateBoundary(runtime.workingTree());
         } catch (IOException exception) {
             throw new RepositoryMutationException("managed Git evidence checkout boundary is invalid", exception);
         }
