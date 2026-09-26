@@ -1,16 +1,25 @@
 package com.java.semantic.repository.adapter.jgit;
 
+import com.java.semantic.indexer.job.IndexJob;
+import com.java.semantic.indexer.job.IndexJobId;
+import com.java.semantic.indexer.job.IndexJobOperation;
+import com.java.semantic.indexer.job.IndexJobPhase;
+import com.java.semantic.indexer.job.IndexJobTarget;
+import com.java.semantic.indexer.repository.ExactRepositoryCheckout;
+import com.java.semantic.model.index.GenerationId;
+import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.model.repository.RepositoryRevision;
 import com.java.semantic.repository.application.RepositoryMutationException;
+import com.java.semantic.repository.application.RepositoryRuntimeRegistry;
 import com.java.semantic.repository.config.RepositoryProperties;
 import org.eclipse.jgit.api.Git;
 import org.eclipse.jgit.api.errors.JGitInternalException;
-import org.eclipse.jgit.lib.Ref;
 import org.eclipse.jgit.lib.Constants;
 import org.eclipse.jgit.lib.CommitBuilder;
 import org.eclipse.jgit.lib.ObjectId;
 import org.eclipse.jgit.lib.ObjectInserter;
 import org.eclipse.jgit.lib.PersonIdent;
+import org.eclipse.jgit.lib.Ref;
 import org.eclipse.jgit.lib.TreeFormatter;
 import org.eclipse.jgit.transport.RefSpec;
 import org.eclipse.jgit.transport.URIish;
@@ -19,6 +28,8 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Map;
+import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -180,6 +191,87 @@ class JGitRepositoryAdapterTest {
                     .hasMessageContaining("not reachable");
         }
     }
+    @Test
+    void fetches_from_the_configured_remote_when_the_persisted_origin_is_rewritten() throws Exception {
+        try (RemoteFixture trusted = createRemote("trusted");
+             RemoteFixture sentinel = createRemote("sentinel")) {
+            JGitRepositoryAdapter adapter = new JGitRepositoryAdapter(new RepositoryProperties());
+            RepositoryId repositoryId = RepositoryId.of("orders");
+            Path managedParent = Files.createDirectories(tempDirectory.resolve("managed-checkouts"));
+            Path workingTree = managedParent.resolve(repositoryId.value());
+            String trustedUrl = trusted.remote().toUri().toString();
+            RepositoryRuntimeRegistry registry = repositoryRegistry(repositoryId, managedParent, trustedUrl);
+            RepositoryRevision admittedRevision = RepositoryRevision.ofSha(
+                    trusted.seed().getRepository().resolve("refs/heads/main").getName());
+            adapter.clone(workingTree, trustedUrl);
+
+            RepositoryRevision trustedTip = RepositoryRevision.ofSha(
+                    commit(trusted.seed(), trusted.seedRoot(), "trusted-only-tip"));
+            pushBranch(trusted.seed(), "main");
+            RepositoryRevision sentinelTip = RepositoryRevision.ofSha(
+                    commit(sentinel.seed(), sentinel.seedRoot(), "sentinel-only-tip"));
+            pushBranch(sentinel.seed(), "main");
+
+            try (Git checkout = Git.open(workingTree.toFile())) {
+                checkout.getRepository().getConfig().setString(
+                        "remote", "origin", "url", sentinel.remote().toUri().toString());
+                checkout.getRepository().getConfig().save();
+            }
+
+            new ExactRepositoryCheckout(registry, adapter, repository -> { })
+                    .checkout(buildJob(repositoryId, admittedRevision));
+
+            try (Git checkout = Git.open(workingTree.toFile())) {
+                ObjectId fetchedMain = checkout.getRepository().resolve("refs/remotes/origin/main");
+                assertThat(fetchedMain).isEqualTo(ObjectId.fromString(trustedTip.value()));
+                assertThat(fetchedMain).isNotEqualTo(ObjectId.fromString(sentinelTip.value()));
+            }
+        }
+    }
+
+    @Test
+    void rejects_git_file_indirection_before_fetch_mutates_the_external_repository() throws Exception {
+        try (RemoteFixture remote = createRemote("gitdir-source")) {
+            Path externalWorkTree = tempDirectory.resolve("external-worktree");
+            try (Git external = Git.init().setInitialBranch("main").setDirectory(externalWorkTree.toFile()).call()) {
+                commit(external, externalWorkTree, "external-worktree");
+                external.remoteAdd()
+                        .setName("origin")
+                        .setUri(new URIish(remote.remote().toUri().toString()))
+                        .call();
+            }
+            Path redirectedWorkTree = Files.createDirectories(tempDirectory.resolve("redirected-worktree"));
+            Files.writeString(redirectedWorkTree.resolve(".git"),
+                    "gitdir: " + externalWorkTree.resolve(".git").toAbsolutePath() + System.lineSeparator());
+            try (Git external = Git.open(externalWorkTree.toFile())) {
+                assertThat(external.getRepository().exactRef("refs/remotes/origin/main")).isNull();
+            }
+
+            JGitRepositoryAdapter adapter = new JGitRepositoryAdapter(new RepositoryProperties());
+            assertThatThrownBy(() -> adapter.fetch(redirectedWorkTree))
+                    .isInstanceOf(RepositoryMutationException.class);
+
+            try (Git external = Git.open(externalWorkTree.toFile())) {
+                assertThat(external.getRepository().exactRef("refs/remotes/origin/main")).isNull();
+            }
+        }
+    }
+
+    @Test
+    void rejects_object_alternates_before_fetch_uses_external_metadata() throws Exception {
+        try (RemoteFixture fixture = createRemote("alternate-source")) {
+            JGitRepositoryAdapter adapter = new JGitRepositoryAdapter(new RepositoryProperties());
+            Path checkout = tempDirectory.resolve("checkout-with-alternates");
+            adapter.clone(checkout, fixture.remote().toUri().toString());
+            Path alternates = Files.createDirectories(checkout.resolve(".git/objects/info"))
+                    .resolve("alternates");
+            Files.writeString(alternates, fixture.remote().resolve("objects").toAbsolutePath()
+                    + System.lineSeparator());
+
+            assertThatThrownBy(() -> adapter.fetch(checkout))
+                    .isInstanceOf(RepositoryMutationException.class);
+        }
+    }
 
     private static RepositoryRevision rewriteRemoteHead(Path remote) throws Exception {
         try (Git bare = Git.open(remote.toFile()); ObjectInserter inserter = bare.getRepository().newObjectInserter()) {
@@ -202,12 +294,35 @@ class JGitRepositoryAdapterTest {
         }
     }
 
+    private RepositoryRuntimeRegistry repositoryRegistry(
+            RepositoryId repositoryId,
+            Path managedParent,
+            String remoteUrl) {
+        RepositoryProperties properties = new RepositoryProperties();
+        properties.setDataRoot(managedParent.toString());
+        RepositoryProperties.RepositoryConfig repository = new RepositoryProperties.RepositoryConfig();
+        repository.setUrl(remoteUrl);
+        repository.setDefaultBranch("main");
+        properties.setRepositories(Map.of(repositoryId.value(), repository));
+        return new RepositoryRuntimeRegistry(properties);
+    }
+
+    private static IndexJob buildJob(RepositoryId repositoryId, RepositoryRevision revision) {
+        return new IndexJob(new IndexJobId("job-1"), repositoryId,
+                Optional.of(new IndexJobTarget(revision, new GenerationId("generation-1"), 1L)),
+                IndexJobPhase.RUNNING, true, Optional.empty(), false, IndexJobOperation.BUILD);
+    }
+
     private RemoteFixture createRemote() throws Exception {
-        Path remote = tempDirectory.resolve("remote.git");
+        return createRemote("remote");
+    }
+
+    private RemoteFixture createRemote(String name) throws Exception {
+        Path remote = tempDirectory.resolve(name + ".git");
         try (Git bare = Git.init().setBare(true).setDirectory(remote.toFile()).call()) {
             assertThat(bare.getRepository().isBare()).isTrue();
         }
-        Path seedRoot = tempDirectory.resolve("seed");
+        Path seedRoot = tempDirectory.resolve(name + "-seed");
         Git seed = Git.init()
                 .setInitialBranch("main")
                 .setDirectory(seedRoot.toFile())
@@ -219,7 +334,7 @@ class JGitRepositoryAdapterTest {
                 .call();
         pushBranch(seed, "main");
         try (Git bare = Git.open(remote.toFile())) {
-            bare.getRepository().updateRef("HEAD", true).link("refs/heads/main");
+            bare.getRepository().updateRef(Constants.HEAD, true).link("refs/heads/main");
         }
         return new RemoteFixture(remote, seedRoot, seed);
     }

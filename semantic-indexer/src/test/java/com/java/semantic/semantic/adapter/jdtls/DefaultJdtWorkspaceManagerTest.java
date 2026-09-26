@@ -214,6 +214,65 @@ class DefaultJdtWorkspaceManagerTest {
         assertThat(fixture.startedCommands()).isEmpty();
         assertThat(outside).isEmptyDirectory();
     }
+    @Test
+    void linux_uid_rejects_workspace_root_equal_to_checkout_root_before_side_effects() throws IOException {
+        Path checkoutRoot = tempDirectory.resolve("equal-checkout-root/repos/orders");
+        assertRejectedLinuxUidWorkspaceOverlap(checkoutRoot, checkoutRoot);
+    }
+
+    @Test
+    void linux_uid_rejects_workspace_root_equal_to_checkout_parent_before_side_effects() throws IOException {
+        Path checkoutRoot = tempDirectory.resolve("equal-checkout-parent/repos/orders");
+        assertRejectedLinuxUidWorkspaceOverlap(checkoutRoot.getParent(), checkoutRoot);
+    }
+
+    @Test
+    void linux_uid_rejects_workspace_inside_checkout_before_side_effects() throws IOException {
+        Path checkoutRoot = tempDirectory.resolve("workspace-inside-checkout/repos/orders");
+        assertRejectedLinuxUidWorkspaceOverlap(checkoutRoot.resolve("jdtls"), checkoutRoot);
+    }
+
+    @Test
+    void linux_uid_rejects_checkout_inside_workspace_before_side_effects() throws IOException {
+        Path workspaceRoot = tempDirectory.resolve("checkout-inside-workspace");
+        Path checkoutRoot = workspaceRoot.resolve("repos/orders");
+        assertRejectedLinuxUidWorkspaceOverlap(workspaceRoot, checkoutRoot);
+    }
+
+    @Test
+    void linux_uid_acquires_when_workspace_and_checkout_use_distinct_sibling_roots() throws IOException {
+        Path dataRoot = tempDirectory.resolve("separate-data");
+        Path workspaceRoot = dataRoot.resolve("jdtls");
+        Path checkoutRoot = dataRoot.resolve("repos/orders");
+        Fixture fixture = new Fixture(JdtLsProperties.IsolationMode.LINUX_UID, workspaceRoot);
+        RepositorySnapshot snapshot = fixture.snapshotAt(REPOSITORY_ID, checkoutRoot);
+        AnalysisWorkspaceKey key = new AnalysisWorkspaceKey(
+                snapshot.repositoryId(), snapshot.revision(), "job-123", "A");
+        RepositoryRuntime runtime = new RepositoryRuntime(snapshot.repositoryId(), "test", checkoutRoot,
+                "file:///remote/test.git", "main", checkoutRoot.getParent());
+        Path leaseBase = workspaceRoot.resolve(REPOSITORY_ID.value()).resolve(REVISION.value())
+                .resolve("job-123").resolve("A");
+
+        try (WorkspaceLease lease = fixture.manager().acquire(key, snapshot, runtime.managedCheckout())) {
+            assertThat(lease.session()).isNotNull();
+            assertThat(leaseBase).isDirectory();
+            assertThat(fixture.startedCommands()).hasSize(1);
+        }
+    }
+
+    @Test
+    void local_trusted_keeps_existing_workspace_overlap_semantics() throws IOException {
+        Path checkoutRoot = tempDirectory.resolve("local-trusted-overlap/repos/orders");
+        Fixture fixture = new Fixture(JdtLsProperties.IsolationMode.LOCAL_TRUSTED, checkoutRoot);
+        RepositorySnapshot snapshot = fixture.snapshotAt(REPOSITORY_ID, checkoutRoot);
+        AnalysisWorkspaceKey key = new AnalysisWorkspaceKey(
+                snapshot.repositoryId(), snapshot.revision(), "job-123", "A");
+
+        try (WorkspaceLease lease = fixture.manager().acquire(key, snapshot)) {
+            assertThat(lease.session()).isNotNull();
+            assertThat(fixture.startedCommands()).hasSize(1);
+        }
+    }
 
     @Test
     void should_not_request_an_incremental_build_before_service_ready() {
@@ -1504,6 +1563,22 @@ class DefaultJdtWorkspaceManagerTest {
         return Either.forLeft(List.of(symbol));
     }
 
+    private void assertRejectedLinuxUidWorkspaceOverlap(Path workspaceRoot, Path checkoutRoot) throws IOException {
+        Fixture fixture = new Fixture(JdtLsProperties.IsolationMode.LINUX_UID, workspaceRoot);
+        RepositorySnapshot snapshot = fixture.snapshotAt(REPOSITORY_ID, checkoutRoot);
+        AnalysisWorkspaceKey key = new AnalysisWorkspaceKey(
+                snapshot.repositoryId(), snapshot.revision(), "job-123", "A");
+        RepositoryRuntime runtime = new RepositoryRuntime(snapshot.repositoryId(), "test", checkoutRoot,
+                "file:///remote/test.git", "main", checkoutRoot.getParent());
+        Path leaseBase = workspaceRoot.resolve(REPOSITORY_ID.value()).resolve(REVISION.value())
+                .resolve("job-123").resolve("A");
+
+        assertThatThrownBy(() -> fixture.manager().acquire(key, snapshot, runtime.managedCheckout()))
+                .isInstanceOf(IllegalStateException.class);
+        assertThat(leaseBase).doesNotExist();
+        assertThat(fixture.startedCommands()).isEmpty();
+    }
+
 
     private void assertRejectedBuildStatus(JdtLsBuildWorkspaceStatus status) {
         Fixture fixture = new Fixture();
@@ -1610,6 +1685,21 @@ class DefaultJdtWorkspaceManagerTest {
                 int maxActiveWorkspaces,
                 Runnable launchCompletionWaitObserver,
                 JdtLsProperties.IsolationMode isolationMode) {
+            this(requestTimeout, shutdownLockWait, maxActiveWorkspaces, launchCompletionWaitObserver,
+                    isolationMode, tempDirectory.resolve("jdtls-data"));
+        }
+
+        private Fixture(JdtLsProperties.IsolationMode isolationMode, Path workspaceDataRoot) {
+            this(Duration.ofMillis(200), Duration.ofSeconds(5), 1, () -> { }, isolationMode, workspaceDataRoot);
+        }
+
+        private Fixture(
+                Duration requestTimeout,
+                Duration shutdownLockWait,
+                int maxActiveWorkspaces,
+                Runnable launchCompletionWaitObserver,
+                JdtLsProperties.IsolationMode isolationMode,
+                Path workspaceDataRoot) {
             Path home;
             try {
                 home = JdtLsTestFixtures.createFakeHome(tempDirectory);
@@ -1618,11 +1708,11 @@ class DefaultJdtWorkspaceManagerTest {
             }
             JdtLsProperties properties = isolationMode == JdtLsProperties.IsolationMode.LOCAL_TRUSTED
                     ? new JdtLsProperties(
-                            true, home, tempDirectory.resolve("jdtls-data"), Duration.ofSeconds(2),
+                            true, home, workspaceDataRoot, Duration.ofSeconds(2),
                             Duration.ofMillis(300), requestTimeout, maxActiveWorkspaces,
                             Duration.ofMinutes(30), Duration.ofMinutes(1), "2g")
                     : new JdtLsProperties(
-                            true, home, tempDirectory.resolve("jdtls-data"), Path.of("java"), isolationMode,
+                            true, home, workspaceDataRoot, Path.of("java"), isolationMode,
                             10001, 10001, tempDirectory, Duration.ofSeconds(2), Duration.ofMillis(300),
                             requestTimeout, maxActiveWorkspaces, Duration.ofMinutes(30), Duration.ofMinutes(1), "2g");
             JdtLsProcessFactory factory = new JdtLsProcessFactory(
@@ -1670,8 +1760,11 @@ class DefaultJdtWorkspaceManagerTest {
         }
 
         private RepositorySnapshot snapshotFor(RepositoryId repositoryId) {
+            return snapshotAt(repositoryId, tempDirectory.resolve("repos").resolve(repositoryId.value()));
+        }
+
+        private RepositorySnapshot snapshotAt(RepositoryId repositoryId, Path root) {
             try {
-                Path root = tempDirectory.resolve("repos").resolve(repositoryId.value());
                 Path source = root.resolve("src/main/java/com/example");
                 Files.createDirectories(source);
                 Files.writeString(source.resolve(SANITY_TYPE + ".java"),
