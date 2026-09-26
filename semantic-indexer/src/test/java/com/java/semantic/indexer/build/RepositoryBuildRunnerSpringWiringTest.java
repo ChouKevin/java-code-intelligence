@@ -5,6 +5,7 @@ import com.java.semantic.indexer.config.IndexerBuildConfiguration;
 import com.java.semantic.indexer.incremental.ChangedSource;
 import com.java.semantic.indexer.incremental.IncrementalIndexPlan;
 import com.java.semantic.indexer.incremental.IncrementalIndexPlanner;
+import com.java.semantic.indexer.incremental.SourceContractChangeDetector;
 import com.java.semantic.indexer.job.GitEvidenceJobHandler;
 import com.java.semantic.indexer.job.IndexJob;
 import com.java.semantic.indexer.job.IndexJobId;
