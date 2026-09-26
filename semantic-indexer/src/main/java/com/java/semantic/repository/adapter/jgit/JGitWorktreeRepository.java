@@ -2,6 +2,7 @@ package com.java.semantic.repository.adapter.jgit;
 
 import com.java.semantic.repository.application.RepositoryMutationException;
 import org.eclipse.jgit.api.Git;
+import org.eclipse.jgit.errors.ConfigInvalidException;
 import org.eclipse.jgit.lib.Config;
 import org.eclipse.jgit.lib.Repository;
 import org.eclipse.jgit.storage.file.FileRepositoryBuilder;
@@ -128,7 +129,11 @@ public final class JGitWorktreeRepository {
             throw new IOException("Git repository config is missing or invalid");
         }
         Config config = new Config();
-        config.fromText(Files.readString(path, StandardCharsets.UTF_8));
+        try {
+            config.fromText(Files.readString(path, StandardCharsets.UTF_8));
+        } catch (ConfigInvalidException exception) {
+            throw new IOException("Git repository config is malformed", exception);
+        }
         if (Objects.nonNull(config.getString("core", null, "worktree"))
                 || config.getBoolean("core", null, "bare", false)
                 || config.getBoolean("extensions", null, "worktreeConfig", false)

@@ -13,7 +13,7 @@ import com.java.semantic.repository.application.RepositoryMutationException;
 import com.java.semantic.repository.application.RepositoryRuntimeRegistry;
 import com.java.semantic.repository.config.RepositoryProperties;
 import org.eclipse.jgit.api.Git;
-import org.eclipse.jgit.api.errors.JGitInternalException;
+import org.eclipse.jgit.errors.ConfigInvalidException;
 import org.eclipse.jgit.lib.Constants;
 import org.eclipse.jgit.lib.CommitBuilder;
 import org.eclipse.jgit.lib.ObjectId;
@@ -313,6 +313,19 @@ class JGitRepositoryAdapterTest {
             assertThat(Files.readString(externalWorkTree.resolve("sentinel.txt"))).isEqualTo("outside");
             assertThat(externalWorkTree.resolve("sample.txt")).doesNotExist();
         }
+    }
+
+    @Test
+    void rejects_malformed_git_config_as_repository_mutation_failure() throws Exception {
+        Path checkout = tempDirectory.resolve("checkout-with-malformed-config");
+        try (Git git = Git.init().setDirectory(checkout.toFile()).call()) {
+            Path config = git.getRepository().getDirectory().toPath().resolve("config");
+            Files.writeString(config, "[core\n");
+        }
+
+        assertThatThrownBy(() -> JGitWorktreeRepository.open(checkout))
+                .isInstanceOf(RepositoryMutationException.class)
+                .hasRootCauseInstanceOf(ConfigInvalidException.class);
     }
 
     private static RepositoryRevision rewriteRemoteHead(Path remote) throws Exception {
