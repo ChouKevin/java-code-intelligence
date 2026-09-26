@@ -28,11 +28,16 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.PosixFilePermission;
+import java.nio.file.attribute.PosixFilePermissions;
+import java.nio.file.attribute.UserPrincipal;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 class JGitRepositoryAdapterTest {
 
@@ -228,6 +233,66 @@ class JGitRepositoryAdapterTest {
     }
 
     @Test
+    void rejects_an_analysis_writable_git_control_file_before_fetch_or_reclamation() throws Exception {
+        requirePosixFileSystem();
+        try (RemoteFixture fixture = createRemote("analysis-writable-control")) {
+            JGitRepositoryAdapter adapter = new JGitRepositoryAdapter(new RepositoryProperties());
+            Path checkout = tempDirectory.resolve("checkout-with-analysis-writable-control");
+            adapter.clone(checkout, fixture.remote().toUri().toString());
+            Path config = checkout.resolve(".git/config");
+            UserPrincipal ownerBefore = Files.getOwner(config);
+            Set<PosixFilePermission> writablePermissions = PosixFilePermissions.fromString("rw-rw-rw-");
+            Files.setPosixFilePermissions(config, writablePermissions);
+            ObjectId retainedRemoteTip;
+            try (Git local = Git.open(checkout.toFile())) {
+                retainedRemoteTip = local.getRepository().resolve("refs/remotes/origin/main");
+            }
+            assertThat(retainedRemoteTip).isNotNull();
+
+            commit(fixture.seed(), fixture.seedRoot(), "unsafe-control-new-tip");
+            pushBranch(fixture.seed(), "main");
+
+            assertThatThrownBy(() -> adapter.fetch(checkout, fixture.remote().toUri().toString()))
+                    .isInstanceOf(RepositoryMutationException.class);
+
+            try (Git local = Git.open(checkout.toFile())) {
+                assertThat(local.getRepository().resolve("refs/remotes/origin/main")).isEqualTo(retainedRemoteTip);
+            }
+            assertThat(Files.getOwner(config)).isEqualTo(ownerBefore);
+            assertThat(Files.getPosixFilePermissions(config)).isEqualTo(writablePermissions);
+        }
+    }
+
+    @Test
+    void rejects_a_hard_linked_git_control_entry_without_changing_an_outside_sentinel() throws Exception {
+        requirePosixFileSystem();
+        try (RemoteFixture fixture = createRemote("hard-linked-control")) {
+            JGitRepositoryAdapter adapter = new JGitRepositoryAdapter(new RepositoryProperties());
+            Path checkout = tempDirectory.resolve("checkout-with-hard-linked-control");
+            adapter.clone(checkout, fixture.remote().toUri().toString());
+            Path config = checkout.resolve(".git/config");
+            Path sentinel = tempDirectory.resolve("outside-git-config-sentinel");
+            byte[] configContents = Files.readAllBytes(config);
+            Files.delete(config);
+            Files.write(sentinel, configContents);
+            Set<PosixFilePermission> writablePermissions = PosixFilePermissions.fromString("rw-r--r--");
+            Files.setPosixFilePermissions(sentinel, writablePermissions);
+            createHardLinkOrSkip(config, sentinel);
+            UserPrincipal sentinelOwner = Files.getOwner(sentinel);
+            byte[] sentinelContents = Files.readAllBytes(sentinel);
+            Set<PosixFilePermission> sentinelPermissions = Files.getPosixFilePermissions(sentinel);
+
+            assertThat(Files.isSameFile(config, sentinel)).isTrue();
+            assertThatThrownBy(() -> adapter.fetch(checkout, fixture.remote().toUri().toString()))
+                    .isInstanceOf(RepositoryMutationException.class);
+
+            assertThat(Files.getOwner(sentinel)).isEqualTo(sentinelOwner);
+            assertThat(Files.getPosixFilePermissions(sentinel)).isEqualTo(sentinelPermissions);
+            assertThat(Files.readAllBytes(sentinel)).containsExactly(sentinelContents);
+        }
+    }
+
+    @Test
     void rejects_git_file_indirection_before_fetch_mutates_the_external_repository() throws Exception {
         try (RemoteFixture remote = createRemote("gitdir-source")) {
             Path externalWorkTree = tempDirectory.resolve("external-worktree");
@@ -418,4 +483,18 @@ class JGitRepositoryAdapterTest {
             seed.close();
         }
     }
+
+    private void requirePosixFileSystem() throws IOException {
+        assumeTrue(Files.getFileStore(tempDirectory).supportsFileAttributeView("posix"),
+                "Git control permission regressions require a POSIX filesystem");
+    }
+
+    private static void createHardLinkOrSkip(Path link, Path existing) throws IOException {
+        try {
+            Files.createLink(link, existing);
+        } catch (UnsupportedOperationException exception) {
+            assumeTrue(false, "the temporary filesystem provider does not support hard links");
+        }
+    }
+
 }
