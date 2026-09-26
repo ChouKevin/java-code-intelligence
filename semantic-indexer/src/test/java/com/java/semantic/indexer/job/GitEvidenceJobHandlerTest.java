@@ -16,6 +16,7 @@ import com.java.semantic.model.review.ReviewId;
 import com.java.semantic.repository.application.RepositoryRuntimeRegistry;
 import com.java.semantic.repository.domain.RepositoryRuntime;
 import com.java.semantic.repository.port.GitRepositoryPort;
+import com.java.semantic.repository.port.RepositoryMutationListener;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -26,6 +27,8 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -52,10 +55,13 @@ class GitEvidenceJobHandlerTest {
         when(evidence.beginCatalog(org.mockito.ArgumentMatchers.eq(job), org.mockito.ArgumentMatchers.any(Instant.class))).thenReturn(manifest);
         when(git.fetchRemoteBranches(runtime.workingTree())).thenReturn(List.of());
 
-        new GitEvidenceJobHandler(repositories, git, evidence).prepare(job);
+        RepositoryMutationListener listener = mock(RepositoryMutationListener.class);
+        new GitEvidenceJobHandler(repositories, git, evidence, listener).prepare(job);
 
-        org.mockito.InOrder order = inOrder(git, evidence);
+        org.mockito.InOrder order = inOrder(git, evidence, listener);
         order.verify(evidence).verifySchemaBeforeEvidence();
+        order.verify(listener).beforeMutation(repositoryId);
+        order.verify(git).isCloned(runtime.workingTree());
         order.verify(git).clone(runtime.workingTree(), runtime.remoteUrl());
         order.verify(evidence).beginCatalog(org.mockito.ArgumentMatchers.eq(job), org.mockito.ArgumentMatchers.any(Instant.class));
         order.verify(git).fetchRemoteBranches(runtime.workingTree());
@@ -77,7 +83,8 @@ class GitEvidenceJobHandlerTest {
                 Optional.empty(), false, IndexJobOperation.GIT_REFS, Optional.of(GitEvidenceJob.refs()));
         when(repositories.get(repositoryId)).thenReturn(runtime);
 
-        org.assertj.core.api.Assertions.assertThatThrownBy(() -> new GitEvidenceJobHandler(repositories, git, evidence).prepare(job))
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> new GitEvidenceJobHandler(repositories, git, evidence,
+                mock(RepositoryMutationListener.class)).prepare(job))
                 .isInstanceOf(com.java.semantic.repository.application.RepositoryMutationException.class)
                 .hasCauseInstanceOf(IOException.class);
 
@@ -100,20 +107,11 @@ class GitEvidenceJobHandlerTest {
         RepositoryRuntimeRegistry repositories = mock(RepositoryRuntimeRegistry.class);
         GitRepositoryPort git = mock(GitRepositoryPort.class);
         GitEvidencePublicationStore evidence = mock(GitEvidencePublicationStore.class);
-        RepositoryRevision previous = new RepositoryRevision("a".repeat(40));
-        RepositoryRevision current = new RepositoryRevision("b".repeat(40));
-        PublishedGenerationPointer pointer = new PublishedGenerationPointer(previous, new GenerationId("baseline"),
-                new ManifestDigest("1".repeat(64)), "baseline-job", Instant.parse("2026-09-15T00:00:00Z"));
-        ReviewJobPayload payload = new ReviewJobPayload(new ReviewId("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"),
-                new CapturedReviewBaseline(pointer, Instant.parse("2026-09-15T00:00:00Z")), current,
-                new ReviewBuildTargets(new IndexJobTarget(previous, new GenerationId("review-a"), 2L),
-                        new IndexJobTarget(current, new GenerationId("review-b"), 3L)),
-                ReviewPreparationStage.PREPARING_A, Optional.empty(), Optional.empty(), Optional.empty(), Optional.empty(), Optional.empty());
-        IndexJob job = new IndexJob(IndexJobId.create(), repositoryId, Optional.empty(), IndexJobPhase.RUNNING, true,
-                Optional.empty(), false, IndexJobOperation.REVIEW, Optional.empty(), Optional.of(payload));
+        IndexJob job = reviewJob(repositoryId);
         when(repositories.get(repositoryId)).thenReturn(runtime);
 
-        org.assertj.core.api.Assertions.assertThatThrownBy(() -> new GitEvidenceJobHandler(repositories, git, evidence).prepareReview(job))
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> new GitEvidenceJobHandler(repositories, git, evidence,
+                mock(RepositoryMutationListener.class)).prepareReview(job))
                 .isInstanceOf(com.java.semantic.repository.application.RepositoryMutationException.class)
                 .hasCauseInstanceOf(IOException.class);
 
@@ -138,10 +136,163 @@ class GitEvidenceJobHandlerTest {
         org.mockito.Mockito.doThrow(new IndexSchemaMaintenanceRequiredException("missing schema"))
                 .when(evidence).verifySchemaBeforeEvidence();
 
-        org.assertj.core.api.Assertions.assertThatThrownBy(() -> new GitEvidenceJobHandler(repositories, git, evidence).prepare(job))
+        RepositoryMutationListener listener = mock(RepositoryMutationListener.class);
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> new GitEvidenceJobHandler(repositories, git, evidence,
+                listener).prepare(job))
                 .isInstanceOf(IndexSchemaMaintenanceRequiredException.class);
 
         verify(evidence, never()).fail(job);
         verify(git, never()).isCloned(runtime.workingTree());
+        verifyNoInteractions(listener);
+    }
+    @Test
+    void failed_invalidation_refuses_standalone_git_and_fails_active_job_without_publication(@TempDir Path temporaryDirectory)
+            throws IOException {
+        RepositoryId repositoryId = RepositoryId.of("orders");
+        RepositoryRuntime runtime = new RepositoryRuntime(repositoryId, "Orders",
+                Files.createDirectories(temporaryDirectory.resolve("repos")).resolve("orders"),
+                "file:///target/orders.git", "main");
+        RepositoryRuntimeRegistry repositories = mock(RepositoryRuntimeRegistry.class);
+        GitRepositoryPort git = mock(GitRepositoryPort.class);
+        GitEvidencePublicationStore evidence = mock(GitEvidencePublicationStore.class);
+        RepositoryMutationListener listener = mock(RepositoryMutationListener.class);
+        IndexJob job = new IndexJob(IndexJobId.create(), repositoryId, Optional.empty(), IndexJobPhase.RUNNING, true,
+                Optional.empty(), false, IndexJobOperation.GIT_REFS, Optional.of(GitEvidenceJob.refs()));
+        com.java.semantic.repository.application.RepositoryMutationException failure =
+                new com.java.semantic.repository.application.RepositoryMutationException("workspace still active");
+        when(repositories.get(repositoryId)).thenReturn(runtime);
+        doThrow(failure).when(listener).beforeMutation(repositoryId);
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(() ->
+                new GitEvidenceJobHandler(repositories, git, evidence, listener).prepare(job)).isSameAs(failure);
+
+        org.mockito.InOrder order = inOrder(evidence, listener);
+        order.verify(evidence).verifySchemaBeforeEvidence();
+        order.verify(listener).beforeMutation(repositoryId);
+        order.verify(evidence).fail(job);
+        verifyNoInteractions(git);
+        verify(evidence, never()).beginCatalog(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
+        verify(evidence, never()).publishComparison(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
+    void review_invalidates_before_git_and_publishes_comparison(@TempDir Path temporaryDirectory) throws IOException {
+        RepositoryId repositoryId = RepositoryId.of("orders");
+        RepositoryRuntime runtime = new RepositoryRuntime(repositoryId, "Orders",
+                Files.createDirectories(temporaryDirectory.resolve("repos")).resolve("orders"),
+                "file:///target/orders.git", "main");
+        RepositoryRuntimeRegistry repositories = mock(RepositoryRuntimeRegistry.class);
+        GitRepositoryPort git = mock(GitRepositoryPort.class);
+        GitEvidencePublicationStore evidence = mock(GitEvidencePublicationStore.class);
+        RepositoryMutationListener listener = mock(RepositoryMutationListener.class);
+        IndexJob job = reviewJob(repositoryId);
+        when(repositories.get(repositoryId)).thenReturn(runtime);
+
+        new GitEvidenceJobHandler(repositories, git, evidence, listener).prepareReview(job);
+
+        org.mockito.InOrder order = inOrder(listener, git, evidence);
+        order.verify(listener).beforeMutation(repositoryId);
+        order.verify(git).isCloned(runtime.workingTree());
+        order.verify(git).fetch(runtime.workingTree());
+        order.verify(evidence).publishComparison(org.mockito.ArgumentMatchers.eq(job), org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
+    void failed_review_invalidation_refuses_git_and_fails_job_without_publication(@TempDir Path temporaryDirectory)
+            throws IOException {
+        RepositoryId repositoryId = RepositoryId.of("orders");
+        RepositoryRuntime runtime = new RepositoryRuntime(repositoryId, "Orders",
+                Files.createDirectories(temporaryDirectory.resolve("repos")).resolve("orders"),
+                "file:///target/orders.git", "main");
+        RepositoryRuntimeRegistry repositories = mock(RepositoryRuntimeRegistry.class);
+        GitRepositoryPort git = mock(GitRepositoryPort.class);
+        GitEvidencePublicationStore evidence = mock(GitEvidencePublicationStore.class);
+        RepositoryMutationListener listener = mock(RepositoryMutationListener.class);
+        IndexJob job = reviewJob(repositoryId);
+        com.java.semantic.repository.application.RepositoryMutationException failure =
+                new com.java.semantic.repository.application.RepositoryMutationException("workspace still active");
+        when(repositories.get(repositoryId)).thenReturn(runtime);
+        doThrow(failure).when(listener).beforeMutation(repositoryId);
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(() ->
+                new GitEvidenceJobHandler(repositories, git, evidence, listener).prepareReview(job)).isSameAs(failure);
+        verify(evidence).fail(job);
+        verifyNoInteractions(git);
+        verify(evidence, never()).publishComparison(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
+    void standalone_git_rechecks_the_checkout_after_invalidation(@TempDir Path temporaryDirectory) throws IOException {
+        RepositoryId repositoryId = RepositoryId.of("orders");
+        Path parent = Files.createDirectories(temporaryDirectory.resolve("repos"));
+        Path root = parent.resolve("orders");
+        Path outside = Files.createDirectories(temporaryDirectory.resolve("outside"));
+        RepositoryRuntime runtime = new RepositoryRuntime(repositoryId, "Orders", root, "file:///target/orders.git", "main");
+        RepositoryRuntimeRegistry repositories = mock(RepositoryRuntimeRegistry.class);
+        GitRepositoryPort git = mock(GitRepositoryPort.class);
+        GitEvidencePublicationStore evidence = mock(GitEvidencePublicationStore.class);
+        RepositoryMutationListener listener = mock(RepositoryMutationListener.class);
+        IndexJob job = new IndexJob(IndexJobId.create(), repositoryId, Optional.empty(), IndexJobPhase.RUNNING, true,
+                Optional.empty(), false, IndexJobOperation.GIT_REFS, Optional.of(GitEvidenceJob.refs()));
+        when(repositories.get(repositoryId)).thenReturn(runtime);
+        doAnswer(invocation -> {
+            Files.createSymbolicLink(root, outside);
+            return null;
+        }).when(listener).beforeMutation(repositoryId);
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(() ->
+                new GitEvidenceJobHandler(repositories, git, evidence, listener).prepare(job))
+                .isInstanceOf(com.java.semantic.repository.application.RepositoryMutationException.class)
+                .hasCauseInstanceOf(IOException.class);
+        verify(listener).beforeMutation(repositoryId);
+        verify(evidence).fail(job);
+        verifyNoInteractions(git);
+        verify(evidence, never()).beginCatalog(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
+    void review_git_rechecks_the_checkout_after_invalidation(@TempDir Path temporaryDirectory) throws IOException {
+        RepositoryId repositoryId = RepositoryId.of("orders");
+        Path parent = Files.createDirectories(temporaryDirectory.resolve("repos"));
+        Path root = parent.resolve("orders");
+        Path outside = Files.createDirectories(temporaryDirectory.resolve("outside"));
+        RepositoryRuntime runtime = new RepositoryRuntime(repositoryId, "Orders", root, "file:///target/orders.git", "main");
+        RepositoryRuntimeRegistry repositories = mock(RepositoryRuntimeRegistry.class);
+        GitRepositoryPort git = mock(GitRepositoryPort.class);
+        GitEvidencePublicationStore evidence = mock(GitEvidencePublicationStore.class);
+        RepositoryMutationListener listener = mock(RepositoryMutationListener.class);
+        IndexJob job = reviewJob(repositoryId);
+        when(repositories.get(repositoryId)).thenReturn(runtime);
+        doAnswer(invocation -> {
+            Files.createSymbolicLink(root, outside);
+            return null;
+        }).when(listener).beforeMutation(repositoryId);
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(() ->
+                new GitEvidenceJobHandler(repositories, git, evidence, listener).prepareReview(job))
+                .isInstanceOf(com.java.semantic.repository.application.RepositoryMutationException.class)
+                .hasCauseInstanceOf(IOException.class);
+        verify(listener).beforeMutation(repositoryId);
+        verify(evidence).fail(job);
+        verifyNoInteractions(git);
+        verify(evidence, never()).publishComparison(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
+    }
+
+    private static IndexJob reviewJob(RepositoryId repositoryId) {
+        RepositoryRevision previous = new RepositoryRevision("a".repeat(40));
+        RepositoryRevision current = new RepositoryRevision("b".repeat(40));
+        PublishedGenerationPointer pointer = new PublishedGenerationPointer(previous, new GenerationId("baseline"),
+                new ManifestDigest("1".repeat(64)), "baseline-job", Instant.parse("2026-09-15T00:00:00Z"));
+        ReviewJobPayload payload = new ReviewJobPayload(new ReviewId("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"),
+                new CapturedReviewBaseline(pointer, Instant.parse("2026-09-15T00:00:00Z")), current,
+                new ReviewBuildTargets(new IndexJobTarget(previous, new GenerationId("review-a"), 2L),
+                        new IndexJobTarget(current, new GenerationId("review-b"), 3L)),
+                ReviewPreparationStage.PREPARING_A, Optional.empty(), Optional.empty(), Optional.empty(), Optional.empty(), Optional.empty());
+        return new IndexJob(IndexJobId.create(), repositoryId, Optional.empty(), IndexJobPhase.RUNNING, true,
+                Optional.empty(), false, IndexJobOperation.REVIEW, Optional.empty(), Optional.of(payload));
     }
 }

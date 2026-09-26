@@ -7,6 +7,7 @@ import com.java.semantic.repository.application.RepositoryMutationException;
 import com.java.semantic.repository.application.RepositoryRuntimeRegistry;
 import com.java.semantic.repository.domain.RepositoryRuntime;
 import com.java.semantic.repository.port.GitRepositoryPort;
+import com.java.semantic.repository.port.RepositoryMutationListener;
 import org.springframework.stereotype.Component;
 
 import java.io.IOException;
@@ -19,10 +20,13 @@ import java.util.concurrent.locks.Lock;
 public final class ExactRepositoryCheckout implements IndexBuildService.CheckoutResolver {
     private final RepositoryRuntimeRegistry registry;
     private final GitRepositoryPort git;
+    private final RepositoryMutationListener mutationListener;
 
-    public ExactRepositoryCheckout(RepositoryRuntimeRegistry registry, GitRepositoryPort git) {
+    public ExactRepositoryCheckout(RepositoryRuntimeRegistry registry, GitRepositoryPort git,
+                                   RepositoryMutationListener mutationListener) {
         this.registry = Objects.requireNonNull(registry, "registry is required");
         this.git = Objects.requireNonNull(git, "git is required");
+        this.mutationListener = Objects.requireNonNull(mutationListener, "mutation listener is required");
     }
 
     @Override
@@ -32,6 +36,7 @@ public final class ExactRepositoryCheckout implements IndexBuildService.Checkout
         Lock writeLock = runtime.lock().writeLock();
         writeLock.lock();
         try {
+            mutationListener.beforeMutation(job.repositoryId());
             Path root = runtime.workingTree().toAbsolutePath().normalize();
             try {
                 runtime.managedCheckout().validate(root);

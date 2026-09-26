@@ -140,7 +140,8 @@ class IndexSchemaBootstrapIT {
                     Optional.empty(), false, IndexJobOperation.GIT_REFS, Optional.of(GitEvidenceJob.refs()));
             when(repositories.get(repositoryId)).thenReturn(runtime);
 
-            assertThatThrownBy(() -> new GitEvidenceJobHandler(repositories, git, evidence).prepare(job))
+            assertThatThrownBy(() -> new GitEvidenceJobHandler(repositories, git, evidence,
+                    mock(com.java.semantic.repository.port.RepositoryMutationListener.class)).prepare(job))
                     .isInstanceOf(IndexSchemaMaintenanceRequiredException.class);
 
             verify(evidence, never()).fail(job);
@@ -167,7 +168,8 @@ class IndexSchemaBootstrapIT {
                     Optional.empty(), false, IndexJobOperation.GIT_REFS, Optional.of(GitEvidenceJob.refs()));
             when(repositories.get(repositoryId)).thenReturn(runtime);
 
-            assertThatThrownBy(() -> new GitEvidenceJobHandler(repositories, git, evidence).prepare(job))
+            assertThatThrownBy(() -> new GitEvidenceJobHandler(repositories, git, evidence,
+                    mock(com.java.semantic.repository.port.RepositoryMutationListener.class)).prepare(job))
                     .isInstanceOf(IndexSchemaMaintenanceRequiredException.class)
                     .hasMessageContaining("conflicting index search.search_generation_fact_lookup");
 

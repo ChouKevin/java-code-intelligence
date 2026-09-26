@@ -114,9 +114,9 @@ class DispatchedBuildIT {
         repository.setDefaultBranch("main");
         properties.setRepositories(Map.of(repositoryId.value(), repository));
         JGitRepositoryAdapter git = new JGitRepositoryAdapter(properties);
-        ExactRepositoryCheckout checkout = new ExactRepositoryCheckout(new RepositoryRuntimeRegistry(properties), git);
         JdtLsProperties jdtLsProperties = jdtLsProperties(jdtLsHome);
         DefaultJdtWorkspaceManager workspaces = workspaceManager(jdtLsProperties);
+        ExactRepositoryCheckout checkout = new ExactRepositoryCheckout(new RepositoryRuntimeRegistry(properties), git, workspaces);
         DefaultRepositoryAnalysisPreparation preparation = new DefaultRepositoryAnalysisPreparation(workspaces,
                 new JdtLsEffectiveEnvironmentInspector(jdtLsProperties), new FullIndexPlanner());
         RepositoryBuildScopeFactory scopes = new RepositoryBuildScopeFactory(checkout, template, jobs,

@@ -13,6 +13,7 @@ import com.java.semantic.repository.application.RepositoryRuntimeRegistry;
 import com.java.semantic.repository.config.RepositoryProperties;
 import com.java.semantic.repository.domain.RepositoryRuntime;
 import com.java.semantic.repository.port.GitRepositoryPort;
+import com.java.semantic.repository.port.RepositoryMutationListener;
 import org.eclipse.jgit.api.Git;
 import org.eclipse.jgit.lib.Constants;
 import org.eclipse.jgit.transport.RefSpec;
@@ -83,7 +84,8 @@ class GitEvidenceJobHandlerTrackedSymlinkTest {
         when(repositories.get(repositoryId)).thenReturn(runtime);
         when(evidence.beginCatalog(eq(job), any(Instant.class))).thenReturn(catalog);
 
-        assertThatCode(() -> new GitEvidenceJobHandler(repositories, git, evidence).prepare(job))
+        assertThatCode(() -> new GitEvidenceJobHandler(repositories, git, evidence,
+                mock(RepositoryMutationListener.class)).prepare(job))
                 .doesNotThrowAnyException();
 
         verify(evidence).appendBranches(catalog, List.of(new GitBranch("main", head)));

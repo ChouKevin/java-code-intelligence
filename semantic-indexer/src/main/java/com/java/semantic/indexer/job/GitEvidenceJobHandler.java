@@ -11,6 +11,7 @@ import com.java.semantic.repository.application.RepositoryMutationException;
 import com.java.semantic.repository.application.RepositoryRuntimeRegistry;
 import com.java.semantic.repository.domain.RepositoryRuntime;
 import com.java.semantic.repository.port.GitRepositoryPort;
+import com.java.semantic.repository.port.RepositoryMutationListener;
 import org.springframework.stereotype.Component;
 
 import java.io.IOException;
@@ -23,11 +24,14 @@ public final class GitEvidenceJobHandler {
     private final RepositoryRuntimeRegistry repositories;
     private final GitRepositoryPort git;
     private final GitEvidencePublicationStore evidence;
+    private final RepositoryMutationListener mutationListener;
 
-    public GitEvidenceJobHandler(RepositoryRuntimeRegistry repositories, GitRepositoryPort git, GitEvidencePublicationStore evidence) {
+    public GitEvidenceJobHandler(RepositoryRuntimeRegistry repositories, GitRepositoryPort git,
+                                 GitEvidencePublicationStore evidence, RepositoryMutationListener mutationListener) {
         this.repositories = Objects.requireNonNull(repositories, "repositories are required");
         this.git = Objects.requireNonNull(git, "git repository port is required");
         this.evidence = Objects.requireNonNull(evidence, "git evidence store is required");
+        this.mutationListener = Objects.requireNonNull(mutationListener, "mutation listener is required");
     }
 
     public void prepare(IndexJob job) {
@@ -36,6 +40,7 @@ public final class GitEvidenceJobHandler {
         try {
             evidence.verifySchemaBeforeEvidence();
             try {
+                mutationListener.beforeMutation(job.repositoryId());
                 validateCheckout(runtime);
                 switch (job.operation()) {
                     case GIT_REFS -> refs(job, runtime);
@@ -61,6 +66,7 @@ public final class GitEvidenceJobHandler {
         RepositoryRuntime runtime = repositories.get(requiredJob.repositoryId());
         runtime.lock().writeLock().lock();
         try {
+            mutationListener.beforeMutation(requiredJob.repositoryId());
             validateCheckout(runtime);
             if (!git.isCloned(runtime.workingTree())) {
                 git.clone(runtime.workingTree(), runtime.remoteUrl());

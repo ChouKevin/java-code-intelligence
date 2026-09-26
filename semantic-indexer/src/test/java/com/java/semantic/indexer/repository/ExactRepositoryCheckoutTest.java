@@ -10,6 +10,7 @@ import com.java.semantic.model.repository.RepositoryRevision;
 import com.java.semantic.repository.application.RepositoryRuntimeRegistry;
 import com.java.semantic.repository.config.RepositoryProperties;
 import com.java.semantic.repository.port.GitRepositoryPort;
+import com.java.semantic.repository.port.RepositoryMutationListener;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -22,9 +23,13 @@ import java.util.Optional;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 class ExactRepositoryCheckoutTest {
@@ -43,9 +48,13 @@ class ExactRepositoryCheckoutTest {
         when(git.isCloned(root)).thenReturn(true);
         when(git.resolveRemoteRef("https://example.test/orders.git", "main")).thenReturn(movedBranchRevision);
         when(git.currentRevision(root)).thenReturn(admittedRevision);
-        ExactRepositoryCheckout checkout = new ExactRepositoryCheckout(registry, git);
+        RepositoryMutationListener listener = mock(RepositoryMutationListener.class);
+        ExactRepositoryCheckout checkout = new ExactRepositoryCheckout(registry, git, listener);
 
         IndexBuildService.CheckedOutRepository result = checkout.checkout(job(repositoryId, admittedRevision));
+        org.mockito.InOrder order = inOrder(listener, git);
+        order.verify(listener).beforeMutation(repositoryId);
+        order.verify(git).isCloned(root);
 
         assertThat(result.root()).isEqualTo(root.toAbsolutePath().normalize());
         assertThat(result.revision()).isEqualTo(admittedRevision);
@@ -64,7 +73,7 @@ class ExactRepositoryCheckoutTest {
         GitRepositoryPort git = mock(GitRepositoryPort.class);
         when(git.isCloned(root)).thenReturn(false);
         when(git.currentRevision(root)).thenReturn(admittedRevision);
-        ExactRepositoryCheckout checkout = new ExactRepositoryCheckout(registry, git);
+        ExactRepositoryCheckout checkout = new ExactRepositoryCheckout(registry, git, mock(RepositoryMutationListener.class));
 
         checkout.checkout(job(repositoryId, admittedRevision));
 
@@ -83,7 +92,7 @@ class ExactRepositoryCheckoutTest {
         GitRepositoryPort git = mock(GitRepositoryPort.class);
         when(git.isCloned(root)).thenReturn(true);
         when(git.currentRevision(root)).thenReturn(RepositoryRevision.ofSha("b".repeat(40)));
-        ExactRepositoryCheckout checkout = new ExactRepositoryCheckout(registry, git);
+        ExactRepositoryCheckout checkout = new ExactRepositoryCheckout(registry, git, mock(RepositoryMutationListener.class));
 
         assertThatThrownBy(() -> checkout.checkout(job(repositoryId, admittedRevision)))
                 .hasMessageContaining("checked out revision differs");
@@ -96,7 +105,7 @@ class ExactRepositoryCheckoutTest {
         Path root = registry.get(repositoryId).workingTree();
         GitRepositoryPort git = mock(GitRepositoryPort.class);
 
-        assertThatThrownBy(() -> new ExactRepositoryCheckout(registry, git)
+        assertThatThrownBy(() -> new ExactRepositoryCheckout(registry, git, mock(RepositoryMutationListener.class))
                 .checkout(job(repositoryId, RepositoryRevision.ofSha("a".repeat(40)))))
                 .isInstanceOf(IllegalStateException.class);
         assertThat(root.getParent()).doesNotExist();
@@ -112,7 +121,7 @@ class ExactRepositoryCheckoutTest {
         Files.writeString(root.getParent(), "occupied");
         GitRepositoryPort git = mock(GitRepositoryPort.class);
 
-        assertThatThrownBy(() -> new ExactRepositoryCheckout(registry, git)
+        assertThatThrownBy(() -> new ExactRepositoryCheckout(registry, git, mock(RepositoryMutationListener.class))
                 .checkout(job(repositoryId, RepositoryRevision.ofSha("a".repeat(40)))))
                 .isInstanceOf(IllegalStateException.class);
         assertThat(root.getParent()).hasContent("occupied");
@@ -129,7 +138,7 @@ class ExactRepositoryCheckoutTest {
         Files.createSymbolicLink(root, outside);
         GitRepositoryPort git = mock(GitRepositoryPort.class);
 
-        assertThatThrownBy(() -> new ExactRepositoryCheckout(registry, git)
+        assertThatThrownBy(() -> new ExactRepositoryCheckout(registry, git, mock(RepositoryMutationListener.class))
                 .checkout(job(repositoryId, RepositoryRevision.ofSha("a".repeat(40)))))
                 .isInstanceOf(IllegalStateException.class);
         org.mockito.Mockito.verifyNoInteractions(git);
@@ -151,7 +160,7 @@ class ExactRepositoryCheckoutTest {
         RepositoryRuntimeRegistry registry = new RepositoryRuntimeRegistry(properties);
         GitRepositoryPort git = mock(GitRepositoryPort.class);
 
-        assertThatThrownBy(() -> new ExactRepositoryCheckout(registry, git)
+        assertThatThrownBy(() -> new ExactRepositoryCheckout(registry, git, mock(RepositoryMutationListener.class))
                 .checkout(job(repositoryId, RepositoryRevision.ofSha("a".repeat(40)))))
                 .isInstanceOf(IllegalStateException.class);
         org.mockito.Mockito.verifyNoInteractions(git);
@@ -167,7 +176,7 @@ class ExactRepositoryCheckoutTest {
         Files.createSymbolicLink(root.resolve("outside-link"), outside);
         GitRepositoryPort git = mock(GitRepositoryPort.class);
 
-        assertThatThrownBy(() -> new ExactRepositoryCheckout(registry, git)
+        assertThatThrownBy(() -> new ExactRepositoryCheckout(registry, git, mock(RepositoryMutationListener.class))
                 .checkout(job(repositoryId, RepositoryRevision.ofSha("a".repeat(40)))))
                 .isInstanceOf(IllegalStateException.class);
         org.mockito.Mockito.verifyNoInteractions(git);
@@ -185,9 +194,49 @@ class ExactRepositoryCheckoutTest {
         when(git.isCloned(root)).thenReturn(true);
         when(git.currentRevision(root)).thenReturn(revision);
 
-        assertThat(new ExactRepositoryCheckout(registry, git).checkout(job(repositoryId, revision)).root())
+        assertThat(new ExactRepositoryCheckout(registry, git, mock(RepositoryMutationListener.class))
+                .checkout(job(repositoryId, revision)).root())
                 .isEqualTo(root);
         verify(git).fetch(root);
+    }
+
+    @Test
+    void refuses_all_git_when_workspace_invalidation_fails() throws IOException {
+        RepositoryId repositoryId = RepositoryId.of("orders");
+        RepositoryRuntimeRegistry registry = registry(repositoryId);
+        Files.createDirectories(registry.get(repositoryId).workingTree().getParent());
+        GitRepositoryPort git = mock(GitRepositoryPort.class);
+        RepositoryMutationListener listener = mock(RepositoryMutationListener.class);
+        com.java.semantic.repository.application.RepositoryMutationException failure =
+                new com.java.semantic.repository.application.RepositoryMutationException("workspace still active");
+        doThrow(failure).when(listener).beforeMutation(repositoryId);
+
+        assertThatThrownBy(() -> new ExactRepositoryCheckout(registry, git, listener)
+                .checkout(job(repositoryId, RepositoryRevision.ofSha("a".repeat(40)))))
+                .isSameAs(failure);
+        verifyNoInteractions(git);
+    }
+
+    @Test
+    void rechecks_the_managed_checkout_after_workspace_invalidation() throws IOException {
+        RepositoryId repositoryId = RepositoryId.of("orders");
+        RepositoryRuntimeRegistry registry = registry(repositoryId);
+        Path root = registry.get(repositoryId).workingTree();
+        Files.createDirectories(root.getParent());
+        Path outside = Files.createDirectories(temporaryDirectory.resolve("outside"));
+        GitRepositoryPort git = mock(GitRepositoryPort.class);
+        RepositoryMutationListener listener = mock(RepositoryMutationListener.class);
+        doAnswer(invocation -> {
+            Files.createSymbolicLink(root, outside);
+            return null;
+        }).when(listener).beforeMutation(repositoryId);
+
+        assertThatThrownBy(() -> new ExactRepositoryCheckout(registry, git, listener)
+                .checkout(job(repositoryId, RepositoryRevision.ofSha("a".repeat(40)))))
+                .isInstanceOf(IllegalStateException.class);
+        verify(listener).beforeMutation(repositoryId);
+        verifyNoInteractions(git);
+        assertThat(outside).isEmptyDirectory();
     }
 
     private RepositoryRuntimeRegistry registry(RepositoryId repositoryId) {

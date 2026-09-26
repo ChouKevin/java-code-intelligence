@@ -28,6 +28,7 @@ import com.java.semantic.query.config.ReadPolicyProperties;
 import com.java.semantic.repository.adapter.jgit.JGitRepositoryAdapter;
 import com.java.semantic.repository.application.RepositoryRuntimeRegistry;
 import com.java.semantic.repository.config.RepositoryProperties;
+import com.java.semantic.repository.port.RepositoryMutationListener;
 import com.mongodb.client.MongoClients;
 import org.bson.Document;
 import org.eclipse.jgit.api.Git;
@@ -82,7 +83,7 @@ class DispatchedGitEvidenceIT {
             MongoIndexJobStore jobs = new MongoIndexJobStore(template);
             RepositoryRuntimeRegistry repositories = registry(remotePath);
             GitEvidenceJobHandler handler = new GitEvidenceJobHandler(repositories, new JGitRepositoryAdapter(properties(remotePath)),
-                    new GitEvidencePublicationStore(template));
+                    new GitEvidencePublicationStore(template), mock(RepositoryMutationListener.class));
             IndexJobExecutor executor = new IndexJobExecutor(jobs, mock(RepositoryBuildRunner.class), mock(PublicationPort.class), Optional.empty(),
                     Optional.of(handler));
             IndexJobDispatcher dispatcher = new IndexJobDispatcher(jobs, executor, new IndexJobProperties(Duration.ofMillis(5)));
