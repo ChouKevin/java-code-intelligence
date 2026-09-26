@@ -4,8 +4,17 @@ set -euo pipefail
 root_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 maven="${MAVEN_CMD:-mvn}"
 
-if [[ -z "${JDTLS_HOME:-}" || ! -d "${JDTLS_HOME}" ]]; then
-  echo "JDTLS_HOME must name an existing JDT LS directory" >&2
+indexer_image="${SEMANTIC_REVIEW_INDEXER_IMAGE:-semantic-indexer:review-local}"
+if ! command -v docker >/dev/null 2>&1; then
+  echo "Docker CLI is required for the semantic review journey" >&2
+  exit 1
+fi
+if ! docker info >/dev/null 2>&1; then
+  echo "Docker daemon is required for the semantic review journey" >&2
+  exit 1
+fi
+if ! docker image inspect "${indexer_image}" >/dev/null 2>&1; then
+  echo "Indexer image '${indexer_image}' is not available locally" >&2
   exit 1
 fi
 
@@ -23,4 +32,5 @@ fi
   -Dtest=SemanticReviewJourneyIT -Dsurefire.failIfNoSpecifiedTests=false \
   -Dsemantic.review.journey.enabled=true \
   -Dsemantic.review.journey.indexer.jar="${indexer_jar}" \
+  -Dsemantic.review.journey.indexer.image="${indexer_image}" \
   -Dsemantic.review.journey.query.jar="${query_jar}" test

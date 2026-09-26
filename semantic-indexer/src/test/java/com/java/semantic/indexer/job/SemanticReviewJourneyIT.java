@@ -1,6 +1,5 @@
 package com.java.semantic.indexer.job;
 
-import com.java.semantic.semantic.adapter.jdtls.JdtLsHomeRequirement;
 import com.mongodb.client.MongoClient;
 import com.mongodb.client.MongoClients;
 import com.mongodb.client.MongoDatabase;
@@ -30,7 +29,11 @@ import org.eclipse.jgit.transport.URIish;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.testcontainers.containers.BindMode;
+import org.testcontainers.containers.GenericContainer;
+import org.testcontainers.containers.Network;
 import org.testcontainers.mongodb.MongoDBContainer;
+import org.testcontainers.utility.DockerImageName;
 import tools.jackson.databind.json.JsonMapper;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -42,6 +45,11 @@ class SemanticReviewJourneyIT {
     private static final String ADMIN_TOKEN = "semantic-review-journey-admin";
     private static final String QUERY_TOKEN = "semantic-review-journey-reader";
     private static final String DATABASE = "semantic_review_journey";
+    private static final String INDEXER_IMAGE_PROPERTY = "semantic.review.journey.indexer.image";
+    private static final String MONGO_NETWORK_ALIAS = "semantic-review-mongo";
+    private static final String REMOTE_CONTAINER_PATH = "/tmp/semantic-review-journey-remote.git";
+    private static final int INDEXER_CONTAINER_PORT = 8080;
+    private static final int MONGO_CONTAINER_PORT = 27017;
     private static final Duration STARTUP_TIMEOUT = Duration.ofSeconds(45);
     private static final Duration JOB_TIMEOUT = Duration.ofMinutes(3);
     private static final List<String> TOOL_NAMES = List.of(
@@ -59,16 +67,17 @@ class SemanticReviewJourneyIT {
     void publishes_real_jdt_review_evidence_then_serves_http_and_mcp_from_read_only_cold_mongo() throws Exception {
         assertThat(Boolean.getBoolean("semantic.review.journey.enabled"))
                 .as("the external semantic journey must be explicitly enabled").isTrue();
-        Path jdtLsHome = JdtLsHomeRequirement.requireHome(System.getenv("JDTLS_HOME"));
         Path indexerJar = requiredJar("semantic.review.journey.indexer.jar");
         Path queryJar = requiredJar("semantic.review.journey.query.jar");
         Path remotePath = temporaryDirectory.resolve("semantic-review-remote.git");
         Path seedPath = temporaryDirectory.resolve("semantic-review-seed");
-        Path checkouts = temporaryDirectory.resolve("checkouts");
-        Path workspace = temporaryDirectory.resolve("jdt-workspace");
-        int indexerPort = availablePort();
         int queryPort = availablePort();
-        try (MongoDBContainer mongo = authenticatedMongo();
+        String indexerImage = requiredImage(INDEXER_IMAGE_PROPERTY);
+        String reviewId;
+        String indexerLogs;
+
+        try (Network network = Network.newNetwork();
+             MongoDBContainer mongo = authenticatedMongo(network);
              Git remote = Git.init().setBare(true).setDirectory(remotePath.toFile()).call();
              Git seed = Git.init().setInitialBranch("main").setDirectory(seedPath.toFile()).call()) {
             mongo.start();
@@ -77,34 +86,57 @@ class SemanticReviewJourneyIT {
             String readerUri = mongoUri(mongo, "review-reader", "read-password", DATABASE, DATABASE);
             assertReadOnly(readerUri);
             String revisionA = commitA(seed, seedPath, remotePath);
+            assertCleanMavenSeed(seedPath);
             String revisionB = commitB(seed, seedPath);
             bootstrapSchema(indexerJar, writerUri);
             remote.getRepository().updateRef(Constants.HEAD, true).link(Constants.R_HEADS + "main");
-            RunningProcess indexer = startIndexer(indexerJar, writerUri, remotePath, checkouts, workspace, jdtLsHome, indexerPort);
-            try {
-                JsonMapper mapper = JsonMapper.builder().build();
-                String indexerBase = "http://127.0.0.1:" + indexerPort;
-                awaitHttp(indexerBase + "/index/repositories/" + REPOSITORY_ID + "/publication", ADMIN_TOKEN, indexer);
-                String checkoutJob = accepted(post(indexerBase, "/index/repositories/" + REPOSITORY_ID + "/checkout", ADMIN_TOKEN,
-                        Map.of("revision", revisionA)), mapper);
-                Map<?, ?> currentA = completed(indexerBase, checkoutJob, mapper, indexer);
-                String baselineGeneration = text(map(currentA, "currentPointer"), "generationId");
-                assertThat(post(indexerBase, "/index/repositories/" + REPOSITORY_ID + "/reviews", QUERY_TOKEN,
-                        Map.of("revision", revisionB)).statusCode()).isEqualTo(401);
-                String reviewJob = acceptedReview(post(indexerBase, "/index/repositories/" + REPOSITORY_ID + "/reviews", ADMIN_TOKEN,
-                        Map.of("revision", revisionB)), mapper);
-                Map<?, ?> completeReview = completed(indexerBase, reviewJob, mapper, indexer);
-                assertReviewComparisonType(completeReview);
-                Map<?, ?> review = map(completeReview, "review");
-                String reviewId = text(review, "reviewId");
-                assertThat(text(map(review, "capturedBaseline"), "generationId")).isEqualTo(baselineGeneration);
-                assertThat(text(review, "requestedRevision")).isEqualTo(revisionB);
+            String indexerMongoUri = mongoUri(MONGO_NETWORK_ALIAS, MONGO_CONTAINER_PORT, "root", "root-password", DATABASE, "admin");
+            JsonMapper mapper = JsonMapper.builder().build();
+            try (GenericContainer<?> indexer = startIndexer(indexerImage, indexerMongoUri, remotePath, network)) {
+                try {
+                    String indexerBase = "http://" + indexer.getHost() + ":" + indexer.getMappedPort(INDEXER_CONTAINER_PORT);
+                    awaitHttp(indexerBase + "/index/repositories/" + REPOSITORY_ID + "/publication", ADMIN_TOKEN, indexer);
+                    String checkoutJob = accepted(post(indexerBase, "/index/repositories/" + REPOSITORY_ID + "/checkout", ADMIN_TOKEN,
+                            Map.of("revision", revisionA)), mapper);
+                    Map<?, ?> currentA = completed(indexerBase, checkoutJob, mapper, indexer);
+                    Map<?, ?> currentPointerA = map(currentA, "currentPointer");
+                    assertThat(text(currentPointerA, "revision")).isEqualTo(revisionA);
+                    String baselineGeneration = text(currentPointerA, "generationId");
+                    assertThat(post(indexerBase, "/index/repositories/" + REPOSITORY_ID + "/reviews", QUERY_TOKEN,
+                            Map.of("revision", revisionB)).statusCode()).isEqualTo(401);
+                    Map<?, ?> acceptedReviewBody = acceptedReview(post(indexerBase,
+                            "/index/repositories/" + REPOSITORY_ID + "/reviews", ADMIN_TOKEN, Map.of("revision", revisionB)), mapper);
+                    String reviewJob = text(acceptedReviewBody, "jobId");
+                    Map<?, ?> admittedReview = successful(get(indexerBase,
+                            "/index/repositories/" + REPOSITORY_ID + "/jobs/" + reviewJob, ADMIN_TOKEN), mapper);
+                    assertThat(text(admittedReview, "jobId")).isEqualTo(reviewJob);
+                    assertThat(text(admittedReview, "operation")).isEqualTo("REVIEW");
+                    assertReviewComparisonType(admittedReview);
+                    Map<?, ?> admittedReviewDetails = map(admittedReview, "review");
+                    Map<?, ?> admittedBaseline = map(admittedReviewDetails, "capturedBaseline");
+                    assertThat(text(admittedBaseline, "generationId")).isEqualTo(baselineGeneration);
+                    assertThat(text(admittedBaseline, "revision")).isEqualTo(revisionA);
+                    assertThat(text(admittedReviewDetails, "requestedRevision")).isEqualTo(revisionB);
+                    assertThat(map(admittedReview, "currentPointer")).isEqualTo(currentPointerA);
 
-                indexer.close();
+                    Map<?, ?> completeReview = completed(indexerBase, reviewJob, mapper, indexer);
+                    assertReviewComparisonType(completeReview);
+                    Map<?, ?> review = map(completeReview, "review");
+                    reviewId = text(review, "reviewId");
+                    Map<?, ?> completedBaseline = map(review, "capturedBaseline");
+                    assertThat(text(completedBaseline, "generationId")).isEqualTo(baselineGeneration);
+                    assertThat(text(completedBaseline, "revision")).isEqualTo(revisionA);
+                    assertThat(text(review, "requestedRevision")).isEqualTo(revisionB);
+                } catch (AssertionError failure) {
+                    throw withIndexerLogs(failure, indexer.getLogs());
+                } finally {
+                    indexerLogs = indexer.getLogs();
+                }
+            }
+
+            try {
                 Files.move(remotePath, temporaryDirectory.resolve("remote-unavailable"));
                 Files.move(seedPath, temporaryDirectory.resolve("seed-unavailable"));
-                Files.move(checkouts, temporaryDirectory.resolve("checkouts-unavailable"));
-                Files.move(workspace, temporaryDirectory.resolve("workspace-unavailable"));
 
                 RunningProcess query = startQuery(queryJar, readerUri, queryPort);
                 try {
@@ -151,30 +183,47 @@ class SemanticReviewJourneyIT {
                             Map.of("repositoryId", REPOSITORY_ID, "comparisonId", comparisonId, "previous", revisionA, "current", revisionB,
                                     "changeId", text(checkoutChange, "changeId"))), mapper);
                     assertThat(text(patch, "patch")).contains("LegacyGateway", "ModernGateway");
-                    assertMcpJourney(queryBase, reviewId, revisionA, revisionB, comparisonId, legacyGateway, legacyPay, modernGateway, modernPay, mapper);
+                    assertMcpJourney(queryBase, reviewId, revisionA, revisionB, comparisonId, legacyGateway, legacyPay, modernGateway, modernPay,
+                            mapper);
                 } finally {
                     query.close();
                 }
-            } finally {
-                indexer.close();
+            } catch (AssertionError failure) {
+                throw withIndexerLogs(failure, indexerLogs);
             }
         }
     }
 
-    private static MongoDBContainer authenticatedMongo() {
+    private static MongoDBContainer authenticatedMongo(Network network) {
         return new MongoDBContainer("mongo:8.0.4").withEnv("MONGO_INITDB_ROOT_USERNAME", "root")
-                .withEnv("MONGO_INITDB_ROOT_PASSWORD", "root-password");
+                .withEnv("MONGO_INITDB_ROOT_PASSWORD", "root-password").withNetwork(network).withNetworkAliases(MONGO_NETWORK_ALIAS);
     }
 
     private static String mongoUri(MongoDBContainer mongo, String user, String password, String database, String authSource) {
-        return "mongodb://" + user + ":" + password + "@" + mongo.getHost() + ":" + mongo.getFirstMappedPort()
-                + "/" + database + "?authSource=" + authSource;
+        return mongoUri(mongo.getHost(), mongo.getFirstMappedPort(), user, password, database, authSource);
+    }
+
+    private static String mongoUri(String host, int port, String user, String password, String database, String authSource) {
+        return "mongodb://" + user + ":" + password + "@" + host + ":" + port + "/" + database + "?authSource=" + authSource;
     }
 
     private static Path requiredJar(String property) {
         Path jar = Path.of(System.getProperty(property, "")).toAbsolutePath();
         assertThat(Files.isRegularFile(jar)).as("fresh executable jar supplied by %s", property).isTrue();
         return jar;
+    }
+
+    private static String requiredImage(String property) {
+        String image = System.getProperty(property, "");
+        assertThat(image).as("local production Indexer image supplied by %s", property).isNotBlank();
+        return image;
+    }
+
+    private static void assertCleanMavenSeed(Path root) {
+        assertThat(Files.exists(root.resolve(".project"))).as("Maven seed A has no precreated .project").isFalse();
+        assertThat(Files.exists(root.resolve(".classpath"))).as("Maven seed A has no precreated .classpath").isFalse();
+        assertThat(Files.exists(root.resolve(".settings"))).as("Maven seed A has no precreated .settings").isFalse();
+        assertThat(Files.exists(root.resolve("target"))).as("Maven seed A has no precreated target").isFalse();
     }
 
     private static void createReadOnlyUser(String writerUri) {
@@ -227,14 +276,19 @@ class SemanticReviewJourneyIT {
         return revision;
     }
 
-    private RunningProcess startIndexer(Path jar, String mongoUri, Path remote, Path checkouts, Path workspace, Path jdtLsHome, int port)
-            throws IOException {
-        return start(jar, List.of("--spring.mongodb.uri=" + mongoUri, "--server.address=127.0.0.1", "--server.port=" + port,
-                "--semantic.indexer.admin-token=" + ADMIN_TOKEN, "--semantic.repositories." + REPOSITORY_ID + ".url=" + remote.toUri(),
-                "--semantic.repositories." + REPOSITORY_ID + ".default-branch=main", "--semantic.data-root=" + checkouts,
-                "--semantic.jdtls.home=" + jdtLsHome, "--semantic.jdtls.workspace-data-root=" + workspace,
-                "--semantic.jdtls.java-executable=" + Path.of(System.getProperty("java.home"), "bin", "java"),
-                "--semantic.jdtls.isolation-mode=LOCAL_TRUSTED", "--semantic.index-jobs.poll-delay=20ms", "--spring.main.banner-mode=off"));
+    private GenericContainer<?> startIndexer(String image, String mongoUri, Path remote, Network network) {
+        GenericContainer<?> indexer = new GenericContainer<>(DockerImageName.parse(image))
+                .withNetwork(network)
+                .withExposedPorts(INDEXER_CONTAINER_PORT)
+                .withTmpFs(Map.of("/data/repos", "rw,noexec,nosuid,nodev,size=1g", "/data/jdtls", "rw,noexec,nosuid,nodev,size=1g"))
+                .withFileSystemBind(remote.toAbsolutePath().toString(), REMOTE_CONTAINER_PATH, BindMode.READ_ONLY)
+                .withCommand("--spring.mongodb.uri=" + mongoUri, "--server.address=0.0.0.0",
+                        "--server.port=" + INDEXER_CONTAINER_PORT, "--semantic.indexer.admin-token=" + ADMIN_TOKEN,
+                        "--semantic.repositories." + REPOSITORY_ID + ".url=file://" + REMOTE_CONTAINER_PATH,
+                        "--semantic.repositories." + REPOSITORY_ID + ".default-branch=main",
+                        "--semantic.index-jobs.poll-delay=20ms", "--spring.main.banner-mode=off");
+        indexer.start();
+        return indexer;
     }
 
     private RunningProcess startQuery(Path jar, String mongoUri, int port) throws IOException {
@@ -326,7 +380,7 @@ class SemanticReviewJourneyIT {
         return mapper.convertValue(response.structuredContent(), Map.class);
     }
 
-    private Map<?, ?> completed(String base, String jobId, JsonMapper mapper, RunningProcess indexer) throws Exception {
+    private Map<?, ?> completed(String base, String jobId, JsonMapper mapper, GenericContainer<?> indexer) throws Exception {
         Instant deadline = Instant.now().plus(JOB_TIMEOUT);
         while (Instant.now().isBefore(deadline)) {
             HttpResponse<String> response = get(base, "/index/repositories/" + REPOSITORY_ID + "/jobs/" + jobId, ADMIN_TOKEN);
@@ -335,11 +389,29 @@ class SemanticReviewJourneyIT {
                 if ("COMPLETE".equals(status.get("phase"))) {
                     return status;
                 }
-                assertThat(status.get("phase")).as("%s%n%s", response.body(), Files.readString(indexer.log())).isNotEqualTo("FAILED");
+                assertThat(status.get("phase")).as("%s%n%s", response.body(), indexer.getLogs()).isNotEqualTo("FAILED");
             }
             Thread.sleep(100L);
         }
-        throw new AssertionError("job did not complete: " + jobId + System.lineSeparator() + Files.readString(indexer.log()));
+        throw new AssertionError("job did not complete: " + jobId + System.lineSeparator() + indexer.getLogs());
+    }
+
+    private void awaitHttp(String url, String token, GenericContainer<?> indexer) throws Exception {
+        Instant deadline = Instant.now().plus(STARTUP_TIMEOUT);
+        while (Instant.now().isBefore(deadline)) {
+            if (!indexer.isRunning()) {
+                throw new AssertionError("application terminated during startup: " + indexer.getLogs());
+            }
+            try {
+                if (getUri(url, token).statusCode() < 500) {
+                    return;
+                }
+            } catch (IOException exception) {
+                // The application has not opened its local socket yet.
+            }
+            Thread.sleep(100L);
+        }
+        throw new AssertionError("application did not open its local HTTP endpoint: " + indexer.getLogs());
     }
 
     private void awaitHttp(String url, String token, RunningProcess process) throws Exception {
@@ -358,6 +430,11 @@ class SemanticReviewJourneyIT {
             Thread.sleep(100L);
         }
         throw new AssertionError("application did not open its local HTTP endpoint: " + Files.readString(process.log()));
+    }
+
+    private static AssertionError withIndexerLogs(AssertionError failure, String logs) {
+        return new AssertionError("Indexer container logs:" + System.lineSeparator() + logs + System.lineSeparator()
+                + "Journey assertion: " + failure.getMessage(), failure);
     }
 
     private static HttpResponse<String> post(String base, String path, String token, Map<String, Object> body) throws Exception {
@@ -383,11 +460,11 @@ class SemanticReviewJourneyIT {
         return text(mapper.readValue(response.body(), Map.class), "jobId");
     }
 
-    private static String acceptedReview(HttpResponse<String> response, JsonMapper mapper) throws Exception {
+    private static Map<?, ?> acceptedReview(HttpResponse<String> response, JsonMapper mapper) throws Exception {
         assertThat(response.statusCode()).as(response.body()).isEqualTo(202);
         Map<?, ?> body = mapper.readValue(response.body(), Map.class);
         assertReviewComparisonType(body);
-        return text(body, "jobId");
+        return body;
     }
 
     private static void assertReviewComparisonType(Map<?, ?> response) {
