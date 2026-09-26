@@ -58,7 +58,7 @@ class ExactRepositoryCheckoutTest {
 
         assertThat(result.root()).isEqualTo(root.toAbsolutePath().normalize());
         assertThat(result.revision()).isEqualTo(admittedRevision);
-        verify(git).fetch(root);
+        verify(git).fetch(root, registry.get(repositoryId).remoteUrl());
         verify(git).checkoutDetached(root, admittedRevision);
         verify(git, never()).resolveRemoteRef(anyString(), anyString());
     }
@@ -78,7 +78,7 @@ class ExactRepositoryCheckoutTest {
         checkout.checkout(job(repositoryId, admittedRevision));
 
         verify(git).clone(root, "https://example.test/orders.git");
-        verify(git, never()).fetch(root);
+        verify(git, never()).fetch(root, "https://example.test/orders.git");
         verify(git).checkoutDetached(root, admittedRevision);
     }
 
@@ -168,19 +168,22 @@ class ExactRepositoryCheckoutTest {
     }
 
     @Test
-    void rejects_existing_checkout_tree_with_symlink_before_git() throws IOException {
+    void allows_worktree_symlinks_during_existing_checkout_preflight() throws IOException {
         RepositoryId repositoryId = RepositoryId.of("orders");
         RepositoryRuntimeRegistry registry = registry(repositoryId);
         Path root = Files.createDirectories(registry.get(repositoryId).workingTree());
-        Path outside = Files.createDirectories(temporaryDirectory.resolve("outside"));
-        Files.createSymbolicLink(root.resolve("outside-link"), outside);
+        Path target = root.resolve("source-target.java");
+        Files.writeString(target, "class SourceTarget {}");
+        Files.createSymbolicLink(root.resolve("source-link.java"), target.getFileName());
+        RepositoryRevision revision = RepositoryRevision.ofSha("a".repeat(40));
         GitRepositoryPort git = mock(GitRepositoryPort.class);
+        when(git.isCloned(root)).thenReturn(true);
+        when(git.currentRevision(root)).thenReturn(revision);
 
-        assertThatThrownBy(() -> new ExactRepositoryCheckout(registry, git, mock(RepositoryMutationListener.class))
-                .checkout(job(repositoryId, RepositoryRevision.ofSha("a".repeat(40)))))
-                .isInstanceOf(IllegalStateException.class);
-        org.mockito.Mockito.verifyNoInteractions(git);
-        assertThat(outside).isEmptyDirectory();
+        assertThat(new ExactRepositoryCheckout(registry, git, mock(RepositoryMutationListener.class))
+                .checkout(job(repositoryId, revision)).root())
+                .isEqualTo(root);
+        verify(git).fetch(root, registry.get(repositoryId).remoteUrl());
     }
 
     @Test
@@ -197,7 +200,7 @@ class ExactRepositoryCheckoutTest {
         assertThat(new ExactRepositoryCheckout(registry, git, mock(RepositoryMutationListener.class))
                 .checkout(job(repositoryId, revision)).root())
                 .isEqualTo(root);
-        verify(git).fetch(root);
+        verify(git).fetch(root, registry.get(repositoryId).remoteUrl());
     }
 
     @Test

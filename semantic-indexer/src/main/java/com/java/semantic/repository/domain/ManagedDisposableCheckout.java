@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.Objects;
 import java.util.stream.Stream;
 
@@ -26,15 +27,35 @@ public final class ManagedDisposableCheckout {
         return managedParent;
     }
 
-    public void validate(Path candidate) throws IOException {
+    public List<Path> validateTree(Path candidate) throws IOException {
         Path checkout = validateBoundaryPath(candidate);
-        if (Files.exists(checkout, LinkOption.NOFOLLOW_LINKS)) {
-            try (Stream<Path> tree = Files.walk(checkout)) {
-                if (tree.anyMatch(Files::isSymbolicLink)) {
-                    throw new IOException("managed checkout tree contains a symbolic link");
+        if (!Files.exists(checkout, LinkOption.NOFOLLOW_LINKS)) {
+            return List.of();
+        }
+        if (!Files.isDirectory(checkout, LinkOption.NOFOLLOW_LINKS)) {
+            throw new IOException("managed checkout must be a real directory");
+        }
+        Path realRoot = checkout.toRealPath();
+        Path gitDirectory = checkout.resolve(".git");
+        try (Stream<Path> tree = Files.walk(checkout)) {
+            List<Path> entries = tree.toList();
+            for (Path entry : entries) {
+                if (Files.isSymbolicLink(entry)) {
+                    if (entry.startsWith(gitDirectory)) {
+                        throw new IOException("managed checkout Git metadata contains a symbolic link");
+                    }
+                    continue;
+                }
+                if (!entry.toRealPath().startsWith(realRoot)) {
+                    throw new IOException("managed checkout tree contains an escaping path");
                 }
             }
+            return List.copyOf(entries);
         }
+    }
+
+    public void validate(Path candidate) throws IOException {
+        validateTree(candidate);
     }
 
     public void validateBoundary(Path candidate) throws IOException {

@@ -64,12 +64,12 @@ class JGitEvidenceHistoryAdapterTest {
             JGitRepositoryAdapter adapter = new JGitRepositoryAdapter(new RepositoryProperties());
             adapter.clone(checkoutRoot, remoteRoot.toUri().toString());
 
-            assertThat(adapter.fetchRemoteBranches(checkoutRoot)).extracting(GitBranch::name)
+            assertThat(adapter.fetchRemoteBranches(checkoutRoot, remoteRoot.toUri().toString())).extracting(GitBranch::name)
                     .containsExactly("main", "retired");
 
             seed.push().setRemote("origin").setRefSpecs(new RefSpec(":refs/heads/retired")).call();
 
-            assertThat(adapter.fetchRemoteBranches(checkoutRoot)).extracting(GitBranch::name)
+            assertThat(adapter.fetchRemoteBranches(checkoutRoot, remoteRoot.toUri().toString())).extracting(GitBranch::name)
                     .containsExactly("main");
         }
     }

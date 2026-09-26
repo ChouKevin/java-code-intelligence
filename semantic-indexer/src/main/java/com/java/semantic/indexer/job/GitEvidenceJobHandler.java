@@ -71,7 +71,7 @@ public final class GitEvidenceJobHandler {
             if (!git.isCloned(runtime.workingTree())) {
                 git.clone(runtime.workingTree(), runtime.remoteUrl());
             }
-            git.fetch(runtime.workingTree());
+            git.fetch(runtime.workingTree(), runtime.remoteUrl());
             RepositoryRevision previous = payload.baseline().pointer().revision();
             RepositoryRevision current = payload.requestedRevision();
             git.verifyComparisonEndpoints(runtime.workingTree(), previous, current);
@@ -99,7 +99,7 @@ public final class GitEvidenceJobHandler {
             git.clone(runtime.workingTree(), runtime.remoteUrl());
         }
         GitCatalogManifest manifest = evidence.beginCatalog(job, Instant.now());
-        evidence.appendBranches(manifest, git.fetchRemoteBranches(runtime.workingTree()));
+        evidence.appendBranches(manifest, git.fetchRemoteBranches(runtime.workingTree(), runtime.remoteUrl()));
     }
 
     private void history(IndexJob job, RepositoryRuntime runtime) {
@@ -126,7 +126,7 @@ public final class GitEvidenceJobHandler {
         if (!git.isCloned(runtime.workingTree())) {
             git.clone(runtime.workingTree(), runtime.remoteUrl());
         }
-        git.fetch(runtime.workingTree());
+        git.fetch(runtime.workingTree(), runtime.remoteUrl());
         git.verifyComparisonEndpoints(runtime.workingTree(), previous, current);
         GitPreparedComparison comparison = git.prepareComparison(runtime.workingTree(), previous, current);
         evidence.publishComparison(job, comparison, Instant.now(), GitEvidenceOwnership.standalone());

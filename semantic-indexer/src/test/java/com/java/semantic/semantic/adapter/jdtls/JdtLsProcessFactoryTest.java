@@ -145,38 +145,30 @@ class JdtLsProcessFactoryTest {
     }
 
     @Test
-    void should_attach_the_configured_lombok_agent_only_to_the_linux_uid_command() throws Exception {
+    void builds_the_linux_uid_command_with_the_configured_lombok_agent() throws IOException {
         Path home = JdtLsTestFixtures.createFakeHome(tempDirectory);
-        Path workspaceRoot = Files.createDirectories(tempDirectory.resolve("linux-repository"));
-        Path workspaceData = Files.createDirectories(tempDirectory.resolve("linux-workspace-data"));
-        TestProcess process = new TestProcess(new ByteArrayInputStream(new byte[0]));
-        AtomicReference<List<String>> capturedCommand = new AtomicReference<>();
-        JdtLsLanguageServer server = mock(JdtLsLanguageServer.class, invocation -> {
-            if ("initialize".equals(invocation.getMethod().getName())) {
-                return CompletableFuture.completedFuture(null);
-            }
-            return CALLS_REAL_METHODS.answer(invocation);
-        });
+        JdtLsProperties properties = linuxUidProperties(home);
         JdtLsProcessFactory factory = new JdtLsProcessFactory(
-                linuxUidProperties(home),
+                properties,
                 command -> {
-                    capturedCommand.set(List.copyOf(command));
-                    return process;
+                    throw new AssertionError("command planning must not start JDT");
                 },
-                (client, launchedProcess) -> new JdtLsProcessFactory.Connection(
-                        server, CompletableFuture.completedFuture(null)));
+                (client, launchedProcess) -> {
+                    throw new AssertionError("command planning must not connect to JDT");
+                });
 
-        factory.launch(workspaceRoot, workspaceData, mock(JdtLanguageClient.class),
-                new RepositoryRuntime(RepositoryId.of("linux-test"), "linux-test", workspaceRoot,
-                        "file:///remote/linux-test.git", "main").managedCheckout());
+        List<String> command = factory.createCommand(
+                home.resolve("plugins/org.eclipse.equinox.launcher_test.jar"),
+                tempDirectory.resolve("workspace-data"),
+                tempDirectory.resolve("configuration"));
 
-        assertThat(capturedCommand.get()).containsSubsequence(
+        assertThat(command).containsSubsequence(
                 "/usr/bin/setpriv",
                 "--clear-groups",
                 "--no-new-privs",
                 "--bounding-set=-all",
                 "/opt/java/openjdk/bin/java");
-        assertThat(capturedCommand.get()).contains("-javaagent:" + home.resolve("lombok.jar"));
+        assertThat(command).contains("-javaagent:" + home.resolve("lombok.jar"));
     }
 
     @Test

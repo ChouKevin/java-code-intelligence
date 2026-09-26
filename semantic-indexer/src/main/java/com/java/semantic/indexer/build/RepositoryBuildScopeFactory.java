@@ -11,9 +11,8 @@ import com.java.semantic.indexer.store.MongoGenerationWriter;
 import com.java.semantic.indexer.store.PublicationPort;
 import com.java.semantic.indexer.uat.PublicationGate;
 import com.java.semantic.model.repository.RepositoryId;
-import com.java.semantic.repository.application.RepositoryMutationException;
+import com.java.semantic.repository.adapter.jgit.JGitWorktreeRepository;
 import com.java.semantic.semantic.adapter.jdtls.JdtWorkspaceManager;
-import java.io.IOException;
 import java.nio.file.Path;
 import java.util.Objects;
 import java.util.Optional;
@@ -90,11 +89,7 @@ public final class RepositoryBuildScopeFactory implements RepositoryBuildRunner.
     }
 
     private static Git openGit(Path repositoryRoot) {
-        try {
-            return Git.open(repositoryRoot.toFile());
-        } catch (IOException exception) {
-            throw new RepositoryMutationException("unable to open exact checked-out repository", exception);
-        }
+        return JGitWorktreeRepository.open(repositoryRoot);
     }
 
     private void closeAfterFailedOpen(Git git, RepositoryId repositoryId) {

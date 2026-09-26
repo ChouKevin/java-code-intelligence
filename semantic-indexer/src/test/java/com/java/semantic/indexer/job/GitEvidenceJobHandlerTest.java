@@ -53,7 +53,7 @@ class GitEvidenceJobHandlerTest {
         when(repositories.get(repositoryId)).thenReturn(runtime);
         when(git.isCloned(runtime.workingTree())).thenReturn(false);
         when(evidence.beginCatalog(org.mockito.ArgumentMatchers.eq(job), org.mockito.ArgumentMatchers.any(Instant.class))).thenReturn(manifest);
-        when(git.fetchRemoteBranches(runtime.workingTree())).thenReturn(List.of());
+        when(git.fetchRemoteBranches(runtime.workingTree(), runtime.remoteUrl())).thenReturn(List.of());
 
         RepositoryMutationListener listener = mock(RepositoryMutationListener.class);
         new GitEvidenceJobHandler(repositories, git, evidence, listener).prepare(job);
@@ -64,7 +64,7 @@ class GitEvidenceJobHandlerTest {
         order.verify(git).isCloned(runtime.workingTree());
         order.verify(git).clone(runtime.workingTree(), runtime.remoteUrl());
         order.verify(evidence).beginCatalog(org.mockito.ArgumentMatchers.eq(job), org.mockito.ArgumentMatchers.any(Instant.class));
-        order.verify(git).fetchRemoteBranches(runtime.workingTree());
+        order.verify(git).fetchRemoteBranches(runtime.workingTree(), runtime.remoteUrl());
         order.verify(evidence).appendBranches(manifest, List.of());
     }
 
@@ -194,7 +194,7 @@ class GitEvidenceJobHandlerTest {
         org.mockito.InOrder order = inOrder(listener, git, evidence);
         order.verify(listener).beforeMutation(repositoryId);
         order.verify(git).isCloned(runtime.workingTree());
-        order.verify(git).fetch(runtime.workingTree());
+        order.verify(git).fetch(runtime.workingTree(), runtime.remoteUrl());
         order.verify(evidence).publishComparison(org.mockito.ArgumentMatchers.eq(job), org.mockito.ArgumentMatchers.any(),
                 org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
     }

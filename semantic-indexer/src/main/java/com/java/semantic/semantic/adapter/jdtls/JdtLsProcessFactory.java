@@ -23,8 +23,10 @@ import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.attribute.UserPrincipal;
+import java.nio.file.attribute.GroupPrincipal;
 import java.nio.file.attribute.UserPrincipalLookupService;
 import java.util.ArrayList;
 import java.nio.file.Path;
@@ -122,7 +124,7 @@ public final class JdtLsProcessFactory {
     /** 啟動程序並完成 LSP initialize handshake */
     public LaunchHandle launch(Path workspaceRoot, Path workspaceData, JdtLanguageClient client)
             throws IOException, InterruptedException, ExecutionException, TimeoutException {
-        return launch(workspaceRoot, workspaceData, client, null, process -> { });
+        return launch(workspaceRoot, workspaceData, client, null, null, process -> { });
     }
 
     LaunchHandle launch(
@@ -131,7 +133,17 @@ public final class JdtLsProcessFactory {
             JdtLanguageClient client,
             ManagedDisposableCheckout managedCheckout)
             throws IOException, InterruptedException, ExecutionException, TimeoutException {
-        return launch(workspaceRoot, workspaceData, client, managedCheckout, process -> { });
+        return launch(workspaceRoot, workspaceData, client, managedCheckout, null, process -> { });
+    }
+
+    LaunchHandle launch(
+            Path workspaceRoot,
+            Path workspaceData,
+            JdtLanguageClient client,
+            ManagedDisposableCheckout managedCheckout,
+            List<Path> validatedCheckoutTree)
+            throws IOException, InterruptedException, ExecutionException, TimeoutException {
+        return launch(workspaceRoot, workspaceData, client, managedCheckout, validatedCheckoutTree, process -> { });
     }
 
     LaunchHandle launch(
@@ -140,19 +152,20 @@ public final class JdtLsProcessFactory {
             JdtLanguageClient client,
             Consumer<Process> processStartedObserver)
             throws IOException, InterruptedException, ExecutionException, TimeoutException {
-        return launch(workspaceRoot, workspaceData, client, null, processStartedObserver);
+        return launch(workspaceRoot, workspaceData, client, null, null, processStartedObserver);
     }
-
     private LaunchHandle launch(
             Path workspaceRoot,
             Path workspaceData,
             JdtLanguageClient client,
             ManagedDisposableCheckout managedCheckout,
+            List<Path> validatedCheckoutTree,
             Consumer<Process> processStartedObserver)
             throws IOException, InterruptedException, ExecutionException, TimeoutException {
         Objects.requireNonNull(processStartedObserver, "processStartedObserver is required");
         Path launcherJar = findLauncherJar();
-        Path configuration = prepareWritablePaths(workspaceRoot, workspaceData, managedCheckout);
+        Path configuration = prepareWritablePaths(workspaceRoot, workspaceData, managedCheckout,
+                validatedCheckoutTree);
         List<String> command = createCommand(launcherJar, workspaceData, configuration);
         Process process = processStarter.start(command);
         log.info("phase=jdtls-process outcome=started");
@@ -203,7 +216,7 @@ public final class JdtLsProcessFactory {
         }
     }
 
-    private List<String> createCommand(Path launcherJar, Path workspaceData, Path configuration) {
+    List<String> createCommand(Path launcherJar, Path workspaceData, Path configuration) {
         List<String> command = new ArrayList<>();
         if (properties.getIsolationMode() == JdtLsProperties.IsolationMode.LINUX_UID) {
             command.add("/usr/bin/setpriv");
@@ -244,7 +257,8 @@ public final class JdtLsProcessFactory {
     private Path prepareWritablePaths(
             Path workspaceRoot,
             Path workspaceData,
-            ManagedDisposableCheckout managedCheckout) throws IOException {
+            ManagedDisposableCheckout managedCheckout,
+            List<Path> validatedCheckoutTree) throws IOException {
         ManagedDisposableCheckout.validateAncestors(workspaceData);
         if (properties.getIsolationMode() == JdtLsProperties.IsolationMode.LINUX_UID
                 || Objects.nonNull(managedCheckout)) {
@@ -273,7 +287,14 @@ public final class JdtLsProcessFactory {
         if (properties.getIsolationMode() == JdtLsProperties.IsolationMode.LINUX_UID) {
             UserPrincipalLookupService lookup = workspaceData.getFileSystem().getUserPrincipalLookupService();
             UserPrincipal analysisUser = lookup.lookupPrincipalByName(Long.toString(properties.getAnalysisUid()));
-            assignAnalysisOwner(workspaceRoot, analysisUser);
+            GroupPrincipal analysisGroup = lookup.lookupPrincipalByGroupName(Long.toString(properties.getAnalysisGid()));
+            List<Path> checkoutTree = validatedCheckoutTree;
+            if (Objects.isNull(checkoutTree)) {
+                checkoutTree = managedCheckout.validateTree(workspaceRoot);
+            }
+            UserPrincipal applicationOwner = applicationOwner();
+            prepareManagedCheckout(workspaceRoot, managedCheckout, checkoutTree, applicationOwner,
+                    analysisUser, analysisGroup, properties.getAnalysisUid());
             assignAnalysisOwner(workspaceData, analysisUser);
         }
         return configuration;
@@ -286,7 +307,7 @@ public final class JdtLsProcessFactory {
             throw new IOException("LINUX_UID requires a managed disposable checkout");
         }
         try {
-            managedCheckout.validate(workspaceRoot);
+            managedCheckout.validateBoundary(workspaceRoot);
         } catch (IOException exception) {
             throw new IOException("managed checkout root is invalid", exception);
         }
@@ -298,6 +319,94 @@ public final class JdtLsProcessFactory {
                 throw new IOException("managed writable path contains a symbolic link");
             }
         }
+    }
+
+    private UserPrincipal applicationOwner() throws IOException {
+        Path processDirectory = Path.of("/proc/self");
+        long processUid = ((Number) Files.getAttribute(processDirectory, "unix:uid")).longValue();
+        if (processUid == properties.getAnalysisUid()) {
+            throw new IOException("Indexer and analysis identities must be distinct");
+        }
+        return Files.getOwner(processDirectory);
+    }
+
+    private static void prepareManagedCheckout(
+            Path workspaceRoot,
+            ManagedDisposableCheckout managedCheckout,
+            List<Path> checkoutTree,
+            UserPrincipal applicationOwner,
+            UserPrincipal analysisUser,
+            GroupPrincipal analysisGroup,
+            long analysisUid) throws IOException {
+        managedCheckout.validateBoundary(workspaceRoot);
+        Path root = workspaceRoot.toAbsolutePath().normalize();
+        Path realRoot = root.toRealPath();
+        Path gitDirectory = root.resolve(".git");
+        if (!Files.isDirectory(gitDirectory, LinkOption.NOFOLLOW_LINKS)) {
+            throw new IOException("LINUX_UID requires a real checkout Git directory");
+        }
+        for (Path entry : checkoutTree) {
+            boolean symbolicLink = Files.isSymbolicLink(entry);
+            if (!entry.startsWith(root) || (symbolicLink && entry.startsWith(gitDirectory))
+                    || (!symbolicLink && !entry.toRealPath().startsWith(realRoot))) {
+                throw new IOException("managed checkout tree changed after validation");
+            }
+        }
+        Path managedParent = managedCheckout.managedParent();
+        Path managedParentParent = managedParent.getParent();
+        if (Objects.isNull(managedParentParent)) {
+            throw new IOException("managed checkout parent has no trusted ancestor");
+        }
+        protectApplicationDirectory(managedParent, applicationOwner);
+        validateProtectedDirectoryEntry(managedParentParent, managedParent, applicationOwner, analysisUid);
+
+        Files.setOwner(root, applicationOwner);
+        Files.setAttribute(root, "posix:group", analysisGroup, LinkOption.NOFOLLOW_LINKS);
+        Files.setAttribute(root, "unix:mode", 03775, LinkOption.NOFOLLOW_LINKS);
+        for (Path entry : checkoutTree) {
+            if (entry.equals(root)) {
+                continue;
+            }
+            if (entry.startsWith(gitDirectory)) {
+                protectGitControlEntry(entry, applicationOwner);
+            } else {
+                Files.setAttribute(entry, "posix:owner", analysisUser, LinkOption.NOFOLLOW_LINKS);
+            }
+        }
+    }
+
+    private static void protectApplicationDirectory(Path directory, UserPrincipal applicationOwner)
+            throws IOException {
+        Path canonical = directory.toAbsolutePath().normalize();
+        if (!Files.isDirectory(canonical, LinkOption.NOFOLLOW_LINKS)
+                || !canonical.equals(canonical.toRealPath())) {
+            throw new IOException("managed checkout ancestor must be a canonical directory");
+        }
+        Files.setOwner(canonical, applicationOwner);
+        Files.setAttribute(canonical, "unix:mode", 0755, LinkOption.NOFOLLOW_LINKS);
+    }
+
+    private static void validateProtectedDirectoryEntry(
+            Path parent,
+            Path entry,
+            UserPrincipal applicationOwner,
+            long analysisUid) throws IOException {
+        int mode = ((Number) Files.getAttribute(parent, "unix:mode", LinkOption.NOFOLLOW_LINKS)).intValue();
+        if ((mode & 0022) == 0) {
+            return;
+        }
+        long parentUid = ((Number) Files.getAttribute(parent, "unix:uid", LinkOption.NOFOLLOW_LINKS)).longValue();
+        boolean sticky = (mode & 01000) != 0;
+        UserPrincipal entryOwner = Files.getOwner(entry, LinkOption.NOFOLLOW_LINKS);
+        if (!sticky || parentUid == analysisUid || !entryOwner.equals(applicationOwner)) {
+            throw new IOException("analysis identity could replace the managed checkout parent");
+        }
+    }
+
+    private static void protectGitControlEntry(Path entry, UserPrincipal applicationOwner) throws IOException {
+        Files.setOwner(entry, applicationOwner);
+        int mode = ((Number) Files.getAttribute(entry, "unix:mode", LinkOption.NOFOLLOW_LINKS)).intValue();
+        Files.setAttribute(entry, "unix:mode", mode & ~0022, LinkOption.NOFOLLOW_LINKS);
     }
 
     private void assignAnalysisOwner(Path path, UserPrincipal analysisUser) throws IOException {

@@ -16,7 +16,7 @@ public interface GitRepositoryPort {
 
     RepositoryRevision clone(Path workingTree, String remoteUrl);
 
-    void fetch(Path workingTree);
+    void fetch(Path workingTree, String remoteUrl);
 
     /** Verifies immutable comparison endpoints are still reachable from fetched trusted remote heads. */
     void verifyComparisonEndpoints(Path workingTree, RepositoryRevision previous, RepositoryRevision current);
@@ -27,7 +27,7 @@ public interface GitRepositoryPort {
 
     RepositoryRevision resolveRemoteRef(String remoteUrl, String ref);
 
-    List<GitBranch> fetchRemoteBranches(Path workingTree);
+    List<GitBranch> fetchRemoteBranches(Path workingTree, String remoteUrl);
 
     void streamReachableHistory(Path workingTree, RepositoryRevision revision, Consumer<GitCommit> consumer);
 

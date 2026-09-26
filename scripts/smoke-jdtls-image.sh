@@ -15,6 +15,48 @@ docker run --rm --entrypoint sh "${image_name}" -ceu '
   test -x /usr/bin/setpriv
 '
 
+docker run --rm --entrypoint sh "${image_name}" -ceu '
+  test "$(stat -c "%u:%a" /data)" = "0:755"
+  test "$(stat -c "%u:%a" /data/repos)" = "0:755"
+  test "$(stat -c "%u:%a" /data/jdtls)" = "10001:755"
+  probe=$(mktemp -d /data/repos/uid-boundary.XXXXXX)
+  checkout="$probe/checkout"
+  mkdir -p "$checkout/.git/objects"
+  printf "ref: refs/heads/main\n" > "$checkout/.git/HEAD"
+  chown -R 0:0 "$checkout/.git"
+  chown 0:10001 "$checkout"
+  chmod 3775 "$checkout"
+  chmod 755 "$probe"
+  if setpriv --reuid=10001 --regid=10001 --clear-groups --no-new-privs --bounding-set=-all \
+      mv "$checkout/.git" "$checkout/.git.attacker"; then
+    echo "analysis UID renamed checkout Git metadata" >&2
+    exit 1
+  fi
+  if setpriv --reuid=10001 --regid=10001 --clear-groups --no-new-privs --bounding-set=-all \
+      mv "$checkout/.git/HEAD" "$checkout/.git/HEAD.attacker"; then
+    echo "analysis UID renamed a Git control file" >&2
+    exit 1
+  fi
+  if setpriv --reuid=10001 --regid=10001 --clear-groups --no-new-privs --bounding-set=-all \
+      mv "$checkout" "$checkout.attacker"; then
+    echo "analysis UID renamed the managed checkout root" >&2
+    exit 1
+  fi
+  if setpriv --reuid=10001 --regid=10001 --clear-groups --no-new-privs --bounding-set=-all \
+      mv /data/repos /data/repos.attacker; then
+    echo "analysis UID renamed the managed repository parent" >&2
+    exit 1
+  fi
+  if setpriv --reuid=10001 --regid=10001 --clear-groups --no-new-privs --bounding-set=-all \
+      mv /data /data.attacker; then
+    echo "analysis UID renamed the data root" >&2
+    exit 1
+  fi
+  setpriv --reuid=10001 --regid=10001 --clear-groups --no-new-privs --bounding-set=-all \
+    touch "$checkout/analysis-write-probe"
+  rm -rf "$probe"
+'
+
 docker run --rm --env SYNTHETIC_PARENT_SECRET=only-for-image-smoke --entrypoint sh "${image_name}" -ceu '
   env -i HOME=/home/analysis USER=analysis \
     /usr/bin/setpriv --reuid=10001 --regid=10001 --clear-groups --no-new-privs --bounding-set=-all \

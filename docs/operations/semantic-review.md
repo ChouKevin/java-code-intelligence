@@ -35,8 +35,8 @@ child as a volume, so Docker otherwise creates anonymous child volumes that
 hide the parent mount.
 
 After provisioning the private Docker network, secret-backed Indexer env file,
-writable host directories for the Indexer and analysis UID, and the image tagged
-`java-semantic-indexer:uat`, start it with both child paths bound explicitly:
+checkout storage for the Indexer, analysis-owned JDT workspace storage, and the
+image tagged `java-semantic-indexer:uat`, start it with both child paths bound explicitly:
 
 ```bash
 docker run -d --name semantic-indexer --network semantic-private \
@@ -49,6 +49,17 @@ docker run -d --name semantic-indexer --network semantic-private \
 The container's `SEMANTIC_DATA_ROOT=/data/repos` and
 `JDTLS_WORKSPACE_DATA_ROOT=/data/jdtls` refer to these exact targets; neither
 host directory is mounted into Query.
+
+For the `LINUX_UID` image, `/data` and `/data/repos` remain owned by the
+Indexer/application identity and are not writable by the analysis UID;
+`/data/jdtls` alone is analysis-owned. Do not recursively transfer `/data` or
+`/data/repos` to `analysis`. Before JDT LS starts, Indexer keeps the checkout
+parent application-owned, makes the checkout root sticky and group-writable for
+analysis, and keeps `.git` and its control files application-owned and
+non-writable by analysis. Tracked worktree symlinks remain available to the
+analysis process. The image smoke script checks that UID 10001 can write
+ordinary checkout content but cannot rename `.git`, the checkout root,
+`/data/repos`, or `/data`.
 
 Mongo and Indexer admin must bind only to the private management interface or
 private container network. Do not publish MongoDB or `/index/**` on a public

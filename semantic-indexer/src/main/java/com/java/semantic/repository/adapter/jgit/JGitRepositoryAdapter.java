@@ -71,7 +71,7 @@ public class JGitRepositoryAdapter implements GitRepositoryPort {
 
     @Override
     public boolean isCloned(Path workingTree) {
-        return Files.isDirectory(workingTree.resolve(".git"));
+        return JGitWorktreeRepository.isCloned(workingTree);
     }
 
     @Override
@@ -96,9 +96,9 @@ public class JGitRepositoryAdapter implements GitRepositoryPort {
     }
 
     @Override
-    public void fetch(Path workingTree) {
-        try (Git git = Git.open(workingTree.toFile())) {
-            fetchRemote(git);
+    public void fetch(Path workingTree, String remoteUrl) {
+        try (Git git = JGitWorktreeRepository.open(workingTree)) {
+            fetchRemote(git, remoteUrl);
         } catch (RepositoryMutationException exception) {
             throw exception;
         } catch (IOException | GitAPIException | RuntimeException exception) {
@@ -108,7 +108,7 @@ public class JGitRepositoryAdapter implements GitRepositoryPort {
 
     @Override
     public void verifyComparisonEndpoints(Path workingTree, RepositoryRevision previous, RepositoryRevision current) {
-        try (Git git = Git.open(workingTree.toFile()); RevWalk walk = new RevWalk(git.getRepository())) {
+        try (Git git = JGitWorktreeRepository.open(workingTree); RevWalk walk = new RevWalk(git.getRepository())) {
             RevCommit previousCommit = walk.parseCommit(ObjectId.fromString(previous.value()));
             RevCommit currentCommit = walk.parseCommit(ObjectId.fromString(current.value()));
             List<RevCommit> trustedHeads = git.getRepository().getRefDatabase().getRefsByPrefix("refs/remotes/origin/").stream()
@@ -130,7 +130,7 @@ public class JGitRepositoryAdapter implements GitRepositoryPort {
 
     @Override
     public void checkoutDetached(Path workingTree, RepositoryRevision revision) {
-        try (Git git = Git.open(workingTree.toFile())) {
+        try (Git git = JGitWorktreeRepository.open(workingTree)) {
             git.checkout().setName(revision.value()).setForced(true).call();
             git.clean().setForce(true).setCleanDirectories(true).setIgnore(false)
                     .setPaths(Set.of("target", "build", ".classpath", ".factorypath", ".project", ".settings")).call();
@@ -144,7 +144,7 @@ public class JGitRepositoryAdapter implements GitRepositoryPort {
 
     @Override
     public RepositoryRevision currentRevision(Path workingTree) {
-        try (Git git = Git.open(workingTree.toFile())) {
+        try (Git git = JGitWorktreeRepository.open(workingTree)) {
             return resolveHead(git);
         } catch (RepositoryMutationException exception) {
             throw exception;
@@ -179,9 +179,9 @@ public class JGitRepositoryAdapter implements GitRepositoryPort {
     }
 
     @Override
-    public List<GitBranch> fetchRemoteBranches(Path workingTree) {
-        try (Git git = Git.open(workingTree.toFile())) {
-            fetchRemote(git);
+    public List<GitBranch> fetchRemoteBranches(Path workingTree, String remoteUrl) {
+        try (Git git = JGitWorktreeRepository.open(workingTree)) {
+            fetchRemote(git, remoteUrl);
             return git.getRepository().getRefDatabase().getRefsByPrefix("refs/remotes/origin/").stream()
                     .filter(reference -> !reference.getName().equals("refs/remotes/origin/HEAD"))
                     .filter(reference -> Objects.nonNull(reference.getObjectId()))
@@ -196,7 +196,7 @@ public class JGitRepositoryAdapter implements GitRepositoryPort {
     @Override
     public void streamReachableHistory(Path workingTree, RepositoryRevision revision, Consumer<GitCommit> consumer) {
         Consumer<GitCommit> requiredConsumer = Objects.requireNonNull(consumer, "history consumer is required");
-        try (Git git = Git.open(workingTree.toFile()); RevWalk walk = new RevWalk(git.getRepository())) {
+        try (Git git = JGitWorktreeRepository.open(workingTree); RevWalk walk = new RevWalk(git.getRepository())) {
             RevCommit head = walk.parseCommit(ObjectId.fromString(revision.value()));
             walk.sort(RevSort.TOPO);
             walk.sort(RevSort.COMMIT_TIME_DESC, true);
@@ -214,7 +214,7 @@ public class JGitRepositoryAdapter implements GitRepositoryPort {
 
     @Override
     public GitPreparedComparison prepareComparison(Path workingTree, RepositoryRevision previous, RepositoryRevision current) {
-        try (Git git = Git.open(workingTree.toFile()); RevWalk walk = new RevWalk(git.getRepository())) {
+        try (Git git = JGitWorktreeRepository.open(workingTree); RevWalk walk = new RevWalk(git.getRepository())) {
             RevCommit previousCommit = walk.parseCommit(ObjectId.fromString(previous.value()));
             RevCommit currentCommit = walk.parseCommit(ObjectId.fromString(current.value()));
             List<GitSnapshotEntry> previousEntries = snapshot(git.getRepository(), previousCommit);
@@ -533,10 +533,12 @@ public class JGitRepositoryAdapter implements GitRepositoryPort {
         }
     }
 
-    private void fetchRemote(Git git) throws GitAPIException {
-        FetchCommand fetch = git.fetch().setRefSpecs(
-                new RefSpec("+refs/heads/*:refs/remotes/origin/*"),
-                new RefSpec("+refs/tags/*:refs/tags/*"))
+    private void fetchRemote(Git git, String remoteUrl) throws GitAPIException {
+        FetchCommand fetch = git.fetch()
+                .setRemote(remoteUrl)
+                .setRefSpecs(
+                        new RefSpec("+refs/heads/*:refs/remotes/origin/*"),
+                        new RefSpec("+refs/tags/*:refs/tags/*"))
                 .setRemoveDeletedRefs(true);
         credentialsProvider().ifPresent(fetch::setCredentialsProvider);
         fetch.call();

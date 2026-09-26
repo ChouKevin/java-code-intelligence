@@ -19,6 +19,7 @@ import lombok.extern.slf4j.Slf4j;
 
 import java.io.IOException;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -168,19 +169,23 @@ public class DefaultJdtWorkspaceManager implements JdtWorkspaceManager, Reposito
                 && Objects.isNull(managedCheckout)) {
             throw new IllegalStateException("LINUX_UID requires a managed disposable checkout");
         }
+        List<Path> checkoutTree = List.of();
         if (Objects.nonNull(managedCheckout)) {
             try {
-                managedCheckout.validate(snapshot.root());
+                checkoutTree = managedCheckout.validateTree(snapshot.root());
             } catch (IOException exception) {
                 throw new IllegalStateException("managed checkout boundary is invalid", exception);
             }
+        }
+        if (properties.getIsolationMode() == JdtLsProperties.IsolationMode.LINUX_UID) {
+            validateDisjointWorkspaceRoot(managedCheckout);
         }
         Path workspaceData = createLeaseDirectory(key);
         JdtLsReadinessProbe.ImportProgressClient client = readinessProbe.newClient();
         JdtWorkspaceSession session = null;
         try {
             JdtLsProcessFactory.LaunchHandle handle = processFactory.launch(
-                    snapshot.root(), workspaceData, client, managedCheckout);
+                    snapshot.root(), workspaceData, client, managedCheckout, checkoutTree);
             session = new JdtWorkspaceSession(snapshot.repositoryId(), snapshot.revision(), handle,
                     properties.getRequestTimeout(), ticker);
             readinessProbe.awaitReady(session, client, snapshot.root());
@@ -198,6 +203,42 @@ public class DefaultJdtWorkspaceManager implements JdtWorkspaceManager, Reposito
             closeFailedLease(session, workspaceData);
             throw exception;
         }
+    }
+
+    private void validateDisjointWorkspaceRoot(ManagedDisposableCheckout managedCheckout) {
+        try {
+            Path workspaceRoot = canonicalProvisionedRoot(properties.getWorkspaceDataRoot());
+            if (overlaps(workspaceRoot, managedCheckout.root())
+                    || overlaps(workspaceRoot, managedCheckout.managedParent())) {
+                throw new IllegalStateException("workspace data root overlaps the managed checkout boundary");
+            }
+        } catch (IOException exception) {
+            throw new IllegalStateException("workspace data root is not canonical", exception);
+        }
+    }
+
+    private static Path canonicalProvisionedRoot(Path configuredRoot) throws IOException {
+        Path root = configuredRoot.toAbsolutePath().normalize();
+        ManagedDisposableCheckout.validateAncestors(root);
+        Path existing = root;
+        while (!Files.exists(existing, LinkOption.NOFOLLOW_LINKS)) {
+            existing = existing.getParent();
+            if (Objects.isNull(existing)) {
+                throw new IOException("workspace data root has no existing ancestor");
+            }
+        }
+        if (!Files.isDirectory(existing, LinkOption.NOFOLLOW_LINKS)) {
+            throw new IOException("workspace data root ancestor must be a real directory");
+        }
+        Path realExisting = existing.toRealPath();
+        if (!existing.equals(realExisting)) {
+            throw new IOException("workspace data root contains a noncanonical path");
+        }
+        return realExisting.resolve(existing.relativize(root)).normalize();
+    }
+
+    private static boolean overlaps(Path first, Path second) {
+        return first.startsWith(second) || second.startsWith(first);
     }
 
     private Path createLeaseDirectory(AnalysisWorkspaceKey key) {

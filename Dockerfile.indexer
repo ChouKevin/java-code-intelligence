@@ -15,7 +15,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends curl git util-l
     && groupadd --gid 10001 analysis \
     && useradd --uid 10001 --gid 10001 --create-home --home-dir /home/analysis --shell /usr/sbin/nologin analysis \
     && mkdir -p /data/repos /data/jdtls \
-    && chown -R analysis:analysis /data /home/analysis \
+    && chown -R analysis:analysis /data/jdtls /home/analysis \
     && rm -rf /var/lib/apt/lists/*
 COPY scripts/install-jdtls.sh /usr/local/bin/install-jdtls
 RUN /usr/local/bin/install-jdtls /opt/jdtls

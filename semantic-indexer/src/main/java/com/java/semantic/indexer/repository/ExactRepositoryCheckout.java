@@ -44,7 +44,7 @@ public final class ExactRepositoryCheckout implements IndexBuildService.Checkout
                 throw new IllegalStateException("managed checkout boundary is invalid", exception);
             }
             if (git.isCloned(root)) {
-                git.fetch(root);
+                git.fetch(root, runtime.remoteUrl());
             } else {
                 git.clone(root, runtime.remoteUrl());
             }

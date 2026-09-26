@@ -51,7 +51,7 @@ class JGitRepositoryAdapterTest {
             assertThat(clonedRevision).isEqualTo(admittedRevision);
             String movedBranchRevision = commit(fixture.seed(), fixture.seedRoot(), "new-main-tip");
             pushBranch(fixture.seed(), "main");
-            adapter.fetch(clone);
+            adapter.fetch(clone, fixture.remote().toUri().toString());
             adapter.checkoutDetached(clone, admittedRevision);
 
             assertThat(adapter.currentRevision(clone)).isEqualTo(admittedRevision);
@@ -184,7 +184,7 @@ class JGitRepositoryAdapterTest {
             RepositoryRevision retained = RepositoryRevision.ofSha(fixture.seed().getRepository().resolve("refs/heads/main").getName());
             adapter.clone(clone, fixture.remote().toUri().toString());
             RepositoryRevision rewritten = rewriteRemoteHead(fixture.remote());
-            adapter.fetch(clone);
+            adapter.fetch(clone, fixture.remote().toUri().toString());
 
             assertThatThrownBy(() -> adapter.verifyComparisonEndpoints(clone, retained, rewritten))
                     .isInstanceOf(RepositoryMutationException.class)
@@ -248,7 +248,7 @@ class JGitRepositoryAdapterTest {
             }
 
             JGitRepositoryAdapter adapter = new JGitRepositoryAdapter(new RepositoryProperties());
-            assertThatThrownBy(() -> adapter.fetch(redirectedWorkTree))
+            assertThatThrownBy(() -> adapter.fetch(redirectedWorkTree, remote.remote().toUri().toString()))
                     .isInstanceOf(RepositoryMutationException.class);
 
             try (Git external = Git.open(externalWorkTree.toFile())) {
@@ -268,8 +268,50 @@ class JGitRepositoryAdapterTest {
             Files.writeString(alternates, fixture.remote().resolve("objects").toAbsolutePath()
                     + System.lineSeparator());
 
-            assertThatThrownBy(() -> adapter.fetch(checkout))
+            assertThatThrownBy(() -> adapter.fetch(checkout, fixture.remote().toUri().toString()))
                     .isInstanceOf(RepositoryMutationException.class);
+        }
+    }
+
+    @Test
+    void rejects_git_control_symlink_before_fetch_writes_refs_outside_the_checkout() throws Exception {
+        try (RemoteFixture fixture = createRemote("control-symlink")) {
+            JGitRepositoryAdapter adapter = new JGitRepositoryAdapter(new RepositoryProperties());
+            Path checkout = tempDirectory.resolve("checkout-with-control-symlink");
+            adapter.clone(checkout, fixture.remote().toUri().toString());
+            Path originRefs = checkout.resolve(".git/refs/remotes/origin");
+            Path retainedRefs = originRefs.resolveSibling("origin-retained");
+            Path externalRefs = Files.createDirectories(tempDirectory.resolve("external-remote-refs"));
+            Files.move(originRefs, retainedRefs);
+            Files.createSymbolicLink(originRefs, externalRefs);
+
+            assertThatThrownBy(() -> adapter.fetch(checkout, fixture.remote().toUri().toString()))
+                    .isInstanceOf(RepositoryMutationException.class);
+
+            assertThat(externalRefs.resolve("main")).doesNotExist();
+        }
+    }
+
+    @Test
+    void rejects_core_worktree_redirect_before_checkout_mutates_an_external_directory() throws Exception {
+        try (RemoteFixture fixture = createRemote("worktree-redirect")) {
+            JGitRepositoryAdapter adapter = new JGitRepositoryAdapter(new RepositoryProperties());
+            Path checkout = tempDirectory.resolve("checkout-with-worktree-redirect");
+            adapter.clone(checkout, fixture.remote().toUri().toString());
+            RepositoryRevision revision = RepositoryRevision.ofSha(
+                    fixture.seed().getRepository().resolve("refs/heads/main").getName());
+            Path externalWorkTree = Files.createDirectories(tempDirectory.resolve("external-worktree-target"));
+            Files.writeString(externalWorkTree.resolve("sentinel.txt"), "outside");
+            try (Git local = Git.open(checkout.toFile())) {
+                local.getRepository().getConfig().setString("core", null, "worktree", externalWorkTree.toString());
+                local.getRepository().getConfig().save();
+            }
+
+            assertThatThrownBy(() -> adapter.checkoutDetached(checkout, revision))
+                    .isInstanceOf(RepositoryMutationException.class);
+
+            assertThat(Files.readString(externalWorkTree.resolve("sentinel.txt"))).isEqualTo("outside");
+            assertThat(externalWorkTree.resolve("sample.txt")).doesNotExist();
         }
     }
 
