@@ -146,6 +146,7 @@ class DefaultJdtWorkspaceManagerTest {
                 snapshot.repositoryId(), snapshot.revision(), "job-123", "A");
 
         WorkspaceLease lease = fixture.manager().acquire(key, snapshot);
+        FakeProcess leaseProcess = fixture.process();
 
         assertThat(lease.session()).isNotSameAs(fixture.manager().getOrStart(snapshot));
         assertThatThrownBy(() -> fixture.manager().acquire(key, new RepositorySnapshot(
@@ -153,6 +154,8 @@ class DefaultJdtWorkspaceManagerTest {
                 .isInstanceOf(IllegalArgumentException.class);
 
         lease.close();
+        assertThat(leaseProcess.isAlive()).isFalse();
+        assertThat(leaseProcess.timedWaitCount()).isEqualTo(1);
 
         assertThatThrownBy(lease::session)
                 .isInstanceOf(JdtWorkspaceSession.JdtWorkspaceClosingException.class);
@@ -534,6 +537,20 @@ class DefaultJdtWorkspaceManagerTest {
     }
 
     @Test
+    void should_stop_a_healthy_session_for_another_repository_before_mutation() {
+        Fixture fixture = new Fixture();
+        fixture.manager().getOrStart(fixture.snapshot());
+        FakeProcess otherRepositoryChild = fixture.process();
+        RepositoryId otherRepository = RepositoryId.of("billing-service");
+
+        fixture.manager().beforeMutation(otherRepository);
+
+        assertThat(otherRepositoryChild.isAlive()).isFalse();
+        assertThat(otherRepositoryChild.timedWaitCount()).isEqualTo(1);
+        assertThat(fixture.manager().status(REPOSITORY_ID)).isEqualTo(SemanticEngineStatus.STOPPED);
+    }
+
+    @Test
     void should_wrap_the_failure_in_a_repository_mutation_exception_when_invalidation_fails() {
         Fixture fixture = new Fixture();
         fixture.manager().getOrStart(fixture.snapshot());
@@ -748,6 +765,110 @@ class DefaultJdtWorkspaceManagerTest {
         assertThat(report.confirmedRetries()).isEqualTo(1);
         assertThat(fixture.manager().activeProcessIds()).isEmpty();
         assertThat(fixture.manager().status(REPOSITORY_ID)).isEqualTo(SemanticEngineStatus.STOPPED);
+    }
+
+    @Test
+    void should_reject_another_repository_mutation_until_a_failed_lease_close_exits() {
+        Fixture fixture = new Fixture();
+        RepositorySnapshot snapshot = fixture.snapshot();
+        AnalysisWorkspaceKey key = new AnalysisWorkspaceKey(
+                snapshot.repositoryId(), snapshot.revision(), "job-123", "A");
+        WorkspaceLease lease = fixture.manager().acquire(key, snapshot);
+        FakeProcess retained = fixture.process();
+        retained.refuseToExit();
+        retained.refuseForcedExit();
+        RepositoryId otherRepository = RepositoryId.of("billing-service");
+
+        assertThatThrownBy(lease::close)
+                .isInstanceOf(JdtWorkspaceSession.JdtProcessTerminationException.class);
+        int firstAttemptWaits = retained.timedWaitCount();
+
+        assertThatThrownBy(() -> fixture.manager().beforeMutation(otherRepository))
+                .isInstanceOf(RepositoryMutationException.class);
+        assertThat(retained.timedWaitCount()).isGreaterThan(firstAttemptWaits);
+        assertThat(retained.isAlive()).isTrue();
+
+        retained.allowForcedExit();
+        fixture.manager().beforeMutation(otherRepository);
+
+        assertThat(retained.isAlive()).isFalse();
+        assertThat(retained.timedWaitCount()).isGreaterThan(firstAttemptWaits);
+    }
+
+    @Test
+    void should_reject_another_repository_mutation_after_failed_lease_startup_cleanup() {
+        Fixture fixture = new Fixture();
+        fixture.workspaceService().respondWith(
+                query -> CompletableFuture.completedFuture(Either.forRight(List.of())));
+        fixture.failStopWith(new IllegalStateException("controlled termination failure"));
+        RepositorySnapshot snapshot = fixture.snapshot();
+        AnalysisWorkspaceKey key = new AnalysisWorkspaceKey(
+                snapshot.repositoryId(), snapshot.revision(), "job-123", "A");
+        RepositoryId otherRepository = RepositoryId.of("billing-service");
+
+        assertThatThrownBy(() -> fixture.manager().acquire(key, snapshot))
+                .isInstanceOf(JdtLsReadinessProbe.JdtWorkspaceStartupException.class);
+        FakeProcess retained = fixture.process();
+        int firstAttemptWaits = retained.timedWaitCount();
+
+        assertThatThrownBy(() -> fixture.manager().beforeMutation(otherRepository))
+                .isInstanceOf(RepositoryMutationException.class);
+        assertThat(retained.timedWaitCount()).isGreaterThan(firstAttemptWaits);
+        retained.clearDestroyForciblyFailure();
+
+        fixture.manager().beforeMutation(otherRepository);
+
+        assertThat(retained.isAlive()).isFalse();
+    }
+
+    @Test
+    void should_reject_another_repository_mutation_until_a_retained_session_exits() {
+        Fixture fixture = new Fixture();
+        RepositoryId otherRepository = RepositoryId.of("billing-service");
+        fixture.manager().getOrStart(fixture.snapshot());
+        FakeProcess retained = fixture.process();
+        retained.refuseToExit();
+        retained.refuseForcedExit();
+
+        assertThatThrownBy(() -> fixture.manager().beforeMutation(REPOSITORY_ID))
+                .isInstanceOf(RepositoryMutationException.class);
+        int firstAttemptWaits = retained.timedWaitCount();
+
+        assertThatThrownBy(() -> fixture.manager().beforeMutation(otherRepository))
+                .isInstanceOf(RepositoryMutationException.class);
+        assertThat(retained.timedWaitCount()).isGreaterThan(firstAttemptWaits);
+        assertThat(retained.isAlive()).isTrue();
+
+        retained.allowForcedExit();
+        fixture.manager().beforeMutation(otherRepository);
+
+        assertThat(retained.isAlive()).isFalse();
+        assertThat(fixture.manager().activeProcessIds()).isEmpty();
+        assertThat(fixture.manager().status(REPOSITORY_ID)).isEqualTo(SemanticEngineStatus.STOPPED);
+    }
+
+    @Test
+    void should_reject_another_repository_mutation_until_a_retained_launch_exits() {
+        Fixture fixture = new Fixture();
+        RepositoryId otherRepository = RepositoryId.of("billing-service");
+        fixture.failConnectionWith(new AssertionError("controlled connection failure"));
+        fixture.failStopWith(new IllegalStateException("controlled termination failure"));
+
+        assertThatThrownBy(() -> fixture.manager().getOrStart(fixture.snapshot()))
+                .isInstanceOf(JdtLsReadinessProbe.JdtWorkspaceStartupException.class);
+        FakeProcess retained = fixture.process();
+        int firstAttemptWaits = retained.timedWaitCount();
+
+        assertThatThrownBy(() -> fixture.manager().beforeMutation(otherRepository))
+                .isInstanceOf(RepositoryMutationException.class);
+        assertThat(retained.timedWaitCount()).isGreaterThan(firstAttemptWaits);
+        assertThat(retained.isAlive()).isTrue();
+
+        retained.clearDestroyForciblyFailure();
+        fixture.manager().beforeMutation(otherRepository);
+
+        assertThat(retained.isAlive()).isFalse();
+        assertThat(fixture.manager().activeProcessIds()).isEmpty();
     }
 
     @Test

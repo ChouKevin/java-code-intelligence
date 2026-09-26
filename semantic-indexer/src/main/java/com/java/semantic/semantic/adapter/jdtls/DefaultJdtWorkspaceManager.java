@@ -228,6 +228,9 @@ public class DefaultJdtWorkspaceManager implements JdtWorkspaceManager, Reposito
             } catch (RuntimeException ignored) {
                 // The original launch or readiness failure is the observable failure.
             }
+            if (session.isProcessAlive()) {
+                ownedLeases.add(new OwnedWorkspaceLease(session, workspaceData));
+            }
         }
         deleteLeaseDirectory(workspaceData);
     }
@@ -298,10 +301,48 @@ public class DefaultJdtWorkspaceManager implements JdtWorkspaceManager, Reposito
         }
     }
 
-    /** Git 變更前先失效工作區,此時仍在 B1 的寫鎖內 */
+    /** Git 變更前確認共用 UID 的所有受管子程序均已退出,此時仍在 B1 的寫鎖內。 */
     @Override
     public void beforeMutation(RepositoryId repositoryId) {
-        invalidate(repositoryId);
+        Assert.notNull(repositoryId, "repositoryId is required");
+        for (RepositoryId trackedRepository : Set.copyOf(sessions.keySet())) {
+            try {
+                invalidate(trackedRepository);
+            } catch (RepositoryMutationException exception) {
+                // Continue stopping other same-UID children; the final registry check rejects any survivor.
+            }
+            JdtWorkspaceSession session = sessions.get(trackedRepository);
+            if (Objects.nonNull(session)) {
+                removeStoppedSession(trackedRepository, session);
+            }
+        }
+        for (OwnedWorkspaceLease lease : Set.copyOf(ownedLeases)) {
+            try {
+                lease.session.stop();
+            } catch (RuntimeException exception) {
+                JdtFatalErrorPolicy.rethrowIfFatal(exception);
+                // Keep the lease registered for a later termination attempt.
+            }
+            if (!lease.session.isProcessAlive()) {
+                ownedLeases.remove(lease);
+            }
+        }
+        for (RepositoryId trackedRepository : Set.copyOf(launchingProcesses.keySet())) {
+            try {
+                stopLaunchingProcess(trackedRepository, null);
+            } catch (RuntimeException exception) {
+                JdtFatalErrorPolicy.rethrowIfFatal(exception);
+                log.warn("phase=jdtls-process outcome=launch-stop-failed repoId={} exceptionType={}",
+                        trackedRepository.value(), exception.getClass().getSimpleName());
+            }
+        }
+        synchronized (processRegistryLock) {
+            launchingProcesses.forEach(this::removeTerminatedLaunchingProcess);
+            if (!sessions.isEmpty() || !ownedLeases.isEmpty() || !launchingProcesses.isEmpty()) {
+                throw new RepositoryMutationException(
+                        "semantic workspace termination remains unconfirmed before repository mutation");
+            }
+        }
     }
 
     /**
@@ -1108,7 +1149,9 @@ public class DefaultJdtWorkspaceManager implements JdtWorkspaceManager, Reposito
             } catch (RuntimeException exception) {
                 stopFailure = exception;
             } finally {
-                ownedLeases.remove(this);
+                if (!session.isProcessAlive()) {
+                    ownedLeases.remove(this);
+                }
                 deleteLeaseDirectory(workspaceData);
             }
             if (Objects.nonNull(stopFailure)) {
