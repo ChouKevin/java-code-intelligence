@@ -328,7 +328,7 @@ public final class CheckoutSecurityProbe {
                     "file:///unused/security-probe.git");
             git.getRepository().getConfig().save();
         }
-        Files.setAttribute(checkout, "unix:gid", ANALYSIS_GID, LinkOption.NOFOLLOW_LINKS);
+        Files.setAttribute(checkout, "unix:gid", Math.toIntExact(ANALYSIS_GID), LinkOption.NOFOLLOW_LINKS);
         setMode(checkout, 01770);
         return checkout;
     }

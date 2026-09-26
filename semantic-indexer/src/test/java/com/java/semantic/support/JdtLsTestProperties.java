@@ -35,7 +35,7 @@ public final class JdtLsTestProperties {
     }
 
     public static void prepareSafeCheckoutRoot(Path checkoutRoot) throws IOException {
-        Files.setAttribute(checkoutRoot, "unix:gid", LINUX_UID.getAnalysisGid(), LinkOption.NOFOLLOW_LINKS);
+        Files.setAttribute(checkoutRoot, "unix:gid", Math.toIntExact(LINUX_UID.getAnalysisGid()), LinkOption.NOFOLLOW_LINKS);
         Files.setAttribute(checkoutRoot, "unix:mode", 01770, LinkOption.NOFOLLOW_LINKS);
     }
 

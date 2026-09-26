@@ -28,6 +28,11 @@ and its import as untrusted input: the configured analysis child runs with the
 restricted `analysis` UID in the published Indexer image and must not receive
 unrelated VM secrets.
 
+Build images from the reactor root with the committed `.dockerignore`. It keeps
+Git/editor state, private `.superpowers` scratch data, nested worktrees, and Maven
+`target` directories out of the build context, so container builds compile source
+rather than importing host build outputs.
+
 For the published Indexer image, mount the two declared durable paths separately:
 `/data/repos` for the disposable managed checkout and `/data/jdtls` for JDT LS
 lease data. Do not mount only their `/data` parent: the image declares each

@@ -392,7 +392,7 @@ public final class JGitWorktreeRepository {
 
     private static void setUnixGroup(Path path, long groupId) throws IOException {
         try {
-            Files.setAttribute(path, "unix:gid", groupId, LinkOption.NOFOLLOW_LINKS);
+            Files.setAttribute(path, "unix:gid", Math.toIntExact(groupId), LinkOption.NOFOLLOW_LINKS);
         } catch (IllegalArgumentException | UnsupportedOperationException exception) {
             throw new IOException("LINUX_UID requires supported unix group attributes for managed paths", exception);
         }

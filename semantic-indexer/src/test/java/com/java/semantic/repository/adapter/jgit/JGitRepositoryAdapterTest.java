@@ -309,7 +309,7 @@ class JGitRepositoryAdapterTest {
             try (Git local = Git.open(checkout.toFile())) {
                 originalRemoteTip = local.getRepository().resolve("refs/remotes/origin/main");
             }
-            assertThat(Files.getAttribute(checkout, "unix:gid"))
+            assertThat(((Number) Files.getAttribute(checkout, "unix:gid")).longValue())
                     .isEqualTo(JdtLsTestProperties.linuxUid().getAnalysisGid());
             assertThat((int) Files.getAttribute(checkout, "unix:mode") & 017777).isEqualTo(01770);
 
@@ -348,7 +348,7 @@ class JGitRepositoryAdapterTest {
 
             assertThatThrownBy(() -> wrongGroupAdapter.fetch(checkout, fixture.remote().toUri().toString()))
                     .isInstanceOf(RepositoryMutationException.class);
-            assertThat(Files.getAttribute(checkout, "unix:gid")).isEqualTo(policy.analysisGid());
+            assertThat(((Number) Files.getAttribute(checkout, "unix:gid")).longValue()).isEqualTo(policy.analysisGid());
             assertThat(Files.readAllBytes(config)).containsExactly(originalConfig);
         }
     }
