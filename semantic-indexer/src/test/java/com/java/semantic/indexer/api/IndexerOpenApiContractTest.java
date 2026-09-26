@@ -49,7 +49,9 @@ class IndexerOpenApiContractTest {
         assertThat(document).contains("/index/repositories/{repoId}/reviews:", "operationId: prepareRepositoryCurrentToCommitReview",
                 "$ref: '#/components/schemas/ReviewIndexRequest'");
         assertThat(schema(document, "ReviewIndexRequest")).contains("additionalProperties: false", "required: [revision]");
-        assertThat(schema(document, "ReviewJob")).contains("capturedBaseline: { $ref: '#/components/schemas/GenerationPointer' }",
+        assertThat(schema(document, "ReviewJob")).contains("required: [reviewId, comparisonType, capturedBaseline, requestedRevision, stage]",
+                "comparisonType: { type: string, enum: [CURRENT_TO_COMMIT] }",
+                "capturedBaseline: { $ref: '#/components/schemas/GenerationPointer' }",
                 "stage: { type: string, enum: [PREPARING_A, BUILDING_A, PREPARING_B, BUILDING_B, PREPARING_GIT, VALIDATING, READY] }");
 
         assertThat(recordComponentNames(IndexRepositoryController.IndexJobResponse.class))
@@ -59,8 +61,10 @@ class IndexerOpenApiContractTest {
         assertThat(recordComponentNames(IndexRepositoryController.GitEvidenceResultResponse.class))
                 .containsExactly("evidenceId", "branch", "revision", "comparisonId", "previousSnapshotId", "currentSnapshotId");
         assertThat(recordComponentNames(IndexRepositoryController.ReviewJobResponse.class))
-                .containsExactly("reviewId", "capturedBaseline", "requestedRevision", "stage", "aGenerationId", "bGenerationId",
-                        "comparisonId", "previousSnapshotId", "currentSnapshotId");
+                .containsExactly("reviewId", "comparisonType", "capturedBaseline", "requestedRevision", "stage",
+                        "aGenerationId", "bGenerationId", "comparisonId", "previousSnapshotId", "currentSnapshotId");
+        assertThat(IndexRepositoryController.ReviewJobResponse.class.getRecordComponents()[1].getType())
+                .isEqualTo(com.java.semantic.model.review.ReviewComparisonType.class);
     }
 
     private static String openApi() throws IOException {

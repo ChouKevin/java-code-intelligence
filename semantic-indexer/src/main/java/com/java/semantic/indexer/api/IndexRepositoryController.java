@@ -6,6 +6,7 @@ import com.java.semantic.indexer.job.IndexPublicationState;
 import com.java.semantic.indexer.job.IndexRequestService;
 import com.java.semantic.model.index.PublishedGenerationPointer;
 import com.java.semantic.model.repository.RepositoryId;
+import com.java.semantic.model.review.ReviewComparisonType;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import jakarta.validation.Valid;
@@ -133,12 +134,12 @@ public final class IndexRepositoryController {
     public record GitEvidenceResultResponse(String evidenceId, String branch, String revision, String comparisonId,
                                             String previousSnapshotId, String currentSnapshotId) { }
 
-    public record ReviewJobResponse(String reviewId, GenerationPointerResponse capturedBaseline, String requestedRevision,
-                                    String stage, String aGenerationId, String bGenerationId, String comparisonId,
-                                    String previousSnapshotId, String currentSnapshotId) {
+    public record ReviewJobResponse(String reviewId, ReviewComparisonType comparisonType, GenerationPointerResponse capturedBaseline,
+                                    String requestedRevision, String stage, String aGenerationId, String bGenerationId,
+                                    String comparisonId, String previousSnapshotId, String currentSnapshotId) {
         static ReviewJobResponse from(com.java.semantic.indexer.job.ReviewJobPayload review) {
-            return new ReviewJobResponse(review.reviewId().value(), GenerationPointerResponse.from(review.baseline().pointer()),
-                    review.requestedRevision().value(), review.stage().name(),
+            return new ReviewJobResponse(review.reviewId().value(), ReviewComparisonType.CURRENT_TO_COMMIT,
+                    GenerationPointerResponse.from(review.baseline().pointer()), review.requestedRevision().value(), review.stage().name(),
                     review.a().map(generation -> generation.selected().generationId().value()).orElse(null),
                     review.b().map(generation -> generation.selected().generationId().value()).orElse(null),
                     review.comparisonId().map(com.java.semantic.model.git.GitComparisonId::value).orElse(null),

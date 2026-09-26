@@ -355,9 +355,10 @@ components:
     ReviewJob:
       type: object
       additionalProperties: false
-      required: [reviewId, capturedBaseline, requestedRevision, stage]
+      required: [reviewId, comparisonType, capturedBaseline, requestedRevision, stage]
       properties:
         reviewId: { type: string, format: uuid }
+        comparisonType: { type: string, enum: [CURRENT_TO_COMMIT] }
         capturedBaseline: { $ref: '#/components/schemas/GenerationPointer' }
         requestedRevision: { type: string, pattern: '^[0-9a-f]{40}$' }
         stage: { type: string, enum: [PREPARING_A, BUILDING_A, PREPARING_B, BUILDING_B, PREPARING_GIT, VALIDATING, READY] }
