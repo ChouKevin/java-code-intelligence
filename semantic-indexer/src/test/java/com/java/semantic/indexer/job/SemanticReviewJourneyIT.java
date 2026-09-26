@@ -393,7 +393,7 @@ class SemanticReviewJourneyIT {
     private static void assertReviewComparisonType(Map<?, ?> response) {
         Map<?, ?> review = map(response, "review");
         assertThat(text(review, "comparisonType")).isEqualTo("CURRENT_TO_COMMIT");
-        assertThat(response).doesNotContainKey("comparisonType");
+        assertThat(response.containsKey("comparisonType")).isFalse();
     }
 
     private static Map<?, ?> successful(HttpResponse<String> response, JsonMapper mapper) throws Exception {
