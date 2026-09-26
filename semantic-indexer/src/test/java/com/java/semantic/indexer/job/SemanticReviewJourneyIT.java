@@ -91,9 +91,10 @@ class SemanticReviewJourneyIT {
                 String baselineGeneration = text(map(currentA, "currentPointer"), "generationId");
                 assertThat(post(indexerBase, "/index/repositories/" + REPOSITORY_ID + "/reviews", QUERY_TOKEN,
                         Map.of("revision", revisionB)).statusCode()).isEqualTo(401);
-                String reviewJob = accepted(post(indexerBase, "/index/repositories/" + REPOSITORY_ID + "/reviews", ADMIN_TOKEN,
+                String reviewJob = acceptedReview(post(indexerBase, "/index/repositories/" + REPOSITORY_ID + "/reviews", ADMIN_TOKEN,
                         Map.of("revision", revisionB)), mapper);
                 Map<?, ?> completeReview = completed(indexerBase, reviewJob, mapper, indexer);
+                assertReviewComparisonType(completeReview);
                 Map<?, ?> review = map(completeReview, "review");
                 String reviewId = text(review, "reviewId");
                 assertThat(text(map(review, "capturedBaseline"), "generationId")).isEqualTo(baselineGeneration);
@@ -380,6 +381,19 @@ class SemanticReviewJourneyIT {
     private static String accepted(HttpResponse<String> response, JsonMapper mapper) throws Exception {
         assertThat(response.statusCode()).as(response.body()).isEqualTo(202);
         return text(mapper.readValue(response.body(), Map.class), "jobId");
+    }
+
+    private static String acceptedReview(HttpResponse<String> response, JsonMapper mapper) throws Exception {
+        assertThat(response.statusCode()).as(response.body()).isEqualTo(202);
+        Map<?, ?> body = mapper.readValue(response.body(), Map.class);
+        assertReviewComparisonType(body);
+        return text(body, "jobId");
+    }
+
+    private static void assertReviewComparisonType(Map<?, ?> response) {
+        Map<?, ?> review = map(response, "review");
+        assertThat(text(review, "comparisonType")).isEqualTo("CURRENT_TO_COMMIT");
+        assertThat(response).doesNotContainKey("comparisonType");
     }
 
     private static Map<?, ?> successful(HttpResponse<String> response, JsonMapper mapper) throws Exception {
