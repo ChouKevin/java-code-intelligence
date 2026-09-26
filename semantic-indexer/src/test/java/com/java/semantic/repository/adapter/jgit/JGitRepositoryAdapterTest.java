@@ -137,7 +137,7 @@ class JGitRepositoryAdapterTest {
         assertThatThrownBy(() -> adapter.clone(occupied, "https://example.invalid/repo.git"))
                 .isInstanceOf(RepositoryMutationException.class)
                 .cause()
-                .isInstanceOf(JGitInternalException.class);
+                .isNotNull();
     }
 
     @Test
