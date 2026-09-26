@@ -4,6 +4,8 @@ import com.java.semantic.model.repository.RepositoryRevision;
 import com.java.semantic.model.git.GitBranch;
 import com.java.semantic.repository.adapter.jgit.JGitRepositoryAdapter;
 import com.java.semantic.repository.config.RepositoryProperties;
+import com.java.semantic.support.JdtLsTestProperties;
+
 import org.eclipse.jgit.api.Git;
 import org.eclipse.jgit.transport.RefSpec;
 import org.eclipse.jgit.transport.URIish;
@@ -34,7 +36,8 @@ class JGitEvidenceHistoryAdapterTest {
             String head = git.commit().setMessage("second").setAuthor("Test", "test@example.com")
                     .setCommitter("Test", "test@example.com").call().getId().name();
 
-            JGitRepositoryAdapter adapter = new JGitRepositoryAdapter(mock(RepositoryProperties.class));
+            JGitRepositoryAdapter adapter = new JGitRepositoryAdapter(
+                    mock(RepositoryProperties.class), JdtLsTestProperties.linuxUid());
             List<com.java.semantic.model.git.GitCommit> commits = new ArrayList<>();
             adapter.streamReachableHistory(repositoryRoot, RepositoryRevision.ofSha(head), commits::add);
 
@@ -61,7 +64,8 @@ class JGitEvidenceHistoryAdapterTest {
             seed.branchCreate().setName("retired").call();
             pushBranch(seed, "retired");
 
-            JGitRepositoryAdapter adapter = new JGitRepositoryAdapter(new RepositoryProperties());
+            JGitRepositoryAdapter adapter = new JGitRepositoryAdapter(
+                    new RepositoryProperties(), JdtLsTestProperties.linuxUid());
             adapter.clone(checkoutRoot, remoteRoot.toUri().toString());
 
             assertThat(adapter.fetchRemoteBranches(checkoutRoot, remoteRoot.toUri().toString())).extracting(GitBranch::name)

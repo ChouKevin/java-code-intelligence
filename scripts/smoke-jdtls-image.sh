@@ -23,9 +23,12 @@ docker run --rm --entrypoint sh "${image_name}" -ceu '
   checkout="$probe/checkout"
   mkdir -p "$checkout/.git/objects"
   printf "ref: refs/heads/main\n" > "$checkout/.git/HEAD"
+  mkdir -p "$checkout/src"
+  printf "class TrackedSource { }\n" > "$checkout/src/TrackedSource.java"
+  chown -R 10001:10001 "$checkout/src"
   chown -R 0:0 "$checkout/.git"
-  chown 0:10001 "$checkout"
-  chmod 3775 "$checkout"
+  chown 0:0 "$checkout"
+  chmod 755 "$checkout"
   chmod 755 "$probe"
   if setpriv --reuid=10001 --regid=10001 --clear-groups --no-new-privs --bounding-set=-all \
       mv "$checkout/.git" "$checkout/.git.attacker"; then
@@ -58,8 +61,15 @@ docker run --rm --entrypoint sh "${image_name}" -ceu '
     echo "analysis UID renamed the data root" >&2
     exit 1
   fi
-  setpriv --reuid=10001 --regid=10001 --clear-groups --no-new-privs --bounding-set=-all \
-    touch "$checkout/analysis-write-probe"
+  if setpriv --reuid=10001 --regid=10001 --clear-groups --no-new-privs --bounding-set=-all \
+      touch "$checkout/analysis-root-write-probe"; then
+    echo "analysis UID wrote the managed checkout root" >&2
+    exit 1
+  fi
+  printf "class TrackedSource { int analysisEdit; }\n" | \
+    setpriv --reuid=10001 --regid=10001 --clear-groups --no-new-privs --bounding-set=-all \
+      tee "$checkout/src/TrackedSource.java" >/dev/null
+  grep -q analysisEdit "$checkout/src/TrackedSource.java"
   rm -rf "$probe"
 '
 

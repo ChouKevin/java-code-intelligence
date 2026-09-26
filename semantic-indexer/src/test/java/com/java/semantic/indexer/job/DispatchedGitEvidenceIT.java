@@ -26,6 +26,8 @@ import com.java.semantic.query.config.ConfiguredReadPolicy;
 import com.java.semantic.query.config.GitEvidenceProperties;
 import com.java.semantic.query.config.ReadPolicyProperties;
 import com.java.semantic.repository.adapter.jgit.JGitRepositoryAdapter;
+import com.java.semantic.support.JdtLsTestProperties;
+
 import com.java.semantic.repository.application.RepositoryRuntimeRegistry;
 import com.java.semantic.repository.config.RepositoryProperties;
 import com.java.semantic.repository.port.RepositoryMutationListener;
@@ -82,7 +84,8 @@ class DispatchedGitEvidenceIT {
             new IndexSchemaBootstrap(template).bootstrap();
             MongoIndexJobStore jobs = new MongoIndexJobStore(template);
             RepositoryRuntimeRegistry repositories = registry(remotePath);
-            GitEvidenceJobHandler handler = new GitEvidenceJobHandler(repositories, new JGitRepositoryAdapter(properties(remotePath)),
+            GitEvidenceJobHandler handler = new GitEvidenceJobHandler(repositories, new JGitRepositoryAdapter(
+                    properties(remotePath), JdtLsTestProperties.linuxUid()),
                     new GitEvidencePublicationStore(template), mock(RepositoryMutationListener.class));
             IndexJobExecutor executor = new IndexJobExecutor(jobs, mock(RepositoryBuildRunner.class), mock(PublicationPort.class), Optional.empty(),
                     Optional.of(handler));

@@ -113,14 +113,15 @@ class DispatchedBuildIT {
         repository.setUrl(remoteUrl);
         repository.setDefaultBranch("main");
         properties.setRepositories(Map.of(repositoryId.value(), repository));
-        JGitRepositoryAdapter git = new JGitRepositoryAdapter(properties);
         JdtLsProperties jdtLsProperties = jdtLsProperties(jdtLsHome);
+        JGitRepositoryAdapter git = new JGitRepositoryAdapter(properties, jdtLsProperties);
         DefaultJdtWorkspaceManager workspaces = workspaceManager(jdtLsProperties);
         ExactRepositoryCheckout checkout = new ExactRepositoryCheckout(new RepositoryRuntimeRegistry(properties), git, workspaces);
         DefaultRepositoryAnalysisPreparation preparation = new DefaultRepositoryAnalysisPreparation(workspaces,
                 new JdtLsEffectiveEnvironmentInspector(jdtLsProperties), new FullIndexPlanner());
         RepositoryBuildScopeFactory scopes = new RepositoryBuildScopeFactory(checkout, template, jobs,
-                new MongoPublicationWriter(template), new NoOpPublicationGate(), workspaces, preparation);
+                new MongoPublicationWriter(template), new NoOpPublicationGate(), workspaces, preparation,
+                jdtLsProperties);
         return new BuildHarness(new RepositoryBuildRunner(scopes), workspaces);
     }
 

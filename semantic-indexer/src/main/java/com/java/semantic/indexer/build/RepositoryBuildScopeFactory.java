@@ -1,5 +1,7 @@
 package com.java.semantic.indexer.build;
 
+import com.java.semantic.config.JdtLsProperties;
+
 import com.java.semantic.indexer.analysis.RepositoryAnalysisPreparation;
 import com.java.semantic.indexer.incremental.IncrementalIndexPlanner;
 import com.java.semantic.indexer.incremental.JGitRevisionDiffAdapter;
@@ -35,9 +37,10 @@ public final class RepositoryBuildScopeFactory implements RepositoryBuildRunner.
 
     public RepositoryBuildScopeFactory(IndexBuildService.CheckoutResolver checkout, MongoTemplate template,
                                        IndexJobStore jobs, PublicationPort publication, PublicationGate publicationGate,
-                                       JdtWorkspaceManager workspaces, RepositoryAnalysisPreparation analysisPreparation) {
+                                       JdtWorkspaceManager workspaces, RepositoryAnalysisPreparation analysisPreparation,
+                                       JdtLsProperties jdtLsProperties) {
         this(checkout, template, jobs, publication, publicationGate, workspaces, analysisPreparation,
-                RepositoryBuildScopeFactory::openGit);
+                configuredGitResources(jdtLsProperties));
     }
 
     RepositoryBuildScopeFactory(IndexBuildService.CheckoutResolver checkout, MongoTemplate template,
@@ -88,8 +91,9 @@ public final class RepositoryBuildScopeFactory implements RepositoryBuildRunner.
         return ConservativeModuleLocator.INSTANCE;
     }
 
-    private static Git openGit(Path repositoryRoot) {
-        return JGitWorktreeRepository.open(repositoryRoot);
+    private static GitResourceFactory configuredGitResources(JdtLsProperties jdtLsProperties) {
+        JdtLsProperties policy = Objects.requireNonNull(jdtLsProperties, "JDT LS properties are required");
+        return repositoryRoot -> JGitWorktreeRepository.open(repositoryRoot, policy);
     }
 
     private void closeAfterFailedOpen(Git git, RepositoryId repositoryId) {

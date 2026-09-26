@@ -2,6 +2,8 @@ package com.java.semantic.semantic.adapter.jdtls;
 
 import com.java.semantic.config.JdtLsProperties;
 import com.java.semantic.repository.application.RepositoryMutationException;
+import com.java.semantic.repository.adapter.jgit.JGitWorktreeRepository;
+
 import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.model.repository.RepositoryRevision;
 import com.java.semantic.repository.domain.RepositorySnapshot;
@@ -179,6 +181,11 @@ public class DefaultJdtWorkspaceManager implements JdtWorkspaceManager, Reposito
         }
         if (properties.getIsolationMode() == JdtLsProperties.IsolationMode.LINUX_UID) {
             validateDisjointWorkspaceRoot(managedCheckout);
+            try {
+                JGitWorktreeRepository.validateManagedCheckoutAuthorityChain(snapshot.root(), properties);
+            } catch (IOException exception) {
+                throw new IllegalStateException("managed checkout authority is unsafe", exception);
+            }
         }
         Path workspaceData = createLeaseDirectory(key);
         JdtLsReadinessProbe.ImportProgressClient client = readinessProbe.newClient();

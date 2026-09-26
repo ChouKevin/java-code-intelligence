@@ -12,6 +12,8 @@ import com.java.semantic.model.repository.RepositoryRevision;
 import com.java.semantic.repository.application.RepositoryMutationException;
 import com.java.semantic.repository.application.RepositoryRuntimeRegistry;
 import com.java.semantic.repository.config.RepositoryProperties;
+import com.java.semantic.support.JdtLsTestProperties;
+
 import org.eclipse.jgit.api.Git;
 import org.eclipse.jgit.errors.ConfigInvalidException;
 import org.eclipse.jgit.lib.Constants;
@@ -48,7 +50,7 @@ class JGitRepositoryAdapterTest {
     @Test
     void should_fetch_and_checkout_an_exact_revision_after_main_moves() throws Exception {
         try (RemoteFixture fixture = createRemote()) {
-            JGitRepositoryAdapter adapter = new JGitRepositoryAdapter(new RepositoryProperties());
+            JGitRepositoryAdapter adapter = adapter();
             Path clone = tempDirectory.resolve("clone");
             RepositoryRevision admittedRevision = RepositoryRevision.ofSha(
                     fixture.seed().getRepository().resolve("refs/heads/main").getName());
@@ -73,7 +75,7 @@ class JGitRepositoryAdapterTest {
     @Test
     void should_detach_head_when_a_local_branch_has_the_same_name_as_the_exact_revision() throws Exception {
         try (RemoteFixture fixture = createRemote()) {
-            JGitRepositoryAdapter adapter = new JGitRepositoryAdapter(new RepositoryProperties());
+            JGitRepositoryAdapter adapter = adapter();
             Path clone = tempDirectory.resolve("clone-with-sha-branch");
             RepositoryRevision revision = RepositoryRevision.ofSha(
                     fixture.seed().getRepository().resolve("refs/heads/main").getName());
@@ -105,7 +107,7 @@ class JGitRepositoryAdapterTest {
                     .call();
             pushBranch(fixture.seed(), "main");
 
-            JGitRepositoryAdapter adapter = new JGitRepositoryAdapter(new RepositoryProperties());
+            JGitRepositoryAdapter adapter = adapter();
             Path clone = tempDirectory.resolve("clone-with-build-output");
             RepositoryRevision revision = RepositoryRevision.ofSha(
                     fixture.seed().getRepository().resolve("refs/heads/main").getName());
@@ -135,7 +137,7 @@ class JGitRepositoryAdapterTest {
     @Test
     void should_wrap_as_repository_mutation_exception_when_jgit_clone_fails()
             throws Exception {
-        JGitRepositoryAdapter adapter = new JGitRepositoryAdapter(new RepositoryProperties());
+        JGitRepositoryAdapter adapter = adapter();
         Path occupied = tempDirectory.resolve("occupied");
         Files.createDirectories(occupied);
         Files.writeString(occupied.resolve("existing.txt"), "keep-me");
@@ -148,7 +150,7 @@ class JGitRepositoryAdapterTest {
     void should_resolve_remote_branch_and_reachable_exact_revision_without_a_worktree_checkout()
             throws Exception {
         try (RemoteFixture fixture = createRemote()) {
-            JGitRepositoryAdapter adapter = new JGitRepositoryAdapter(new RepositoryProperties());
+            JGitRepositoryAdapter adapter = adapter();
             String historicalRevision = fixture.seed().getRepository().resolve("refs/heads/main").getName();
             String revision = commit(fixture.seed(), fixture.seedRoot(), "new-main-tip");
             pushBranch(fixture.seed(), "main");
@@ -173,7 +175,7 @@ class JGitRepositoryAdapterTest {
             fixture.seed().tag().setName("annotated-v1").setAnnotated(true).setMessage("release").call();
             fixture.seed().push().setRemote("origin").setPushTags().call();
 
-            RepositoryRevision resolved = new JGitRepositoryAdapter(new RepositoryProperties())
+            RepositoryRevision resolved = adapter()
                     .resolveRemoteRef(fixture.remote().toUri().toString(), "annotated-v1");
 
             assertThat(resolved.value()).isEqualTo(revision);
@@ -183,7 +185,7 @@ class JGitRepositoryAdapterTest {
     @Test
     void rejects_a_locally_retained_endpoint_after_the_trusted_remote_ref_is_rewritten() throws Exception {
         try (RemoteFixture fixture = createRemote()) {
-            JGitRepositoryAdapter adapter = new JGitRepositoryAdapter(new RepositoryProperties());
+            JGitRepositoryAdapter adapter = adapter();
             Path clone = tempDirectory.resolve("rewritten-clone");
             RepositoryRevision retained = RepositoryRevision.ofSha(fixture.seed().getRepository().resolve("refs/heads/main").getName());
             adapter.clone(clone, fixture.remote().toUri().toString());
@@ -199,7 +201,7 @@ class JGitRepositoryAdapterTest {
     void fetches_from_the_configured_remote_when_the_persisted_origin_is_rewritten() throws Exception {
         try (RemoteFixture trusted = createRemote("trusted");
              RemoteFixture sentinel = createRemote("sentinel")) {
-            JGitRepositoryAdapter adapter = new JGitRepositoryAdapter(new RepositoryProperties());
+            JGitRepositoryAdapter adapter = adapter();
             RepositoryId repositoryId = RepositoryId.of("orders");
             Path managedParent = Files.createDirectories(tempDirectory.resolve("managed-checkouts"));
             Path workingTree = managedParent.resolve(repositoryId.value());
@@ -237,7 +239,7 @@ class JGitRepositoryAdapterTest {
     void rejects_an_analysis_writable_git_control_file_before_fetch_or_reclamation() throws Exception {
         requirePosixFileSystem();
         try (RemoteFixture fixture = createRemote("analysis-writable-control")) {
-            JGitRepositoryAdapter adapter = new JGitRepositoryAdapter(new RepositoryProperties());
+            JGitRepositoryAdapter adapter = adapter();
             Path checkout = tempDirectory.resolve("checkout-with-analysis-writable-control");
             adapter.clone(checkout, fixture.remote().toUri().toString());
             Path config = checkout.resolve(".git/config");
@@ -268,7 +270,7 @@ class JGitRepositoryAdapterTest {
     void rejects_a_hard_linked_git_control_entry_without_changing_an_outside_sentinel() throws Exception {
         requirePosixFileSystem();
         try (RemoteFixture fixture = createRemote("hard-linked-control")) {
-            JGitRepositoryAdapter adapter = new JGitRepositoryAdapter(new RepositoryProperties());
+            JGitRepositoryAdapter adapter = adapter();
             Path checkout = tempDirectory.resolve("checkout-with-hard-linked-control");
             adapter.clone(checkout, fixture.remote().toUri().toString());
             Path config = checkout.resolve(".git/config");
@@ -311,7 +313,7 @@ class JGitRepositoryAdapterTest {
                 assertThat(external.getRepository().exactRef("refs/remotes/origin/main")).isNull();
             }
 
-            JGitRepositoryAdapter adapter = new JGitRepositoryAdapter(new RepositoryProperties());
+            JGitRepositoryAdapter adapter = adapter();
             assertThatThrownBy(() -> adapter.fetch(redirectedWorkTree, remote.remote().toUri().toString()))
                     .isInstanceOf(RepositoryMutationException.class);
 
@@ -324,7 +326,7 @@ class JGitRepositoryAdapterTest {
     @Test
     void rejects_object_alternates_before_fetch_uses_external_metadata() throws Exception {
         try (RemoteFixture fixture = createRemote("alternate-source")) {
-            JGitRepositoryAdapter adapter = new JGitRepositoryAdapter(new RepositoryProperties());
+            JGitRepositoryAdapter adapter = adapter();
             Path checkout = tempDirectory.resolve("checkout-with-alternates");
             adapter.clone(checkout, fixture.remote().toUri().toString());
             Path alternates = Files.createDirectories(checkout.resolve(".git/objects/info"))
@@ -340,7 +342,7 @@ class JGitRepositoryAdapterTest {
     @Test
     void rejects_git_control_symlink_before_fetch_writes_refs_outside_the_checkout() throws Exception {
         try (RemoteFixture fixture = createRemote("control-symlink")) {
-            JGitRepositoryAdapter adapter = new JGitRepositoryAdapter(new RepositoryProperties());
+            JGitRepositoryAdapter adapter = adapter();
             Path checkout = tempDirectory.resolve("checkout-with-control-symlink");
             adapter.clone(checkout, fixture.remote().toUri().toString());
             Path originRefs = checkout.resolve(".git/refs/remotes/origin");
@@ -359,7 +361,7 @@ class JGitRepositoryAdapterTest {
     @Test
     void rejects_core_worktree_redirect_before_checkout_mutates_an_external_directory() throws Exception {
         try (RemoteFixture fixture = createRemote("worktree-redirect")) {
-            JGitRepositoryAdapter adapter = new JGitRepositoryAdapter(new RepositoryProperties());
+            JGitRepositoryAdapter adapter = adapter();
             Path checkout = tempDirectory.resolve("checkout-with-worktree-redirect");
             adapter.clone(checkout, fixture.remote().toUri().toString());
             RepositoryRevision revision = RepositoryRevision.ofSha(
@@ -387,7 +389,7 @@ class JGitRepositoryAdapterTest {
             Files.writeString(config, "[core\n");
         }
 
-        assertThatThrownBy(() -> JGitWorktreeRepository.open(checkout))
+        assertThatThrownBy(() -> JGitWorktreeRepository.open(checkout, JdtLsTestProperties.linuxUid()))
                 .isInstanceOf(RepositoryMutationException.class)
                 .hasRootCauseInstanceOf(ConfigInvalidException.class);
     }
@@ -496,6 +498,10 @@ class JGitRepositoryAdapterTest {
         } catch (UnsupportedOperationException exception) {
             assumeTrue(false, "the temporary filesystem provider does not support hard links");
         }
+    }
+
+    private static JGitRepositoryAdapter adapter() {
+        return new JGitRepositoryAdapter(new RepositoryProperties(), JdtLsTestProperties.linuxUid());
     }
 
 }

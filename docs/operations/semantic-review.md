@@ -50,15 +50,16 @@ The container's `SEMANTIC_DATA_ROOT=/data/repos` and
 `JDTLS_WORKSPACE_DATA_ROOT=/data/jdtls` refer to these exact targets; neither
 host directory is mounted into Query.
 
-For the `LINUX_UID` image, `/data` and `/data/repos` remain owned by the
-Indexer/application identity and are not writable by the analysis UID;
-`/data/jdtls` alone is analysis-owned. Do not recursively transfer `/data` or
-`/data/repos` to `analysis`. Before JDT LS starts, Indexer keeps the checkout
-parent application-owned, makes the checkout root sticky and group-writable for
-analysis, and keeps `.git` and its control files application-owned and
-non-writable by analysis. Tracked worktree symlinks remain available to the
-analysis process. The image smoke script checks that UID 10001 can write
-ordinary checkout content but cannot rename `.git`, the checkout root,
+For the `LINUX_UID` image, `/data` and `/data/repos` remain application-owned
+and the analysis UID cannot write them; `/data/jdtls` alone is analysis-owned.
+Do not recursively transfer `/data` or `/data/repos` to `analysis`. Before JDT
+LS starts, every canonical directory from `/` through the checkout root must
+have an authority chain that prevents analysis from replacing the next entry.
+The checkout root stays application-owned and non-writable by analysis, as do
+`.git` and all its authoritative control entries. Only ordinary tracked
+worktree entries (including symlinks) are made analysis-owned; symlink targets
+are not followed. The image smoke script proves UID 10001 can edit tracked
+source content while it cannot write or rename the checkout root, `.git`,
 `/data/repos`, or `/data`.
 
 Mongo and Indexer admin must bind only to the private management interface or
@@ -325,6 +326,38 @@ is reused. Manual maintenance first inventories active jobs and every review
 reference, then takes/validates a coherent backup and removes only unreferenced
 artifacts outside active work. Do not race cleanup against the dispatcher or
 remove one member of a retained review graph.
+
+## Fail-closed managed checkout upgrade and recovery
+
+When a `LINUX_UID` ownership check rejects an existing checkout after an
+upgrade, leave it rejected. Do not chmod, chown, relink, or otherwise repair or
+reclaim `.git` in place. Use this recovery sequence:
+
+1. Drain new Indexer admissions and let active work reach a terminal boundary.
+2. Stop the Indexer and verify it has exited and no analysis-UID child process
+   remains. Do not remove a checkout while Indexer or an analysis child can use
+   it.
+3. Provision a trusted, canonical managed-parent chain that is application-owned
+   and cannot be replaced by the analysis UID. Identify only the affected
+   repository's disposable managed checkout from its runtime configuration.
+   Using the application/operator identity that owns the managed parent, verify
+   the parent is a real directory and the checkout is its direct child; inspect
+   for nested mounts before recursive removal. If the checkout entry itself is a
+   symlink, unlink that entry only. If it is a real directory, remove only that
+   disposable directory with a no-follow removal operation. Never resolve a
+   checkout symlink and remove its target, traverse symlinks, glob across
+   repositories, or remove the managed parent.
+4. Preserve MongoDB volumes, repository pointers, generation/source evidence,
+   Git evidence, READY review graphs, and coherent backups. Checkout recovery
+   does not require deleting or rewriting MongoDB or review data.
+5. Restart the Indexer only after the authority chain is safe. Re-admit the
+   repository through normal Indexer operations so it reclones from the
+   configured `RepositoryRuntime.remoteUrl`; do not substitute an operator
+   clone or an unconfigured origin.
+
+An unsafe persisted checkout is disposable; its `.git` ownership or modes are
+not an operator repair target. Correct storage-parent authority separately,
+then let Indexer create a fresh managed checkout from the configured remote.
 
 See [Offline Index Operations](offline-index.md), [Tool projection data
 evolution](tool-data-evolution.md), [Git review context](git-review-context.md),

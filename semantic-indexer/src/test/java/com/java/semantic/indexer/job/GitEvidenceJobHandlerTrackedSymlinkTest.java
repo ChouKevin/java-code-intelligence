@@ -12,6 +12,8 @@ import com.java.semantic.repository.adapter.jgit.JGitRepositoryAdapter;
 import com.java.semantic.repository.application.RepositoryRuntimeRegistry;
 import com.java.semantic.repository.config.RepositoryProperties;
 import com.java.semantic.repository.domain.RepositoryRuntime;
+import com.java.semantic.support.JdtLsTestProperties;
+
 import com.java.semantic.repository.port.GitRepositoryPort;
 import com.java.semantic.repository.port.RepositoryMutationListener;
 import org.eclipse.jgit.api.Git;
@@ -68,7 +70,8 @@ class GitEvidenceJobHandlerTrackedSymlinkTest {
         RepositoryId repositoryId = RepositoryId.of("orders");
         Path managedParent = Files.createDirectories(temporaryDirectory.resolve("repos"));
         Path checkoutRoot = managedParent.resolve("orders");
-        GitRepositoryPort git = new JGitRepositoryAdapter(new RepositoryProperties());
+        GitRepositoryPort git = new JGitRepositoryAdapter(
+                new RepositoryProperties(), JdtLsTestProperties.linuxUid());
         git.clone(checkoutRoot, remotePath.toUri().toString());
         assertThat(Files.isSymbolicLink(checkoutRoot.resolve("tracked-link"))).isTrue();
 

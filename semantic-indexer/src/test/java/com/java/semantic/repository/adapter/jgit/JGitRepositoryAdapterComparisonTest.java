@@ -7,6 +7,8 @@ import com.java.semantic.model.git.GitPreparedComparison;
 import com.java.semantic.model.repository.RepositoryRevision;
 import com.java.semantic.repository.application.RepositoryMutationException;
 import com.java.semantic.repository.config.RepositoryProperties;
+import com.java.semantic.support.JdtLsTestProperties;
+
 import org.eclipse.jgit.api.Git;
 import org.eclipse.jgit.dircache.DirCache;
 import org.eclipse.jgit.dircache.DirCacheEditor;
@@ -50,7 +52,7 @@ class JGitRepositoryAdapterComparisonTest {
             git.add().addFilepattern("README.md").call();
             RevCommit current = git.commit().setMessage("current").setAuthor("tester", "tester@example.test").call();
 
-            GitPreparedComparison comparison = new JGitRepositoryAdapter(new RepositoryProperties()).prepareComparison(repositoryDirectory,
+            GitPreparedComparison comparison = new JGitRepositoryAdapter(new RepositoryProperties(), JdtLsTestProperties.linuxUid()).prepareComparison(repositoryDirectory,
                     RepositoryRevision.ofSha(previous.getId().getName()), RepositoryRevision.ofSha(current.getId().getName()));
 
             assertThat(comparison.previousEntries()).extracting(entry -> entry.path()).containsExactly("README.md", "binary.bin", "invalid.txt", "large.txt", "mentions-lfs.txt", "pointer.txt");
@@ -93,7 +95,7 @@ class JGitRepositoryAdapterComparisonTest {
                     "module", FileMode.GITLINK, ObjectId.fromString("a".repeat(40)));
             RevCommit current = git.commit().setMessage("rename and modes").setAuthor("tester", "tester@example.test").call();
 
-            JGitRepositoryAdapter adapter = new JGitRepositoryAdapter(new RepositoryProperties());
+            JGitRepositoryAdapter adapter = new JGitRepositoryAdapter(new RepositoryProperties(), JdtLsTestProperties.linuxUid());
             GitPreparedComparison same = adapter.prepareComparison(repositoryDirectory, RepositoryRevision.ofSha(base.getId().getName()),
                     RepositoryRevision.ofSha(base.getId().getName()));
             GitPreparedComparison forward = adapter.prepareComparison(repositoryDirectory, RepositoryRevision.ofSha(base.getId().getName()),
@@ -127,7 +129,7 @@ class JGitRepositoryAdapterComparisonTest {
             git.add().addFilepattern("README.md").call();
             RevCommit commit = git.commit().setMessage("only").setAuthor("tester", "tester@example.test").call();
 
-            assertThatThrownBy(() -> new JGitRepositoryAdapter(new RepositoryProperties()).prepareComparison(repositoryDirectory,
+            assertThatThrownBy(() -> new JGitRepositoryAdapter(new RepositoryProperties(), JdtLsTestProperties.linuxUid()).prepareComparison(repositoryDirectory,
                     RepositoryRevision.ofSha(commit.getId().getName()), RepositoryRevision.ofSha("f".repeat(40))))
                     .isInstanceOf(RepositoryMutationException.class);
         }
@@ -147,7 +149,7 @@ class JGitRepositoryAdapterComparisonTest {
             git.add().addFilepattern("README.md").call();
             RevCommit right = git.commit().setMessage("right").setAuthor("tester", "tester@example.test").call();
 
-            GitPreparedComparison comparison = new JGitRepositoryAdapter(new RepositoryProperties()).prepareComparison(repositoryDirectory,
+            GitPreparedComparison comparison = new JGitRepositoryAdapter(new RepositoryProperties(), JdtLsTestProperties.linuxUid()).prepareComparison(repositoryDirectory,
                     RepositoryRevision.ofSha(left.getId().getName()), RepositoryRevision.ofSha(right.getId().getName()));
 
             assertThat(comparison.ancestry()).isEqualTo(GitComparisonAncestry.DIVERGED);
@@ -173,7 +175,7 @@ class JGitRepositoryAdapterComparisonTest {
             replaceIndexMode(git, "mode.txt", modeBlob, FileMode.EXECUTABLE_FILE);
             RevCommit current = git.commit().setMessage("current").setAuthor("tester", "tester@example.test").call();
 
-            GitPreparedComparison comparison = new JGitRepositoryAdapter(new RepositoryProperties()).prepareComparison(repositoryDirectory,
+            GitPreparedComparison comparison = new JGitRepositoryAdapter(new RepositoryProperties(), JdtLsTestProperties.linuxUid()).prepareComparison(repositoryDirectory,
                     RepositoryRevision.ofSha(previous.getId().getName()), RepositoryRevision.ofSha(current.getId().getName()));
 
             assertThat(comparison.changes()).extracting(change -> change.kind()).containsExactlyInAnyOrder(GitChangeKind.ADD, GitChangeKind.DELETE, GitChangeKind.MODE);
@@ -196,7 +198,7 @@ class JGitRepositoryAdapterComparisonTest {
             git.add().addFilepattern("rewrite.txt").call();
             RevCommit current = git.commit().setMessage("current").setAuthor("tester", "tester@example.test").call();
 
-            GitPreparedComparison comparison = new JGitRepositoryAdapter(properties).prepareComparison(repositoryDirectory,
+            GitPreparedComparison comparison = new JGitRepositoryAdapter(properties, JdtLsTestProperties.linuxUid()).prepareComparison(repositoryDirectory,
                     RepositoryRevision.ofSha(previous.getId().getName()), RepositoryRevision.ofSha(current.getId().getName()));
 
             assertThat(comparison.changes()).singleElement().satisfies(change -> {
@@ -218,7 +220,7 @@ class JGitRepositoryAdapterComparisonTest {
             git.add().addFilepattern(".").call();
             RevCommit commit = git.commit().setMessage("over budget").setAuthor("tester", "tester@example.test").call();
 
-            assertThatThrownBy(() -> new JGitRepositoryAdapter(properties).prepareComparison(repositoryDirectory,
+            assertThatThrownBy(() -> new JGitRepositoryAdapter(properties, JdtLsTestProperties.linuxUid()).prepareComparison(repositoryDirectory,
                     RepositoryRevision.ofSha(commit.getId().getName()), RepositoryRevision.ofSha(commit.getId().getName())))
                     .isInstanceOf(RepositoryMutationException.class)
                     .hasRootCauseMessage("exact snapshot text budget exceeded");
@@ -243,7 +245,7 @@ class JGitRepositoryAdapterComparisonTest {
             ObjectId commitId = inserter.insert(Constants.OBJ_COMMIT, builder.build());
             inserter.flush();
 
-            GitPreparedComparison comparison = new JGitRepositoryAdapter(new RepositoryProperties()).prepareComparison(repositoryDirectory,
+            GitPreparedComparison comparison = new JGitRepositoryAdapter(new RepositoryProperties(), JdtLsTestProperties.linuxUid()).prepareComparison(repositoryDirectory,
                     RepositoryRevision.ofSha(commitId.name()), RepositoryRevision.ofSha(commitId.name()));
 
             assertThat(comparison.previousEntries()).hasSize(2);
@@ -271,7 +273,7 @@ class JGitRepositoryAdapterComparisonTest {
             ObjectId current = rawCommit(inserter, currentTree, previous);
             inserter.flush();
 
-            GitPreparedComparison comparison = new JGitRepositoryAdapter(new RepositoryProperties()).prepareComparison(repositoryDirectory,
+            GitPreparedComparison comparison = new JGitRepositoryAdapter(new RepositoryProperties(), JdtLsTestProperties.linuxUid()).prepareComparison(repositoryDirectory,
                     RepositoryRevision.ofSha(previous.name()), RepositoryRevision.ofSha(current.name()));
 
             assertThat(comparison.changes()).singleElement().satisfies(change -> {
@@ -303,7 +305,7 @@ class JGitRepositoryAdapterComparisonTest {
             ObjectId current = rawCommit(inserter, currentTree.insertTo(inserter), previous);
             inserter.flush();
 
-            GitPreparedComparison comparison = new JGitRepositoryAdapter(new RepositoryProperties()).prepareComparison(repositoryDirectory,
+            GitPreparedComparison comparison = new JGitRepositoryAdapter(new RepositoryProperties(), JdtLsTestProperties.linuxUid()).prepareComparison(repositoryDirectory,
                     RepositoryRevision.ofSha(previous.name()), RepositoryRevision.ofSha(current.name()));
 
             assertThat(comparison.changes()).singleElement().satisfies(change -> {
@@ -329,7 +331,7 @@ class JGitRepositoryAdapterComparisonTest {
             ObjectId current = rawCommit(inserter, rawTree(inserter, malformed, blob), previous);
             inserter.flush();
 
-            GitPreparedComparison comparison = new JGitRepositoryAdapter(new RepositoryProperties()).prepareComparison(repositoryDirectory,
+            GitPreparedComparison comparison = new JGitRepositoryAdapter(new RepositoryProperties(), JdtLsTestProperties.linuxUid()).prepareComparison(repositoryDirectory,
                     RepositoryRevision.ofSha(previous.name()), RepositoryRevision.ofSha(current.name()));
 
             assertThat(comparison.changes()).singleElement().satisfies(change -> {
@@ -359,7 +361,7 @@ class JGitRepositoryAdapterComparisonTest {
             ObjectId current = rawCommit(inserter, currentTree.insertTo(inserter), previous);
             inserter.flush();
 
-            GitPreparedComparison comparison = new JGitRepositoryAdapter(new RepositoryProperties()).prepareComparison(repositoryDirectory,
+            GitPreparedComparison comparison = new JGitRepositoryAdapter(new RepositoryProperties(), JdtLsTestProperties.linuxUid()).prepareComparison(repositoryDirectory,
                     RepositoryRevision.ofSha(previous.name()), RepositoryRevision.ofSha(current.name()));
 
             assertThat(comparison.changes()).singleElement().satisfies(change -> {

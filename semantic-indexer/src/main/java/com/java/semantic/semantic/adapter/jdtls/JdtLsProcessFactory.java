@@ -2,6 +2,8 @@ package com.java.semantic.semantic.adapter.jdtls;
 
 import com.java.semantic.config.JdtLsProperties;
 import com.java.semantic.repository.domain.ManagedDisposableCheckout;
+import com.java.semantic.repository.adapter.jgit.JGitWorktreeRepository;
+
 import org.eclipse.lsp4j.CallHierarchyCapabilities;
 import org.eclipse.lsp4j.ClientCapabilities;
 import org.eclipse.lsp4j.DefinitionCapabilities;
@@ -26,7 +28,6 @@ import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.attribute.UserPrincipal;
-import java.nio.file.attribute.GroupPrincipal;
 import java.nio.file.attribute.UserPrincipalLookupService;
 import java.util.ArrayList;
 import java.nio.file.Path;
@@ -271,6 +272,18 @@ public final class JdtLsProcessFactory {
         if (!configuration.startsWith(workspaceData.toAbsolutePath().normalize())) {
             throw new IOException("JDT LS configuration escaped its workspace data directory");
         }
+        Optional<UserPrincipal> analysisUser = Optional.empty();
+        if (properties.getIsolationMode() == JdtLsProperties.IsolationMode.LINUX_UID) {
+            UserPrincipalLookupService lookup = workspaceData.getFileSystem().getUserPrincipalLookupService();
+            analysisUser = Optional.of(
+                    lookup.lookupPrincipalByName(Long.toString(properties.getAnalysisUid())));
+            List<Path> checkoutTree = validatedCheckoutTree;
+            if (Objects.isNull(checkoutTree)) {
+                checkoutTree = managedCheckout.validateTree(workspaceRoot);
+            }
+            prepareManagedCheckout(workspaceRoot, managedCheckout, checkoutTree,
+                    analysisUser.orElseThrow(), properties);
+        }
         if (!Files.exists(configuration)) {
             Path template = properties.getHome().resolve("config_linux");
             try (Stream<Path> paths = Files.walk(template)) {
@@ -284,18 +297,8 @@ public final class JdtLsProcessFactory {
                 }
             }
         }
-        if (properties.getIsolationMode() == JdtLsProperties.IsolationMode.LINUX_UID) {
-            UserPrincipalLookupService lookup = workspaceData.getFileSystem().getUserPrincipalLookupService();
-            UserPrincipal analysisUser = lookup.lookupPrincipalByName(Long.toString(properties.getAnalysisUid()));
-            GroupPrincipal analysisGroup = lookup.lookupPrincipalByGroupName(Long.toString(properties.getAnalysisGid()));
-            List<Path> checkoutTree = validatedCheckoutTree;
-            if (Objects.isNull(checkoutTree)) {
-                checkoutTree = managedCheckout.validateTree(workspaceRoot);
-            }
-            UserPrincipal applicationOwner = applicationOwner();
-            prepareManagedCheckout(workspaceRoot, managedCheckout, checkoutTree, applicationOwner,
-                    analysisUser, analysisGroup, properties.getAnalysisUid());
-            assignAnalysisOwner(workspaceData, analysisUser);
+        if (analysisUser.isPresent()) {
+            assignAnalysisOwner(workspaceData, analysisUser.orElseThrow());
         }
         return configuration;
     }
@@ -321,23 +324,13 @@ public final class JdtLsProcessFactory {
         }
     }
 
-    private UserPrincipal applicationOwner() throws IOException {
-        Path processDirectory = Path.of("/proc/self");
-        long processUid = ((Number) Files.getAttribute(processDirectory, "unix:uid")).longValue();
-        if (processUid == properties.getAnalysisUid()) {
-            throw new IOException("Indexer and analysis identities must be distinct");
-        }
-        return Files.getOwner(processDirectory);
-    }
 
     private static void prepareManagedCheckout(
             Path workspaceRoot,
             ManagedDisposableCheckout managedCheckout,
             List<Path> checkoutTree,
-            UserPrincipal applicationOwner,
             UserPrincipal analysisUser,
-            GroupPrincipal analysisGroup,
-            long analysisUid) throws IOException {
+            JdtLsProperties properties) throws IOException {
         managedCheckout.validateBoundary(workspaceRoot);
         Path root = workspaceRoot.toAbsolutePath().normalize();
         Path realRoot = root.toRealPath();
@@ -345,6 +338,7 @@ public final class JdtLsProcessFactory {
         if (!Files.isDirectory(gitDirectory, LinkOption.NOFOLLOW_LINKS)) {
             throw new IOException("LINUX_UID requires a real checkout Git directory");
         }
+        JGitWorktreeRepository.validateManagedCheckoutOwnership(root, properties);
         for (Path entry : checkoutTree) {
             boolean symbolicLink = Files.isSymbolicLink(entry);
             if (!entry.startsWith(root) || (symbolicLink && entry.startsWith(gitDirectory))
@@ -352,62 +346,13 @@ public final class JdtLsProcessFactory {
                 throw new IOException("managed checkout tree changed after validation");
             }
         }
-        Path managedParent = managedCheckout.managedParent();
-        Path managedParentParent = managedParent.getParent();
-        if (Objects.isNull(managedParentParent)) {
-            throw new IOException("managed checkout parent has no trusted ancestor");
-        }
-        protectApplicationDirectory(managedParent, applicationOwner);
-        validateProtectedDirectoryEntry(managedParentParent, managedParent, applicationOwner, analysisUid);
-
-        Files.setOwner(root, applicationOwner);
-        Files.setAttribute(root, "posix:group", analysisGroup, LinkOption.NOFOLLOW_LINKS);
-        Files.setAttribute(root, "unix:mode", 03775, LinkOption.NOFOLLOW_LINKS);
         for (Path entry : checkoutTree) {
-            if (entry.equals(root)) {
-                continue;
-            }
-            if (entry.startsWith(gitDirectory)) {
-                protectGitControlEntry(entry, applicationOwner);
-            } else {
+            if (!entry.equals(root) && !entry.startsWith(gitDirectory)) {
                 Files.setAttribute(entry, "posix:owner", analysisUser, LinkOption.NOFOLLOW_LINKS);
             }
         }
     }
 
-    private static void protectApplicationDirectory(Path directory, UserPrincipal applicationOwner)
-            throws IOException {
-        Path canonical = directory.toAbsolutePath().normalize();
-        if (!Files.isDirectory(canonical, LinkOption.NOFOLLOW_LINKS)
-                || !canonical.equals(canonical.toRealPath())) {
-            throw new IOException("managed checkout ancestor must be a canonical directory");
-        }
-        Files.setOwner(canonical, applicationOwner);
-        Files.setAttribute(canonical, "unix:mode", 0755, LinkOption.NOFOLLOW_LINKS);
-    }
-
-    private static void validateProtectedDirectoryEntry(
-            Path parent,
-            Path entry,
-            UserPrincipal applicationOwner,
-            long analysisUid) throws IOException {
-        int mode = ((Number) Files.getAttribute(parent, "unix:mode", LinkOption.NOFOLLOW_LINKS)).intValue();
-        if ((mode & 0022) == 0) {
-            return;
-        }
-        long parentUid = ((Number) Files.getAttribute(parent, "unix:uid", LinkOption.NOFOLLOW_LINKS)).longValue();
-        boolean sticky = (mode & 01000) != 0;
-        UserPrincipal entryOwner = Files.getOwner(entry, LinkOption.NOFOLLOW_LINKS);
-        if (!sticky || parentUid == analysisUid || !entryOwner.equals(applicationOwner)) {
-            throw new IOException("analysis identity could replace the managed checkout parent");
-        }
-    }
-
-    private static void protectGitControlEntry(Path entry, UserPrincipal applicationOwner) throws IOException {
-        Files.setOwner(entry, applicationOwner);
-        int mode = ((Number) Files.getAttribute(entry, "unix:mode", LinkOption.NOFOLLOW_LINKS)).intValue();
-        Files.setAttribute(entry, "unix:mode", mode & ~0022, LinkOption.NOFOLLOW_LINKS);
-    }
 
     private void assignAnalysisOwner(Path path, UserPrincipal analysisUser) throws IOException {
         try (Stream<Path> paths = Files.walk(path)) {

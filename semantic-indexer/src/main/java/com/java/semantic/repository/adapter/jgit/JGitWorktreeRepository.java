@@ -1,6 +1,8 @@
 package com.java.semantic.repository.adapter.jgit;
 
+import com.java.semantic.config.JdtLsProperties;
 import com.java.semantic.repository.application.RepositoryMutationException;
+
 import org.eclipse.jgit.api.Git;
 import org.eclipse.jgit.errors.ConfigInvalidException;
 import org.eclipse.jgit.lib.Config;
@@ -42,14 +44,12 @@ public final class JGitWorktreeRepository {
         }
     }
 
-    public static Git open(Path workingTree) {
+    public static Git open(Path workingTree, JdtLsProperties properties) {
         Path root = Objects.requireNonNull(workingTree, "working tree is required").toAbsolutePath().normalize();
         Repository repository = null;
         try {
-            requireCanonicalDirectory(root, "working tree");
+            validateExistingCheckout(root, properties);
             Path gitDirectory = root.resolve(".git");
-            requireGitDirectory(root, gitDirectory);
-            validateControlMetadata(root, gitDirectory);
             repository = new FileRepositoryBuilder()
                     .setGitDir(gitDirectory.toFile())
                     .setWorkTree(root.toFile())
@@ -95,7 +95,13 @@ public final class JGitWorktreeRepository {
         }
     }
 
-    private static void validateControlMetadata(Path root, Path gitDirectory) throws IOException {
+    private static void validateControlMetadata(
+            Path root,
+            Path gitDirectory,
+            JdtLsProperties properties,
+            long applicationUid,
+            boolean requireNonWritable) throws IOException {
+        boolean linuxUid = properties.getIsolationMode() == JdtLsProperties.IsolationMode.LINUX_UID;
         try (Stream<Path> entries = Files.walk(gitDirectory)) {
             Iterator<Path> iterator = entries.iterator();
             while (iterator.hasNext()) {
@@ -106,6 +112,9 @@ public final class JGitWorktreeRepository {
                 Path realEntry = entry.toRealPath();
                 if (!realEntry.startsWith(gitDirectory) || !realEntry.startsWith(root)) {
                     throw new IOException("Git control metadata escaped its configured directory");
+                }
+                if (linuxUid) {
+                    validateAuthoritativeControlEntry(entry, applicationUid, properties, requireNonWritable);
                 }
             }
         }
@@ -149,4 +158,217 @@ public final class JGitWorktreeRepository {
     private static boolean hasValues(String[] values) {
         return Arrays.stream(values).anyMatch(StringUtils::hasText);
     }
+    public static void validateManagedCheckoutAuthorityChain(Path workingTree, JdtLsProperties properties)
+            throws IOException {
+        JdtLsProperties policy = Objects.requireNonNull(properties, "JDT LS properties are required");
+        if (policy.getIsolationMode() != JdtLsProperties.IsolationMode.LINUX_UID) {
+            return;
+        }
+        Path root = Objects.requireNonNull(workingTree, "working tree is required").toAbsolutePath().normalize();
+        long applicationUid = applicationUid(policy);
+        Path protectedDirectory = Files.exists(root, LinkOption.NOFOLLOW_LINKS) ? root : root.getParent();
+        if (Objects.isNull(protectedDirectory)) {
+            throw new IOException("managed checkout has no trusted parent");
+        }
+        requireCanonicalDirectory(protectedDirectory, "managed checkout authority");
+        validateAuthorityDirectoryChain(protectedDirectory, policy);
+        requireApplicationOwnedNonWritable(protectedDirectory, applicationUid, policy);
+    }
+
+    public static void validateNewCheckoutDestination(Path workingTree, JdtLsProperties properties)
+            throws IOException {
+        JdtLsProperties policy = Objects.requireNonNull(properties, "JDT LS properties are required");
+        if (policy.getIsolationMode() != JdtLsProperties.IsolationMode.LINUX_UID) {
+            return;
+        }
+        Path root = Objects.requireNonNull(workingTree, "working tree is required").toAbsolutePath().normalize();
+        if (Files.exists(root, LinkOption.NOFOLLOW_LINKS)) {
+            throw new IOException("new managed checkout destination already exists");
+        }
+        Path parent = root.getParent();
+        if (Objects.isNull(parent)) {
+            throw new IOException("new managed checkout has no parent");
+        }
+        requireCanonicalDirectory(parent, "managed checkout parent");
+        long applicationUid = applicationUid(policy);
+        validateAuthorityDirectoryChain(parent, policy);
+        requireApplicationOwnedNonWritable(parent, applicationUid, policy);
+    }
+
+    public static void prepareNewCheckout(Path workingTree, JdtLsProperties properties) throws IOException {
+        JdtLsProperties policy = Objects.requireNonNull(properties, "JDT LS properties are required");
+        if (policy.getIsolationMode() != JdtLsProperties.IsolationMode.LINUX_UID) {
+            return;
+        }
+        Path root = Objects.requireNonNull(workingTree, "working tree is required").toAbsolutePath().normalize();
+        Path parent = root.getParent();
+        if (Objects.isNull(parent)) {
+            throw new IOException("new managed checkout has no parent");
+        }
+        requireCanonicalDirectory(parent, "managed checkout parent");
+        long applicationUid = applicationUid(policy);
+        validateAuthorityDirectoryChain(parent, policy);
+        requireApplicationOwnedNonWritable(parent, applicationUid, policy);
+        requireCanonicalDirectory(root, "new managed checkout");
+        requireApplicationOwned(root, applicationUid);
+        Path gitDirectory = root.resolve(".git");
+        requireGitDirectory(root, gitDirectory);
+        validateControlMetadata(root, gitDirectory, policy, applicationUid, false);
+
+        try (Stream<Path> entries = Files.walk(gitDirectory)) {
+            for (Path entry : entries.toList()) {
+                setUnixMode(entry, unixMode(entry) & ~0022);
+            }
+        }
+        setUnixMode(root, (unixMode(root) & 01000) | 0755);
+        validateExistingCheckout(root, policy);
+    }
+
+    public static void validateManagedCheckoutOwnership(Path workingTree, JdtLsProperties properties)
+            throws IOException {
+        JdtLsProperties policy = Objects.requireNonNull(properties, "JDT LS properties are required");
+        if (policy.getIsolationMode() == JdtLsProperties.IsolationMode.LINUX_UID) {
+            Path root = Objects.requireNonNull(workingTree, "working tree is required").toAbsolutePath().normalize();
+            validateExistingCheckout(root, policy);
+        }
+    }
+
+    private static void validateExistingCheckout(Path root, JdtLsProperties properties) throws IOException {
+        JdtLsProperties policy = Objects.requireNonNull(properties, "JDT LS properties are required");
+        requireCanonicalDirectory(root, "working tree");
+        Path gitDirectory = root.resolve(".git");
+        requireGitDirectory(root, gitDirectory);
+        long applicationUid = -1;
+        if (policy.getIsolationMode() == JdtLsProperties.IsolationMode.LINUX_UID) {
+            applicationUid = applicationUid(policy);
+            validateAuthorityDirectoryChain(root, policy);
+            requireApplicationOwnedNonWritable(root, applicationUid, policy);
+        }
+        validateControlMetadata(root, gitDirectory, policy, applicationUid, true);
+    }
+
+    private static long applicationUid(JdtLsProperties properties) throws IOException {
+        Path processDirectory = Path.of("/proc/self").toRealPath();
+        long applicationUid = unixLong(processDirectory, "uid");
+        if (applicationUid == properties.getAnalysisUid() || properties.getAnalysisUid() == 0) {
+            throw new IOException("Indexer and analysis identities must be distinct and non-root");
+        }
+        return applicationUid;
+    }
+
+    private static void validateAuthorityDirectoryChain(Path directory, JdtLsProperties properties)
+            throws IOException {
+        Path normalized = directory.toAbsolutePath().normalize();
+        Path current = normalized.getRoot();
+        if (Objects.isNull(current) || !Files.isDirectory(current, LinkOption.NOFOLLOW_LINKS)) {
+            throw new IOException("managed checkout authority has no real root");
+        }
+        for (Path segment : normalized) {
+            Path child = current.resolve(segment);
+            if (Files.isSymbolicLink(child)
+                    || !Files.isDirectory(child, LinkOption.NOFOLLOW_LINKS)
+                    || !child.equals(child.toRealPath())) {
+                throw new IOException("managed checkout authority contains a noncanonical directory");
+            }
+            validateDirectoryEntryBoundary(current, child, properties);
+            current = child;
+        }
+    }
+
+    private static void validateDirectoryEntryBoundary(
+            Path parent,
+            Path entry,
+            JdtLsProperties properties) throws IOException {
+        long analysisUid = properties.getAnalysisUid();
+        long parentUid = unixLong(parent, "uid");
+        long entryUid = unixLong(entry, "uid");
+        int parentMode = unixMode(parent);
+        boolean analysisOwnsParent = parentUid == analysisUid;
+        boolean analysisCanWriteParent = analysisCanWrite(parent, properties);
+        boolean sticky = (parentMode & 01000) != 0;
+        boolean stickyProtectsEntry = sticky
+                && analysisUid != 0
+                && !analysisOwnsParent
+                && entryUid != analysisUid;
+        if (analysisOwnsParent || (analysisCanWriteParent && !stickyProtectsEntry)) {
+            throw new IOException("analysis identity can replace a managed checkout authority entry");
+        }
+    }
+
+    private static void requireApplicationOwnedNonWritable(
+            Path path,
+            long applicationUid,
+            JdtLsProperties properties) throws IOException {
+        requireApplicationOwned(path, applicationUid);
+        if (analysisCanWrite(path, properties)) {
+            throw new IOException("analysis identity can write a protected managed checkout path");
+        }
+    }
+
+    private static void requireApplicationOwned(Path path, long applicationUid) throws IOException {
+        if (unixLong(path, "uid") != applicationUid) {
+            throw new IOException("managed checkout path is not application-owned");
+        }
+    }
+
+    private static boolean analysisCanWrite(Path path, JdtLsProperties properties) throws IOException {
+        long analysisUid = properties.getAnalysisUid();
+        if (analysisUid == 0) {
+            return true;
+        }
+        long ownerUid = unixLong(path, "uid");
+        long groupId = unixLong(path, "gid");
+        int mode = unixMode(path);
+        if (ownerUid == analysisUid) {
+            return (mode & 0200) != 0;
+        }
+        if (groupId == properties.getAnalysisGid()) {
+            return (mode & 0020) != 0;
+        }
+        return (mode & 0002) != 0;
+    }
+
+    private static void validateAuthoritativeControlEntry(
+            Path entry,
+            long applicationUid,
+            JdtLsProperties properties,
+            boolean requireNonWritable) throws IOException {
+        if (!Files.isDirectory(entry, LinkOption.NOFOLLOW_LINKS)
+                && !Files.isRegularFile(entry, LinkOption.NOFOLLOW_LINKS)) {
+            throw new IOException("Git control metadata contains an unsupported filesystem entry");
+        }
+        requireApplicationOwned(entry, applicationUid);
+        if (Files.isRegularFile(entry, LinkOption.NOFOLLOW_LINKS)
+                && unixLong(entry, "nlink") != 1) {
+            throw new IOException("Git control metadata contains a hard-linked file");
+        }
+        if (requireNonWritable && analysisCanWrite(entry, properties)) {
+            throw new IOException("analysis identity can write Git control metadata");
+        }
+    }
+
+    private static long unixLong(Path path, String attribute) throws IOException {
+        try {
+            Object value = Files.getAttribute(path, "unix:" + attribute, LinkOption.NOFOLLOW_LINKS);
+            if (value instanceof Number number) {
+                return number.longValue();
+            }
+            throw new IOException("LINUX_UID requires numeric unix:" + attribute + " attributes");
+        } catch (IllegalArgumentException | UnsupportedOperationException exception) {
+            throw new IOException("LINUX_UID requires supported unix attributes for managed paths", exception);
+        }
+    }
+
+    private static int unixMode(Path path) throws IOException {
+        return (int) unixLong(path, "mode");
+    }
+
+    private static void setUnixMode(Path path, int mode) throws IOException {
+        try {
+            Files.setAttribute(path, "unix:mode", mode, LinkOption.NOFOLLOW_LINKS);
+        } catch (IllegalArgumentException | UnsupportedOperationException exception) {
+            throw new IOException("LINUX_UID requires supported unix mode attributes for managed paths", exception);
+        }
+    }
+
 }

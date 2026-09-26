@@ -65,9 +65,10 @@ public class IndexerBuildConfiguration {
                                                                                  MongoTemplate template, IndexJobStore jobs,
                                                                                  PublicationPort publication, PublicationGate publicationGate,
                                                                                  JdtWorkspaceManager workspaces,
-                                                                                 RepositoryAnalysisPreparation analysisPreparation) {
+                                                                                 RepositoryAnalysisPreparation analysisPreparation,
+                                                                                 JdtLsProperties jdtLsProperties) {
         return new RepositoryBuildScopeFactory(checkout, template, jobs, publication, publicationGate, workspaces,
-                analysisPreparation);
+                analysisPreparation, jdtLsProperties);
     }
 
     @Bean
