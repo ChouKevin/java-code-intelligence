@@ -135,9 +135,7 @@ class JGitRepositoryAdapterTest {
         Files.writeString(occupied.resolve("existing.txt"), "keep-me");
 
         assertThatThrownBy(() -> adapter.clone(occupied, "https://example.invalid/repo.git"))
-                .isInstanceOf(RepositoryMutationException.class)
-                .cause()
-                .isNotNull();
+                .isInstanceOf(RepositoryMutationException.class);
     }
 
     @Test

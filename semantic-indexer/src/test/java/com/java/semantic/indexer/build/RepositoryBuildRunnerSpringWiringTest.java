@@ -5,7 +5,7 @@ import com.java.semantic.indexer.config.IndexerBuildConfiguration;
 import com.java.semantic.indexer.incremental.ChangedSource;
 import com.java.semantic.indexer.incremental.IncrementalIndexPlan;
 import com.java.semantic.indexer.incremental.IncrementalIndexPlanner;
-import com.java.semantic.indexer.incremental.SourceContractChangeDetector;
+import com.java.semantic.indexer.job.GitEvidenceJobHandler;
 import com.java.semantic.indexer.job.IndexJob;
 import com.java.semantic.indexer.job.IndexJobId;
 import com.java.semantic.indexer.job.IndexJobOperation;
@@ -43,6 +43,7 @@ class RepositoryBuildRunnerSpringWiringTest {
             .withBean(ExactRepositoryCheckout.class, () -> mock(ExactRepositoryCheckout.class))
             .withBean(MongoTemplate.class, () -> mongoTemplate())
             .withBean(IndexJobStore.class, () -> mock(IndexJobStore.class))
+            .withBean(GitEvidenceJobHandler.class, () -> mock(GitEvidenceJobHandler.class))
             .withBean(PublicationPort.class, () -> mock(PublicationPort.class))
             .withBean(JavaSemanticService.class, () -> mock(JavaSemanticService.class))
             .withBean(JdtWorkspaceManager.class, () -> mock(JdtWorkspaceManager.class))
