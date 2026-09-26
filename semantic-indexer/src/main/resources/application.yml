@@ -24,7 +24,7 @@ semantic:
     idle-timeout: ${JDTLS_IDLE_TIMEOUT:30m}
     maintenance-interval: ${JDTLS_MAINTENANCE_INTERVAL:1m}
     max-heap: ${JDTLS_MAX_HEAP:2g}
-  data-root: /data/repos
+  data-root: ${SEMANTIC_DATA_ROOT:/data/repos}
   repository-lock-timeout: 5s
   git-username: ${GIT_USERNAME:}
   git-token: ${GIT_TOKEN:}

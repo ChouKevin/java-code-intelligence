@@ -34,6 +34,22 @@ lease data. Do not mount only their `/data` parent: the image declares each
 child as a volume, so Docker otherwise creates anonymous child volumes that
 hide the parent mount.
 
+After provisioning the private Docker network, secret-backed Indexer env file,
+writable host directories for the Indexer and analysis UID, and the image tagged
+`java-semantic-indexer:uat`, start it with both child paths bound explicitly:
+
+```bash
+docker run -d --name semantic-indexer --network semantic-private \
+  --env-file /etc/semantic/indexer.env \
+  --mount type=bind,source=/srv/semantic/indexer/checkouts,target=/data/repos \
+  --mount type=bind,source=/srv/semantic/indexer/jdtls,target=/data/jdtls \
+  java-semantic-indexer:uat
+```
+
+The container's `SEMANTIC_DATA_ROOT=/data/repos` and
+`JDTLS_WORKSPACE_DATA_ROOT=/data/jdtls` refer to these exact targets; neither
+host directory is mounted into Query.
+
 Mongo and Indexer admin must bind only to the private management interface or
 private container network. Do not publish MongoDB or `/index/**` on a public
 address. Query may be exposed only through the approved ingress. For a direct
@@ -66,9 +82,9 @@ collection writes, and Query collection reads. Do not give Query write,
 `SEMANTIC_INDEXER_ADMIN_TOKEN` for `/index/**` and
 `SEMANTIC_QUERY_API_TOKEN` for Query HTTP and `/mcp`.
 
-The following is a configuration shape, with secret-file references rather than
-secret values. Substitute the secret manager's file-loading mechanism before
-launching the existing images or jars:
+The following shows separate container env files, with secret-file references
+rather than secret values. Substitute the secret manager's file-loading
+mechanism before launching the images:
 
 ```bash
 # /etc/semantic/indexer.env: readable only by the Indexer service account
@@ -76,8 +92,9 @@ SEMANTIC_MONGODB_URI='mongodb://semantic-index-writer:<from-secret-file>@mongo.p
 SEMANTIC_INDEXER_ADMIN_TOKEN='<from-/run/secrets/indexer-admin-token>'
 GIT_USERNAME='<from-/run/secrets/git-username>'
 GIT_TOKEN='<from-/run/secrets/git-read-token>'
+SEMANTIC_DATA_ROOT=/data/repos
 JDTLS_HOME=/opt/jdtls
-JDTLS_WORKSPACE_DATA_ROOT=/srv/semantic/indexer/jdtls
+JDTLS_WORKSPACE_DATA_ROOT=/data/jdtls
 JDTLS_ENABLED=true
 JDTLS_ISOLATION_MODE=LINUX_UID
 JDTLS_ANALYSIS_UID=10001
@@ -89,13 +106,20 @@ SEMANTIC_MONGODB_URI='mongodb://semantic-query-reader:<from-secret-file>@mongo.p
 SEMANTIC_QUERY_API_TOKEN='<from-/run/secrets/query-read-token>'
 ```
 
+For a host-jar Indexer instead of the image, use the host paths explicitly
+in its Indexer env file:
+
+```bash
+SEMANTIC_DATA_ROOT=/srv/semantic/indexer/checkouts
+JDTLS_WORKSPACE_DATA_ROOT=/srv/semantic/indexer/jdtls
+```
+
 Register each approved repository in Indexer configuration. `url` is the
 read-only Git URL and `default-branch` supplies ordinary admission; a local
 operator clone is never the configured checkout:
 
 ```yaml
 semantic:
-  data-root: /srv/semantic/indexer/checkouts
   repositories:
     orders:
       url: https://git.example.invalid/team/orders.git
