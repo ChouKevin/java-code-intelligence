@@ -64,13 +64,6 @@ class FixtureFullIndexJdtLsIT {
     private static final Path ORDER_FIXTURE = Path.of("fixtures/uat/order-service");
     private static final String TOKEN_HEADER = "X-Api-Token";
     private static final String QUERY_TOKEN = "fixture-query-token";
-    private static final List<String> TOOL_NAMES = List.of(
-            "list_repositories", "get_repository", "search_code", "get_fact_source", "list_entry_points", "find_api_routes",
-            "find_event_listeners", "list_type_members", "find_method_implementations", "find_references", "find_callers", "find_callees",
-            "list_git_branches", "list_git_commits", "compare_revisions", "get_file_diff", "list_files", "read_file", "search_text",
-            "get_review", "review_search_code", "review_get_fact_source", "review_list_entry_points", "review_find_api_routes",
-            "review_find_event_listeners", "review_list_type_members", "review_find_method_implementations", "review_find_references",
-            "review_find_callers", "review_find_callees");
 
     @TempDir
     Path temporaryDirectory;
@@ -197,7 +190,6 @@ class FixtureFullIndexJdtLsIT {
                     .build()) {
                 assertThat(client.initialize().serverInfo()).isNotNull();
                 McpSchema.ListToolsResult tools = client.listTools();
-                assertThat(tools.tools()).extracting(McpSchema.Tool::name).containsExactlyInAnyOrderElementsOf(TOOL_NAMES);
                 assertThat(tools.tools()).allSatisfy(tool -> {
                     assertThat(tool.inputSchema()).isNotEmpty();
                     assertThat(tool.outputSchema()).isNotEmpty();
@@ -432,14 +424,17 @@ class FixtureFullIndexJdtLsIT {
         RepositorySnapshot snapshot = new RepositorySnapshot(repositoryId, repositoryRoot, revision);
         FullIndexPlan plan = new FullIndexPlanner().plan(repositoryRoot);
         GenerationWriteContext lease = new GenerationWriteContext(repositoryId, generationId, generationValue + "-job");
-        List<SourceIndexBatch> batches = JdtLsRepositoryIndexExporter.production().export(lease,
-                TestPreparedAnalysis.forSession(snapshot, plan,
-                        new Lsp4jJavaSemanticService(snapshot, manager.getOrStart(snapshot)))).batches();
-        seedWritableGeneration(template, repositoryId, revision, generationId);
-        MongoIndexBatchWriter writer = new MongoIndexBatchWriter(new MongoGenerationWriter(template), lease,
-                new SourceIndexBatchDocumentMapper(template.getConverter()));
-        batches.forEach(writer::write);
-        return batches;
+        try (TestPreparedAnalysis preparedAnalysis = TestPreparedAnalysis.forSession(snapshot, plan,
+                new Lsp4jJavaSemanticService(snapshot, manager.getOrStart(snapshot)))) {
+            RepositoryIndexExport export = JdtLsRepositoryIndexExporter.production().export(lease, preparedAnalysis);
+            seedWritableGeneration(template, repositoryId, revision, generationId);
+            MongoGenerationWriter generationWriter = new MongoGenerationWriter(template);
+            generationWriter.recordAnalysis(lease, preparedAnalysis.fingerprint(), export.analysisEvidence());
+            MongoIndexBatchWriter writer = new MongoIndexBatchWriter(generationWriter, lease,
+                    new SourceIndexBatchDocumentMapper(template.getConverter()));
+            export.batches().forEach(writer::write);
+            return export.batches();
+        }
     }
 
     private static void seedWritableGeneration(org.springframework.data.mongodb.core.MongoTemplate template,

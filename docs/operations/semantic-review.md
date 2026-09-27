@@ -76,6 +76,12 @@ validation or close. Fresh clones persist `gc.autoDetach=false`; fetches also
 override the setting in memory. GC time counts against the single dispatcher
 operation. Do not run external Git maintenance while Indexer owns the checkout.
 
+Imported source-root classification uses project-relative paths even when JDT
+returns absolute paths. Readiness filters source files relative to each admitted
+root; repository or ancestor names containing `generated`, `build`, or `test`
+must not exclude ordinary production sources. Generated/build/test subtrees,
+source-root containment, and exact declaration/URI evidence remain enforced.
+
 Mongo and Indexer admin must bind only to the private management interface or
 private container network. Do not publish MongoDB or `/index/**` on a public
 address. Query may be exposed only through the approved ingress. For a direct
@@ -303,6 +309,14 @@ private hostname, full source body, local path, or model transcript. Keep three
 evidence classes separate: Task 9 scripted local journey; an actual local OMP
 journey; and remote VM/TLS/private-credential acceptance. The latter remains an
 external prerequisite until independently exercised.
+
+The general `mongo-it` and `jdtls-it` profiles skip their explicitly enabled
+packaged-service journeys. Run `scripts/test-git-review-context-journey.sh` and
+`scripts/test-semantic-review-journey.sh` separately for acceptance; neither
+dedicated run may be skipped. The semantic journey requires a locally built
+Indexer image selected by `SEMANTIC_REVIEW_INDEXER_IMAGE`. The shipped image
+smoke proves UID boundaries and JDT startup, not a complete Maven import or
+semantic-review journey.
 
 ## Schema-3 release, backup, and retention
 

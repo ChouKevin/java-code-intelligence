@@ -131,7 +131,7 @@ public final class JdtLsReadinessProbe {
         for (Path sourceRoot : importedRoots) {
             try (Stream<Path> paths = Files.walk(sourceRoot, MAX_SCAN_DEPTH)) {
                 List<Path> sourceFiles = paths.filter(Files::isRegularFile)
-                        .filter(this::isJavaTypeSource)
+                        .filter(path -> isJavaTypeSource(sourceRoot.relativize(path)))
                         .sorted()
                         .toList();
                 for (Path sourceFile : sourceFiles) {
@@ -198,11 +198,11 @@ public final class JdtLsReadinessProbe {
         return List.copyOf(paths);
     }
 
-    private boolean isJavaTypeSource(Path sourceFile) {
-        String filename = sourceFile.getFileName().toString();
+    private boolean isJavaTypeSource(Path relativeSourceFile) {
+        String filename = relativeSourceFile.getFileName().toString();
         return filename.endsWith(JAVA_SUFFIX)
                 && !NON_TYPE_SOURCES.contains(filename)
-                && !hasExcludedSegment(sourceFile);
+                && !hasExcludedSegment(relativeSourceFile);
     }
 
     private boolean hasExcludedSegment(Path path) {

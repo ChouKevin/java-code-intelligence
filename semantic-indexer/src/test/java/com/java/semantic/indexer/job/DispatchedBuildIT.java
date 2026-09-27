@@ -2,6 +2,7 @@ package com.java.semantic.indexer.job;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.java.semantic.SemanticIndexerApplication;
 import com.java.semantic.config.JdtLsProperties;
 import com.java.semantic.indexer.analysis.DefaultRepositoryAnalysisPreparation;
 import com.java.semantic.indexer.build.FullIndexPlanner;
@@ -46,6 +47,7 @@ import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.data.mongodb.core.MongoTemplate;
+import org.springframework.data.mongodb.core.convert.MappingMongoConverter;
 import org.testcontainers.mongodb.MongoDBContainer;
 
 /** Exercises the production dispatcher build assembly against revisions admitted from a moving remote. */
@@ -73,6 +75,10 @@ class DispatchedBuildIT {
         try (MongoDBContainer mongo = mongo(); RemoteFixture remote = RemoteFixture.create(temporaryDirectory);
                 MongoClient mongoClient = MongoClients.create(mongo.getConnectionString())) {
             MongoTemplate template = new MongoTemplate(mongoClient, "dispatched_build");
+            MappingMongoConverter converter = (MappingMongoConverter) template.getConverter();
+            converter.setMapKeyDotReplacement("__dot__");
+            converter.setCustomConversions(SemanticIndexerApplication.semanticAnalysisEvidenceMongoCustomConversions());
+            converter.afterPropertiesSet();
             new IndexSchemaBootstrap(template).bootstrap();
             MongoIndexJobStore jobs = new MongoIndexJobStore(template);
             RepositoryId repositoryId = RepositoryId.of("payment-service");
@@ -106,9 +112,10 @@ class DispatchedBuildIT {
     }
 
     private BuildHarness buildHarness(RepositoryId repositoryId, String remoteUrl, IndexJobStore jobs, MongoTemplate template,
-                                      Path jdtLsHome) {
+                                      Path jdtLsHome) throws IOException {
+        Path checkoutParent = Files.createDirectories(temporaryDirectory.resolve("checked-out")).toRealPath();
         RepositoryProperties properties = new RepositoryProperties();
-        properties.setDataRoot(temporaryDirectory.resolve("checked-out").toString());
+        properties.setDataRoot(checkoutParent.toString());
         RepositoryProperties.RepositoryConfig repository = new RepositoryProperties.RepositoryConfig();
         repository.setUrl(remoteUrl);
         repository.setDefaultBranch("main");

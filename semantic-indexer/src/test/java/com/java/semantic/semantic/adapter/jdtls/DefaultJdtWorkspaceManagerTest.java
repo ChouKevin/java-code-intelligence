@@ -94,6 +94,37 @@ class DefaultJdtWorkspaceManagerTest {
     }
 
     @Test
+    void should_verify_imported_production_type_when_repository_and_ancestor_names_contain_generated() {
+        Fixture fixture = new Fixture();
+        RepositorySnapshot snapshot = fixture.snapshotAt(
+                RepositoryId.of("lombok-generated"),
+                tempDirectory.resolve("generated-checkouts/lombok-generated"));
+
+        JdtWorkspaceSession session = fixture.manager().getOrStart(snapshot);
+
+        assertThat(session.status()).isEqualTo(SemanticEngineStatus.READY);
+        assertThat(fixture.workspaceService().queries()).containsExactly(SANITY_TYPE);
+    }
+
+    @Test
+    void should_not_verify_sources_in_generated_build_or_test_subtrees_of_an_imported_root() throws IOException {
+        Fixture fixture = new Fixture();
+        RepositorySnapshot snapshot = fixture.snapshot();
+        Path sourceRoot = snapshot.root().resolve("src/main/java");
+        Path normalType = sourceRoot.resolve("com/example/" + SANITY_TYPE + ".java");
+        Files.delete(normalType);
+        for (String excluded : List.of("generated", "build", "test")) {
+            Path source = sourceRoot.resolve(excluded + "/Excluded.java");
+            Files.createDirectories(source.getParent());
+            Files.writeString(source, "class Excluded {}");
+        }
+
+        assertThatThrownBy(() -> fixture.manager().getOrStart(snapshot))
+                .isInstanceOf(JdtLsReadinessProbe.JdtWorkspaceStartupException.class);
+        assertThat(fixture.workspaceService().queries()).isEmpty();
+    }
+
+    @Test
     void should_skip_an_excluded_first_candidate_and_accept_a_symbol_from_an_imported_production_root() {
         Fixture fixture = new Fixture();
         RepositorySnapshot snapshot = fixture.multiModuleSnapshot();

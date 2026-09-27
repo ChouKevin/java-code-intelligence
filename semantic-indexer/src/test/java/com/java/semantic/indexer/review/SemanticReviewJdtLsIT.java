@@ -191,6 +191,7 @@ class SemanticReviewJdtLsIT {
             String revisionC = commitDivergent(seed, seedPath, revisionA);
             RefUpdate head = bare.getRepository().updateRef(Constants.HEAD, true);
             head.link(Constants.R_HEADS + "main");
+            Path checkoutParent = Files.createDirectories(temporaryDirectory.resolve("checkouts")).toRealPath();
 
             int indexerPort = availablePort();
             ConfigurableApplicationContext indexer = new SpringApplicationBuilder(SemanticIndexerApplication.class)
@@ -198,27 +199,30 @@ class SemanticReviewJdtLsIT {
                     .run("--spring.mongodb.uri=" + mongoUri, "--server.address=127.0.0.1", "--server.port=" + indexerPort,
                             "--semantic.indexer.admin-token=" + ADMIN_TOKEN, "--semantic.repositories." + REPOSITORY_ID + ".url=" + remote.toUri(),
                             "--semantic.repositories." + REPOSITORY_ID + ".default-branch=main",
-                            "--semantic.data-root=" + temporaryDirectory.resolve("checkouts"), "--semantic.jdtls.home=" + jdtLsHome,
+                            "--semantic.data-root=" + checkoutParent, "--semantic.jdtls.home=" + jdtLsHome,
                             "--semantic.jdtls.workspace-data-root=" + temporaryDirectory.resolve("jdt-workspace"),
                             "--semantic.jdtls.java-executable=" + Path.of(System.getProperty("java.home"), "bin", "java"),
                             "--semantic.jdtls.isolation-mode=LOCAL_TRUSTED", "--semantic.index-jobs.poll-delay=20ms",
                             "--spring.autoconfigure.exclude=org.springframework.ai.mcp.server.common.autoconfigure.McpServerAutoConfiguration",
                             "--spring.ai.mcp.server.enabled=false", "--spring.main.banner-mode=off");
             String indexerBase = "http://127.0.0.1:" + indexerPort;
+            Optional<ConfigurableApplicationContext> query = Optional.empty();
             try {
                 Path queryConfig = Path.of("../semantic-query/src/main/resources/application.yml").toAbsolutePath();
-                ConfigurableApplicationContext query = new SpringApplicationBuilder(SemanticQueryApplication.class)
+                ConfigurableApplicationContext queryContext = new SpringApplicationBuilder(SemanticQueryApplication.class)
                         .web(WebApplicationType.NONE)
                         .run("--spring.config.location=" + queryConfig.toUri(), "--spring.mongodb.uri=" + mongoUri,
                                 "--semantic.query.git-evidence.allowed-repositories[0]=" + REPOSITORY_ID,
                                 "--spring.main.banner-mode=off");
+                query = Optional.of(queryContext);
                 SemanticReviewFixture fixture = new SemanticReviewFixture(temporaryDirectory, mongo, bare, seed, revisionA, revisionB,
-                        revisionC, effectiveDependency, indexer, query, indexerBase, query.getBean(ReviewQueryFacade.class),
-                        query.getBean(SemanticQueryFacade.class), query.getBean(MongoTemplate.class));
+                        revisionC, effectiveDependency, indexer, queryContext, indexerBase, queryContext.getBean(ReviewQueryFacade.class),
+                        queryContext.getBean(SemanticQueryFacade.class), queryContext.getBean(MongoTemplate.class));
                 fixture.publishCurrent(revisionA);
                 return fixture;
-            } catch (Exception exception) {
+            } catch (Exception | AssertionError exception) {
                 indexer.close();
+                query.ifPresent(ConfigurableApplicationContext::close);
                 seed.close();
                 bare.close();
                 mongo.stop();
@@ -447,8 +451,8 @@ class SemanticReviewJdtLsIT {
 
         @Override
         public void close() {
-            query.close();
             indexer.close();
+            query.close();
             seed.close();
             bare.close();
             mongo.stop();

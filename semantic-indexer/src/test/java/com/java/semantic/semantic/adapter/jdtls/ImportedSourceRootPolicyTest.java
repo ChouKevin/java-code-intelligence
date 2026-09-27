@@ -32,4 +32,23 @@ class ImportedSourceRootPolicyTest {
         assertThat(roots).filteredOn(root -> root.analysisRoot().path().equals("module/src/main-linked"))
                 .singleElement().satisfies(root -> assertThat(root.analysisRoot().exclusions()).contains("symlink"));
     }
+
+    @Test
+    void should_classify_absolute_imported_roots_relative_to_the_project() throws Exception {
+        Path repository = Files.createDirectories(tempDirectory.resolve("generated-workspaces/lombok-generated"));
+        Path project = Files.createDirectories(repository.resolve("module-generated"));
+        Path production = project.resolve("src/main/java");
+        Path tests = project.resolve("src/test/java");
+        Path generated = project.resolve("target/generated-sources");
+
+        List<ImportedSourceRootPolicy.Root> roots = ImportedSourceRootPolicy.inventory(repository, project,
+                List.of(production.toString(), tests.toString(), generated.toString()));
+
+        assertThat(roots).filteredOn(root -> root.analysisRoot().included())
+                .extracting(root -> root.analysisRoot().path()).containsExactly("module-generated/src/main/java");
+        assertThat(roots).filteredOn(root -> root.path().equals(tests))
+                .singleElement().satisfies(root -> assertThat(root.analysisRoot().exclusions()).containsExactly("test"));
+        assertThat(roots).filteredOn(root -> root.path().equals(generated))
+                .singleElement().satisfies(root -> assertThat(root.analysisRoot().exclusions()).containsExactly("generated"));
+    }
 }

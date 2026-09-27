@@ -24,8 +24,9 @@ final class ImportedSourceRootPolicy {
         for (String sourcePath : Objects.requireNonNull(sourcePaths, "source paths are required")) {
             Path candidate = project.resolve(sourcePath).normalize();
             boolean contained = candidate.startsWith(repository);
-            boolean test = sourcePath.contains("/test/") || sourcePath.startsWith("src/test/");
-            boolean generated = sourcePath.contains("generated");
+            String projectRelativePath = relative(project, candidate);
+            boolean test = projectRelativePath.contains("/test/") || projectRelativePath.startsWith("src/test/");
+            boolean generated = projectRelativePath.contains("generated");
             boolean symlink = contained && containsSymbolicLink(repository, candidate);
             boolean escaped = contained && !symlink && realPathEscapes(repository, candidate);
             List<String> exclusions = exclusions(test, generated, contained, symlink, escaped);

@@ -144,8 +144,8 @@ class LombokParityJdtLsIT {
      * <p>
      * builder() 進入點：接收者型別是 Shipment 本身，不依賴任何繫結即可判定，維持 LOMBOK_GENERATED 不透明邊
      * <p>
-     * 內嵌 chain（{@code .carrier(x).build()}）：本環境的 JDTLS_HOME 未安裝 Lombok agent（spec 明列為
-     * out-of-scope），ECJ 因此無法為 {@code Shipment.builder()} 的回傳值繫結型別，語法層也拿不到
+     * 內嵌 chain（{@code .carrier(x).build()}）：本測試使用 LOCAL_TRUSTED 啟動，並未為 JDT LS 載入
+     * Lombok agent；ECJ 因此無法為 {@code Shipment.builder()} 的回傳值繫結型別，語法層也拿不到
      * ShipmentBuilder 的接收者宣告；以純文字重建接收者型別不滿足 spec 的「語法證據完整」門檻，因此依設計維持
      * 失敗封閉，不得被 GeneratedMemberEvidence 重新標記——此為 adjudicated 的 spec-correct 行為，而非缺陷
      */

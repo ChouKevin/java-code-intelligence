@@ -26,6 +26,7 @@ import org.eclipse.jgit.api.Git;
 import org.eclipse.jgit.lib.Constants;
 import org.eclipse.jgit.transport.RefSpec;
 import org.eclipse.jgit.transport.URIish;
+import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -65,8 +66,8 @@ class SemanticReviewJourneyIT {
 
     @Test
     void publishes_real_jdt_review_evidence_then_serves_http_and_mcp_from_read_only_cold_mongo() throws Exception {
-        assertThat(Boolean.getBoolean("semantic.review.journey.enabled"))
-                .as("the external semantic journey must be explicitly enabled").isTrue();
+        Assumptions.assumeTrue(Boolean.getBoolean("semantic.review.journey.enabled"),
+                "the external process journey is opt-in and requires fresh executable jars and an Indexer image");
         Path indexerJar = requiredJar("semantic.review.journey.indexer.jar");
         Path queryJar = requiredJar("semantic.review.journey.query.jar");
         Path remotePath = temporaryDirectory.resolve("semantic-review-remote.git");
