@@ -70,6 +70,12 @@ are not followed. The image smoke script proves UID 10001 can create project
 metadata and edit tracked source content while it cannot replace `.git`,
 modify or rename its controls, or replace the checkout or any ancestor.
 
+Clone/fetch keep JGit's automatic object maintenance synchronous with the
+owning operation, rather than leaving background GC to alter `.git` after
+validation or close. Fresh clones persist `gc.autoDetach=false`; fetches also
+override the setting in memory. GC time counts against the single dispatcher
+operation. Do not run external Git maintenance while Indexer owns the checkout.
+
 Mongo and Indexer admin must bind only to the private management interface or
 private container network. Do not publish MongoDB or `/index/**` on a public
 address. Query may be exposed only through the approved ingress. For a direct

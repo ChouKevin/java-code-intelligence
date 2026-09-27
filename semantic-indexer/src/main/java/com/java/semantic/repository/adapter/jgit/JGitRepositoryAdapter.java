@@ -19,6 +19,7 @@ import org.eclipse.jgit.api.FetchCommand;
 import org.eclipse.jgit.api.Git;
 import org.eclipse.jgit.api.LsRemoteCommand;
 import org.eclipse.jgit.api.errors.GitAPIException;
+import org.eclipse.jgit.errors.ConfigInvalidException;
 import org.eclipse.jgit.internal.storage.dfs.DfsRepositoryDescription;
 import org.eclipse.jgit.internal.storage.dfs.InMemoryRepository;
 import org.eclipse.jgit.util.FS;
@@ -33,6 +34,7 @@ import org.eclipse.jgit.diff.RenameDetector;
 import org.eclipse.jgit.treewalk.TreeWalk;
 import org.eclipse.jgit.treewalk.filter.TreeFilter;
 import org.eclipse.jgit.util.io.DisabledOutputStream;
+import org.eclipse.jgit.storage.file.FileBasedConfig;
 import org.eclipse.jgit.revwalk.RevWalk;
 import org.eclipse.jgit.revwalk.RevCommit;
 import org.eclipse.jgit.revwalk.RevSort;
@@ -95,7 +97,8 @@ public class JGitRepositoryAdapter implements GitRepositoryPort {
             }
             CloneCommand command = Git.cloneRepository()
                     .setURI(remoteUrl)
-                    .setDirectory(root.toFile());
+                    .setDirectory(root.toFile())
+                    .setTransportConfigCallback(ignoredTransport -> configureCloneMaintenance(root));
             credentialsProvider().ifPresent(command::setCredentialsProvider);
             try (Git git = command.call()) {
                 return resolveHead(git);
@@ -116,7 +119,8 @@ public class JGitRepositoryAdapter implements GitRepositoryPort {
         try {
             CloneCommand command = Git.cloneRepository()
                     .setURI(remoteUrl)
-                    .setDirectory(staging.toFile());
+                    .setDirectory(staging.toFile())
+                    .setTransportConfigCallback(ignoredTransport -> configureCloneMaintenance(staging));
             credentialsProvider().ifPresent(command::setCredentialsProvider);
             RepositoryRevision revision;
             try (Git git = command.call()) {
@@ -128,6 +132,18 @@ public class JGitRepositoryAdapter implements GitRepositoryPort {
         } catch (IOException | GitAPIException | RuntimeException exception) {
             discardFailedClone(staging, exception);
             throw exception;
+        }
+    }
+
+    private static void configureCloneMaintenance(Path workingTree) {
+        // CloneCommand owns its Repository internally; configure its fresh file before the first fetch.
+        FileBasedConfig config = new FileBasedConfig(workingTree.resolve(".git/config").toFile(), FS.DETECTED);
+        try {
+            config.load();
+            config.setBoolean("gc", null, "autoDetach", false);
+            config.save();
+        } catch (IOException | ConfigInvalidException exception) {
+            throw new RepositoryMutationException("cannot configure serialized Git maintenance", exception);
         }
     }
 
@@ -584,6 +600,8 @@ public class JGitRepositoryAdapter implements GitRepositoryPort {
     }
 
     private void fetchRemote(Git git, String remoteUrl) throws GitAPIException {
+        // Detached GC must not outlive this operation and race the next checked metadata traversal.
+        git.getRepository().getConfig().setBoolean("gc", null, "autoDetach", false);
         FetchCommand fetch = git.fetch()
                 .setRemote(remoteUrl)
                 .setRefSpecs(
