@@ -45,12 +45,13 @@ Release and rebuild in this exact order:
 5. Deploy the schema-3 Indexer. Rebuild every approved repository current
    generation so each sealed manifest has projection version 3 plus a v1
    analysis fingerprint and evidence. A pre-cutover manifest is never reused.
-6. Reprepare standalone Git evidence at version 2 as needed. Version-2 catalog
-   and history manifests must persist `scope: STANDALONE`, without a `reviewId`;
-   a missing scope is invalid, not an implicit ownership default. Reprepare
-   malformed intermediate evidence rather than patching immutable manifests.
-   Create new review manifests only from the rebuilt sealed generations and
-   their explicit Git evidence graph.
+6. Reprepare standalone Git evidence at version 2 during the cutover. Query
+   rejects version 1 rather than inferring standalone ownership. Version-2
+   catalog and history manifests must persist `scope: STANDALONE`, without a
+   `reviewId`; a missing scope is invalid, not an implicit ownership default.
+   Reprepare malformed intermediate evidence rather than patching immutable
+   manifests. Create new review manifests only from the rebuilt sealed
+   generations and their explicit Git evidence graph.
 7. Verify the rebuilt manifests, generation identity digests, analysis evidence,
    and named indexes. Only then deploy the Query release and reopen admissions.
 

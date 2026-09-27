@@ -292,7 +292,7 @@ class MongoIndexJobStoreIT {
                     new Document("$set", new Document("gitEvidence.evidenceId", evidenceId)));
             template.getCollection(IndexCollections.GIT_EVIDENCE_MANIFESTS).insertOne(new Document("repoId", "orders")
                     .append("evidenceId", evidenceId).append("ownerJobId", ready.id().value()).append("kind", "CATALOG")
-                    .append("state", "READY").append("gitEvidenceVersion", 1).append("observedAt", new Date()).append("total", 0L));
+                    .append("state", "READY").append("gitEvidenceVersion", IndexSchemaContract.GIT_EVIDENCE_VERSION).append("scope", "STANDALONE").append("observedAt", new Date()).append("total", 0L));
 
             store.failUnreconciledRunningJobs();
 

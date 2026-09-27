@@ -8,8 +8,10 @@ import com.java.semantic.model.git.GitPublicationScope;
 import com.java.semantic.model.git.GitComparisonId;
 import com.java.semantic.model.git.GitSnapshotId;
 import com.java.semantic.model.index.IndexCollections;
+import com.java.semantic.model.index.IndexSchemaContract;
 import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.model.repository.RepositoryRevision;
+import com.java.semantic.model.review.ReviewId;
 import com.java.semantic.query.config.ConfiguredReadPolicy;
 import com.mongodb.client.model.Filters;
 import com.mongodb.client.model.Sorts;
@@ -1112,16 +1114,7 @@ public final class GitEvidenceReadService {
 
     private GitEvidenceOwnership ownership(Document manifest) {
         Integer version = manifest.getInteger("gitEvidenceVersion");
-        if (Objects.isNull(version)) {
-            throw new IndexContractMismatchException();
-        }
-        if (version == 1) {
-            if (manifest.containsKey("scope") || manifest.containsKey("reviewId")) {
-                throw new IndexContractMismatchException();
-            }
-            return GitEvidenceOwnership.standalone();
-        }
-        if (version != 2) {
+        if (Objects.isNull(version) || version != IndexSchemaContract.GIT_EVIDENCE_VERSION) {
             throw new IndexContractMismatchException();
         }
         String scope = requiredText(manifest, "scope");
@@ -1130,7 +1123,7 @@ public final class GitEvidenceReadService {
         }
         if (GitPublicationScope.REVIEW.name().equals(scope)) {
             return new GitEvidenceOwnership(GitPublicationScope.REVIEW,
-                    Optional.of(new com.java.semantic.model.review.ReviewId(requiredText(manifest, "reviewId"))));
+                    Optional.of(new ReviewId(requiredText(manifest, "reviewId"))));
         }
         throw new IndexContractMismatchException();
     }
@@ -1362,7 +1355,7 @@ public final class GitEvidenceReadService {
             throw new GitEvidenceNotReadyException();
         }
         int version = manifest.getInteger("gitEvidenceVersion", 0);
-        if (version != 1 && version != 2) {
+        if (version != IndexSchemaContract.GIT_EVIDENCE_VERSION) {
             throw new IndexContractMismatchException();
         }
         return manifest;

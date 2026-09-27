@@ -50,6 +50,26 @@ class GitEvidenceReadServiceIT {
     private static final String ALTERNATE_REVISION = "2".repeat(40);
 
     @Test
+    void rejects_old_git_contract_instead_of_defaulting_standalone_ownership() {
+        try (MongoDBContainer container = new MongoDBContainer(DockerImageName.parse("mongo:8.0.4"))) {
+            container.start();
+            try (MongoClient client = MongoClients.create(container.getConnectionString())) {
+                MongoTemplate template = new MongoTemplate(client, "git_cutover_no_default");
+                seedRepository(template, "orders");
+                seedCatalog(template, "orders", CATALOG_ID, "READY");
+                template.getCollection("git_evidence_manifests").updateOne(
+                        new Document("repoId", "orders").append("evidenceId", CATALOG_ID),
+                        new Document("$set", new Document("gitEvidenceVersion", 1))
+                                .append("$unset", new Document("scope", "")));
+                GitEvidenceReadService service = service(template, List.of("orders"));
+
+                assertThatThrownBy(() -> service.branches(new SemanticQueryContract.GitBranchRequest(
+                        "orders", Optional.of(CATALOG_ID), 0, 20))).isInstanceOf(IndexContractMismatchException.class);
+            }
+        }
+    }
+
+    @Test
     void denies_review_owned_snapshot_evidence_while_its_review_is_preparing() {
         try (MongoDBContainer container = new MongoDBContainer(DockerImageName.parse("mongo:8.0.4"))) {
             container.start();
@@ -269,8 +289,7 @@ class GitEvidenceReadServiceIT {
             template.getCollection("git_evidence_manifests").updateMany(new Document("kind", "COMPARISON"),
                     new Document("$set", new Document("state", "READY")));
             template.getCollection("git_evidence_manifests").insertOne(new Document("repoId", "orders")
-                    .append("evidenceId", siblingSnapshotId).append("kind", "SNAPSHOT").append("state", "READY")
-                    .append("gitEvidenceVersion", 1).append("ownerJobId", "wrong-owner").append("revision", "2".repeat(40)));
+                    .append("evidenceId", siblingSnapshotId).append("kind", "SNAPSHOT").append("state", "READY").append("gitEvidenceVersion", IndexSchemaContract.GIT_EVIDENCE_VERSION).append("scope", "STANDALONE").append("ownerJobId", "wrong-owner").append("revision", "2".repeat(40)));
             assertThatThrownBy(() -> service.listFiles(new SemanticQueryContract.GitFileListRequest("orders", SNAPSHOT_ID, REVISION, "", 0, 1)))
                     .isInstanceOf(IndexContractMismatchException.class);
             template.getCollection("git_evidence_manifests").updateOne(new Document("evidenceId", siblingSnapshotId),
@@ -1077,7 +1096,7 @@ class GitEvidenceReadServiceIT {
         }
         long byteLength = (long) ordinary.length * 64L + finalChunk.length;
         template.getCollection("git_evidence_manifests").insertOne(new Document("repoId", repositoryId).append("evidenceId", SNAPSHOT_ID)
-                .append("kind", "SNAPSHOT").append("state", "READY").append("gitEvidenceVersion", 1).append("ownerJobId", "job-budget").append("revision", REVISION)
+                .append("kind", "SNAPSHOT").append("state", "READY").append("gitEvidenceVersion", IndexSchemaContract.GIT_EVIDENCE_VERSION).append("scope", "STANDALONE").append("ownerJobId", "job-budget").append("revision", REVISION)
                 .append("total", 1L).append("contentDigest", "a".repeat(64)).append("fileTextBytesLimit", byteLength)
                 .append("snapshotTextBytesLimit", byteLength).append("contentCoverage", new Document("entryCount", 1L).append("textEntries", 1L)
                         .append("textBytes", byteLength)));
@@ -1129,7 +1148,7 @@ class GitEvidenceReadServiceIT {
         byte[] matched = ("needle" + "x".repeat(64 * 1024 - 6)).getBytes(StandardCharsets.UTF_8);
         long byteLength = (long) ordinary.length * 63L + matched.length;
         template.getCollection("git_evidence_manifests").insertOne(new Document("repoId", repositoryId).append("evidenceId", SNAPSHOT_ID)
-                .append("kind", "SNAPSHOT").append("state", "READY").append("gitEvidenceVersion", 1).append("ownerJobId", "job-snippet").append("revision", REVISION)
+                .append("kind", "SNAPSHOT").append("state", "READY").append("gitEvidenceVersion", IndexSchemaContract.GIT_EVIDENCE_VERSION).append("scope", "STANDALONE").append("ownerJobId", "job-snippet").append("revision", REVISION)
                 .append("total", 1L).append("contentDigest", "a".repeat(64)).append("fileTextBytesLimit", byteLength)
                 .append("snapshotTextBytesLimit", byteLength).append("contentCoverage", new Document("entryCount", 1L).append("textEntries", 1L)
                         .append("textBytes", byteLength)));
@@ -1155,7 +1174,7 @@ class GitEvidenceReadServiceIT {
         byte[] end = ("b" + "x".repeat(64 * 1024 - 1)).getBytes(StandardCharsets.UTF_8);
         long byteLength = (long) ordinary.length * 62L + start.length + end.length;
         template.getCollection("git_evidence_manifests").insertOne(new Document("repoId", repositoryId).append("evidenceId", SNAPSHOT_ID)
-                .append("kind", "SNAPSHOT").append("state", "READY").append("gitEvidenceVersion", 1).append("ownerJobId", "job-cross-chunk").append("revision", REVISION)
+                .append("kind", "SNAPSHOT").append("state", "READY").append("gitEvidenceVersion", IndexSchemaContract.GIT_EVIDENCE_VERSION).append("scope", "STANDALONE").append("ownerJobId", "job-cross-chunk").append("revision", REVISION)
                 .append("total", 1L).append("contentDigest", "a".repeat(64)).append("fileTextBytesLimit", byteLength)
                 .append("snapshotTextBytesLimit", byteLength).append("contentCoverage", new Document("entryCount", 1L).append("textEntries", 1L)
                         .append("textBytes", byteLength)));
@@ -1180,7 +1199,7 @@ class GitEvidenceReadServiceIT {
         byte[] edge = "Z".getBytes(StandardCharsets.UTF_8);
         long textBytes = (long) searchable.length + longLine.length + edge.length;
         template.getCollection("git_evidence_manifests").insertOne(new Document("repoId", repositoryId).append("evidenceId", SNAPSHOT_ID)
-                .append("kind", "SNAPSHOT").append("state", "READY").append("gitEvidenceVersion", 1).append("ownerJobId", "job-reader").append("revision", REVISION)
+                .append("kind", "SNAPSHOT").append("state", "READY").append("gitEvidenceVersion", IndexSchemaContract.GIT_EVIDENCE_VERSION).append("scope", "STANDALONE").append("ownerJobId", "job-reader").append("revision", REVISION)
                 .append("total", 4L).append("contentDigest", "a".repeat(64)).append("fileTextBytesLimit", 1_048_576L)
                 .append("snapshotTextBytesLimit", 1_048_576L).append("contentCoverage", new Document("entryCount", 4L).append("textEntries", 4L)
                         .append("textBytes", textBytes)));
@@ -1210,7 +1229,7 @@ class GitEvidenceReadServiceIT {
         byte[] first = "a😀\r\nneed".getBytes(StandardCharsets.UTF_8);
         byte[] second = java.util.Arrays.copyOfRange(text, first.length, text.length);
         template.getCollection("git_evidence_manifests").insertOne(new Document("repoId", repositoryId).append("evidenceId", SNAPSHOT_ID)
-                .append("kind", "SNAPSHOT").append("state", "READY").append("gitEvidenceVersion", 1).append("ownerJobId", "job-snapshot").append("revision", REVISION)
+                .append("kind", "SNAPSHOT").append("state", "READY").append("gitEvidenceVersion", IndexSchemaContract.GIT_EVIDENCE_VERSION).append("scope", "STANDALONE").append("ownerJobId", "job-snapshot").append("revision", REVISION)
                 .append("total", 1L).append("contentDigest", "a".repeat(64)).append("fileTextBytesLimit", 1_048_576L)
                 .append("snapshotTextBytesLimit", 1_048_576L).append("contentCoverage", new Document("entryCount", 1L).append("textEntries", 1L)
                         .append("textBytes", (long) text.length)));
@@ -1239,7 +1258,7 @@ class GitEvidenceReadServiceIT {
         long total = 7L + noHitFileCount;
         long textBytes = bytes.length + noHitFileCount * noHit.length;
         template.getCollection("git_evidence_manifests").insertOne(new Document("repoId", repositoryId).append("evidenceId", SNAPSHOT_ID)
-                .append("kind", "SNAPSHOT").append("state", "READY").append("gitEvidenceVersion", 1).append("ownerJobId", "job-replay").append("revision", REVISION)
+                .append("kind", "SNAPSHOT").append("state", "READY").append("gitEvidenceVersion", IndexSchemaContract.GIT_EVIDENCE_VERSION).append("scope", "STANDALONE").append("ownerJobId", "job-replay").append("revision", REVISION)
                 .append("total", total).append("contentDigest", "a".repeat(64)).append("fileTextBytesLimit", 1_048_576L)
                 .append("snapshotTextBytesLimit", textBytes).append("contentCoverage", new Document("entryCount", total).append("textEntries", total)
                         .append("textBytes", textBytes)));
@@ -1315,11 +1334,10 @@ class GitEvidenceReadServiceIT {
     private static void seedReadyComparisonOwner(MongoTemplate template, String repositoryId, String snapshotId, String revision, String ownerJobId) {
         String siblingSnapshotId = siblingSnapshotId(repositoryId, ownerJobId);
         template.getCollection("git_evidence_manifests").insertOne(new Document("repoId", repositoryId).append("evidenceId", siblingSnapshotId)
-                .append("kind", "SNAPSHOT").append("state", "READY").append("gitEvidenceVersion", 1).append("ownerJobId", ownerJobId)
+                .append("kind", "SNAPSHOT").append("state", "READY").append("gitEvidenceVersion", IndexSchemaContract.GIT_EVIDENCE_VERSION).append("scope", "STANDALONE").append("ownerJobId", ownerJobId)
                 .append("revision", "2".repeat(40)));
         template.getCollection("git_evidence_manifests").insertOne(new Document("repoId", repositoryId)
-                .append("evidenceId", java.util.UUID.randomUUID().toString()).append("kind", "COMPARISON").append("state", "READY")
-                .append("gitEvidenceVersion", 1).append("ownerJobId", ownerJobId).append("previous", "2".repeat(40)).append("current", revision)
+                .append("evidenceId", java.util.UUID.randomUUID().toString()).append("kind", "COMPARISON").append("state", "READY").append("gitEvidenceVersion", IndexSchemaContract.GIT_EVIDENCE_VERSION).append("scope", "STANDALONE").append("ownerJobId", ownerJobId).append("previous", "2".repeat(40)).append("current", revision)
                 .append("previousSnapshotId", siblingSnapshotId).append("currentSnapshotId", snapshotId));
     }
 
@@ -1339,7 +1357,7 @@ class GitEvidenceReadServiceIT {
         for (int index = 0; index < count; index++) {
             template.getCollection("git_evidence_manifests").insertOne(new Document("repoId", repositoryId)
                     .append("evidenceId", java.util.UUID.nameUUIDFromBytes(("unrelated-" + index).getBytes(StandardCharsets.UTF_8)).toString())
-                    .append("kind", "COMPARISON").append("state", "READY").append("gitEvidenceVersion", 1)
+                    .append("kind", "COMPARISON").append("state", "READY").append("gitEvidenceVersion", IndexSchemaContract.GIT_EVIDENCE_VERSION).append("scope", "STANDALONE")
                     .append("ownerJobId", "unrelated-job-" + index).append("previous", "3".repeat(40)).append("current", "4".repeat(40))
                     .append("previousSnapshotId", java.util.UUID.nameUUIDFromBytes(("previous-" + index).getBytes(StandardCharsets.UTF_8)).toString())
                     .append("currentSnapshotId", java.util.UUID.nameUUIDFromBytes(("current-" + index).getBytes(StandardCharsets.UTF_8)).toString()));
@@ -1455,8 +1473,7 @@ class GitEvidenceReadServiceIT {
 
     private static void seedCatalog(MongoTemplate template, String repositoryId, String catalogId, String state) {
         template.getCollection("git_evidence_manifests").insertOne(new Document("repoId", repositoryId)
-                .append("evidenceId", catalogId).append("kind", "CATALOG").append("state", state)
-                .append("gitEvidenceVersion", 1).append("observedAt", new Date()).append("total", 2L));
+                .append("evidenceId", catalogId).append("kind", "CATALOG").append("state", state).append("gitEvidenceVersion", IndexSchemaContract.GIT_EVIDENCE_VERSION).append("scope", "STANDALONE").append("observedAt", new Date()).append("total", 2L));
         template.getCollection("git_branches").insertMany(List.of(
                 new Document("repoId", repositoryId).append("catalogId", catalogId).append("ordinal", 0L)
                         .append("branch", "main").append("head", REVISION),
@@ -1466,8 +1483,7 @@ class GitEvidenceReadServiceIT {
 
     private static void seedHistory(MongoTemplate template, String repositoryId, String state) {
         template.getCollection("git_evidence_manifests").insertOne(new Document("repoId", repositoryId)
-                .append("evidenceId", HISTORY_ID).append("kind", "HISTORY").append("state", state)
-                .append("gitEvidenceVersion", 1).append("revision", REVISION).append("preparedAt", new Date()).append("total", 1L));
+                .append("evidenceId", HISTORY_ID).append("kind", "HISTORY").append("state", state).append("gitEvidenceVersion", IndexSchemaContract.GIT_EVIDENCE_VERSION).append("scope", "STANDALONE").append("revision", REVISION).append("preparedAt", new Date()).append("total", 1L));
         template.getCollection("git_commits").insertOne(new Document("repoId", repositoryId).append("historyId", HISTORY_ID)
                 .append("ordinal", 0L).append("revision", REVISION).append("parents", List.of("2".repeat(40)))
                 .append("subject", "prepared commit").append("committedAt", new Date()));
@@ -1478,11 +1494,10 @@ class GitEvidenceReadServiceIT {
         String ownerJobId = "comparison-job";
         template.getCollection("git_evidence_manifests").insertMany(List.of(
                 new Document("repoId", repositoryId).append("evidenceId", "dddddddd-dddd-dddd-dddd-dddddddddddd").append("kind", "SNAPSHOT")
-                        .append("state", "READY").append("gitEvidenceVersion", 1).append("ownerJobId", ownerJobId).append("revision", REVISION),
+                        .append("state", "READY").append("gitEvidenceVersion", IndexSchemaContract.GIT_EVIDENCE_VERSION).append("scope", "STANDALONE").append("ownerJobId", ownerJobId).append("revision", REVISION),
                 new Document("repoId", repositoryId).append("evidenceId", "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee").append("kind", "SNAPSHOT")
-                        .append("state", "READY").append("gitEvidenceVersion", 1).append("ownerJobId", ownerJobId).append("revision", current),
-                new Document("repoId", repositoryId).append("evidenceId", COMPARISON_ID).append("kind", "COMPARISON").append("state", state)
-                        .append("gitEvidenceVersion", 1).append("ownerJobId", ownerJobId).append("previous", REVISION).append("current", current)
+                        .append("state", "READY").append("gitEvidenceVersion", IndexSchemaContract.GIT_EVIDENCE_VERSION).append("scope", "STANDALONE").append("ownerJobId", ownerJobId).append("revision", current),
+                new Document("repoId", repositoryId).append("evidenceId", COMPARISON_ID).append("kind", "COMPARISON").append("state", state).append("gitEvidenceVersion", IndexSchemaContract.GIT_EVIDENCE_VERSION).append("scope", "STANDALONE").append("ownerJobId", ownerJobId).append("previous", REVISION).append("current", current)
                         .append("previousSnapshotId", "dddddddd-dddd-dddd-dddd-dddddddddddd")
                         .append("currentSnapshotId", "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee").append("ancestry", "PREVIOUS_ANCESTOR").append("total", 1L)));
         template.getCollection("git_comparison_changes").insertOne(new Document("repoId", repositoryId).append("comparisonId", COMPARISON_ID)

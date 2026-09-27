@@ -1,6 +1,9 @@
 package com.java.semantic.indexer.job;
 
+import com.java.semantic.config.JdtLsProperties;
 import com.java.semantic.model.index.IndexCollections;
+import com.java.semantic.model.index.IndexSchemaContract;
+import com.java.semantic.support.JdtLsTestProperties;
 import com.mongodb.client.MongoClient;
 import com.mongodb.client.MongoClients;
 import com.mongodb.client.MongoDatabase;
@@ -86,17 +89,17 @@ class GitReviewContextJourneyIT {
 
                 JsonMapper mapper = JsonMapper.builder().build();
                 String catalogJob = acceptedJob(post(indexerBase, "/index/repositories/" + REPOSITORY_ID + "/git/refs", ADMIN_TOKEN, Map.of()), mapper);
-                Map<?, ?> catalogStatus = completedJob(indexerBase, catalogJob, mapper);
+                Map<?, ?> catalogStatus = completedJob(indexerBase, catalogJob, mapper, indexer);
                 String catalogId = text(map(catalogStatus, "gitEvidence"), "evidenceId");
 
                 String historyJob = acceptedJob(post(indexerBase, "/index/repositories/" + REPOSITORY_ID + "/git/history", ADMIN_TOKEN,
                         Map.of("catalogId", catalogId, "branch", "main", "revision", current)), mapper);
-                Map<?, ?> historyStatus = completedJob(indexerBase, historyJob, mapper);
+                Map<?, ?> historyStatus = completedJob(indexerBase, historyJob, mapper, indexer);
                 String historyId = text(map(historyStatus, "gitEvidence"), "evidenceId");
 
                 String comparisonJob = acceptedJob(post(indexerBase, "/index/repositories/" + REPOSITORY_ID + "/git/comparisons", ADMIN_TOKEN,
                         Map.of("previous", previous, "current", current)), mapper);
-                Map<?, ?> comparisonStatus = completedJob(indexerBase, comparisonJob, mapper);
+                Map<?, ?> comparisonStatus = completedJob(indexerBase, comparisonJob, mapper, indexer);
                 Map<?, ?> comparisonEvidence = map(comparisonStatus, "gitEvidence");
                 String comparisonId = text(comparisonEvidence, "comparisonId");
                 String previousSnapshotId = text(comparisonEvidence, "previousSnapshotId");
@@ -261,10 +264,15 @@ class GitReviewContextJourneyIT {
 
     private RunningProcess startIndexer(Path jar, String mongoUri, Path remotePath, int port, Path missingJdtHome, Path jdtWorkspace)
             throws IOException {
+        Path checkoutRoot = Files.createDirectories(temporaryDirectory.resolve("checkouts"));
+        JdtLsProperties isolation = JdtLsTestProperties.linuxUid();
         return start(jar, List.of("--spring.mongodb.uri=" + mongoUri, "--server.address=127.0.0.1", "--server.port=" + port,
                 "--semantic.indexer.admin-token=" + ADMIN_TOKEN, "--semantic.repositories." + REPOSITORY_ID + ".url=" + remotePath.toUri(),
-                "--semantic.repositories." + REPOSITORY_ID + ".default-branch=main", "--semantic.data-root=" + temporaryDirectory.resolve("checkouts"),
+                "--semantic.repositories." + REPOSITORY_ID + ".default-branch=main", "--semantic.data-root=" + checkoutRoot,
                 "--semantic.jdtls.home=" + missingJdtHome, "--semantic.jdtls.workspace-data-root=" + jdtWorkspace,
+                "--semantic.jdtls.isolation-mode=" + isolation.getIsolationMode(),
+                "--semantic.jdtls.analysis-uid=" + isolation.getAnalysisUid(),
+                "--semantic.jdtls.analysis-gid=" + isolation.getAnalysisGid(),
                 "--semantic.index-jobs.poll-delay=20ms", "--spring.main.banner-mode=off"));
     }
 
@@ -322,7 +330,7 @@ class GitReviewContextJourneyIT {
         try (MongoClient client = MongoClients.create(mongoUri)) {
             MongoDatabase database = client.getDatabase("git_review_journey");
             database.getCollection(IndexCollections.GIT_EVIDENCE_MANIFESTS).insertOne(new org.bson.Document("repoId", REPOSITORY_ID)
-                    .append("evidenceId", pendingId).append("kind", "CATALOG").append("state", "PREPARING").append("gitEvidenceVersion", 1));
+                    .append("evidenceId", pendingId).append("kind", "CATALOG").append("state", "PREPARING").append("gitEvidenceVersion", IndexSchemaContract.GIT_EVIDENCE_VERSION).append("scope", "STANDALONE"));
         }
         HttpResponse<String> response = post(queryBase, "/api/v1/git/branches", QUERY_TOKEN,
                 Map.of("repositoryId", REPOSITORY_ID, "catalogId", pendingId, "offset", 0, "limit", 1));
@@ -500,7 +508,7 @@ class GitReviewContextJourneyIT {
         return text(page, "content");
     }
 
-    private Map<?, ?> completedJob(String base, String jobId, JsonMapper mapper) throws Exception {
+    private Map<?, ?> completedJob(String base, String jobId, JsonMapper mapper, RunningProcess indexer) throws Exception {
         Instant deadline = Instant.now().plus(JOB_TIMEOUT);
         while (Instant.now().isBefore(deadline)) {
             HttpResponse<String> response = get(base, "/index/repositories/" + REPOSITORY_ID + "/jobs/" + jobId, ADMIN_TOKEN);
@@ -509,7 +517,10 @@ class GitReviewContextJourneyIT {
                 if ("COMPLETE".equals(status.get("phase"))) {
                     return status;
                 }
-                assertThat(status.get("phase")).isNotEqualTo("FAILED");
+                if ("FAILED".equals(status.get("phase"))) {
+                    throw new AssertionError("job " + jobId + " failed: " + status.get("failureCategory")
+                            + "\n" + Files.readString(indexer.log()));
+                }
             }
             Thread.sleep(100L);
         }
