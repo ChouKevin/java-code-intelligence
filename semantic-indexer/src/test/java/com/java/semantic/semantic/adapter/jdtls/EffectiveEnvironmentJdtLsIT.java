@@ -34,6 +34,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import org.eclipse.lsp4j.DidCloseTextDocumentParams;
 import org.eclipse.lsp4j.DidOpenTextDocumentParams;
@@ -111,6 +113,30 @@ class EffectiveEnvironmentJdtLsIT {
         }
     }
 
+    @Test
+    void ignores_unrelated_host_files_but_rejects_changed_analysis_dependencies() throws Exception {
+        Path home = JdtLsHomeRequirement.requireHome(System.getenv("JDTLS_HOME"));
+        JdtLsProperties properties = new JdtLsProperties(
+                true, home, temporaryDirectory.resolve("workspaces"),
+                Duration.ofSeconds(30), Duration.ofSeconds(120), Duration.ofSeconds(30),
+                1, Duration.ofMinutes(1), Duration.ofMinutes(1), "1g");
+        Path unrelated = Files.createTempFile(Path.of("").toAbsolutePath(), "analysis-host-state-", ".tmp");
+        try {
+            Files.writeString(unrelated, "before");
+            try (Fixture fixture = new Fixture(temporaryDirectory, properties);
+                    PreparedAnalysis analysis = fixture.prepare("A")) {
+                Files.writeString(unrelated, "after");
+                assertThatCode(analysis::verifyUnchangedInputs).doesNotThrowAnyException();
+
+                fixture.replaceDependencyBytes("changed");
+                assertThatThrownBy(analysis::verifyUnchangedInputs)
+                        .isInstanceOf(IllegalStateException.class);
+            }
+        } finally {
+            Files.deleteIfExists(unrelated);
+        }
+    }
+
 
     private static final class Fixture implements AutoCloseable {
         private final Path repository;
@@ -121,6 +147,15 @@ class EffectiveEnvironmentJdtLsIT {
         private String revisionB;
 
         private Fixture(Path home, Path temporaryDirectory) throws Exception {
+            this(temporaryDirectory, new JdtLsProperties(
+                    true, home, temporaryDirectory.resolve("workspaces"),
+                    Path.of(System.getProperty("java.home"), "bin", "java"),
+                    JdtLsProperties.IsolationMode.LOCAL_TRUSTED, 0, 0,
+                    temporaryDirectory, Duration.ofSeconds(30), Duration.ofSeconds(120), Duration.ofSeconds(30),
+                    2, Duration.ofMinutes(1), Duration.ofMinutes(1), "1g"));
+        }
+
+        private Fixture(Path temporaryDirectory, JdtLsProperties properties) throws Exception {
             repository = Files.createDirectories(temporaryDirectory.resolve("repository"));
             compilationScratch = Files.createDirectories(temporaryDirectory.resolve("compilation-scratch"));
             writeRepository();
@@ -128,12 +163,6 @@ class EffectiveEnvironmentJdtLsIT {
             git = Git.init().setDirectory(repository.toFile()).call();
             git.add().addFilepattern(".").call();
             git.commit().setMessage("A").setAuthor("test", "test@example.invalid").call();
-            JdtLsProperties properties = new JdtLsProperties(
-                    true, home, temporaryDirectory.resolve("workspaces"),
-                    Path.of(System.getProperty("java.home"), "bin", "java"),
-                    JdtLsProperties.IsolationMode.LOCAL_TRUSTED, 0, 0,
-                    temporaryDirectory, Duration.ofSeconds(30), Duration.ofSeconds(120), Duration.ofSeconds(30),
-                    2, Duration.ofMinutes(1), Duration.ofMinutes(1), "1g");
             SimpleMeterRegistry registry = new SimpleMeterRegistry();
             manager = new DefaultJdtWorkspaceManager(new JdtLsProcessFactory(properties),
                     new JdtLsReadinessProbe(properties), properties, registry,

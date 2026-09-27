@@ -53,7 +53,8 @@ public record JdtLsProperties(
             Duration idleTimeout,
             Duration maintenanceInterval,
             String maxHeap) {
-        this(enabled, home, workspaceDataRoot, Path.of("java"), IsolationMode.LOCAL_TRUSTED, 0, 0,
+        this(enabled, home, workspaceDataRoot, Path.of(System.getProperty("java.home"), "bin", "java"),
+                IsolationMode.LOCAL_TRUSTED, 0, 0,
                 Path.of(System.getProperty("user.home", ".")), startupTimeout, importTimeout, requestTimeout,
                 maxActiveWorkspaces, idleTimeout, maintenanceInterval, maxHeap);
     }

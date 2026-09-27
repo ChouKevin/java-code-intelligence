@@ -21,6 +21,14 @@ non-directory `JDTLS_HOME` is a test failure before expensive setup; it is not a
 skip. Fixture-only checks remain runnable without `JDTLS_HOME`, and unrelated
 platform assumptions remain independent checks.
 
+The local-trusted `JdtLsProperties` convenience constructor selects the running
+JVM's `java.home/bin/java`, so launch and effective-input attestation identify
+the same JDK rather than resolving a bare `java` command against unrelated host
+paths. `EffectiveEnvironmentJdtLsIT` verifies that changing an unrelated host
+file does not invalidate a prepared analysis, while changing actual dependency
+bytes still fails its unchanged-input guard. Deployed configurations continue
+to select the explicit `JDTLS_JAVA_EXECUTABLE` inside the Indexer image.
+
 For the deployed profile, use test-only placeholders and keep its token
 separate from the production Query variable `SEMANTIC_QUERY_API_TOKEN`:
 
