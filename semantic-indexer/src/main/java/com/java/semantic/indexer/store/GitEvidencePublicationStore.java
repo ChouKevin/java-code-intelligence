@@ -62,10 +62,11 @@ public final class GitEvidencePublicationStore {
         GitEvidenceId id = GitEvidenceId.create();
         GitCatalogManifest manifest = new GitCatalogManifest(id, job.repositoryId(), observedAt, GitEvidenceState.PREPARING,
                 GitCatalogManifest.VERSION, GitEvidenceOwnership.standalone());
-        template.getCollection(IndexCollections.GIT_EVIDENCE_MANIFESTS).insertOne(new Document("repoId", job.repositoryId().value())
+        Document catalogDocument = ownershipDocument(new Document("repoId", job.repositoryId().value())
                 .append("evidenceId", id.value()).append("kind", "CATALOG").append("state", "PREPARING")
                 .append("gitEvidenceVersion", GitCatalogManifest.VERSION).append("observedAt", java.util.Date.from(observedAt))
-                .append("ownerJobId", job.id().value()).append("contentDigest", emptyDigest()).append("total", 0L));
+                .append("ownerJobId", job.id().value()).append("contentDigest", emptyDigest()).append("total", 0L), manifest.ownership());
+        template.getCollection(IndexCollections.GIT_EVIDENCE_MANIFESTS).insertOne(catalogDocument);
         bind(job, id);
         return manifest;
     }
@@ -75,11 +76,12 @@ public final class GitEvidencePublicationStore {
         GitEvidenceId id = GitEvidenceId.create();
         GitHistoryManifest manifest = new GitHistoryManifest(id, catalogId, job.repositoryId(), branch, revision, preparedAt,
                 GitEvidenceState.PREPARING, GitHistoryManifest.VERSION, 0L, GitEvidenceOwnership.standalone());
-        template.getCollection(IndexCollections.GIT_EVIDENCE_MANIFESTS).insertOne(new Document("repoId", job.repositoryId().value())
+        Document historyDocument = ownershipDocument(new Document("repoId", job.repositoryId().value())
                 .append("evidenceId", id.value()).append("kind", "HISTORY").append("state", "PREPARING")
                 .append("gitEvidenceVersion", GitHistoryManifest.VERSION).append("catalogId", catalogId.value()).append("branch", branch)
                 .append("revision", revision.value()).append("preparedAt", java.util.Date.from(preparedAt)).append("ownerJobId", job.id().value())
-                .append("contentDigest", emptyDigest()).append("total", 0L));
+                .append("contentDigest", emptyDigest()).append("total", 0L), manifest.ownership());
+        template.getCollection(IndexCollections.GIT_EVIDENCE_MANIFESTS).insertOne(historyDocument);
         bind(job, id);
         return manifest;
     }

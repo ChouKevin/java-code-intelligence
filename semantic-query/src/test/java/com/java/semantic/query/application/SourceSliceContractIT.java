@@ -13,6 +13,7 @@ import com.java.semantic.model.codefact.SourceTypeIdentity;
 import com.java.semantic.model.codefact.SyntaxPosition;
 import com.java.semantic.model.codefact.SyntaxRange;
 import com.java.semantic.model.index.GenerationId;
+import com.java.semantic.model.index.IndexSchemaContract;
 import com.java.semantic.model.index.ManifestDigest;
 import com.java.semantic.model.query.SelectedGeneration;
 import com.java.semantic.model.repository.RepositoryId;
@@ -34,6 +35,7 @@ import org.testcontainers.utility.DockerImageName;
 
 import java.time.Duration;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -122,8 +124,7 @@ class SourceSliceContractIT extends PublishedMongoITSupport {
             CodeFactIdentity method = methodIdentity("example.payment", "PaymentService", "method", path);
             seedMethod(template, method, List.of());
             seedSearch(template, method, "SYMBOLS", List.of("method"));
-            java.util.Map<String, Integer> currentVersions =
-                    com.java.semantic.model.index.IndexSchemaContract.requiredProjectionVersions();
+            Map<String, Integer> currentVersions = IndexSchemaContract.requiredProjectionVersions();
             template.getCollection("generation_manifests").updateOne(new Document("repoId", "orders"),
                     new Document("$set", new Document("projectionVersions", List.of(
                             new Document("name", "SOURCES").append("version", 1),

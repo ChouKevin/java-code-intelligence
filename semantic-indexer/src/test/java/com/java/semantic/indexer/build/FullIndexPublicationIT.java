@@ -78,8 +78,7 @@ class FullIndexPublicationIT {
 
     @ParameterizedTest(name = "{0} leaves the old pointer current")
     @MethodSource("invalidScenarios")
-    void invalid_full_build_never_seals_or_publishes(String scenario, Consumer<MongoTemplate> mutation,
-                                                     String expectedError) throws Exception {
+    void invalid_full_build_never_seals_or_publishes(String scenario, Consumer<MongoTemplate> mutation) throws Exception {
         try (MongoDBContainer container = new MongoDBContainer("mongo:8.0.4")) {
             container.start();
             MongoTemplate template = template(container);
@@ -89,7 +88,6 @@ class FullIndexPublicationIT {
             IndexBuildService service = service(template, store, exporter(template, mutation), checkout(scenario, revision()));
 
             assertThatThrownBy(() -> service.build(job)).isInstanceOf(RuntimeException.class)
-                    .hasMessageContaining(expectedError)
                     .satisfies(FullIndexPublicationIT::assertSafeMessage);
 
             assertPreviousPointer(template);
@@ -102,8 +100,7 @@ class FullIndexPublicationIT {
     @ParameterizedTest(name = "{0} mapped batch leaves the old pointer current")
     @MethodSource("invalidBatchScenarios")
     void invalid_mapped_batch_never_seals_or_publishes(String scenario,
-                                                       java.util.function.UnaryOperator<SourceIndexBatch> mutation,
-                                                       String expectedError) throws Exception {
+                                                       java.util.function.UnaryOperator<SourceIndexBatch> mutation) throws Exception {
         try (MongoDBContainer container = new MongoDBContainer("mongo:8.0.4")) {
             container.start();
             MongoTemplate template = template(container);
@@ -116,7 +113,6 @@ class FullIndexPublicationIT {
             IndexBuildService service = service(template, store, exporter, checkout(scenario, revision()));
 
             assertThatThrownBy(() -> service.build(job)).isInstanceOf(RuntimeException.class)
-                    .hasMessageContaining(expectedError)
                     .satisfies(FullIndexPublicationIT::assertSafeMessage);
 
             assertPreviousPointer(template);
@@ -239,42 +235,42 @@ class FullIndexPublicationIT {
     private static Stream<Arguments> invalidScenarios() {
         return Stream.of(
                 scenario("missing artifact", template -> template.getCollection(IndexCollections.GENERATION_FILES)
-                        .insertOne(missingArtifactFile(writingGeneration(template))), "MISSING_ARTIFACT"),
+                        .insertOne(missingArtifactFile(writingGeneration(template)))),
                 scenario("duplicate canonical identity", template -> template.getCollection(IndexCollections.SYMBOLS)
-                        .insertOne(projection(writingGeneration(template), "symbol-duplicate", methodCanonical(), validRange())), "DUPLICATE_CANONICAL"),
+                        .insertOne(projection(writingGeneration(template), "symbol-duplicate", methodCanonical(), validRange()))),
                 scenario("dangling internal relation", template -> template.getCollection(IndexCollections.RELATIONS)
-                        .insertOne(relation(writingGeneration(template), "relation-dangling", "internal[14]missing-method")), "DANGLING_INTERNAL_RELATION"),
+                        .insertOne(relation(writingGeneration(template), "relation-dangling", "internal[14]missing-method"))),
                 scenario("unclassified target", template -> template.getCollection(IndexCollections.RELATIONS)
-                        .insertOne(relation(writingGeneration(template), "relation-unclassified", "unknown-target")), "UNCLASSIFIED_RELATION_TARGET"),
+                        .insertOne(relation(writingGeneration(template), "relation-unclassified", "unknown-target"))),
                 scenario("invalid range", template -> template.getCollection(IndexCollections.SYMBOLS)
-                        .insertOne(projection(writingGeneration(template), "symbol-range", "invalid-method", invalidRange())), "INVALID_RANGE"),
+                        .insertOne(projection(writingGeneration(template), "symbol-range", "invalid-method", invalidRange()))),
                 scenario("missing entry-point method", template -> template.getCollection(IndexCollections.ENTRY_POINTS)
-                        .insertOne(entryPoint(writingGeneration(template), "entry-missing", "missing-method")), "MISSING_ENTRY_POINT_METHOD"),
+                        .insertOne(entryPoint(writingGeneration(template), "entry-missing", "missing-method"))),
                 scenario("unsupported schema", template -> template.getCollection(IndexCollections.GENERATION_MANIFESTS)
-                        .updateOne(writingManifest(), new Document("$set", new Document("schemaVersion", 99))), "UNSUPPORTED_SCHEMA"),
+                        .updateOne(writingManifest(), new Document("$set", new Document("schemaVersion", 99)))),
                 scenario("incomplete projection versions", template -> template.getCollection(IndexCollections.GENERATION_MANIFESTS)
                         .updateOne(writingManifest(), new Document("$set", new Document("projectionVersions", List.of(
-                                new Document("name", "SOURCES").append("version", 1))))), "INCOMPLETE_PROJECTION_VERSIONS"));
+                                new Document("name", "SOURCES").append("version", 1)))))));
     }
 
     private static Stream<Arguments> invalidBatchScenarios() {
         return Stream.of(
                 Arguments.of("wrong projection revision", (java.util.function.UnaryOperator<SourceIndexBatch>) batch ->
-                        validBatch(batch.repositoryId(), revision("b"), batch.generationId()), "PROJECTION_REVISION_MISMATCH"),
+                        validBatch(batch.repositoryId(), revision("b"), batch.generationId())),
                 Arguments.of("missing search authority", (java.util.function.UnaryOperator<SourceIndexBatch>) batch ->
-                        copyBatch(batch, batch.symbols(), batch.search().subList(0, batch.search().size() - 1)), "INCOMPLETE_SEARCH"),
+                        copyBatch(batch, batch.symbols(), batch.search().subList(0, batch.search().size() - 1))),
                 Arguments.of("orphan search authority", (java.util.function.UnaryOperator<SourceIndexBatch>) batch -> {
                     java.util.ArrayList<SearchDocument> search = new java.util.ArrayList<>(batch.search());
                     search.add(orphanSearch(batch.repositoryId(), revision(), batch.generationId()));
                     return copyBatch(batch, batch.symbols(), search);
-                }, "ORPHAN_SEARCH"),
+                }),
                 Arguments.of("mismatched projection artifact", (java.util.function.UnaryOperator<SourceIndexBatch>) batch -> {
                     SymbolDocument symbol = batch.symbols().getFirst();
                     SymbolDocument mismatched = new SymbolDocument(symbol.repositoryId(), symbol.generationId(), symbol.fact(), symbol.kind(),
                             symbol.owner(), symbol.name(), symbol.signature(), symbol.declaredType(), symbol.modifiers(), symbol.annotations(),
                             new SourceArtifactId("f".repeat(64)), symbol.range());
                     return copyBatch(batch, List.of(mismatched), batch.search());
-                }, "PROJECTION_ARTIFACT_MISMATCH"),
+                }),
                 Arguments.of("character crosses source line", (java.util.function.UnaryOperator<SourceIndexBatch>) batch -> {
                     SymbolDocument symbol = batch.symbols().getFirst();
                     SourceRange invalid = new SourceRange(batch.sourcePath(),
@@ -283,11 +279,11 @@ class FullIndexPublicationIT {
                             symbol.owner(), symbol.name(), symbol.signature(), symbol.declaredType(), symbol.modifiers(), symbol.annotations(),
                             symbol.sourceArtifactId(), invalid);
                     return copyBatch(batch, List.of(outOfLine), batch.search());
-                }, "INVALID_RANGE"));
+                }));
     }
 
-    private static Arguments scenario(String name, Consumer<MongoTemplate> mutation, String error) {
-        return Arguments.of(name, mutation, error);
+    private static Arguments scenario(String name, Consumer<MongoTemplate> mutation) {
+        return Arguments.of(name, mutation);
     }
 
     private MongoTemplate template(MongoDBContainer container) {

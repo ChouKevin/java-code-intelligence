@@ -36,15 +36,21 @@ Release and rebuild in this exact order:
    jobs, Git evidence, and any review graph that must be retained.
 4. Run the schema-maintenance bootstrap for schema 3 and verify its named
    indexes: the unique review `(repoId, reviewId)` index, review owner lookup,
-   sealed-generation reuse partial index, generation identity uniqueness,
-   active-job uniqueness, and Git ordinal/ID indexes. There is no TTL index and
-   no unique content-SHA index.
+   sealed-generation reuse partial index on the persisted flat
+   `analysisFingerprint` field, generation identity uniqueness, active-job
+   uniqueness, and Git ordinal/ID indexes. Preserve the existing global semantic
+   source-artifact unique indexes on `sourceArtifactId` and `contentHash`.
+   There is no TTL index or new unique commit-SHA constraint on generations,
+   reviews, or Git snapshots; Git snapshot deduplication is not introduced.
 5. Deploy the schema-3 Indexer. Rebuild every approved repository current
    generation so each sealed manifest has projection version 3 plus a v1
    analysis fingerprint and evidence. A pre-cutover manifest is never reused.
-6. Reprepare standalone Git evidence at version 2 as needed. Create new review
-   manifests only from the rebuilt sealed generations and their explicit Git
-   evidence graph.
+6. Reprepare standalone Git evidence at version 2 as needed. Version-2 catalog
+   and history manifests must persist `scope: STANDALONE`, without a `reviewId`;
+   a missing scope is invalid, not an implicit ownership default. Reprepare
+   malformed intermediate evidence rather than patching immutable manifests.
+   Create new review manifests only from the rebuilt sealed generations and
+   their explicit Git evidence graph.
 7. Verify the rebuilt manifests, generation identity digests, analysis evidence,
    and named indexes. Only then deploy the Query release and reopen admissions.
 

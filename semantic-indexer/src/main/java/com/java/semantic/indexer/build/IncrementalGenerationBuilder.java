@@ -38,14 +38,6 @@ public final class IncrementalGenerationBuilder {
         this.mapper = new SourceIndexBatchDocumentMapper(template.getConverter());
     }
 
-    /** Uses the selected checkout inventory as the sole source set for planning and full-fallback selection. */
-    /** Test-only planning entry point without attested inputs always fails closed to a full build. */
-    public BuildSelection assemble(IndexJob job, GenerationWriteContext lease, FullIndexPlan selectedRevisionPlan) {
-        FullIndexPlan completePlan = Objects.requireNonNull(selectedRevisionPlan, "selected revision plan is required");
-        List<String> selectedPaths = completePlan.sources().stream().map(FullIndexPlan.SourceInput::sourcePath).sorted().toList();
-        return BuildSelection.full(fullPlan(selectedPaths, "MISSING_ANALYSIS_FINGERPRINT"), completePlan);
-    }
-
     /** Reuses a parent only when its sealed semantic inputs exactly equal this prepared analysis. */
     public BuildSelection assemble(IndexJob job, GenerationWriteContext lease, FullIndexPlan selectedRevisionPlan,
                                    AnalysisFingerprint fingerprint) {

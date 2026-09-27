@@ -70,6 +70,7 @@ class DispatchedGitEvidenceIT {
     void dispatches_admitted_catalog_and_history_that_remain_pinned_after_the_remote_moves() throws Exception {
         Path remotePath = temporaryDirectory.resolve("remote.git");
         Path seedPath = temporaryDirectory.resolve("seed");
+        Files.createDirectories(temporaryDirectory.resolve("checkouts"));
         try (MongoDBContainer container = new MongoDBContainer("mongo:8.0.4");
              Git remote = Git.init().setBare(true).setDirectory(remotePath.toFile()).call();
              Git seed = Git.init().setInitialBranch("main").setDirectory(seedPath.toFile()).call()) {

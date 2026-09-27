@@ -8,12 +8,16 @@ import com.java.semantic.indexer.incremental.ModuleLocator;
 import com.java.semantic.indexer.store.IndexSchemaBootstrap;
 import com.java.semantic.indexer.store.GenerationWriteContext;
 import com.java.semantic.indexer.store.MongoGenerationWriter;
+import com.java.semantic.model.index.AnalysisFingerprint;
+import com.java.semantic.model.index.AnalysisInputs;
 import com.java.semantic.model.index.GenerationId;
 import com.java.semantic.model.index.GenerationWriteState;
 import com.java.semantic.model.index.IndexCollections;
 import com.java.semantic.model.index.IndexSchemaContract;
+import com.java.semantic.model.index.SourceArtifactDocument;
 import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.model.repository.RepositoryRevision;
+import com.java.semantic.repository.domain.RepositorySnapshot;
 import com.mongodb.client.MongoClients;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -36,13 +40,35 @@ class IncrementalGenerationBuilderIT {
     Path temporaryDirectory;
 
     @Test
-    void exposes_a_deterministic_full_fallback_when_parent_contract_cannot_be_reused() {
-        IncrementalGenerationBuilder.BuildSelection selection = IncrementalGenerationBuilder.BuildSelection.full(
-                new IncrementalIndexPlan(true, List.of("src/Current.java"), List.of(), List.of(), List.of("PARENT_CONTRACT_MISMATCH")),
-                new FullIndexPlan(java.nio.file.Path.of("."), List.of()));
+    void rebuilds_selected_sources_when_parent_analysis_fingerprint_differs() throws Exception {
+        try (MongoDBContainer container = new MongoDBContainer("mongo:8.0.4")) {
+            container.start();
+            MongoTemplate template = new MongoTemplate(MongoClients.create(container.getConnectionString()), "semantic");
+            new IndexSchemaBootstrap(template).bootstrap();
+            preparePublishedParent(template);
+            GenerationWriteContext childLease = childLease(template);
+            insertChildManifest(template, childLease);
+            SourceArtifactDocument parentArtifact = FullIndexPublicationIT.validBatch(RepositoryId.of("orders"),
+                    GenerationValidatorIT.revision(), GenerationValidatorIT.lease().generationId()).sourceArtifact();
+            Path source = Files.writeString(temporaryDirectory.resolve("Order.java"), parentArtifact.utf8Content());
+            FullIndexPlan selected = new FullIndexPlan(temporaryDirectory, List.of(
+                    new FullIndexPlan.SourceInput("src/Order.java", source, parentArtifact)));
 
-        assertThat(selection.incremental()).isFalse();
-        assertThat(selection.plan().reanalyzePaths()).containsExactly("src/Current.java");
+            AnalysisInputs originalInputs = preparedAnalysis().fingerprint().inputs();
+            AnalysisFingerprint changedFingerprint = AnalysisFingerprint.from(new AnalysisInputs(
+                    originalInputs.contractVersion(), originalInputs.analyzerDigest(), originalInputs.jdtLsDigest(),
+                    originalInputs.launcherJdkDigest(), "f".repeat(64), originalInputs.projects()));
+            IncrementalGenerationBuilder.BuildSelection selection = new IncrementalGenerationBuilder(template, emptyDiffPlanner(),
+                    new ParentGenerationCopier(template, new MongoGenerationWriter(template)))
+                    .assemble(childJob(), childLease, selected, changedFingerprint);
+
+            assertThat(selection.incremental()).isFalse();
+            assertThat(selection.exportPaths()).containsExactly("src/Order.java");
+            assertThat(template.getCollection(IndexCollections.GENERATION_FILES)
+                    .countDocuments(new Document("generationId", "g2"))).isZero();
+            assertThat(template.getCollection(IndexCollections.SYMBOLS)
+                    .countDocuments(new Document("generationId", "g2"))).isZero();
+        }
     }
 
     @Test
@@ -75,7 +101,7 @@ class IncrementalGenerationBuilderIT {
             com.java.semantic.indexer.job.IndexJob job = childJob();
 
             IncrementalGenerationBuilder.BuildSelection selection = new IncrementalGenerationBuilder(template, planner,
-                    new ParentGenerationCopier(template, writer)).assemble(job, childLease, selected);
+                    new ParentGenerationCopier(template, writer)).assemble(job, childLease, selected, preparedAnalysis().fingerprint());
 
             assertThat(selection.incremental()).isTrue();
             assertThat(selection.exportPaths()).isEmpty();
@@ -112,7 +138,7 @@ class IncrementalGenerationBuilderIT {
                     com.java.semantic.model.index.SourceArtifactDocument.create("class Projection { }"))));
 
             IncrementalGenerationBuilder.BuildSelection selection = new IncrementalGenerationBuilder(template, emptyDiffPlanner(),
-                    new ParentGenerationCopier(template, writer)).assemble(childJob(), childLease, selected);
+                    new ParentGenerationCopier(template, writer)).assemble(childJob(), childLease, selected, preparedAnalysis().fingerprint());
 
             assertThat(selection.incremental()).isFalse();
             assertThat(selection.exportPaths()).containsExactly("src/Order.java");
@@ -140,7 +166,7 @@ class IncrementalGenerationBuilderIT {
                             com.java.semantic.model.index.SourceArtifactDocument.create("class Added { }"))));
 
             IncrementalGenerationBuilder.BuildSelection selection = new IncrementalGenerationBuilder(template, emptyDiffPlanner(),
-                    new ParentGenerationCopier(template, new MongoGenerationWriter(template))).assemble(childJob(true), childLease, selected);
+                    new ParentGenerationCopier(template, new MongoGenerationWriter(template))).assemble(childJob(true), childLease, selected, preparedAnalysis().fingerprint());
 
             assertThat(selection.incremental()).isFalse();
             assertThat(selection.exportPaths()).containsExactly("src/Order.java", "src/Added.java");
@@ -162,7 +188,7 @@ class IncrementalGenerationBuilderIT {
                     com.java.semantic.model.index.SourceArtifactDocument.create("class Order { changed(); }"))));
 
             IncrementalGenerationBuilder.BuildSelection selection = new IncrementalGenerationBuilder(template, emptyDiffPlanner(),
-                    new ParentGenerationCopier(template, new MongoGenerationWriter(template))).assemble(childJob(), childLease, selected);
+                    new ParentGenerationCopier(template, new MongoGenerationWriter(template))).assemble(childJob(), childLease, selected, preparedAnalysis().fingerprint());
 
             assertThat(selection.incremental()).isTrue();
             assertThat(selection.plan().copyPaths()).isEmpty();
@@ -188,7 +214,7 @@ class IncrementalGenerationBuilderIT {
             Files.writeString(source, "class Order { changedAfterPlanning(); }");
 
             IncrementalGenerationBuilder.BuildSelection selection = new IncrementalGenerationBuilder(template, emptyDiffPlanner(),
-                    new ParentGenerationCopier(template, new MongoGenerationWriter(template))).assemble(childJob(), childLease, selected);
+                    new ParentGenerationCopier(template, new MongoGenerationWriter(template))).assemble(childJob(), childLease, selected, preparedAnalysis().fingerprint());
 
             assertThat(selection.plan().copyPaths()).isEmpty();
             assertThat(selection.exportPaths()).containsExactly("src/Order.java");
@@ -215,12 +241,18 @@ class IncrementalGenerationBuilderIT {
                             com.java.semantic.model.index.SourceArtifactDocument.create("class Added { }"))));
 
             IncrementalGenerationBuilder.BuildSelection selection = new IncrementalGenerationBuilder(template, emptyDiffPlanner(),
-                    new ParentGenerationCopier(template, new MongoGenerationWriter(template))).assemble(childJob(), childLease, selected);
+                    new ParentGenerationCopier(template, new MongoGenerationWriter(template))).assemble(childJob(), childLease, selected, preparedAnalysis().fingerprint());
 
             assertThat(selection.plan().copyPaths()).containsExactly("src/Order.java");
             assertThat(selection.plan().reanalyzePaths()).containsExactly("src/Added.java");
             assertThat(selection.exportPaths()).containsExactly("src/Added.java");
         }
+    }
+
+    private static TestPreparedAnalysis preparedAnalysis() {
+        return TestPreparedAnalysis.forSnapshot(new RepositorySnapshot(
+                RepositoryId.of("orders"), Path.of("."), new RepositoryRevision("b".repeat(40))),
+                new FullIndexPlan(Path.of("."), List.of()));
     }
 
     private static void preparePublishedParent(MongoTemplate template) {
@@ -260,6 +292,8 @@ class IncrementalGenerationBuilderIT {
                 .append("schemaVersion", IndexSchemaContract.SCHEMA_VERSION).append("projectionVersions", projectionVersions())
                 .append("identityDigest", "0".repeat(64)).append("outstandingBatches", List.of()).append("acknowledgedBatches", List.of())
                 .append("failedOrAmbiguousBatches", List.of()));
+        TestPreparedAnalysis analysis = preparedAnalysis();
+        new MongoGenerationWriter(template).recordAnalysis(lease, analysis.fingerprint(), analysis.readinessEvidence());
     }
 
     private static List<Document> projectionVersions() {

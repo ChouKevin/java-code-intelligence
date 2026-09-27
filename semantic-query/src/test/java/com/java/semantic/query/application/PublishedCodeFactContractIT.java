@@ -16,6 +16,7 @@ import com.java.semantic.model.codefact.SourceRange;
 import com.java.semantic.model.codefact.SyntaxPosition;
 import com.java.semantic.model.codefact.SyntaxRange;
 import com.java.semantic.model.index.GenerationId;
+import com.java.semantic.model.index.IndexSchemaContract;
 import com.java.semantic.model.index.RelationDocument;
 import com.java.semantic.model.index.SourceArtifactId;
 import com.java.semantic.model.index.SourceIndexScope;
@@ -40,6 +41,7 @@ import org.springframework.data.mongodb.core.MongoTemplate;
 
 import java.time.Duration;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -69,8 +71,7 @@ class PublishedCodeFactContractIT extends PublishedMongoITSupport {
                     "src/main/java/example/payment/PaymentService.java");
             seedMethod(template, identity, List.of());
             seedSearch(template, identity, "SYMBOLS", List.of("find", "payment"));
-            java.util.Map<String, Integer> currentVersions =
-                    com.java.semantic.model.index.IndexSchemaContract.requiredProjectionVersions();
+            Map<String, Integer> currentVersions = IndexSchemaContract.requiredProjectionVersions();
             template.getCollection("generation_manifests").updateOne(new Document("repoId", "orders"),
                     new Document("$set", new Document("projectionVersions", List.of(
                             new Document("name", "SOURCES").append("version", 1),
@@ -216,8 +217,7 @@ class PublishedCodeFactContractIT extends PublishedMongoITSupport {
                     "src/main/java/example/payment/PaymentService.java");
             seedMethod(template, identity, List.of());
             seedSearch(template, identity, "SYMBOLS", List.of("find", "payment"));
-            java.util.Map<String, Integer> currentVersions =
-                    com.java.semantic.model.index.IndexSchemaContract.requiredProjectionVersions();
+            Map<String, Integer> currentVersions = IndexSchemaContract.requiredProjectionVersions();
             template.getCollection("generation_manifests").updateOne(new Document("repoId", "orders"),
                     new Document("$set", new Document("projectionVersions", List.of(
                             new Document("name", "SOURCES").append("version", currentVersions.get("SOURCES")),
