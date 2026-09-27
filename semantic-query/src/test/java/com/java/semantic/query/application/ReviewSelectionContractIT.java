@@ -30,10 +30,13 @@ import com.java.semantic.model.repository.RepositoryRevision;
 import com.java.semantic.model.review.ReviewId;
 import com.java.semantic.model.review.ReviewSide;
 import com.java.semantic.query.config.ConfiguredReadPolicy;
+import com.java.semantic.query.config.ReadPolicyProperties;
 import com.mongodb.client.MongoClients;
 import java.time.Duration;
 import java.util.Date;
 import java.util.List;
+import java.util.Optional;
+import java.util.Set;
 import org.bson.Document;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -71,8 +74,8 @@ class ReviewSelectionContractIT extends PublishedMongoITSupport {
             assertThat(selected.selected().generationId().value()).isEqualTo("g-a");
             SelectedSemanticQueryService selectedQueries = SelectedSemanticQueryService.create(template, guard(template, policy), Duration.ofSeconds(2));
             SemanticQueryContract.SearchCodeResult result = selectedQueries.searchCode(selected.selected(),
-                    new SemanticQueryContract.SearchCodeRequest("orders", REVISION_A, "Order", java.util.Set.of(CodeFactKind.TYPE),
-                            java.util.Optional.empty(), 0, 20));
+                    new SemanticQueryContract.SearchCodeRequest("orders", REVISION_A, "Order", Set.of(CodeFactKind.TYPE),
+                            Optional.empty(), 0, 20));
             assertThat(result.items()).singleElement().satisfies(item -> assertThat(item.source().code()).contains("A-g-a"));
             assertThatThrownBy(() -> selectedQueries.getFactSource(selected.selected(), new SemanticQueryContract.FactSourceRequest(
                     "orders", REVISION_B, factId(REVISION_B), 0))).isInstanceOf(IllegalArgumentException.class);
@@ -102,7 +105,7 @@ class ReviewSelectionContractIT extends PublishedMongoITSupport {
             template.getCollection("review_manifests").updateOne(new Document("repoId", "orders"), new Document("$set", new Document("state", "READY")));
             assertThatThrownBy(() -> reader.requireReady(repository, review)).isInstanceOf(IndexContractMismatchException.class);
             ReviewManifestReadService denied = new ReviewManifestReadService(template,
-                    new ConfiguredReadPolicy(new com.java.semantic.query.config.ReadPolicyProperties(List.of("orders"), List.of(), List.of(), List.of())),
+                    new ConfiguredReadPolicy(new ReadPolicyProperties(List.of("orders"), List.of(), List.of(), List.of())),
                     Duration.ofSeconds(2));
             assertThatThrownBy(() -> denied.requireReady(repository, review)).isInstanceOf(RepositoryNotFoundException.class);
         }
@@ -143,7 +146,7 @@ class ReviewSelectionContractIT extends PublishedMongoITSupport {
         CodeFactIdentity identity = new CodeFactIdentity(new RepositoryId("orders"), new RepositoryRevision(revision), CodeFactKind.TYPE, type);
         CodeFact fact = new CodeFact(CodeFactId.from(identity), identity);
         SymbolDocument symbol = new SymbolDocument(new RepositoryId("orders"), new GenerationId(generationId), fact, CodeFactKind.TYPE,
-                type.fullyQualifiedName(), "Order", type.canonicalForm(), new DeclaredType(type.fullyQualifiedName()), java.util.Set.of(), List.of(),
+                type.fullyQualifiedName(), "Order", type.canonicalForm(), new DeclaredType(type.fullyQualifiedName()), Set.of(), List.of(),
                 artifact.id(), new SourceRange(path, new SyntaxRange(new SyntaxPosition(0, 0), new SyntaxPosition(0, content.length()))));
         Document storedSymbol = new Document();
         template.getConverter().write(symbol, storedSymbol);

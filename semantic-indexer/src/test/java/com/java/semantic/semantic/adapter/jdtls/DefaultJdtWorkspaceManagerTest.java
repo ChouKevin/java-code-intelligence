@@ -41,6 +41,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -52,6 +53,7 @@ import java.util.Map;
 import java.util.List;
 import java.util.Objects;
 import java.util.ServiceConfigurationError;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
@@ -2070,7 +2072,7 @@ class DefaultJdtWorkspaceManagerTest {
         private final List<String> queries = Collections.synchronizedList(new ArrayList<>());
         private final List<String> protocolCalls;
         private final Map<String, List<String>> sourcePathsByProject =
-                new java.util.concurrent.ConcurrentHashMap<>();
+                new ConcurrentHashMap<>();
         private volatile Function<String, CompletableFuture<Either<List<? extends SymbolInformation>,
                 List<? extends WorkspaceSymbol>>>> responder =
                 query -> CompletableFuture.completedFuture(symbolsForImportedSource());
@@ -2126,7 +2128,7 @@ class DefaultJdtWorkspaceManagerTest {
 
         private Either<List<? extends SymbolInformation>, List<? extends WorkspaceSymbol>> symbolsForImportedSource() {
             Map.Entry<String, List<String>> imported = sourcePathsByProject.entrySet().stream().findFirst().orElseThrow();
-            Path projectRoot = Path.of(java.net.URI.create(imported.getKey()));
+            Path projectRoot = Path.of(URI.create(imported.getKey()));
             Path sourceRoot = projectRoot.resolve(imported.getValue().getFirst());
             return symbolsAt(sourceRoot.resolve("com/example/" + SANITY_TYPE + ".java"));
         }

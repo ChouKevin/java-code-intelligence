@@ -1,21 +1,29 @@
 package com.java.semantic.query.application;
 
+import com.java.semantic.model.git.GitComparisonId;
+import com.java.semantic.model.git.GitSnapshotId;
 import com.java.semantic.model.index.GenerationId;
+import com.java.semantic.model.index.AnalysisFingerprint;
 import com.java.semantic.model.index.ManifestDigest;
 import com.java.semantic.model.index.SourceIndexCoverage;
 import com.java.semantic.model.index.SourceIndexIssue;
 import com.java.semantic.model.index.IndexSchemaContract;
 import com.java.semantic.model.index.SemanticAnalysisEvidence;
 import com.java.semantic.model.index.SealedGeneration;
+import com.java.semantic.model.index.PublishedGenerationPointer;
 import com.java.semantic.model.query.SelectedGeneration;
 import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.model.repository.RepositoryRevision;
 import com.java.semantic.model.review.ReviewId;
+import com.java.semantic.model.review.CapturedReviewBaseline;
 import com.java.semantic.model.review.ReviewManifestDocument;
+import com.java.semantic.model.review.ReviewComparisonType;
 import com.java.semantic.model.review.ReviewSide;
+import com.java.semantic.model.review.ReviewEndpoint;
 import com.java.semantic.query.config.SearchAccessPlan;
 import org.junit.jupiter.api.Test;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
@@ -43,7 +51,7 @@ class ReviewQueryFacadeTest {
         when(manifest.reviewId()).thenReturn(new ReviewId("review-fixture"));
         SealedGeneration sealed = mock(SealedGeneration.class);
         when(sealed.analysisEvidence()).thenReturn(evidence());
-        com.java.semantic.model.review.ReviewEndpoint endpoint = mock(com.java.semantic.model.review.ReviewEndpoint.class);
+        ReviewEndpoint endpoint = mock(ReviewEndpoint.class);
         when(endpoint.generation()).thenReturn(sealed);
         when(manifest.a()).thenReturn(Optional.of(endpoint));
         when(selector.select(any(), any(), any(), any(), any())).thenReturn(new ReviewSelection(manifest, ReviewSide.A, selected));
@@ -80,8 +88,8 @@ class ReviewQueryFacadeTest {
                 new SemanticAnalysisEvidence.Limitation("SOURCE_ALLOWED", Optional.of("src/Allowed.java")),
                 new SemanticAnalysisEvidence.Limitation("SOURCE_DENIED", Optional.of("src/Denied.java")));
         ReviewManifestDocument manifest = mock(ReviewManifestDocument.class);
-        com.java.semantic.model.review.ReviewEndpoint endpointA = endpoint(selectedA, evidence, "snapshot-a");
-        com.java.semantic.model.review.ReviewEndpoint endpointB = endpoint(selectedB, evidence, "snapshot-b");
+        ReviewEndpoint endpointA = endpoint(selectedA, evidence, "snapshot-a");
+        ReviewEndpoint endpointB = endpoint(selectedB, evidence, "snapshot-b");
         when(manifest.reviewId()).thenReturn(new ReviewId("review-fixture"));
         when(manifest.a()).thenReturn(Optional.of(endpointA));
         when(manifest.b()).thenReturn(Optional.of(endpointB));
@@ -119,36 +127,36 @@ class ReviewQueryFacadeTest {
                 new SemanticAnalysisEvidence.ResolutionCoverage(0, 0, 0, 0, 0), List.of(limitations));
     }
 
-    private static com.java.semantic.model.review.ReviewEndpoint endpoint(SelectedGeneration selected,
+    private static ReviewEndpoint endpoint(SelectedGeneration selected,
                                                                            SemanticAnalysisEvidence evidence, String snapshotId) {
         SealedGeneration generation = mock(SealedGeneration.class);
         when(generation.selected()).thenReturn(selected);
         when(generation.analysisEvidence()).thenReturn(evidence);
-        com.java.semantic.model.index.AnalysisFingerprint fingerprint =
-                mock(com.java.semantic.model.index.AnalysisFingerprint.class);
+        AnalysisFingerprint fingerprint =
+                mock(AnalysisFingerprint.class);
         when(fingerprint.digest()).thenReturn("e".repeat(64));
         when(generation.fingerprint()).thenReturn(fingerprint);
-        com.java.semantic.model.git.GitSnapshotId snapshot = mock(com.java.semantic.model.git.GitSnapshotId.class);
+        GitSnapshotId snapshot = mock(GitSnapshotId.class);
         when(snapshot.value()).thenReturn(snapshotId);
-        com.java.semantic.model.review.ReviewEndpoint endpoint = mock(com.java.semantic.model.review.ReviewEndpoint.class);
+        ReviewEndpoint endpoint = mock(ReviewEndpoint.class);
         when(endpoint.generation()).thenReturn(generation);
         when(endpoint.snapshotId()).thenReturn(snapshot);
         return endpoint;
     }
 
     private static void configureDiscovery(ReviewManifestDocument manifest) {
-        com.java.semantic.model.review.CapturedReviewBaseline baseline = mock(com.java.semantic.model.review.CapturedReviewBaseline.class);
-        com.java.semantic.model.index.PublishedGenerationPointer pointer = mock(com.java.semantic.model.index.PublishedGenerationPointer.class);
+        CapturedReviewBaseline baseline = mock(CapturedReviewBaseline.class);
+        PublishedGenerationPointer pointer = mock(PublishedGenerationPointer.class);
         when(pointer.revision()).thenReturn(new RepositoryRevision("a".repeat(40)));
         when(pointer.generationId()).thenReturn(new GenerationId("baseline"));
         when(pointer.manifestDigest()).thenReturn(new ManifestDigest("b".repeat(64)));
         when(baseline.pointer()).thenReturn(pointer);
-        when(baseline.capturedAt()).thenReturn(java.time.Instant.parse("2026-09-19T00:00:00Z"));
+        when(baseline.capturedAt()).thenReturn(Instant.parse("2026-09-19T00:00:00Z"));
         when(manifest.capturedBaseline()).thenReturn(baseline);
-        when(manifest.comparisonType()).thenReturn(com.java.semantic.model.review.ReviewComparisonType.CURRENT_TO_COMMIT);
-        com.java.semantic.model.git.GitComparisonId comparison = mock(com.java.semantic.model.git.GitComparisonId.class);
+        when(manifest.comparisonType()).thenReturn(ReviewComparisonType.CURRENT_TO_COMMIT);
+        GitComparisonId comparison = mock(GitComparisonId.class);
         when(comparison.value()).thenReturn("comparison");
         when(manifest.comparisonId()).thenReturn(Optional.of(comparison));
-        when(manifest.publishedAt()).thenReturn(Optional.of(java.time.Instant.parse("2026-09-19T00:00:01Z")));
+        when(manifest.publishedAt()).thenReturn(Optional.of(Instant.parse("2026-09-19T00:00:01Z")));
     }
 }

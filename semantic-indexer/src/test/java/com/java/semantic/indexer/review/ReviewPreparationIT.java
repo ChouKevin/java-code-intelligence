@@ -8,8 +8,10 @@ import com.java.semantic.indexer.job.MongoIndexJobStore;
 import com.java.semantic.indexer.store.GitEvidencePublicationStore;
 import com.java.semantic.indexer.store.IndexSchemaBootstrap;
 import com.java.semantic.model.git.GitComparisonAncestry;
+import com.java.semantic.model.git.GitChangeKind;
 import com.java.semantic.model.git.GitComparisonChange;
 import com.java.semantic.model.git.GitEvidenceOwnership;
+import com.java.semantic.model.git.GitPublicationScope;
 import com.java.semantic.model.git.GitFileContentStatus;
 import com.java.semantic.model.git.GitPreparedComparison;
 import com.java.semantic.model.git.GitSnapshotEntry;
@@ -29,11 +31,14 @@ import com.java.semantic.model.index.SemanticAnalysisEvidence;
 import com.java.semantic.model.query.SelectedGeneration;
 import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.model.repository.RepositoryRevision;
+import com.java.semantic.model.review.ReviewId;
 import com.java.semantic.model.review.ReviewSide;
+import com.mongodb.client.MongoClients;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.Date;
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.atomic.AtomicReference;
 import org.bson.Document;
 import org.junit.jupiter.api.Tag;
@@ -201,7 +206,7 @@ class ReviewPreparationIT {
     }
 
     private static Fixture fixture(MongoDBContainer container) {
-        MongoTemplate template = new MongoTemplate(com.mongodb.client.MongoClients.create(container.getConnectionString()), "semantic");
+        MongoTemplate template = new MongoTemplate(MongoClients.create(container.getConnectionString()), "semantic");
         new IndexSchemaBootstrap(template).bootstrap();
         return new Fixture(template);
     }
@@ -266,7 +271,7 @@ class ReviewPreparationIT {
                 return selected;
             };
             ReviewGitEvidencePort git = job -> new GitEvidencePublicationStore(template).publishComparison(job, comparison(), Instant.now(),
-                    new GitEvidenceOwnership(com.java.semantic.model.git.GitPublicationScope.REVIEW, java.util.Optional.of(job.review().orElseThrow().reviewId())));
+                    new GitEvidenceOwnership(GitPublicationScope.REVIEW, Optional.of(job.review().orElseThrow().reviewId())));
             new ReviewPreparationService(jobs, endpoints, git, reviews, template).prepare(running);
             IndexJob ready = jobs.find(accepted.id()).orElseThrow();
             return new PreparedReview(ready, ready.review().orElseThrow().reviewId(), a.get(), b.get(), captured,
@@ -289,7 +294,7 @@ class ReviewPreparationIT {
         private GitPreparedComparison comparison() {
             GitSnapshotEntry entry = new GitSnapshotEntry(REVIEW_SOURCE_PATH, "100644", "1".repeat(40), GitFileContentStatus.TEXT,
                     REVIEW_SOURCE.getBytes(StandardCharsets.UTF_8));
-            GitComparisonChange change = new GitComparisonChange("change-0", com.java.semantic.model.git.GitChangeKind.MODIFY,
+            GitComparisonChange change = new GitComparisonChange("change-0", GitChangeKind.MODIFY,
                     REVIEW_SOURCE_PATH, REVIEW_SOURCE_PATH, "100644", "100644", "1".repeat(40), "2".repeat(40),
                     "@@ -1 +1 @@\n-review source\n+review source\n", "AVAILABLE");
             return new GitPreparedComparison(CAPTURED_REVISION, REQUESTED_REVISION, GitComparisonAncestry.PREVIOUS_ANCESTOR,
@@ -349,7 +354,7 @@ class ReviewPreparationIT {
             return counts;
         }
 
-        private String reviewState(com.java.semantic.model.review.ReviewId reviewId) {
+        private String reviewState(ReviewId reviewId) {
             return template.getCollection(IndexCollections.REVIEW_MANIFESTS).find(new Document("reviewId", reviewId.value())).first().getString("state");
         }
 
@@ -367,7 +372,7 @@ class ReviewPreparationIT {
 
     }
 
-    private record PreparedReview(IndexJob job, com.java.semantic.model.review.ReviewId reviewId, SealedGeneration endpointA,
+    private record PreparedReview(IndexJob job, ReviewId reviewId, SealedGeneration endpointA,
                                   SealedGeneration endpointB, SealedGeneration captured, String comparisonId, String currentSnapshotId) {
         private GenerationId reservedA() {
             return job.review().orElseThrow().reservedTargets().a().generationId();

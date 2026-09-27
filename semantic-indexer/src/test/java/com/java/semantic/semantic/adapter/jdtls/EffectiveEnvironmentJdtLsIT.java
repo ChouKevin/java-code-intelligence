@@ -22,7 +22,6 @@ import com.java.semantic.semantic.domain.SemanticLocation;
 import com.java.semantic.semantic.domain.SemanticMethod;
 import com.java.semantic.semantic.domain.SemanticPosition;
 import com.java.semantic.semantic.domain.SemanticRange;
-import com.java.semantic.semantic.adapter.jdtls.Lsp4jJavaSemanticService;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.io.IOException;
 import java.io.OutputStream;
@@ -30,7 +29,10 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
+import java.util.stream.Stream;
 import java.util.jar.JarEntry;
 import java.util.jar.JarOutputStream;
 import javax.tools.JavaCompiler;
@@ -47,16 +49,11 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import org.eclipse.lsp4j.DidCloseTextDocumentParams;
 import org.eclipse.lsp4j.DidOpenTextDocumentParams;
-import org.eclipse.lsp4j.DefinitionParams;
-import org.eclipse.lsp4j.Location;
-import org.eclipse.lsp4j.LocationLink;
 import org.eclipse.lsp4j.Position;
 import org.eclipse.lsp4j.TextDocumentIdentifier;
 import org.eclipse.lsp4j.TextDocumentItem;
-import org.eclipse.lsp4j.jsonrpc.messages.Either;
 import org.eclipse.lsp4j.Hover;
 import org.eclipse.lsp4j.HoverParams;
-import org.eclipse.lsp4j.TypeDefinitionParams;
 @Tag("jdtls-it")
 class EffectiveEnvironmentJdtLsIT {
     @TempDir
@@ -280,7 +277,7 @@ class EffectiveEnvironmentJdtLsIT {
 
         private static List<AnalysisInputs.Artifact> artifacts(PreparedAnalysis analysis) {
             return analysis.fingerprint().inputs().projects().stream()
-                    .flatMap(project -> java.util.stream.Stream.concat(project.classpath().stream(), project.modulepath().stream()))
+                    .flatMap(project -> Stream.concat(project.classpath().stream(), project.modulepath().stream()))
                     .toList();
         }
 
@@ -296,26 +293,6 @@ class EffectiveEnvironmentJdtLsIT {
             SemanticRange invocationRange = range(0, invocationOffset, invocationOffset + "bOnly".length());
             return analysis.semanticService().resolveCallResolutionAt(analysis.snapshot(), caller,
                     new SemanticCallSite(invocationRange, new SemanticPosition(0, invocationOffset)));
-        }
-
-        private SemanticCallResolution resolveDependency(
-                PreparedAnalysis analysis, String className, String callerMethod, String invocation) throws IOException {
-            Path source = repository.resolve("application/src/production/java/example/app/" + className + ".java");
-            String content = Files.readString(source);
-            int methodOffset = content.indexOf(" " + callerMethod + "()");
-            int invocationOffset = content.indexOf(invocation);
-            SemanticPosition methodStart = positionAt(content, methodOffset + 1);
-            SemanticPosition methodEnd = positionAt(content, content.length());
-            SemanticRange methodRange = new SemanticRange(methodStart, methodEnd);
-            SemanticRange selectionRange = new SemanticRange(methodStart,
-                    new SemanticPosition(methodStart.line(), methodStart.character() + callerMethod.length()));
-            SemanticMethod caller = new SemanticMethod("example.app", className, callerMethod, List.of(), "void",
-                    new SemanticLocation(source.toUri().toString(), methodRange, selectionRange));
-            SemanticPosition invocationStart = positionAt(content, invocationOffset);
-            SemanticRange invocationRange = new SemanticRange(invocationStart,
-                    new SemanticPosition(invocationStart.line(), invocationStart.character() + invocation.length()));
-            return analysis.semanticService().resolveCallResolutionAt(analysis.snapshot(), caller,
-                    new SemanticCallSite(invocationRange, invocationStart));
         }
 
         private static SemanticPosition positionAt(String source, int offset) {
@@ -343,13 +320,13 @@ class EffectiveEnvironmentJdtLsIT {
                 session.call("test:didOpen", server -> {
                     server.getTextDocumentService().didOpen(new DidOpenTextDocumentParams(
                             new TextDocumentItem(uri, "java", 1, text)));
-                    return java.util.concurrent.CompletableFuture.completedFuture(null);
+                    return CompletableFuture.completedFuture(null);
                 });
                 try {
                     Hover result = session.call("test:hover", server -> server.getTextDocumentService().hover(
                             new HoverParams(new TextDocumentIdentifier(uri),
                                     new Position(position.line(), position.character()))));
-                    if (result == null) {
+                    if (Objects.isNull(result)) {
                         throw new IllegalStateException("no hover for " + typeName);
                     }
                     return result.toString();
@@ -357,7 +334,7 @@ class EffectiveEnvironmentJdtLsIT {
                     session.call("test:didClose", server -> {
                         server.getTextDocumentService().didClose(
                                 new DidCloseTextDocumentParams(new TextDocumentIdentifier(uri)));
-                        return java.util.concurrent.CompletableFuture.completedFuture(null);
+                        return CompletableFuture.completedFuture(null);
                     });
                 }
             });

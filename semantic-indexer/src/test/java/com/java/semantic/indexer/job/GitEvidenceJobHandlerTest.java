@@ -13,12 +13,16 @@ import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.model.repository.RepositoryRevision;
 import com.java.semantic.model.review.CapturedReviewBaseline;
 import com.java.semantic.model.review.ReviewId;
+import com.java.semantic.repository.application.RepositoryMutationException;
 import com.java.semantic.repository.application.RepositoryRuntimeRegistry;
 import com.java.semantic.repository.domain.RepositoryRuntime;
 import com.java.semantic.repository.port.GitRepositoryPort;
 import com.java.semantic.repository.port.RepositoryMutationListener;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.assertj.core.api.Assertions;
+import org.mockito.ArgumentMatchers;
+import org.mockito.InOrder;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -58,7 +62,7 @@ class GitEvidenceJobHandlerTest {
         RepositoryMutationListener listener = mock(RepositoryMutationListener.class);
         new GitEvidenceJobHandler(repositories, git, evidence, listener).prepare(job);
 
-        org.mockito.InOrder order = inOrder(git, evidence, listener);
+        InOrder order = inOrder(git, evidence, listener);
         order.verify(evidence).verifySchemaBeforeEvidence();
         order.verify(listener).beforeMutation(repositoryId);
         order.verify(git).isCloned(runtime.workingTree());
@@ -83,17 +87,17 @@ class GitEvidenceJobHandlerTest {
                 Optional.empty(), false, IndexJobOperation.GIT_REFS, Optional.of(GitEvidenceJob.refs()));
         when(repositories.get(repositoryId)).thenReturn(runtime);
 
-        org.assertj.core.api.Assertions.assertThatThrownBy(() -> new GitEvidenceJobHandler(repositories, git, evidence,
+        Assertions.assertThatThrownBy(() -> new GitEvidenceJobHandler(repositories, git, evidence,
                 mock(RepositoryMutationListener.class)).prepare(job))
-                .isInstanceOf(com.java.semantic.repository.application.RepositoryMutationException.class)
+                .isInstanceOf(RepositoryMutationException.class)
                 .hasCauseInstanceOf(IOException.class);
 
         verify(evidence).verifySchemaBeforeEvidence();
         verify(evidence).fail(job);
         verifyNoInteractions(git);
-        verify(evidence, never()).beginCatalog(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
-        verify(evidence, never()).publishComparison(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
-                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
+        verify(evidence, never()).beginCatalog(ArgumentMatchers.any(), ArgumentMatchers.any());
+        verify(evidence, never()).publishComparison(ArgumentMatchers.any(), ArgumentMatchers.any(),
+                ArgumentMatchers.any(), ArgumentMatchers.any());
     }
 
     @Test
@@ -110,16 +114,16 @@ class GitEvidenceJobHandlerTest {
         IndexJob job = reviewJob(repositoryId);
         when(repositories.get(repositoryId)).thenReturn(runtime);
 
-        org.assertj.core.api.Assertions.assertThatThrownBy(() -> new GitEvidenceJobHandler(repositories, git, evidence,
+        Assertions.assertThatThrownBy(() -> new GitEvidenceJobHandler(repositories, git, evidence,
                 mock(RepositoryMutationListener.class)).prepareReview(job))
-                .isInstanceOf(com.java.semantic.repository.application.RepositoryMutationException.class)
+                .isInstanceOf(RepositoryMutationException.class)
                 .hasCauseInstanceOf(IOException.class);
 
         verify(evidence).fail(job);
         verifyNoInteractions(git);
-        verify(evidence, never()).beginCatalog(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
-        verify(evidence, never()).publishComparison(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
-                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
+        verify(evidence, never()).beginCatalog(ArgumentMatchers.any(), ArgumentMatchers.any());
+        verify(evidence, never()).publishComparison(ArgumentMatchers.any(), ArgumentMatchers.any(),
+                ArgumentMatchers.any(), ArgumentMatchers.any());
     }
 
     @Test
@@ -137,7 +141,7 @@ class GitEvidenceJobHandlerTest {
                 .when(evidence).verifySchemaBeforeEvidence();
 
         RepositoryMutationListener listener = mock(RepositoryMutationListener.class);
-        org.assertj.core.api.Assertions.assertThatThrownBy(() -> new GitEvidenceJobHandler(repositories, git, evidence,
+        Assertions.assertThatThrownBy(() -> new GitEvidenceJobHandler(repositories, git, evidence,
                 listener).prepare(job))
                 .isInstanceOf(IndexSchemaMaintenanceRequiredException.class);
 
@@ -158,22 +162,22 @@ class GitEvidenceJobHandlerTest {
         RepositoryMutationListener listener = mock(RepositoryMutationListener.class);
         IndexJob job = new IndexJob(IndexJobId.create(), repositoryId, Optional.empty(), IndexJobPhase.RUNNING, true,
                 Optional.empty(), false, IndexJobOperation.GIT_REFS, Optional.of(GitEvidenceJob.refs()));
-        com.java.semantic.repository.application.RepositoryMutationException failure =
-                new com.java.semantic.repository.application.RepositoryMutationException("workspace still active");
+        RepositoryMutationException failure =
+                new RepositoryMutationException("workspace still active");
         when(repositories.get(repositoryId)).thenReturn(runtime);
         doThrow(failure).when(listener).beforeMutation(repositoryId);
 
-        org.assertj.core.api.Assertions.assertThatThrownBy(() ->
+        Assertions.assertThatThrownBy(() ->
                 new GitEvidenceJobHandler(repositories, git, evidence, listener).prepare(job)).isSameAs(failure);
 
-        org.mockito.InOrder order = inOrder(evidence, listener);
+        InOrder order = inOrder(evidence, listener);
         order.verify(evidence).verifySchemaBeforeEvidence();
         order.verify(listener).beforeMutation(repositoryId);
         order.verify(evidence).fail(job);
         verifyNoInteractions(git);
-        verify(evidence, never()).beginCatalog(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
-        verify(evidence, never()).publishComparison(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
-                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
+        verify(evidence, never()).beginCatalog(ArgumentMatchers.any(), ArgumentMatchers.any());
+        verify(evidence, never()).publishComparison(ArgumentMatchers.any(), ArgumentMatchers.any(),
+                ArgumentMatchers.any(), ArgumentMatchers.any());
     }
 
     @Test
@@ -191,12 +195,12 @@ class GitEvidenceJobHandlerTest {
 
         new GitEvidenceJobHandler(repositories, git, evidence, listener).prepareReview(job);
 
-        org.mockito.InOrder order = inOrder(listener, git, evidence);
+        InOrder order = inOrder(listener, git, evidence);
         order.verify(listener).beforeMutation(repositoryId);
         order.verify(git).isCloned(runtime.workingTree());
         order.verify(git).fetch(runtime.workingTree(), runtime.remoteUrl());
-        order.verify(evidence).publishComparison(org.mockito.ArgumentMatchers.eq(job), org.mockito.ArgumentMatchers.any(),
-                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
+        order.verify(evidence).publishComparison(ArgumentMatchers.eq(job), ArgumentMatchers.any(),
+                ArgumentMatchers.any(), ArgumentMatchers.any());
     }
 
     @Test
@@ -211,17 +215,17 @@ class GitEvidenceJobHandlerTest {
         GitEvidencePublicationStore evidence = mock(GitEvidencePublicationStore.class);
         RepositoryMutationListener listener = mock(RepositoryMutationListener.class);
         IndexJob job = reviewJob(repositoryId);
-        com.java.semantic.repository.application.RepositoryMutationException failure =
-                new com.java.semantic.repository.application.RepositoryMutationException("workspace still active");
+        RepositoryMutationException failure =
+                new RepositoryMutationException("workspace still active");
         when(repositories.get(repositoryId)).thenReturn(runtime);
         doThrow(failure).when(listener).beforeMutation(repositoryId);
 
-        org.assertj.core.api.Assertions.assertThatThrownBy(() ->
+        Assertions.assertThatThrownBy(() ->
                 new GitEvidenceJobHandler(repositories, git, evidence, listener).prepareReview(job)).isSameAs(failure);
         verify(evidence).fail(job);
         verifyNoInteractions(git);
-        verify(evidence, never()).publishComparison(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
-                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
+        verify(evidence, never()).publishComparison(ArgumentMatchers.any(), ArgumentMatchers.any(),
+                ArgumentMatchers.any(), ArgumentMatchers.any());
     }
 
     @Test
@@ -243,14 +247,14 @@ class GitEvidenceJobHandlerTest {
             return null;
         }).when(listener).beforeMutation(repositoryId);
 
-        org.assertj.core.api.Assertions.assertThatThrownBy(() ->
+        Assertions.assertThatThrownBy(() ->
                 new GitEvidenceJobHandler(repositories, git, evidence, listener).prepare(job))
-                .isInstanceOf(com.java.semantic.repository.application.RepositoryMutationException.class)
+                .isInstanceOf(RepositoryMutationException.class)
                 .hasCauseInstanceOf(IOException.class);
         verify(listener).beforeMutation(repositoryId);
         verify(evidence).fail(job);
         verifyNoInteractions(git);
-        verify(evidence, never()).beginCatalog(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
+        verify(evidence, never()).beginCatalog(ArgumentMatchers.any(), ArgumentMatchers.any());
     }
 
     @Test
@@ -271,15 +275,15 @@ class GitEvidenceJobHandlerTest {
             return null;
         }).when(listener).beforeMutation(repositoryId);
 
-        org.assertj.core.api.Assertions.assertThatThrownBy(() ->
+        Assertions.assertThatThrownBy(() ->
                 new GitEvidenceJobHandler(repositories, git, evidence, listener).prepareReview(job))
-                .isInstanceOf(com.java.semantic.repository.application.RepositoryMutationException.class)
+                .isInstanceOf(RepositoryMutationException.class)
                 .hasCauseInstanceOf(IOException.class);
         verify(listener).beforeMutation(repositoryId);
         verify(evidence).fail(job);
         verifyNoInteractions(git);
-        verify(evidence, never()).publishComparison(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
-                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
+        verify(evidence, never()).publishComparison(ArgumentMatchers.any(), ArgumentMatchers.any(),
+                ArgumentMatchers.any(), ArgumentMatchers.any());
     }
 
     private static IndexJob reviewJob(RepositoryId repositoryId) {

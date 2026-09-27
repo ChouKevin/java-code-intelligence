@@ -29,6 +29,7 @@ import org.springframework.data.mongodb.core.MongoTemplate;
 
 import java.time.Duration;
 import java.util.List;
+import java.util.Map;
 
 abstract class PublishedMongoITSupport {
     static final String REVISION = "1".repeat(40);
@@ -65,7 +66,7 @@ abstract class PublishedMongoITSupport {
                 .append("generationId", "g1").append("identityDigest", DIGEST).append("writeState", "SEALED_VALID")
                 .append("schemaVersion", IndexSchemaContract.SCHEMA_VERSION)
                 .append("projectionVersions", IndexSchemaContract.requiredProjectionVersions().entrySet().stream()
-                        .sorted(java.util.Map.Entry.comparingByKey())
+                        .sorted(Map.Entry.comparingByKey())
                         .map(entry -> new Document("name", entry.getKey()).append("version", entry.getValue()))
                         .toList()));
     }

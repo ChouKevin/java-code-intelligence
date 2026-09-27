@@ -3,6 +3,7 @@ package com.java.semantic.api;
 import com.java.semantic.model.codefact.CodeFactKind;
 import com.java.semantic.model.codefact.CodeFactSearchQuery;
 import com.java.semantic.query.application.SemanticQueryContract;
+import org.assertj.core.api.InstanceOfAssertFactories;
 import org.junit.jupiter.api.Test;
 import org.yaml.snakeyaml.Yaml;
 
@@ -216,7 +217,7 @@ class OpenApiContractTest {
         assertThat(responseSchema(root, "/api/v1/reviews/fact-source"))
                 .containsEntry("$ref", "#/components/schemas/ReviewFactSourceResult");
         assertThat(map(schemas.get("ReviewSearchCodeResult"))).containsEntry("additionalProperties", false);
-        assertThat(map(schemas.get("ReviewContext")).get("required")).asInstanceOf(org.assertj.core.api.InstanceOfAssertFactories.LIST)
+        assertThat(map(schemas.get("ReviewContext")).get("required")).asInstanceOf(InstanceOfAssertFactories.LIST)
                 .containsExactly("repositoryId", "reviewId", "side", "revision", "generationId", "coverage");
     }
 

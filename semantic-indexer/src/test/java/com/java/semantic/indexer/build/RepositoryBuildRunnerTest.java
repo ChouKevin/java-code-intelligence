@@ -6,11 +6,14 @@ import com.java.semantic.indexer.job.IndexJobOperation;
 import com.java.semantic.indexer.job.IndexJobPhase;
 import com.java.semantic.indexer.job.IndexJobTarget;
 import com.java.semantic.model.index.GenerationId;
+import com.java.semantic.model.index.SealedGeneration;
 import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.model.repository.RepositoryRevision;
 import java.util.Optional;
+import java.util.Objects;
 import java.util.concurrent.atomic.AtomicBoolean;
 import org.junit.jupiter.api.Test;
+import org.mockito.Mockito;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -42,7 +45,7 @@ class RepositoryBuildRunnerTest {
     @Test
     void seals_in_an_owned_scope_without_publishing_and_closes_the_scope() {
         AtomicBoolean closed = new AtomicBoolean();
-        com.java.semantic.model.index.SealedGeneration sealed = org.mockito.Mockito.mock(com.java.semantic.model.index.SealedGeneration.class);
+        SealedGeneration sealed = Mockito.mock(SealedGeneration.class);
         RepositoryBuildRunner runner = new RepositoryBuildRunner(job -> scope(() -> { }, () -> closed.set(true), sealed));
 
         assertThat(runner.seal(job())).isSameAs(sealed);
@@ -55,7 +58,7 @@ class RepositoryBuildRunnerTest {
     }
 
     private static RepositoryBuildRunner.BuildScope scope(Runnable build, Runnable close,
-                                                           com.java.semantic.model.index.SealedGeneration sealed) {
+                                                           SealedGeneration sealed) {
         return new RepositoryBuildRunner.BuildScope() {
             @Override
             public void build() {
@@ -63,8 +66,8 @@ class RepositoryBuildRunnerTest {
             }
 
             @Override
-            public com.java.semantic.model.index.SealedGeneration seal() {
-                if (sealed == null) { // cs-allow
+            public SealedGeneration seal() {
+                if (Objects.isNull(sealed)) {
                     throw new UnsupportedOperationException("seal was not configured");
                 }
                 return sealed;

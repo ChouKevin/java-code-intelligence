@@ -4,12 +4,15 @@ import com.java.semantic.indexer.store.IndexSchemaBootstrap;
 import com.java.semantic.indexer.store.MongoPublicationWriter;
 import com.java.semantic.indexer.store.PublicationConflictException;
 import com.java.semantic.model.index.IndexCollections;
+import com.java.semantic.indexer.review.ReviewBaselineUnavailableException;
+import com.java.semantic.model.index.GenerationId;
 import com.java.semantic.model.index.IndexSchemaContract;
 import com.java.semantic.model.index.ManifestDigest;
 import com.java.semantic.model.index.PublishGenerationCommand;
 import com.java.semantic.model.index.PublishedGenerationPointer;
 import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.model.repository.RepositoryRevision;
+import com.java.semantic.model.review.ReviewSide;
 import org.bson.Document;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -54,7 +57,7 @@ class MongoIndexJobStoreIT {
 
             RepositoryId missing = RepositoryId.of("missing");
             assertThatThrownBy(() -> store.admitReview(missing, revision("e")))
-                    .isInstanceOf(com.java.semantic.indexer.review.ReviewBaselineUnavailableException.class);
+                    .isInstanceOf(ReviewBaselineUnavailableException.class);
             assertThat(template.getCollection(IndexCollections.INDEX_JOBS).countDocuments(new Document("repoId", missing.value()))).isZero();
         }
     }
@@ -184,11 +187,11 @@ class MongoIndexJobStoreIT {
             String jobId = "review-job";
             template.getCollection(IndexCollections.INDEX_JOBS).insertOne(reviewJob(jobId));
 
-            IndexJob activeA = store.activateReviewTarget(new IndexJobId(jobId), com.java.semantic.model.review.ReviewSide.A);
+            IndexJob activeA = store.activateReviewTarget(new IndexJobId(jobId), ReviewSide.A);
 
-            assertThat(activeA.target()).contains(new IndexJobTarget(revision("a"), new com.java.semantic.model.index.GenerationId("g-a"), 5L));
+            assertThat(activeA.target()).contains(new IndexJobTarget(revision("a"), new GenerationId("g-a"), 5L));
             assertThat(activeA.review().orElseThrow().stage()).isEqualTo(ReviewPreparationStage.BUILDING_A);
-            assertThatThrownBy(() -> store.activateReviewTarget(activeA.id(), com.java.semantic.model.review.ReviewSide.B))
+            assertThatThrownBy(() -> store.activateReviewTarget(activeA.id(), ReviewSide.B))
                     .isInstanceOf(IllegalStateException.class);
             assertThat(store.complete(activeA.id())).isTrue();
 

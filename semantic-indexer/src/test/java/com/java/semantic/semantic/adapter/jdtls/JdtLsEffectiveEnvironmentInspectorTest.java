@@ -3,6 +3,7 @@ package com.java.semantic.semantic.adapter.jdtls;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
@@ -20,7 +21,7 @@ class JdtLsEffectiveEnvironmentInspectorTest {
                     .isInstanceOf(IllegalStateException.class)
                     .hasMessageContaining(field);
             assertThatThrownBy(() -> JdtLsEffectiveEnvironmentInspector.requiredStringList(
-                    java.util.Collections.singletonMap(field, null), field))
+                    Collections.singletonMap(field, null), field))
                     .isInstanceOf(IllegalStateException.class)
                     .hasMessageContaining(field);
             assertThatThrownBy(() -> JdtLsEffectiveEnvironmentInspector.requiredStringList(Map.of(field, "wrong"), field))

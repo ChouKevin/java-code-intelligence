@@ -12,6 +12,7 @@ import com.java.semantic.model.query.PublishedRelationQuery;
 import com.java.semantic.model.query.PublishedRelationResult;
 import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.model.repository.RepositoryRevision;
+import com.java.semantic.query.config.ReadPolicyProperties;
 import org.bson.Document;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
@@ -89,10 +90,10 @@ class PublishedRelationContractIT extends PublishedMongoITSupport {
             seedMethod(template, privateSource, List.of());
             seedRelation(template, privateSource, RelationKind.REFERENCES, new RelationTarget.Internal(declaration), range(privateSource, 4));
             CurrentGenerationSelector selector = selector(template,
-                    policy(new com.java.semantic.query.config.ReadPolicyProperties.PackageRule("orders", "example.privatecode")));
+                    policy(new ReadPolicyProperties.PackageRule("orders", "example.privatecode")));
             SelectedGeneration context = selector.selectCodeFact("orders", REVISION, declaration, SelectedGenerationGuard.RELATIONS);
             PublishedRelationQueryService service = new PublishedRelationQueryService(template, guard(template,
-                    policy(new com.java.semantic.query.config.ReadPolicyProperties.PackageRule("orders", "example.privatecode"))),
+                    policy(new ReadPolicyProperties.PackageRule("orders", "example.privatecode"))),
                     Duration.ofSeconds(2));
             PublishedRelationQuery query = new PublishedRelationQuery(new RepositoryId("orders"),
                     new RepositoryRevision(REVISION), declaration, 0, 20);

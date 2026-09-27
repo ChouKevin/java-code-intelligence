@@ -2,6 +2,7 @@ package com.java.semantic.indexer.build;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.java.semantic.model.codefact.ExternalTarget;
 import com.java.semantic.model.codefact.SyntaxPosition;
 import com.java.semantic.model.codefact.SyntaxRange;
 import com.java.semantic.syntax.domain.SyntaxInvocation;
@@ -17,7 +18,7 @@ class SemanticRelationProjectorTest {
         SyntaxInvocation invocation = new SyntaxInvocation(SyntaxInvocation.InvocationKind.METHOD,
                 new SyntaxRange(position, position), "()", "", "", "", Optional.empty(), position, List.of());
 
-        com.java.semantic.model.codefact.ExternalTarget.UnresolvedCall target = SemanticRelationProjector.unresolvedCall(invocation);
+        ExternalTarget.UnresolvedCall target = SemanticRelationProjector.unresolvedCall(invocation);
 
         assertThat(target.expression()).isEqualTo("()");
         assertThat(target.methodName()).isEqualTo("unknownMethod");

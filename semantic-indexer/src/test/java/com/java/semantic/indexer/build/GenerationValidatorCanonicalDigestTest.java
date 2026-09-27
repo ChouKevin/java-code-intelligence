@@ -2,10 +2,13 @@ package com.java.semantic.indexer.build;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.java.semantic.model.index.ManifestDigest;
 import com.java.semantic.model.index.ProjectionName;
 import java.lang.reflect.Method;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 import org.bson.Document;
 import org.junit.jupiter.api.Test;
 
@@ -39,8 +42,8 @@ class GenerationValidatorCanonicalDigestTest {
     private static String digest(Document manifest) throws Exception {
         Method method = GenerationValidator.class.getDeclaredMethod("digest", Map.class, Document.class);
         method.setAccessible(true);
-        Map<ProjectionName, List<Document>> projections = java.util.Arrays.stream(ProjectionName.values())
-                .collect(java.util.stream.Collectors.toMap(value -> value, value -> List.of()));
-        return ((com.java.semantic.model.index.ManifestDigest) method.invoke(null, projections, manifest)).value();
+        Map<ProjectionName, List<Document>> projections = Arrays.stream(ProjectionName.values())
+                .collect(Collectors.toMap(value -> value, value -> List.of()));
+        return ((ManifestDigest) method.invoke(null, projections, manifest)).value();
     }
 }

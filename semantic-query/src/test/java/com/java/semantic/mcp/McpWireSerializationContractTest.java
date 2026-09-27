@@ -6,6 +6,7 @@ import com.java.semantic.api.QueryTokenFilter;
 import com.java.semantic.api.SemanticQueryController;
 import com.java.semantic.model.codefact.CodeFactKind;
 import com.java.semantic.query.application.SemanticQueryContract;
+import com.java.semantic.query.application.ReviewQueryFacade;
 import com.java.semantic.query.application.SemanticQueryFacade;
 import io.modelcontextprotocol.json.jackson3.JacksonMcpJsonMapper;
 import io.modelcontextprotocol.server.McpServer;
@@ -117,7 +118,7 @@ class McpWireSerializationContractTest {
         WebMvcStatelessServerTransport transport = WebMvcStatelessServerTransport.builder()
                 .jsonMapper(new JacksonMcpJsonMapper(mapper)).messageEndpoint("/mcp").build();
         McpServer.sync(transport).tools(new QueryMcpToolCatalogConfiguration().mcpQueryToolSpecifications(facade,
-                mock(com.java.semantic.query.application.ReviewQueryFacade.class), mapper)).build();
+                mock(ReviewQueryFacade.class), mapper)).build();
         String requestBody = mapper.writeValueAsString(Map.of("jsonrpc", "2.0", "id", 1, "method", "tools/call",
                 "params", Map.of("name", toolName, "arguments", arguments)));
         MockHttpServletRequest servletRequest = new MockHttpServletRequest("POST", "/mcp");
@@ -137,7 +138,7 @@ class McpWireSerializationContractTest {
         WebMvcStatelessServerTransport transport = WebMvcStatelessServerTransport.builder()
                 .jsonMapper(new JacksonMcpJsonMapper(mapper)).messageEndpoint("/mcp").build();
         McpServer.sync(transport).tools(new QueryMcpToolCatalogConfiguration().mcpQueryToolSpecifications(facade,
-                mock(com.java.semantic.query.application.ReviewQueryFacade.class), mapper)).build();
+                mock(ReviewQueryFacade.class), mapper)).build();
         String requestBody = mapper.writeValueAsString(Map.of("jsonrpc", "2.0", "id", 1, "method", "tools/list", "params", Map.of()));
         MockHttpServletRequest servletRequest = new MockHttpServletRequest("POST", "/mcp");
         servletRequest.setContentType(MediaType.APPLICATION_JSON_VALUE);

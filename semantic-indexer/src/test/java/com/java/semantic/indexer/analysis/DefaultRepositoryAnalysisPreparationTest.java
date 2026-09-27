@@ -1,5 +1,6 @@
 package com.java.semantic.indexer.analysis;
 
+import com.java.semantic.model.index.AnalysisFingerprint;
 import com.java.semantic.model.index.AnalysisInputs;
 import com.java.semantic.model.index.IndexSchemaContract;
 import com.java.semantic.model.repository.RepositoryId;
@@ -45,8 +46,8 @@ class DefaultRepositoryAnalysisPreparationTest {
                 DIGEST,
                 DIGEST,
                 List.of(project("application", "disabled"), project("query", "disabled")));
-        assertThat(com.java.semantic.model.index.AnalysisFingerprint.from(inputs))
-                .isNotEqualTo(com.java.semantic.model.index.AnalysisFingerprint.from(changed));
+        assertThat(AnalysisFingerprint.from(inputs))
+                .isNotEqualTo(AnalysisFingerprint.from(changed));
     }
 
     @Test

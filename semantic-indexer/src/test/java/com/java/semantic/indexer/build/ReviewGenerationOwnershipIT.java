@@ -19,6 +19,8 @@ import com.java.semantic.model.query.SelectedGeneration;
 import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.model.repository.RepositoryRevision;
 import com.java.semantic.model.review.ReviewSide;
+import com.java.semantic.repository.domain.RepositorySnapshot;
+import com.mongodb.client.MongoClients;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.Date;
@@ -39,7 +41,7 @@ class ReviewGenerationOwnershipIT {
     void stale_a_cannot_mutate_after_b_activates_and_review_sealing_leaves_pointers_unchanged() {
         try (MongoDBContainer container = new MongoDBContainer("mongo:8.0.4")) {
             container.start();
-            MongoTemplate template = new MongoTemplate(com.mongodb.client.MongoClients.create(container.getConnectionString()), "semantic");
+            MongoTemplate template = new MongoTemplate(MongoClients.create(container.getConnectionString()), "semantic");
             new IndexSchemaBootstrap(template).bootstrap();
             MongoIndexJobStore jobs = new MongoIndexJobStore(template);
             seedPointersAndReview(template);
@@ -69,7 +71,7 @@ class ReviewGenerationOwnershipIT {
 
     private static SealedGeneration seal(MongoTemplate template, MongoGenerationWriter writer, GenerationValidator validator, IndexJob job) {
         GenerationWriteContext context = context(job);
-        TestPreparedAnalysis analysis = TestPreparedAnalysis.forSnapshot(new com.java.semantic.repository.domain.RepositorySnapshot(
+        TestPreparedAnalysis analysis = TestPreparedAnalysis.forSnapshot(new RepositorySnapshot(
                 job.repositoryId(), Path.of("."), job.target().orElseThrow().revision()), new FullIndexPlan(Path.of("."), List.of()));
         writeGeneration(template, writer, job);
         SourceIndexBatch batch = FullIndexPublicationIT.validBatch(job.repositoryId(), job.target().orElseThrow().revision(),
@@ -88,7 +90,7 @@ class ReviewGenerationOwnershipIT {
     private static void writeGeneration(MongoTemplate template, MongoGenerationWriter writer, IndexJob job) {
         GenerationWriteContext context = context(job);
         writer.insertManifest(context, manifest(job));
-        TestPreparedAnalysis analysis = TestPreparedAnalysis.forSnapshot(new com.java.semantic.repository.domain.RepositorySnapshot(
+        TestPreparedAnalysis analysis = TestPreparedAnalysis.forSnapshot(new RepositorySnapshot(
                 job.repositoryId(), Path.of("."), job.target().orElseThrow().revision()), new FullIndexPlan(Path.of("."), List.of()));
         writer.recordAnalysis(context, analysis.fingerprint(), analysis.readinessEvidence());
         new MongoIndexBatchWriter(writer, context, new SourceIndexBatchDocumentMapper(template.getConverter()))

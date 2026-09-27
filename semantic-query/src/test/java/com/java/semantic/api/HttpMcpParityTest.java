@@ -1,12 +1,18 @@
 package com.java.semantic.api;
 
 import com.java.semantic.model.codefact.CodeFactKind;
+import com.java.semantic.model.review.ReviewSide;
 import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.model.repository.RepositoryRevision;
 import com.java.semantic.mcp.QueryMcpToolCatalogConfiguration;
 import com.java.semantic.query.application.CodeFactKindMismatchException;
 import com.java.semantic.query.application.GitEvidenceNotFoundException;
 import com.java.semantic.query.application.RevisionOutdatedException;
+import com.java.semantic.query.application.ReviewContextMismatchException;
+import com.java.semantic.query.application.ReviewNotFoundException;
+import com.java.semantic.query.application.ReviewNotReadyException;
+import com.java.semantic.query.application.ReviewQueryContract;
+import com.java.semantic.query.application.ReviewQueryFacade;
 import com.java.semantic.query.application.SemanticQueryContract;
 import com.java.semantic.query.application.SemanticQueryFacade;
 import io.modelcontextprotocol.server.McpStatelessServerFeatures;
@@ -70,7 +76,7 @@ class HttpMcpParityTest {
 
         ObjectMapper mapper = applicationJsonMapper();
         List<McpStatelessServerFeatures.SyncToolSpecification> specifications = new QueryMcpToolCatalogConfiguration()
-                .mcpQueryToolSpecifications(facade, mock(com.java.semantic.query.application.ReviewQueryFacade.class), mapper);
+                .mcpQueryToolSpecifications(facade, mock(ReviewQueryFacade.class), mapper);
         McpSchema.CallToolResult mcpSuccess = call(specifications, "list_repositories", Map.of());
         McpSchema.CallToolResult mcpFailure = call(specifications, "search_code", Map.of(
                 "repositoryId", "orders", "revision", "a".repeat(40), "query", "payment"));
@@ -94,7 +100,7 @@ class HttpMcpParityTest {
                 .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
         ObjectMapper mapper = applicationJsonMapper();
         McpSchema.CallToolResult mcpSuccess = call(new QueryMcpToolCatalogConfiguration().mcpQueryToolSpecifications(facade,
-                mock(com.java.semantic.query.application.ReviewQueryFacade.class), mapper),
+                mock(ReviewQueryFacade.class), mapper),
                 "search_code", Map.of("repositoryId", REPOSITORY_ID, "revision", REVISION, "query", "missing"));
 
         assertThat(mapper.readTree(httpSuccess)).isEqualTo(mapper.readTree(mapper.writeValueAsString(mcpSuccess.structuredContent())));
@@ -127,7 +133,7 @@ class HttpMcpParityTest {
         MockMvc http = authenticatedHttp(facade);
         ObjectMapper mapper = applicationJsonMapper();
         List<McpStatelessServerFeatures.SyncToolSpecification> specifications = new QueryMcpToolCatalogConfiguration()
-                .mcpQueryToolSpecifications(facade, mock(com.java.semantic.query.application.ReviewQueryFacade.class), mapper);
+                .mcpQueryToolSpecifications(facade, mock(ReviewQueryFacade.class), mapper);
         String filesHttp = http.perform(post("/api/v1/git/files").header(QueryTokenFilter.TOKEN_HEADER, "query-token")
                         .contentType("application/json").content("{\"repositoryId\":\"orders\",\"snapshotId\":\"" + snapshotId
                                 + "\",\"revision\":\"" + REVISION + "\",\"directory\":\"\"}"))
@@ -219,7 +225,7 @@ class HttpMcpParityTest {
                 .andExpect(status().isBadRequest()).andReturn().getResponse().getContentAsString();
         ObjectMapper mapper = applicationJsonMapper();
         List<McpStatelessServerFeatures.SyncToolSpecification> specifications = new QueryMcpToolCatalogConfiguration()
-                .mcpQueryToolSpecifications(facade, mock(com.java.semantic.query.application.ReviewQueryFacade.class), mapper);
+                .mcpQueryToolSpecifications(facade, mock(ReviewQueryFacade.class), mapper);
         McpSchema.CallToolResult mcpFailure = call(specifications, "search_code", Map.of(
                 "repositoryId", REPOSITORY_ID, "revision", REVISION, "query", "payment", "packagePrefix", " "));
 
@@ -238,7 +244,7 @@ class HttpMcpParityTest {
                 .andExpect(status().isBadRequest()).andReturn().getResponse().getContentAsString();
         ObjectMapper mapper = applicationJsonMapper();
         List<McpStatelessServerFeatures.SyncToolSpecification> specifications = new QueryMcpToolCatalogConfiguration()
-                .mcpQueryToolSpecifications(facade, mock(com.java.semantic.query.application.ReviewQueryFacade.class), mapper);
+                .mcpQueryToolSpecifications(facade, mock(ReviewQueryFacade.class), mapper);
         McpSchema.CallToolResult mcpFailure = call(specifications, "find_callers", Map.of(
                 "repositoryId", REPOSITORY_ID, "revision", REVISION, "methodFactId", FACT_ID));
 
@@ -249,22 +255,22 @@ class HttpMcpParityTest {
     @Test
     void authenticated_http_and_mcp_return_matching_typed_review_results_with_distinct_side_evidence() throws Exception {
         SemanticQueryFacade facade = mock(SemanticQueryFacade.class);
-        com.java.semantic.query.application.ReviewQueryFacade reviewFacade =
-                mock(com.java.semantic.query.application.ReviewQueryFacade.class);
+        ReviewQueryFacade reviewFacade =
+                mock(ReviewQueryFacade.class);
         when(reviewFacade.searchCode(any())).thenAnswer(invocation -> {
-            com.java.semantic.query.application.ReviewQueryContract.ReviewSearchCodeRequest request = invocation.getArgument(0);
-            String sourceCode = request.side() == com.java.semantic.model.review.ReviewSide.A
+            ReviewQueryContract.ReviewSearchCodeRequest request = invocation.getArgument(0);
+            String sourceCode = request.side() == ReviewSide.A
                     ? "class BaselineOrder { }" : "class CommitOrder { }";
-            String generationId = request.side() == com.java.semantic.model.review.ReviewSide.A ? "review-a" : "review-b";
+            String generationId = request.side() == ReviewSide.A ? "review-a" : "review-b";
             SemanticQueryContract.SourceSnippet source = new SemanticQueryContract.SourceSnippet("src/Order.java", 1, 1, sourceCode);
             SemanticQueryContract.SearchCodeResult result = new SemanticQueryContract.SearchCodeResult(REPOSITORY_ID, request.revision(),
                     List.of(new SemanticQueryContract.ProgramElement(FACT_ID, CodeFactKind.TYPE, "Order", source)),
                     new SemanticQueryContract.Page(0, 20, 1, 1, false), new SemanticQueryContract.SourceCoverage(1, 0, List.of()));
-            com.java.semantic.query.application.ReviewQueryContract.ReviewCoverage coverage =
-                    new com.java.semantic.query.application.ReviewQueryContract.ReviewCoverage(
+            ReviewQueryContract.ReviewCoverage coverage =
+                    new ReviewQueryContract.ReviewCoverage(
                             new SemanticQueryContract.SourceCoverage(1, 0, List.of()), List.of());
-            return new com.java.semantic.query.application.ReviewQueryContract.ReviewResult<>(
-                    new com.java.semantic.query.application.ReviewQueryContract.ReviewContext(REPOSITORY_ID, "review-fixture",
+            return new ReviewQueryContract.ReviewResult<>(
+                    new ReviewQueryContract.ReviewContext(REPOSITORY_ID, "review-fixture",
                             request.side(), request.revision(), generationId, coverage), result);
         });
 
@@ -303,13 +309,13 @@ class HttpMcpParityTest {
     @Test
     void authenticated_http_and_mcp_share_review_lifecycle_unknown_and_context_errors() throws Exception {
         SemanticQueryFacade facade = mock(SemanticQueryFacade.class);
-        com.java.semantic.query.application.ReviewQueryFacade reviewFacade =
-                mock(com.java.semantic.query.application.ReviewQueryFacade.class);
+        ReviewQueryFacade reviewFacade =
+                mock(ReviewQueryFacade.class);
         ObjectMapper mapper = applicationJsonMapper();
         List<McpStatelessServerFeatures.SyncToolSpecification> specifications = new QueryMcpToolCatalogConfiguration()
                 .mcpQueryToolSpecifications(facade, reviewFacade, mapper);
         MockMvc http = authenticatedReviewHttp(facade, reviewFacade);
-        when(reviewFacade.getReview(any())).thenThrow(new com.java.semantic.query.application.ReviewNotReadyException());
+        when(reviewFacade.getReview(any())).thenThrow(new ReviewNotReadyException());
         String notReadyHttp = http.perform(get("/api/v1/repositories/orders/reviews/review-fixture")
                         .header(QueryTokenFilter.TOKEN_HEADER, "query-token"))
                 .andExpect(status().isConflict()).andReturn().getResponse().getContentAsString();
@@ -317,9 +323,9 @@ class HttpMcpParityTest {
                 Map.of("repositoryId", REPOSITORY_ID, "reviewId", "review-fixture"));
         assertThat(mapper.readTree(notReadyHttp)).isEqualTo(mapper.readTree(mapper.writeValueAsString(notReadyMcp.structuredContent())));
 
-        com.java.semantic.query.application.ReviewQueryFacade unknownFacade =
-                mock(com.java.semantic.query.application.ReviewQueryFacade.class);
-        when(unknownFacade.getReview(any())).thenThrow(new com.java.semantic.query.application.ReviewNotFoundException());
+        ReviewQueryFacade unknownFacade =
+                mock(ReviewQueryFacade.class);
+        when(unknownFacade.getReview(any())).thenThrow(new ReviewNotFoundException());
         specifications = new QueryMcpToolCatalogConfiguration().mcpQueryToolSpecifications(facade, unknownFacade, mapper);
         http = authenticatedReviewHttp(facade, unknownFacade);
         String unknownHttp = http.perform(get("/api/v1/repositories/orders/reviews/review-fixture")
@@ -329,9 +335,9 @@ class HttpMcpParityTest {
                 Map.of("repositoryId", REPOSITORY_ID, "reviewId", "review-fixture"));
         assertThat(mapper.readTree(unknownHttp)).isEqualTo(mapper.readTree(mapper.writeValueAsString(unknownMcp.structuredContent())));
 
-        com.java.semantic.query.application.ReviewQueryFacade mismatchedFacade =
-                mock(com.java.semantic.query.application.ReviewQueryFacade.class);
-        when(mismatchedFacade.searchCode(any())).thenThrow(new com.java.semantic.query.application.ReviewContextMismatchException());
+        ReviewQueryFacade mismatchedFacade =
+                mock(ReviewQueryFacade.class);
+        when(mismatchedFacade.searchCode(any())).thenThrow(new ReviewContextMismatchException());
         specifications = new QueryMcpToolCatalogConfiguration().mcpQueryToolSpecifications(facade, mismatchedFacade, mapper);
         http = authenticatedReviewHttp(facade, mismatchedFacade);
         String request = "{\"repositoryId\":\"orders\",\"reviewId\":\"review-fixture\",\"side\":\"A\",\"revision\":\""
@@ -383,7 +389,7 @@ class HttpMcpParityTest {
     }
 
     private static MockMvc authenticatedReviewHttp(SemanticQueryFacade facade,
-                                                   com.java.semantic.query.application.ReviewQueryFacade reviewFacade) {
+                                                   ReviewQueryFacade reviewFacade) {
         QuerySecurityProperties securityProperties = new QuerySecurityProperties();
         securityProperties.setApiToken("query-token");
         return standaloneSetup(new SemanticQueryController(facade), new ReviewQueryController(reviewFacade))

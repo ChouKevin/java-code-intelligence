@@ -33,6 +33,7 @@ import java.util.Base64;
 import java.util.Date;
 import java.util.List;
 import java.util.Optional;
+import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -1337,7 +1338,7 @@ class GitEvidenceReadServiceIT {
                 .append("kind", "SNAPSHOT").append("state", "READY").append("gitEvidenceVersion", IndexSchemaContract.GIT_EVIDENCE_VERSION).append("scope", "STANDALONE").append("ownerJobId", ownerJobId)
                 .append("revision", "2".repeat(40)));
         template.getCollection("git_evidence_manifests").insertOne(new Document("repoId", repositoryId)
-                .append("evidenceId", java.util.UUID.randomUUID().toString()).append("kind", "COMPARISON").append("state", "READY").append("gitEvidenceVersion", IndexSchemaContract.GIT_EVIDENCE_VERSION).append("scope", "STANDALONE").append("ownerJobId", ownerJobId).append("previous", "2".repeat(40)).append("current", revision)
+                .append("evidenceId", UUID.randomUUID().toString()).append("kind", "COMPARISON").append("state", "READY").append("gitEvidenceVersion", IndexSchemaContract.GIT_EVIDENCE_VERSION).append("scope", "STANDALONE").append("ownerJobId", ownerJobId).append("previous", "2".repeat(40)).append("current", revision)
                 .append("previousSnapshotId", siblingSnapshotId).append("currentSnapshotId", snapshotId));
     }
 

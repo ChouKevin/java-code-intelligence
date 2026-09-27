@@ -2,9 +2,12 @@ package com.java.semantic.indexer.review;
 
 import com.java.semantic.SemanticIndexerApplication;
 import com.java.semantic.indexer.store.IndexSchemaBootstrap;
+import com.java.semantic.indexer.job.MongoIndexJobStore;
 import com.java.semantic.model.codefact.CodeFactKind;
 import com.java.semantic.model.index.AnalysisInputs;
+import com.java.semantic.model.index.IndexCollections;
 import com.java.semantic.model.repository.RepositoryRevision;
+import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.model.review.ReviewId;
 import com.java.semantic.model.review.ReviewManifestDocument;
 import com.java.semantic.model.review.ReviewSide;
@@ -26,14 +29,18 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Objects;
 import java.util.Set;
+import java.util.stream.Stream;
 import java.util.jar.JarEntry;
 import java.util.jar.JarOutputStream;
 import javax.tools.JavaCompiler;
 import javax.tools.ToolProvider;
+import org.bson.Document;
 import org.eclipse.jgit.api.Git;
 import org.eclipse.jgit.lib.Constants;
 import org.eclipse.jgit.lib.RefUpdate;
@@ -314,9 +321,9 @@ class SemanticReviewJdtLsIT {
         }
 
         String currentGeneration() {
-            return template.getCollection(com.java.semantic.model.index.IndexCollections.REPOSITORIES)
-                    .find(new org.bson.Document("repoId", REPOSITORY_ID)).first()
-                    .get("currentPointer", org.bson.Document.class).getString("generationId");
+            return template.getCollection(IndexCollections.REPOSITORIES)
+                    .find(new Document("repoId", REPOSITORY_ID)).first()
+                    .get("currentPointer", Document.class).getString("generationId");
         }
 
         void replaceEffectiveDependency() throws IOException {
@@ -361,8 +368,8 @@ class SemanticReviewJdtLsIT {
 
         private ReviewManifestDocument readManifest(ReviewId id) {
             return new ReviewPublicationStore(template, new ReviewReadinessValidator(template),
-                    new com.java.semantic.indexer.job.MongoIndexJobStore(template))
-                    .findReady(new com.java.semantic.model.repository.RepositoryId(REPOSITORY_ID), id);
+                    new MongoIndexJobStore(template))
+                    .findReady(new RepositoryId(REPOSITORY_ID), id);
         }
 
         private String changedCheckoutId(String comparisonId, String previous, String currentRevision) {
@@ -503,7 +510,7 @@ class SemanticReviewJdtLsIT {
             seed.add().setUpdate(true).addFilepattern(".").call();
             String revision = seed.commit().setMessage(message).setAuthor("Fixture", "fixture@example.test")
                     .setCommitter("Fixture", "fixture@example.test").call().getId().name();
-            if (remote != null) {
+            if (Objects.nonNull(remote)) {
                 seed.remoteAdd().setName("origin").setUri(new URIish(remote.toUri().toString())).call();
             }
             seed.push().setRemote("origin").setRefSpecs(new RefSpec("refs/heads/main:refs/heads/main")).call();
@@ -540,7 +547,7 @@ class SemanticReviewJdtLsIT {
                         + "; public final class " + className.substring(className.lastIndexOf('.') + 1)
                         + " { public String label() { return \"" + label + "\"; } }\n");
                 JavaCompiler compiler = ToolProvider.getSystemJavaCompiler();
-                if (compiler == null || compiler.run(null, null, null, "-d", classes.toString(), source.toString()) != 0) {
+                if (Objects.isNull(compiler) || compiler.run(null, null, null, "-d", classes.toString(), source.toString()) != 0) {
                     throw new IOException("fixture dependency compilation failed");
                 }
                 Files.createDirectories(path.getParent());
@@ -562,8 +569,8 @@ class SemanticReviewJdtLsIT {
         }
 
         private static void deleteTree(Path root) throws IOException {
-            try (java.util.stream.Stream<Path> paths = Files.walk(root)) {
-                for (Path path : paths.sorted(java.util.Comparator.reverseOrder()).toList()) {
+            try (Stream<Path> paths = Files.walk(root)) {
+                for (Path path : paths.sorted(Comparator.reverseOrder()).toList()) {
                     Files.delete(path);
                 }
             }

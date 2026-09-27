@@ -10,6 +10,7 @@ import com.java.semantic.model.index.GenerationId;
 import com.java.semantic.model.index.IndexCollections;
 import com.java.semantic.model.index.IndexSchemaContract;
 import com.java.semantic.model.index.SourceArtifactDocument;
+import com.java.semantic.repository.domain.RepositorySnapshot;
 import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.model.repository.RepositoryRevision;
 import com.mongodb.client.MongoClients;
@@ -17,6 +18,8 @@ import com.mongodb.client.model.IndexOptions;
 import java.nio.file.Path;
 import java.util.Date;
 import java.util.List;
+import java.util.Map;
+import java.util.function.Consumer;
 import java.util.stream.Stream;
 import org.bson.Document;
 import org.junit.jupiter.api.Tag;
@@ -118,15 +121,15 @@ class GenerationValidatorIT {
 
     private static Stream<Arguments> invalidGenerationMutations() {
         return Stream.of(
-                Arguments.of("missing semantic evidence", (java.util.function.Consumer<MongoTemplate>) template ->
+                Arguments.of("missing semantic evidence", (Consumer<MongoTemplate>) template ->
                         template.getCollection(IndexCollections.GENERATION_MANIFESTS).updateOne(new Document("generationId", "g1"),
                                 new Document("$unset", new Document("analysisEvidence", ""))), "MISSING_ANALYSIS_EVIDENCE"),
-                Arguments.of("mismatched semantic fingerprint", (java.util.function.Consumer<MongoTemplate>) template ->
+                Arguments.of("mismatched semantic fingerprint", (Consumer<MongoTemplate>) template ->
                         template.getCollection(IndexCollections.GENERATION_MANIFESTS).updateOne(new Document("generationId", "g1"),
                                 new Document("$set", new Document("analysisFingerprint", "b".repeat(64)))), "ANALYSIS_FINGERPRINT_MISMATCH"),
                 Arguments.of("missing artifact", (java.util.function.Consumer<MongoTemplate>) template ->
                         template.getCollection(IndexCollections.SOURCE_ARTIFACTS).deleteMany(new Document()), "MISSING_ARTIFACT"),
-                Arguments.of("source artifact bytes changed with retained line layout", (java.util.function.Consumer<MongoTemplate>) template -> {
+                Arguments.of("source artifact bytes changed with retained line layout", (Consumer<MongoTemplate>) template -> {
                     Document artifact = template.getCollection(IndexCollections.SOURCE_ARTIFACTS).find().first();
                     String replacement = artifact.getString("utf8Content").replace("Secret", "Forged");
                     template.getCollection(IndexCollections.SOURCE_ARTIFACTS).updateOne(
@@ -208,8 +211,8 @@ class GenerationValidatorIT {
                 .append("schemaVersion", IndexSchemaContract.SCHEMA_VERSION).append("projectionVersions", projectionVersions()).append("identityDigest", "0".repeat(64))
                 .append("outstandingBatches", List.of()).append("acknowledgedBatches", List.of())
                 .append("failedOrAmbiguousBatches", List.of()));
-        TestPreparedAnalysis analysis = TestPreparedAnalysis.forSnapshot(new com.java.semantic.repository.domain.RepositorySnapshot(
-                RepositoryId.of("orders"), java.nio.file.Path.of("."), revision()), new FullIndexPlan(java.nio.file.Path.of("."), List.of()));
+        TestPreparedAnalysis analysis = TestPreparedAnalysis.forSnapshot(new RepositorySnapshot(
+                RepositoryId.of("orders"), Path.of("."), revision()), new FullIndexPlan(Path.of("."), List.of()));
         new MongoGenerationWriter(template).recordAnalysis(lease(), analysis.fingerprint(), analysis.readinessEvidence());
         SourceIndexBatch batch = FullIndexPublicationIT.validBatch(RepositoryId.of("orders"), revision(), new GenerationId("g1"));
         new MongoIndexBatchWriter(new MongoGenerationWriter(template), lease(),
@@ -256,7 +259,7 @@ class GenerationValidatorIT {
 
     private static List<Document> projectionVersions() {
         return IndexSchemaContract.requiredProjectionVersions().entrySet().stream()
-                .sorted(java.util.Map.Entry.comparingByKey())
+                .sorted(Map.Entry.comparingByKey())
                 .map(entry -> new Document("name", entry.getKey()).append("version", entry.getValue()))
                 .toList();
     }

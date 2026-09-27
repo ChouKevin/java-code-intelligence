@@ -1,5 +1,6 @@
 package com.java.semantic.indexer.api;
 
+import com.java.semantic.indexer.job.GitEvidenceJob;
 import com.java.semantic.indexer.job.IndexJob;
 import com.java.semantic.indexer.job.IndexJobId;
 import com.java.semantic.indexer.job.IndexJobPhase;
@@ -122,7 +123,7 @@ class IndexRepositoryControllerTest {
     void comparison_admission_rejects_missing_null_and_invalid_shas_at_the_http_boundary_and_accepts_exact_payload() throws Exception {
         IndexRequestService service = mock(IndexRequestService.class);
         IndexJob comparison = new IndexJob(IndexJobId.create(), RepositoryId.of("orders"), Optional.empty(), IndexJobPhase.ACCEPTED, true,
-                Optional.empty(), false, IndexJobOperation.GIT_COMPARISON, Optional.of(com.java.semantic.indexer.job.GitEvidenceJob.comparison(
+                Optional.empty(), false, IndexJobOperation.GIT_COMPARISON, Optional.of(GitEvidenceJob.comparison(
                         new RepositoryRevision("a".repeat(40)), new RepositoryRevision("b".repeat(40)))));
         String previous = "a".repeat(40);
         String current = "b".repeat(40);

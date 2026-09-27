@@ -3,6 +3,7 @@ package com.java.semantic.mcp;
 import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.model.repository.RepositoryRevision;
 import com.java.semantic.query.application.RevisionOutdatedException;
+import com.java.semantic.query.application.ReviewQueryFacade;
 import com.java.semantic.query.application.SemanticQueryFacade;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.mcp.server.common.autoconfigure.McpServerJsonMapperAutoConfiguration;
@@ -85,8 +86,8 @@ class McpProductionContextContractTest {
                 .withInitializer(new ConfigDataApplicationContextInitializer())
                 .withUserConfiguration(SemanticMcpConfiguration.class)
                 .withBean(SemanticQueryFacade.class, () -> facade)
-                .withBean(com.java.semantic.query.application.ReviewQueryFacade.class,
-                        () -> mock(com.java.semantic.query.application.ReviewQueryFacade.class))
+                .withBean(ReviewQueryFacade.class,
+                        () -> mock(ReviewQueryFacade.class))
                 .withConfiguration(AutoConfigurations.of(JacksonAutoConfiguration.class, McpServerJsonMapperAutoConfiguration.class,
                         McpServerStatelessWebMvcAutoConfiguration.class, McpServerStatelessAutoConfiguration.class));
     }

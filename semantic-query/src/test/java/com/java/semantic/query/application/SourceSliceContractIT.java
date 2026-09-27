@@ -2,6 +2,7 @@ package com.java.semantic.query.application;
 
 import com.java.semantic.model.codefact.CodeFactIdentity;
 import com.java.semantic.model.codefact.CodeFactId;
+import com.java.semantic.model.codefact.PublishedSourceSegment;
 import com.java.semantic.model.codefact.CodeFactReadQuery;
 import com.java.semantic.model.codefact.CodeFactScope;
 import com.java.semantic.model.codefact.ExternalTarget;
@@ -36,6 +37,7 @@ import org.testcontainers.utility.DockerImageName;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -60,7 +62,7 @@ class SourceSliceContractIT extends PublishedMongoITSupport {
             seedSearch(template, relation, "RELATIONS", List.of("charge"));
             CurrentGenerationSelector selector = selector(template, policy());
             SelectedGeneration context = selector.selectCodeFact("orders", REVISION, relation,
-                    CodeFactReadService.requirementsForSearchKinds(java.util.Set.of(relation.kind())));
+                    CodeFactReadService.requirementsForSearchKinds(Set.of(relation.kind())));
             SelectedGenerationGuard guard = guard(template, policy());
             SourceSliceService service = new SourceSliceService(
                     new CurrentSourceQueryService(template, guard, Duration.ofSeconds(2)),
@@ -102,7 +104,7 @@ class SourceSliceContractIT extends PublishedMongoITSupport {
                             List.of("example.events.VideoReady")))));
             CurrentGenerationSelector selector = selector(template, forbiddenMethodPolicy);
             SelectedGeneration context = selector.selectCodeFact("orders", REVISION, relation,
-                    CodeFactReadService.requirementsForSearchKinds(java.util.Set.of(relation.kind())));
+                    CodeFactReadService.requirementsForSearchKinds(Set.of(relation.kind())));
             SelectedGenerationGuard guard = guard(template, forbiddenMethodPolicy);
             SourceSliceService service = new SourceSliceService(
                     new CurrentSourceQueryService(template, guard, Duration.ofSeconds(2)),
@@ -186,7 +188,7 @@ class SourceSliceContractIT extends PublishedMongoITSupport {
             String mapperPath = "src/main/resources/VideoMapper.xml";
             com.java.semantic.model.index.SourceArtifactDocument mapperArtifact = seedSource(template, mapperPath, "<select>");
             CodeFactIdentity mapper = seedMapper(template, mapperPath, mapperArtifact.id());
-            com.java.semantic.model.codefact.PublishedSourceSegment mapperEvidence = service.evidenceSource(context, mapper);
+            PublishedSourceSegment mapperEvidence = service.evidenceSource(context, mapper);
             assertThat(mapperEvidence.content()).isEqualTo("<select>");
             assertThat(mapperEvidence.location().sourceFile()).isEqualTo(mapperPath);
             assertThat(mapperEvidence.location().range()).isEqualTo(new SyntaxRange(new SyntaxPosition(0, 0), new SyntaxPosition(0, 8)));

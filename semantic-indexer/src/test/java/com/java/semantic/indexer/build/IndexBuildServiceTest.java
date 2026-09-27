@@ -1,5 +1,6 @@
 package com.java.semantic.indexer.build;
 
+import com.java.semantic.indexer.analysis.AnalysisTarget;
 import com.java.semantic.indexer.analysis.PreparedAnalysis;
 import com.java.semantic.indexer.analysis.RepositoryAnalysisPreparation;
 import com.java.semantic.indexer.job.IndexJob;
@@ -9,13 +10,17 @@ import com.java.semantic.indexer.job.IndexJobOperation;
 import com.java.semantic.indexer.job.IndexPublicationIntent;
 import com.java.semantic.indexer.job.IndexJobStore;
 import com.java.semantic.indexer.job.IndexJobTarget;
+import com.java.semantic.indexer.incremental.IncrementalIndexPlan;
 import com.java.semantic.indexer.store.MongoGenerationWriter;
 import com.java.semantic.indexer.store.PublicationPort;
 import com.java.semantic.indexer.store.PublicationConflictException;
 import com.java.semantic.indexer.uat.PublicationGate;
 import com.java.semantic.indexer.uat.UatPublicationGate;
+import com.java.semantic.model.index.AnalysisFingerprint;
 import com.java.semantic.model.index.GenerationId;
 import com.java.semantic.model.index.ManifestDigest;
+import com.java.semantic.model.index.SealedGeneration;
+import com.java.semantic.model.index.SemanticAnalysisEvidence;
 import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.model.repository.RepositoryRevision;
 import com.java.semantic.repository.application.RepositoryMutationException;
@@ -26,10 +31,12 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -81,32 +88,32 @@ class IndexBuildServiceTest {
         when(preparation.prepare(any())).thenReturn(preparedAnalysis);
         when(preparedAnalysis.plan()).thenReturn(preparedPlan);
         when(preparedAnalysis.semanticService()).thenReturn(boundSemanticService);
-        com.java.semantic.model.index.AnalysisFingerprint fingerprint = mock(com.java.semantic.model.index.AnalysisFingerprint.class);
+        AnalysisFingerprint fingerprint = mock(AnalysisFingerprint.class);
         when(preparedAnalysis.fingerprint()).thenReturn(fingerprint);
         when(fingerprint.digest()).thenReturn("f".repeat(64));
-        com.java.semantic.model.index.SemanticAnalysisEvidence analysisEvidence = mock(com.java.semantic.model.index.SemanticAnalysisEvidence.class);
+        SemanticAnalysisEvidence analysisEvidence = mock(SemanticAnalysisEvidence.class);
         when(analysisEvidence.fingerprintDigest()).thenReturn("f".repeat(64));
         when(preparedAnalysis.forExportPlan(preparedPlan)).thenReturn(preparedAnalysis);
-        when(incrementalBuilder.assemble(any(), any(), any(), org.mockito.ArgumentMatchers.eq(fingerprint)))
+        when(incrementalBuilder.assemble(any(), any(), any(), eq(fingerprint)))
                 .thenReturn(new IncrementalGenerationBuilder.BuildSelection(
-                        false, mock(com.java.semantic.indexer.incremental.IncrementalIndexPlan.class), preparedPlan));
-        when(exporter.export(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.eq(preparedAnalysis)))
+                        false, mock(IncrementalIndexPlan.class), preparedPlan));
+        when(exporter.export(any(), eq(preparedAnalysis)))
                 .thenReturn(new RepositoryIndexExport(List.of(), analysisEvidence));
-        when(validator.validate(any(), org.mockito.ArgumentMatchers.eq(target.revision()),
-                org.mockito.ArgumentMatchers.eq(target.revision()), org.mockito.ArgumentMatchers.eq(preparedPlan))).thenReturn(validation);
+        when(validator.validate(any(), eq(target.revision()),
+                eq(target.revision()), eq(preparedPlan))).thenReturn(validation);
         IndexBuildService service = new IndexBuildService(planner, exporter, generationWriter, mock(SourceIndexBatchDocumentMapper.class),
                 validator, ignored -> checkout, incrementalBuilder, jobs, publication, gate, preparation);
 
-        com.java.semantic.model.index.SealedGeneration sealed = service.seal(job);
+        SealedGeneration sealed = service.seal(job);
 
-        org.mockito.ArgumentCaptor<com.java.semantic.indexer.analysis.AnalysisTarget> targetCaptor =
-                org.mockito.ArgumentCaptor.forClass(com.java.semantic.indexer.analysis.AnalysisTarget.class);
+        ArgumentCaptor<AnalysisTarget> targetCaptor =
+                ArgumentCaptor.forClass(AnalysisTarget.class);
         verify(preparation).prepare(targetCaptor.capture());
         assertThat(targetCaptor.getValue().snapshot().root()).isEqualTo(checkout.root());
         assertThat(targetCaptor.getValue().snapshot().revision()).isEqualTo(target.revision());
         assertThat(targetCaptor.getValue().jobId()).isEqualTo(job.id().value());
         assertThat(targetCaptor.getValue().stage()).isEqualTo("CODEBASE");
-        verify(exporter).export(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.eq(preparedAnalysis));
+        verify(exporter).export(any(), eq(preparedAnalysis));
         verifyNoInteractions(planner);
         assertThat(sealed.selected().generationId()).isEqualTo(target.generationId());
         verifyNoInteractions(publication);
@@ -146,12 +153,12 @@ class IndexBuildServiceTest {
         ManifestDigest digest = new ManifestDigest("1".repeat(64));
         RepositoryAnalysisPreparation preparation = mock(RepositoryAnalysisPreparation.class);
         PreparedAnalysis preparedAnalysis = mock(PreparedAnalysis.class);
-        com.java.semantic.model.index.AnalysisFingerprint fingerprint = mock(com.java.semantic.model.index.AnalysisFingerprint.class);
+        AnalysisFingerprint fingerprint = mock(AnalysisFingerprint.class);
         when(preparation.prepare(any())).thenReturn(preparedAnalysis);
         when(preparedAnalysis.plan()).thenReturn(plan);
         when(preparedAnalysis.fingerprint()).thenReturn(fingerprint);
         when(fingerprint.digest()).thenReturn("f".repeat(64));
-        com.java.semantic.model.index.SemanticAnalysisEvidence analysisEvidence = mock(com.java.semantic.model.index.SemanticAnalysisEvidence.class);
+        SemanticAnalysisEvidence analysisEvidence = mock(SemanticAnalysisEvidence.class);
         when(analysisEvidence.fingerprintDigest()).thenReturn("f".repeat(64));
         when(preparedAnalysis.forExportPlan(plan)).thenReturn(preparedAnalysis);
         GenerationValidator.ValidationResult result = new GenerationValidator.ValidationResult(digest, Map.of(), List.of());
@@ -161,11 +168,11 @@ class IndexBuildServiceTest {
         IndexBuildService.CheckedOutRepository checkout = new IndexBuildService.CheckedOutRepository(Path.of("."), target.revision());
         when(planner.plan(checkout.root())).thenReturn(plan);
         when(incrementalBuilder.assemble(org.mockito.ArgumentMatchers.eq(job), org.mockito.ArgumentMatchers.any(),
-                org.mockito.ArgumentMatchers.eq(plan), org.mockito.ArgumentMatchers.eq(fingerprint))).thenReturn(selection);
-        when(exporter.export(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any()))
+                eq(plan), eq(fingerprint))).thenReturn(selection);
+        when(exporter.export(any(), any()))
                 .thenReturn(new RepositoryIndexExport(List.of(), analysisEvidence));
         when(validator.validate(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.eq(target.revision()),
-                org.mockito.ArgumentMatchers.eq(target.revision()), org.mockito.ArgumentMatchers.eq(plan))).thenReturn(result);
+                eq(target.revision()), eq(plan))).thenReturn(result);
         when(jobs.prepareBuildPublication(job, digest)).thenReturn(Optional.of(intent));
         return new IndexBuildService(planner, exporter, generationWriter, mapper, validator, ignored -> checkout,
                 incrementalBuilder, jobs, publication, gate, preparation);

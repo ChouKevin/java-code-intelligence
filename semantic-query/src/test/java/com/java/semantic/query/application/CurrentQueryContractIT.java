@@ -44,6 +44,7 @@ import org.testcontainers.utility.DockerImageName;
 
 import java.time.Duration;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -363,7 +364,7 @@ class CurrentQueryContractIT {
 
     private void seedManifest(String repositoryId, String revision, String generationId, String digest, boolean compatible) {
         List<Document> projections = compatible ? IndexSchemaContract.requiredProjectionVersions().entrySet().stream()
-                .sorted(java.util.Map.Entry.comparingByKey())
+                .sorted(Map.Entry.comparingByKey())
                 .map(entry -> new Document("name", entry.getKey()).append("version", entry.getValue()))
                 .toList()
                 : List.of(new Document("name", "SOURCES").append("version", 0));

@@ -66,7 +66,7 @@ class SemanticQueryFacadeDiscoveryTest {
         PublishedDiscoveryQueryService discovery = mock(PublishedDiscoveryQueryService.class);
         when(facts.get(generation, new CodeFactReadQuery(new RepositoryId(REPOSITORY), new RepositoryRevision(REVISION), CodeFactId.from(typeIdentity))))
                 .thenReturn(type);
-        when(discovery.discoverTypeMembers(any(SelectedGeneration.class), any(TypeMemberQuery.class))).thenReturn(new com.java.semantic.model.codefact.TypeMemberResult(generation,
+        when(discovery.discoverTypeMembers(any(SelectedGeneration.class), any(TypeMemberQuery.class))).thenReturn(new TypeMemberResult(generation,
                 new com.java.semantic.model.codefact.TypeMemberQuery(new RepositoryId(REPOSITORY), new RepositoryRevision(REVISION), TYPE,
                         Set.of(CodeFactKind.METHOD), 0, 20),
                 List.of(new com.java.semantic.model.codefact.CodeFactSummary(method.fact(), method.location())), 1, false,

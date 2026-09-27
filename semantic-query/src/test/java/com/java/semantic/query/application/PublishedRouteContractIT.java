@@ -3,6 +3,7 @@ package com.java.semantic.query.application;
 import com.java.semantic.model.codefact.CodeFact;
 import com.java.semantic.model.codefact.CodeFactId;
 import com.java.semantic.model.codefact.CodeFactIdentity;
+import com.java.semantic.model.codefact.PublishedEntryPoint;
 import com.java.semantic.model.codefact.CodeFactKind;
 import com.java.semantic.model.codefact.CodeFactReadQuery;
 import com.java.semantic.model.codefact.CodeFactScope;
@@ -18,11 +19,13 @@ import com.java.semantic.model.codefact.SyntaxPosition;
 import com.java.semantic.model.codefact.SyntaxRange;
 import com.java.semantic.model.index.EntryPointDocument;
 import com.java.semantic.model.index.GenerationId;
+import com.java.semantic.model.index.ManifestDigest;
 import com.java.semantic.model.index.persistence.EntryPointPersistence;
 import com.java.semantic.model.query.SelectedGeneration;
 import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.model.repository.RepositoryRevision;
 import com.java.semantic.query.config.ConfiguredReadPolicy;
+import com.java.semantic.query.config.ReadPolicyProperties;
 import com.mongodb.ConnectionString;
 import com.mongodb.MongoClientSettings;
 import com.mongodb.client.MongoClient;
@@ -39,6 +42,7 @@ import org.testcontainers.utility.DockerImageName;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -64,7 +68,7 @@ class PublishedRouteContractIT extends PublishedMongoITSupport {
             try (MongoClient client = MongoClients.create(settings)) {
                 MongoTemplate template = new MongoTemplate(client, "published_route");
                 SelectedGeneration context = new SelectedGeneration(new RepositoryId("orders"), new RepositoryRevision(REVISION),
-                        new GenerationId("g1"), new com.java.semantic.model.index.ManifestDigest(DIGEST));
+                        new GenerationId("g1"), new ManifestDigest(DIGEST));
                 PublishedEntryPointQueryService service = new PublishedEntryPointQueryService(template,
                         guard(template, policy()), Duration.ofSeconds(2));
 
@@ -108,15 +112,15 @@ class PublishedRouteContractIT extends PublishedMongoITSupport {
             SelectedGeneration context = selector.select("orders", REVISION, SelectedGenerationGuard.ENTRY_POINTS);
             PublishedEntryPointQueryService service = new PublishedEntryPointQueryService(template, guard(template, policy()), Duration.ofSeconds(2));
 
-            java.util.List<com.java.semantic.model.codefact.PublishedEntryPoint> routes = service.findRoutes(context, "orders", REVISION,
+            List<PublishedEntryPoint> routes = service.findRoutes(context, "orders", REVISION,
                     "GET", "/payments/{id}", 0, 20).entryPoints();
             assertThat(routes).extracting(value -> value.factId())
                     .containsExactly(entryPoint.fact().id().value());
             assertThat(service.findRoutes(context, "orders", REVISION, "POST", "/payments/{id}", 0, 20).entryPoints()).isEmpty();
             SelectedGeneration searchContext = selector.selectCodeFact("orders", REVISION, identity,
-                    CodeFactReadService.requirementsForSearchKinds(java.util.Set.of(CodeFactKind.API_ROUTE)));
+                    CodeFactReadService.requirementsForSearchKinds(Set.of(CodeFactKind.API_ROUTE)));
             CodeFactSearchService search = new CodeFactSearchService(template, guard(template, policy()), Duration.ofSeconds(2));
-            com.java.semantic.model.codefact.CodeFactId searchFactId = search.search(searchContext, new CodeFactSearchQuery(
+            CodeFactId searchFactId = search.search(searchContext, new CodeFactSearchQuery(
                     new RepositoryId("orders"), new RepositoryRevision(REVISION), "payment")).facts().getFirst().fact().id();
             CodeFactReadService reader = new CodeFactReadService(template, guard(template, policy()), Duration.ofSeconds(2));
             assertThat(reader.get(searchContext, new CodeFactReadQuery(new RepositoryId("orders"), new RepositoryRevision(REVISION),
@@ -133,7 +137,7 @@ class PublishedRouteContractIT extends PublishedMongoITSupport {
             EntryPointDocument hidden = entryPoint("example.private", "HiddenPayments", "hidden", "/hidden");
             storeEntryPoint(template, hidden, new CodeFactScope("example.api", "Payments", java.util.Optional.of("hidden"),
                     java.util.List.of(), java.util.Optional.of("src/main/java/HiddenPayments.java")));
-            ConfiguredReadPolicy deniedPolicy = policy(new com.java.semantic.query.config.ReadPolicyProperties.PackageRule("orders", "example.private"));
+            ConfiguredReadPolicy deniedPolicy = policy(new ReadPolicyProperties.PackageRule("orders", "example.private"));
             CurrentGenerationSelector deniedSelector = selector(template, deniedPolicy);
             SelectedGeneration deniedContext = deniedSelector.select("orders", REVISION, SelectedGenerationGuard.ENTRY_POINTS);
             PublishedEntryPointQueryService denied = new PublishedEntryPointQueryService(template,

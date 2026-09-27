@@ -1,5 +1,6 @@
 package com.java.semantic.indexer.job;
 
+import com.mongodb.MongoCommandException;
 import com.mongodb.client.MongoClient;
 import com.mongodb.client.MongoClients;
 import com.mongodb.client.MongoDatabase;
@@ -21,6 +22,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
 import org.bson.Document;
 import org.eclipse.jgit.api.Git;
 import org.eclipse.jgit.lib.Constants;
@@ -38,6 +40,7 @@ import org.testcontainers.utility.DockerImageName;
 import tools.jackson.databind.json.JsonMapper;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Runs the separately packaged services against JDT-produced review evidence, then reads it cold. */
 @Tag("jdtls-it")
@@ -259,9 +262,9 @@ class SemanticReviewJourneyIT {
 
     private static void assertReadOnly(String readerUri) {
         try (MongoClient client = MongoClients.create(readerUri)) {
-            org.assertj.core.api.Assertions.assertThatThrownBy(() -> client.getDatabase(DATABASE)
+            assertThatThrownBy(() -> client.getDatabase(DATABASE)
                     .getCollection("read_only_probe").insertOne(new Document("probe", true)))
-                    .isInstanceOf(com.mongodb.MongoCommandException.class);
+                    .isInstanceOf(MongoCommandException.class);
         }
     }
 
@@ -576,7 +579,7 @@ class SemanticReviewJourneyIT {
 
     private record RunningProcess(Process process, Path log) implements AutoCloseable {
         private int await(Duration timeout) throws InterruptedException {
-            assertThat(process.waitFor(timeout.toMillis(), java.util.concurrent.TimeUnit.MILLISECONDS)).isTrue();
+            assertThat(process.waitFor(timeout.toMillis(), TimeUnit.MILLISECONDS)).isTrue();
             return process.exitValue();
         }
 
@@ -585,7 +588,7 @@ class SemanticReviewJourneyIT {
             if (process.isAlive()) {
                 process.destroy();
                 try {
-                    if (!process.waitFor(10, java.util.concurrent.TimeUnit.SECONDS)) {
+                    if (!process.waitFor(10, TimeUnit.SECONDS)) {
                         process.destroyForcibly();
                     }
                 } catch (InterruptedException exception) {

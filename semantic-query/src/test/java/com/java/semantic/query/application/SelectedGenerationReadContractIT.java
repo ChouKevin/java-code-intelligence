@@ -32,7 +32,9 @@ import org.testcontainers.mongodb.MongoDBContainer;
 import org.testcontainers.utility.DockerImageName;
 
 import java.time.Duration;
+import java.util.Date;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 
@@ -134,12 +136,12 @@ class SelectedGenerationReadContractIT extends PublishedMongoITSupport {
 
     private static Document pointer(RepositoryRevision revision, String generationId, String digest) {
         return new Document("revision", revision.value()).append("generationId", generationId).append("manifestDigest", digest)
-                .append("committedJobId", "job-" + generationId).append("publishedAt", new java.util.Date());
+                .append("committedJobId", "job-" + generationId).append("publishedAt", new Date());
     }
 
     private static List<Document> projectionVersions() {
         return IndexSchemaContract.requiredProjectionVersions().entrySet().stream()
-                .sorted(java.util.Map.Entry.comparingByKey())
+                .sorted(Map.Entry.comparingByKey())
                 .map(entry -> new Document("name", entry.getKey()).append("version", entry.getValue()))
                 .toList();
     }

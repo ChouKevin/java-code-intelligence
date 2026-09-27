@@ -3,8 +3,10 @@ package com.java.semantic.query.application;
 import com.java.semantic.model.codefact.AnnotationFact;
 import com.java.semantic.model.codefact.DeclarationResolutionQuery;
 import com.java.semantic.model.codefact.EventListenerQuery;
+import com.java.semantic.model.codefact.EventListenerResult;
 import com.java.semantic.model.codefact.SourceTypeIdentity;
 import com.java.semantic.model.codefact.TypeMemberQuery;
+import com.java.semantic.model.codefact.TypeMemberResult;
 import com.java.semantic.model.codefact.CodeFactKind;
 import com.java.semantic.model.index.SourceIndexScope;
 import com.java.semantic.model.query.SelectedGeneration;
@@ -55,7 +57,7 @@ class PublishedDiscoveryContractIT extends PublishedMongoITSupport {
                     type, "onReady", Optional.empty())).declaration()).isPresent();
             assertThat(service.resolveDeclaration(context, new DeclarationResolutionQuery(new RepositoryId("orders"), new RepositoryRevision(REVISION),
                     type, "localVariable", Optional.empty())).declaration()).isEmpty();
-            com.java.semantic.model.codefact.TypeMemberResult methods = service.discoverTypeMembers(context, new TypeMemberQuery(
+            TypeMemberResult methods = service.discoverTypeMembers(context, new TypeMemberQuery(
                     new RepositoryId("orders"), new RepositoryRevision(REVISION), type, Set.of(CodeFactKind.METHOD), 0, 20));
             assertThat(methods.members()).extracting(member -> member.fact().identity().canonicalForm())
                     .containsExactly(identity.canonicalForm());
@@ -65,11 +67,11 @@ class PublishedDiscoveryContractIT extends PublishedMongoITSupport {
             seedMember(template, type, CodeFactKind.FIELD, "state", 2);
             seedMember(template, type, CodeFactKind.ENUM_CONSTANT, "READY", 3);
             seedMember(template, type, CodeFactKind.RECORD_COMPONENT, "id", 4);
-            com.java.semantic.model.codefact.TypeMemberResult allMembers = service.discoverTypeMembers(context, new TypeMemberQuery(
+            TypeMemberResult allMembers = service.discoverTypeMembers(context, new TypeMemberQuery(
                     new RepositoryId("orders"), new RepositoryRevision(REVISION), type, TypeMemberQuery.MEMBER_KINDS, 0, 20));
             assertThat(allMembers.members()).extracting(member -> member.fact().identity().kind())
                     .containsExactly(CodeFactKind.ENUM_CONSTANT, CodeFactKind.FIELD, CodeFactKind.METHOD, CodeFactKind.RECORD_COMPONENT);
-            com.java.semantic.model.codefact.TypeMemberResult page = service.discoverTypeMembers(context, new TypeMemberQuery(
+            TypeMemberResult page = service.discoverTypeMembers(context, new TypeMemberQuery(
                     new RepositoryId("orders"), new RepositoryRevision(REVISION), type, TypeMemberQuery.MEMBER_KINDS, 1, 2));
             assertThat(page.totalCount()).isEqualTo(4);
             assertThat(page.hasMore()).isTrue();
@@ -106,7 +108,7 @@ class PublishedDiscoveryContractIT extends PublishedMongoITSupport {
                 PublishedDiscoveryQueryService service = new PublishedDiscoveryQueryService(observedTemplate,
                         guard(observedTemplate, policy()), Duration.ofSeconds(2));
 
-                com.java.semantic.model.codefact.EventListenerResult result = service.discoverEventListeners(context, new EventListenerQuery(
+                EventListenerResult result = service.discoverEventListeners(context, new EventListenerQuery(
                         new RepositoryId("orders"), new RepositoryRevision(REVISION), "example.events.VideoReady", 1, 1));
 
                 assertThat(result.totalCount()).isEqualTo(2);
@@ -147,7 +149,7 @@ class PublishedDiscoveryContractIT extends PublishedMongoITSupport {
             PublishedDiscoveryQueryService service = new PublishedDiscoveryQueryService(template,
                     guard(template, deniedPolicy), Duration.ofSeconds(2));
 
-            com.java.semantic.model.codefact.EventListenerResult result = service.discoverEventListeners(context, new EventListenerQuery(
+            EventListenerResult result = service.discoverEventListeners(context, new EventListenerQuery(
                     new RepositoryId("orders"), new RepositoryRevision(REVISION), "example.events.VideoReady", 1, 1));
 
             assertThat(result.totalCount()).isEqualTo(1);

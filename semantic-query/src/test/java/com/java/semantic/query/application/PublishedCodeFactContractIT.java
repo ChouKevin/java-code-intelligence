@@ -2,6 +2,7 @@ package com.java.semantic.query.application;
 
 import com.java.semantic.model.codefact.CodeFactIdentity;
 import com.java.semantic.model.codefact.CodeFact;
+import com.java.semantic.model.codefact.CodeFactDetails;
 import com.java.semantic.model.codefact.CodeFactId;
 import com.java.semantic.model.codefact.CodeFactKind;
 import com.java.semantic.model.codefact.CodeFactScope;
@@ -43,6 +44,7 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -81,12 +83,12 @@ class PublishedCodeFactContractIT extends PublishedMongoITSupport {
                             new Document("name", "SEARCH").append("version", currentVersions.get("SEARCH"))))));
             CurrentGenerationSelector selector = selector(template, policy());
             SelectedGeneration context = selector.select("orders", REVISION,
-                    CodeFactReadService.requirementsForSearchKinds(java.util.Set.of(CodeFactKind.METHOD)));
+                    CodeFactReadService.requirementsForSearchKinds(Set.of(CodeFactKind.METHOD)));
             SelectedGenerationGuard guard = guard(template, policy());
             CodeFactSearchService search = new CodeFactSearchService(template, guard, Duration.ofSeconds(2));
             CodeFactReadService reader = new CodeFactReadService(template, guard, Duration.ofSeconds(2));
             CodeFactSearchQuery query = new CodeFactSearchQuery(new RepositoryId("orders"),
-                    new RepositoryRevision(REVISION), "findPayment", java.util.Set.of(CodeFactKind.METHOD), Optional.empty(), 0, 20);
+                    new RepositoryRevision(REVISION), "findPayment", Set.of(CodeFactKind.METHOD), Optional.empty(), 0, 20);
             CodeFactSearchResult results = search.search(context, query);
 
             assertThat(results.facts()).extracting(summary -> summary.fact().identity()).containsExactly(identity);
@@ -137,7 +139,7 @@ class PublishedCodeFactContractIT extends PublishedMongoITSupport {
                     policy(new ReadPolicyProperties.PackageRule("orders", "example.payment"))), Duration.ofSeconds(2));
             assertThat(denied.search(context, query).facts()).isEmpty();
             CodeFactSearchQuery deniedQuery = new CodeFactSearchQuery(new RepositoryId("orders"), new RepositoryRevision(REVISION),
-                    "findPayment", java.util.Set.of(), java.util.Optional.of("example.payment"), 0, 20);
+                    "findPayment", Set.of(), Optional.of("example.payment"), 0, 20);
             assertThatThrownBy(() -> denied.search(context, deniedQuery))
                     .isInstanceOf(RepositoryNotFoundException.class);
             assertThatThrownBy(() -> new CodeFactSearchQuery(new RepositoryId("orders"), new RepositoryRevision(REVISION),
@@ -172,7 +174,7 @@ class PublishedCodeFactContractIT extends PublishedMongoITSupport {
             CurrentGenerationSelector selector = selector(template, policy());
             CodeFactSearchQuery query = new CodeFactSearchQuery(new RepositoryId("orders"), new RepositoryRevision(REVISION), "charge");
             SelectedGeneration context = selector.select("orders", REVISION,
-                    CodeFactReadService.requirementsForSearchKinds(java.util.Set.of(CodeFactKind.OUTBOUND_API)));
+                    CodeFactReadService.requirementsForSearchKinds(Set.of(CodeFactKind.OUTBOUND_API)));
             CodeFactSearchService service = new CodeFactSearchService(template, guard(template, policy()), Duration.ofSeconds(2));
 
             CodeFactSearchResult result = service.search(context, query);
@@ -195,11 +197,11 @@ class PublishedCodeFactContractIT extends PublishedMongoITSupport {
             CurrentGenerationSelector selector = selector(template, policy());
             CodeFactSearchQuery query = new CodeFactSearchQuery(new RepositoryId("orders"), new RepositoryRevision(REVISION), "feeFormula");
             SelectedGeneration context = selector.select("orders", REVISION,
-                    CodeFactReadService.requirementsForSearchKinds(java.util.Set.of(CodeFactKind.METHOD)));
+                    CodeFactReadService.requirementsForSearchKinds(Set.of(CodeFactKind.METHOD)));
             CodeFactSearchService search = new CodeFactSearchService(template, guard(template, policy()), Duration.ofSeconds(2));
             CodeFactId factId = search.search(context, query).facts().getFirst().fact().id();
             CodeFactReadService reader = new CodeFactReadService(template, guard(template, policy()), Duration.ofSeconds(2));
-            com.java.semantic.model.codefact.CodeFactDetails details = reader.get(context, new CodeFactReadQuery(
+            CodeFactDetails details = reader.get(context, new CodeFactReadQuery(
                     new RepositoryId("orders"), new RepositoryRevision(REVISION), factId));
 
             assertThat(details.fact().identity()).isEqualTo(identity);
@@ -226,7 +228,7 @@ class PublishedCodeFactContractIT extends PublishedMongoITSupport {
                             new Document("name", "SEARCH").append("version", currentVersions.get("SEARCH"))))));
             CurrentGenerationSelector selector = selector(template, policy());
             SelectedGeneration selectedContext = selector.selectCodeFact("orders", REVISION, identity,
-                    CodeFactReadService.requirementsForSearchKinds(java.util.Set.of(identity.kind())));
+                    CodeFactReadService.requirementsForSearchKinds(Set.of(identity.kind())));
             CodeFactSearchService search = new CodeFactSearchService(template, guard(template, policy()), Duration.ofSeconds(2));
             CodeFactReadService reader = new CodeFactReadService(template, guard(template, policy()), Duration.ofSeconds(2));
             CodeFactSearchQuery query = new CodeFactSearchQuery(new RepositoryId("orders"),
@@ -282,13 +284,13 @@ class PublishedCodeFactContractIT extends PublishedMongoITSupport {
                 MongoTemplate observedTemplate = new MongoTemplate(observedClient, invocation.databaseName());
                 CurrentGenerationSelector selector = selector(observedTemplate, policy);
                 SelectedGeneration context = selector.select("orders", REVISION,
-                        CodeFactReadService.requirementsForSearchKinds(java.util.Set.of()));
+                        CodeFactReadService.requirementsForSearchKinds(Set.of()));
                 CodeFactSearchService service = new CodeFactSearchService(observedTemplate, guard(observedTemplate, policy), Duration.ofSeconds(2));
 
                 CodeFactSearchQuery broadQuery = new CodeFactSearchQuery(new RepositoryId("orders"),
                         new RepositoryRevision(REVISION), "findPayment");
                 CodeFactSearchQuery scopedQuery = new CodeFactSearchQuery(new RepositoryId("orders"),
-                        new RepositoryRevision(REVISION), "findPayment", java.util.Set.of(), Optional.of("example.payment"), 0, 20);
+                        new RepositoryRevision(REVISION), "findPayment", Set.of(), Optional.of("example.payment"), 0, 20);
                 CodeFactSearchResult broad = service.search(context, broadQuery);
                 CodeFactSearchResult result = service.search(context, scopedQuery);
 

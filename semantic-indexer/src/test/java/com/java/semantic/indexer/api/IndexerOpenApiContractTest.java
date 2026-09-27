@@ -1,5 +1,6 @@
 package com.java.semantic.indexer.api;
 
+import com.java.semantic.model.review.ReviewComparisonType;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
@@ -64,7 +65,7 @@ class IndexerOpenApiContractTest {
                 .containsExactly("reviewId", "comparisonType", "capturedBaseline", "requestedRevision", "stage",
                         "aGenerationId", "bGenerationId", "comparisonId", "previousSnapshotId", "currentSnapshotId");
         assertThat(IndexRepositoryController.ReviewJobResponse.class.getRecordComponents()[1].getType())
-                .isEqualTo(com.java.semantic.model.review.ReviewComparisonType.class);
+                .isEqualTo(ReviewComparisonType.class);
     }
 
     private static String openApi() throws IOException {

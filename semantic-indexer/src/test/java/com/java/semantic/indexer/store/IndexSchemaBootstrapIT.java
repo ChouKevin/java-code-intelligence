@@ -12,10 +12,14 @@ import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.model.repository.RepositoryRevision;
 import com.java.semantic.repository.application.RepositoryRuntimeRegistry;
 import com.java.semantic.repository.domain.RepositoryRuntime;
+import com.java.semantic.repository.port.RepositoryMutationListener;
 import com.java.semantic.repository.port.GitRepositoryPort;
+import com.mongodb.MongoWriteException;
+import com.mongodb.client.MongoCollection;
 import org.bson.Document;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
+import org.springframework.data.mongodb.core.MongoTemplate;
 import org.testcontainers.mongodb.MongoDBContainer;
 
 import java.util.ArrayList;
@@ -67,14 +71,14 @@ class IndexSchemaBootstrapIT {
     @Test
     void rejects_duplicate_review_ids_within_a_repository_but_allows_the_same_review_id_in_another_repository() {
         try (MongoDBContainer container = MongoSchemaTestSupport.container()) {
-            org.springframework.data.mongodb.core.MongoTemplate template = MongoSchemaTestSupport.template(container);
+            MongoTemplate template = MongoSchemaTestSupport.template(container);
             new IndexSchemaBootstrap(template).bootstrap();
-            com.mongodb.client.MongoCollection<Document> manifests = template.getCollection(IndexCollections.REVIEW_MANIFESTS);
+            MongoCollection<Document> manifests = template.getCollection(IndexCollections.REVIEW_MANIFESTS);
 
             manifests.insertOne(new Document("repoId", "orders").append("reviewId", "review-1"));
 
             assertThatThrownBy(() -> manifests.insertOne(new Document("repoId", "orders").append("reviewId", "review-1")))
-                    .isInstanceOf(com.mongodb.MongoWriteException.class);
+                    .isInstanceOf(MongoWriteException.class);
             assertThatCode(() -> manifests.insertOne(new Document("repoId", "billing").append("reviewId", "review-1")))
                     .doesNotThrowAnyException();
         }
@@ -141,7 +145,7 @@ class IndexSchemaBootstrapIT {
             when(repositories.get(repositoryId)).thenReturn(runtime);
 
             assertThatThrownBy(() -> new GitEvidenceJobHandler(repositories, git, evidence,
-                    mock(com.java.semantic.repository.port.RepositoryMutationListener.class)).prepare(job))
+                    mock(RepositoryMutationListener.class)).prepare(job))
                     .isInstanceOf(IndexSchemaMaintenanceRequiredException.class);
 
             verify(evidence, never()).fail(job);
@@ -169,7 +173,7 @@ class IndexSchemaBootstrapIT {
             when(repositories.get(repositoryId)).thenReturn(runtime);
 
             assertThatThrownBy(() -> new GitEvidenceJobHandler(repositories, git, evidence,
-                    mock(com.java.semantic.repository.port.RepositoryMutationListener.class)).prepare(job))
+                    mock(RepositoryMutationListener.class)).prepare(job))
                     .isInstanceOf(IndexSchemaMaintenanceRequiredException.class)
                     .hasMessageContaining("conflicting index search.search_generation_fact_lookup");
 

@@ -50,7 +50,7 @@ class IndexProjectionContractTest {
         Files.writeString(javaSource, "package example; interface OrderMapper { void find(); }\n");
         Files.writeString(mapper, "<mapper namespace=\"example.OrderMapper\"><select id=\"find\">select 1</select></mapper>");
 
-        java.util.List<SourceIndexBatch> batches = new TestSyntaxRepositoryIndexExporter().export(new RepositoryId("orders"),
+        List<SourceIndexBatch> batches = new TestSyntaxRepositoryIndexExporter().export(new RepositoryId("orders"),
                 new RepositoryRevision("a".repeat(40)), new GenerationId("g1"), new FullIndexPlanner().plan(repository));
 
         assertTrue(batches.stream().flatMap(batch -> batch.symbols().stream())
@@ -70,7 +70,7 @@ class IndexProjectionContractTest {
                 + "class Coordinates { String \uD801\uDC00note = \"😀\"; }\r\n";
         Files.writeString(javaSource, source);
 
-        java.util.List<SourceIndexBatch> batches = new TestSyntaxRepositoryIndexExporter().export(new RepositoryId("payment-service"),
+        List<SourceIndexBatch> batches = new TestSyntaxRepositoryIndexExporter().export(new RepositoryId("payment-service"),
                 new RepositoryRevision("b".repeat(40)), new GenerationId("g2"), new FullIndexPlanner().plan(repository));
 
         SourceIndexBatch batch = batches.getFirst();
@@ -105,7 +105,7 @@ class IndexProjectionContractTest {
                 class CatalogUnavailableException extends RuntimeException { }
                 """);
 
-        java.util.List<SourceIndexBatch> batches = new TestSyntaxRepositoryIndexExporter().export(new RepositoryId("catalog"),
+        List<SourceIndexBatch> batches = new TestSyntaxRepositoryIndexExporter().export(new RepositoryId("catalog"),
                 new RepositoryRevision("c".repeat(40)), new GenerationId("g3"), new FullIndexPlanner().plan(repository));
 
         assertTrue(batches.stream().flatMap(batch -> batch.relations().stream())
@@ -133,7 +133,7 @@ class IndexProjectionContractTest {
         Files.createDirectories(source.getParent());
         Files.writeString(source, "package example; class Broken {");
 
-        java.util.List<SourceIndexBatch> batches = new TestSyntaxRepositoryIndexExporter().export(new RepositoryId("orders"),
+        List<SourceIndexBatch> batches = new TestSyntaxRepositoryIndexExporter().export(new RepositoryId("orders"),
                 new RepositoryRevision("a".repeat(40)), new GenerationId("g1"), new FullIndexPlanner().plan(repository));
 
         assertEquals(1, batches.size());

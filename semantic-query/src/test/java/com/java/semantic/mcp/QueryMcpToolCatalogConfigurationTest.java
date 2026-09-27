@@ -2,6 +2,7 @@ package com.java.semantic.mcp;
 
 import com.java.semantic.model.codefact.CodeFactKind;
 import com.java.semantic.model.codefact.EntryPointKind;
+import com.java.semantic.query.application.ReviewQueryFacade;
 import com.java.semantic.query.application.SemanticQueryContract;
 import com.java.semantic.query.application.SemanticQueryError;
 import com.java.semantic.query.application.SemanticQueryFacade;
@@ -11,6 +12,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import tools.jackson.databind.ObjectMapper;
 
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -30,7 +32,7 @@ class QueryMcpToolCatalogConfigurationTest {
     void publishes_git_discovery_tools_with_closed_paged_input_schemas() {
         QueryMcpToolCatalogConfiguration configuration = new QueryMcpToolCatalogConfiguration();
         List<McpStatelessServerFeatures.SyncToolSpecification> specifications = configuration.mcpQueryToolSpecifications(
-                mock(SemanticQueryFacade.class), mock(com.java.semantic.query.application.ReviewQueryFacade.class), new ObjectMapper());
+                mock(SemanticQueryFacade.class), mock(ReviewQueryFacade.class), new ObjectMapper());
 
         assertEquals(Set.of("list_git_branches", "list_git_commits"), specifications.stream()
                 .map(specification -> specification.tool().name())
@@ -50,7 +52,7 @@ class QueryMcpToolCatalogConfigurationTest {
     void publishes_exactly_the_thirty_approved_tools_and_closed_schemas() {
         QueryMcpToolCatalogConfiguration configuration = new QueryMcpToolCatalogConfiguration();
         List<McpStatelessServerFeatures.SyncToolSpecification> specifications = configuration.mcpQueryToolSpecifications(
-                mock(SemanticQueryFacade.class), mock(com.java.semantic.query.application.ReviewQueryFacade.class), new ObjectMapper());
+                mock(SemanticQueryFacade.class), mock(ReviewQueryFacade.class), new ObjectMapper());
 
         assertEquals(Set.of(
                 "list_repositories", "get_repository", "search_code", "get_fact_source",
@@ -76,7 +78,7 @@ class QueryMcpToolCatalogConfigurationTest {
     void schemas_publish_contract_defaults_bounds_enums_and_identity_fields() {
         QueryMcpToolCatalogConfiguration configuration = new QueryMcpToolCatalogConfiguration();
         List<McpStatelessServerFeatures.SyncToolSpecification> specifications = configuration.mcpQueryToolSpecifications(
-                mock(SemanticQueryFacade.class), mock(com.java.semantic.query.application.ReviewQueryFacade.class), new ObjectMapper());
+                mock(SemanticQueryFacade.class), mock(ReviewQueryFacade.class), new ObjectMapper());
 
         for (String name : Set.of("list_repositories", "search_code", "list_entry_points", "find_api_routes",
                 "find_event_listeners", "list_type_members", "find_method_implementations", "find_references",
@@ -110,7 +112,7 @@ class QueryMcpToolCatalogConfigurationTest {
     void git_evidence_mcp_schemas_match_the_public_string_bounds_and_file_entry_enum() {
         QueryMcpToolCatalogConfiguration configuration = new QueryMcpToolCatalogConfiguration();
         List<McpStatelessServerFeatures.SyncToolSpecification> specifications = configuration.mcpQueryToolSpecifications(
-                mock(SemanticQueryFacade.class), mock(com.java.semantic.query.application.ReviewQueryFacade.class), new ObjectMapper());
+                mock(SemanticQueryFacade.class), mock(ReviewQueryFacade.class), new ObjectMapper());
         Map<String, Object> readProperties = properties(specification(specifications, "read_file").tool().inputSchema());
         Map<String, Object> searchProperties = properties(specification(specifications, "search_text").tool().inputSchema());
         Map<String, Object> fileItem = property(property(properties(specification(specifications, "list_files").tool().outputSchema()), "items"), "items");
@@ -127,7 +129,7 @@ class QueryMcpToolCatalogConfigurationTest {
     void tools_publish_concrete_success_schemas_with_compact_search_coverage_and_operation_specific_nested_items() {
         QueryMcpToolCatalogConfiguration configuration = new QueryMcpToolCatalogConfiguration();
         List<McpStatelessServerFeatures.SyncToolSpecification> specifications = configuration.mcpQueryToolSpecifications(
-                mock(SemanticQueryFacade.class), mock(com.java.semantic.query.application.ReviewQueryFacade.class), new ObjectMapper());
+                mock(SemanticQueryFacade.class), mock(ReviewQueryFacade.class), new ObjectMapper());
 
         for (McpStatelessServerFeatures.SyncToolSpecification specification : specifications) {
             Map<String, Object> outputSchema = specification.tool().outputSchema();
@@ -256,7 +258,7 @@ class QueryMcpToolCatalogConfigurationTest {
         when(facade.getFactSource(any())).thenThrow(new com.java.semantic.query.application.CodeFactNotFoundException());
         QueryMcpToolCatalogConfiguration configuration = new QueryMcpToolCatalogConfiguration();
         McpStatelessServerFeatures.SyncToolSpecification specification = specification(configuration.mcpQueryToolSpecifications(facade,
-                mock(com.java.semantic.query.application.ReviewQueryFacade.class), new ObjectMapper()), "get_fact_source");
+                mock(ReviewQueryFacade.class), new ObjectMapper()), "get_fact_source");
 
         McpSchema.CallToolResult result = specification.callHandler().apply(null, McpSchema.CallToolRequest.builder("get_fact_source").arguments(Map.of(
                 "repositoryId", "orders", "revision", "a".repeat(40), "factId", "b".repeat(64))).build());
@@ -268,8 +270,8 @@ class QueryMcpToolCatalogConfigurationTest {
     @Test
     void dispatches_each_approved_tool_to_its_named_facade_operation() {
         SemanticQueryFacade facade = mock(SemanticQueryFacade.class);
-        com.java.semantic.query.application.ReviewQueryFacade reviewFacade =
-                mock(com.java.semantic.query.application.ReviewQueryFacade.class);
+        ReviewQueryFacade reviewFacade =
+                mock(ReviewQueryFacade.class);
         QueryMcpToolCatalogConfiguration configuration = new QueryMcpToolCatalogConfiguration();
         List<McpStatelessServerFeatures.SyncToolSpecification> specifications = configuration.mcpQueryToolSpecifications(facade,
                 reviewFacade, new ObjectMapper());
@@ -372,7 +374,7 @@ class QueryMcpToolCatalogConfigurationTest {
     }
 
     private static Map<String, Object> reviewRequest(Map<String, Object> arguments) {
-        Map<String, Object> request = new java.util.LinkedHashMap<>(arguments);
+        Map<String, Object> request = new LinkedHashMap<>(arguments);
         request.put("repositoryId", "orders");
         request.put("reviewId", "review-fixture");
         request.put("side", "A");

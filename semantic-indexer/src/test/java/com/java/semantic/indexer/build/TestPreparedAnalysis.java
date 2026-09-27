@@ -9,6 +9,7 @@ import com.java.semantic.repository.domain.RepositorySnapshot;
 import com.java.semantic.semantic.domain.JavaSemanticService;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 final class TestPreparedAnalysis implements PreparedAnalysis {
     private static final String DIGEST = "a".repeat(64);
@@ -45,7 +46,7 @@ final class TestPreparedAnalysis implements PreparedAnalysis {
     @Override public AnalysisFingerprint fingerprint() { return fingerprint; }
     @Override public SemanticAnalysisEvidence readinessEvidence() { return evidence; }
     @Override public JavaSemanticService semanticService() {
-        if (semanticService == null) {
+        if (Objects.isNull(semanticService)) {
             throw new UnsupportedOperationException("test exporter does not use semantic service");
         }
         return semanticService;

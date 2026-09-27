@@ -55,6 +55,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
+import java.util.function.UnaryOperator;
 import java.util.stream.Stream;
 import org.bson.Document;
 import org.junit.jupiter.api.Tag;
@@ -101,7 +102,7 @@ class FullIndexPublicationIT {
     @ParameterizedTest(name = "{0} mapped batch leaves the old pointer current")
     @MethodSource("invalidBatchScenarios")
     void invalid_mapped_batch_never_seals_or_publishes(String scenario,
-                                                       java.util.function.UnaryOperator<SourceIndexBatch> mutation) throws Exception {
+                                                       UnaryOperator<SourceIndexBatch> mutation) throws Exception {
         try (MongoDBContainer container = new MongoDBContainer("mongo:8.0.4")) {
             container.start();
             MongoTemplate template = template(container);
