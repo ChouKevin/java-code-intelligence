@@ -17,6 +17,7 @@ import org.springframework.stereotype.Component;
 import java.io.IOException;
 import java.time.Instant;
 import java.util.Objects;
+import java.util.Optional;
 
 /** Runs Git evidence preparation inside the existing serialized dispatcher. */
 @Component
@@ -77,7 +78,7 @@ public final class GitEvidenceJobHandler {
             git.verifyComparisonEndpoints(runtime.workingTree(), previous, current);
             GitPreparedComparison comparison = git.prepareComparison(runtime.workingTree(), previous, current);
             evidence.publishComparison(requiredJob, comparison, Instant.now(),
-                    new GitEvidenceOwnership(GitPublicationScope.REVIEW, java.util.Optional.of(payload.reviewId())));
+                    new GitEvidenceOwnership(GitPublicationScope.REVIEW, Optional.of(payload.reviewId())));
         } catch (RuntimeException exception) {
             evidence.fail(requiredJob);
             throw exception;

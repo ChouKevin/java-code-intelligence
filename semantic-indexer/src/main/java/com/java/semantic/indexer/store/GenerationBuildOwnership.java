@@ -17,7 +17,7 @@ public final class GenerationBuildOwnership {
 
     public void require(GenerationWriteContext context) {
         GenerationWriteContext requiredContext = Objects.requireNonNull(context, "generation write context is required");
-        if (template.getCollection(IndexCollections.INDEX_JOBS).find(activeFilter(requiredContext)).first() == null) { // cs-allow
+        if (Objects.isNull(template.getCollection(IndexCollections.INDEX_JOBS).find(activeFilter(requiredContext)).first())) {
             throw new IllegalStateException("generation write context is not owned by an active build");
         }
     }

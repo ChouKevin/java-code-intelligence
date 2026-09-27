@@ -1,5 +1,6 @@
 package com.java.semantic.query.application;
 
+import com.java.semantic.model.index.ProjectionRequirements;
 import com.java.semantic.model.query.SelectedGeneration;
 
 import java.util.Comparator;
@@ -146,7 +147,7 @@ public final class SemanticQueryFacade {
     }
 
     private SelectedGeneration select(String repositoryId, String revision,
-                                      com.java.semantic.model.index.ProjectionRequirements requirements) {
+                                      ProjectionRequirements requirements) {
         return Objects.requireNonNull(currentSelector, "current generation selector is required").select(repositoryId, revision, requirements);
     }
 }

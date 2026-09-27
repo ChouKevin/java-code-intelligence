@@ -81,7 +81,7 @@ class IncrementalGenerationBuilderIT {
             MongoGenerationWriter writer = new MongoGenerationWriter(template);
             GenerationValidator validator = new GenerationValidator(template);
             GenerationValidator.ValidationResult parentResult = validator.validate(GenerationValidatorIT.lease(), GenerationValidatorIT.revision(),
-                    GenerationValidatorIT.revision());
+                    GenerationValidatorIT.revision(), GenerationValidatorIT.expectedPlan());
             validator.recordValid(GenerationValidatorIT.lease(), parentResult);
             writer.seal(GenerationValidatorIT.lease(), parentResult.identityDigest().value());
             publishParent(template, parentResult.identityDigest().value());
@@ -110,8 +110,8 @@ class IncrementalGenerationBuilderIT {
                     .append("generationId", "g2").append("sourcePath", "src/Order.java"))).isEqualTo(1L);
             assertThat(template.getCollection(IndexCollections.SYMBOLS).countDocuments(new Document("repoId", "orders")
                     .append("generationId", "g2"))).isEqualTo(1L);
-            assertThat(validator.validate(childLease, new RepositoryRevision("b".repeat(40)), new RepositoryRevision("b".repeat(40))).valid())
-                    .isTrue();
+            assertThat(validator.validate(childLease, new RepositoryRevision("b".repeat(40)),
+                    new RepositoryRevision("b".repeat(40)), selected).valid()).isTrue();
         }
     }
 
@@ -125,7 +125,7 @@ class IncrementalGenerationBuilderIT {
             MongoGenerationWriter writer = new MongoGenerationWriter(template);
             GenerationValidator validator = new GenerationValidator(template);
             GenerationValidator.ValidationResult parentResult = validator.validate(GenerationValidatorIT.lease(), GenerationValidatorIT.revision(),
-                    GenerationValidatorIT.revision());
+                    GenerationValidatorIT.revision(), GenerationValidatorIT.expectedPlan());
             validator.recordValid(GenerationValidatorIT.lease(), parentResult);
             writer.seal(GenerationValidatorIT.lease(), parentResult.identityDigest().value());
             publishParent(template, parentResult.identityDigest().value());
@@ -260,7 +260,7 @@ class IncrementalGenerationBuilderIT {
         MongoGenerationWriter writer = new MongoGenerationWriter(template);
         GenerationValidator validator = new GenerationValidator(template);
         GenerationValidator.ValidationResult parentResult = validator.validate(GenerationValidatorIT.lease(), GenerationValidatorIT.revision(),
-                GenerationValidatorIT.revision());
+                GenerationValidatorIT.revision(), GenerationValidatorIT.expectedPlan());
         validator.recordValid(GenerationValidatorIT.lease(), parentResult);
         writer.seal(GenerationValidatorIT.lease(), parentResult.identityDigest().value());
         publishParent(template, parentResult.identityDigest().value());

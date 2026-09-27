@@ -159,7 +159,7 @@ public class DefaultJdtWorkspaceManager implements JdtWorkspaceManager, Reposito
     public WorkspaceLease acquire(
             AnalysisWorkspaceKey key,
             RepositorySnapshot snapshot,
-            com.java.semantic.repository.domain.ManagedDisposableCheckout managedCheckout) {
+            ManagedDisposableCheckout managedCheckout) {
         Assert.notNull(key, "workspace key is required");
         Assert.notNull(snapshot, "snapshot is required");
         Assert.isTrue(key.repositoryId().equals(snapshot.repositoryId()),

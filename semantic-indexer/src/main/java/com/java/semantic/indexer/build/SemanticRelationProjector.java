@@ -411,7 +411,7 @@ public final class SemanticRelationProjector {
         add(from, RelationKind.CALLS, target, occurrence, CodeFactKind.TYPE_USAGE, repositoryId, revision, generationId, artifact, documents);
     }
 
-    static ExternalTarget.UnresolvedCall unresolvedCall(com.java.semantic.syntax.domain.SyntaxInvocation invocation) {
+    static ExternalTarget.UnresolvedCall unresolvedCall(SyntaxInvocation invocation) {
         String expression = invocation.expression();
         int openingParenthesis = expression.indexOf('(');
         String invocationHead = openingParenthesis < 0 ? expression : expression.substring(0, openingParenthesis);

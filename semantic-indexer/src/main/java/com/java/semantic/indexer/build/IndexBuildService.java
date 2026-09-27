@@ -129,7 +129,7 @@ public final class IndexBuildService {
                 writer.write(batch);
             }
             preparedAnalysis.verifyUnchangedInputs();
-            GenerationValidator.ValidationResult result = validator.validate(context, target.revision(), checkout.revision());
+            GenerationValidator.ValidationResult result = validator.validate(context, target.revision(), checkout.revision(), plan);
             if (!result.valid()) {
                 throw new GenerationValidationException(result.issues().getFirst().code());
             }

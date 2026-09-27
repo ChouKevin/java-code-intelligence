@@ -32,7 +32,7 @@ public final class DefaultReviewEndpointPreparation implements ReviewEndpointPre
         List<SealedGeneration> candidates = List.copyOf(Objects.requireNonNull(reuseCandidates, "reuse candidates are required"));
         IndexBuildService.CheckedOutRepository checkedOut = checkout.checkout(requiredJob);
         AnalysisTarget target = new AnalysisTarget(new RepositorySnapshot(requiredJob.repositoryId(), checkedOut.root(), checkedOut.revision()),
-                requiredJob.id().value(), requiredSide.name());
+                requiredJob.id().value(), requiredSide.name(), checkedOut.managedCheckout());
         for (SealedGeneration candidate : candidates) {
             if (reuse.matches(candidate, target)) {
                 return candidate;

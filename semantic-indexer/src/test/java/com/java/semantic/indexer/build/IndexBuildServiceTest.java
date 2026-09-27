@@ -93,7 +93,7 @@ class IndexBuildServiceTest {
         when(exporter.export(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.eq(preparedAnalysis)))
                 .thenReturn(new RepositoryIndexExport(List.of(), analysisEvidence));
         when(validator.validate(any(), org.mockito.ArgumentMatchers.eq(target.revision()),
-                org.mockito.ArgumentMatchers.eq(target.revision()))).thenReturn(validation);
+                org.mockito.ArgumentMatchers.eq(target.revision()), org.mockito.ArgumentMatchers.eq(preparedPlan))).thenReturn(validation);
         IndexBuildService service = new IndexBuildService(planner, exporter, generationWriter, mock(SourceIndexBatchDocumentMapper.class),
                 validator, ignored -> checkout, incrementalBuilder, jobs, publication, gate, preparation);
 
@@ -165,7 +165,7 @@ class IndexBuildServiceTest {
         when(exporter.export(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any()))
                 .thenReturn(new RepositoryIndexExport(List.of(), analysisEvidence));
         when(validator.validate(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.eq(target.revision()),
-                org.mockito.ArgumentMatchers.eq(target.revision()))).thenReturn(result);
+                org.mockito.ArgumentMatchers.eq(target.revision()), org.mockito.ArgumentMatchers.eq(plan))).thenReturn(result);
         when(jobs.prepareBuildPublication(job, digest)).thenReturn(Optional.of(intent));
         return new IndexBuildService(planner, exporter, generationWriter, mapper, validator, ignored -> checkout,
                 incrementalBuilder, jobs, publication, gate, preparation);

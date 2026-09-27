@@ -9,17 +9,22 @@ import com.java.semantic.model.codefact.EventListenerCandidate;
 import com.java.semantic.model.codefact.EventListenerQuery;
 import com.java.semantic.model.codefact.EventListenerResult;
 import com.java.semantic.model.codefact.MethodTarget;
+import com.java.semantic.model.codefact.SourceTypeIdentity;
 import com.java.semantic.model.codefact.TypeMemberQuery;
 import com.java.semantic.model.codefact.TypeMemberResult;
 import com.java.semantic.model.index.IndexCollections;
+import com.java.semantic.model.index.ProjectionRequirements;
 import com.java.semantic.model.index.SymbolDocument;
 import com.java.semantic.model.query.SelectedGeneration;
+import com.java.semantic.model.repository.RepositoryId;
+import com.java.semantic.model.repository.RepositoryRevision;
 import com.java.semantic.query.config.SearchAccessPlan;
 import com.mongodb.MongoException;
 import com.mongodb.client.FindIterable;
 import com.mongodb.client.model.Filters;
 import com.mongodb.client.model.Sorts;
 import org.bson.Document;
+import org.bson.conversions.Bson;
 import org.springframework.dao.DataAccessException;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.util.StringUtils;
@@ -87,7 +92,7 @@ public final class PublishedDiscoveryQueryService {
         requireContext(selected, requiredQuery.repositoryId(), requiredQuery.revision(), SelectedGenerationGuard.SYMBOLS);
         SearchAccessPlan accessPlan = guard.searchAccessPlan(requiredQuery.repositoryId().value());
         try {
-            org.bson.conversions.Bson filter = accessPlan.authorizedMethod(listenerFilter(selected, requiredQuery));
+            Bson filter = accessPlan.authorizedMethod(listenerFilter(selected, requiredQuery));
             long total = template.getCollection(IndexCollections.SYMBOLS).countDocuments(filter,
                     new com.mongodb.client.model.CountOptions().maxTime(storageTimeout.toMillis(), TimeUnit.MILLISECONDS));
             FindIterable<Document> rows = template.getCollection(IndexCollections.SYMBOLS).find(filter)
@@ -109,7 +114,7 @@ public final class PublishedDiscoveryQueryService {
         }
     }
 
-    private static org.bson.conversions.Bson listenerFilter(SelectedGeneration current, EventListenerQuery query) {
+    private static Bson listenerFilter(SelectedGeneration current, EventListenerQuery query) {
         return Filters.and(Filters.eq("repoId", current.repositoryId().value()), Filters.eq("generationId", current.generationId().value()),
                 Filters.eq("kind", CodeFactKind.METHOD.name()),
                 Filters.eq("fact.identity.canonicalIdentity.parameterTypes", query.eventType()),
@@ -168,7 +173,7 @@ public final class PublishedDiscoveryQueryService {
         SearchAccessPlan accessPlan = guard.searchAccessPlan(requiredQuery.repositoryId().value());
         try {
             List<String> kinds = requiredQuery.kinds().stream().map(Enum::name).sorted().toList();
-            org.bson.conversions.Bson filter = accessPlan.authorized(Filters.and(Filters.eq("repoId", selected.repositoryId().value()),
+            Bson filter = accessPlan.authorized(Filters.and(Filters.eq("repoId", selected.repositoryId().value()),
                     Filters.eq("generationId", selected.generationId().value()), Filters.eq("owner", requiredQuery.sourceType().fullyQualifiedName()),
                     Filters.in("kind", kinds)));
             long total = template.getCollection(IndexCollections.SYMBOLS).countDocuments(filter,
@@ -197,16 +202,14 @@ public final class PublishedDiscoveryQueryService {
         }
     }
 
-    private void requireSourceContext(SelectedGeneration context, com.java.semantic.model.repository.RepositoryId repositoryId,
-                                      com.java.semantic.model.repository.RepositoryRevision revision,
-                                      com.java.semantic.model.codefact.SourceTypeIdentity sourceType) {
+    private void requireSourceContext(SelectedGeneration context, RepositoryId repositoryId,
+                                      RepositoryRevision revision, SourceTypeIdentity sourceType) {
         guard.requireSourceVisible(context, sourceType);
         requireContext(context, repositoryId, revision, SelectedGenerationGuard.SYMBOLS);
     }
 
-    private void requireContext(SelectedGeneration context, com.java.semantic.model.repository.RepositoryId repositoryId,
-                                com.java.semantic.model.repository.RepositoryRevision revision,
-                                com.java.semantic.model.index.ProjectionRequirements requirements) {
+    private void requireContext(SelectedGeneration context, RepositoryId repositoryId,
+                                RepositoryRevision revision, ProjectionRequirements requirements) {
         if (!context.repositoryId().equals(repositoryId) || !context.revision().equals(revision)) {
             throw new IllegalArgumentException("query repository and revision must match the selected generation");
         }

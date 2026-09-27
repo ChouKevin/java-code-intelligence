@@ -6,6 +6,8 @@ import com.java.semantic.indexer.job.IndexJobOperation;
 import com.java.semantic.indexer.job.IndexJobStore;
 import com.java.semantic.indexer.job.ReviewJobPayload;
 import com.java.semantic.indexer.job.ReviewPreparationStage;
+import com.java.semantic.indexer.job.IndexJobPhase;
+import com.java.semantic.indexer.job.IndexJobTarget;
 import com.java.semantic.model.index.AnalysisFingerprint;
 import com.java.semantic.model.index.AnalysisInputs;
 import com.java.semantic.model.index.GenerationId;
@@ -15,6 +17,7 @@ import com.java.semantic.model.index.SealedGeneration;
 import com.java.semantic.model.index.SemanticAnalysisEvidence;
 import com.java.semantic.model.query.SelectedGeneration;
 import com.java.semantic.model.repository.RepositoryRevision;
+import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.model.review.ReviewSide;
 import java.util.ArrayList;
 import java.util.List;
@@ -107,7 +110,7 @@ public final class ReviewPreparationService {
     }
 
     private List<SealedGeneration> sealedCandidates(IndexJob job) {
-        com.java.semantic.indexer.job.IndexJobTarget target = job.target().orElseThrow();
+        IndexJobTarget target = job.target().orElseThrow();
         List<SealedGeneration> candidates = new ArrayList<>();
         template.getCollection(IndexCollections.GENERATION_MANIFESTS).find(new Document("repoId", job.repositoryId().value())
                 .append("sourceRevision", target.revision().value()).append("writeState", "SEALED_VALID"))
@@ -121,7 +124,7 @@ public final class ReviewPreparationService {
         return List.copyOf(candidates);
     }
 
-    private SealedGeneration sealedFromManifest(com.java.semantic.model.repository.RepositoryId repositoryId,
+    private SealedGeneration sealedFromManifest(RepositoryId repositoryId,
                                                 RepositoryRevision revision, Document manifest) {
         Document inputs = manifest.get("analysisInputs", Document.class);
         String storedFingerprint = manifest.getString("analysisFingerprint");
@@ -141,7 +144,7 @@ public final class ReviewPreparationService {
     private static IndexJob requireRunningReview(IndexJob job) {
         IndexJob requiredJob = Objects.requireNonNull(job, "review job is required");
         if (requiredJob.operation() != IndexJobOperation.REVIEW || !requiredJob.active()
-                || requiredJob.phase() != com.java.semantic.indexer.job.IndexJobPhase.RUNNING
+                || requiredJob.phase() != IndexJobPhase.RUNNING
                 || requiredJob.review().orElseThrow().stage() != ReviewPreparationStage.PREPARING_A) {
             throw new IllegalArgumentException("review preparation requires its active PREPARING_A owner");
         }

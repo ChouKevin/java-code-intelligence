@@ -31,6 +31,7 @@ import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Profile;
+import org.springframework.core.env.Environment;
 import org.springframework.data.mongodb.core.MongoTemplate;
 
 /** Wires job-scoped build assembly and dispatch configuration. */
@@ -52,7 +53,7 @@ public class IndexerBuildConfiguration {
     public AnalysisReuseVerifier analysisReuseVerifier(JdtWorkspaceManager workspaces, JdtLsEffectiveEnvironmentInspector inspector) {
         return new ConservativeAnalysisReuseVerifier(target -> {
             try (WorkspaceLease lease = workspaces.acquire(new AnalysisWorkspaceKey(target.snapshot().repositoryId(),
-                    target.snapshot().revision(), target.jobId(), target.stage()), target.snapshot())) {
+                    target.snapshot().revision(), target.jobId(), target.stage()), target.snapshot(), target.managedCheckout())) {
                 return Optional.of(inspector.inspect(lease.session(), target.snapshot()));
             } catch (RuntimeException exception) {
                 return Optional.empty();
@@ -79,7 +80,7 @@ public class IndexerBuildConfiguration {
     @Bean
     public ReviewEndpointPreparationPort reviewEndpointPreparationPort(ExactRepositoryCheckout checkout,
                                                                          RepositoryBuildRunner buildRunner,
-                                                                         com.java.semantic.indexer.analysis.AnalysisReuseVerifier reuseVerifier) {
+                                                                         AnalysisReuseVerifier reuseVerifier) {
         return new DefaultReviewEndpointPreparation(checkout, buildRunner, reuseVerifier);
     }
 
@@ -106,7 +107,7 @@ public class IndexerBuildConfiguration {
 
     @Bean
     @Profile("uat")
-    public UatPublicationGate uatPublicationGate(org.springframework.core.env.Environment environment) {
+    public UatPublicationGate uatPublicationGate(Environment environment) {
         Duration timeout = environment.getProperty("semantic.uat.publication-timeout", Duration.class, Duration.ofSeconds(30));
         return new UatPublicationGate(timeout);
     }

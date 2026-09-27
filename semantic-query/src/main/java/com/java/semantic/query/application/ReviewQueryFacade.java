@@ -18,6 +18,8 @@ import com.java.semantic.query.config.SearchAccessPlan;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.SortedSet;
+import java.util.TreeSet;
 
 /** Selects immutable READY review evidence once and delegates semantic work to the selected-generation service. */
 public final class ReviewQueryFacade {
@@ -181,7 +183,7 @@ public final class ReviewQueryFacade {
     private ReviewQueryContract.ReviewCoverage coverage(SelectedGeneration selected, SemanticAnalysisEvidence evidence) {
         SearchAccessPlan accessPlan = guard.searchAccessPlan(selected.repositoryId().value());
         SourceIndexCoverage sourceCoverage = coverageReader.coverage(selected, accessPlan, Optional.empty(), Optional.empty());
-        java.util.SortedSet<String> limitations = new java.util.TreeSet<>();
+        SortedSet<String> limitations = new TreeSet<>();
         sourceCoverage.issues().stream().map(SourceIndexIssue::code).forEach(limitations::add);
         for (SemanticAnalysisEvidence.Limitation limitation : evidence.limitations()) {
             if (limitation.sourcePath().isEmpty() || coverageReader.coverage(selected, accessPlan, Optional.empty(),

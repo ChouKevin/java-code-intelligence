@@ -6,6 +6,7 @@ import com.java.semantic.model.git.GitPublicationScope;
 import com.java.semantic.model.git.GitSnapshotId;
 import com.java.semantic.model.index.GenerationId;
 import com.java.semantic.model.index.IndexCollections;
+import com.java.semantic.model.index.IndexSchemaContract;
 import com.java.semantic.model.index.ManifestDigest;
 import com.java.semantic.model.index.PublishedGenerationPointer;
 import com.java.semantic.model.index.SealedGeneration;
@@ -113,7 +114,7 @@ public final class ReviewManifestReadService {
     private ReviewManifestDocument decodeReady(Document document, RepositoryId repositoryId, ReviewId reviewId) {
         try {
             if (!repositoryId.value().equals(requiredText(document, "repoId")) || !reviewId.value().equals(requiredText(document, "reviewId"))
-                    || requiredInteger(document, "reviewContractVersion") != com.java.semantic.model.index.IndexSchemaContract.REVIEW_MANIFEST_VERSION
+                    || requiredInteger(document, "reviewContractVersion") != IndexSchemaContract.REVIEW_MANIFEST_VERSION
                     || ReviewComparisonType.CURRENT_TO_COMMIT != ReviewComparisonType.valueOf(requiredText(document, "comparisonType"))) {
                 throw new IndexContractMismatchException();
             }

@@ -94,3 +94,24 @@ Each Git comparison continues to write its own eligible snapshot text. A semanti
 generation reused for A or B does not deduplicate the comparison's previous or
 current snapshot. Retention capacity must account for that duplication until a
 separately designed storage contract changes it.
+
+## Analyzer policy changes within schema 3
+
+The Indexer hashes the explicit analyzer policy `semantic-indexer-analysis:1`
+into `analyzerDigest`. Advance this policy version when source planning,
+extraction, or semantic interpretation changes, even if persisted document
+shapes do not. A Java implementation class name is not an analyzer version.
+
+Generation reuse and incremental-parent selection require the resulting exact
+analysis fingerprint. Generations produced with the earlier unversioned
+class-name identity are therefore not reused by the corrected analyzer.
+Rebuild affected current generations through ordinary indexing and prepare new
+reviews; never rewrite the fingerprints or payloads of immutable old reviews.
+An analyzer-policy change alone does not require schema bootstrap or a volume
+reset. Persisted shape changes still follow the coordinated cutover above.
+
+The corrected planner includes supported mapper XML in imported production
+resource roots, while JDT declaration proof applies to Java-bearing roots.
+Before sealing, validation compares the complete prepared source inventory,
+including source artifact identities, with persisted outputs rather than
+inferring completeness from whichever files happened to be exported.

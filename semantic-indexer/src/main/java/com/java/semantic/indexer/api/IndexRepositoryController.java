@@ -4,8 +4,13 @@ import com.java.semantic.indexer.job.IndexJob;
 import com.java.semantic.indexer.job.IndexJobId;
 import com.java.semantic.indexer.job.IndexPublicationState;
 import com.java.semantic.indexer.job.IndexRequestService;
+import com.java.semantic.indexer.job.IndexJobTarget;
+import com.java.semantic.indexer.job.ReviewJobPayload;
+import com.java.semantic.model.git.GitComparisonId;
+import com.java.semantic.model.git.GitSnapshotId;
 import com.java.semantic.model.index.PublishedGenerationPointer;
 import com.java.semantic.model.repository.RepositoryId;
+import com.java.semantic.model.repository.RepositoryRevision;
 import com.java.semantic.model.review.ReviewComparisonType;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -19,6 +24,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.time.Instant;
 import java.util.Objects;
 import java.util.Optional;
 
@@ -65,7 +71,7 @@ public final class IndexRepositoryController {
 
     @PostMapping("/reviews")
     public ResponseEntity<IndexJobResponse> review(@PathVariable String repoId, @Valid @RequestBody ReviewIndexRequest request) {
-        return accepted(requests.review(RepositoryId.of(repoId), com.java.semantic.model.repository.RepositoryRevision.ofSha(request.revision())));
+        return accepted(requests.review(RepositoryId.of(repoId), RepositoryRevision.ofSha(request.revision())));
     }
 
     @PostMapping("/rebuild")
@@ -122,10 +128,10 @@ public final class IndexRepositoryController {
                     job.failureCategory().map(Enum::name).orElse(null),
                     currentPointer.map(GenerationPointerResponse::from).orElse(null),
                     job.gitEvidence().flatMap(payload -> payload.evidenceId().map(id -> new GitEvidenceResultResponse(id.value(), payload.branch().orElse(null),
-                            payload.revision().map(com.java.semantic.model.repository.RepositoryRevision::value).orElse(null),
+                            payload.revision().map(RepositoryRevision::value).orElse(null),
                             payload.previousRevision().isPresent() ? id.value() : null,
-                            payload.previousSnapshotId().map(com.java.semantic.model.git.GitSnapshotId::value).orElse(null),
-                            payload.currentSnapshotId().map(com.java.semantic.model.git.GitSnapshotId::value).orElse(null))))
+                            payload.previousSnapshotId().map(GitSnapshotId::value).orElse(null),
+                            payload.currentSnapshotId().map(GitSnapshotId::value).orElse(null))))
                             .orElse(null),
                     job.review().map(ReviewJobResponse::from).orElse(null));
         }
@@ -137,25 +143,25 @@ public final class IndexRepositoryController {
     public record ReviewJobResponse(String reviewId, ReviewComparisonType comparisonType, GenerationPointerResponse capturedBaseline,
                                     String requestedRevision, String stage, String aGenerationId, String bGenerationId,
                                     String comparisonId, String previousSnapshotId, String currentSnapshotId) {
-        static ReviewJobResponse from(com.java.semantic.indexer.job.ReviewJobPayload review) {
+        static ReviewJobResponse from(ReviewJobPayload review) {
             return new ReviewJobResponse(review.reviewId().value(), ReviewComparisonType.CURRENT_TO_COMMIT,
                     GenerationPointerResponse.from(review.baseline().pointer()), review.requestedRevision().value(), review.stage().name(),
                     review.a().map(generation -> generation.selected().generationId().value()).orElse(null),
                     review.b().map(generation -> generation.selected().generationId().value()).orElse(null),
-                    review.comparisonId().map(com.java.semantic.model.git.GitComparisonId::value).orElse(null),
-                    review.previousSnapshotId().map(com.java.semantic.model.git.GitSnapshotId::value).orElse(null),
-                    review.currentSnapshotId().map(com.java.semantic.model.git.GitSnapshotId::value).orElse(null));
+                    review.comparisonId().map(GitComparisonId::value).orElse(null),
+                    review.previousSnapshotId().map(GitSnapshotId::value).orElse(null),
+                    review.currentSnapshotId().map(GitSnapshotId::value).orElse(null));
         }
     }
 
     public record IndexJobTargetResponse(String revision, String generationId, long generation) {
-        static IndexJobTargetResponse from(com.java.semantic.indexer.job.IndexJobTarget target) {
+        static IndexJobTargetResponse from(IndexJobTarget target) {
             return new IndexJobTargetResponse(target.revision().value(), target.generationId().value(), target.generation());
         }
     }
 
     public record GenerationPointerResponse(String revision, String generationId, String manifestDigest, String committedJobId,
-                                            java.time.Instant publishedAt) {
+                                            Instant publishedAt) {
         static GenerationPointerResponse from(PublishedGenerationPointer pointer) {
             return new GenerationPointerResponse(pointer.revision().value(), pointer.generationId().value(),
                     pointer.manifestDigest().value(), pointer.committedJobId(), pointer.publishedAt());

@@ -18,8 +18,10 @@ import com.java.semantic.model.review.ReviewEndpoint;
 import com.java.semantic.model.review.ReviewManifestDocument;
 import com.java.semantic.model.review.ReviewState;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 import org.bson.Document;
 import org.springframework.stereotype.Component;
 import org.springframework.data.mongodb.core.MongoTemplate;
@@ -90,8 +92,8 @@ public final class ReviewReadinessValidator {
         return new ReviewManifestDocument(job.repositoryId(), payload.reviewId(), job.id().value(),
                 IndexSchemaContract.REVIEW_MANIFEST_VERSION, ReviewState.READY, ReviewComparisonType.CURRENT_TO_COMMIT,
                 payload.baseline(), payload.requestedRevision(),
-                java.util.Optional.of(new ReviewEndpoint(a, previousSnapshotId)), java.util.Optional.of(new ReviewEndpoint(b, currentSnapshotId)),
-                java.util.Optional.of(comparisonId), Instant.now(), java.util.Optional.of(Instant.now()), java.util.Optional.empty());
+                Optional.of(new ReviewEndpoint(a, previousSnapshotId)), Optional.of(new ReviewEndpoint(b, currentSnapshotId)),
+                Optional.of(comparisonId), Instant.now(), Optional.of(Instant.now()), Optional.empty());
     }
 
     private void validateGeneration(IndexJob job, SealedGeneration generation, GitSnapshotId snapshotId) {
@@ -109,7 +111,7 @@ public final class ReviewReadinessValidator {
             throw mismatch("review generation persisted semantic graph does not match its sealed identity");
         }
         List<Document> sources = template.getCollection(IndexCollections.GENERATION_FILES).find(new Document("repoId", job.repositoryId().value())
-                .append("generationId", generation.selected().generationId().value())).into(new java.util.ArrayList<>());
+                .append("generationId", generation.selected().generationId().value())).into(new ArrayList<>());
         for (Document source : sources) {
             Document snapshotFile = template.getCollection(IndexCollections.GIT_SNAPSHOT_FILES).find(new Document("repoId", job.repositoryId().value())
                     .append("snapshotId", snapshotId.value()).append("path", source.getString("sourcePath"))

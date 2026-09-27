@@ -21,11 +21,13 @@ import com.java.semantic.model.codefact.RelationTarget;
 import com.java.semantic.model.codefact.SourceTypeIdentity;
 import com.java.semantic.model.codefact.TypeMemberQuery;
 import com.java.semantic.model.codefact.TypeMemberResult;
+import com.java.semantic.model.index.RelationDocument;
 import com.java.semantic.model.query.PublishedRelationQuery;
 import com.java.semantic.model.query.PublishedRelationResult;
 import com.java.semantic.model.query.SelectedGeneration;
 import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.model.repository.RepositoryRevision;
+import org.springframework.data.mongodb.core.MongoTemplate;
 
 import java.time.Duration;
 import java.util.ArrayList;
@@ -67,7 +69,7 @@ public final class SelectedSemanticQueryService {
         this.relationQueryService = Objects.requireNonNull(relationQueryService, "relation query service is required");
     }
 
-    public static SelectedSemanticQueryService create(org.springframework.data.mongodb.core.MongoTemplate template,
+    public static SelectedSemanticQueryService create(MongoTemplate template,
                                                        SelectedGenerationGuard guard, Duration storageTimeout) {
         CodeFactReadService factReader = new CodeFactReadService(template, guard, storageTimeout);
         CurrentSourceQueryService sourceReader = new CurrentSourceQueryService(template, guard, storageTimeout);
@@ -168,7 +170,7 @@ public final class SelectedSemanticQueryService {
         PublishedRelationResult result = relationQueryService.findImplementations(context,
                 relationQuery(requiredRequest, requireRelationTarget(context, requiredRequest, FactKindPolicy.METHOD_IMPLEMENTATIONS)));
         List<SemanticQueryContract.ImplementationItem> items = new ArrayList<>();
-        for (com.java.semantic.model.index.RelationDocument relation : result.relations()) {
+        for (RelationDocument relation : result.relations()) {
             items.add(new SemanticQueryContract.ImplementationItem(programElement(context, relation.from()), relation.kind()));
         }
         return relationCollection(result, requiredRequest, items);
@@ -179,7 +181,7 @@ public final class SelectedSemanticQueryService {
         PublishedRelationResult result = relationQueryService.findReferences(context,
                 relationQuery(requiredRequest, requireRelationTarget(context, requiredRequest, FactKindPolicy.REFERENCE_TARGETS)));
         List<SemanticQueryContract.ReferenceItem> items = new ArrayList<>();
-        for (com.java.semantic.model.index.RelationDocument relation : result.relations()) {
+        for (RelationDocument relation : result.relations()) {
             items.add(new SemanticQueryContract.ReferenceItem(programElement(context, relation.from()), callSite(context, relation)));
         }
         return relationCollection(result, requiredRequest, items);
@@ -190,7 +192,7 @@ public final class SelectedSemanticQueryService {
         PublishedRelationResult result = relationQueryService.findCallers(context,
                 relationQuery(requiredRequest, requireRelationTarget(context, requiredRequest, FactKindPolicy.CALLERS)));
         List<SemanticQueryContract.CallerItem> items = new ArrayList<>();
-        for (com.java.semantic.model.index.RelationDocument relation : result.relations()) {
+        for (RelationDocument relation : result.relations()) {
             items.add(new SemanticQueryContract.CallerItem(programElement(context, relation.from()), callSite(context, relation)));
         }
         return relationCollection(result, requiredRequest, items);
@@ -201,7 +203,7 @@ public final class SelectedSemanticQueryService {
         PublishedRelationResult result = relationQueryService.findCallees(context,
                 relationQuery(requiredRequest, requireRelationTarget(context, requiredRequest, FactKindPolicy.CALLEES)));
         List<SemanticQueryContract.CalleeItem> items = new ArrayList<>();
-        for (com.java.semantic.model.index.RelationDocument relation : result.relations()) {
+        for (RelationDocument relation : result.relations()) {
             items.add(new SemanticQueryContract.CalleeItem(callee(context, relation.target()), callSite(context, relation),
                     calleeResolutionStatus(relation.target())));
         }
@@ -268,7 +270,7 @@ public final class SelectedSemanticQueryService {
     }
 
     private SemanticQueryContract.RelationSite callSite(SelectedGeneration context,
-                                                        com.java.semantic.model.index.RelationDocument relation) {
+                                                        RelationDocument relation) {
         FactSourceSlice source = sourceSliceService.factSource(context, readQuery(context, relation.fact().id().value()), 0);
         return new SemanticQueryContract.RelationSite(relation.fact().id().value(),
                 SourceSnippetMapper.toSnippet(source.sourceRange(), source.fileContent()));

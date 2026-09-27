@@ -5,6 +5,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 import com.java.semantic.syntax.domain.EntryPointClass;
@@ -52,11 +53,11 @@ public class JdtSyntaxExtractionService implements SyntaxExtractionService {
 
     @Override
     public RepositorySyntax extract(Path repositoryRoot) {
-        return extract(repositoryRoot, sourceRootLocator.sourceRootsOf(repositoryRoot), java.util.Map.of());
+        return extract(repositoryRoot, sourceRootLocator.sourceRootsOf(repositoryRoot), Map.of());
     }
 
     public RepositorySyntax extract(
-            Path repositoryRoot, List<Path> sourceRoots, java.util.Map<String, String> effectiveCompilerOptions) {
+            Path repositoryRoot, List<Path> sourceRoots, Map<String, String> effectiveCompilerOptions) {
         if (CollectionUtils.isEmpty(sourceRoots)) {
             log.warn("Syntax extraction skipped category={}", "JAVA_SOURCE_ROOTS_NOT_FOUND");
             return RepositorySyntax.empty();

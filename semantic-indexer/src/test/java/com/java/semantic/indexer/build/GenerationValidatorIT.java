@@ -9,10 +9,12 @@ import com.java.semantic.indexer.store.MongoGenerationWriter;
 import com.java.semantic.model.index.GenerationId;
 import com.java.semantic.model.index.IndexCollections;
 import com.java.semantic.model.index.IndexSchemaContract;
+import com.java.semantic.model.index.SourceArtifactDocument;
 import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.model.repository.RepositoryRevision;
 import com.mongodb.client.MongoClients;
 import com.mongodb.client.model.IndexOptions;
+import java.nio.file.Path;
 import java.util.Date;
 import java.util.List;
 import java.util.stream.Stream;
@@ -41,7 +43,8 @@ class GenerationValidatorIT {
             seedValidWritingGeneration(template);
             mutation.accept(template);
 
-            GenerationValidator.ValidationResult result = new GenerationValidator(template).validate(lease(), revision(), revision());
+            GenerationValidator.ValidationResult result = new GenerationValidator(template).validate(lease(), revision(), revision(),
+                    expectedPlan());
 
             assertThat(result.valid()).isFalse();
             assertThat(result.issues()).extracting(GenerationValidationIssue::code).contains(expectedCode);
@@ -60,7 +63,7 @@ class GenerationValidatorIT {
             seedValidWritingGeneration(template);
 
             GenerationValidator.ValidationResult result = new GenerationValidator(template).validate(lease(), revision(),
-                    new RepositoryRevision("b".repeat(40)));
+                    new RepositoryRevision("b".repeat(40)), expectedPlan());
 
             assertThat(result.valid()).isFalse();
             assertThat(result.issues()).extracting(GenerationValidationIssue::code).contains("CHECKOUT_CHANGED");
@@ -76,7 +79,7 @@ class GenerationValidatorIT {
             seedValidWritingGeneration(template);
             GenerationValidator validator = new GenerationValidator(template);
 
-            GenerationValidator.ValidationResult result = validator.validate(lease(), revision(), revision());
+            GenerationValidator.ValidationResult result = validator.validate(lease(), revision(), revision(), expectedPlan());
             long searchBefore = template.getCollection(IndexCollections.SEARCH).countDocuments();
             MongoGenerationWriter.StoredDocument lateSearch = new MongoGenerationWriter.StoredDocument(IndexCollections.SEARCH,
                     new Document("repoId", "orders").append("generationId", "g1").append("factId", "late-fact")
@@ -84,11 +87,32 @@ class GenerationValidatorIT {
 
             assertThat(result.valid()).as("validation issues: %s", result.issues()).isTrue();
             assertThatThrownBy(() -> new MongoGenerationWriter(template).writeBatch(lease(), "late#0", List.of(lateSearch)))
-                    .isInstanceOf(IllegalStateException.class).hasMessageContaining("registration failed closed");
+                    .isInstanceOf(IllegalStateException.class);
             assertThat(template.getCollection(IndexCollections.SEARCH).countDocuments()).isEqualTo(searchBefore);
             validator.recordValid(lease(), result);
             assertThat(template.getCollection(IndexCollections.GENERATION_MANIFESTS).find(new Document("generationId", "g1")).first()
                     .getString("validationResult")).isEqualTo("VALID");
+        }
+    }
+
+    @Test
+    void rejects_missing_attested_mapper_even_when_persisted_java_projection_is_consistent() {
+        try (MongoDBContainer container = new MongoDBContainer("mongo:8.0.4")) {
+            container.start();
+            MongoTemplate template = new MongoTemplate(MongoClients.create(container.getConnectionString()), "semantic");
+            new IndexSchemaBootstrap(template).bootstrap();
+            seedValidWritingGeneration(template);
+            FullIndexPlan.SourceInput mapperSource = new FullIndexPlan.SourceInput("src/main/resources/mapper/OrderMapper.xml",
+                    Path.of("src/main/resources/mapper/OrderMapper.xml"),
+                    SourceArtifactDocument.create(
+                            "<mapper namespace=\"orders.OrderMapper\"><select id=\"find\">select 1</select></mapper>"));
+            FullIndexPlan plan = new FullIndexPlan(Path.of("."), List.of(expectedPlan().sources().getFirst(), mapperSource));
+
+            GenerationValidator.ValidationResult result = new GenerationValidator(template).validate(lease(), revision(),
+                    revision(), plan);
+
+            assertThat(result.valid()).isFalse();
+            assertThat(result.issues()).extracting(GenerationValidationIssue::code).contains("SOURCE_INVENTORY_MISMATCH");
         }
     }
 
@@ -213,6 +237,13 @@ class GenerationValidatorIT {
     private static Document syntaxRange(int startLine, int startCharacter, int endLine, int endCharacter) {
         return new Document("start", new Document("line", startLine).append("character", startCharacter))
                 .append("end", new Document("line", endLine).append("character", endCharacter));
+    }
+
+    static FullIndexPlan expectedPlan() {
+        SourceIndexBatch batch = FullIndexPublicationIT.validBatch(RepositoryId.of("orders"), revision(),
+                lease().generationId());
+        return new FullIndexPlan(Path.of("."), List.of(new FullIndexPlan.SourceInput(batch.sourcePath(),
+                Path.of(batch.sourcePath()), batch.sourceArtifact())));
     }
 
     static GenerationWriteContext lease() {

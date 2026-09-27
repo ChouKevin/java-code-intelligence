@@ -2,10 +2,17 @@ package com.java.semantic.semantic.adapter.jdtls;
 
 import com.java.semantic.config.JdtLsProperties;
 import com.java.semantic.indexer.analysis.AnalysisTarget;
+import com.java.semantic.indexer.analysis.ConservativeAnalysisReuseVerifier;
 import com.java.semantic.indexer.analysis.DefaultRepositoryAnalysisPreparation;
 import com.java.semantic.indexer.analysis.PreparedAnalysis;
 import com.java.semantic.indexer.build.FullIndexPlanner;
+import com.java.semantic.model.index.AnalysisFingerprint;
 import com.java.semantic.model.index.AnalysisInputs;
+import com.java.semantic.model.index.GenerationId;
+import com.java.semantic.model.index.ManifestDigest;
+import com.java.semantic.model.index.SealedGeneration;
+import com.java.semantic.model.index.SemanticAnalysisEvidence;
+import com.java.semantic.model.query.SelectedGeneration;
 import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.model.repository.RepositoryRevision;
 import com.java.semantic.repository.domain.RepositorySnapshot;
@@ -23,6 +30,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
+import java.util.Optional;
 import java.util.jar.JarEntry;
 import java.util.jar.JarOutputStream;
 import javax.tools.JavaCompiler;
@@ -114,6 +122,23 @@ class EffectiveEnvironmentJdtLsIT {
     }
 
     @Test
+    void proves_a_deep_package_private_declaration_in_a_modular_imported_root() throws Exception {
+        Path home = JdtLsHomeRequirement.requireHome(System.getenv("JDTLS_HOME"));
+        try (Fixture fixture = new Fixture(home, temporaryDirectory)) {
+            fixture.addModularDeepRoot();
+
+            try (PreparedAnalysis analysis = fixture.prepare("A")) {
+                assertThat(analysis.readinessEvidence().projects())
+                        .anySatisfy(project -> {
+                            assertThat(project.projectPath()).isEqualTo("modular");
+                            assertThat(project.imported()).isTrue();
+                            assertThat(project.verifiedSourcePaths()).contains("modular/src/main/java");
+                        });
+            }
+        }
+    }
+
+    @Test
     void ignores_unrelated_host_files_but_rejects_changed_analysis_dependencies() throws Exception {
         Path home = JdtLsHomeRequirement.requireHome(System.getenv("JDTLS_HOME"));
         JdtLsProperties properties = new JdtLsProperties(
@@ -134,6 +159,36 @@ class EffectiveEnvironmentJdtLsIT {
             }
         } finally {
             Files.deleteIfExists(unrelated);
+        }
+    }
+
+    @Test
+    void rejects_reuse_of_generations_from_the_unversioned_analyzer() throws Exception {
+        Path home = JdtLsHomeRequirement.requireHome(System.getenv("JDTLS_HOME"));
+        try (Fixture fixture = new Fixture(home, temporaryDirectory);
+                PreparedAnalysis analysis = fixture.prepare("A")) {
+            AnalysisInputs inputs = analysis.fingerprint().inputs();
+            AnalysisInputs historicalInputs = new AnalysisInputs(inputs.contractVersion(),
+                    "771cead1eea149e0a853154955e187d9f07c2468b1da11c9f011f5ea740026d9",
+                    inputs.jdtLsDigest(), inputs.launcherJdkDigest(), inputs.importInputsDigest(), inputs.projects());
+            AnalysisFingerprint historicalFingerprint = AnalysisFingerprint.from(historicalInputs);
+            SemanticAnalysisEvidence evidence = analysis.readinessEvidence();
+            SemanticAnalysisEvidence historicalEvidence = new SemanticAnalysisEvidence(evidence.contractVersion(),
+                    historicalFingerprint.digest(), evidence.buildStatus(), evidence.projects(),
+                    evidence.resolution(), evidence.limitations());
+            SelectedGeneration selected = new SelectedGeneration(analysis.snapshot().repositoryId(),
+                    analysis.snapshot().revision(), new GenerationId("previous-generation"),
+                    new ManifestDigest("a".repeat(64)));
+            SealedGeneration current = new SealedGeneration(selected, analysis.fingerprint(), evidence);
+            SealedGeneration historical = new SealedGeneration(selected, historicalFingerprint, historicalEvidence);
+            ConservativeAnalysisReuseVerifier verifier = new ConservativeAnalysisReuseVerifier(
+                    target -> Optional.of(inputs));
+            AnalysisTarget target = new AnalysisTarget(analysis.snapshot(), "analyzer-reuse", "A");
+
+            assertThat(verifier.matches(current, target)).isTrue();
+            assertThat(verifier.matches(historical, target))
+                    .as("same SHA and dependencies cannot authorize an obsolete unversioned analyzer")
+                    .isFalse();
         }
     }
 
@@ -169,6 +224,25 @@ class EffectiveEnvironmentJdtLsIT {
                     new JdtWorkspaceLifecycleMetrics(registry));
             preparation = new DefaultRepositoryAnalysisPreparation(manager,
                     new JdtLsEffectiveEnvironmentInspector(properties), new FullIndexPlanner());
+        }
+
+        private void addModularDeepRoot() throws Exception {
+            Path parent = repository.resolve("pom.xml");
+            Files.writeString(parent, Files.readString(parent).replace(
+                    "<module>application</module>", "<module>application</module><module>modular</module>"));
+            Path sourceRoot = Files.createDirectories(repository.resolve("modular/src/main/java"));
+            Files.writeString(repository.resolve("modular/pom.xml"), """
+                    <project xmlns="http://maven.apache.org/POM/4.0.0"><modelVersion>4.0.0</modelVersion>
+                    <parent><groupId>example</groupId><artifactId>root</artifactId><version>1</version></parent>
+                    <artifactId>modular</artifactId>
+                    </project>
+                    """);
+            Files.writeString(sourceRoot.resolve("module-info.java"), "module example.modular { }\n");
+            Path deepPackage = Files.createDirectories(sourceRoot.resolve("org/a/b/c/d/e/f/g/h/i/j/k/l/m"));
+            Files.writeString(deepPackage.resolve("OddFilename.java"),
+                    "package org.a.b.c.d.e.f.g.h.i.j.k.l.m; class DeepDeclaration { }\n");
+            git.add().addFilepattern(".").call();
+            git.commit().setMessage("add modular deep root").setAuthor("test", "test@example.invalid").call();
         }
 
         private PreparedAnalysis prepare(String stage) {

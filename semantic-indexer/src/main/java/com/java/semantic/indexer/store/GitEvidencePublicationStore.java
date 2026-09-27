@@ -17,9 +17,11 @@ import com.java.semantic.model.git.GitComparisonChange;
 import com.java.semantic.model.git.GitChangeKind;
 import com.java.semantic.model.git.GitFileContentStatus;
 import com.java.semantic.model.index.IndexCollections;
+import com.java.semantic.model.index.IndexSchemaContract;
 import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.model.repository.RepositoryRevision;
 import com.mongodb.client.model.Filters;
+import com.mongodb.client.model.Sorts;
 import com.mongodb.client.model.Updates;
 import org.bson.Document;
 import org.bson.types.Binary;
@@ -36,6 +38,8 @@ import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Date;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -149,10 +153,10 @@ public final class GitEvidencePublicationStore {
         }
         Document comparisonManifest = ownershipDocument(new Document("repoId", requiredJob.repositoryId().value())
                 .append("evidenceId", comparisonId.value()).append("kind", "COMPARISON").append("state", "PREPARING")
-                .append("gitEvidenceVersion", com.java.semantic.model.index.IndexSchemaContract.GIT_EVIDENCE_VERSION)
+                .append("gitEvidenceVersion", IndexSchemaContract.GIT_EVIDENCE_VERSION)
                 .append("previous", comparison.previous().value()).append("current", comparison.current().value())
                 .append("previousSnapshotId", previousSnapshot.value()).append("currentSnapshotId", currentSnapshot.value())
-                .append("ancestry", comparison.ancestry().name()).append("preparedAt", java.util.Date.from(preparedAt))
+                .append("ancestry", comparison.ancestry().name()).append("preparedAt", Date.from(preparedAt))
                 .append("ownerJobId", requiredJob.id().value()).append("total", (long) comparison.changes().size())
                 .append("contentDigest", comparisonDigest), requiredOwnership);
         template.getCollection(IndexCollections.GIT_EVIDENCE_MANIFESTS).insertOne(comparisonManifest);
@@ -182,8 +186,8 @@ public final class GitEvidencePublicationStore {
         long textEntries = 0L;
         Document snapshotManifest = ownershipDocument(new Document("repoId", job.repositoryId().value()).append("evidenceId", snapshotId.value())
                 .append("kind", "SNAPSHOT").append("state", "PREPARING")
-                .append("gitEvidenceVersion", com.java.semantic.model.index.IndexSchemaContract.GIT_EVIDENCE_VERSION).append("revision", revision)
-                .append("preparedAt", java.util.Date.from(preparedAt)).append("ownerJobId", job.id().value()).append("total", (long) entries.size())
+                .append("gitEvidenceVersion", IndexSchemaContract.GIT_EVIDENCE_VERSION).append("revision", revision)
+                .append("preparedAt", Date.from(preparedAt)).append("ownerJobId", job.id().value()).append("total", (long) entries.size())
                 .append("contentDigest", emptyDigest()).append("fileTextBytesLimit", limits.fileTextBytes())
                 .append("snapshotTextBytesLimit", limits.snapshotTextBytes()).append("contentCoverage", new Document("textBytes", 0L)
                         .append("textEntries", 0L).append("entryCount", (long) entries.size())), ownership);
@@ -270,7 +274,7 @@ public final class GitEvidencePublicationStore {
         long ordinal = 0L;
         for (Document file : template.getCollection(IndexCollections.GIT_SNAPSHOT_FILES).find(Filters.and(
                 Filters.eq("repoId", repositoryId.value()), Filters.eq("snapshotId", snapshotId.value())))
-                .sort(com.mongodb.client.model.Sorts.ascending("ordinal"))) {
+                .sort(Sorts.ascending("ordinal"))) {
             Number storedOrdinal = file.get("ordinal", Number.class);
             Number length = file.get("byteLength", Number.class);
             Optional<byte[]> rawPath = binaryBytes(file.get("rawPath"));
@@ -289,7 +293,7 @@ public final class GitEvidencePublicationStore {
         List<Document> chunks = new ArrayList<>();
         template.getCollection(IndexCollections.GIT_SNAPSHOT_CHUNKS).find(Filters.and(Filters.eq("repoId", repositoryId.value()),
                 Filters.eq("snapshotId", snapshotId.value()), Filters.eq("pathKey", pathKey(rawPath))))
-                .sort(com.mongodb.client.model.Sorts.ascending("ordinal")).into(chunks);
+                .sort(Sorts.ascending("ordinal")).into(chunks);
         byte[] bytes = new byte[0];
         for (Document chunk : chunks) {
             byte[] part = binaryBytes(chunk.get("bytes")).orElseThrow(PublicationConflictException::new);
@@ -305,14 +309,14 @@ public final class GitEvidencePublicationStore {
         long ordinal = 0L;
         for (Document row : template.getCollection(IndexCollections.GIT_COMPARISON_CHANGES).find(Filters.and(
                 Filters.eq("repoId", repositoryId.value()), Filters.eq("comparisonId", comparisonId.value())))
-                .sort(com.mongodb.client.model.Sorts.ascending("ordinal"))) {
+                .sort(Sorts.ascending("ordinal"))) {
             Number storedOrdinal = row.get("ordinal", Number.class);
             if (Objects.isNull(storedOrdinal) || storedOrdinal.longValue() != ordinal) {
                 throw new PublicationConflictException();
             }
             List<String> patches = template.getCollection(IndexCollections.GIT_COMPARISON_PATCHES).find(Filters.and(
                     Filters.eq("repoId", repositoryId.value()), Filters.eq("comparisonId", comparisonId.value()),
-                    Filters.eq("changeId", row.getString("changeId")))).sort(com.mongodb.client.model.Sorts.ascending("ordinal"))
+                    Filters.eq("changeId", row.getString("changeId")))).sort(Sorts.ascending("ordinal"))
                     .map(chunk -> chunk.getString("patch")).into(new ArrayList<>());
             changes.add(new GitComparisonChange(row.getString("changeId"), GitChangeKind.valueOf(row.getString("kind")),
                     row.getString("oldPath"), row.getString("newPath"), row.getString("oldMode"), row.getString("newMode"),
@@ -801,8 +805,8 @@ public final class GitEvidencePublicationStore {
         return ordinal + "\\u0000" + change.changeId() + "\\u0000" + change.kind().name() + "\\u0000"
                 + change.oldPath() + "\\u0000" + change.newPath() + "\\u0000" + change.oldMode() + "\\u0000"
                 + change.newMode() + "\\u0000" + change.oldBlobId() + "\\u0000" + change.newBlobId() + "\\u0000"
-                + change.diffStatus() + "\\u0000" + java.util.HexFormat.of().formatHex(change.oldRawPath()) + "\\u0000"
-                + java.util.HexFormat.of().formatHex(change.newRawPath()) + "\\u0000" + String.join("\\u0001", change.patchChunks());
+                + change.diffStatus() + "\\u0000" + HexFormat.of().formatHex(change.oldRawPath()) + "\\u0000"
+                + HexFormat.of().formatHex(change.newRawPath()) + "\\u0000" + String.join("\\u0001", change.patchChunks());
     }
 
     private static String digest(String previous, String row) {

@@ -25,11 +25,14 @@ import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.nio.file.LinkOption;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.attribute.UserPrincipal;
 import java.nio.file.attribute.UserPrincipalLookupService;
 import java.util.ArrayList;
+import java.util.HexFormat;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Objects;
@@ -79,14 +82,14 @@ public final class JdtLsProcessFactory {
 
     private static String sha256(Path file) {
         try (InputStream input = Files.newInputStream(file)) {
-            java.security.MessageDigest digest = java.security.MessageDigest.getInstance("SHA-256");
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
             byte[] buffer = new byte[8192];
             int count;
             while ((count = input.read(buffer)) != -1) {
                 digest.update(buffer, 0, count);
             }
-            return java.util.HexFormat.of().formatHex(digest.digest());
-        } catch (IOException | java.security.NoSuchAlgorithmException exception) {
+            return HexFormat.of().formatHex(digest.digest());
+        } catch (IOException | NoSuchAlgorithmException exception) {
             throw new IllegalStateException("unable to digest configured Lombok agent", exception);
         }
     }

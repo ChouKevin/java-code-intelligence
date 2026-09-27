@@ -4,20 +4,28 @@ import com.java.semantic.indexer.build.FullIndexPlan;
 import com.java.semantic.indexer.build.FullIndexPlanner;
 import com.java.semantic.model.index.AnalysisFingerprint;
 import com.java.semantic.model.index.AnalysisInputs;
+import com.java.semantic.model.index.IndexSchemaContract;
 import com.java.semantic.model.index.SemanticAnalysisEvidence;
 import com.java.semantic.repository.domain.RepositorySnapshot;
 import com.java.semantic.semantic.adapter.jdtls.AnalysisWorkspaceKey;
+import com.java.semantic.semantic.adapter.jdtls.JdtLsBuildWorkspaceStatus;
 import com.java.semantic.semantic.adapter.jdtls.JdtLsEffectiveEnvironmentInspector;
 import com.java.semantic.semantic.adapter.jdtls.JdtWorkspaceManager;
 import com.java.semantic.semantic.adapter.jdtls.JdtWorkspaceSession;
 import com.java.semantic.semantic.adapter.jdtls.Lsp4jJavaSemanticService;
 import com.java.semantic.semantic.adapter.jdtls.WorkspaceLease;
 import com.java.semantic.semantic.domain.JavaSemanticService;
+import java.io.IOException;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
+import java.util.TreeMap;
+import java.util.stream.Stream;
 
 /** Coordinates a fresh lease, post-import attestation, and a bound semantic service. */
 public final class DefaultRepositoryAnalysisPreparation implements RepositoryAnalysisPreparation {
@@ -72,7 +80,7 @@ public final class DefaultRepositoryAnalysisPreparation implements RepositoryAna
             for (AnalysisInputs.Root root : project.roots()) {
                 if (!root.included()) {
                     limitations.add(new SemanticAnalysisEvidence.Limitation("ROOT_EXCLUDED_" + root.kind(),
-                            java.util.Optional.of(root.path())));
+                            Optional.of(root.path())));
                     continue;
                 }
                 if (containsJavaSource(snapshot.root(), root.path())) {
@@ -82,14 +90,14 @@ public final class DefaultRepositoryAnalysisPreparation implements RepositoryAna
             }
             projects.add(new SemanticAnalysisEvidence.ProjectProof(project.projectPath(), true, verifiedRoots));
         }
-        if (session.buildStatus() == com.java.semantic.semantic.adapter.jdtls.JdtLsBuildWorkspaceStatus.WITH_ERROR) {
-            limitations.add(new SemanticAnalysisEvidence.Limitation("BUILD_WITH_ERROR", java.util.Optional.empty()));
+        if (session.buildStatus() == JdtLsBuildWorkspaceStatus.WITH_ERROR) {
+            limitations.add(new SemanticAnalysisEvidence.Limitation("BUILD_WITH_ERROR", Optional.empty()));
         }
-        String buildStatus = session.buildStatus() == com.java.semantic.semantic.adapter.jdtls.JdtLsBuildWorkspaceStatus.SUCCEED
+        String buildStatus = session.buildStatus() == JdtLsBuildWorkspaceStatus.SUCCEED
                 ? "SUCCESS"
                 : session.buildStatus().name();
         return new SemanticAnalysisEvidence(
-                com.java.semantic.model.index.IndexSchemaContract.ANALYSIS_EVIDENCE_VERSION,
+                IndexSchemaContract.ANALYSIS_EVIDENCE_VERSION,
                 fingerprint.digest(), buildStatus, projects,
                 new SemanticAnalysisEvidence.ResolutionCoverage(0, 0, 0, 0, 0), limitations);
     }
@@ -99,10 +107,10 @@ public final class DefaultRepositoryAnalysisPreparation implements RepositoryAna
         if (!sourceRoot.startsWith(repositoryRoot.toAbsolutePath().normalize()) || !Files.isDirectory(sourceRoot)) {
             return false;
         }
-        try (java.util.stream.Stream<Path> paths = Files.walk(sourceRoot)) {
+        try (Stream<Path> paths = Files.walk(sourceRoot)) {
             return paths.anyMatch(path -> Files.isRegularFile(path)
                     && path.getFileName().toString().endsWith(".java"));
-        } catch (java.io.IOException exception) {
+        } catch (IOException exception) {
             return false;
         }
     }
@@ -111,28 +119,30 @@ public final class DefaultRepositoryAnalysisPreparation implements RepositoryAna
         List<Path> roots = new ArrayList<>();
         for (AnalysisInputs.Project project : inputs.projects()) {
             for (AnalysisInputs.Root root : project.roots()) {
-                if (root.included() && containsJavaSource(snapshot.root(), root.path())) {
-                    roots.add(snapshot.root().resolve(root.path()).normalize());
+                Path sourceRoot = snapshot.root().resolve(root.path()).normalize();
+                if (root.included() && sourceRoot.startsWith(snapshot.root().toAbsolutePath().normalize())
+                        && Files.isDirectory(sourceRoot, LinkOption.NOFOLLOW_LINKS)) {
+                    roots.add(sourceRoot);
                 }
             }
         }
         return List.copyOf(roots);
     }
 
-    static java.util.Map<String, String> effectiveCompilerOptions(AnalysisInputs inputs) {
-        java.util.Map<String, String> options = new java.util.TreeMap<>();
+    static Map<String, String> effectiveCompilerOptions(AnalysisInputs inputs) {
+        Map<String, String> options = new TreeMap<>();
         for (AnalysisInputs.Project project : inputs.projects()) {
-            for (java.util.Map.Entry<String, String> option : project.compilerOptions().entrySet()) {
+            for (Map.Entry<String, String> option : project.compilerOptions().entrySet()) {
                 if (PROCESS_ANNOTATIONS.equals(option.getKey())) {
                     continue;
                 }
                 String existing = options.putIfAbsent(option.getKey(), option.getValue());
-                if (existing != null && !existing.equals(option.getValue())) {
+                if (Objects.nonNull(existing) && !existing.equals(option.getValue())) {
                     throw new IllegalStateException("included projects disagree on compiler option " + option.getKey());
                 }
             }
         }
-        return java.util.Map.copyOf(options);
+        return Map.copyOf(options);
     }
 
     private static final class LeasePreparedAnalysis implements PreparedAnalysis {

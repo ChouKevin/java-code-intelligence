@@ -46,6 +46,7 @@ class SameRevisionRebuildIT {
                     List.of(FullIndexPublicationIT.validBatch(context.repositoryId(), analysis.snapshot().revision(),
                             context.generationId())), analysis.readinessEvidence());
             Path checkout = Files.createDirectories(temporaryDirectory.resolve("checkout"));
+            FullIndexPublicationIT.writeCheckoutSource(checkout);
             IndexBuildService service = FullIndexPublicationIT.service(template, store, exporter,
                     ignored -> new IndexBuildService.CheckedOutRepository(checkout,
                             new com.java.semantic.model.repository.RepositoryRevision(revision)));

@@ -72,7 +72,12 @@ class ReviewGenerationOwnershipIT {
         TestPreparedAnalysis analysis = TestPreparedAnalysis.forSnapshot(new com.java.semantic.repository.domain.RepositorySnapshot(
                 job.repositoryId(), Path.of("."), job.target().orElseThrow().revision()), new FullIndexPlan(Path.of("."), List.of()));
         writeGeneration(template, writer, job);
-        GenerationValidator.ValidationResult result = validator.validate(context, job.target().orElseThrow().revision(), job.target().orElseThrow().revision());
+        SourceIndexBatch batch = FullIndexPublicationIT.validBatch(job.repositoryId(), job.target().orElseThrow().revision(),
+                job.target().orElseThrow().generationId());
+        FullIndexPlan plan = new FullIndexPlan(Path.of("."), List.of(new FullIndexPlan.SourceInput(batch.sourcePath(),
+                Path.of(batch.sourcePath()), batch.sourceArtifact())));
+        GenerationValidator.ValidationResult result = validator.validate(context, job.target().orElseThrow().revision(),
+                job.target().orElseThrow().revision(), plan);
         assertThat(result.valid()).isTrue();
         validator.recordValid(context, result);
         writer.seal(context, result.identityDigest().value());

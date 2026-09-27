@@ -11,7 +11,7 @@ the two test sets because later profile values overwrite the same properties.
 | Mongo integration | `mvn --batch-mode --no-transfer-progress -Pmongo-it verify` | Java 21, Maven, and Docker | Mongo storage and generation contracts, including `SourceSliceContractIT`; this profile is separate from the ordinary suite |
 | Full JDT LS profile | `JDTLS_HOME=/opt/jdtls mvn --batch-mode --no-transfer-progress -Pjdtls-it test` | Java 21, Maven, and a real JDT LS installation; some scenarios also need Docker | All scenarios tagged `jdtls-it`; a valid directory satisfies the basic prerequisite, while the existing startup checks report an incomplete installation |
 | Local fixture contract | `JDTLS_HOME=/opt/jdtls scripts/test-indexer-query-contract.sh` | Java 21, Maven, Docker, and a real JDT LS installation | Payment, order, and video fixture indexing through the exporter and temporary Mongo to a temporary Query HTTP/MCP server, followed by projection evolution; it does not use an existing deployment |
-| Semantic review journey | `JDTLS_HOME=/opt/jdtls scripts/test-semantic-review-journey.sh` | Java 21, Maven, Docker, a real JDT LS installation, and fresh locally packaged Indexer and Query jars | A disposable real-JDT A→B review: it captures A, submits only B, stops Indexer, removes the checkout and JDT workspace, then proves Query HTTP/MCP serves persisted semantic and Git evidence through a Mongo read-only credential |
+| Semantic review journey | `scripts/test-semantic-review-journey.sh` | Java 21, Maven, Docker, an existing production Indexer image selected by `SEMANTIC_REVIEW_INDEXER_IMAGE`, and fresh locally packaged Indexer and Query jars | Real-image A→B review, compatible generation reuse and changed-installation rebuild under UID isolation, then cold Query HTTP/MCP over read-only Mongo including mapper XML facts |
 | Deployed Query profile | `mvn --batch-mode --no-transfer-progress -Pdeployed-it test` | Java 21, Maven, an available Query deployment, and the three deployment variables below | The actual deployed Query HTTP/MCP contract |
 | Fixture Maven tests | See commands below | Java 21 and Maven | Focused deterministic payment, order, and video fixture project tests |
 | Image checks | See commands below | Docker | Indexer JDT LS image smoke and Query image isolation |
@@ -28,6 +28,19 @@ paths. `EffectiveEnvironmentJdtLsIT` verifies that changing an unrelated host
 file does not invalidate a prepared analysis, while changing actual dependency
 bytes still fails its unchanged-input guard. Deployed configurations continue
 to select the explicit `JDTLS_JAVA_EXECUTABLE` inside the Indexer image.
+
+The same real-JDT suite covers a modular source root whose only type is
+package-private, differs from its filename, and sits deeper than twelve
+directories. Imported-root proof must use actual JDT declarations, not filename
+or depth guesses. It also rejects same-SHA generation reuse from the older
+unversioned analyzer identity.
+
+`DispatchedBuildIT` requires imported resource-only mapper XML to survive the
+production preparation, export, and Mongo publication path as both source and
+`MAPPER_STATEMENT` evidence. The semantic review journey reads mapper facts and
+source through current and review HTTP/MCP operations after Indexer is stopped.
+Its changed-installation case modifies only the disposable container's JDT
+directory, not the shared image or an existing deployment.
 
 For the deployed profile, use test-only placeholders and keep its token
 separate from the production Query variable `SEMANTIC_QUERY_API_TOKEN`:

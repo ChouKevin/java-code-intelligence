@@ -6,9 +6,11 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.TreeMap;
 
 /** SHA-256 identity of the exact effective analysis environment. */
 public record AnalysisFingerprint(AnalysisInputs inputs, String digest) {
@@ -41,7 +43,7 @@ public record AnalysisFingerprint(AnalysisInputs inputs, String digest) {
             for (AnalysisInputs.Project project : projects) {
                 writeProject(writer, project);
             }
-            return java.util.HexFormat.of().formatHex(messageDigest.digest());
+            return HexFormat.of().formatHex(messageDigest.digest());
         } catch (NoSuchAlgorithmException exception) {
             throw new IllegalStateException("SHA-256 must be available", exception);
         }
@@ -50,7 +52,7 @@ public record AnalysisFingerprint(AnalysisInputs inputs, String digest) {
     private static void writeProject(CanonicalWriter writer, AnalysisInputs.Project project) {
         writer.text(project.projectPath());
         writer.text(project.projectJdkDigest());
-        Map<String, String> compilerOptions = new java.util.TreeMap<>(project.compilerOptions());
+        Map<String, String> compilerOptions = new TreeMap<>(project.compilerOptions());
         writer.number(compilerOptions.size());
         compilerOptions.forEach((key, value) -> {
             writer.text(key);
@@ -98,7 +100,7 @@ public record AnalysisFingerprint(AnalysisInputs inputs, String digest) {
         append(key, project.projectPath());
         append(key, "projectJdkDigest");
         append(key, project.projectJdkDigest());
-        Map<String, String> compilerOptions = new java.util.TreeMap<>(project.compilerOptions());
+        Map<String, String> compilerOptions = new TreeMap<>(project.compilerOptions());
         append(key, "compilerOptions");
         append(key, Integer.toString(compilerOptions.size()));
         compilerOptions.forEach((name, value) -> {

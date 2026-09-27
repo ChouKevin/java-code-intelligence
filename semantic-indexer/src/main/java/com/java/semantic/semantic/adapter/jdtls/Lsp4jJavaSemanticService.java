@@ -46,6 +46,7 @@ import org.eclipse.lsp4j.SymbolKind;
 import org.eclipse.lsp4j.TextDocumentIdentifier;
 import org.eclipse.lsp4j.WorkspaceSymbol;
 import org.eclipse.lsp4j.WorkspaceSymbolParams;
+import org.eclipse.lsp4j.WorkspaceSymbolLocation;
 import org.eclipse.lsp4j.TextDocumentItem;
 import org.eclipse.jdt.core.dom.AST;
 import org.eclipse.jdt.core.dom.ASTNode;
@@ -62,6 +63,7 @@ import lombok.extern.slf4j.Slf4j;
 import java.io.IOException;
 import java.net.URI;
 import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.EnumSet;
@@ -72,6 +74,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.TreeSet;
+import java.util.stream.Stream;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Supplier;
 import java.util.regex.Pattern;
@@ -130,42 +133,79 @@ public class Lsp4jJavaSemanticService implements JavaSemanticService {
     }
 
     /** Proves an imported declaration is visible through this precise leased semantic session. */
-    public void proveImportedRoot(RepositorySnapshot snapshot, java.nio.file.Path root) {
+    public void proveImportedRoot(RepositorySnapshot snapshot, Path root) {
         JdtWorkspaceSession session = requireSession(snapshot);
-        java.nio.file.Path normalizedRoot = root.toAbsolutePath().normalize();
-        java.nio.file.Path declarationSource;
-        try (java.util.stream.Stream<java.nio.file.Path> paths = Files.walk(normalizedRoot, 12)) {
-            declarationSource = paths.filter(Files::isRegularFile)
+        Path normalizedRoot = root.toAbsolutePath().normalize();
+        boolean proved;
+        try (Stream<Path> paths = Files.walk(normalizedRoot)) {
+            proved = paths.filter(Files::isRegularFile)
                     .filter(path -> {
                         String name = path.getFileName().toString();
-                        return name.endsWith(".java") && !name.equals("package-info.java");
+                        return name.endsWith(".java")
+                                && !name.equals("package-info.java")
+                                && !name.equals("module-info.java");
                     })
-                    .sorted()
-                    .findFirst()
-                    .orElseThrow(() -> new IllegalStateException("included source root contains no Java declaration " + root));
+                    .anyMatch(path -> hasImportedDeclaration(session, snapshot, path));
         } catch (IOException exception) {
             throw new IllegalStateException("unable to inspect included source root " + root, exception);
         }
-        String query = declarationSource.getFileName().toString().replaceFirst("\\.java$", "");
-        String expectedUri = declarationSource.toUri().toString();
-        Either<List<? extends SymbolInformation>, List<? extends WorkspaceSymbol>> symbols = session.call(
-                "workspace/symbol:root-proof",
-                server -> server.getWorkspaceService().symbol(new WorkspaceSymbolParams(query)));
-        boolean proved = Objects.nonNull(symbols) && (symbols.isLeft()
-                ? symbols.getLeft().stream().anyMatch(symbol -> query.equals(symbol.getName())
-                        && expectedUri.equals(symbol.getLocation().getUri()))
-                : symbols.getRight().stream().anyMatch(symbol -> workspaceSymbolMatches(symbol, query, expectedUri)));
         if (!proved) {
             throw new IllegalStateException("JDT LS did not prove an imported declaration for " + root);
         }
     }
-    private static boolean workspaceSymbolMatches(WorkspaceSymbol symbol, String expectedName, String expectedUri) {
-        if (Objects.isNull(symbol) || !expectedName.equals(symbol.getName()) || Objects.isNull(symbol.getLocation())) {
+
+    private boolean hasImportedDeclaration(
+            JdtWorkspaceSession session, RepositorySnapshot snapshot, Path source) {
+        String uri = source.toUri().toString();
+        Path canonicalSource = sourceLocator.localSource(snapshot, uri)
+                .orElseThrow(() -> new IllegalStateException("included source is not local " + source));
+        return session.withDocumentUri(uri, () -> withOpenedDocument(session, snapshot, uri, () ->
+                documentSymbols(session, uri).stream().anyMatch(symbol -> {
+                    if (symbol.isRight()) {
+                        DocumentSymbol declaration = symbol.getRight();
+                        return isType(declaration.getKind())
+                                && importedSymbolMatches(session, declaration.getName(), canonicalSource);
+                    }
+                    SymbolInformation declaration = symbol.getLeft();
+                    return isType(declaration.getKind())
+                            && sameCanonicalSource(canonicalSource, declaration.getLocation().getUri())
+                            && importedSymbolMatches(session, declaration.getName(), canonicalSource);
+                })));
+    }
+
+    private boolean importedSymbolMatches(JdtWorkspaceSession session, String name, Path canonicalSource) {
+        Either<List<? extends SymbolInformation>, List<? extends WorkspaceSymbol>> symbols = session.call(
+                "workspace/symbol:root-proof",
+                server -> server.getWorkspaceService().symbol(new WorkspaceSymbolParams(name)));
+        if (Objects.isNull(symbols)) {
             return false;
         }
-        Either<org.eclipse.lsp4j.Location, org.eclipse.lsp4j.WorkspaceSymbolLocation> location = symbol.getLocation();
+        if (symbols.isLeft()) {
+            return nullSafe(symbols.getLeft()).stream().anyMatch(symbol ->
+                    isType(symbol.getKind()) && name.equals(symbol.getName())
+                            && Objects.nonNull(symbol.getLocation())
+                            && sameCanonicalSource(canonicalSource, symbol.getLocation().getUri()));
+        }
+        return nullSafe(symbols.getRight()).stream().anyMatch(symbol ->
+                isType(symbol.getKind()) && name.equals(symbol.getName())
+                        && workspaceSymbolMatches(symbol, canonicalSource));
+    }
+
+    private static boolean workspaceSymbolMatches(WorkspaceSymbol symbol, Path canonicalSource) {
+        if (Objects.isNull(symbol.getLocation())) {
+            return false;
+        }
+        Either<Location, WorkspaceSymbolLocation> location = symbol.getLocation();
         String uri = location.isLeft() ? location.getLeft().getUri() : location.getRight().getUri();
-        return expectedUri.equals(uri);
+        return sameCanonicalSource(canonicalSource, uri);
+    }
+
+    private static boolean sameCanonicalSource(Path canonicalSource, String uri) {
+        try {
+            return canonicalSource.equals(Path.of(URI.create(uri)).toRealPath());
+        } catch (IOException | RuntimeException exception) {
+            return false;
+        }
     }
 
     @Override
@@ -739,7 +779,7 @@ public class Lsp4jJavaSemanticService implements JavaSemanticService {
         return sourceLocator.localSource(snapshot, uri).map(this::readSourceText);
     }
 
-    private String readSourceText(java.nio.file.Path source) {
+    private String readSourceText(Path source) {
         try {
             return Files.readString(source);
         } catch (IOException exception) {

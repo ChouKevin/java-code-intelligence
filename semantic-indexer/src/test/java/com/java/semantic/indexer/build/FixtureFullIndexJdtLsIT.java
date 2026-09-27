@@ -98,9 +98,9 @@ class FixtureFullIndexJdtLsIT {
                 List<SourceIndexBatch> payment = exportAndPersist(manager, template, PAYMENT_FIXTURE, "payment-service", "a".repeat(40), "payment-generation");
                 List<SourceIndexBatch> video = exportAndPersist(manager, template, VIDEO_FIXTURE, "video-service", "b".repeat(40), "video-generation");
                 List<SourceIndexBatch> order = exportAndPersist(manager, template, ORDER_FIXTURE, "order-service", "c".repeat(40), "order-generation");
-                publish(template, "payment-service", "a".repeat(40), "payment-generation");
-                publish(template, "video-service", "b".repeat(40), "video-generation");
-                publish(template, "order-service", "c".repeat(40), "order-generation");
+                publish(template, "payment-service", "a".repeat(40), "payment-generation", temporaryDirectory.resolve("payment-service"));
+                publish(template, "video-service", "b".repeat(40), "video-generation", temporaryDirectory.resolve("video-service"));
+                publish(template, "order-service", "c".repeat(40), "order-generation", temporaryDirectory.resolve("order-service"));
 
                 assertThat(video).flatMap(SourceIndexBatch::symbols).extracting(document -> document.name())
                         .contains("VideoFormat", "MP4", "WEBM", "MOV", "upload");
@@ -399,12 +399,12 @@ class FixtureFullIndexJdtLsIT {
     }
 
     private static void publish(org.springframework.data.mongodb.core.MongoTemplate template, String repositoryId,
-                                String revision, String generationId) {
+                                String revision, String generationId, Path repositoryRoot) {
         RepositoryId id = new RepositoryId(repositoryId);
         GenerationId generation = new GenerationId(generationId);
         GenerationWriteContext lease = new GenerationWriteContext(id, generation, generationId + "-job");
         GenerationValidator.ValidationResult result = new GenerationValidator(template).validate(lease,
-                new RepositoryRevision(revision), new RepositoryRevision(revision));
+                new RepositoryRevision(revision), new RepositoryRevision(revision), new FullIndexPlanner().plan(repositoryRoot));
 
         assertThat(result.valid()).as("validation issues: %s", result.issues()).isTrue();
         new GenerationValidator(template).recordValid(lease, result);

@@ -30,6 +30,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.Date;
+import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -37,6 +38,8 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import org.bson.Document;
 import org.springframework.data.mongodb.core.MongoTemplate;
@@ -61,7 +64,8 @@ public final class GenerationValidator {
     }
 
     public ValidationResult validate(GenerationWriteContext context, RepositoryRevision requestedRevision,
-                                     RepositoryRevision checkedOutRevision) {
+                                     RepositoryRevision checkedOutRevision, FullIndexPlan expectedPlan) {
+        Objects.requireNonNull(expectedPlan, "attested source inventory is required");
         Objects.requireNonNull(context, "generation write context is required");
         Objects.requireNonNull(requestedRevision, "requested revision is required");
         Objects.requireNonNull(checkedOutRevision, "checked out revision is required");
@@ -86,7 +90,7 @@ public final class GenerationValidator {
         }
         validateOwnership(context, issues);
         validateRequiredIndexes(issues);
-        return validatePersistedGraph(context, requestedRevision, manifest, issues, true);
+        return validatePersistedGraph(context, requestedRevision, manifest, issues, true, Optional.of(expectedPlan));
     }
 
     /**
@@ -112,7 +116,7 @@ public final class GenerationValidator {
         GenerationWriteContext context = new GenerationWriteContext(selected.repositoryId(), selected.generationId(), ownerJobId);
         validateManifest(manifest, selected.revision(), issues);
         validateRequiredIndexes(issues);
-        ValidationResult result = validatePersistedGraph(context, selected.revision(), manifest, issues, false);
+        ValidationResult result = validatePersistedGraph(context, selected.revision(), manifest, issues, false, Optional.empty());
         if (!selected.manifestDigest().value().equals(manifest.getString("identityDigest"))
                 || !selected.manifestDigest().equals(result.identityDigest())) {
             issues.add(issue("SEALED_IDENTITY_MISMATCH", "sealed manifest identity does not match its persisted graph"));
@@ -123,13 +127,14 @@ public final class GenerationValidator {
 
     private ValidationResult validatePersistedGraph(GenerationWriteContext context, RepositoryRevision requestedRevision,
                                                     Document manifest, List<GenerationValidationIssue> issues,
-                                                    boolean requireActiveOwner) {
+                                                    boolean requireActiveOwner, Optional<FullIndexPlan> expectedPlan) {
         Map<ProjectionName, List<Document>> persistedProjections = projectionDocuments(context);
         List<Document> files = persistedProjections.get(ProjectionName.SOURCES);
         List<Document> symbols = persistedProjections.get(ProjectionName.SYMBOLS);
         List<Document> relations = persistedProjections.get(ProjectionName.RELATIONS);
         List<Document> entryPoints = persistedProjections.get(ProjectionName.ENTRY_POINTS);
         List<Document> search = persistedProjections.get(ProjectionName.SEARCH);
+        expectedPlan.ifPresent(plan -> validateSourceInventory(plan, files, issues));
         Map<String, Document> artifacts = artifactsById(files, issues);
         validateAnalysisEvidence(manifest, files, issues);
         validateCanonicalIdentities(symbols, issues);
@@ -146,6 +151,31 @@ public final class GenerationValidator {
         Map<String, Long> counts = collectionCounts(persistedProjections, artifacts);
         ManifestDigest digest = digest(persistedProjections, manifest);
         return new ValidationResult(digest, counts, issues);
+    }
+
+    private static void validateSourceInventory(FullIndexPlan plan, List<Document> files,
+                                                List<GenerationValidationIssue> issues) {
+        Map<String, FullIndexPlan.SourceInput> expected = new LinkedHashMap<>();
+        for (FullIndexPlan.SourceInput source : plan.sources()) {
+            expected.put(source.sourcePath(), source);
+        }
+        if (expected.size() != plan.sources().size() || expected.size() != files.size()) {
+            issues.add(issue("SOURCE_INVENTORY_MISMATCH", "persisted sources differ from attested supported inputs"));
+            return;
+        }
+        for (Document file : files) {
+            try {
+                FullIndexPlan.SourceInput source = expected.get(file.getString("sourcePath"));
+                if (Objects.isNull(source) || !source.contentArtifact().id().value().equals(sourceArtifactId(file))
+                        || !source.contentArtifact().contentHash().equals(file.getString("contentHash"))) {
+                    issues.add(issue("SOURCE_INVENTORY_MISMATCH", "persisted sources differ from attested supported inputs"));
+                    return;
+                }
+            } catch (RuntimeException exception) {
+                issues.add(issue("SOURCE_INVENTORY_MISMATCH", "persisted sources differ from attested supported inputs"));
+                return;
+            }
+        }
     }
 
     private static void validateSealedCollectionCounts(Document manifest, Map<String, Long> counts,
@@ -167,7 +197,7 @@ public final class GenerationValidator {
     /** Keys of the production dispatch that reads, validates, counts, and digests persisted projections. */
     public static Set<ProjectionName> validatedCountedAndDigestedProjections() {
         return VALIDATION_DISPATCH.stream().map(ValidatedProjection::name)
-                .collect(java.util.stream.Collectors.toUnmodifiableSet());
+                .collect(Collectors.toUnmodifiableSet());
     }
 
     /** Records the exact values that publication re-checks before the manifest is sealed. */
@@ -210,10 +240,10 @@ public final class GenerationValidator {
                 issues.add(issue("INVALID_RESOLUTION_ACCOUNTING", "semantic resolution accounting is inconsistent"));
             }
             Map<String, SemanticAnalysisEvidence.ProjectProof> proofs = evidence.projects().stream()
-                    .collect(java.util.stream.Collectors.toMap(SemanticAnalysisEvidence.ProjectProof::projectPath,
-                            java.util.function.Function.identity(), (left, right) -> left));
+                    .collect(Collectors.toMap(SemanticAnalysisEvidence.ProjectProof::projectPath,
+                            Function.identity(), (left, right) -> left));
             Set<String> sourcePaths = files.stream().map(file -> file.getString("sourcePath"))
-                    .filter(Objects::nonNull).collect(java.util.stream.Collectors.toSet());
+                    .filter(Objects::nonNull).collect(Collectors.toSet());
             if (proofs.size() != inputs.projects().size()) {
                 issues.add(issue("ANALYSIS_PROJECT_MISMATCH", "semantic evidence does not prove every prepared project"));
             }
@@ -225,9 +255,9 @@ public final class GenerationValidator {
                 }
                 Set<String> includedRoots = project.roots().stream().filter(AnalysisInputs.Root::included)
                         .map(AnalysisInputs.Root::path)
-                        .filter(root -> root.equals(".") || sourcePaths.stream().anyMatch(
-                                path -> path.equals(root) || path.startsWith(root + "/")))
-                        .collect(java.util.stream.Collectors.toSet());
+                        .filter(root -> sourcePaths.stream().anyMatch(
+                                path -> path.endsWith(".java") && (root.equals(".") || path.startsWith(root + "/"))))
+                        .collect(Collectors.toSet());
                 if (!proof.verifiedSourcePaths().containsAll(includedRoots)) {
                     issues.add(issue("ANALYSIS_ROOT_MISMATCH", "semantic evidence does not prove each included root"));
                 }
@@ -238,7 +268,8 @@ public final class GenerationValidator {
             }
             for (SemanticAnalysisEvidence.ProjectProof proof : evidence.projects()) {
                 for (String root : proof.verifiedSourcePaths()) {
-                    if (!root.equals(".") && sourcePaths.stream().noneMatch(path -> path.equals(root) || path.startsWith(root + "/"))) {
+                    if (sourcePaths.stream().noneMatch(path -> path.endsWith(".java")
+                            && (root.equals(".") || path.startsWith(root + "/")))) {
                         issues.add(issue("ANALYSIS_SOURCE_MISMATCH", "verified semantic root has no persisted source"));
                     }
                 }
@@ -397,7 +428,7 @@ public final class GenerationValidator {
 
     private static void validateRelations(List<Document> symbols, List<Document> relations, List<GenerationValidationIssue> issues) {
         Set<String> canonicalSymbols = symbols.stream().map(document -> document.getString("canonical"))
-                .filter(Objects::nonNull).collect(java.util.stream.Collectors.toSet());
+                .filter(Objects::nonNull).collect(Collectors.toSet());
         for (Document relation : relations) {
             String from = relation.getString("from");
             if (!canonicalSymbols.contains(from)) {
@@ -416,7 +447,7 @@ public final class GenerationValidator {
 
     private static void validateEntryPoints(List<Document> symbols, List<Document> entryPoints, List<GenerationValidationIssue> issues) {
         Set<String> canonicalSymbols = symbols.stream().map(document -> document.getString("canonical"))
-                .filter(Objects::nonNull).collect(java.util.stream.Collectors.toSet());
+                .filter(Objects::nonNull).collect(Collectors.toSet());
         for (Document entryPoint : entryPoints) {
             String method = entryPoint.getString("method");
             if (!containsMethodSymbol(canonicalSymbols, method)) {
@@ -702,7 +733,7 @@ public final class GenerationValidator {
                 digest.update(identity.getBytes(StandardCharsets.UTF_8));
                 digest.update((byte) '\n');
             }
-            return new ManifestDigest(java.util.HexFormat.of().formatHex(digest.digest()));
+            return new ManifestDigest(HexFormat.of().formatHex(digest.digest()));
         } catch (NoSuchAlgorithmException exception) {
             throw new IllegalStateException("SHA-256 must be available", exception);
         }
@@ -721,14 +752,14 @@ public final class GenerationValidator {
                             canonicalAnalysisValue(entry.getValue(), String.valueOf(entry.getKey()))))
                     .sorted(Map.Entry.comparingByKey())
                     .map(entry -> entry.getKey() + "=" + entry.getValue())
-                    .collect(java.util.stream.Collectors.joining(",", "{", "}"));
+                    .collect(Collectors.joining(",", "{", "}"));
         }
         if (value instanceof List<?> list) {
             List<String> values = list.stream().map(item -> canonicalAnalysisValue(item, field)).toList();
             if (Set.of("projects", "roots", "verifiedSourcePaths", "limitations").contains(field)) {
                 values = values.stream().sorted().toList();
             }
-            return values.stream().collect(java.util.stream.Collectors.joining(",", "[", "]"));
+            return values.stream().collect(Collectors.joining(",", "[", "]"));
         }
         return String.valueOf(value);
     }

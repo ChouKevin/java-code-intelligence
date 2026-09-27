@@ -5,15 +5,23 @@ import com.java.semantic.indexer.job.IndexJob;
 import com.java.semantic.indexer.job.IndexJobId;
 import com.java.semantic.indexer.job.IndexJobOperation;
 import com.java.semantic.indexer.job.IndexJobStore;
+import com.java.semantic.indexer.job.ReviewJobPayload;
 import com.java.semantic.model.index.IndexCollections;
 import com.java.semantic.model.index.IndexSchemaContract;
 import com.java.semantic.model.index.SealedGeneration;
+import com.java.semantic.model.git.GitComparisonId;
+import com.java.semantic.model.git.GitSnapshotId;
+import com.java.semantic.model.index.GenerationId;
+import com.java.semantic.model.index.ManifestDigest;
+import com.java.semantic.model.index.PublishedGenerationPointer;
 import com.java.semantic.model.review.ReviewComparisonType;
 import com.java.semantic.model.review.ReviewEndpoint;
 import com.java.semantic.model.review.ReviewId;
 import com.java.semantic.model.review.ReviewManifestDocument;
+import com.java.semantic.model.review.CapturedReviewBaseline;
 import com.java.semantic.model.review.ReviewState;
 import com.java.semantic.model.repository.RepositoryId;
+import com.java.semantic.model.repository.RepositoryRevision;
 import java.time.Instant;
 import java.util.Date;
 import java.util.Objects;
@@ -37,7 +45,7 @@ public final class ReviewPublicationStore {
 
     public ReviewManifestDocument begin(IndexJob job) {
         IndexJob requiredJob = requireReview(job);
-        com.java.semantic.indexer.job.ReviewJobPayload payload = requiredJob.review().orElseThrow();
+        ReviewJobPayload payload = requiredJob.review().orElseThrow();
         ReviewManifestDocument manifest = new ReviewManifestDocument(requiredJob.repositoryId(), payload.reviewId(), requiredJob.id().value(),
                 IndexSchemaContract.REVIEW_MANIFEST_VERSION, ReviewState.PREPARING, ReviewComparisonType.CURRENT_TO_COMMIT,
                 payload.baseline(), payload.requestedRevision(), Optional.empty(), Optional.empty(), Optional.empty(), Instant.now(),
@@ -128,30 +136,30 @@ public final class ReviewPublicationStore {
     private ReviewManifestDocument fromReady(Document document) {
         Document baseline = Objects.requireNonNull(document.get("capturedBaseline", Document.class), "review baseline is required");
         Document pointer = Objects.requireNonNull(baseline.get("pointer", Document.class), "review pointer is required");
-        com.java.semantic.model.index.PublishedGenerationPointer captured = new com.java.semantic.model.index.PublishedGenerationPointer(
-                new com.java.semantic.model.repository.RepositoryRevision(pointer.getString("revision")),
-                new com.java.semantic.model.index.GenerationId(pointer.getString("generationId")),
-                new com.java.semantic.model.index.ManifestDigest(pointer.getString("manifestDigest")), pointer.getString("committedJobId"),
+        PublishedGenerationPointer captured = new PublishedGenerationPointer(
+                new RepositoryRevision(pointer.getString("revision")),
+                new GenerationId(pointer.getString("generationId")),
+                new ManifestDigest(pointer.getString("manifestDigest")), pointer.getString("committedJobId"),
                 pointer.getDate("publishedAt").toInstant());
-        com.java.semantic.model.review.CapturedReviewBaseline reviewBaseline = new com.java.semantic.model.review.CapturedReviewBaseline(captured,
+        CapturedReviewBaseline reviewBaseline = new CapturedReviewBaseline(captured,
                 baseline.getDate("capturedAt").toInstant());
         return new ReviewManifestDocument(RepositoryId.of(document.getString("repoId")), new ReviewId(document.getString("reviewId")),
                 document.getString("ownerJobId"), document.get("reviewContractVersion", Number.class).intValue(), ReviewState.READY,
                 ReviewComparisonType.valueOf(document.getString("comparisonType")), reviewBaseline,
-                new com.java.semantic.model.repository.RepositoryRevision(document.getString("requestedRevision")),
+                new RepositoryRevision(document.getString("requestedRevision")),
                 Optional.of(endpointFrom(document.get("a", Document.class))), Optional.of(endpointFrom(document.get("b", Document.class))),
-                Optional.of(new com.java.semantic.model.git.GitComparisonId(document.getString("comparisonId"))), document.getDate("createdAt").toInstant(),
+                Optional.of(new GitComparisonId(document.getString("comparisonId"))), document.getDate("createdAt").toInstant(),
                 Optional.of(document.getDate("publishedAt").toInstant()), Optional.empty());
     }
 
     private ReviewEndpoint endpointFrom(Document endpoint) {
         SealedGeneration generation = template.getConverter().read(SealedGeneration.class,
                 Objects.requireNonNull(endpoint.get("generation", Document.class), "review generation is required"));
-        return new ReviewEndpoint(generation, new com.java.semantic.model.git.GitSnapshotId(endpoint.getString("snapshotId")));
+        return new ReviewEndpoint(generation, new GitSnapshotId(endpoint.getString("snapshotId")));
     }
 
-    private static Document baselineDocument(com.java.semantic.model.review.CapturedReviewBaseline baseline) {
-        com.java.semantic.model.index.PublishedGenerationPointer pointer = baseline.pointer();
+    private static Document baselineDocument(CapturedReviewBaseline baseline) {
+        PublishedGenerationPointer pointer = baseline.pointer();
         return new Document("pointer", new Document("revision", pointer.revision().value()).append("generationId", pointer.generationId().value())
                 .append("manifestDigest", pointer.manifestDigest().value()).append("committedJobId", pointer.committedJobId())
                 .append("publishedAt", Date.from(pointer.publishedAt()))).append("capturedAt", Date.from(baseline.capturedAt()));

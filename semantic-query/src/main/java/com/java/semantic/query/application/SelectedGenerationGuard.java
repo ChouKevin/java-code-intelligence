@@ -7,6 +7,7 @@ import com.java.semantic.model.index.IndexSchemaContract;
 import com.java.semantic.model.index.ProjectionName;
 import com.java.semantic.model.index.ProjectionRequirements;
 import com.java.semantic.model.query.SelectedGeneration;
+import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.query.config.ConfiguredReadPolicy;
 import com.java.semantic.query.config.SearchAccessPlan;
 import com.mongodb.MongoException;
@@ -76,7 +77,7 @@ public final class SelectedGenerationGuard {
     }
 
     public SearchAccessPlan searchAccessPlan(String requestedRepositoryId) {
-        return readPolicy.searchAccessPlan(new com.java.semantic.model.repository.RepositoryId(requestedRepositoryId));
+        return readPolicy.searchAccessPlan(new RepositoryId(requestedRepositoryId));
     }
 
     public void requireSourceVisible(SelectedGeneration context, SourceTypeIdentity sourceType) {
@@ -95,7 +96,7 @@ public final class SelectedGenerationGuard {
         }
     }
 
-    boolean isRepositoryVisible(com.java.semantic.model.repository.RepositoryId repositoryId) {
+    boolean isRepositoryVisible(RepositoryId repositoryId) {
         return readPolicy.isRepositoryVisible(repositoryId);
     }
 

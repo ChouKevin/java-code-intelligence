@@ -21,6 +21,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.regex.Pattern;
 import java.util.concurrent.TimeUnit;
 
@@ -66,7 +67,7 @@ public final class CodeFactSearchService {
                 facts.add(fact);
             }
             return new CodeFactSearchResult(selected, requiredQuery, facts, total, requiredQuery.offset() + facts.size() < total,
-                    coverageReader.coverage(selected, accessPlan, requiredQuery.packagePrefix(), java.util.Optional.empty()));
+                    coverageReader.coverage(selected, accessPlan, requiredQuery.packagePrefix(), Optional.empty()));
         } catch (MongoException | DataAccessException exception) {
             throw new SemanticIndexUnavailableException(exception);
         } catch (RepositoryNotFoundException | IndexContractMismatchException exception) {

@@ -6,10 +6,12 @@ import com.java.semantic.model.index.IndexSchemaContract;
 import com.java.semantic.repository.domain.RepositorySnapshot;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.OutputStream;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.security.DigestOutputStream;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
@@ -19,6 +21,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.TreeSet;
+import java.util.stream.Stream;
 import org.eclipse.jdt.core.IClasspathEntry;
 import org.eclipse.jdt.core.JavaCore;
 import org.eclipse.lsp4j.ExecuteCommandParams;
@@ -26,6 +30,8 @@ import org.springframework.util.Assert;
 
 /** Reads JDT LS's post-import project model and converts it into persistable, path-free inputs. */
 public final class JdtLsEffectiveEnvironmentInspector {
+    // Advance the analyzer policy version when planning or extraction semantics change.
+    private static final String ANALYZER_DIGEST = digestText("semantic-indexer-analysis:1");
     private static final String GET_ALL = "java.project.getAll";
     private static final String GET_SETTINGS = "java.project.getSettings";
     private static final String GET_CLASSPATHS = "java.project.getClasspaths";
@@ -96,7 +102,7 @@ public final class JdtLsEffectiveEnvironmentInspector {
                     artifacts(snapshot, project.modulepaths(), "MODULEPATH", referencedOutputs)));
         }
         return new AnalysisInputs(IndexSchemaContract.ANALYSIS_EVIDENCE_VERSION,
-                digestText(getClass().getName()), digestDirectory(properties.getHome()),
+                ANALYZER_DIGEST, digestDirectory(properties.getHome()),
                 digestDirectory(javaHome(properties.getJavaExecutable())),
                 importInputsDigest(snapshot, JdtLsProcessFactory.launchPolicyIdentity(properties)), projects);
     }
@@ -160,7 +166,7 @@ public final class JdtLsEffectiveEnvironmentInspector {
     }
 
     private List<String> settingsKeys() {
-        java.util.TreeSet<String> keys = new java.util.TreeSet<>(SETTINGS);
+        TreeSet<String> keys = new TreeSet<>(SETTINGS);
         keys.addAll(JavaCore.getOptions().keySet());
         return List.copyOf(keys);
     }
@@ -214,7 +220,7 @@ public final class JdtLsEffectiveEnvironmentInspector {
         Map<String, List<Path>> outputs = new LinkedHashMap<>();
         for (ImportedProject project : projects) {
             String reference = projectReference(project.root());
-            if (outputs.put(reference, projectOutputPaths(project.settings())) != null) {
+            if (Objects.nonNull(outputs.put(reference, projectOutputPaths(project.settings())))) {
                 throw new IllegalStateException("JDT LS imported duplicate project reference " + reference);
             }
         }
@@ -341,7 +347,7 @@ public final class JdtLsEffectiveEnvironmentInspector {
             if (Files.isRegularFile(path)) {
                 return Files.size(path);
             }
-            try (java.util.stream.Stream<Path> paths = Files.walk(path)) {
+            try (Stream<Path> paths = Files.walk(path)) {
                 return paths.filter(Files::isRegularFile).mapToLong(JdtLsEffectiveEnvironmentInspector::fileSize).sum();
             }
         } catch (IOException exception) {
@@ -368,7 +374,7 @@ public final class JdtLsEffectiveEnvironmentInspector {
     private static Path javaHome(Path executable) {
         Path normalized = executable.toAbsolutePath().normalize();
         Path bin = normalized.getParent();
-        if (bin == null || bin.getParent() == null) {
+        if (Objects.isNull(bin) || Objects.isNull(bin.getParent())) {
             throw new IllegalStateException("configured Java executable has no Java home");
         }
         return bin.getParent();
@@ -447,7 +453,7 @@ public final class JdtLsEffectiveEnvironmentInspector {
     private static String digestDirectory(Path directory) {
         try {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            try (java.util.stream.Stream<Path> paths = Files.walk(directory)) {
+            try (Stream<Path> paths = Files.walk(directory)) {
                 List<Path> files = paths.filter(Files::isRegularFile).sorted(Comparator.comparing(path ->
                         directory.toAbsolutePath().normalize().relativize(path.toAbsolutePath().normalize()).toString()))
                         .toList();
@@ -455,7 +461,7 @@ public final class JdtLsEffectiveEnvironmentInspector {
                     update(digest, directory.toAbsolutePath().normalize()
                             .relativize(file.toAbsolutePath().normalize()).toString());
                     try (InputStream input = Files.newInputStream(file)) {
-                        input.transferTo(new java.security.DigestOutputStream(java.io.OutputStream.nullOutputStream(), digest));
+                        input.transferTo(new DigestOutputStream(OutputStream.nullOutputStream(), digest));
                     }
                 }
             }
@@ -468,7 +474,7 @@ public final class JdtLsEffectiveEnvironmentInspector {
     private static String digestFile(Path file) {
         try (InputStream input = Files.newInputStream(file)) {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            input.transferTo(new java.security.DigestOutputStream(java.io.OutputStream.nullOutputStream(), digest));
+            input.transferTo(new DigestOutputStream(OutputStream.nullOutputStream(), digest));
             return HexFormat.of().formatHex(digest.digest());
         } catch (IOException | NoSuchAlgorithmException exception) {
             throw new IllegalStateException("unable to digest JDT LS artifact", exception);

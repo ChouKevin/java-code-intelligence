@@ -1,6 +1,7 @@
 package com.java.semantic.indexer.build;
 
 import com.java.semantic.indexer.job.IndexJob;
+import com.java.semantic.model.index.SealedGeneration;
 import java.util.Objects;
 
 /** Owns the closeable resource scope for one admitted repository build. */
@@ -18,7 +19,7 @@ public final class RepositoryBuildRunner {
         }
     }
 
-    public com.java.semantic.model.index.SealedGeneration seal(IndexJob job) {
+    public SealedGeneration seal(IndexJob job) {
         IndexJob requiredJob = Objects.requireNonNull(job, "job is required");
         try (BuildScope scope = Objects.requireNonNull(scopes.open(requiredJob), "build scope is required")) {
             return scope.seal();
@@ -33,7 +34,7 @@ public final class RepositoryBuildRunner {
     public interface BuildScope extends AutoCloseable {
         void build();
 
-        com.java.semantic.model.index.SealedGeneration seal();
+        SealedGeneration seal();
 
         @Override
         void close();

@@ -93,6 +93,7 @@ class DispatchedBuildIT {
                 runner.run(runningR1);
 
                 assertPublishedRevision(template, repositoryId, remote.r1());
+                assertPersistedMapperSourceAndFact(template, repositoryId, runningR1);
                 assertThat(paymentMethodContent(template, repositoryId, runningR1)).doesNotContain("MOBILE_PAYMENT");
                 assertThat(symbolNames(template, repositoryId, runningR1)).doesNotContain("MOBILE_PAYMENT");
                 assertThat(jobs.complete(runningR1.id())).isTrue();
@@ -144,6 +145,27 @@ class DispatchedBuildIT {
         return template.getCollection(IndexCollections.SYMBOLS).find(new Document("repoId", repositoryId.value())
                         .append("generationId", generationId))
                 .map(document -> document.getString("name")).into(new java.util.ArrayList<>());
+    }
+
+    private static void assertPersistedMapperSourceAndFact(MongoTemplate template, RepositoryId repositoryId, IndexJob job) {
+        String generationId = job.target().orElseThrow().generationId().value();
+        String mapperPath = "src/main/resources/mapper/PaymentMapper.xml";
+        Document filter = new Document("repoId", repositoryId.value()).append("generationId", generationId)
+                .append("sourcePath", mapperPath);
+        Document file = template.getCollection(IndexCollections.GENERATION_FILES).find(filter).first();
+        assertThat(file).as("imported production mapper source").isNotNull();
+        String artifactId = file.get("sourceArtifactId", Document.class).getString("value");
+        Document artifact = template.getCollection(IndexCollections.SOURCE_ARTIFACTS)
+                .find(new Document("sourceArtifactId", artifactId)).first();
+        assertThat(artifact).isNotNull();
+        assertThat(artifact.getString("utf8Content")).contains("<select id=\"findByMethod\">");
+        Document symbol = template.getCollection(IndexCollections.SYMBOLS).find(
+                new Document(filter).append("kind", "MAPPER_STATEMENT").append("name", "findByMethod")).first();
+        assertThat(symbol).as("mapper statement fact").isNotNull();
+        Document search = template.getCollection(IndexCollections.SEARCH).find(
+                new Document(filter).append("kind", "MAPPER_STATEMENT")
+                        .append("factId", symbol.getString("symbolId"))).first();
+        assertThat(search).as("searchable mapper statement fact").isNotNull();
     }
 
     private static String paymentMethodContent(MongoTemplate template, RepositoryId repositoryId, IndexJob job) {

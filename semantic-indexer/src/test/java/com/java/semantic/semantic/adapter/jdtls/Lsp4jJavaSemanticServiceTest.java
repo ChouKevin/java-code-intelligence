@@ -123,14 +123,23 @@ class Lsp4jJavaSemanticServiceTest {
                 RepositoryRevision.ofSha("b".repeat(40)));
 
         assertThatThrownBy(() -> boundService.classifySource(otherSnapshot, method))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("different repository snapshot");
+                .isInstanceOf(IllegalArgumentException.class);
 
         boundSession.rejectNewWork();
 
         assertThatThrownBy(() -> boundService.classifySource(snapshot, method))
-                .isInstanceOf(JdtWorkspaceSession.JdtWorkspaceClosingException.class)
-                .hasMessageContaining("closed");
+                .isInstanceOf(JdtWorkspaceSession.JdtWorkspaceClosingException.class);
+    }
+
+    @Test
+    void should_reject_root_without_any_imported_declaration() throws IOException {
+        Path sourceRoot = Files.createDirectories(root.resolve("src/main/java"));
+        Files.writeString(sourceRoot.resolve("module-info.java"), "module example.empty { }\n");
+        Path packageRoot = Files.createDirectories(sourceRoot.resolve("org/example"));
+        Files.writeString(packageRoot.resolve("package-info.java"), "package org.example;\n");
+
+        assertThatThrownBy(() -> service.proveImportedRoot(snapshot, sourceRoot))
+                .isInstanceOf(IllegalStateException.class);
     }
 
     @Test

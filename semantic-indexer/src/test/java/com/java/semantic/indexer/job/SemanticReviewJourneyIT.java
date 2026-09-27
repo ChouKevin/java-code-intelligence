@@ -75,6 +75,8 @@ class SemanticReviewJourneyIT {
         int queryPort = availablePort();
         String indexerImage = requiredImage(INDEXER_IMAGE_PROPERTY);
         String reviewId;
+        String changedInstallationReviewId;
+        String baselineGeneration;
         String indexerLogs;
 
         try (Network network = Network.newNetwork();
@@ -102,7 +104,7 @@ class SemanticReviewJourneyIT {
                     Map<?, ?> currentA = completed(indexerBase, checkoutJob, mapper, indexer);
                     Map<?, ?> currentPointerA = map(currentA, "currentPointer");
                     assertThat(text(currentPointerA, "revision")).isEqualTo(revisionA);
-                    String baselineGeneration = text(currentPointerA, "generationId");
+                    baselineGeneration = text(currentPointerA, "generationId");
                     assertThat(post(indexerBase, "/index/repositories/" + REPOSITORY_ID + "/reviews", QUERY_TOKEN,
                             Map.of("revision", revisionB)).statusCode()).isEqualTo(401);
                     Map<?, ?> acceptedReviewBody = acceptedReview(post(indexerBase,
@@ -128,6 +130,16 @@ class SemanticReviewJourneyIT {
                     assertThat(text(completedBaseline, "generationId")).isEqualTo(baselineGeneration);
                     assertThat(text(completedBaseline, "revision")).isEqualTo(revisionA);
                     assertThat(text(review, "requestedRevision")).isEqualTo(revisionB);
+
+                    assertThat(indexer.execInContainer("sh", "-c",
+                            "printf 'changed installation\\n' > /opt/jdtls/reuse-fingerprint-marker").getExitCode()).isZero();
+                    Map<?, ?> changedInstallationAdmission = acceptedReview(post(indexerBase,
+                            "/index/repositories/" + REPOSITORY_ID + "/reviews", ADMIN_TOKEN,
+                            Map.of("revision", revisionB)), mapper);
+                    Map<?, ?> changedInstallationComplete = completed(indexerBase,
+                            text(changedInstallationAdmission, "jobId"), mapper, indexer);
+                    changedInstallationReviewId = text(map(changedInstallationComplete, "review"), "reviewId");
+                    assertThat(map(changedInstallationComplete, "currentPointer")).isEqualTo(currentPointerA);
                 } catch (AssertionError failure) {
                     throw withIndexerLogs(failure, indexer.getLogs());
                 } finally {
@@ -148,6 +160,16 @@ class SemanticReviewJourneyIT {
                     assertThat(text(map(reviewDetails, "a"), "revision")).isEqualTo(revisionA);
                     assertThat(text(map(reviewDetails, "b"), "revision")).isEqualTo(revisionB);
                     assertThat(text(map(reviewDetails, "a"), "snapshotId")).isNotEqualTo(text(map(reviewDetails, "b"), "snapshotId"));
+                    assertThat(text(map(reviewDetails, "a"), "generationId"))
+                            .as("LINUX_UID analysis reuses the exact compatible current generation")
+                            .isEqualTo(baselineGeneration);
+                    Map<?, ?> changedInstallationReview = successful(get(queryBase,
+                            "/api/v1/repositories/" + REPOSITORY_ID + "/reviews/" + changedInstallationReviewId,
+                            QUERY_TOKEN), mapper);
+                    assertThat(text(map(changedInstallationReview, "a"), "revision")).isEqualTo(revisionA);
+                    assertThat(text(map(changedInstallationReview, "a"), "generationId")).isNotEqualTo(baselineGeneration);
+                    assertThat(text(map(changedInstallationReview, "a"), "analysisFingerprint"))
+                            .isNotEqualTo(text(map(reviewDetails, "a"), "analysisFingerprint"));
 
                     Map<String, Object> searchA = reviewSearch(reviewId, "A", revisionA, "LegacyGateway", "TYPE");
                     Map<?, ?> legacySearch = successful(post(queryBase, "/api/v1/reviews/search-code", QUERY_TOKEN, searchA), mapper);
@@ -253,7 +275,11 @@ class SemanticReviewJourneyIT {
     private String commitA(Git seed, Path root, Path remote) throws Exception {
 
         write(root, "pom.xml", "<project xmlns=\"http://maven.apache.org/POM/4.0.0\"><modelVersion>4.0.0</modelVersion><groupId>example</groupId><artifactId>journey</artifactId><version>1</version><properties><maven.compiler.release>21</maven.compiler.release></properties></project>\n");
-        write(root, "src/main/resources/.gitkeep", "");
+        write(root, "src/main/resources/mapper/PaymentMapper.xml", """
+                <mapper namespace="example.PaymentMapper">
+                  <select id="findActive">SELECT id FROM payments WHERE active = TRUE</select>
+                </mapper>
+                """);
         write(root, "src/main/java/example/Gateway.java", "package example; public interface Gateway { void pay(); }\n");
         write(root, "src/main/java/example/LegacyGateway.java", "package example; public class LegacyGateway implements Gateway { public void pay() {} }\n");
         write(root, "src/main/java/example/Checkout.java", "package example; public class Checkout { public void place() { new LegacyGateway().pay(); } }\n");
@@ -340,7 +366,7 @@ class SemanticReviewJourneyIT {
     }
 
     private void assertMcpJourney(String base, String reviewId, String revisionA, String revisionB, String comparisonId,
-                                  String legacyGateway, String legacyPay, String modernGateway, String modernPay, JsonMapper mapper) {
+                                  String legacyGateway, String legacyPay, String modernGateway, String modernPay, JsonMapper mapper) throws Exception {
         HttpClientStreamableHttpTransport transport = HttpClientStreamableHttpTransport.builder(base + "/mcp")
                 .jsonMapper(new JacksonMcpJsonMapper(mapper))
                 .httpRequestCustomizer((request, method, uri, body, context) -> request.header("X-Api-Token", QUERY_TOKEN)).build();
@@ -372,7 +398,37 @@ class SemanticReviewJourneyIT {
             Map<?, ?> patch = mcpBody(client, "get_file_diff", Map.of("repositoryId", REPOSITORY_ID, "comparisonId", comparisonId,
                     "previous", revisionA, "current", revisionB, "changeId", text(checkoutChange, "changeId")), mapper);
             assertThat(text(patch, "patch")).contains("LegacyGateway", "ModernGateway");
+            assertMapperVisibleThroughHttpAndMcp(base, client, reviewId, revisionA, revisionB, mapper);
         }
+    }
+
+    private void assertMapperVisibleThroughHttpAndMcp(String base, McpSyncClient client, String reviewId,
+                                                       String revisionA, String revisionB, JsonMapper mapper) throws Exception {
+        Map<String, Object> currentSearchRequest = Map.of("repositoryId", REPOSITORY_ID, "revision", revisionA,
+                "query", "findActive", "kinds", List.of("MAPPER_STATEMENT"));
+        Map<?, ?> currentSearch = successful(post(base, "/api/v1/search-code", QUERY_TOKEN, currentSearchRequest), mapper);
+        assertThat(mapList(currentSearch, "items")).singleElement()
+                .satisfies(item -> assertThat(text(item, "kind")).isEqualTo("MAPPER_STATEMENT"));
+        String currentFactId = text(mapList(currentSearch, "items").getFirst(), "factId");
+        Map<String, Object> currentSourceRequest = Map.of("repositoryId", REPOSITORY_ID, "revision", revisionA,
+                "factId", currentFactId);
+        Map<?, ?> currentSource = successful(post(base, "/api/v1/fact-source", QUERY_TOKEN, currentSourceRequest), mapper);
+        assertThat(text(map(currentSource, "source"), "code")).contains("SELECT id FROM payments WHERE active = TRUE");
+        assertThat(mcpBody(client, "search_code", currentSearchRequest, mapper)).isEqualTo(currentSearch);
+        assertThat(mcpBody(client, "get_fact_source", currentSourceRequest, mapper)).isEqualTo(currentSource);
+
+        Map<String, Object> reviewSearchRequest = reviewSearch(reviewId, "B", revisionB, "findActive", "MAPPER_STATEMENT");
+        Map<?, ?> reviewSearch = successful(post(base, "/api/v1/reviews/search-code", QUERY_TOKEN, reviewSearchRequest), mapper);
+        assertThat(mapList(map(reviewSearch, "result"), "items")).singleElement()
+                .satisfies(item -> assertThat(text(item, "kind")).isEqualTo("MAPPER_STATEMENT"));
+        String reviewFactId = text(mapList(map(reviewSearch, "result"), "items").getFirst(), "factId");
+        Map<String, Object> reviewSourceRequest = Map.of("repositoryId", REPOSITORY_ID, "reviewId", reviewId,
+                "side", "B", "revision", revisionB, "factId", reviewFactId);
+        Map<?, ?> reviewSource = successful(post(base, "/api/v1/reviews/fact-source", QUERY_TOKEN, reviewSourceRequest), mapper);
+        assertThat(text(map(map(reviewSource, "result"), "source"), "code"))
+                .contains("SELECT id FROM payments WHERE active = TRUE");
+        assertThat(mcpBody(client, "review_search_code", reviewSearchRequest, mapper)).isEqualTo(reviewSearch);
+        assertThat(mcpBody(client, "review_get_fact_source", reviewSourceRequest, mapper)).isEqualTo(reviewSource);
     }
 
     private static Map<?, ?> mcpBody(McpSyncClient client, String name, Map<String, Object> arguments, JsonMapper mapper) {

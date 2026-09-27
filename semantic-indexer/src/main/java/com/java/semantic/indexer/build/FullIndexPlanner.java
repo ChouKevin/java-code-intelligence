@@ -11,7 +11,10 @@ import java.nio.file.Path;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
+import java.util.stream.Stream;
 import javax.xml.stream.XMLInputFactory;
 import javax.xml.stream.XMLStreamConstants;
 import javax.xml.stream.XMLStreamException;
@@ -32,11 +35,11 @@ public final class FullIndexPlanner {
     public FullIndexPlan plan(Path repositoryRoot) {
         Path root = Objects.requireNonNull(repositoryRoot, "repository root is required").toAbsolutePath().normalize();
         try {
-            try (java.util.stream.Stream<Path> paths = Files.walk(root)) {
+            try (Stream<Path> paths = Files.walk(root)) {
                 List<FullIndexPlan.SourceInput> sources = paths.filter(path -> !Files.isDirectory(path, LinkOption.NOFOLLOW_LINKS))
                     .map(path -> toSource(root, path))
-                    .filter(java.util.Optional::isPresent)
-                    .map(java.util.Optional::orElseThrow)
+                    .filter(Optional::isPresent)
+                    .map(Optional::orElseThrow)
                     .sorted(Comparator.comparing(FullIndexPlan.SourceInput::sourcePath))
                     .toList();
                 return new FullIndexPlan(root, sources);
@@ -47,11 +50,11 @@ public final class FullIndexPlanner {
     }
 
     public FullIndexPlan plan(Path repositoryRoot, List<Path> includedSourceRoots) {
-        return plan(repositoryRoot, includedSourceRoots, java.util.Map.of());
+        return plan(repositoryRoot, includedSourceRoots, Map.of());
     }
 
     public FullIndexPlan plan(Path repositoryRoot, List<Path> includedSourceRoots,
-                              java.util.Map<String, String> effectiveCompilerOptions) {
+                              Map<String, String> effectiveCompilerOptions) {
         Path root = Objects.requireNonNull(repositoryRoot, "repository root is required").toAbsolutePath().normalize();
         List<Path> roots = List.copyOf(Objects.requireNonNull(includedSourceRoots, "included source roots are required"))
                 .stream().map(path -> path.toAbsolutePath().normalize()).toList();
@@ -66,24 +69,24 @@ public final class FullIndexPlanner {
                 .toList(), roots, effectiveCompilerOptions);
     }
 
-    private java.util.Optional<FullIndexPlan.SourceInput> toSource(Path root, Path path) {
+    private Optional<FullIndexPlan.SourceInput> toSource(Path root, Path path) {
         Path relative = root.relativize(path);
         if (!inputSelector.includes(relative) || !supportedCandidate(path)) {
-            return java.util.Optional.empty();
+            return Optional.empty();
         }
         try {
             if (Files.isSymbolicLink(path)) {
                 throw new IllegalArgumentException("supported source must not be a symlink or escape repository root: " + relative);
             }
             if (!Files.isRegularFile(path) || !path.toRealPath().startsWith(root.toRealPath())) {
-                return java.util.Optional.empty();
+                return Optional.empty();
             }
             String content = Files.readString(path);
             if (!supported(path, content)) {
-                return java.util.Optional.empty();
+                return Optional.empty();
             }
             String sourcePath = relative.toString().replace(path.getFileSystem().getSeparator(), "/");
-            return java.util.Optional.of(new FullIndexPlan.SourceInput(sourcePath, path,
+            return Optional.of(new FullIndexPlan.SourceInput(sourcePath, path,
                     SourceArtifactDocument.create(content)));
         } catch (IOException exception) {
             throw new UncheckedIOException("unable to read source input", exception);

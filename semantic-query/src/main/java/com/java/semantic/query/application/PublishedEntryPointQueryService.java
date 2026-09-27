@@ -13,6 +13,7 @@ import com.mongodb.client.FindIterable;
 import com.mongodb.client.model.Filters;
 import com.mongodb.client.model.Sorts;
 import org.bson.Document;
+import org.bson.conversions.Bson;
 import org.springframework.dao.DataAccessException;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.util.StringUtils;
@@ -52,7 +53,7 @@ public final class PublishedEntryPointQueryService {
         guard.require(selected, SelectedGenerationGuard.ENTRY_POINTS);
         SearchAccessPlan accessPlan = guard.searchAccessPlan(repositoryId);
         try {
-            org.bson.conversions.Bson filter = accessPlan.authorized(Filters.and(
+            Bson filter = accessPlan.authorized(Filters.and(
                     Filters.eq("repoId", selected.repositoryId().value()), Filters.eq("generationId", selected.generationId().value()),
                     Filters.eq("path", requestedPath), Filters.in("httpMethod", matchingMethods(requestedMethod))));
             long total = template.getCollection(IndexCollections.ENTRY_POINTS).countDocuments(filter,
@@ -96,11 +97,11 @@ public final class PublishedEntryPointQueryService {
         guard.require(selectedGeneration, SelectedGenerationGuard.ENTRY_POINTS);
         SearchAccessPlan accessPlan = guard.searchAccessPlan(repositoryId);
         try {
-            org.bson.conversions.Bson base = Filters.and(Filters.eq("repoId", selectedGeneration.repositoryId().value()),
+            Bson base = Filters.and(Filters.eq("repoId", selectedGeneration.repositoryId().value()),
                     Filters.eq("generationId", selectedGeneration.generationId().value()));
-            org.bson.conversions.Bson selected = requestedKinds.isEmpty() ? base : Filters.and(base,
+            Bson selected = requestedKinds.isEmpty() ? base : Filters.and(base,
                     Filters.in("entryPoint.kind", requestedKinds.stream().map(Enum::name).sorted().toList()));
-            org.bson.conversions.Bson filter = accessPlan.authorized(selected);
+            Bson filter = accessPlan.authorized(selected);
             long total = template.getCollection(IndexCollections.ENTRY_POINTS).countDocuments(filter,
                     new com.mongodb.client.model.CountOptions().maxTime(storageTimeout.toMillis(), TimeUnit.MILLISECONDS));
             FindIterable<Document> rows = template.getCollection(IndexCollections.ENTRY_POINTS).find(filter)

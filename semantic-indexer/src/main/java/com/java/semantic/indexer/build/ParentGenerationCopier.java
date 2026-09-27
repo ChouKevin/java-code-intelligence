@@ -5,6 +5,7 @@ import com.java.semantic.indexer.store.GenerationWriteContext;
 import com.java.semantic.model.codefact.CodeFact;
 import com.java.semantic.model.codefact.CodeFactId;
 import com.java.semantic.model.codefact.CodeFactIdentity;
+import com.java.semantic.model.codefact.RelationTarget;
 import com.java.semantic.model.index.EntryPointDocument;
 import com.java.semantic.model.index.GenerationFileDocument;
 import com.java.semantic.model.index.GenerationId;
@@ -120,11 +121,10 @@ public final class ParentGenerationCopier {
         return new CodeFactIdentity(lease.repositoryId(), targetRevision, parent.kind(), canonical);
     }
 
-    private static com.java.semantic.model.codefact.RelationTarget copy(com.java.semantic.model.codefact.RelationTarget target,
-                                                                          GenerationWriteContext lease,
-                                                                          RepositoryRevision targetRevision) {
-        if (target instanceof com.java.semantic.model.codefact.RelationTarget.Internal internal) {
-            return new com.java.semantic.model.codefact.RelationTarget.Internal(copy(internal.identity(), lease, targetRevision));
+    private static RelationTarget copy(RelationTarget target, GenerationWriteContext lease,
+                                       RepositoryRevision targetRevision) {
+        if (target instanceof RelationTarget.Internal internal) {
+            return new RelationTarget.Internal(copy(internal.identity(), lease, targetRevision));
         }
         return target;
     }

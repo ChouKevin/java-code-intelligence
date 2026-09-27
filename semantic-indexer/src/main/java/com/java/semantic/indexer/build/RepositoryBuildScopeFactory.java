@@ -12,6 +12,7 @@ import com.java.semantic.indexer.job.IndexJobStore;
 import com.java.semantic.indexer.store.MongoGenerationWriter;
 import com.java.semantic.indexer.store.PublicationPort;
 import com.java.semantic.indexer.uat.PublicationGate;
+import com.java.semantic.model.index.SealedGeneration;
 import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.repository.adapter.jgit.JGitWorktreeRepository;
 import com.java.semantic.semantic.adapter.jdtls.JdtWorkspaceManager;
@@ -128,7 +129,7 @@ public final class RepositoryBuildScopeFactory implements RepositoryBuildRunner.
         }
 
         @Override
-        public com.java.semantic.model.index.SealedGeneration seal() {
+        public SealedGeneration seal() {
             return buildService.seal(job);
         }
 

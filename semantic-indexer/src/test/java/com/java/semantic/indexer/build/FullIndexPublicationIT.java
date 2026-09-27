@@ -43,6 +43,7 @@ import com.java.semantic.model.index.SymbolDocument;
 import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.model.repository.RepositoryRevision;
 import com.mongodb.client.MongoClients;
+import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
@@ -292,10 +293,15 @@ class FullIndexPublicationIT {
         return template;
     }
 
-    private IndexBuildService.CheckedOutRepository checkout(String name, RepositoryRevision checkoutRevision) throws java.io.IOException {
+    private IndexBuildService.CheckedOutRepository checkout(String name, RepositoryRevision checkoutRevision) throws IOException {
         Path root = Files.createDirectories(temporaryDirectory.resolve(name));
-        Files.writeString(root.resolve("Order.java"), SOURCE_BODY);
+        writeCheckoutSource(root);
         return new IndexBuildService.CheckedOutRepository(root, checkoutRevision);
+    }
+
+    static void writeCheckoutSource(Path root) throws IOException {
+        Files.createDirectories(root.resolve("src"));
+        Files.writeString(root.resolve("src/Order.java"), SOURCE_BODY);
     }
 
     private static IndexBuildService service(MongoTemplate template, MongoIndexJobStore store, RepositoryIndexExporter exporter,

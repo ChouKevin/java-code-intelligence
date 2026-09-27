@@ -50,9 +50,14 @@ class DefaultRepositoryAnalysisPreparationTest {
     }
 
     @Test
-    void should_only_plan_imported_roots_that_contain_java_source(@TempDir Path repository) throws Exception {
+    void should_plan_safe_imported_production_roots_even_when_resources_have_no_java(@TempDir Path repository) throws Exception {
         Path productionRoot = Files.createDirectories(repository.resolve("module-a/src/main/java"));
+        Path resourceRoot = Files.createDirectories(repository.resolve("module-a/src/main/resources/mapper"));
+        Path testRoot = Files.createDirectories(repository.resolve("module-a/src/test/java"));
         Files.writeString(productionRoot.resolve("Service.java"), "class Service {}");
+        Files.writeString(resourceRoot.resolve("ServiceMapper.xml"),
+                "<mapper namespace=\"ServiceMapper\"><select id=\"find\">select 1</select></mapper>");
+        Files.writeString(testRoot.resolve("TestService.java"), "class TestService {}");
         RepositorySnapshot snapshot = new RepositorySnapshot(
                 RepositoryId.of("actual-review"),
                 repository,
@@ -70,12 +75,14 @@ class DefaultRepositoryAnalysisPreparationTest {
                         List.of(),
                         List.of(
                                 new AnalysisInputs.Root("module-a/src/main/java", "SOURCE", true, List.of()),
-                                new AnalysisInputs.Root("module-a/src/generated/java", "SOURCE", true, List.of())),
+                                new AnalysisInputs.Root("module-a/src/main/resources", "SOURCE", true, List.of()),
+                                new AnalysisInputs.Root("module-a/src/generated/java", "SOURCE", false, List.of("generated")),
+                                new AnalysisInputs.Root("module-a/src/test/java", "SOURCE", false, List.of("test"))),
                         List.of(),
                         List.of())));
 
         assertThat(DefaultRepositoryAnalysisPreparation.includedSourceRoots(snapshot, inputs))
-                .containsExactly(productionRoot);
+                .containsExactly(productionRoot, resourceRoot.getParent());
     }
 
     private static AnalysisInputs.Project project(String path, String processAnnotations) {

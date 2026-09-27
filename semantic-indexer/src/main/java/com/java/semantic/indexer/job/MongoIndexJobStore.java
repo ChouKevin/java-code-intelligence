@@ -2,6 +2,8 @@ package com.java.semantic.indexer.job;
 
 import com.java.semantic.indexer.store.PublicationConflictException;
 import com.java.semantic.indexer.review.ReviewBaselineUnavailableException;
+import com.java.semantic.indexer.review.ReviewPreparationException;
+import com.java.semantic.indexer.review.ReviewReadinessValidator;
 import com.java.semantic.model.index.GenerationId;
 import com.java.semantic.model.index.IndexCollections;
 import com.java.semantic.model.index.IndexSchemaContract;
@@ -504,9 +506,9 @@ public final class MongoIndexJobStore implements IndexJobStore {
             return false;
         }
         try {
-            new com.java.semantic.indexer.review.ReviewReadinessValidator(template).validateReadyCandidate(from(job));
+            new ReviewReadinessValidator(template).validateReadyCandidate(from(job));
             return true;
-        } catch (com.java.semantic.indexer.review.ReviewPreparationException exception) {
+        } catch (ReviewPreparationException exception) {
             return false;
         }
     }

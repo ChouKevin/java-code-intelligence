@@ -50,6 +50,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.charset.CharacterCodingException;
 import java.nio.charset.CodingErrorAction;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.attribute.PosixFilePermissions;
@@ -64,6 +65,7 @@ import java.time.Instant;
 import java.util.function.Consumer;
 import java.io.ByteArrayOutputStream;
 import java.io.OutputStream;
+import java.util.stream.Stream;
 
 /** JGit 的唯一 production adapter */
 @Component
@@ -149,8 +151,8 @@ public class JGitRepositoryAdapter implements GitRepositoryPort {
 
     private static void discardFailedClone(Path staging, Exception failure) {
         try {
-            if (Files.exists(staging, java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
-                try (java.util.stream.Stream<Path> entries = Files.walk(staging)) {
+            if (Files.exists(staging, LinkOption.NOFOLLOW_LINKS)) {
+                try (Stream<Path> entries = Files.walk(staging)) {
                     for (Path entry : entries.sorted(Comparator.reverseOrder()).toList()) {
                         Files.deleteIfExists(entry);
                     }
