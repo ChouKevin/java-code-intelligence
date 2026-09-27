@@ -27,7 +27,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class ToolProjectionEvolutionIT extends PublishedMongoITSupport {
 
     @Test
-    void rejects_search_v1_with_a_typed_contract_failure_then_accepts_the_rebuilt_same_revision_v2() {
+    void rejects_search_v1_with_a_typed_contract_failure_then_accepts_the_rebuilt_same_revision_current_contract() {
         try (MongoDBContainer container = new MongoDBContainer("mongo:8.0.4")) {
             container.start();
             MongoTemplate template = new MongoTemplate(MongoClients.create(container.getConnectionString()), "tool_projection_evolution");
@@ -65,11 +65,10 @@ class ToolProjectionEvolutionIT extends PublishedMongoITSupport {
     }
 
     private static List<Document> v1Versions() {
-        return List.of(new Document("name", ProjectionName.SOURCES.name()).append("version", 2),
-                new Document("name", ProjectionName.SYMBOLS.name()).append("version", 2),
-                new Document("name", ProjectionName.RELATIONS.name()).append("version", 2),
-                new Document("name", ProjectionName.ENTRY_POINTS.name()).append("version", 2),
-                new Document("name", ProjectionName.SEARCH.name()).append("version", 1));
+        return IndexSchemaContract.requiredProjectionVersions().entrySet().stream()
+                .map(entry -> new Document("name", entry.getKey()).append("version",
+                        ProjectionName.SEARCH.name().equals(entry.getKey()) ? 1 : entry.getValue()))
+                .toList();
     }
 
     private static List<Document> currentVersions() {

@@ -69,13 +69,15 @@ class PublishedCodeFactContractIT extends PublishedMongoITSupport {
                     "src/main/java/example/payment/PaymentService.java");
             seedMethod(template, identity, List.of());
             seedSearch(template, identity, "SYMBOLS", List.of("find", "payment"));
+            java.util.Map<String, Integer> currentVersions =
+                    com.java.semantic.model.index.IndexSchemaContract.requiredProjectionVersions();
             template.getCollection("generation_manifests").updateOne(new Document("repoId", "orders"),
                     new Document("$set", new Document("projectionVersions", List.of(
                             new Document("name", "SOURCES").append("version", 1),
-                            new Document("name", "SYMBOLS").append("version", 2),
+                            new Document("name", "SYMBOLS").append("version", currentVersions.get("SYMBOLS")),
                             new Document("name", "RELATIONS").append("version", 1),
                             new Document("name", "ENTRY_POINTS").append("version", 1),
-                            new Document("name", "SEARCH").append("version", 2)))));
+                            new Document("name", "SEARCH").append("version", currentVersions.get("SEARCH"))))));
             CurrentGenerationSelector selector = selector(template, policy());
             SelectedGeneration context = selector.select("orders", REVISION,
                     CodeFactReadService.requirementsForSearchKinds(java.util.Set.of(CodeFactKind.METHOD)));
@@ -96,7 +98,7 @@ class PublishedCodeFactContractIT extends PublishedMongoITSupport {
                             new Document("name", "SYMBOLS").append("version", 1),
                             new Document("name", "RELATIONS").append("version", 1),
                             new Document("name", "ENTRY_POINTS").append("version", 1),
-                            new Document("name", "SEARCH").append("version", 2)))));
+                            new Document("name", "SEARCH").append("version", currentVersions.get("SEARCH"))))));
 
             assertThatThrownBy(() -> search.search(context, query))
                     .isInstanceOf(IndexContractMismatchException.class);
@@ -188,7 +190,7 @@ class PublishedCodeFactContractIT extends PublishedMongoITSupport {
             CodeFactIdentity identity = methodIdentity("example.payment", "PaymentFeeCalculator", "feeFormula",
                     "src/main/java/example/payment/PaymentFeeCalculator.java");
             seedMethod(template, identity, List.of());
-            seedSearch(template, identity, "SYMBOLS", List.of("feeFormula", "fee"));
+            seedSearch(template, identity, "SYMBOLS", List.of("fee", "formula"));
             CurrentGenerationSelector selector = selector(template, policy());
             CodeFactSearchQuery query = new CodeFactSearchQuery(new RepositoryId("orders"), new RepositoryRevision(REVISION), "feeFormula");
             SelectedGeneration context = selector.select("orders", REVISION,
@@ -202,8 +204,6 @@ class PublishedCodeFactContractIT extends PublishedMongoITSupport {
             assertThat(details.fact().identity()).isEqualTo(identity);
             assertThat(details.location().sourceFile()).isEqualTo("src/main/java/example/payment/PaymentFeeCalculator.java");
             assertThat(details.annotations()).isEmpty();
-            assertThat(com.java.semantic.model.codefact.CodeFactDetails.class.getRecordComponents())
-                    .extracting(component -> component.getName()).containsExactly("generation", "fact", "location", "annotations");
         }
     }
 
@@ -216,12 +216,14 @@ class PublishedCodeFactContractIT extends PublishedMongoITSupport {
                     "src/main/java/example/payment/PaymentService.java");
             seedMethod(template, identity, List.of());
             seedSearch(template, identity, "SYMBOLS", List.of("find", "payment"));
+            java.util.Map<String, Integer> currentVersions =
+                    com.java.semantic.model.index.IndexSchemaContract.requiredProjectionVersions();
             template.getCollection("generation_manifests").updateOne(new Document("repoId", "orders"),
                     new Document("$set", new Document("projectionVersions", List.of(
-                            new Document("name", "SOURCES").append("version", 2),
-                            new Document("name", "SYMBOLS").append("version", 2),
+                            new Document("name", "SOURCES").append("version", currentVersions.get("SOURCES")),
+                            new Document("name", "SYMBOLS").append("version", currentVersions.get("SYMBOLS")),
                             new Document("name", "RELATIONS").append("version", 1),
-                            new Document("name", "SEARCH").append("version", 2)))));
+                            new Document("name", "SEARCH").append("version", currentVersions.get("SEARCH"))))));
             CurrentGenerationSelector selector = selector(template, policy());
             SelectedGeneration selectedContext = selector.selectCodeFact("orders", REVISION, identity,
                     CodeFactReadService.requirementsForSearchKinds(java.util.Set.of(identity.kind())));

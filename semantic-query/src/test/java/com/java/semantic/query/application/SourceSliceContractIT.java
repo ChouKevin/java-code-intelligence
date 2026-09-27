@@ -55,6 +55,7 @@ class SourceSliceContractIT extends PublishedMongoITSupport {
             CodeFactIdentity relation = seedRelation(template, from, RelationKind.CALLS_OUTBOUND_API,
                     new RelationTarget.External(new ExternalTarget.Endpoint("POST", "https://payments.example/charge")), factRange)
                     .fact().identity();
+            seedSearch(template, relation, "RELATIONS", List.of("charge"));
             CurrentGenerationSelector selector = selector(template, policy());
             SelectedGeneration context = selector.selectCodeFact("orders", REVISION, relation,
                     CodeFactReadService.requirementsForSearchKinds(java.util.Set.of(relation.kind())));
@@ -121,13 +122,15 @@ class SourceSliceContractIT extends PublishedMongoITSupport {
             CodeFactIdentity method = methodIdentity("example.payment", "PaymentService", "method", path);
             seedMethod(template, method, List.of());
             seedSearch(template, method, "SYMBOLS", List.of("method"));
+            java.util.Map<String, Integer> currentVersions =
+                    com.java.semantic.model.index.IndexSchemaContract.requiredProjectionVersions();
             template.getCollection("generation_manifests").updateOne(new Document("repoId", "orders"),
                     new Document("$set", new Document("projectionVersions", List.of(
                             new Document("name", "SOURCES").append("version", 1),
-                            new Document("name", "SYMBOLS").append("version", 2),
-                            new Document("name", "RELATIONS").append("version", 2),
-                            new Document("name", "ENTRY_POINTS").append("version", 2),
-                            new Document("name", "SEARCH").append("version", 2)))));
+                            new Document("name", "SYMBOLS").append("version", currentVersions.get("SYMBOLS")),
+                            new Document("name", "RELATIONS").append("version", currentVersions.get("RELATIONS")),
+                            new Document("name", "ENTRY_POINTS").append("version", currentVersions.get("ENTRY_POINTS")),
+                            new Document("name", "SEARCH").append("version", currentVersions.get("SEARCH"))))));
             CurrentGenerationSelector selector = selector(template, policy());
             SelectedGenerationGuard guard = guard(template, policy());
             SourceSliceService service = new SourceSliceService(

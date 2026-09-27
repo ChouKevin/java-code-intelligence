@@ -41,13 +41,14 @@ class PublishedDiscoveryContractIT extends PublishedMongoITSupport {
             MongoTemplate template = new MongoTemplate(com.mongodb.client.MongoClients.create(container.getConnectionString()), "published_discovery");
             seedCurrent(template, "orders");
             com.java.semantic.model.codefact.CodeFactIdentity identity = methodIdentity("example.video", "VideoListener", "onReady", "src/main/java/example/video/VideoListener.java");
+            seedMethod(template, identity, List.of(new AnnotationFact("org.springframework.context.event.EventListener")));
             CurrentGenerationSelector selector = selector(template, policy());
             SelectedGeneration context = selector.select("orders", REVISION, SelectedGenerationGuard.SYMBOLS);
             PublishedDiscoveryQueryService service = new PublishedDiscoveryQueryService(template, guard(template, policy()), Duration.ofSeconds(2));
             SourceTypeIdentity type = ((com.java.semantic.model.codefact.MethodTarget) identity.canonicalIdentity()).sourceType();
             seedCoverageSource(template, type.sourceFile(), "JDT_SYNTAX_PROBLEM", new SourceIndexScope(true, List.of("example.video"),
                     List.of(SourceIndexScope.classKey("example.video", "VideoListener")),
-                    List.of(SourceIndexScope.methodKey("example.video", "VideoListener", "onReady", List.of("VideoReady")))));
+                    List.of(SourceIndexScope.methodKey("example.video", "VideoListener", "onReady", List.of("example.events.VideoReady")))));
             assertThat(service.discoverEventListeners(context, new EventListenerQuery(new RepositoryId("orders"), new RepositoryRevision(REVISION),
                     "example.events.VideoReady", 0, 20)).candidates()).hasSize(1);
             assertThat(service.resolveDeclaration(context, new DeclarationResolutionQuery(new RepositoryId("orders"), new RepositoryRevision(REVISION),
