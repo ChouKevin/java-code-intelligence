@@ -17,11 +17,10 @@ public record ReviewManifestDocument(
         String ownerJobId,
         int reviewContractVersion,
         ReviewState state,
-        ReviewComparisonType comparisonType,
-        CapturedReviewBaseline capturedBaseline,
-        RepositoryRevision requestedRevision,
-        Optional<ReviewEndpoint> a,
-        Optional<ReviewEndpoint> b,
+        ReviewSelection selection,
+        Optional<ResolvedReviewEndpoints> resolvedEndpoints,
+        Optional<ReviewEndpoint> before,
+        Optional<ReviewEndpoint> after,
         Optional<GitComparisonId> comparisonId,
         Instant createdAt,
         Optional<Instant> publishedAt,
@@ -34,11 +33,10 @@ public record ReviewManifestDocument(
         ModelValidation.require(reviewContractVersion == IndexSchemaContract.REVIEW_MANIFEST_VERSION,
                 "unsupported review manifest version");
         state = Objects.requireNonNull(state, "review state is required");
-        comparisonType = Objects.requireNonNull(comparisonType, "review comparison type is required");
-        capturedBaseline = Objects.requireNonNull(capturedBaseline, "captured review baseline is required");
-        requestedRevision = Objects.requireNonNull(requestedRevision, "requested review revision is required");
-        a = Objects.requireNonNull(a, "review A endpoint is required");
-        b = Objects.requireNonNull(b, "review B endpoint is required");
+        selection = Objects.requireNonNull(selection, "review selection is required");
+        resolvedEndpoints = Objects.requireNonNull(resolvedEndpoints, "resolved review endpoints are required");
+        before = Objects.requireNonNull(before, "review before endpoint is required");
+        after = Objects.requireNonNull(after, "review after endpoint is required");
         comparisonId = Objects.requireNonNull(comparisonId, "review comparison id is required");
         createdAt = Objects.requireNonNull(createdAt, "review creation time is required");
         publishedAt = Objects.requireNonNull(publishedAt, "review publication time is required");
@@ -46,44 +44,55 @@ public record ReviewManifestDocument(
                 .map(value -> ModelValidation.requiredText(value, "review failure category"));
 
         switch (state) {
-            case READY -> requireReady(repositoryId, capturedBaseline, requestedRevision, a, b, comparisonId, publishedAt, failureCategory);
-            case PREPARING -> requirePreparingOrFailed(a, b, comparisonId, publishedAt, failureCategory, false);
-            case FAILED -> requirePreparingOrFailed(a, b, comparisonId, publishedAt, failureCategory, true);
+            case READY -> requireReady(repositoryId, selection, resolvedEndpoints, before, after, comparisonId, publishedAt, failureCategory);
+            case PREPARING -> requirePreparingOrFailed(before, after, comparisonId, publishedAt, failureCategory, false);
+            case FAILED -> requirePreparingOrFailed(before, after, comparisonId, publishedAt, failureCategory, true);
         }
     }
 
     private static void requireReady(
             RepositoryId repositoryId,
-            CapturedReviewBaseline capturedBaseline,
-            RepositoryRevision requestedRevision,
-            Optional<ReviewEndpoint> a,
-            Optional<ReviewEndpoint> b,
+            ReviewSelection selection,
+            Optional<ResolvedReviewEndpoints> resolvedEndpoints,
+            Optional<ReviewEndpoint> before,
+            Optional<ReviewEndpoint> after,
             Optional<GitComparisonId> comparisonId,
             Optional<Instant> publishedAt,
             Optional<String> failureCategory) {
-        ModelValidation.require(a.isPresent() && b.isPresent() && comparisonId.isPresent() && publishedAt.isPresent(),
-                "ready review requires A, B, comparison, and publication time");
+        ModelValidation.require(resolvedEndpoints.isPresent() && after.isPresent() && comparisonId.isPresent() && publishedAt.isPresent(),
+                "ready review requires resolved endpoints, after, comparison, and publication time");
         ModelValidation.require(failureCategory.isEmpty(), "ready review must not have a failure category");
-        ReviewEndpoint endpointA = a.orElseThrow();
-        ReviewEndpoint endpointB = b.orElseThrow();
-        validateEndpoint(repositoryId, endpointA);
-        validateEndpoint(repositoryId, endpointB);
-        ModelValidation.require(endpointA.generation().selected().revision().equals(capturedBaseline.pointer().revision()),
-                "review A revision must match the captured baseline revision");
-
-        ModelValidation.require(endpointB.generation().selected().revision().equals(requestedRevision),
-                "review B revision must match the requested review revision");
-        requireDistinctSnapshots(endpointA, endpointB);
+        ResolvedReviewEndpoints resolved = resolvedEndpoints.orElseThrow();
+        ModelValidation.require(resolved.afterRevision().equals(selection.afterRevision()),
+                "resolved after revision must match the selection");
+        ModelValidation.require((selection.kind() == ReviewComparisonType.RANGE) == (resolved.baselineRule() == ReviewBaselineRule.DIRECT_RANGE),
+                "resolved baseline rule must match selection kind");
+        if (selection.kind() == ReviewComparisonType.RANGE) {
+            ModelValidation.require(resolved.beforeRevision().equals(selection.beforeRevision()),
+                    "range before revision must match the selection");
+        }
+        ModelValidation.require(before.isPresent() == resolved.beforeRevision().isPresent(),
+                "review before membership must match the resolved endpoint");
+        before.ifPresent(endpoint -> {
+            validateEndpoint(repositoryId, endpoint);
+            ModelValidation.require(endpoint.generation().selected().revision().equals(resolved.beforeRevision().orElseThrow()),
+                    "review before revision must match the resolved revision");
+        });
+        ReviewEndpoint afterEndpoint = after.orElseThrow();
+        validateEndpoint(repositoryId, afterEndpoint);
+        ModelValidation.require(afterEndpoint.generation().selected().revision().equals(resolved.afterRevision()),
+                "review after revision must match the resolved revision");
+        before.ifPresent(endpoint -> requireDistinctSnapshots(endpoint, afterEndpoint));
     }
 
     private static void requirePreparingOrFailed(
-            Optional<ReviewEndpoint> a,
-            Optional<ReviewEndpoint> b,
+            Optional<ReviewEndpoint> before,
+            Optional<ReviewEndpoint> after,
             Optional<GitComparisonId> comparisonId,
             Optional<Instant> publishedAt,
             Optional<String> failureCategory,
             boolean failed) {
-        ModelValidation.require(a.isEmpty() && b.isEmpty() && comparisonId.isEmpty() && publishedAt.isEmpty(),
+        ModelValidation.require(before.isEmpty() && after.isEmpty() && comparisonId.isEmpty() && publishedAt.isEmpty(),
                 "only ready reviews may contain review membership");
         if (failed) {
             ModelValidation.require(failureCategory.isPresent(), "failed review requires a failure category");

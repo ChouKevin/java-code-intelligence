@@ -5,7 +5,9 @@ import com.java.semantic.model.codefact.CodeFactKind;
 import com.java.semantic.model.codefact.EntryPointKind;
 import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.model.repository.RepositoryRevision;
-import com.java.semantic.model.review.ReviewComparisonType;
+import com.java.semantic.model.review.ReviewBaselineRule;
+import com.java.semantic.model.review.ReviewSelection;
+import com.java.semantic.model.review.ResolvedReviewEndpoints;
 import com.java.semantic.model.review.ReviewId;
 import com.java.semantic.model.review.ReviewSide;
 import com.java.semantic.model.support.ModelValidation;
@@ -142,14 +144,6 @@ public final class ReviewQueryContract {
         }
     }
 
-    public record CapturedBaselineDetails(String revision, String generationId, String manifestDigest, Instant capturedAt) {
-        public CapturedBaselineDetails {
-            revision = new RepositoryRevision(revision).value();
-            generationId = ModelValidation.requiredText(generationId, "generation id");
-            manifestDigest = ModelValidation.sha256(manifestDigest, "manifest digest");
-            capturedAt = Objects.requireNonNull(capturedAt, "baseline capture time is required");
-        }
-    }
 
     public record ReviewEndpointDetails(String revision, String generationId, String manifestDigest,
                                         String analysisFingerprint, String snapshotId, ReviewCoverage coverage) {
@@ -163,16 +157,26 @@ public final class ReviewQueryContract {
         }
     }
 
-    public record ReviewDetails(String repositoryId, String reviewId, ReviewComparisonType comparisonType,
-                                CapturedBaselineDetails capturedBaseline, ReviewEndpointDetails a, ReviewEndpointDetails b,
-                                String comparisonId, Instant publishedAt) {
+    public record ReviewBeforeDetails(ReviewBaselineRule kind, Optional<ReviewEndpointDetails> endpoint) {
+        public ReviewBeforeDetails {
+            kind = Objects.requireNonNull(kind, "review before kind is required");
+            endpoint = Objects.requireNonNull(endpoint, "review before endpoint is required");
+            if (endpoint.isEmpty() != (kind == ReviewBaselineRule.EMPTY_TREE)) {
+                throw new IllegalArgumentException("empty tree has no semantic before endpoint");
+            }
+        }
+    }
+
+    public record ReviewDetails(String repositoryId, String reviewId, ReviewSelection selection,
+                                ResolvedReviewEndpoints resolvedEndpoints, ReviewBeforeDetails before,
+                                ReviewEndpointDetails after, String comparisonId, Instant publishedAt) {
         public ReviewDetails {
             repositoryId = new RepositoryId(repositoryId).value();
             reviewId = new ReviewId(reviewId).value();
-            comparisonType = Objects.requireNonNull(comparisonType, "review comparison type is required");
-            capturedBaseline = Objects.requireNonNull(capturedBaseline, "captured baseline is required");
-            a = Objects.requireNonNull(a, "review A details are required");
-            b = Objects.requireNonNull(b, "review B details are required");
+            selection = Objects.requireNonNull(selection, "review selection is required");
+            resolvedEndpoints = Objects.requireNonNull(resolvedEndpoints, "resolved review endpoints are required");
+            before = Objects.requireNonNull(before, "review before details are required");
+            after = Objects.requireNonNull(after, "review after details are required");
             comparisonId = ModelValidation.requiredText(comparisonId, "comparison id");
             publishedAt = Objects.requireNonNull(publishedAt, "review publication time is required");
         }

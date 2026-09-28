@@ -7,6 +7,7 @@ import com.java.semantic.model.git.GitCatalogManifest;
 import com.java.semantic.model.git.GitCommit;
 import com.java.semantic.model.git.GitEvidenceId;
 import com.java.semantic.model.git.GitEvidenceOwnership;
+import com.java.semantic.model.git.GitPublicationScope;
 import com.java.semantic.model.git.GitEvidenceState;
 import com.java.semantic.model.git.GitHistoryManifest;
 import com.java.semantic.model.git.GitPreparedComparison;
@@ -19,6 +20,7 @@ import com.java.semantic.model.git.GitFileContentStatus;
 import com.java.semantic.model.index.IndexCollections;
 import com.java.semantic.model.index.IndexSchemaContract;
 import com.java.semantic.model.repository.RepositoryId;
+import com.java.semantic.model.review.ResolvedReviewEndpoints;
 import com.java.semantic.model.repository.RepositoryRevision;
 import com.mongodb.client.model.Filters;
 import com.mongodb.client.model.Sorts;
@@ -143,6 +145,17 @@ public final class GitEvidencePublicationStore {
         verifySchemaBeforeEvidence();
         IndexJob requiredJob = Objects.requireNonNull(job, "job is required");
         GitEvidenceOwnership requiredOwnership = Objects.requireNonNull(ownership, "Git evidence ownership is required");
+        if (requiredOwnership.scope() == GitPublicationScope.REVIEW) {
+            ResolvedReviewEndpoints resolved = requiredJob.review().orElseThrow()
+                    .resolvedEndpoints().orElseThrow();
+            if (!resolved.beforeRevision().equals(comparison.previous())
+                    || !resolved.afterRevision().equals(comparison.current())
+                    || !requiredOwnership.reviewId().orElseThrow().equals(requiredJob.review().orElseThrow().reviewId())) {
+                throw new PublicationConflictException();
+            }
+        } else if (comparison.previous().isEmpty()) {
+            throw new PublicationConflictException();
+        }
         GitComparisonId comparisonId = GitComparisonId.create();
         GitSnapshotId previousSnapshot = GitSnapshotId.create();
         GitSnapshotId currentSnapshot = GitSnapshotId.create();
@@ -154,14 +167,18 @@ public final class GitEvidencePublicationStore {
         Document comparisonManifest = ownershipDocument(new Document("repoId", requiredJob.repositoryId().value())
                 .append("evidenceId", comparisonId.value()).append("kind", "COMPARISON").append("state", "PREPARING")
                 .append("gitEvidenceVersion", IndexSchemaContract.GIT_EVIDENCE_VERSION)
-                .append("previous", comparison.previous().value()).append("current", comparison.current().value())
+                .append("current", comparison.current().value())
+                .append("baselineRule", requiredOwnership.scope() == GitPublicationScope.REVIEW
+                        ? requiredJob.review().orElseThrow().resolvedEndpoints().orElseThrow().baselineRule().name() : "DIRECT_RANGE")
                 .append("previousSnapshotId", previousSnapshot.value()).append("currentSnapshotId", currentSnapshot.value())
                 .append("ancestry", comparison.ancestry().name()).append("preparedAt", Date.from(preparedAt))
                 .append("ownerJobId", requiredJob.id().value()).append("total", (long) comparison.changes().size())
                 .append("contentDigest", comparisonDigest), requiredOwnership);
+        comparison.previous().ifPresent(revision -> comparisonManifest.append("previous", revision.value()));
         template.getCollection(IndexCollections.GIT_EVIDENCE_MANIFESTS).insertOne(comparisonManifest);
-        publishSnapshot(requiredJob, previousSnapshot, comparison.previous().value(), comparison.previousEntries(), preparedAt, requiredOwnership);
-        publishSnapshot(requiredJob, currentSnapshot, comparison.current().value(), comparison.currentEntries(), preparedAt, requiredOwnership);
+        publishSnapshot(requiredJob, previousSnapshot, comparison.previous().map(RepositoryRevision::value),
+                comparison.previousEntries(), preparedAt, requiredOwnership);
+        publishSnapshot(requiredJob, currentSnapshot, Optional.of(comparison.current().value()), comparison.currentEntries(), preparedAt, requiredOwnership);
         long ordinal = 0L;
         for (GitComparisonChange change : comparison.changes()) {
             template.getCollection(IndexCollections.GIT_COMPARISON_CHANGES).insertOne(new Document("repoId", requiredJob.repositoryId().value())
@@ -179,18 +196,19 @@ public final class GitEvidencePublicationStore {
         return new ComparisonPublication(comparisonId, previousSnapshot, currentSnapshot);
     }
 
-    private void publishSnapshot(IndexJob job, GitSnapshotId snapshotId, String revision, List<GitSnapshotEntry> entries,
+    private void publishSnapshot(IndexJob job, GitSnapshotId snapshotId, Optional<String> revision, List<GitSnapshotEntry> entries,
                                  Instant preparedAt, GitEvidenceOwnership ownership) {
         EvidenceLimits limits = evidenceLimits();
         long totalText = 0L;
         long textEntries = 0L;
         Document snapshotManifest = ownershipDocument(new Document("repoId", job.repositoryId().value()).append("evidenceId", snapshotId.value())
                 .append("kind", "SNAPSHOT").append("state", "PREPARING")
-                .append("gitEvidenceVersion", IndexSchemaContract.GIT_EVIDENCE_VERSION).append("revision", revision)
+                .append("gitEvidenceVersion", IndexSchemaContract.GIT_EVIDENCE_VERSION)
                 .append("preparedAt", Date.from(preparedAt)).append("ownerJobId", job.id().value()).append("total", (long) entries.size())
                 .append("contentDigest", emptyDigest()).append("fileTextBytesLimit", limits.fileTextBytes())
                 .append("snapshotTextBytesLimit", limits.snapshotTextBytes()).append("contentCoverage", new Document("textBytes", 0L)
                         .append("textEntries", 0L).append("entryCount", (long) entries.size())), ownership);
+        revision.ifPresent(value -> snapshotManifest.append("revision", value));
         template.getCollection(IndexCollections.GIT_EVIDENCE_MANIFESTS).insertOne(snapshotManifest);
         long ordinal = 0L;
         String digest = emptyDigest();
@@ -233,13 +251,14 @@ public final class GitEvidencePublicationStore {
                 Filters.in("evidenceId", List.of(previousSnapshot.value(), currentSnapshot.value()))));
         Document manifest = template.getCollection(IndexCollections.GIT_EVIDENCE_MANIFESTS).find(Filters.and(Filters.eq("repoId", repositoryId.value()),
                 Filters.eq("evidenceId", comparisonId.value()), Filters.eq("kind", "COMPARISON"), Filters.eq("state", "PREPARING"))).first();
-        if (readySnapshots != 2L || Objects.isNull(manifest) || !expected.previous().value().equals(manifest.getString("previous"))
+        if (readySnapshots != 2L || Objects.isNull(manifest)
+                || !Objects.equals(expected.previous().map(RepositoryRevision::value).orElse(null), manifest.getString("previous"))
                 || !expected.current().value().equals(manifest.getString("current")) || !previousSnapshot.value().equals(manifest.getString("previousSnapshotId"))
                 || !currentSnapshot.value().equals(manifest.getString("currentSnapshotId")) || !expected.ancestry().name().equals(manifest.getString("ancestry"))) {
             throw new PublicationConflictException();
         }
-        validateReadySnapshot(repositoryId, previousSnapshot, expected.previous().value(), expected.previousEntries());
-        validateReadySnapshot(repositoryId, currentSnapshot, expected.current().value(), expected.currentEntries());
+        validateReadySnapshot(repositoryId, previousSnapshot, expected.previous().map(RepositoryRevision::value), expected.previousEntries());
+        validateReadySnapshot(repositoryId, currentSnapshot, Optional.of(expected.current().value()), expected.currentEntries());
         validateChanges(repositoryId, comparisonId, expected.changes());
     }
 
@@ -250,14 +269,18 @@ public final class GitEvidencePublicationStore {
                 Filters.eq("repoId", repositoryId.value()), Filters.eq("evidenceId", comparisonId.value()),
                 Filters.eq("kind", "COMPARISON"), Filters.eq("state", "READY"),
                 Filters.eq("previousSnapshotId", previousSnapshot.value()), Filters.eq("currentSnapshotId", currentSnapshot.value()))).first();
-        if (Objects.isNull(manifest) || Objects.isNull(manifest.getString("previous")) || Objects.isNull(manifest.getString("current"))
+        if (Objects.isNull(manifest) || Objects.isNull(manifest.getString("current"))
                 || Objects.isNull(manifest.getString("ancestry"))) {
+            throw new PublicationConflictException();
+        }
+        Optional<String> previous = Optional.ofNullable(manifest.getString("previous"));
+        if (previous.isEmpty() != "EMPTY_TREE".equals(manifest.getString("ancestry"))) {
             throw new PublicationConflictException();
         }
         List<GitSnapshotEntry> previousEntries = storedSnapshotEntries(repositoryId, previousSnapshot);
         List<GitSnapshotEntry> currentEntries = storedSnapshotEntries(repositoryId, currentSnapshot);
-        validateReadySnapshot(repositoryId, previousSnapshot, manifest.getString("previous"), previousEntries);
-        validateReadySnapshot(repositoryId, currentSnapshot, manifest.getString("current"), currentEntries);
+        validateReadySnapshot(repositoryId, previousSnapshot, previous, previousEntries);
+        validateReadySnapshot(repositoryId, currentSnapshot, Optional.of(manifest.getString("current")), currentEntries);
         List<GitComparisonChange> changes = storedChanges(repositoryId, comparisonId);
         validateChanges(repositoryId, comparisonId, changes);
         String digest = emptyDigest();
@@ -345,12 +368,12 @@ public final class GitEvidencePublicationStore {
         }
     }
 
-    private void validateSnapshotPublication(RepositoryId repositoryId, GitSnapshotId snapshotId, String revision,
+    private void validateSnapshotPublication(RepositoryId repositoryId, GitSnapshotId snapshotId, Optional<String> revision,
                                              List<GitSnapshotEntry> expectedEntries, long expectedTextBytes, EvidenceLimits limits) {
         validateSnapshotContents(repositoryId, snapshotId, revision, expectedEntries, expectedTextBytes, "PREPARING", limits);
     }
 
-    private void validateReadySnapshot(RepositoryId repositoryId, GitSnapshotId snapshotId, String revision,
+    private void validateReadySnapshot(RepositoryId repositoryId, GitSnapshotId snapshotId, Optional<String> revision,
                                        List<GitSnapshotEntry> expectedEntries) {
         long expectedTextBytes = expectedEntries.stream().filter(entry -> entry.contentStatus().name().equals("TEXT"))
                 .mapToLong(GitSnapshotEntry::byteLength).sum();
@@ -358,10 +381,11 @@ public final class GitEvidencePublicationStore {
         validateSnapshotContents(repositoryId, snapshotId, revision, expectedEntries, expectedTextBytes, "READY", limitsFrom(manifest));
     }
 
-    private void validateSnapshotContents(RepositoryId repositoryId, GitSnapshotId snapshotId, String revision,
+    private void validateSnapshotContents(RepositoryId repositoryId, GitSnapshotId snapshotId, Optional<String> revision,
                                           List<GitSnapshotEntry> expectedEntries, long expectedTextBytes, String state, EvidenceLimits limits) {
         Document manifest = snapshotManifest(repositoryId, snapshotId, state);
-        if (Objects.isNull(manifest) || !revision.equals(manifest.getString("revision")) || manifest.getLong("total") != expectedEntries.size()) {
+        if (Objects.isNull(manifest) || !Objects.equals(revision.orElse(null), manifest.getString("revision"))
+                || revision.isEmpty() && !expectedEntries.isEmpty() || manifest.getLong("total") != expectedEntries.size()) {
             throw new PublicationConflictException();
         }
         long actualTextBytes = 0L;
@@ -576,10 +600,10 @@ public final class GitEvidencePublicationStore {
     }
 
     private void setSnapshotCoverage(RepositoryId repositoryId, GitSnapshotId snapshotId, long textBytes, long textEntries, int entryCount) {
-        long modified = template.getCollection(IndexCollections.GIT_EVIDENCE_MANIFESTS).updateOne(Filters.and(Filters.eq("repoId", repositoryId.value()),
+        long matched = template.getCollection(IndexCollections.GIT_EVIDENCE_MANIFESTS).updateOne(Filters.and(Filters.eq("repoId", repositoryId.value()),
                 Filters.eq("evidenceId", snapshotId.value()), Filters.eq("state", "PREPARING")), Updates.set("contentCoverage",
-                new Document("textBytes", textBytes).append("textEntries", textEntries).append("entryCount", (long) entryCount))).getModifiedCount();
-        if (modified != 1L) {
+                new Document("textBytes", textBytes).append("textEntries", textEntries).append("entryCount", (long) entryCount))).getMatchedCount();
+        if (matched != 1L) {
             throw new PublicationConflictException();
         }
     }
@@ -787,9 +811,9 @@ public final class GitEvidencePublicationStore {
     }
 
     private void setContentDigest(RepositoryId repositoryId, GitEvidenceId evidenceId, String digest) {
-        long modified = template.getCollection(IndexCollections.GIT_EVIDENCE_MANIFESTS).updateOne(Filters.and(Filters.eq("repoId", repositoryId.value()),
-                Filters.eq("evidenceId", evidenceId.value()), Filters.eq("state", "PREPARING")), Updates.set("contentDigest", digest)).getModifiedCount();
-        if (modified != 1L) {
+        long matched = template.getCollection(IndexCollections.GIT_EVIDENCE_MANIFESTS).updateOne(Filters.and(Filters.eq("repoId", repositoryId.value()),
+                Filters.eq("evidenceId", evidenceId.value()), Filters.eq("state", "PREPARING")), Updates.set("contentDigest", digest)).getMatchedCount();
+        if (matched != 1L) {
             throw new PublicationConflictException();
         }
     }

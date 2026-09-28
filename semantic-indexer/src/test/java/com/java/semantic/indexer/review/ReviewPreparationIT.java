@@ -32,7 +32,11 @@ import com.java.semantic.model.query.SelectedGeneration;
 import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.model.repository.RepositoryRevision;
 import com.java.semantic.model.review.ReviewId;
+import com.java.semantic.model.review.ReviewManifestDocument;
 import com.java.semantic.model.review.ReviewSide;
+import com.java.semantic.model.review.ReviewSelection;
+import com.java.semantic.model.review.ReviewBaselineRule;
+import com.java.semantic.model.review.ResolvedReviewEndpoints;
 import com.mongodb.client.MongoClients;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
@@ -66,7 +70,7 @@ class ReviewPreparationIT {
             fixture.jobs.reconcileCommittedJobs();
 
             assertThat(fixture.jobs.find(prepared.job.id()).orElseThrow().phase()).isEqualTo(IndexJobPhase.COMPLETE);
-            assertThat(fixture.reviews.findReady(fixture.repositoryId, prepared.reviewId()).a().orElseThrow().generation().selected())
+            assertThat(fixture.reviews.findReady(fixture.repositoryId, prepared.reviewId()).before().orElseThrow().generation().selected())
                     .isEqualTo(prepared.captured.selected());
         }
     }
@@ -135,16 +139,35 @@ class ReviewPreparationIT {
     }
 
     @Test
-    void preparation_keeps_captured_a_after_current_moves_and_publishes_controlled_b_and_git_evidence() {
+    void range_uses_requested_before_after_current_moves_and_publishes_direct_git_evidence() {
         try (MongoDBContainer container = container()) {
             Fixture fixture = fixture(container);
             PreparedReview prepared = fixture.prepare(Selection.CAPTURED);
 
             assertThat(prepared.endpointA()).isEqualTo(prepared.captured);
             assertThat(prepared.endpointB().selected().revision()).isEqualTo(fixture.requestedRevision);
-            assertThat(fixture.reviews.findReady(fixture.repositoryId, prepared.reviewId()).a().orElseThrow().generation().selected())
+            assertThat(fixture.reviews.findReady(fixture.repositoryId, prepared.reviewId()).before().orElseThrow().generation().selected())
                     .isEqualTo(prepared.captured.selected());
+            assertThat(fixture.reviews.findReady(fixture.repositoryId, prepared.reviewId()).resolvedEndpoints().orElseThrow().baselineRule())
+                    .isEqualTo(ReviewBaselineRule.DIRECT_RANGE);
             assertThat(fixture.currentPointer().revision()).isEqualTo(fixture.movedCurrent.revision());
+        }
+    }
+
+    @Test
+    void root_review_without_current_publishes_only_after_semantics_and_empty_tree_additions() {
+        try (MongoDBContainer container = container()) {
+            Fixture fixture = fixture(container);
+            PreparedReview prepared = fixture.prepare(Selection.ROOT);
+            ReviewManifestDocument ready = fixture.reviews.findReady(fixture.repositoryId, prepared.reviewId());
+
+            assertThat(prepared.endpointA()).isNull();
+            assertThat(ready.before()).isEmpty();
+            assertThat(ready.after().orElseThrow().generation().selected().revision()).isEqualTo(fixture.requestedRevision);
+            assertThat(ready.resolvedEndpoints().orElseThrow().baselineRule()).isEqualTo(ReviewBaselineRule.EMPTY_TREE);
+            assertThat(fixture.jobs.publicationState(fixture.repositoryId).orElseThrow().currentPointer()).isEmpty();
+            assertThat(fixture.template.getCollection(IndexCollections.GIT_COMPARISON_CHANGES)
+                    .find(new Document("comparisonId", prepared.comparisonId())).first().getString("kind")).isEqualTo("ADD");
         }
     }
 
@@ -216,9 +239,7 @@ class ReviewPreparationIT {
     }
 
     private enum Selection {
-        CAPTURED,
-        RESERVED_TARGET,
-        ALTERNATE
+        CAPTURED, RESERVED_TARGET, ALTERNATE, ROOT
     }
 
     private static final class Fixture {
@@ -249,32 +270,53 @@ class ReviewPreparationIT {
         }
 
         private PreparedReview prepare(Selection selection) {
-            IndexJob accepted = jobs.admitReview(repositoryId, requestedRevision);
-            template.getCollection(IndexCollections.REPOSITORIES).updateOne(new Document("repoId", repositoryId.value()),
-                    new Document("$set", new Document("currentPointer", pointer(movedCurrent))));
+            ReviewSelection requested = selection == Selection.ROOT ? ReviewSelection.commit(requestedRevision)
+                    : ReviewSelection.range(CAPTURED_REVISION, requestedRevision);
+            if (selection == Selection.ROOT) {
+                template.getCollection(IndexCollections.REPOSITORIES).updateOne(new Document("repoId", repositoryId.value()),
+                        new Document("$unset", new Document("currentPointer", "")));
+            }
+            IndexJob accepted = jobs.admitReview(repositoryId, requested);
+            if (selection != Selection.ROOT) {
+                template.getCollection(IndexCollections.REPOSITORIES).updateOne(new Document("repoId", repositoryId.value()),
+                        new Document("$set", new Document("currentPointer", pointer(movedCurrent))));
+            }
             IndexJob running = jobs.startNextAccepted().orElseThrow();
-            AtomicReference<SealedGeneration> a = new AtomicReference<>();
-            AtomicReference<SealedGeneration> b = new AtomicReference<>();
+            AtomicReference<SealedGeneration> before = new AtomicReference<>();
+            AtomicReference<SealedGeneration> after = new AtomicReference<>();
             ReviewEndpointPreparationPort endpoints = (job, side, candidates) -> {
                 SealedGeneration selected;
-                if (side == ReviewSide.A) {
+                if (side == ReviewSide.BEFORE) {
                     selected = switch (selection) {
                         case CAPTURED -> candidates.stream().filter(candidate -> candidate.selected().equals(captured.selected())).findFirst().orElseThrow();
                         case RESERVED_TARGET -> reservedGeneration(job);
                         case ALTERNATE -> candidates.stream().filter(candidate -> candidate.selected().equals(alternateA.selected())).findFirst().orElseThrow();
+                        case ROOT -> throw new AssertionError("root must not prepare before semantics");
                     };
-                    a.set(selected);
+                    before.set(selected);
                 } else {
                     selected = reservedGeneration(job);
-                    b.set(selected);
+                    after.set(selected);
                 }
                 return selected;
             };
-            ReviewGitEvidencePort git = job -> new GitEvidencePublicationStore(template).publishComparison(job, comparison(), Instant.now(),
-                    new GitEvidenceOwnership(GitPublicationScope.REVIEW, Optional.of(job.review().orElseThrow().reviewId())));
+            ReviewGitEvidencePort git = new ReviewGitEvidencePort() {
+                @Override
+                public ResolvedReviewEndpoints resolve(IndexJob job) {
+                    return selection == Selection.ROOT
+                            ? new ResolvedReviewEndpoints(Optional.empty(), requestedRevision, ReviewBaselineRule.EMPTY_TREE)
+                            : new ResolvedReviewEndpoints(Optional.of(CAPTURED_REVISION), requestedRevision, ReviewBaselineRule.DIRECT_RANGE);
+                }
+
+                @Override
+                public void prepare(IndexJob job) {
+                    new GitEvidencePublicationStore(template).publishComparison(job, comparison(selection), Instant.now(),
+                            new GitEvidenceOwnership(GitPublicationScope.REVIEW, Optional.of(job.review().orElseThrow().reviewId())));
+                }
+            };
             new ReviewPreparationService(jobs, endpoints, git, reviews, template).prepare(running);
             IndexJob ready = jobs.find(accepted.id()).orElseThrow();
-            return new PreparedReview(ready, ready.review().orElseThrow().reviewId(), a.get(), b.get(), captured,
+            return new PreparedReview(ready, ready.review().orElseThrow().reviewId(), before.get(), after.get(), captured,
                     ready.review().orElseThrow().comparisonId().orElseThrow().value(),
                     ready.review().orElseThrow().currentSnapshotId().orElseThrow().value());
         }
@@ -291,13 +333,20 @@ class ReviewPreparationIT {
             return seedGeneration(target.revision(), target.generationId(), new ManifestDigest(target.revision().value().substring(0, 1).repeat(64)), job.id().value());
         }
 
-        private GitPreparedComparison comparison() {
+        private GitPreparedComparison comparison(Selection selection) {
             GitSnapshotEntry entry = new GitSnapshotEntry(REVIEW_SOURCE_PATH, "100644", "1".repeat(40), GitFileContentStatus.TEXT,
                     REVIEW_SOURCE.getBytes(StandardCharsets.UTF_8));
+            if (selection == Selection.ROOT) {
+                GitComparisonChange addition = new GitComparisonChange("change-0", GitChangeKind.ADD,
+                        "", REVIEW_SOURCE_PATH, "", "100644", "", "1".repeat(40),
+                        "@@ -0,0 +1 @@\n+" + REVIEW_SOURCE, "AVAILABLE");
+                return new GitPreparedComparison(Optional.empty(), REQUESTED_REVISION, GitComparisonAncestry.EMPTY_TREE,
+                        List.of(), List.of(entry), List.of(addition));
+            }
             GitComparisonChange change = new GitComparisonChange("change-0", GitChangeKind.MODIFY,
                     REVIEW_SOURCE_PATH, REVIEW_SOURCE_PATH, "100644", "100644", "1".repeat(40), "2".repeat(40),
                     "@@ -1 +1 @@\n-review source\n+review source\n", "AVAILABLE");
-            return new GitPreparedComparison(CAPTURED_REVISION, REQUESTED_REVISION, GitComparisonAncestry.PREVIOUS_ANCESTOR,
+            return new GitPreparedComparison(Optional.of(CAPTURED_REVISION), REQUESTED_REVISION, GitComparisonAncestry.PREVIOUS_ANCESTOR,
                     List.of(entry), List.of(entry), List.of(change));
         }
 
@@ -375,7 +424,7 @@ class ReviewPreparationIT {
     private record PreparedReview(IndexJob job, ReviewId reviewId, SealedGeneration endpointA,
                                   SealedGeneration endpointB, SealedGeneration captured, String comparisonId, String currentSnapshotId) {
         private GenerationId reservedA() {
-            return job.review().orElseThrow().reservedTargets().a().generationId();
+            return job.review().orElseThrow().reservedTargets().orElseThrow().before().orElseThrow().generationId();
         }
     }
 

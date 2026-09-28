@@ -12,13 +12,13 @@ public record AnalysisWorkspaceKey(
         RepositoryRevision revision,
         String jobId,
         String stage) {
-    private static final Set<String> STAGES = Set.of("CODEBASE", "A", "B");
+    private static final Set<String> STAGES = Set.of("CODEBASE", "BEFORE", "AFTER");
 
     public AnalysisWorkspaceKey {
         repositoryId = Objects.requireNonNull(repositoryId, "repositoryId is required");
         revision = Objects.requireNonNull(revision, "revision is required");
         Assert.hasText(jobId, "jobId is required");
-        Assert.isTrue(STAGES.contains(stage), "stage must be CODEBASE, A, or B");
+        Assert.isTrue(STAGES.contains(stage), "stage must be CODEBASE, BEFORE, or AFTER");
         Assert.isTrue(isSafePathSegment(jobId), "jobId must be a safe path segment");
     }
 

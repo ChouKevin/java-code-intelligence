@@ -9,6 +9,7 @@ import com.java.semantic.indexer.build.FullIndexPlanner;
 import com.java.semantic.indexer.build.RepositoryBuildRunner;
 import com.java.semantic.indexer.build.RepositoryBuildScopeFactory;
 import com.java.semantic.indexer.job.GitEvidenceJobHandler;
+import com.java.semantic.indexer.job.IndexJob;
 import com.java.semantic.indexer.job.IndexJobExecutor;
 import com.java.semantic.indexer.job.IndexJobProperties;
 import com.java.semantic.indexer.job.IndexJobStore;
@@ -86,7 +87,17 @@ public class IndexerBuildConfiguration {
 
     @Bean
     public ReviewGitEvidencePort reviewGitEvidencePort(GitEvidenceJobHandler gitEvidence) {
-        return gitEvidence::prepareReview;
+        return new ReviewGitEvidencePort() {
+            @Override
+            public com.java.semantic.model.review.ResolvedReviewEndpoints resolve(IndexJob reviewJob) {
+                return gitEvidence.resolveReview(reviewJob);
+            }
+
+            @Override
+            public void prepare(IndexJob reviewJob) {
+                gitEvidence.prepareReview(reviewJob);
+            }
+        };
     }
 
     @Bean

@@ -346,24 +346,46 @@ components:
         target: { type: object, nullable: true }
         candidates: { type: array, items: { type: object } }
         requestId: { type: string }
+    ReviewSelection:
+      oneOf:
+        - type: object
+          additionalProperties: false
+          required: [kind, revision]
+          properties:
+            kind: { type: string, const: COMMIT }
+            revision: { type: string, pattern: '^[0-9a-f]{40}$' }
+        - type: object
+          additionalProperties: false
+          required: [kind, beforeRevision, afterRevision]
+          properties:
+            kind: { type: string, const: RANGE }
+            beforeRevision: { type: string, pattern: '^[0-9a-f]{40}$' }
+            afterRevision: { type: string, pattern: '^[0-9a-f]{40}$' }
+    ResolvedReviewEndpoints:
+      type: object
+      additionalProperties: false
+      required: [afterRevision, baselineRule]
+      properties:
+        beforeRevision: { type: string, pattern: '^[0-9a-f]{40}$' }
+        afterRevision: { type: string, pattern: '^[0-9a-f]{40}$' }
+        baselineRule: { type: string, enum: [FIRST_PARENT, EMPTY_TREE, DIRECT_RANGE] }
     ReviewIndexRequest:
       type: object
       additionalProperties: false
-      required: [revision]
+      required: [selection]
       properties:
-        revision: { type: string, pattern: '^[0-9a-f]{40}$' }
+        selection: { $ref: '#/components/schemas/ReviewSelection' }
     ReviewJob:
       type: object
       additionalProperties: false
-      required: [reviewId, comparisonType, capturedBaseline, requestedRevision, stage]
+      required: [reviewId, selection, stage]
       properties:
         reviewId: { type: string, format: uuid }
-        comparisonType: { type: string, enum: [CURRENT_TO_COMMIT] }
-        capturedBaseline: { $ref: '#/components/schemas/GenerationPointer' }
-        requestedRevision: { type: string, pattern: '^[0-9a-f]{40}$' }
-        stage: { type: string, enum: [PREPARING_A, BUILDING_A, PREPARING_B, BUILDING_B, PREPARING_GIT, VALIDATING, READY] }
-        aGenerationId: { type: string, nullable: true }
-        bGenerationId: { type: string, nullable: true }
+        selection: { $ref: '#/components/schemas/ReviewSelection' }
+        resolvedEndpoints: { $ref: '#/components/schemas/ResolvedReviewEndpoints' }
+        stage: { type: string, enum: [RESOLVING, PREPARING_BEFORE, BUILDING_BEFORE, PREPARING_AFTER, BUILDING_AFTER, PREPARING_GIT, VALIDATING, READY] }
+        beforeGenerationId: { type: string, nullable: true }
+        afterGenerationId: { type: string, nullable: true }
         comparisonId: { type: string, format: uuid, nullable: true }
         previousSnapshotId: { type: string, format: uuid, nullable: true }
         currentSnapshotId: { type: string, format: uuid, nullable: true }

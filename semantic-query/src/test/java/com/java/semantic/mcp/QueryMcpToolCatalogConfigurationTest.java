@@ -377,7 +377,7 @@ class QueryMcpToolCatalogConfigurationTest {
         Map<String, Object> request = new LinkedHashMap<>(arguments);
         request.put("repositoryId", "orders");
         request.put("reviewId", "review-fixture");
-        request.put("side", "A");
+        request.put("side", "BEFORE");
         request.put("revision", "a".repeat(40));
         return Map.copyOf(request);
     }

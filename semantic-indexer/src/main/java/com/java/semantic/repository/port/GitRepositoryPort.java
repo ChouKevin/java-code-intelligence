@@ -4,9 +4,12 @@ import com.java.semantic.model.repository.RepositoryRevision;
 import com.java.semantic.model.git.GitBranch;
 import com.java.semantic.model.git.GitCommit;
 import com.java.semantic.model.git.GitPreparedComparison;
+import com.java.semantic.model.review.ReviewSelection;
+import com.java.semantic.model.review.ResolvedReviewEndpoints;
 
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Optional;
 import java.util.function.Consumer;
 
 /** Git 操作的唯一出口,語意層與控制器都不得直接使用 JGit */
@@ -20,6 +23,9 @@ public interface GitRepositoryPort {
 
     /** Verifies immutable comparison endpoints are still reachable from fetched trusted remote heads. */
     void verifyComparisonEndpoints(Path workingTree, RepositoryRevision previous, RepositoryRevision current);
+    /** Verifies requested commits after fetch and fixes the first parent or empty tree once. */
+    ResolvedReviewEndpoints resolveReviewEndpoints(Path workingTree, ReviewSelection selection);
+
 
     void checkoutDetached(Path workingTree, RepositoryRevision revision);
 
@@ -31,5 +37,5 @@ public interface GitRepositoryPort {
 
     void streamReachableHistory(Path workingTree, RepositoryRevision revision, Consumer<GitCommit> consumer);
 
-    GitPreparedComparison prepareComparison(Path workingTree, RepositoryRevision previous, RepositoryRevision current);
+    GitPreparedComparison prepareComparison(Path workingTree, Optional<RepositoryRevision> previous, RepositoryRevision current);
 }

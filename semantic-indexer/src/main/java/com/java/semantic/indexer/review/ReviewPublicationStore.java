@@ -11,14 +11,13 @@ import com.java.semantic.model.index.IndexSchemaContract;
 import com.java.semantic.model.index.SealedGeneration;
 import com.java.semantic.model.git.GitComparisonId;
 import com.java.semantic.model.git.GitSnapshotId;
-import com.java.semantic.model.index.GenerationId;
-import com.java.semantic.model.index.ManifestDigest;
-import com.java.semantic.model.index.PublishedGenerationPointer;
+import com.java.semantic.model.review.ReviewBaselineRule;
 import com.java.semantic.model.review.ReviewComparisonType;
 import com.java.semantic.model.review.ReviewEndpoint;
 import com.java.semantic.model.review.ReviewId;
 import com.java.semantic.model.review.ReviewManifestDocument;
-import com.java.semantic.model.review.CapturedReviewBaseline;
+import com.java.semantic.model.review.ReviewSelection;
+import com.java.semantic.model.review.ResolvedReviewEndpoints;
 import com.java.semantic.model.review.ReviewState;
 import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.model.repository.RepositoryRevision;
@@ -47,8 +46,8 @@ public final class ReviewPublicationStore {
         IndexJob requiredJob = requireReview(job);
         ReviewJobPayload payload = requiredJob.review().orElseThrow();
         ReviewManifestDocument manifest = new ReviewManifestDocument(requiredJob.repositoryId(), payload.reviewId(), requiredJob.id().value(),
-                IndexSchemaContract.REVIEW_MANIFEST_VERSION, ReviewState.PREPARING, ReviewComparisonType.CURRENT_TO_COMMIT,
-                payload.baseline(), payload.requestedRevision(), Optional.empty(), Optional.empty(), Optional.empty(), Instant.now(),
+                IndexSchemaContract.REVIEW_MANIFEST_VERSION, ReviewState.PREPARING, payload.selection(),
+                Optional.empty(), Optional.empty(), Optional.empty(), Optional.empty(), Instant.now(),
                 Optional.empty(), Optional.empty());
         template.getCollection(IndexCollections.REVIEW_MANIFESTS).insertOne(preparingDocument(manifest));
         return manifest;
@@ -96,9 +95,9 @@ public final class ReviewPublicationStore {
                 .orElseThrow(() -> new IllegalStateException("ready review owner was not found"));
         ReviewManifestDocument verified = readiness.validatePublishedReady(owner);
         if (!manifest.repositoryId().equals(requiredRepository) || !manifest.reviewId().equals(requiredReview)
-                || !manifest.ownerJobId().equals(verified.ownerJobId()) || !manifest.capturedBaseline().equals(verified.capturedBaseline())
-                || !manifest.requestedRevision().equals(verified.requestedRevision()) || !manifest.a().equals(verified.a())
-                || !manifest.b().equals(verified.b()) || !manifest.comparisonId().equals(verified.comparisonId())) {
+                || !manifest.ownerJobId().equals(verified.ownerJobId()) || !manifest.selection().equals(verified.selection())
+                || !manifest.resolvedEndpoints().equals(verified.resolvedEndpoints()) || !manifest.before().equals(verified.before())
+                || !manifest.after().equals(verified.after()) || !manifest.comparisonId().equals(verified.comparisonId())) {
             throw new IllegalStateException("ready review membership is incompatible");
         }
         return manifest;
@@ -115,17 +114,20 @@ public final class ReviewPublicationStore {
     private static Document preparingDocument(ReviewManifestDocument manifest) {
         return new Document("repoId", manifest.repositoryId().value()).append("reviewId", manifest.reviewId().value())
                 .append("ownerJobId", manifest.ownerJobId()).append("reviewContractVersion", manifest.reviewContractVersion())
-                .append("state", manifest.state().name()).append("comparisonType", manifest.comparisonType().name())
-                .append("capturedBaseline", baselineDocument(manifest.capturedBaseline()))
-                .append("requestedRevision", manifest.requestedRevision().value()).append("createdAt", Date.from(manifest.createdAt()));
+                .append("state", manifest.state().name()).append("selection", selectionDocument(manifest.selection()))
+                .append("selectionKey", selectionKey(manifest.selection()))
+                .append("createdAt", Date.from(manifest.createdAt()));
     }
 
     private Document readyValues(ReviewManifestDocument manifest) {
-        ReviewEndpoint a = manifest.a().orElseThrow();
-        ReviewEndpoint b = manifest.b().orElseThrow();
-        return new Document("state", "READY").append("a", endpointDocument(a)).append("b", endpointDocument(b))
+        ReviewEndpoint after = manifest.after().orElseThrow();
+        Document values = new Document("state", "READY")
+                .append("resolvedEndpoints", resolvedDocument(manifest.resolvedEndpoints().orElseThrow()))
+                .append("after", endpointDocument(after))
                 .append("comparisonId", manifest.comparisonId().orElseThrow().value())
                 .append("publishedAt", Date.from(manifest.publishedAt().orElseThrow()));
+        manifest.before().ifPresent(before -> values.append("before", endpointDocument(before)));
+        return values;
     }
 
     private Document endpointDocument(ReviewEndpoint endpoint) {
@@ -134,20 +136,13 @@ public final class ReviewPublicationStore {
     }
 
     private ReviewManifestDocument fromReady(Document document) {
-        Document baseline = Objects.requireNonNull(document.get("capturedBaseline", Document.class), "review baseline is required");
-        Document pointer = Objects.requireNonNull(baseline.get("pointer", Document.class), "review pointer is required");
-        PublishedGenerationPointer captured = new PublishedGenerationPointer(
-                new RepositoryRevision(pointer.getString("revision")),
-                new GenerationId(pointer.getString("generationId")),
-                new ManifestDigest(pointer.getString("manifestDigest")), pointer.getString("committedJobId"),
-                pointer.getDate("publishedAt").toInstant());
-        CapturedReviewBaseline reviewBaseline = new CapturedReviewBaseline(captured,
-                baseline.getDate("capturedAt").toInstant());
+        Document selection = Objects.requireNonNull(document.get("selection", Document.class), "review selection is required");
+        Document resolved = Objects.requireNonNull(document.get("resolvedEndpoints", Document.class), "resolved review endpoints are required");
         return new ReviewManifestDocument(RepositoryId.of(document.getString("repoId")), new ReviewId(document.getString("reviewId")),
                 document.getString("ownerJobId"), document.get("reviewContractVersion", Number.class).intValue(), ReviewState.READY,
-                ReviewComparisonType.valueOf(document.getString("comparisonType")), reviewBaseline,
-                new RepositoryRevision(document.getString("requestedRevision")),
-                Optional.of(endpointFrom(document.get("a", Document.class))), Optional.of(endpointFrom(document.get("b", Document.class))),
+                selectionFrom(selection), Optional.of(resolvedFrom(resolved)),
+                Optional.ofNullable(document.get("before", Document.class)).map(this::endpointFrom),
+                Optional.of(endpointFrom(Objects.requireNonNull(document.get("after", Document.class), "review after endpoint is required"))),
                 Optional.of(new GitComparisonId(document.getString("comparisonId"))), document.getDate("createdAt").toInstant(),
                 Optional.of(document.getDate("publishedAt").toInstant()), Optional.empty());
     }
@@ -158,10 +153,38 @@ public final class ReviewPublicationStore {
         return new ReviewEndpoint(generation, new GitSnapshotId(endpoint.getString("snapshotId")));
     }
 
-    private static Document baselineDocument(CapturedReviewBaseline baseline) {
-        PublishedGenerationPointer pointer = baseline.pointer();
-        return new Document("pointer", new Document("revision", pointer.revision().value()).append("generationId", pointer.generationId().value())
-                .append("manifestDigest", pointer.manifestDigest().value()).append("committedJobId", pointer.committedJobId())
-                .append("publishedAt", Date.from(pointer.publishedAt()))).append("capturedAt", Date.from(baseline.capturedAt()));
+    private static Document selectionDocument(ReviewSelection selection) {
+        Document document = new Document("kind", selection.kind().name());
+        if (selection.kind() == ReviewComparisonType.COMMIT) {
+            document.append("revision", selection.afterRevision().value());
+        } else {
+            document.append("beforeRevision", selection.beforeRevision().orElseThrow().value())
+                    .append("afterRevision", selection.afterRevision().value());
+        }
+        return document;
+    }
+
+    private static String selectionKey(ReviewSelection selection) {
+        return selection.kind().name() + ":" + selection.beforeRevision().map(RepositoryRevision::value).orElse("")
+                + ":" + selection.afterRevision().value();
+    }
+
+    private static ReviewSelection selectionFrom(Document document) {
+        ReviewComparisonType kind = ReviewComparisonType.valueOf(document.getString("kind"));
+        return new ReviewSelection(kind, Optional.ofNullable(document.getString("beforeRevision")).map(RepositoryRevision::ofSha),
+                RepositoryRevision.ofSha(document.getString(kind == ReviewComparisonType.COMMIT ? "revision" : "afterRevision")));
+    }
+
+    private static Document resolvedDocument(ResolvedReviewEndpoints endpoints) {
+        Document document = new Document("afterRevision", endpoints.afterRevision().value())
+                .append("baselineRule", endpoints.baselineRule().name());
+        endpoints.beforeRevision().ifPresent(revision -> document.append("beforeRevision", revision.value()));
+        return document;
+    }
+
+    private static ResolvedReviewEndpoints resolvedFrom(Document document) {
+        return new ResolvedReviewEndpoints(Optional.ofNullable(document.getString("beforeRevision")).map(RepositoryRevision::ofSha),
+                RepositoryRevision.ofSha(document.getString("afterRevision")),
+                ReviewBaselineRule.valueOf(document.getString("baselineRule")));
     }
 }

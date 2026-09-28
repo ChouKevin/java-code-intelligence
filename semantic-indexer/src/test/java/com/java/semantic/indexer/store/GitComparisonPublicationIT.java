@@ -46,7 +46,7 @@ class GitComparisonPublicationIT {
             GitComparisonChange change = new GitComparisonChange("change-0", GitChangeKind.ADD, "", "logo.bin", "", "100644", "",
                     "4".repeat(40), "", "UNAVAILABLE");
 
-            new GitEvidencePublicationStore(template).publishComparison(job, new GitPreparedComparison(previous, current,
+            new GitEvidencePublicationStore(template).publishComparison(job, new GitPreparedComparison(Optional.of(previous), current,
                     GitComparisonAncestry.PREVIOUS_ANCESTOR, List.of(text), List.of(text, binary), List.of(change)), Instant.now(),
                     GitEvidenceOwnership.standalone());
 
@@ -70,7 +70,7 @@ class GitComparisonPublicationIT {
                     "context\n".getBytes(java.nio.charset.StandardCharsets.UTF_8));
             GitComparisonChange change = new GitComparisonChange("change-0", GitChangeKind.MODIFY, "README.md", "README.md", "100644",
                     "100644", "3".repeat(40), "4".repeat(40), "@@ -1 +1 @@\n-context\n+changed\n", "AVAILABLE");
-            GitPreparedComparison prepared = new GitPreparedComparison(previous, current, GitComparisonAncestry.PREVIOUS_ANCESTOR,
+            GitPreparedComparison prepared = new GitPreparedComparison(Optional.of(previous), current, GitComparisonAncestry.PREVIOUS_ANCESTOR,
                     List.of(entry), List.of(entry), List.of(change));
             GitEvidencePublicationStore store = new GitEvidencePublicationStore(template);
             store.publishComparison(job, prepared, Instant.now(), GitEvidenceOwnership.standalone());
@@ -117,7 +117,7 @@ class GitComparisonPublicationIT {
                     "context\\n".getBytes(java.nio.charset.StandardCharsets.UTF_8));
             GitComparisonChange change = new GitComparisonChange("change-0", GitChangeKind.MODIFY, "README.md", "README.md", "100644",
                     "100644", "3".repeat(40), "4".repeat(40), "@@ -1 +1 @@\\n-context\\n+changed\\n", "AVAILABLE");
-            GitPreparedComparison prepared = new GitPreparedComparison(previous, current, GitComparisonAncestry.PREVIOUS_ANCESTOR,
+            GitPreparedComparison prepared = new GitPreparedComparison(Optional.of(previous), current, GitComparisonAncestry.PREVIOUS_ANCESTOR,
                     List.of(entry), List.of(entry), List.of(change));
             GitEvidencePublicationStore store = new GitEvidencePublicationStore(template);
             store.publishComparison(job, prepared, Instant.now(), GitEvidenceOwnership.standalone());
@@ -154,7 +154,7 @@ class GitComparisonPublicationIT {
             RepositoryRevision current = RepositoryRevision.ofSha("2".repeat(40));
             GitSnapshotEntry text = new GitSnapshotEntry("README.md", "100644", "3".repeat(40), GitFileContentStatus.TEXT,
                     "context\\n".getBytes(java.nio.charset.StandardCharsets.UTF_8));
-            GitPreparedComparison prepared = new GitPreparedComparison(previous, current, GitComparisonAncestry.SAME,
+            GitPreparedComparison prepared = new GitPreparedComparison(Optional.of(previous), current, GitComparisonAncestry.SAME,
                     List.of(text), List.of(text), List.of());
 
             new GitEvidencePublicationStore(template, properties).publishComparison(comparisonJob(repository, previous, current), prepared,
@@ -190,7 +190,7 @@ class GitComparisonPublicationIT {
             GitComparisonChange change = new GitComparisonChange("change-0", GitChangeKind.MODIFY, "README.md", "README.md", "100644",
                     "100644", "3".repeat(40), "4".repeat(40), patchChunks, "AVAILABLE");
 
-            new GitEvidencePublicationStore(template).publishComparison(comparisonJob(repository, previous, current), new GitPreparedComparison(previous,
+            new GitEvidencePublicationStore(template).publishComparison(comparisonJob(repository, previous, current), new GitPreparedComparison(Optional.of(previous),
                     current, GitComparisonAncestry.PREVIOUS_ANCESTOR, List.of(entry), List.of(entry), List.of(change)), Instant.now(),
                     GitEvidenceOwnership.standalone());
 

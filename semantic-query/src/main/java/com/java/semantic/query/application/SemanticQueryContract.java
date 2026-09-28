@@ -145,7 +145,9 @@ public final class SemanticQueryContract {
         public GitComparisonRequest {
             repositoryId = requireRepositoryId(repositoryId);
             comparisonId = ModelValidation.requiredText(comparisonId, "comparison id");
-            previous = requireRevision(previous);
+            if (Objects.nonNull(previous)) {
+                previous = requireRevision(previous);
+            }
             current = requireRevision(current);
             offset = requireOffset(offset);
             limit = requireLimit(limit);
@@ -157,7 +159,9 @@ public final class SemanticQueryContract {
         public GitFileDiffRequest {
             repositoryId = requireRepositoryId(repositoryId);
             comparisonId = ModelValidation.requiredText(comparisonId, "comparison id");
-            previous = requireRevision(previous);
+            if (Objects.nonNull(previous)) {
+                previous = requireRevision(previous);
+            }
             current = requireRevision(current);
             changeId = ModelValidation.requiredText(changeId, "change id");
             cursor = Objects.requireNonNull(cursor, "cursor is required");

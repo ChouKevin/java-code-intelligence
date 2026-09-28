@@ -10,15 +10,14 @@ import com.java.semantic.model.index.SourceIndexIssue;
 import com.java.semantic.model.index.IndexSchemaContract;
 import com.java.semantic.model.index.SemanticAnalysisEvidence;
 import com.java.semantic.model.index.SealedGeneration;
-import com.java.semantic.model.index.PublishedGenerationPointer;
 import com.java.semantic.model.query.SelectedGeneration;
 import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.model.repository.RepositoryRevision;
 import com.java.semantic.model.review.ReviewId;
-import com.java.semantic.model.review.CapturedReviewBaseline;
 import com.java.semantic.model.review.ReviewManifestDocument;
-import com.java.semantic.model.review.ReviewComparisonType;
 import com.java.semantic.model.review.ReviewSide;
+import com.java.semantic.model.review.ResolvedReviewEndpoints;
+import com.java.semantic.model.review.ReviewBaselineRule;
 import com.java.semantic.model.review.ReviewEndpoint;
 import com.java.semantic.query.config.SearchAccessPlan;
 import org.junit.jupiter.api.Test;
@@ -53,8 +52,8 @@ class ReviewQueryFacadeTest {
         when(sealed.analysisEvidence()).thenReturn(evidence());
         ReviewEndpoint endpoint = mock(ReviewEndpoint.class);
         when(endpoint.generation()).thenReturn(sealed);
-        when(manifest.a()).thenReturn(Optional.of(endpoint));
-        when(selector.select(any(), any(), any(), any(), any())).thenReturn(new ReviewSelection(manifest, ReviewSide.A, selected));
+        when(manifest.before()).thenReturn(Optional.of(endpoint));
+        when(selector.select(any(), any(), any(), any(), any())).thenReturn(new ReviewSelection(manifest, ReviewSide.BEFORE, selected));
         when(guard.searchAccessPlan("orders")).thenReturn(mock(SearchAccessPlan.class));
         when(coverageReader.coverage(any(), any(), any(), any())).thenReturn(new SourceIndexCoverage(2,
                 List.of(new SourceIndexIssue("src/Order.java", "PARSE_ERROR"))));
@@ -64,7 +63,7 @@ class ReviewQueryFacadeTest {
         ReviewQueryFacade facade = new ReviewQueryFacade(selector, manifests, selectedQueries, guard, coverageReader);
 
         ReviewQueryContract.ReviewResult<SemanticQueryContract.SearchCodeResult> result = facade.searchCode(
-                new ReviewQueryContract.ReviewSearchCodeRequest("orders", "review-fixture", ReviewSide.A, "a".repeat(40),
+                new ReviewQueryContract.ReviewSearchCodeRequest("orders", "review-fixture", ReviewSide.BEFORE, "a".repeat(40),
                         "Order", Set.of(), Optional.empty(), 0, 20));
 
         assertThat(result.result().items()).isEmpty();
@@ -91,11 +90,11 @@ class ReviewQueryFacadeTest {
         ReviewEndpoint endpointA = endpoint(selectedA, evidence, "snapshot-a");
         ReviewEndpoint endpointB = endpoint(selectedB, evidence, "snapshot-b");
         when(manifest.reviewId()).thenReturn(new ReviewId("review-fixture"));
-        when(manifest.a()).thenReturn(Optional.of(endpointA));
-        when(manifest.b()).thenReturn(Optional.of(endpointB));
+        when(manifest.before()).thenReturn(Optional.of(endpointA));
+        when(manifest.after()).thenReturn(Optional.of(endpointB));
         when(manifests.requireReady(any(), any())).thenReturn(manifest);
-        when(selector.select(any(), any(), eq(ReviewSide.A), any(), any())).thenReturn(new ReviewSelection(manifest, ReviewSide.A, selectedA));
-        when(selector.select(any(), any(), eq(ReviewSide.B), any(), any())).thenReturn(new ReviewSelection(manifest, ReviewSide.B, selectedB));
+        when(selector.select(any(), any(), eq(ReviewSide.BEFORE), any(), any())).thenReturn(new ReviewSelection(manifest, ReviewSide.BEFORE, selectedA));
+        when(selector.select(any(), any(), eq(ReviewSide.AFTER), any(), any())).thenReturn(new ReviewSelection(manifest, ReviewSide.AFTER, selectedB));
         SearchAccessPlan accessPlan = mock(SearchAccessPlan.class);
         when(guard.searchAccessPlan("orders")).thenReturn(accessPlan);
         when(coverageReader.coverage(any(), any(), any(), eq(Optional.empty()))).thenReturn(new SourceIndexCoverage(2, List.of()));
@@ -109,11 +108,11 @@ class ReviewQueryFacadeTest {
 
         ReviewQueryContract.ReviewDetails details = facade.getReview(new ReviewQueryContract.ReviewRequest("orders", "review-fixture"));
         ReviewQueryContract.ReviewResult<SemanticQueryContract.SearchCodeResult> side = facade.searchCode(
-                new ReviewQueryContract.ReviewSearchCodeRequest("orders", "review-fixture", ReviewSide.A, "a".repeat(40),
+                new ReviewQueryContract.ReviewSearchCodeRequest("orders", "review-fixture", ReviewSide.BEFORE, "a".repeat(40),
                         "Order", Set.of(), Optional.empty(), 0, 20));
 
-        assertThat(details.a().coverage().semanticLimitations()).containsExactly("BUILD_WITH_ERROR", "SOURCE_ALLOWED");
-        assertThat(details.b().coverage().semanticLimitations()).containsExactly("BUILD_WITH_ERROR", "SOURCE_ALLOWED");
+        assertThat(details.before().endpoint().orElseThrow().coverage().semanticLimitations()).containsExactly("BUILD_WITH_ERROR", "SOURCE_ALLOWED");
+        assertThat(details.after().coverage().semanticLimitations()).containsExactly("BUILD_WITH_ERROR", "SOURCE_ALLOWED");
         assertThat(side.context().coverage().semanticLimitations()).containsExactly("BUILD_WITH_ERROR", "SOURCE_ALLOWED");
     }
 
@@ -145,15 +144,11 @@ class ReviewQueryFacadeTest {
     }
 
     private static void configureDiscovery(ReviewManifestDocument manifest) {
-        CapturedReviewBaseline baseline = mock(CapturedReviewBaseline.class);
-        PublishedGenerationPointer pointer = mock(PublishedGenerationPointer.class);
-        when(pointer.revision()).thenReturn(new RepositoryRevision("a".repeat(40)));
-        when(pointer.generationId()).thenReturn(new GenerationId("baseline"));
-        when(pointer.manifestDigest()).thenReturn(new ManifestDigest("b".repeat(64)));
-        when(baseline.pointer()).thenReturn(pointer);
-        when(baseline.capturedAt()).thenReturn(Instant.parse("2026-09-19T00:00:00Z"));
-        when(manifest.capturedBaseline()).thenReturn(baseline);
-        when(manifest.comparisonType()).thenReturn(ReviewComparisonType.CURRENT_TO_COMMIT);
+        when(manifest.selection()).thenReturn(com.java.semantic.model.review.ReviewSelection.range(new RepositoryRevision("a".repeat(40)),
+                new RepositoryRevision("c".repeat(40))));
+        when(manifest.resolvedEndpoints()).thenReturn(Optional.of(new ResolvedReviewEndpoints(
+                Optional.of(new RepositoryRevision("a".repeat(40))), new RepositoryRevision("c".repeat(40)),
+                ReviewBaselineRule.DIRECT_RANGE)));
         GitComparisonId comparison = mock(GitComparisonId.class);
         when(comparison.value()).thenReturn("comparison");
         when(manifest.comparisonId()).thenReturn(Optional.of(comparison));

@@ -1281,23 +1281,23 @@ class GitEvidenceReadServiceIT {
 
     private static void markSnapshotComparisonReviewOwned(MongoTemplate template, String repositoryId, String reviewId, String reviewState) {
         template.getCollection("git_evidence_manifests").updateMany(new Document("repoId", repositoryId), new Document("$set",
-                new Document("gitEvidenceVersion", 2).append("scope", "REVIEW").append("reviewId", reviewId)));
+                new Document("gitEvidenceVersion", IndexSchemaContract.GIT_EVIDENCE_VERSION).append("scope", "REVIEW").append("reviewId", reviewId)));
         Document comparison = template.getCollection("git_evidence_manifests").find(new Document("repoId", repositoryId)
                 .append("kind", "COMPARISON")).first();
-        SealedGeneration a = sealed("2".repeat(40), "review-a", "a".repeat(64));
-        SealedGeneration b = sealed(REVISION, "review-b", "b".repeat(64));
-        Document aEndpoint = new Document("generation", template.getConverter().convertToMongoType(a))
+        SealedGeneration before = sealed("2".repeat(40), "review-before", "a".repeat(64));
+        SealedGeneration after = sealed(REVISION, "review-after", "b".repeat(64));
+        Document beforeEndpoint = new Document("generation", template.getConverter().convertToMongoType(before))
                 .append("snapshotId", comparison.getString("previousSnapshotId"));
-        Document bEndpoint = new Document("generation", template.getConverter().convertToMongoType(b))
+        Document afterEndpoint = new Document("generation", template.getConverter().convertToMongoType(after))
                 .append("snapshotId", comparison.getString("currentSnapshotId"));
         Date now = new Date();
         template.getCollection("review_manifests").insertOne(new Document("repoId", repositoryId).append("reviewId", reviewId)
                 .append("ownerJobId", "job-snapshot").append("reviewContractVersion", IndexSchemaContract.REVIEW_MANIFEST_VERSION)
-                .append("state", reviewState).append("comparisonType", "CURRENT_TO_COMMIT")
-                .append("capturedBaseline", new Document("pointer", new Document("revision", "2".repeat(40)).append("generationId", "review-a")
-                        .append("manifestDigest", "a".repeat(64)).append("committedJobId", "job-snapshot").append("publishedAt", now))
-                        .append("capturedAt", now))
-                .append("requestedRevision", REVISION).append("a", aEndpoint).append("b", bEndpoint)
+                .append("state", reviewState)
+                .append("selection", new Document("kind", "RANGE").append("beforeRevision", "2".repeat(40)).append("afterRevision", REVISION))
+                .append("resolvedEndpoints", new Document("beforeRevision", "2".repeat(40)).append("afterRevision", REVISION)
+                        .append("baselineRule", "DIRECT_RANGE"))
+                .append("before", beforeEndpoint).append("after", afterEndpoint)
                 .append("comparisonId", comparison.getString("evidenceId")).append("createdAt", now).append("publishedAt", now));
     }
 

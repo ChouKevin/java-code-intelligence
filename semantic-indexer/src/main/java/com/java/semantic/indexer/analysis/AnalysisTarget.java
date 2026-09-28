@@ -12,12 +12,12 @@ public record AnalysisTarget(
         String jobId,
         String stage,
         ManagedDisposableCheckout managedCheckout) {
-    private static final Set<String> STAGES = Set.of("CODEBASE", "A", "B");
+    private static final Set<String> STAGES = Set.of("CODEBASE", "BEFORE", "AFTER");
 
     public AnalysisTarget {
         snapshot = Objects.requireNonNull(snapshot, "snapshot is required");
         Assert.hasText(jobId, "jobId is required");
-        Assert.isTrue(STAGES.contains(stage), "stage must be CODEBASE, A, or B");
+        Assert.isTrue(STAGES.contains(stage), "stage must be CODEBASE, BEFORE, or AFTER");
     }
 
     public AnalysisTarget(RepositorySnapshot snapshot, String jobId, String stage) {

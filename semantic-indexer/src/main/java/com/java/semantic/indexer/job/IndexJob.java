@@ -45,8 +45,8 @@ public record IndexJob(
                 throw new IllegalArgumentException("REVIEW forbids a Git payload");
             }
             switch (payload.stage()) {
-                case BUILDING_A -> requireReviewTarget(target, payload.reservedTargets().a());
-                case BUILDING_B -> requireReviewTarget(target, payload.reservedTargets().b());
+                case BUILDING_BEFORE -> requireReviewTarget(target, payload.reservedTargets().orElseThrow().before().orElseThrow());
+                case BUILDING_AFTER -> requireReviewTarget(target, payload.reservedTargets().orElseThrow().after());
                 default -> {
                     if (target.isPresent()) {
                         throw new IllegalArgumentException("review target is present only while a side is building");

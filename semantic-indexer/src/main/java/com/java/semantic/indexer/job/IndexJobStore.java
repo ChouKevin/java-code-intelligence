@@ -8,6 +8,8 @@ import com.java.semantic.model.repository.RepositoryRevision;
 import com.java.semantic.model.git.GitEvidenceId;
 import com.java.semantic.model.index.SealedGeneration;
 import com.java.semantic.model.review.ReviewSide;
+import com.java.semantic.model.review.ReviewSelection;
+import com.java.semantic.model.review.ResolvedReviewEndpoints;
 
 import java.util.Optional;
 
@@ -23,7 +25,8 @@ public interface IndexJobStore {
     IndexJob admitGitHistory(RepositoryId repositoryId, GitEvidenceId catalogId, String branch, RepositoryRevision revision);
 
     IndexJob admitGitComparison(RepositoryId repositoryId, RepositoryRevision previous, RepositoryRevision current);
-    IndexJob admitReview(RepositoryId repositoryId, RepositoryRevision revision);
+    IndexJob admitReview(RepositoryId repositoryId, ReviewSelection selection);
+    IndexJob resolveReviewEndpoints(IndexJobId jobId, ResolvedReviewEndpoints endpoints);
     IndexJob activateReviewTarget(IndexJobId jobId, ReviewSide side);
     IndexJob recordReviewSide(IndexJobId jobId, ReviewSide side, SealedGeneration generation);
     IndexJob beginReviewValidation(IndexJobId jobId);

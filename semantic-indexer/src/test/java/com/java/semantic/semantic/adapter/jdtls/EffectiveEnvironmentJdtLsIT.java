@@ -65,7 +65,7 @@ class EffectiveEnvironmentJdtLsIT {
         try (Fixture fixture = new Fixture(home, temporaryDirectory)) {
             String firstDependencyDigest;
             String firstProjectEdgeDigest;
-            try (PreparedAnalysis first = fixture.prepare("A")) {
+            try (PreparedAnalysis first = fixture.prepare("BEFORE")) {
                 assertThat(first.plan().sources()).anySatisfy(input ->
                         assertThat(input.sourcePath()).contains("application/src/production/java"));
                 firstDependencyDigest = fixture.inRepositoryArtifact(first).contentDigest();
@@ -77,7 +77,7 @@ class EffectiveEnvironmentJdtLsIT {
             fixture.replaceDependencyBytes("B");
             fixture.commitRevisionB();
 
-            try (PreparedAnalysis second = fixture.prepare("B")) {
+            try (PreparedAnalysis second = fixture.prepare("AFTER")) {
                 assertThat(fixture.inRepositoryArtifact(second).contentDigest()).isNotEqualTo(firstDependencyDigest);
                 assertThat(fixture.projectEdge(second).contentDigest()).isNotEqualTo(firstProjectEdgeDigest);
                 assertThat(second.snapshot().revision().value()).isEqualTo(fixture.revisionB());
@@ -124,7 +124,7 @@ class EffectiveEnvironmentJdtLsIT {
         try (Fixture fixture = new Fixture(home, temporaryDirectory)) {
             fixture.addModularDeepRoot();
 
-            try (PreparedAnalysis analysis = fixture.prepare("A")) {
+            try (PreparedAnalysis analysis = fixture.prepare("BEFORE")) {
                 assertThat(analysis.readinessEvidence().projects())
                         .anySatisfy(project -> {
                             assertThat(project.projectPath()).isEqualTo("modular");
@@ -146,7 +146,7 @@ class EffectiveEnvironmentJdtLsIT {
         try {
             Files.writeString(unrelated, "before");
             try (Fixture fixture = new Fixture(temporaryDirectory, properties);
-                    PreparedAnalysis analysis = fixture.prepare("A")) {
+                    PreparedAnalysis analysis = fixture.prepare("BEFORE")) {
                 Files.writeString(unrelated, "after");
                 assertThatCode(analysis::verifyUnchangedInputs).doesNotThrowAnyException();
 
@@ -163,7 +163,7 @@ class EffectiveEnvironmentJdtLsIT {
     void rejects_reuse_of_generations_from_the_unversioned_analyzer() throws Exception {
         Path home = JdtLsHomeRequirement.requireHome(System.getenv("JDTLS_HOME"));
         try (Fixture fixture = new Fixture(home, temporaryDirectory);
-                PreparedAnalysis analysis = fixture.prepare("A")) {
+                PreparedAnalysis analysis = fixture.prepare("BEFORE")) {
             AnalysisInputs inputs = analysis.fingerprint().inputs();
             AnalysisInputs historicalInputs = new AnalysisInputs(inputs.contractVersion(),
                     "771cead1eea149e0a853154955e187d9f07c2468b1da11c9f011f5ea740026d9",
@@ -180,7 +180,7 @@ class EffectiveEnvironmentJdtLsIT {
             SealedGeneration historical = new SealedGeneration(selected, historicalFingerprint, historicalEvidence);
             ConservativeAnalysisReuseVerifier verifier = new ConservativeAnalysisReuseVerifier(
                     target -> Optional.of(inputs));
-            AnalysisTarget target = new AnalysisTarget(analysis.snapshot(), "analyzer-reuse", "A");
+            AnalysisTarget target = new AnalysisTarget(analysis.snapshot(), "analyzer-reuse", "BEFORE");
 
             assertThat(verifier.matches(current, target)).isTrue();
             assertThat(verifier.matches(historical, target))

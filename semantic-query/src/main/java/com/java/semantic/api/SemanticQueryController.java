@@ -117,14 +117,14 @@ public final class SemanticQueryController {
     @PostMapping("/git/comparisons")
     public SemanticQueryContract.GitComparisonCollection gitComparisons(@RequestBody GitComparisonHttpRequest request) {
         return facade.compareRevisions(new SemanticQueryContract.GitComparisonRequest(requiredText(request.repositoryId(), "repositoryId"),
-                requiredText(request.comparisonId(), "comparisonId"), requiredText(request.previous(), "previous"),
+                requiredText(request.comparisonId(), "comparisonId"), request.previous(),
                 requiredText(request.current(), "current"), offset(request.offset()), limit(request.limit())));
     }
 
     @PostMapping("/git/file-diff")
     public SemanticQueryContract.GitFileDiffResult gitFileDiff(@RequestBody GitFileDiffHttpRequest request) {
         return facade.getFileDiff(new SemanticQueryContract.GitFileDiffRequest(requiredText(request.repositoryId(), "repositoryId"),
-                requiredText(request.comparisonId(), "comparisonId"), requiredText(request.previous(), "previous"),
+                requiredText(request.comparisonId(), "comparisonId"), request.previous(),
                 requiredText(request.current(), "current"), requiredText(request.changeId(), "changeId"), optionalText(request.cursor())));
     }
 

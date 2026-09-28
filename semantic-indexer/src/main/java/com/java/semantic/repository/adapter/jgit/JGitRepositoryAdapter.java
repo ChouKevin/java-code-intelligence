@@ -14,6 +14,10 @@ import com.java.semantic.model.git.GitFileContentStatus;
 import com.java.semantic.model.git.GitPreparedComparison;
 import com.java.semantic.model.git.GitSnapshotEntry;
 import com.java.semantic.repository.port.GitRepositoryPort;
+import com.java.semantic.model.review.ReviewBaselineRule;
+import com.java.semantic.model.review.ReviewComparisonType;
+import com.java.semantic.model.review.ReviewSelection;
+import com.java.semantic.model.review.ResolvedReviewEndpoints;
 import org.eclipse.jgit.api.CloneCommand;
 import org.eclipse.jgit.api.FetchCommand;
 import org.eclipse.jgit.api.Git;
@@ -32,6 +36,7 @@ import org.eclipse.jgit.diff.DiffEntry;
 import org.eclipse.jgit.diff.DiffFormatter;
 import org.eclipse.jgit.diff.RenameDetector;
 import org.eclipse.jgit.treewalk.TreeWalk;
+import org.eclipse.jgit.treewalk.EmptyTreeIterator;
 import org.eclipse.jgit.treewalk.filter.TreeFilter;
 import org.eclipse.jgit.util.io.DisabledOutputStream;
 import org.eclipse.jgit.storage.file.FileBasedConfig;
@@ -195,6 +200,38 @@ public class JGitRepositoryAdapter implements GitRepositoryPort {
             throw new RepositoryMutationException("cannot validate comparison endpoints", exception);
         }
     }
+    @Override
+    public ResolvedReviewEndpoints resolveReviewEndpoints(Path workingTree, ReviewSelection selection) {
+        ReviewSelection requested = Objects.requireNonNull(selection, "review selection is required");
+        try (Git git = JGitWorktreeRepository.open(workingTree, jdtLsProperties); RevWalk walk = new RevWalk(git.getRepository())) {
+            RevCommit after = walk.parseCommit(ObjectId.fromString(requested.afterRevision().value()));
+            List<RevCommit> trustedHeads = git.getRepository().getRefDatabase().getRefsByPrefix("refs/remotes/origin/").stream()
+                    .filter(reference -> !reference.getName().equals("refs/remotes/origin/HEAD"))
+                    .filter(reference -> Objects.nonNull(reference.getObjectId()))
+                    .map(Ref::getObjectId).map(objectId -> parseTrustedHead(walk, objectId)).toList();
+            if (!reachableFromTrustedHead(walk, after, trustedHeads)) {
+                throw new RepositoryMutationException("review after commit is not reachable from a trusted remote ref");
+            }
+            if (requested.kind() == ReviewComparisonType.RANGE) {
+                RepositoryRevision before = requested.beforeRevision().orElseThrow();
+                RevCommit beforeCommit = walk.parseCommit(ObjectId.fromString(before.value()));
+                if (!reachableFromTrustedHead(walk, beforeCommit, trustedHeads)) {
+                    throw new RepositoryMutationException("review before commit is not reachable from a trusted remote ref");
+                }
+                return new ResolvedReviewEndpoints(Optional.of(before), requested.afterRevision(), ReviewBaselineRule.DIRECT_RANGE);
+            }
+            if (after.getParentCount() == 0) {
+                return new ResolvedReviewEndpoints(Optional.empty(), requested.afterRevision(), ReviewBaselineRule.EMPTY_TREE);
+            }
+            return new ResolvedReviewEndpoints(Optional.of(new RepositoryRevision(after.getParent(0).name())),
+                    requested.afterRevision(), ReviewBaselineRule.FIRST_PARENT);
+        } catch (RepositoryMutationException exception) {
+            throw exception;
+        } catch (IOException | RuntimeException exception) {
+            throw new RepositoryMutationException("cannot resolve review endpoints", exception);
+        }
+    }
+
 
     @Override
     public void checkoutDetached(Path workingTree, RepositoryRevision revision) {
@@ -281,14 +318,16 @@ public class JGitRepositoryAdapter implements GitRepositoryPort {
     }
 
     @Override
-    public GitPreparedComparison prepareComparison(Path workingTree, RepositoryRevision previous, RepositoryRevision current) {
+    public GitPreparedComparison prepareComparison(Path workingTree, Optional<RepositoryRevision> previous, RepositoryRevision current) {
         try (Git git = JGitWorktreeRepository.open(workingTree, jdtLsProperties); RevWalk walk = new RevWalk(git.getRepository())) {
-            RevCommit previousCommit = walk.parseCommit(ObjectId.fromString(previous.value()));
+            RevCommit previousCommit = previous.isPresent() ? walk.parseCommit(ObjectId.fromString(previous.orElseThrow().value())) : null;
             RevCommit currentCommit = walk.parseCommit(ObjectId.fromString(current.value()));
-            List<GitSnapshotEntry> previousEntries = snapshot(git.getRepository(), previousCommit);
+            List<GitSnapshotEntry> previousEntries = Objects.isNull(previousCommit) ? List.of() : snapshot(git.getRepository(), previousCommit);
             List<GitSnapshotEntry> currentEntries = snapshot(git.getRepository(), currentCommit);
             List<GitComparisonChange> changes = changes(git.getRepository(), previousCommit, currentCommit);
-            return new GitPreparedComparison(previous, current, ancestry(walk, previousCommit, currentCommit), previousEntries, currentEntries, changes);
+            GitComparisonAncestry relationship = Objects.isNull(previousCommit) ? GitComparisonAncestry.EMPTY_TREE
+                    : ancestry(walk, previousCommit, currentCommit);
+            return new GitPreparedComparison(previous, current, relationship, previousEntries, currentEntries, changes);
         } catch (IOException | RuntimeException exception) {
             throw new RepositoryMutationException("cannot prepare exact Git comparison", exception);
         }
@@ -369,7 +408,11 @@ public class JGitRepositoryAdapter implements GitRepositoryPort {
     /** Uses JGit's raw TreeWalk only to retain path identity before DiffEntry renders it. */
     private static List<DiffEntry> diffEntries(org.eclipse.jgit.lib.Repository repository, RevCommit previous, RevCommit current) throws IOException {
         try (RawPathTreeWalk walk = new RawPathTreeWalk(repository)) {
-            walk.addTree(previous.getTree());
+            if (Objects.isNull(previous)) {
+                walk.addTree(new EmptyTreeIterator());
+            } else {
+                walk.addTree(previous.getTree());
+            }
             walk.addTree(current.getTree());
             walk.setRecursive(true);
             walk.setFilter(TreeFilter.ANY_DIFF);

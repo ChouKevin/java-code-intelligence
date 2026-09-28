@@ -197,15 +197,23 @@ public final class SemanticMcpSchemaCatalog {
     }
 
     private static Map<String, Object> reviewDetails() {
-        Map<String, Object> baseline = schema(Map.of("revision", revision(), "generationId", string(), "manifestDigest", string(),
-                "capturedAt", string()), List.of("revision", "generationId", "manifestDigest", "capturedAt"));
         Map<String, Object> endpoint = schema(Map.of("revision", revision(), "generationId", string(), "manifestDigest", string(),
                 "analysisFingerprint", string(), "snapshotId", string(), "coverage", reviewCoverage()),
                 List.of("revision", "generationId", "manifestDigest", "analysisFingerprint", "snapshotId", "coverage"));
-        return schema(Map.of("repositoryId", repositoryId(), "reviewId", reviewId(), "comparisonType", Map.of("type", "string",
-                "enum", List.of("CURRENT_TO_COMMIT")), "capturedBaseline", baseline, "a", endpoint, "b", endpoint,
+        Map<String, Object> commit = schema(Map.of("kind", Map.of("type", "string", "const", "COMMIT"),
+                "revision", revision()), List.of("kind", "revision"));
+        Map<String, Object> range = schema(Map.of("kind", Map.of("type", "string", "const", "RANGE"),
+                "beforeRevision", revision(), "afterRevision", revision()), List.of("kind", "beforeRevision", "afterRevision"));
+        Map<String, Object> selection = Map.of("oneOf", List.of(commit, range));
+        Map<String, Object> resolved = schema(Map.of("beforeRevision", revision(), "afterRevision", revision(),
+                "baselineRule", Map.of("type", "string", "enum", List.of("FIRST_PARENT", "EMPTY_TREE", "DIRECT_RANGE"))),
+                List.of("afterRevision", "baselineRule"));
+        Map<String, Object> before = schema(Map.of("kind", Map.of("type", "string",
+                "enum", List.of("FIRST_PARENT", "EMPTY_TREE", "DIRECT_RANGE")), "endpoint", endpoint), List.of("kind"));
+        return schema(Map.of("repositoryId", repositoryId(), "reviewId", reviewId(), "selection", selection,
+                "resolvedEndpoints", resolved, "before", before, "after", endpoint,
                 "comparisonId", string(), "publishedAt", string()),
-                List.of("repositoryId", "reviewId", "comparisonType", "capturedBaseline", "a", "b", "comparisonId", "publishedAt"));
+                List.of("repositoryId", "reviewId", "selection", "resolvedEndpoints", "before", "after", "comparisonId", "publishedAt"));
     }
 
     private static Map<String, Object> sourceSnippet() {

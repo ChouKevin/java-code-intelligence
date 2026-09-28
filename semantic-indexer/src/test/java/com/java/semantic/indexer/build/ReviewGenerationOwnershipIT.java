@@ -49,21 +49,21 @@ class ReviewGenerationOwnershipIT {
             GenerationValidator validator = new GenerationValidator(template);
 
             Document pointersBeforeReview = pointerState(template);
-            IndexJob activeA = jobs.activateReviewTarget(new IndexJobId("review-job"), ReviewSide.A);
-            SealedGeneration sealedA = seal(template, writer, validator, activeA);
-            jobs.recordReviewSide(activeA.id(), ReviewSide.A, sealedA);
+            IndexJob activeBefore = jobs.activateReviewTarget(new IndexJobId("review-job"), ReviewSide.BEFORE);
+            SealedGeneration sealedBefore = seal(template, writer, validator, activeBefore);
+            jobs.recordReviewSide(activeBefore.id(), ReviewSide.BEFORE, sealedBefore);
             assertThat(pointerState(template)).isEqualTo(pointersBeforeReview);
-            IndexJob activeB = jobs.activateReviewTarget(activeA.id(), ReviewSide.B);
-            GenerationWriteContext b = context(activeB);
-            writeGeneration(template, writer, activeB);
-            GenerationWriteContext staleA = context(activeA);
+            IndexJob activeAfter = jobs.activateReviewTarget(activeBefore.id(), ReviewSide.AFTER);
+            GenerationWriteContext after = context(activeAfter);
+            writeGeneration(template, writer, activeAfter);
+            GenerationWriteContext staleBefore = context(activeBefore);
 
-            assertThat(template.getCollection(IndexCollections.GENERATION_MANIFESTS).find(new Document("generationId", b.generationId().value())).first()
+            assertThat(template.getCollection(IndexCollections.GENERATION_MANIFESTS).find(new Document("generationId", after.generationId().value())).first()
                     .getList("acknowledgedBatches", String.class)).isNotEmpty();
-            assertThatThrownBy(() -> writer.insertManifest(staleA, manifest(activeA))).isInstanceOf(IllegalStateException.class);
-            assertThatThrownBy(() -> writer.seal(staleA, sealedA.selected().manifestDigest().value())).isInstanceOf(IllegalStateException.class);
-            assertThatThrownBy(() -> validator.recordValid(staleA,
-                    new GenerationValidator.ValidationResult(sealedA.selected().manifestDigest(), Map.of(), List.of())))
+            assertThatThrownBy(() -> writer.insertManifest(staleBefore, manifest(activeBefore))).isInstanceOf(IllegalStateException.class);
+            assertThatThrownBy(() -> writer.seal(staleBefore, sealedBefore.selected().manifestDigest().value())).isInstanceOf(IllegalStateException.class);
+            assertThatThrownBy(() -> validator.recordValid(staleBefore,
+                    new GenerationValidator.ValidationResult(sealedBefore.selected().manifestDigest(), Map.of(), List.of())))
                     .isInstanceOf(IllegalStateException.class);
             assertThat(pointerState(template)).isEqualTo(pointersBeforeReview);
         }
@@ -114,11 +114,15 @@ class ReviewGenerationOwnershipIT {
         Document current = pointer("a", "current", "current-job");
         Document rollback = pointer("b", "rollback", "rollback-job");
         template.getCollection(IndexCollections.REPOSITORIES).insertOne(new Document("repoId", "orders").append("currentPointer", current).append("rollbackPointer", rollback));
-        Document a = target("a", "review-a", 5L);
-        Document b = target("b", "review-b", 6L);
-        Document review = new Document("reviewId", "review-1").append("baseline", new Document("pointer", current).append("capturedAt", new Date()))
-                .append("requestedRevision", revision("b").value()).append("reservedTargets", new Document("a", a).append("b", b))
-                .append("stage", ReviewPreparationStage.PREPARING_A.name());
+        Document before = target("a", "review-before", 5L);
+        Document after = target("b", "review-after", 6L);
+        Document review = new Document("reviewId", "review-1")
+                .append("selection", new Document("kind", "RANGE").append("beforeRevision", revision("a").value())
+                        .append("afterRevision", revision("b").value()))
+                .append("resolvedEndpoints", new Document("beforeRevision", revision("a").value())
+                        .append("afterRevision", revision("b").value()).append("baselineRule", "DIRECT_RANGE"))
+                .append("reservedTargets", new Document("before", before).append("after", after))
+                .append("stage", ReviewPreparationStage.PREPARING_BEFORE.name());
         template.getCollection(IndexCollections.INDEX_JOBS).insertOne(new Document("jobId", "review-job").append("repoId", "orders")
                 .append("active", true).append("phase", IndexJobPhase.RUNNING.name()).append("operation", IndexJobOperation.REVIEW.name())
                 .append("rebuild", false).append("jobVersion", IndexSchemaContract.PERSISTED_JOB_VERSION).append("generationHighWatermark", 6L)

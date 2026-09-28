@@ -11,6 +11,7 @@ import com.java.semantic.repository.application.RepositoryMutationException;
 import com.java.semantic.repository.application.RepositoryRuntimeRegistry;
 import com.java.semantic.repository.domain.RepositoryRuntime;
 import com.java.semantic.repository.port.GitRepositoryPort;
+import com.java.semantic.model.review.ResolvedReviewEndpoints;
 import com.java.semantic.repository.port.RepositoryMutationListener;
 import org.springframework.stereotype.Component;
 
@@ -58,12 +59,11 @@ public final class GitEvidenceJobHandler {
         }
     }
 
-    public void prepareReview(IndexJob job) {
+    public ResolvedReviewEndpoints resolveReview(IndexJob job) {
         IndexJob requiredJob = Objects.requireNonNull(job, "review job is required");
         if (requiredJob.operation() != IndexJobOperation.REVIEW) {
-            throw new IllegalArgumentException("review Git evidence requires a REVIEW job");
+            throw new IllegalArgumentException("review resolution requires a REVIEW job");
         }
-        ReviewJobPayload payload = requiredJob.review().orElseThrow(() -> new IllegalArgumentException("review payload is required"));
         RepositoryRuntime runtime = repositories.get(requiredJob.repositoryId());
         runtime.lock().writeLock().lock();
         try {
@@ -73,10 +73,26 @@ public final class GitEvidenceJobHandler {
                 git.clone(runtime.workingTree(), runtime.remoteUrl());
             }
             git.fetch(runtime.workingTree(), runtime.remoteUrl());
-            RepositoryRevision previous = payload.baseline().pointer().revision();
-            RepositoryRevision current = payload.requestedRevision();
-            git.verifyComparisonEndpoints(runtime.workingTree(), previous, current);
-            GitPreparedComparison comparison = git.prepareComparison(runtime.workingTree(), previous, current);
+            return git.resolveReviewEndpoints(runtime.workingTree(), requiredJob.review().orElseThrow().selection());
+        } finally {
+            runtime.lock().writeLock().unlock();
+        }
+    }
+
+    public void prepareReview(IndexJob job) {
+        IndexJob requiredJob = Objects.requireNonNull(job, "review job is required");
+        if (requiredJob.operation() != IndexJobOperation.REVIEW) {
+            throw new IllegalArgumentException("review Git evidence requires a REVIEW job");
+        }
+        ReviewJobPayload payload = requiredJob.review().orElseThrow(() -> new IllegalArgumentException("review payload is required"));
+        ResolvedReviewEndpoints endpoints = payload.resolvedEndpoints().orElseThrow();
+        RepositoryRuntime runtime = repositories.get(requiredJob.repositoryId());
+        runtime.lock().writeLock().lock();
+        try {
+            mutationListener.beforeMutation(requiredJob.repositoryId());
+            validateCheckout(runtime);
+            GitPreparedComparison comparison = git.prepareComparison(runtime.workingTree(), endpoints.beforeRevision(),
+                    endpoints.afterRevision());
             evidence.publishComparison(requiredJob, comparison, Instant.now(),
                     new GitEvidenceOwnership(GitPublicationScope.REVIEW, Optional.of(payload.reviewId())));
         } catch (RuntimeException exception) {
@@ -129,7 +145,7 @@ public final class GitEvidenceJobHandler {
         }
         git.fetch(runtime.workingTree(), runtime.remoteUrl());
         git.verifyComparisonEndpoints(runtime.workingTree(), previous, current);
-        GitPreparedComparison comparison = git.prepareComparison(runtime.workingTree(), previous, current);
+        GitPreparedComparison comparison = git.prepareComparison(runtime.workingTree(), Optional.of(previous), current);
         evidence.publishComparison(job, comparison, Instant.now(), GitEvidenceOwnership.standalone());
     }
 }

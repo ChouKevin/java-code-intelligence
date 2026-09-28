@@ -68,7 +68,7 @@ class ReviewSelectionContractIT extends PublishedMongoITSupport {
             ReviewGenerationSelector selector = new ReviewGenerationSelector(
                     new ReviewManifestReadService(template, policy, Duration.ofSeconds(2)), guard(template, policy));
 
-            ReviewSelection selected = selector.select(new RepositoryId("orders"), new ReviewId(REVIEW_ID), ReviewSide.A,
+            ReviewSelection selected = selector.select(new RepositoryId("orders"), new ReviewId(REVIEW_ID), ReviewSide.BEFORE,
                     new RepositoryRevision(REVISION_A));
 
             assertThat(selected.selected().generationId().value()).isEqualTo("g-a");
@@ -79,7 +79,7 @@ class ReviewSelectionContractIT extends PublishedMongoITSupport {
             assertThat(result.items()).singleElement().satisfies(item -> assertThat(item.source().code()).contains("A-g-a"));
             assertThatThrownBy(() -> selectedQueries.getFactSource(selected.selected(), new SemanticQueryContract.FactSourceRequest(
                     "orders", REVISION_B, factId(REVISION_B), 0))).isInstanceOf(IllegalArgumentException.class);
-            assertThatThrownBy(() -> selector.select(new RepositoryId("orders"), new ReviewId(REVIEW_ID), ReviewSide.A,
+            assertThatThrownBy(() -> selector.select(new RepositoryId("orders"), new ReviewId(REVIEW_ID), ReviewSide.BEFORE,
                     new RepositoryRevision(REVISION_B))).isInstanceOf(ReviewContextMismatchException.class);
         }
     }
@@ -167,16 +167,18 @@ class ReviewSelectionContractIT extends PublishedMongoITSupport {
         return CodeFactId.from(new CodeFactIdentity(new RepositoryId("orders"), new RepositoryRevision(revision), CodeFactKind.TYPE, type)).value();
     }
 
-    private static void seedReadyReview(MongoTemplate template, SealedGeneration a, SealedGeneration b) {
-        Document aEndpoint = new Document("generation", template.getConverter().convertToMongoType(a))
+    private static void seedReadyReview(MongoTemplate template, SealedGeneration before, SealedGeneration after) {
+        Document beforeEndpoint = new Document("generation", template.getConverter().convertToMongoType(before))
                 .append("snapshotId", "aaaaaaaa-1111-1111-1111-111111111111");
-        Document bEndpoint = new Document("generation", template.getConverter().convertToMongoType(b))
+        Document afterEndpoint = new Document("generation", template.getConverter().convertToMongoType(after))
                 .append("snapshotId", "bbbbbbbb-2222-2222-2222-222222222222");
         template.getCollection("review_manifests").insertOne(new Document("repoId", "orders").append("reviewId", REVIEW_ID)
                 .append("ownerJobId", "review-job").append("reviewContractVersion", IndexSchemaContract.REVIEW_MANIFEST_VERSION)
-                .append("state", "READY").append("comparisonType", "CURRENT_TO_COMMIT")
-                .append("capturedBaseline", new Document("pointer", pointer(REVISION_A, "g-a", "1".repeat(64))).append("capturedAt", new Date()))
-                .append("requestedRevision", REVISION_B).append("a", aEndpoint).append("b", bEndpoint)
+                .append("state", "READY")
+                .append("selection", new Document("kind", "RANGE").append("beforeRevision", REVISION_A).append("afterRevision", REVISION_B))
+                .append("resolvedEndpoints", new Document("beforeRevision", REVISION_A).append("afterRevision", REVISION_B)
+                        .append("baselineRule", "DIRECT_RANGE"))
+                .append("before", beforeEndpoint).append("after", afterEndpoint)
                 .append("comparisonId", "cccccccc-3333-3333-3333-333333333333").append("createdAt", new Date()).append("publishedAt", new Date()));
     }
 

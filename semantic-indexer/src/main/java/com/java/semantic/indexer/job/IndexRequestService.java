@@ -8,6 +8,7 @@ import com.java.semantic.model.repository.RepositoryRevision;
 import com.java.semantic.model.index.PublishedGenerationPointer;
 import com.java.semantic.model.git.GitEvidenceId;
 import org.springframework.stereotype.Service;
+import com.java.semantic.model.review.ReviewSelection;
 
 import java.util.Objects;
 import java.util.Optional;
@@ -83,9 +84,9 @@ public final class IndexRequestService {
         return jobs.admitGitComparison(repositoryId, RepositoryRevision.ofSha(previous), RepositoryRevision.ofSha(current));
     }
 
-    public IndexJob review(RepositoryId repositoryId, RepositoryRevision revision) {
+    public IndexJob review(RepositoryId repositoryId, ReviewSelection selection) {
         repositories.get(repositoryId);
-        return jobs.admitReview(repositoryId, revision);
+        return jobs.admitReview(repositoryId, selection);
     }
 
     private IndexJob admit(RepositoryId repositoryId, RepositoryRevision revision, boolean rebuild) {

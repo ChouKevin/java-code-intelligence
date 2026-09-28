@@ -259,9 +259,9 @@ class HttpMcpParityTest {
                 mock(ReviewQueryFacade.class);
         when(reviewFacade.searchCode(any())).thenAnswer(invocation -> {
             ReviewQueryContract.ReviewSearchCodeRequest request = invocation.getArgument(0);
-            String sourceCode = request.side() == ReviewSide.A
+            String sourceCode = request.side() == ReviewSide.BEFORE
                     ? "class BaselineOrder { }" : "class CommitOrder { }";
-            String generationId = request.side() == ReviewSide.A ? "review-a" : "review-b";
+            String generationId = request.side() == ReviewSide.BEFORE ? "review-before" : "review-after";
             SemanticQueryContract.SourceSnippet source = new SemanticQueryContract.SourceSnippet("src/Order.java", 1, 1, sourceCode);
             SemanticQueryContract.SearchCodeResult result = new SemanticQueryContract.SearchCodeResult(REPOSITORY_ID, request.revision(),
                     List.of(new SemanticQueryContract.ProgramElement(FACT_ID, CodeFactKind.TYPE, "Order", source)),
@@ -278,9 +278,9 @@ class HttpMcpParityTest {
         ObjectMapper mapper = applicationJsonMapper();
         List<McpStatelessServerFeatures.SyncToolSpecification> specifications = new QueryMcpToolCatalogConfiguration()
                 .mcpQueryToolSpecifications(facade, reviewFacade, mapper);
-        String requestA = "{\"repositoryId\":\"orders\",\"reviewId\":\"review-fixture\",\"side\":\"A\",\"revision\":\""
+        String requestA = "{\"repositoryId\":\"orders\",\"reviewId\":\"review-fixture\",\"side\":\"BEFORE\",\"revision\":\""
                 + REVISION + "\",\"query\":\"Order\"}";
-        String requestB = requestA.replace("\"side\":\"A\"", "\"side\":\"B\"");
+        String requestB = requestA.replace("\"side\":\"BEFORE\"", "\"side\":\"AFTER\"");
         String httpA = http.perform(post("/api/v1/reviews/search-code").header(QueryTokenFilter.TOKEN_HEADER, "query-token")
                         .contentType("application/json").content(requestA))
                 .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
@@ -288,21 +288,21 @@ class HttpMcpParityTest {
                         .contentType("application/json").content(requestB))
                 .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
         McpSchema.CallToolResult mcpA = call(specifications, "review_search_code", Map.of("repositoryId", REPOSITORY_ID,
-                "reviewId", "review-fixture", "side", "A", "revision", REVISION, "query", "Order"));
+                "reviewId", "review-fixture", "side", "BEFORE", "revision", REVISION, "query", "Order"));
         McpSchema.CallToolResult mcpB = call(specifications, "review_search_code", Map.of("repositoryId", REPOSITORY_ID,
-                "reviewId", "review-fixture", "side", "B", "revision", REVISION, "query", "Order"));
+                "reviewId", "review-fixture", "side", "AFTER", "revision", REVISION, "query", "Order"));
 
         assertThat(mapper.readTree(httpA)).isEqualTo(mapper.readTree(mapper.writeValueAsString(mcpA.structuredContent())));
         assertThat(mapper.readTree(httpB)).isEqualTo(mapper.readTree(mapper.writeValueAsString(mcpB.structuredContent())));
-        assertThat(httpA).contains("\"side\":\"A\"", "BaselineOrder", "\"generationId\":\"review-a\"");
-        assertThat(httpB).contains("\"side\":\"B\"", "CommitOrder", "\"generationId\":\"review-b\"");
+        assertThat(httpA).contains("\"side\":\"BEFORE\"", "BaselineOrder", "\"generationId\":\"review-before\"");
+        assertThat(httpB).contains("\"side\":\"AFTER\"", "CommitOrder", "\"generationId\":\"review-after\"");
         assertThat(httpA).isNotEqualTo(httpB);
 
         String httpExtra = http.perform(post("/api/v1/reviews/search-code").header(QueryTokenFilter.TOKEN_HEADER, "query-token")
                         .contentType("application/json").content(requestA.replace("}", ",\"generationId\":\"forbidden\"}")))
                 .andExpect(status().isBadRequest()).andReturn().getResponse().getContentAsString();
         McpSchema.CallToolResult mcpExtra = call(specifications, "review_search_code", Map.of("repositoryId", REPOSITORY_ID,
-                "reviewId", "review-fixture", "side", "A", "revision", REVISION, "query", "Order", "generationId", "forbidden"));
+                "reviewId", "review-fixture", "side", "BEFORE", "revision", REVISION, "query", "Order", "generationId", "forbidden"));
         assertThat(mapper.readTree(httpExtra)).isEqualTo(mapper.readTree(mapper.writeValueAsString(mcpExtra.structuredContent())));
     }
 
@@ -340,13 +340,13 @@ class HttpMcpParityTest {
         when(mismatchedFacade.searchCode(any())).thenThrow(new ReviewContextMismatchException());
         specifications = new QueryMcpToolCatalogConfiguration().mcpQueryToolSpecifications(facade, mismatchedFacade, mapper);
         http = authenticatedReviewHttp(facade, mismatchedFacade);
-        String request = "{\"repositoryId\":\"orders\",\"reviewId\":\"review-fixture\",\"side\":\"A\",\"revision\":\""
+        String request = "{\"repositoryId\":\"orders\",\"reviewId\":\"review-fixture\",\"side\":\"BEFORE\",\"revision\":\""
                 + REVISION + "\",\"query\":\"Order\"}";
         String mismatchHttp = http.perform(post("/api/v1/reviews/search-code").header(QueryTokenFilter.TOKEN_HEADER, "query-token")
                         .contentType("application/json").content(request))
                 .andExpect(status().isBadRequest()).andReturn().getResponse().getContentAsString();
         McpSchema.CallToolResult mismatchMcp = call(specifications, "review_search_code", Map.of("repositoryId", REPOSITORY_ID,
-                "reviewId", "review-fixture", "side", "A", "revision", REVISION, "query", "Order"));
+                "reviewId", "review-fixture", "side", "BEFORE", "revision", REVISION, "query", "Order"));
         assertThat(mapper.readTree(mismatchHttp)).isEqualTo(mapper.readTree(mapper.writeValueAsString(mismatchMcp.structuredContent())));
     }
 

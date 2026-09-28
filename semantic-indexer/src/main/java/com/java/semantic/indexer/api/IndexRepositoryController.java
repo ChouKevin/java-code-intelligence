@@ -12,6 +12,8 @@ import com.java.semantic.model.index.PublishedGenerationPointer;
 import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.model.repository.RepositoryRevision;
 import com.java.semantic.model.review.ReviewComparisonType;
+import com.java.semantic.model.review.ReviewSelection;
+import com.java.semantic.model.review.ResolvedReviewEndpoints;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import jakarta.validation.Valid;
@@ -25,6 +27,7 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.time.Instant;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 
@@ -71,7 +74,7 @@ public final class IndexRepositoryController {
 
     @PostMapping("/reviews")
     public ResponseEntity<IndexJobResponse> review(@PathVariable String repoId, @Valid @RequestBody ReviewIndexRequest request) {
-        return accepted(requests.review(RepositoryId.of(repoId), RepositoryRevision.ofSha(request.revision())));
+        return accepted(requests.review(RepositoryId.of(repoId), request.reviewSelection()));
     }
 
     @PostMapping("/rebuild")
@@ -140,14 +143,19 @@ public final class IndexRepositoryController {
     public record GitEvidenceResultResponse(String evidenceId, String branch, String revision, String comparisonId,
                                             String previousSnapshotId, String currentSnapshotId) { }
 
-    public record ReviewJobResponse(String reviewId, ReviewComparisonType comparisonType, GenerationPointerResponse capturedBaseline,
-                                    String requestedRevision, String stage, String aGenerationId, String bGenerationId,
+    public record ReviewJobResponse(String reviewId, Map<String, String> selection, ResolvedReviewEndpoints resolvedEndpoints,
+                                    String stage, String beforeGenerationId, String afterGenerationId,
                                     String comparisonId, String previousSnapshotId, String currentSnapshotId) {
         static ReviewJobResponse from(ReviewJobPayload review) {
-            return new ReviewJobResponse(review.reviewId().value(), ReviewComparisonType.CURRENT_TO_COMMIT,
-                    GenerationPointerResponse.from(review.baseline().pointer()), review.requestedRevision().value(), review.stage().name(),
-                    review.a().map(generation -> generation.selected().generationId().value()).orElse(null),
-                    review.b().map(generation -> generation.selected().generationId().value()).orElse(null),
+            ReviewSelection selected = review.selection();
+            Map<String, String> selection = selected.kind() == ReviewComparisonType.COMMIT
+                    ? Map.of("kind", "COMMIT", "revision", selected.afterRevision().value())
+                    : Map.of("kind", "RANGE", "beforeRevision", selected.beforeRevision().orElseThrow().value(),
+                            "afterRevision", selected.afterRevision().value());
+            return new ReviewJobResponse(review.reviewId().value(), selection, review.resolvedEndpoints().orElse(null),
+                    review.stage().name(),
+                    review.before().map(generation -> generation.selected().generationId().value()).orElse(null),
+                    review.after().map(generation -> generation.selected().generationId().value()).orElse(null),
                     review.comparisonId().map(GitComparisonId::value).orElse(null),
                     review.previousSnapshotId().map(GitSnapshotId::value).orElse(null),
                     review.currentSnapshotId().map(GitSnapshotId::value).orElse(null));

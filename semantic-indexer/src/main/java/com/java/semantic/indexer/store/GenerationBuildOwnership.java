@@ -27,9 +27,9 @@ public final class GenerationBuildOwnership {
         Document common = new Document("jobId", requiredContext.jobId()).append("repoId", requiredContext.repositoryId().value())
                 .append("active", true).append("phase", "RUNNING");
         Document build = new Document("operation", "BUILD").append("target.generationId", requiredContext.generationId().value());
-        Document reviewA = reviewTargetFilter(requiredContext, ReviewPreparationStage.BUILDING_A, "a");
-        Document reviewB = reviewTargetFilter(requiredContext, ReviewPreparationStage.BUILDING_B, "b");
-        common.append("$or", List.of(build, reviewA, reviewB));
+        Document reviewBefore = reviewTargetFilter(requiredContext, ReviewPreparationStage.BUILDING_BEFORE, "before");
+        Document reviewAfter = reviewTargetFilter(requiredContext, ReviewPreparationStage.BUILDING_AFTER, "after");
+        common.append("$or", List.of(build, reviewBefore, reviewAfter));
         return common;
     }
 

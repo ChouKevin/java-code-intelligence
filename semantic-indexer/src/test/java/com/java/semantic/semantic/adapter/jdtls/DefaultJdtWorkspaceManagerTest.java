@@ -177,7 +177,7 @@ class DefaultJdtWorkspaceManagerTest {
         Fixture fixture = new Fixture();
         RepositorySnapshot snapshot = fixture.snapshot();
         AnalysisWorkspaceKey key = new AnalysisWorkspaceKey(
-                snapshot.repositoryId(), snapshot.revision(), "job-123", "A");
+                snapshot.repositoryId(), snapshot.revision(), "job-123", "BEFORE");
 
         WorkspaceLease lease = fixture.manager().acquire(key, snapshot);
         FakeProcess leaseProcess = fixture.process();
@@ -194,7 +194,7 @@ class DefaultJdtWorkspaceManagerTest {
         assertThatThrownBy(lease::session)
                 .isInstanceOf(JdtWorkspaceSession.JdtWorkspaceClosingException.class);
         assertThat(tempDirectory.resolve("jdtls-data").resolve(REPOSITORY_ID.value())
-                .resolve(REVISION.value()).resolve("job-123").resolve("A"))
+                .resolve(REVISION.value()).resolve("job-123").resolve("BEFORE"))
                 .isEmptyDirectory();
     }
 
@@ -203,7 +203,7 @@ class DefaultJdtWorkspaceManagerTest {
         Fixture fixture = new Fixture(JdtLsProperties.IsolationMode.LINUX_UID);
         RepositorySnapshot snapshot = fixture.snapshot();
         AnalysisWorkspaceKey key = new AnalysisWorkspaceKey(
-                snapshot.repositoryId(), snapshot.revision(), "job-123", "A");
+                snapshot.repositoryId(), snapshot.revision(), "job-123", "BEFORE");
 
         assertThatThrownBy(() -> fixture.manager().acquire(key, snapshot))
                 .isInstanceOf(IllegalStateException.class);
@@ -220,7 +220,7 @@ class DefaultJdtWorkspaceManagerTest {
         Path linkedRoot = tempDirectory.resolve("jdtls-data");
         Files.createSymbolicLink(linkedRoot, outside);
         AnalysisWorkspaceKey key = new AnalysisWorkspaceKey(
-                snapshot.repositoryId(), snapshot.revision(), "job-123", "A");
+                snapshot.repositoryId(), snapshot.revision(), "job-123", "BEFORE");
 
         assertThatThrownBy(() -> fixture.manager().acquire(key, snapshot))
                 .isInstanceOf(IllegalStateException.class);
@@ -240,7 +240,7 @@ class DefaultJdtWorkspaceManagerTest {
         RepositoryRuntime runtime = new RepositoryRuntime(snapshot.repositoryId(), "test", root,
                 "file:///remote/test.git", "main", alias);
         AnalysisWorkspaceKey key = new AnalysisWorkspaceKey(
-                snapshot.repositoryId(), snapshot.revision(), "job-123", "A");
+                snapshot.repositoryId(), snapshot.revision(), "job-123", "BEFORE");
 
         assertThatThrownBy(() -> fixture.manager().acquire(key, linked, runtime.managedCheckout()))
                 .isInstanceOf(IllegalStateException.class);
@@ -281,11 +281,11 @@ class DefaultJdtWorkspaceManagerTest {
         Fixture fixture = new Fixture(JdtLsProperties.IsolationMode.LINUX_UID, workspaceRoot);
         RepositorySnapshot snapshot = fixture.snapshotAt(REPOSITORY_ID, checkoutRoot);
         AnalysisWorkspaceKey key = new AnalysisWorkspaceKey(
-                snapshot.repositoryId(), snapshot.revision(), "job-123", "A");
+                snapshot.repositoryId(), snapshot.revision(), "job-123", "BEFORE");
         RepositoryRuntime runtime = new RepositoryRuntime(snapshot.repositoryId(), "test", checkoutRoot,
                 "file:///remote/test.git", "main", checkoutRoot.getParent());
         Path leaseBase = workspaceRoot.resolve(REPOSITORY_ID.value()).resolve(REVISION.value())
-                .resolve("job-123").resolve("A");
+                .resolve("job-123").resolve("BEFORE");
 
         try (WorkspaceLease lease = fixture.manager().acquire(key, snapshot, runtime.managedCheckout())) {
             assertThat(lease.session()).isNotNull();
@@ -302,7 +302,7 @@ class DefaultJdtWorkspaceManagerTest {
         Fixture fixture = new Fixture(JdtLsProperties.IsolationMode.LINUX_UID, workspaceRoot);
         RepositorySnapshot snapshot = fixture.snapshotAt(REPOSITORY_ID, checkoutRoot);
         AnalysisWorkspaceKey key = new AnalysisWorkspaceKey(
-                snapshot.repositoryId(), snapshot.revision(), "job-123", "A");
+                snapshot.repositoryId(), snapshot.revision(), "job-123", "BEFORE");
         RepositoryRuntime runtime = new RepositoryRuntime(snapshot.repositoryId(), "test", checkoutRoot,
                 "file:///remote/test.git", "main", checkoutRoot.getParent());
         Files.setAttribute(checkoutRoot, "unix:mode", 0755);
@@ -320,7 +320,7 @@ class DefaultJdtWorkspaceManagerTest {
         Fixture fixture = new Fixture(JdtLsProperties.IsolationMode.LOCAL_TRUSTED, checkoutRoot);
         RepositorySnapshot snapshot = fixture.snapshotAt(REPOSITORY_ID, checkoutRoot);
         AnalysisWorkspaceKey key = new AnalysisWorkspaceKey(
-                snapshot.repositoryId(), snapshot.revision(), "job-123", "A");
+                snapshot.repositoryId(), snapshot.revision(), "job-123", "BEFORE");
 
         try (WorkspaceLease lease = fixture.manager().acquire(key, snapshot)) {
             assertThat(lease.session()).isNotNull();
@@ -885,7 +885,7 @@ class DefaultJdtWorkspaceManagerTest {
         Fixture fixture = new Fixture();
         RepositorySnapshot snapshot = fixture.snapshot();
         AnalysisWorkspaceKey key = new AnalysisWorkspaceKey(
-                snapshot.repositoryId(), snapshot.revision(), "job-123", "A");
+                snapshot.repositoryId(), snapshot.revision(), "job-123", "BEFORE");
         WorkspaceLease lease = fixture.manager().acquire(key, snapshot);
         FakeProcess retained = fixture.process();
         retained.refuseToExit();
@@ -916,7 +916,7 @@ class DefaultJdtWorkspaceManagerTest {
         fixture.failStopWith(new IllegalStateException("controlled termination failure"));
         RepositorySnapshot snapshot = fixture.snapshot();
         AnalysisWorkspaceKey key = new AnalysisWorkspaceKey(
-                snapshot.repositoryId(), snapshot.revision(), "job-123", "A");
+                snapshot.repositoryId(), snapshot.revision(), "job-123", "BEFORE");
         RepositoryId otherRepository = RepositoryId.of("billing-service");
 
         assertThatThrownBy(() -> fixture.manager().acquire(key, snapshot))
@@ -1621,11 +1621,11 @@ class DefaultJdtWorkspaceManagerTest {
         Fixture fixture = new Fixture(JdtLsProperties.IsolationMode.LINUX_UID, workspaceRoot);
         RepositorySnapshot snapshot = fixture.snapshotAt(REPOSITORY_ID, checkoutRoot);
         AnalysisWorkspaceKey key = new AnalysisWorkspaceKey(
-                snapshot.repositoryId(), snapshot.revision(), "job-123", "A");
+                snapshot.repositoryId(), snapshot.revision(), "job-123", "BEFORE");
         RepositoryRuntime runtime = new RepositoryRuntime(snapshot.repositoryId(), "test", checkoutRoot,
                 "file:///remote/test.git", "main", checkoutRoot.getParent());
         Path leaseBase = workspaceRoot.resolve(REPOSITORY_ID.value()).resolve(REVISION.value())
-                .resolve("job-123").resolve("A");
+                .resolve("job-123").resolve("BEFORE");
 
         assertThatThrownBy(() -> fixture.manager().acquire(key, snapshot, runtime.managedCheckout()))
                 .isInstanceOf(IllegalStateException.class);

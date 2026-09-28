@@ -1,6 +1,6 @@
 # Semantic review deployment and operation
 
-This guide operates the schema-3 current-to-commit semantic-review release. It
+This guide operates the schema-4 commit/range semantic-review release. It
 uses the existing Indexer, Query, and MongoDB processes; it does not add a
 review service, model, prompt runtime, chat history, or findings store. An
 external client such as OMP interprets evidence returned by Query.
@@ -204,64 +204,53 @@ exact current `revision`, and use them with the ten semantic tools. A stale
 request receives `REVISION_OUTDATED` and `currentRevision`; rediscover
 revision-scoped fact IDs before a fact-bound retry.
 
-A captured-current semantic review is separate immutable READY membership.
-For a review of B against the published A, use **only**
-`POST /index/repositories/{repositoryId}/reviews` with the exact lowercase
-40-character B SHA. Do not admit B via ordinary `/ensure`, `/sync`, `/checkout`,
-or `/rebuild`: those are BUILD operations and may publish B as current.
-Read and retain the current A pointer (revision, generation ID, and digest)
-before admission. The private review admin request is:
+A review is separate immutable READY membership. Choose one of two explicit
+selection forms for `POST /index/repositories/{repositoryId}/reviews`:
+
+- `{"selection":{"kind":"COMMIT","revision":"<full-lowercase-sha>"}}`
+  compares the first parent to the requested commit. For a root commit it
+  compares the real Git empty tree to that commit; there is no before semantic
+  generation and `before.kind` is `EMPTY_TREE`.
+- `{"selection":{"kind":"RANGE","beforeRevision":"<full-lowercase-sha>","afterRevision":"<full-lowercase-sha>"}}`
+  compares precisely those two reachable commits in that order, including
+  equal or divergent commits. It does not calculate a merge base.
+
+Neither selection reads or captures the mutable current pointer at admission.
+Both requested commits must be reachable from fetched trusted remote refs.
+Do not admit the after commit through ordinary `/ensure`, `/sync`, `/checkout`,
+or `/rebuild`: those are BUILD operations and may publish it as current.
+The private review admin request is:
+
 ```bash
 curl --fail-with-body -sS -i \
   -H "X-Api-Token: $SEMANTIC_INDEXER_ADMIN_TOKEN" \
   -H 'Content-Type: application/json' \
-  -d '{"revision":"<B-full-lowercase-sha>"}' \
+  -d '{"selection":{"kind":"COMMIT","revision":"<full-lowercase-sha>"}}' \
   https://indexer.private/index/repositories/orders/reviews
 ```
 
-Require HTTP `202` with a nonempty `jobId`, `review.reviewId`,
-`review.comparisonType: CURRENT_TO_COMMIT`,
-`review.capturedBaseline` equal to the recorded A pointer, and
-`review.requestedRevision` equal to exact B. A response without review
-provenance is **not** review admission, even if it names B. Immediately
-GET the returned job, before any long poll:
-
-```bash
-curl --fail-with-body -sS \
-  -H "X-Api-Token: $SEMANTIC_INDEXER_ADMIN_TOKEN" \
-  'https://indexer.private/index/repositories/orders/jobs/<jobId>'
-```
-
-Check that status has the same `jobId`, `operation: REVIEW`, the same
-`review.reviewId`, `review.comparisonType: CURRENT_TO_COMMIT`,
-`review.capturedBaseline` matching A, `review.requestedRevision` matching B,
-and initial review preparation (`phase: RUNNING`, `review.stage: PREPARING_A`
-or `BUILDING_A`). Also require `currentPointer` still equals A. If the job
-is `operation: BUILD`, the review
-ID/provenance is missing or differs, or current moves from A, **stop**:
-record an admission incident, do not interpret BUILD progress or publication
-as review progress, and do not ask OMP to review it.
-
-Only after these checks, poll this same job for terminal `phase: COMPLETE`
-and review stage `READY`; record its `comparisonId`, `previousSnapshotId`,
-and `currentSnapshotId`. A client outage or timeout means resume reading this
-job's status, never automatically resubmit or resume an interrupted job.
-An interrupted standalone BUILD that has not published B is reconciled at
-startup as `FAILED/WORKER_INTERRUPTED`, not retried and not published as B;
-confirm current remains A. After correcting the cause, an explicit review
-is a **new** request with a new job/review ID and newly captured baseline.
-
-A READY review direction is always direct A → B. It is not a PR diff, does not
-calculate a merge base, and is not a claim that every difference originated in
-B. B may be an ancestor, descendant, equal commit, or divergent commit.
+Require HTTP `202` with a nonempty `jobId`, `review.reviewId`, and exactly the
+requested `review.selection`. Immediately GET the returned job, then poll it
+until terminal `phase: COMPLETE` and `review.stage: READY`. The worker first
+fetches and resolves the endpoints, persists `review.resolvedEndpoints` with
+`baselineRule` (`FIRST_PARENT`, `EMPTY_TREE`, or `DIRECT_RANGE`), then prepares
+available semantic sides and Git evidence. An accepted job can still be
+`RESOLVING` and need not have reserved generation IDs yet. Review completion
+records `comparisonId`, `previousSnapshotId`, and `currentSnapshotId`; the
+root's previous snapshot is empty but real, without a fabricated revision.
+If the job is `operation: BUILD` or selection/review identity differs, stop
+and investigate rather than interpreting it as review progress. An unrelated
+current-pointer update does not alter the review's resolved endpoints or
+READY membership. An interruption or timeout means inspect that same job;
+do not silently retry or resubmit.
 
 Give OMP the Query base/MCP endpoint, a secure reference to the Query-token
-file, `repositoryId`, `reviewId`, and nothing credential-bearing. It first calls
-`get_review`; that response supplies immutable A/B revisions, side generation
-IDs, snapshots, and comparison identity. It next inspects the direct A → B
-comparison/diff through the ordinary Git evidence tools using those returned
-IDs, then calls the following **ten** semantic operations explicitly for side A
-and/or B with `repositoryId`, `reviewId`, `side`, and exact side `revision`:
+file, `repositoryId`, and `reviewId`. It first calls `get_review`: the response
+supplies `selection`, fixed `resolvedEndpoints`, `before.kind`, optional
+`before.endpoint`, required `after`, snapshots, and comparison identity.
+Inspect the direct before → after Git comparison/diff. Use the ten semantic
+operations only on present `BEFORE` and `AFTER` generations with exact side
+revision; on `EMPTY_TREE` no BEFORE semantic lookup is possible:
 
 1. `review_search_code`
 2. `review_get_fact_source`
@@ -293,7 +282,7 @@ follow callers/references as needed and inspect the relevant source. Do not use
 Read continuations until completion where the response supplies a cursor or
 page; an empty code-token search is not proof that a feature does not exist.
 
-For a review, inspect the direct diff first and retain explicit A/B contexts.
+For a review, inspect the direct diff first and retain explicit BEFORE/AFTER contexts.
 Every finding needs the issue, severity, triggering condition, impact, and
 repository/revision/file/line source evidence. Preserve unresolved calls,
 coverage, unsupported source, and other returned limitations. A no-finding
@@ -318,34 +307,35 @@ Indexer image selected by `SEMANTIC_REVIEW_INDEXER_IMAGE`. The shipped image
 smoke proves UID boundaries and JDT startup, not a complete Maven import or
 semantic-review journey.
 
-## Schema-3 release, backup, and retention
+## Schema-4 release, backup, and retention
 
-Schema 3 is a coordinated cutover. Version-2 data is not decoded as version 3;
-there is no defaulting decoder, handwritten migration, or old-generation reuse.
+Schema 4 is a coordinated cutover. Previous persisted jobs, review manifests,
+Git evidence, and generation projections are not decoded as the new contract;
+there is no defaulting decoder or implicit migration.
 Perform this order:
 
 1. Land compatible model, Indexer writer/validator, Query reader, and schema
    catalogue together; do not expose a partial writer or reader.
 2. Drain new admissions, stop the old Indexer, and let active jobs reach their
-   normal terminal/recovery boundary. Do not mix old active jobs with schema-3
+   normal terminal/recovery boundary. Do not mix old active jobs with schema-4
    writes.
 3. Take one coherent backup of repository pointers, manifests and their
    projection/source payloads, jobs, Git evidence, and the complete review
    reference graph.
-4. With the maintenance identity run schema-3 bootstrap and verify its named
+4. With the maintenance identity run schema-4 bootstrap and verify its named
    indexes (including review ownership, active-job, sealed-generation reuse,
    generation identity, and Git ordinal/ID indexes).
-5. Run the schema-3 Indexer with the writer identity. Rebuild every approved
+5. Run the schema-4 Indexer with the writer identity. Rebuild every approved
    repository's current generation so its projections and semantic analysis
    evidence are compatible.
-6. Reprepare standalone Git evidence as necessary. Create new reviews only
-   from rebuilt sealed generations and their explicit Git evidence.
+6. Reprepare standalone Git evidence as necessary. Create new reviews from
+   fetched reachable commits; no published current generation is required.
 7. Verify manifests/evidence/indexes, deploy Query, then reopen admissions.
 
 A same-SHA rebuild writes a new sealed generation before changing current; a
 READY review remains pinned to its selected generation/digest. Retain every
-READY review as a graph: review manifest, both selected generations, comparison,
-and both snapshots. Current updates do not make these artifacts deletable.
+READY review as a graph: review manifest, the after generation, optional before
+generation, comparison, and both snapshots. Current updates do not make these artifacts deletable.
 
 There is no TTL, automatic garbage collection, source-snapshot deduplication,
 or unique content-SHA rule. Every eligible comparison writes its own two

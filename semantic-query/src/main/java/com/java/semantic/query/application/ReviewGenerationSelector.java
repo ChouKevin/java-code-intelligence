@@ -33,8 +33,8 @@ public final class ReviewGenerationSelector {
         RepositoryRevision requiredRevision = Objects.requireNonNull(revision, "revision is required");
         ProjectionRequirements requiredRequirements = Objects.requireNonNull(requirements, "projection requirements are required");
         ReviewManifestDocument manifest = manifests.requireReady(requiredRepositoryId, requiredReviewId);
-        ReviewEndpoint endpoint = requiredSide == ReviewSide.A ? manifest.a().orElseThrow(IndexContractMismatchException::new)
-                : manifest.b().orElseThrow(IndexContractMismatchException::new);
+        ReviewEndpoint endpoint = requiredSide == ReviewSide.BEFORE ? manifest.before().orElseThrow(ReviewContextMismatchException::new)
+                : manifest.after().orElseThrow(IndexContractMismatchException::new);
         SelectedGeneration selected = endpoint.generation().selected();
         if (!requiredRepositoryId.equals(selected.repositoryId()) || !requiredRevision.equals(selected.revision())) {
             throw new ReviewContextMismatchException();

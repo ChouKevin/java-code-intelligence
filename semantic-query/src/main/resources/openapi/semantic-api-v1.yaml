@@ -417,7 +417,7 @@ components:
     FactId: {type: string, pattern: '^[0-9a-f]{64}$'}
     GitEvidenceId: {type: string, format: uuid}
     ReviewId: {type: string, minLength: 1}
-    ReviewSide: {type: string, enum: [A, B]}
+    ReviewSide: {type: string, enum: [BEFORE, AFTER]}
     GitBranchRequest:
       type: object
       additionalProperties: false
@@ -477,7 +477,7 @@ components:
     GitComparisonRequest:
       type: object
       additionalProperties: false
-      required: [repositoryId, comparisonId, previous, current]
+      required: [repositoryId, comparisonId, current]
       properties:
         repositoryId: {$ref: '#/components/schemas/RepositoryId'}
         comparisonId: {type: string, format: uuid}
@@ -488,7 +488,7 @@ components:
     GitFileDiffRequest:
       type: object
       additionalProperties: false
-      required: [repositoryId, comparisonId, previous, current, changeId]
+      required: [repositoryId, comparisonId, current, changeId]
       properties:
         repositoryId: {$ref: '#/components/schemas/RepositoryId'}
         comparisonId: {type: string, format: uuid}
@@ -556,7 +556,7 @@ components:
         current: {$ref: '#/components/schemas/Revision'}
         previousSnapshotId: {type: string, format: uuid}
         currentSnapshotId: {type: string, format: uuid}
-        ancestry: {type: string, enum: [SAME, PREVIOUS_ANCESTOR, CURRENT_ANCESTOR, DIVERGED]}
+        ancestry: {type: string, enum: [SAME, PREVIOUS_ANCESTOR, CURRENT_ANCESTOR, DIVERGED, EMPTY_TREE]}
         items: {type: array, items: {$ref: '#/components/schemas/GitChangeItem'}}
         page: {$ref: '#/components/schemas/Page'}
     GitFileDiffResult:
@@ -1063,15 +1063,6 @@ components:
         revision: {$ref: '#/components/schemas/Revision'}
         generationId: {type: string, minLength: 1}
         coverage: {$ref: '#/components/schemas/ReviewCoverage'}
-    CapturedBaselineDetails:
-      type: object
-      additionalProperties: false
-      required: [revision, generationId, manifestDigest, capturedAt]
-      properties:
-        revision: {$ref: '#/components/schemas/Revision'}
-        generationId: {type: string}
-        manifestDigest: {type: string}
-        capturedAt: {type: string, format: date-time}
     ReviewEndpointDetails:
       type: object
       additionalProperties: false
@@ -1083,17 +1074,47 @@ components:
         analysisFingerprint: {type: string}
         snapshotId: {type: string}
         coverage: {$ref: '#/components/schemas/ReviewCoverage'}
+    ReviewSelection:
+      oneOf:
+        - type: object
+          additionalProperties: false
+          required: [kind, revision]
+          properties:
+            kind: {type: string, const: COMMIT}
+            revision: {$ref: '#/components/schemas/Revision'}
+        - type: object
+          additionalProperties: false
+          required: [kind, beforeRevision, afterRevision]
+          properties:
+            kind: {type: string, const: RANGE}
+            beforeRevision: {$ref: '#/components/schemas/Revision'}
+            afterRevision: {$ref: '#/components/schemas/Revision'}
+    ResolvedReviewEndpoints:
+      type: object
+      additionalProperties: false
+      required: [afterRevision, baselineRule]
+      properties:
+        beforeRevision: {$ref: '#/components/schemas/Revision'}
+        afterRevision: {$ref: '#/components/schemas/Revision'}
+        baselineRule: {type: string, enum: [FIRST_PARENT, EMPTY_TREE, DIRECT_RANGE]}
+    ReviewBeforeDetails:
+      type: object
+      additionalProperties: false
+      required: [kind]
+      properties:
+        kind: {type: string, enum: [FIRST_PARENT, EMPTY_TREE, DIRECT_RANGE]}
+        endpoint: {$ref: '#/components/schemas/ReviewEndpointDetails'}
     ReviewDetails:
       type: object
       additionalProperties: false
-      required: [repositoryId, reviewId, comparisonType, capturedBaseline, a, b, comparisonId, publishedAt]
+      required: [repositoryId, reviewId, selection, resolvedEndpoints, before, after, comparisonId, publishedAt]
       properties:
         repositoryId: {$ref: '#/components/schemas/RepositoryId'}
         reviewId: {$ref: '#/components/schemas/ReviewId'}
-        comparisonType: {type: string, enum: [CURRENT_TO_COMMIT]}
-        capturedBaseline: {$ref: '#/components/schemas/CapturedBaselineDetails'}
-        a: {$ref: '#/components/schemas/ReviewEndpointDetails'}
-        b: {$ref: '#/components/schemas/ReviewEndpointDetails'}
+        selection: {$ref: '#/components/schemas/ReviewSelection'}
+        resolvedEndpoints: {$ref: '#/components/schemas/ResolvedReviewEndpoints'}
+        before: {$ref: '#/components/schemas/ReviewBeforeDetails'}
+        after: {$ref: '#/components/schemas/ReviewEndpointDetails'}
         comparisonId: {type: string}
         publishedAt: {type: string, format: date-time}
     ReviewSearchCodeResult:

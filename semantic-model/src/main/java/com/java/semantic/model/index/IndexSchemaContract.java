@@ -14,18 +14,18 @@ import java.util.stream.Collectors;
 /** Framework-neutral Mongo collection and index contract. */
 public final class IndexSchemaContract {
 
-    public static final int SCHEMA_VERSION = 3;
+    public static final int SCHEMA_VERSION = 4;
     public static final int ANALYSIS_EVIDENCE_VERSION = 1;
-    public static final int REVIEW_MANIFEST_VERSION = 1;
-    public static final int GIT_EVIDENCE_VERSION = 2;
-    public static final int PERSISTED_JOB_VERSION = 2;
+    public static final int REVIEW_MANIFEST_VERSION = 2;
+    public static final int GIT_EVIDENCE_VERSION = 3;
+    public static final int PERSISTED_JOB_VERSION = 3;
     /** Typed projection contract consumed by exporters, validators, and Query release checks. */
     private static final List<ProjectionSpec> PROJECTIONS = List.of(
-            projection(ProjectionName.SOURCES, 3, IndexCollections.GENERATION_FILES),
-            projection(ProjectionName.SYMBOLS, 3, IndexCollections.SYMBOLS),
-            projection(ProjectionName.RELATIONS, 3, IndexCollections.RELATIONS),
-            projection(ProjectionName.ENTRY_POINTS, 3, IndexCollections.ENTRY_POINTS),
-            projection(ProjectionName.SEARCH, 3, IndexCollections.SEARCH));
+            projection(ProjectionName.SOURCES, 4, IndexCollections.GENERATION_FILES),
+            projection(ProjectionName.SYMBOLS, 4, IndexCollections.SYMBOLS),
+            projection(ProjectionName.RELATIONS, 4, IndexCollections.RELATIONS),
+            projection(ProjectionName.ENTRY_POINTS, 4, IndexCollections.ENTRY_POINTS),
+            projection(ProjectionName.SEARCH, 4, IndexCollections.SEARCH));
     private static final Map<String, Integer> REQUIRED_PROJECTION_VERSIONS = PROJECTIONS.stream()
             .collect(Collectors.toUnmodifiableMap(specification -> specification.name().name(), ProjectionSpec::version));
     private static final List<ImmutablePayloadCollectionSpec> IMMUTABLE_PAYLOAD_COLLECTIONS = List.of(

@@ -8,7 +8,6 @@ import com.java.semantic.model.index.SemanticAnalysisEvidence;
 import com.java.semantic.model.query.SelectedGeneration;
 import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.model.repository.RepositoryRevision;
-import com.java.semantic.model.review.CapturedReviewBaseline;
 import com.java.semantic.model.review.ReviewEndpoint;
 import com.java.semantic.model.review.ReviewId;
 import com.java.semantic.model.review.ReviewManifestDocument;
@@ -44,18 +43,18 @@ public final class ReviewQueryFacade {
         RepositoryId repositoryId = new RepositoryId(requiredRequest.repositoryId());
         ReviewId reviewId = new ReviewId(requiredRequest.reviewId());
         ReviewManifestDocument manifest = manifests.requireReady(repositoryId, reviewId);
-        ReviewEndpoint endpointA = manifest.a().orElseThrow(IndexContractMismatchException::new);
-        ReviewEndpoint endpointB = manifest.b().orElseThrow(IndexContractMismatchException::new);
-        ReviewSelection a = selector.select(repositoryId, reviewId, ReviewSide.A, endpointA.generation().selected().revision(),
-                SelectedGenerationGuard.SOURCES);
-        ReviewSelection b = selector.select(repositoryId, reviewId, ReviewSide.B, endpointB.generation().selected().revision(),
-                SelectedGenerationGuard.SOURCES);
-        CapturedReviewBaseline baseline = manifest.capturedBaseline();
-        return new ReviewQueryContract.ReviewDetails(repositoryId.value(), reviewId.value(), manifest.comparisonType(),
-                new ReviewQueryContract.CapturedBaselineDetails(baseline.pointer().revision().value(),
-                        baseline.pointer().generationId().value(), baseline.pointer().manifestDigest().value(), baseline.capturedAt()),
-                endpointDetails(endpointA, a.selected()),
-                endpointDetails(endpointB, b.selected()),
+        ReviewEndpoint endpointAfter = manifest.after().orElseThrow(IndexContractMismatchException::new);
+        ReviewSelection afterSelection = selector.select(repositoryId, reviewId, ReviewSide.AFTER,
+                endpointAfter.generation().selected().revision(), SelectedGenerationGuard.SOURCES);
+        Optional<ReviewQueryContract.ReviewEndpointDetails> beforeDetails = manifest.before().map(endpoint -> {
+            ReviewSelection selected = selector.select(repositoryId, reviewId, ReviewSide.BEFORE,
+                    endpoint.generation().selected().revision(), SelectedGenerationGuard.SOURCES);
+            return endpointDetails(endpoint, selected.selected());
+        });
+        return new ReviewQueryContract.ReviewDetails(repositoryId.value(), reviewId.value(), manifest.selection(),
+                manifest.resolvedEndpoints().orElseThrow(IndexContractMismatchException::new),
+                new ReviewQueryContract.ReviewBeforeDetails(manifest.resolvedEndpoints().orElseThrow().baselineRule(), beforeDetails),
+                endpointDetails(endpointAfter, afterSelection.selected()),
                 manifest.comparisonId().orElseThrow(IndexContractMismatchException::new).value(),
                 manifest.publishedAt().orElseThrow(IndexContractMismatchException::new));
     }
@@ -175,8 +174,9 @@ public final class ReviewQueryFacade {
     }
 
     private ReviewQueryContract.ReviewCoverage coverage(ReviewSelection selection) {
-        ReviewEndpoint endpoint = selection.side() == ReviewSide.A ? selection.manifest().a().orElseThrow(IndexContractMismatchException::new)
-                : selection.manifest().b().orElseThrow(IndexContractMismatchException::new);
+        ReviewEndpoint endpoint = selection.side() == ReviewSide.BEFORE
+                ? selection.manifest().before().orElseThrow(ReviewContextMismatchException::new)
+                : selection.manifest().after().orElseThrow(IndexContractMismatchException::new);
         return coverage(selection.selected(), endpoint.generation().analysisEvidence());
     }
 

@@ -1,7 +1,6 @@
 package com.java.semantic.indexer.job;
 
 import com.java.semantic.indexer.store.PublicationConflictException;
-import com.java.semantic.indexer.review.ReviewBaselineUnavailableException;
 import com.java.semantic.indexer.review.ReviewPreparationException;
 import com.java.semantic.indexer.review.ReviewReadinessValidator;
 import com.java.semantic.model.index.GenerationId;
@@ -16,8 +15,11 @@ import com.java.semantic.model.git.GitEvidenceId;
 import com.java.semantic.model.git.GitComparisonId;
 import com.java.semantic.model.git.GitSnapshotId;
 import com.java.semantic.model.index.SealedGeneration;
-import com.java.semantic.model.review.CapturedReviewBaseline;
+import com.java.semantic.model.review.ReviewBaselineRule;
+import com.java.semantic.model.review.ReviewComparisonType;
 import com.java.semantic.model.review.ReviewId;
+import com.java.semantic.model.review.ReviewSelection;
+import com.java.semantic.model.review.ResolvedReviewEndpoints;
 import com.java.semantic.model.review.ReviewSide;
 import com.mongodb.DuplicateKeyException;
 import com.mongodb.ErrorCategory;
@@ -135,39 +137,76 @@ public final class MongoIndexJobStore implements IndexJobStore {
     }
 
     @Override
-    public IndexJob admitReview(RepositoryId repositoryId, RepositoryRevision revision) {
+    public IndexJob admitReview(RepositoryId repositoryId, ReviewSelection selection) {
         RepositoryId requiredRepositoryId = Objects.requireNonNull(repositoryId, "repository id is required");
-        RepositoryRevision requiredRevision = Objects.requireNonNull(revision, "requested review revision is required");
-        PublishedGenerationPointer baseline = publicationState(requiredRepositoryId).flatMap(IndexPublicationState::currentPointer)
-                .orElseThrow(() -> new ReviewBaselineUnavailableException(requiredRepositoryId));
-        Instant capturedAt = Instant.now();
+        ReviewSelection requested = Objects.requireNonNull(selection, "review selection is required");
         IndexJobId jobId = IndexJobId.create();
-        long aGeneration = nextGeneration(requiredRepositoryId);
-        long bGeneration = aGeneration + 1L;
-        String suffix = jobId.value().replace("-", "");
-        IndexJobTarget a = new IndexJobTarget(baseline.revision(), new GenerationId("g-" + suffix + "-a"), aGeneration);
-        IndexJobTarget b = new IndexJobTarget(requiredRevision, new GenerationId("g-" + suffix + "-b"), bGeneration);
         Document review = new Document("reviewId", UUID.randomUUID().toString())
-                .append("baseline", new Document("pointer", pointerDocument(baseline)).append("capturedAt", Date.from(capturedAt)))
-                .append("requestedRevision", requiredRevision.value())
-                .append("reservedTargets", new Document("a", targetDocument(a)).append("b", targetDocument(b)))
-                .append("stage", ReviewPreparationStage.PREPARING_A.name());
+                .append("selection", selectionDocument(requested))
+                .append("stage", ReviewPreparationStage.RESOLVING.name());
         Document job = new Document(JOB_ID, jobId.value()).append(REPOSITORY_ID, requiredRepositoryId.value()).append(ACTIVE, true)
                 .append("phase", IndexJobPhase.ACCEPTED.name()).append("operation", IndexJobOperation.REVIEW.name()).append("rebuild", false)
-                .append("generationHighWatermark", bGeneration).append("jobVersion", IndexSchemaContract.PERSISTED_JOB_VERSION)
-                .append("review", review).append("createdAt", Date.from(capturedAt));
+                .append("jobVersion", IndexSchemaContract.PERSISTED_JOB_VERSION)
+                .append("review", review).append("createdAt", new Date());
         insert(job, requiredRepositoryId);
         return from(job);
     }
+
+    @Override
+    public IndexJob resolveReviewEndpoints(IndexJobId jobId, ResolvedReviewEndpoints endpoints) {
+        ResolvedReviewEndpoints resolved = Objects.requireNonNull(endpoints, "resolved review endpoints are required");
+        Document candidate = template.getCollection(IndexCollections.INDEX_JOBS).find(new Document(JOB_ID, jobId.value())
+                .append(ACTIVE, true).append("phase", IndexJobPhase.RUNNING.name())
+                .append("operation", IndexJobOperation.REVIEW.name()).append("review.stage", ReviewPreparationStage.RESOLVING.name())).first();
+        if (Objects.isNull(candidate)) {
+            throw new IllegalStateException("review endpoint resolution requires the active resolving job");
+        }
+        ReviewSelection selection = reviewFrom(candidate.get("review", Document.class)).selection();
+        if (!resolved.afterRevision().equals(selection.afterRevision())
+                || (selection.kind() == ReviewComparisonType.RANGE
+                    && (!selection.beforeRevision().equals(resolved.beforeRevision()) || resolved.baselineRule() != ReviewBaselineRule.DIRECT_RANGE))
+                || (selection.kind() == ReviewComparisonType.COMMIT && resolved.baselineRule() == ReviewBaselineRule.DIRECT_RANGE)) {
+            throw new IllegalArgumentException("resolved endpoints do not match the requested review selection");
+        }
+        RepositoryId repositoryId = RepositoryId.of(candidate.getString(REPOSITORY_ID));
+        long afterGeneration = nextGeneration(repositoryId) + (resolved.beforeRevision().isPresent() ? 1L : 0L);
+        String suffix = jobId.value().replace("-", "");
+        Optional<IndexJobTarget> before = resolved.beforeRevision().map(revision ->
+                new IndexJobTarget(revision, new GenerationId("g-" + suffix + "-before"), afterGeneration - 1L));
+        IndexJobTarget after = new IndexJobTarget(resolved.afterRevision(), new GenerationId("g-" + suffix + "-after"), afterGeneration);
+        Document reserved = new Document("after", targetDocument(after));
+        before.ifPresent(target -> reserved.append("before", targetDocument(target)));
+        Document update = new Document("$set", new Document("review.resolvedEndpoints", resolvedDocument(resolved))
+                .append("review.reservedTargets", reserved)
+                .append("review.stage", resolved.beforeRevision().isPresent()
+                        ? ReviewPreparationStage.PREPARING_BEFORE.name() : ReviewPreparationStage.PREPARING_AFTER.name())
+                .append("generationHighWatermark", afterGeneration));
+        Document persisted = template.getCollection(IndexCollections.INDEX_JOBS).findOneAndUpdate(
+                new Document(JOB_ID, jobId.value()).append(ACTIVE, true).append("phase", IndexJobPhase.RUNNING.name())
+                        .append("review.stage", ReviewPreparationStage.RESOLVING.name()).append("review.resolvedEndpoints", new Document("$exists", false)),
+                update, new FindOneAndUpdateOptions().returnDocument(ReturnDocument.AFTER));
+        if (Objects.isNull(persisted)) {
+            throw new IllegalStateException("review endpoint resolution lost ownership");
+        }
+        return from(persisted);
+    }
+
 
     @Override
     public IndexJob beginReviewValidation(IndexJobId jobId) {
         IndexJobId requiredJobId = Objects.requireNonNull(jobId, "job id is required");
         Document filter = new Document(JOB_ID, requiredJobId.value()).append(ACTIVE, true).append("phase", IndexJobPhase.RUNNING.name())
                 .append("operation", IndexJobOperation.REVIEW.name()).append("review.stage", ReviewPreparationStage.PREPARING_GIT.name())
-                .append("review.a", new Document("$exists", true)).append("review.b", new Document("$exists", true))
-                .append("review.comparisonId", new Document("$exists", true)).append("review.previousSnapshotId", new Document("$exists", true))
+                .append("review.resolvedEndpoints", new Document("$exists", true))
+                .append("review.after", new Document("$exists", true))
+                .append("review.comparisonId", new Document("$exists", true))
+                .append("review.previousSnapshotId", new Document("$exists", true))
                 .append("review.currentSnapshotId", new Document("$exists", true));
+        Document current = template.getCollection(IndexCollections.INDEX_JOBS).find(filter).first();
+        if (Objects.isNull(current) || (reviewFrom(current.get("review", Document.class)).resolvedEndpoints().orElseThrow()
+                .beforeRevision().isPresent() != current.get("review", Document.class).containsKey("before"))) {
+            throw new IllegalStateException("review validation requires the required before membership");
+        }
         Document updated = template.getCollection(IndexCollections.INDEX_JOBS).findOneAndUpdate(filter,
                 Updates.set("review.stage", ReviewPreparationStage.VALIDATING.name()),
                 new FindOneAndUpdateOptions().returnDocument(ReturnDocument.AFTER));
@@ -201,15 +240,15 @@ public final class MongoIndexJobStore implements IndexJobStore {
     public IndexJob activateReviewTarget(IndexJobId jobId, ReviewSide side) {
         IndexJobId requiredJobId = Objects.requireNonNull(jobId, "job id is required");
         ReviewSide requiredSide = Objects.requireNonNull(side, "review side is required");
-        ReviewPreparationStage preparing = requiredSide == ReviewSide.A ? ReviewPreparationStage.PREPARING_A : ReviewPreparationStage.PREPARING_B;
-        ReviewPreparationStage building = requiredSide == ReviewSide.A ? ReviewPreparationStage.BUILDING_A : ReviewPreparationStage.BUILDING_B;
+        ReviewPreparationStage preparing = requiredSide == ReviewSide.BEFORE ? ReviewPreparationStage.PREPARING_BEFORE : ReviewPreparationStage.PREPARING_AFTER;
+        ReviewPreparationStage building = requiredSide == ReviewSide.BEFORE ? ReviewPreparationStage.BUILDING_BEFORE : ReviewPreparationStage.BUILDING_AFTER;
         Document candidate = template.getCollection(IndexCollections.INDEX_JOBS).find(new Document(JOB_ID, requiredJobId.value())).first();
         if (Objects.isNull(candidate)) {
             throw new IllegalStateException("review target activation requires a persisted review");
         }
         Document review = Objects.requireNonNull(candidate.get("review", Document.class), "review payload is required");
         Document reservedTargets = Objects.requireNonNull(review.get("reservedTargets", Document.class), "reserved targets are required");
-        IndexJobTarget target = targetFrom(Objects.requireNonNull(reservedTargets.get(requiredSide == ReviewSide.A ? "a" : "b", Document.class),
+        IndexJobTarget target = targetFrom(Objects.requireNonNull(reservedTargets.get(requiredSide == ReviewSide.BEFORE ? "before" : "after", Document.class),
                 "reserved target is required"));
         Document filter = new Document(JOB_ID, requiredJobId.value()).append(ACTIVE, true).append("phase", IndexJobPhase.RUNNING.name())
                 .append("operation", IndexJobOperation.REVIEW.name()).append("review.stage", preparing.name())
@@ -235,16 +274,16 @@ public final class MongoIndexJobStore implements IndexJobStore {
             throw new IllegalStateException("review side record requires an active running review");
         }
         ReviewJobPayload payload = reviewFrom(Objects.requireNonNull(running.get("review", Document.class), "review payload is required"));
-        ReviewPreparationStage building = requiredSide == ReviewSide.A ? ReviewPreparationStage.BUILDING_A : ReviewPreparationStage.BUILDING_B;
-        ReviewPreparationStage next = requiredSide == ReviewSide.A ? ReviewPreparationStage.PREPARING_B : ReviewPreparationStage.PREPARING_GIT;
-        IndexJobTarget target = payload.reservedTargets().target(requiredSide);
+        ReviewPreparationStage building = requiredSide == ReviewSide.BEFORE ? ReviewPreparationStage.BUILDING_BEFORE : ReviewPreparationStage.BUILDING_AFTER;
+        ReviewPreparationStage next = requiredSide == ReviewSide.BEFORE ? ReviewPreparationStage.PREPARING_AFTER : ReviewPreparationStage.PREPARING_GIT;
+        IndexJobTarget target = payload.reservedTargets().orElseThrow().target(requiredSide);
         if (payload.stage() != building || !target.equals(targetFrom(Objects.requireNonNull(running.get("target", Document.class), "active target is required")))
                 || !requiredGeneration.selected().repositoryId().equals(RepositoryId.of(running.getString(REPOSITORY_ID)))
                 || !requiredGeneration.selected().revision().equals(target.revision())) {
             throw new IllegalStateException("review side record does not match its fixed active target");
         }
         requireCompatibleReviewGeneration(running, requiredGeneration, target);
-        String sideField = requiredSide == ReviewSide.A ? "a" : "b";
+        String sideField = requiredSide == ReviewSide.BEFORE ? "before" : "after";
         Document filter = new Document(JOB_ID, requiredJobId.value()).append(ACTIVE, true).append("phase", IndexJobPhase.RUNNING.name())
                 .append("operation", IndexJobOperation.REVIEW.name()).append("review.stage", building.name())
                 .append("target", targetDocument(target))
@@ -496,12 +535,15 @@ public final class MongoIndexJobStore implements IndexJobStore {
         if (Objects.isNull(payload)) {
             return false;
         }
+        ReviewJobPayload review = reviewFrom(payload);
+        boolean needsBefore = review.resolvedEndpoints().orElseThrow().beforeRevision().isPresent();
         Document manifest = template.getCollection(IndexCollections.REVIEW_MANIFESTS).find(new Document(REPOSITORY_ID, job.getString(REPOSITORY_ID))
                 .append("reviewId", payload.getString("reviewId")).append("ownerJobId", job.getString(JOB_ID)).append("state", "READY")
-                .append("comparisonId", payload.getString("comparisonId")).append("a.snapshotId", payload.getString("previousSnapshotId"))
-                .append("b.snapshotId", payload.getString("currentSnapshotId"))).first();
-        if (Objects.isNull(manifest) || Objects.isNull(payload.get("a", Document.class))
-                || Objects.isNull(payload.get("b", Document.class)) || Objects.isNull(payload.getString("comparisonId"))
+                .append("comparisonId", payload.getString("comparisonId")).append("after.snapshotId", payload.getString("currentSnapshotId"))).first();
+        if (Objects.isNull(manifest) || needsBefore != Objects.nonNull(payload.get("before", Document.class))
+                || needsBefore != Objects.nonNull(manifest.get("before", Document.class))
+                || needsBefore && !Objects.equals(payload.getString("previousSnapshotId"), manifest.get("before", Document.class).getString("snapshotId"))
+                || Objects.isNull(payload.get("after", Document.class)) || Objects.isNull(payload.getString("comparisonId"))
                 || Objects.isNull(payload.getString("previousSnapshotId")) || Objects.isNull(payload.getString("currentSnapshotId"))) {
             return false;
         }
@@ -751,19 +793,49 @@ public final class MongoIndexJobStore implements IndexJobStore {
     }
 
     private ReviewJobPayload reviewFrom(Document payload) {
-        Document baselineDocument = Objects.requireNonNull(payload.get("baseline", Document.class), "review baseline is required");
-        CapturedReviewBaseline baseline = new CapturedReviewBaseline(pointerFrom(Objects.requireNonNull(baselineDocument.get("pointer", Document.class),
-                "review baseline pointer is required")), Objects.requireNonNull(baselineDocument.getDate("capturedAt"), "review baseline time is required").toInstant());
-        Document reserved = Objects.requireNonNull(payload.get("reservedTargets", Document.class), "reserved review targets are required");
-        Optional<SealedGeneration> a = sealedGeneration(payload, "a");
-        Optional<SealedGeneration> b = sealedGeneration(payload, "b");
-        return new ReviewJobPayload(new ReviewId(payload.getString("reviewId")), baseline, new RepositoryRevision(payload.getString("requestedRevision")),
-                new ReviewBuildTargets(targetFrom(Objects.requireNonNull(reserved.get("a", Document.class), "reserved A target is required")),
-                        targetFrom(Objects.requireNonNull(reserved.get("b", Document.class), "reserved B target is required"))),
-                ReviewPreparationStage.valueOf(payload.getString("stage")), a, b,
+        Document selection = Objects.requireNonNull(payload.get("selection", Document.class), "review selection is required");
+        Optional<ResolvedReviewEndpoints> resolved = Optional.ofNullable(payload.get("resolvedEndpoints", Document.class))
+                .map(MongoIndexJobStore::resolvedFrom);
+        Optional<ReviewBuildTargets> reserved = Optional.ofNullable(payload.get("reservedTargets", Document.class))
+                .map(targets -> new ReviewBuildTargets(Optional.ofNullable(targets.get("before", Document.class))
+                        .map(MongoIndexJobStore::targetFrom),
+                        targetFrom(Objects.requireNonNull(targets.get("after", Document.class), "reserved after target is required"))));
+        return new ReviewJobPayload(new ReviewId(payload.getString("reviewId")), selectionFrom(selection), resolved, reserved,
+                ReviewPreparationStage.valueOf(payload.getString("stage")), sealedGeneration(payload, "before"),
+                sealedGeneration(payload, "after"),
                 Optional.ofNullable(payload.getString("comparisonId")).map(GitComparisonId::new),
                 Optional.ofNullable(payload.getString("previousSnapshotId")).map(GitSnapshotId::new),
                 Optional.ofNullable(payload.getString("currentSnapshotId")).map(GitSnapshotId::new));
+    }
+
+    private static Document selectionDocument(ReviewSelection selection) {
+        Document document = new Document("kind", selection.kind().name());
+        if (selection.kind() == ReviewComparisonType.COMMIT) {
+            document.append("revision", selection.afterRevision().value());
+        } else {
+            document.append("beforeRevision", selection.beforeRevision().orElseThrow().value())
+                    .append("afterRevision", selection.afterRevision().value());
+        }
+        return document;
+    }
+
+    private static ReviewSelection selectionFrom(Document document) {
+        ReviewComparisonType kind = ReviewComparisonType.valueOf(document.getString("kind"));
+        return new ReviewSelection(kind, Optional.ofNullable(document.getString("beforeRevision")).map(RepositoryRevision::ofSha),
+                RepositoryRevision.ofSha(document.getString(kind == ReviewComparisonType.COMMIT ? "revision" : "afterRevision")));
+    }
+
+    private static Document resolvedDocument(ResolvedReviewEndpoints endpoints) {
+        Document document = new Document("afterRevision", endpoints.afterRevision().value())
+                .append("baselineRule", endpoints.baselineRule().name());
+        endpoints.beforeRevision().ifPresent(revision -> document.append("beforeRevision", revision.value()));
+        return document;
+    }
+
+    private static ResolvedReviewEndpoints resolvedFrom(Document document) {
+        return new ResolvedReviewEndpoints(Optional.ofNullable(document.getString("beforeRevision")).map(RepositoryRevision::ofSha),
+                RepositoryRevision.ofSha(document.getString("afterRevision")),
+                ReviewBaselineRule.valueOf(document.getString("baselineRule")));
     }
 
     private Optional<SealedGeneration> sealedGeneration(Document payload, String side) {

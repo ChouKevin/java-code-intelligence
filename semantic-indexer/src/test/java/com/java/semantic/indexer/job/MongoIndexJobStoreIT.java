@@ -4,7 +4,6 @@ import com.java.semantic.indexer.store.IndexSchemaBootstrap;
 import com.java.semantic.indexer.store.MongoPublicationWriter;
 import com.java.semantic.indexer.store.PublicationConflictException;
 import com.java.semantic.model.index.IndexCollections;
-import com.java.semantic.indexer.review.ReviewBaselineUnavailableException;
 import com.java.semantic.model.index.GenerationId;
 import com.java.semantic.model.index.IndexSchemaContract;
 import com.java.semantic.model.index.ManifestDigest;
@@ -13,6 +12,9 @@ import com.java.semantic.model.index.PublishedGenerationPointer;
 import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.model.repository.RepositoryRevision;
 import com.java.semantic.model.review.ReviewSide;
+import com.java.semantic.model.review.ReviewSelection;
+import com.java.semantic.model.review.ResolvedReviewEndpoints;
+import com.java.semantic.model.review.ReviewBaselineRule;
 import org.bson.Document;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -35,7 +37,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 @Tag("mongo-it")
 class MongoIndexJobStoreIT {
     @Test
-    void review_admission_captures_the_current_pointer_once_and_refuses_missing_baselines_without_a_job() {
+    void range_admission_does_not_capture_current_and_prevents_a_second_active_review() {
         try (MongoDBContainer container = container()) {
             MongoTemplate template = template(container);
             MongoIndexJobStore store = store(template);
@@ -43,22 +45,41 @@ class MongoIndexJobStoreIT {
             PublishedGenerationPointer currentC = pointer("c", "g-current-c", "job-current-c");
             PublishedGenerationPointer currentD = pointer("d", "g-current-d", "job-current-d");
             seedPublished(template, repositoryId.value(), currentC, true, IndexSchemaContract.SCHEMA_VERSION);
+            ReviewSelection selection = ReviewSelection.range(revision("a"), revision("e"));
 
-            IndexJob accepted = store.admitReview(repositoryId, revision("e"));
+            IndexJob accepted = store.admitReview(repositoryId, selection);
             template.getCollection(IndexCollections.REPOSITORIES).updateOne(new Document("repoId", repositoryId.value()),
                     new Document("$set", new Document("currentPointer", pointerDocument(currentD))));
 
-            assertThat(accepted.operation()).isEqualTo(IndexJobOperation.REVIEW);
-            assertThat(accepted.review().orElseThrow().baseline().pointer()).isEqualTo(currentC);
-            assertThat(accepted.review().orElseThrow().requestedRevision()).isEqualTo(revision("e"));
-            assertThat(store.find(accepted.id()).orElseThrow().review().orElseThrow().baseline().pointer()).isEqualTo(currentC);
-            assertThatThrownBy(() -> store.admitReview(repositoryId, revision("f")))
+            assertThat(accepted.review().orElseThrow().selection()).isEqualTo(selection);
+            assertThat(accepted.review().orElseThrow().resolvedEndpoints()).isEmpty();
+            assertThat(store.find(accepted.id()).orElseThrow().review().orElseThrow().selection()).isEqualTo(selection);
+            assertThatThrownBy(() -> store.admitReview(repositoryId, ReviewSelection.commit(revision("f"))))
                     .isInstanceOf(IndexJobAlreadyActiveException.class);
+        }
+    }
 
-            RepositoryId missing = RepositoryId.of("missing");
-            assertThatThrownBy(() -> store.admitReview(missing, revision("e")))
-                    .isInstanceOf(ReviewBaselineUnavailableException.class);
-            assertThat(template.getCollection(IndexCollections.INDEX_JOBS).countDocuments(new Document("repoId", missing.value()))).isZero();
+    @Test
+    void review_without_a_published_current_is_admitted_as_a_durable_job() {
+        try (MongoDBContainer container = container()) {
+            MongoTemplate template = template(container);
+            MongoIndexJobStore store = store(template);
+            RepositoryId repositoryId = RepositoryId.of("root-only");
+            template.getCollection(IndexCollections.REPOSITORIES).insertOne(new Document("repoId", repositoryId.value()));
+
+            IndexJob accepted = store.admitReview(repositoryId, ReviewSelection.commit(revision("a")));
+
+            assertThat(accepted.operation()).isEqualTo(IndexJobOperation.REVIEW);
+            assertThat(accepted.phase()).isEqualTo(IndexJobPhase.ACCEPTED);
+            assertThat(store.find(accepted.id())).contains(accepted);
+            assertThat(template.getCollection(IndexCollections.INDEX_JOBS)
+                    .countDocuments(new Document("jobId", accepted.id().value()).append("repoId", repositoryId.value()))).isEqualTo(1L);
+            IndexJob running = store.startNextAccepted().orElseThrow();
+            IndexJob resolved = store.resolveReviewEndpoints(running.id(),
+                    new ResolvedReviewEndpoints(Optional.empty(), revision("a"), ReviewBaselineRule.EMPTY_TREE));
+            assertThat(resolved.review().orElseThrow().reservedTargets().orElseThrow().before()).isEmpty();
+            assertThat(resolved.review().orElseThrow().resolvedEndpoints().orElseThrow().baselineRule())
+                    .isEqualTo(ReviewBaselineRule.EMPTY_TREE);
         }
     }
 
@@ -187,13 +208,13 @@ class MongoIndexJobStoreIT {
             String jobId = "review-job";
             template.getCollection(IndexCollections.INDEX_JOBS).insertOne(reviewJob(jobId));
 
-            IndexJob activeA = store.activateReviewTarget(new IndexJobId(jobId), ReviewSide.A);
+            IndexJob activeBefore = store.activateReviewTarget(new IndexJobId(jobId), ReviewSide.BEFORE);
 
-            assertThat(activeA.target()).contains(new IndexJobTarget(revision("a"), new GenerationId("g-a"), 5L));
-            assertThat(activeA.review().orElseThrow().stage()).isEqualTo(ReviewPreparationStage.BUILDING_A);
-            assertThatThrownBy(() -> store.activateReviewTarget(activeA.id(), ReviewSide.B))
+            assertThat(activeBefore.target()).contains(new IndexJobTarget(revision("a"), new GenerationId("g-before"), 5L));
+            assertThat(activeBefore.review().orElseThrow().stage()).isEqualTo(ReviewPreparationStage.BUILDING_BEFORE);
+            assertThatThrownBy(() -> store.activateReviewTarget(activeBefore.id(), ReviewSide.AFTER))
                     .isInstanceOf(IllegalStateException.class);
-            assertThat(store.complete(activeA.id())).isTrue();
+            assertThat(store.complete(activeBefore.id())).isTrue();
 
             IndexJob laterBuild = store.admit(RepositoryId.of("orders"), revision("c"), false);
 
@@ -360,13 +381,15 @@ class MongoIndexJobStoreIT {
     }
 
     private static Document reviewJob(String jobId) {
-        Document pointer = pointerDocument(pointer("a", "g-baseline", "baseline-job"));
-        Document a = new Document("revision", revision("a").value()).append("generationId", "g-a").append("generation", 5L);
-        Document b = new Document("revision", revision("b").value()).append("generationId", "g-b").append("generation", 6L);
+        Document before = new Document("revision", revision("a").value()).append("generationId", "g-before").append("generation", 5L);
+        Document after = new Document("revision", revision("b").value()).append("generationId", "g-after").append("generation", 6L);
         Document review = new Document("reviewId", "review-1")
-                .append("baseline", new Document("pointer", pointer).append("capturedAt", Date.from(Instant.parse("2026-09-19T00:00:00Z"))))
-                .append("requestedRevision", revision("b").value()).append("reservedTargets", new Document("a", a).append("b", b))
-                .append("stage", ReviewPreparationStage.PREPARING_A.name());
+                .append("selection", new Document("kind", "RANGE").append("beforeRevision", revision("a").value())
+                        .append("afterRevision", revision("b").value()))
+                .append("resolvedEndpoints", new Document("beforeRevision", revision("a").value())
+                        .append("afterRevision", revision("b").value()).append("baselineRule", "DIRECT_RANGE"))
+                .append("reservedTargets", new Document("before", before).append("after", after))
+                .append("stage", ReviewPreparationStage.PREPARING_BEFORE.name());
         return new Document("jobId", jobId).append("repoId", "orders").append("active", true)
                 .append("phase", IndexJobPhase.RUNNING.name()).append("operation", IndexJobOperation.REVIEW.name()).append("rebuild", false)
                 .append("jobVersion", IndexSchemaContract.PERSISTED_JOB_VERSION).append("generationHighWatermark", 6L)

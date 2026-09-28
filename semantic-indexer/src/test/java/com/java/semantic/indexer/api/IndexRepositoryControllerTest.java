@@ -7,15 +7,14 @@ import com.java.semantic.indexer.job.IndexJobPhase;
 import com.java.semantic.indexer.job.IndexJobOperation;
 import com.java.semantic.indexer.job.IndexJobTarget;
 import com.java.semantic.indexer.job.IndexPublicationState;
-import com.java.semantic.indexer.job.ReviewBuildTargets;
 import com.java.semantic.indexer.job.ReviewJobPayload;
 import com.java.semantic.indexer.job.ReviewPreparationStage;
 import com.java.semantic.indexer.job.IndexRequestService;
 import com.java.semantic.model.index.GenerationId;
 import com.java.semantic.model.index.ManifestDigest;
 import com.java.semantic.model.index.PublishedGenerationPointer;
-import com.java.semantic.model.review.CapturedReviewBaseline;
 import com.java.semantic.model.review.ReviewId;
+import com.java.semantic.model.review.ReviewSelection;
 import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.model.repository.RepositoryRevision;
 import org.junit.jupiter.api.Test;
@@ -172,44 +171,26 @@ class IndexRepositoryControllerTest {
     }
 
     @Test
-    void review_admission_and_status_expose_nested_comparison_type_without_changing_build_responses() throws Exception {
+    void review_http_binds_commit_selection_without_a_published_current() throws Exception {
         IndexRequestService service = mock(IndexRequestService.class);
         RepositoryId repositoryId = RepositoryId.of("orders");
         String revision = "b".repeat(40);
-        PublishedGenerationPointer baseline = pointer("a", "g-baseline", "1", "baseline-job");
+        ReviewSelection selection = ReviewSelection.commit(new RepositoryRevision(revision));
         ReviewJobPayload payload = new ReviewJobPayload(new ReviewId("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"),
-                new CapturedReviewBaseline(baseline, Instant.parse("2026-08-22T00:00:00Z")), new RepositoryRevision(revision),
-                new ReviewBuildTargets(new IndexJobTarget(baseline.revision(), new GenerationId("g-a"), 2L),
-                        new IndexJobTarget(new RepositoryRevision(revision), new GenerationId("g-b"), 3L)),
-                ReviewPreparationStage.PREPARING_A, Optional.empty(), Optional.empty(), Optional.empty(), Optional.empty(), Optional.empty());
+                selection, Optional.empty(), Optional.empty(), ReviewPreparationStage.RESOLVING,
+                Optional.empty(), Optional.empty(), Optional.empty(), Optional.empty(), Optional.empty());
         IndexJob review = new IndexJob(IndexJobId.create(), repositoryId, Optional.empty(), IndexJobPhase.ACCEPTED, true,
                 Optional.empty(), false, IndexJobOperation.REVIEW, Optional.empty(), Optional.of(payload));
-        IndexJob build = job("c");
-        when(service.ensure(repositoryId)).thenReturn(build);
-        when(service.review(repositoryId, new RepositoryRevision(revision))).thenReturn(review);
-        when(service.job(review.id())).thenReturn(Optional.of(review));
-        when(service.job(build.id())).thenReturn(Optional.of(build));
+        when(service.review(repositoryId, selection)).thenReturn(review);
         MockMvc mvc = MockMvcBuilders.standaloneSetup(new IndexRepositoryController(service)).build();
 
         mvc.perform(post("/index/repositories/orders/reviews").contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"revision\":\"" + revision + "\"}"))
+                        .content("{\"selection\":{\"kind\":\"COMMIT\",\"revision\":\"" + revision + "\"}}"))
                 .andExpect(status().isAccepted())
-                .andExpect(jsonPath("$.review.comparisonType").value("CURRENT_TO_COMMIT"))
-                .andExpect(jsonPath("$.review.reviewId").value(payload.reviewId().value()))
-                .andExpect(jsonPath("$.comparisonType").doesNotExist());
-        mvc.perform(get("/index/repositories/orders/jobs/{jobId}", review.id().value()))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.operation").value("REVIEW"))
-                .andExpect(jsonPath("$.review.comparisonType").value("CURRENT_TO_COMMIT"))
-                .andExpect(jsonPath("$.review.reviewId").value(payload.reviewId().value()))
-                .andExpect(jsonPath("$.comparisonType").doesNotExist());
-        mvc.perform(post("/index/repositories/orders/ensure"))
-                .andExpect(status().isAccepted())
-                .andExpect(jsonPath("$.review").doesNotExist());
-        mvc.perform(get("/index/repositories/orders/jobs/{jobId}", build.id().value()))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.operation").value("BUILD"))
-                .andExpect(jsonPath("$.review").doesNotExist());
+                .andExpect(jsonPath("$.review.selection.kind").value("COMMIT"))
+                .andExpect(jsonPath("$.review.selection.revision").value(revision))
+                .andExpect(jsonPath("$.review.resolvedEndpoints").doesNotExist())
+                .andExpect(jsonPath("$.review.reviewId").value(payload.reviewId().value()));
     }
 
     private static RollbackIndexRequest request(PublishedGenerationPointer current, PublishedGenerationPointer rollback) {

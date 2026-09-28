@@ -46,7 +46,7 @@ class DefaultReviewEndpointPreparationTest {
         when(reuse.matches(eq(candidate), any())).thenReturn(true);
 
         SealedGeneration prepared = new DefaultReviewEndpointPreparation(checkout, runner, reuse)
-                .prepare(job, ReviewSide.A, List.of(candidate));
+                .prepare(job, ReviewSide.BEFORE, List.of(candidate));
 
         assertThat(prepared).isSameAs(candidate);
         assertThat(scopeOpened).isFalse();
@@ -72,7 +72,7 @@ class DefaultReviewEndpointPreparationTest {
         when(reuse.matches(eq(candidate), any())).thenReturn(false);
 
         SealedGeneration prepared = new DefaultReviewEndpointPreparation(checkout, runner, reuse)
-                .prepare(job, ReviewSide.B, List.of(candidate));
+                .prepare(job, ReviewSide.AFTER, List.of(candidate));
 
         assertThat(prepared).isSameAs(sealedTarget);
         assertThat(scopedJob.get()).isSameAs(job);

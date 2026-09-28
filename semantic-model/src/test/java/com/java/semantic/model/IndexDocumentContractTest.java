@@ -45,12 +45,12 @@ import com.java.semantic.model.git.GitComparisonId;
 import com.java.semantic.model.git.GitSnapshotId;
 import com.java.semantic.model.index.AnalysisFingerprint;
 import com.java.semantic.model.index.AnalysisInputs;
-import com.java.semantic.model.index.PublishedGenerationPointer;
 import com.java.semantic.model.index.SemanticAnalysisEvidence;
 import com.java.semantic.model.index.SealedGeneration;
 import com.java.semantic.model.query.SelectedGeneration;
-import com.java.semantic.model.review.CapturedReviewBaseline;
-import com.java.semantic.model.review.ReviewComparisonType;
+import com.java.semantic.model.review.ReviewBaselineRule;
+import com.java.semantic.model.review.ReviewSelection;
+import com.java.semantic.model.review.ResolvedReviewEndpoints;
 import com.java.semantic.model.review.ReviewEndpoint;
 import com.java.semantic.model.review.ReviewId;
 import com.java.semantic.model.review.ReviewManifestDocument;
@@ -147,52 +147,41 @@ class IndexDocumentContractTest {
                 IndexCollections.PROJECTION_COLLECTIONS.get(ProjectionName.SOURCES));
     }
 
-    @Test
-    void requires_the_canonical_relations_projection_version() {
-        assertEquals(3, IndexSchemaContract.requiredProjectionVersions().get(ProjectionName.RELATIONS.name()));
-    }
-
 
     @Test
-    void rejects_a_ready_review_when_its_a_endpoint_differs_from_the_captured_baseline_revision() {
+    void root_review_has_no_before_semantic_endpoint_and_keeps_its_after_revision() {
         RepositoryId repositoryId = new RepositoryId("orders");
-        RepositoryRevision capturedRevision = new RepositoryRevision("a".repeat(40));
-        PublishedGenerationPointer pointer = new PublishedGenerationPointer(capturedRevision, new GenerationId("generation-a"),
-                new ManifestDigest("a".repeat(64)), "job-a", Instant.parse("2026-09-19T00:00:00Z"));
-        CapturedReviewBaseline baseline = new CapturedReviewBaseline(pointer, Instant.parse("2026-09-19T00:00:00Z"));
-        ReviewEndpoint a = endpoint(repositoryId, new RepositoryRevision("c".repeat(40)), "generation-a", "a".repeat(64),
-                "00000000-0000-0000-0000-000000000001");
-        ReviewEndpoint b = endpoint(repositoryId, new RepositoryRevision("b".repeat(40)), "generation-b", "b".repeat(64),
+        RepositoryRevision root = new RepositoryRevision("a".repeat(40));
+        ReviewEndpoint after = endpoint(repositoryId, root, "generation-root", "a".repeat(64),
                 "00000000-0000-0000-0000-000000000002");
 
-        assertThrows(IllegalArgumentException.class, () -> new ReviewManifestDocument(repositoryId, new ReviewId("review-1"),
-                "owner-job", 1, ReviewState.READY, ReviewComparisonType.CURRENT_TO_COMMIT, baseline,
-                new RepositoryRevision("b".repeat(40)), Optional.of(a), Optional.of(b),
-                Optional.of(new GitComparisonId("00000000-0000-0000-0000-000000000003")),
-                Instant.parse("2026-09-19T00:00:00Z"), Optional.of(Instant.parse("2026-09-19T00:01:00Z")), Optional.empty()));
+        ReviewManifestDocument ready = new ReviewManifestDocument(repositoryId, new ReviewId("review-root"),
+                "owner-job", IndexSchemaContract.REVIEW_MANIFEST_VERSION, ReviewState.READY, ReviewSelection.commit(root),
+                Optional.of(new ResolvedReviewEndpoints(Optional.empty(), root, ReviewBaselineRule.EMPTY_TREE)),
+                Optional.empty(), Optional.of(after), Optional.of(new GitComparisonId("00000000-0000-0000-0000-000000000003")),
+                Instant.parse("2026-09-19T00:00:00Z"), Optional.of(Instant.parse("2026-09-19T00:01:00Z")), Optional.empty());
+
+        assertTrue(ready.before().isEmpty());
+        assertEquals(root, ready.after().orElseThrow().generation().selected().revision());
     }
 
     @Test
-    void permits_equal_sha_review_sides_to_reuse_one_generation_with_distinct_immutable_snapshots() {
+    void equal_range_reuses_one_generation_without_merging_side_snapshots() {
         RepositoryId repositoryId = new RepositoryId("orders");
         RepositoryRevision revision = new RepositoryRevision("a".repeat(40));
-        PublishedGenerationPointer pointer = new PublishedGenerationPointer(revision, new GenerationId("generation-a"),
-                new ManifestDigest("a".repeat(64)), "job-a", Instant.parse("2026-09-19T00:00:00Z"));
-        CapturedReviewBaseline baseline = new CapturedReviewBaseline(pointer, Instant.parse("2026-09-19T00:00:00Z"));
-        ReviewEndpoint a = endpoint(repositoryId, revision, "generation-a", "a".repeat(64),
+        ReviewEndpoint before = endpoint(repositoryId, revision, "generation-a", "a".repeat(64),
                 "00000000-0000-0000-0000-000000000001");
-        ReviewEndpoint b = endpoint(repositoryId, revision, "generation-a", "a".repeat(64),
+        ReviewEndpoint after = endpoint(repositoryId, revision, "generation-a", "a".repeat(64),
                 "00000000-0000-0000-0000-000000000002");
 
         ReviewManifestDocument ready = new ReviewManifestDocument(repositoryId, new ReviewId("review-1"),
-                "owner-job", 1, ReviewState.READY, ReviewComparisonType.CURRENT_TO_COMMIT, baseline,
-                revision, Optional.of(a), Optional.of(b),
-                Optional.of(new GitComparisonId("00000000-0000-0000-0000-000000000003")),
+                "owner-job", IndexSchemaContract.REVIEW_MANIFEST_VERSION, ReviewState.READY, ReviewSelection.range(revision, revision),
+                Optional.of(new ResolvedReviewEndpoints(Optional.of(revision), revision, ReviewBaselineRule.DIRECT_RANGE)),
+                Optional.of(before), Optional.of(after), Optional.of(new GitComparisonId("00000000-0000-0000-0000-000000000003")),
                 Instant.parse("2026-09-19T00:00:00Z"), Optional.of(Instant.parse("2026-09-19T00:01:00Z")), Optional.empty());
 
-        assertEquals(a.generation(), ready.a().orElseThrow().generation());
-        assertEquals(b.generation(), ready.b().orElseThrow().generation());
-        assertNotEquals(ready.a().orElseThrow().snapshotId(), ready.b().orElseThrow().snapshotId());
+        assertEquals(ready.before().orElseThrow().generation(), ready.after().orElseThrow().generation());
+        assertNotEquals(ready.before().orElseThrow().snapshotId(), ready.after().orElseThrow().snapshotId());
     }
 
     @Test

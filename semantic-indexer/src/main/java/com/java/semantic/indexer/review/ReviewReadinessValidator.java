@@ -13,7 +13,7 @@ import com.java.semantic.model.git.GitSnapshotId;
 import com.java.semantic.model.index.IndexCollections;
 import com.java.semantic.model.index.IndexSchemaContract;
 import com.java.semantic.model.index.SealedGeneration;
-import com.java.semantic.model.review.ReviewComparisonType;
+import com.java.semantic.model.review.ResolvedReviewEndpoints;
 import com.java.semantic.model.review.ReviewEndpoint;
 import com.java.semantic.model.review.ReviewManifestDocument;
 import com.java.semantic.model.review.ReviewState;
@@ -73,26 +73,35 @@ public final class ReviewReadinessValidator {
         }
         ReviewJobPayload payload = job.review().orElseThrow(() -> mismatch("review payload is required"));
         if ((payload.stage() != ReviewPreparationStage.VALIDATING && payload.stage() != ReviewPreparationStage.READY)
-                || payload.a().isEmpty() || payload.b().isEmpty() || payload.comparisonId().isEmpty()
+                || payload.resolvedEndpoints().isEmpty() || payload.after().isEmpty() || payload.comparisonId().isEmpty()
                 || payload.previousSnapshotId().isEmpty() || payload.currentSnapshotId().isEmpty()) {
-            throw mismatch("review readiness requires both sealed sides and all Git identities");
+            throw mismatch("review readiness requires resolved sides and all Git identities");
         }
-        SealedGeneration a = payload.a().orElseThrow();
-        SealedGeneration b = payload.b().orElseThrow();
+        ResolvedReviewEndpoints resolved = payload.resolvedEndpoints().orElseThrow();
+        if (resolved.beforeRevision().isPresent() != payload.before().isPresent()
+                || !resolved.afterRevision().equals(payload.selection().afterRevision())) {
+            throw mismatch("review semantic membership does not match resolved Git endpoints");
+        }
+        Optional<SealedGeneration> before = payload.before();
+        SealedGeneration after = payload.after().orElseThrow();
         GitComparisonId comparisonId = payload.comparisonId().orElseThrow();
         GitSnapshotId previousSnapshotId = payload.previousSnapshotId().orElseThrow();
         GitSnapshotId currentSnapshotId = payload.currentSnapshotId().orElseThrow();
-        if (!a.selected().revision().equals(payload.baseline().pointer().revision())
-                || !b.selected().revision().equals(payload.requestedRevision())) {
-            throw mismatch("review sides do not match their admitted immutable revisions");
+        before.ifPresent(generation -> {
+            if (!generation.selected().revision().equals(resolved.beforeRevision().orElseThrow())) {
+                throw mismatch("review before generation does not match resolved revision");
+            }
+            validateGeneration(job, generation, previousSnapshotId);
+        });
+        if (!after.selected().revision().equals(resolved.afterRevision())) {
+            throw mismatch("review after generation does not match resolved revision");
         }
-        validateGeneration(job, a, previousSnapshotId);
-        validateGeneration(job, b, currentSnapshotId);
+        validateGeneration(job, after, currentSnapshotId);
         validateGit(job, payload, comparisonId, previousSnapshotId, currentSnapshotId);
         return new ReviewManifestDocument(job.repositoryId(), payload.reviewId(), job.id().value(),
-                IndexSchemaContract.REVIEW_MANIFEST_VERSION, ReviewState.READY, ReviewComparisonType.CURRENT_TO_COMMIT,
-                payload.baseline(), payload.requestedRevision(),
-                Optional.of(new ReviewEndpoint(a, previousSnapshotId)), Optional.of(new ReviewEndpoint(b, currentSnapshotId)),
+                IndexSchemaContract.REVIEW_MANIFEST_VERSION, ReviewState.READY, payload.selection(), Optional.of(resolved),
+                before.map(generation -> new ReviewEndpoint(generation, previousSnapshotId)),
+                Optional.of(new ReviewEndpoint(after, currentSnapshotId)),
                 Optional.of(comparisonId), Instant.now(), Optional.of(Instant.now()), Optional.empty());
     }
 
@@ -125,14 +134,17 @@ public final class ReviewReadinessValidator {
     private void validateGit(IndexJob job, ReviewJobPayload payload, GitComparisonId comparisonId,
                              GitSnapshotId previousSnapshotId, GitSnapshotId currentSnapshotId) {
         Document comparison = evidence(job, comparisonId.value(), "COMPARISON", payload.reviewId().value());
-        if (!payload.baseline().pointer().revision().value().equals(comparison.getString("previous"))
-                || !payload.requestedRevision().value().equals(comparison.getString("current"))
+        ResolvedReviewEndpoints resolved = payload.resolvedEndpoints().orElseThrow();
+        if (!Objects.equals(resolved.beforeRevision().map(revision -> revision.value()).orElse(null), comparison.getString("previous"))
+                || !resolved.afterRevision().value().equals(comparison.getString("current"))
+                || !resolved.baselineRule().name().equals(comparison.getString("baselineRule"))
                 || !previousSnapshotId.value().equals(comparison.getString("previousSnapshotId"))
                 || !currentSnapshotId.value().equals(comparison.getString("currentSnapshotId"))) {
             throw mismatch("review comparison endpoints or snapshots are incompatible");
         }
-        validateSnapshot(job, payload.reviewId().value(), previousSnapshotId, payload.baseline().pointer().revision().value());
-        validateSnapshot(job, payload.reviewId().value(), currentSnapshotId, payload.requestedRevision().value());
+        validateSnapshot(job, payload.reviewId().value(), previousSnapshotId,
+                resolved.beforeRevision().map(revision -> revision.value()));
+        validateSnapshot(job, payload.reviewId().value(), currentSnapshotId, Optional.of(resolved.afterRevision().value()));
         try {
             gitEvidence.validateReadyReviewComparison(job.repositoryId(), comparisonId, previousSnapshotId, currentSnapshotId);
         } catch (RuntimeException exception) {
@@ -140,10 +152,12 @@ public final class ReviewReadinessValidator {
         }
     }
 
-    private void validateSnapshot(IndexJob job, String reviewId, GitSnapshotId snapshotId, String revision) {
+    private void validateSnapshot(IndexJob job, String reviewId, GitSnapshotId snapshotId, Optional<String> revision) {
         Document snapshot = evidence(job, snapshotId.value(), "SNAPSHOT", reviewId);
         Number total = snapshot.get("total", Number.class);
-        if (!revision.equals(snapshot.getString("revision")) || Objects.isNull(total) || total.longValue() < 0L
+        if (!Objects.equals(revision.orElse(null), snapshot.getString("revision"))
+                || revision.isEmpty() && (Objects.nonNull(snapshot.getString("revision")) || Objects.isNull(total) || total.longValue() != 0L)
+                || Objects.isNull(total) || total.longValue() < 0L
                 || Objects.isNull(snapshot.getString("contentDigest")) || Objects.isNull(snapshot.get("contentCoverage", Document.class))) {
             throw mismatch("review snapshot is incomplete");
         }

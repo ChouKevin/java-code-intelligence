@@ -70,71 +70,60 @@ class SemanticReviewJdtLsIT {
     Path temporaryDirectory;
 
     @Test
-    void extracts_distinct_real_semantics_for_current_to_commit_review_and_keeps_review_pinned_after_current_moves() throws Exception {
+    void extracts_distinct_real_semantics_for_first_parent_review_and_keeps_review_pinned_after_current_moves() throws Exception {
         Path jdtLsHome = JdtLsHomeRequirement.requireHome(System.getenv("JDTLS_HOME"));
         try (MongoDBContainer mongo = new MongoDBContainer("mongo:8.0.4");
              SemanticReviewFixture fixture = SemanticReviewFixture.create(temporaryDirectory, mongo, jdtLsHome)) {
             ReviewManifestDocument review = fixture.prepareCurrentTo(fixture.revisionB());
             ReviewId reviewId = review.reviewId();
 
-            assertThat(fixture.implementationNames(reviewId, ReviewSide.A, fixture.revisionA(), "Gateway.pay"))
+            assertThat(fixture.implementationNames(reviewId, ReviewSide.BEFORE, fixture.revisionA(), "Gateway.pay"))
                     .containsExactly("LegacyGateway");
-            assertThat(fixture.implementationNames(reviewId, ReviewSide.B, fixture.revisionB(), "Gateway.pay"))
+            assertThat(fixture.implementationNames(reviewId, ReviewSide.AFTER, fixture.revisionB(), "Gateway.pay"))
                     .containsExactly("ModernGateway");
-            assertThat(fixture.callerNames(reviewId, ReviewSide.A, fixture.revisionA(), "LegacyGateway.pay"))
+            assertThat(fixture.callerNames(reviewId, ReviewSide.BEFORE, fixture.revisionA(), "LegacyGateway.pay"))
                     .containsExactly("Checkout.place", "LegacyGateway.authorize");
-            assertThat(fixture.callerNames(reviewId, ReviewSide.B, fixture.revisionB(), "ModernGateway.pay"))
+            assertThat(fixture.callerNames(reviewId, ReviewSide.AFTER, fixture.revisionB(), "ModernGateway.pay"))
                     .containsExactly("Checkout.place", "ModernGateway.authorize");
-            assertThat(fixture.methodSource(reviewId, ReviewSide.A, fixture.revisionA(), "place"))
+            assertThat(fixture.methodSource(reviewId, ReviewSide.BEFORE, fixture.revisionA(), "place"))
                     .contains("LegacyGateway", "LegacyReceipt");
-            assertThat(fixture.methodSource(reviewId, ReviewSide.B, fixture.revisionB(), "place"))
+            assertThat(fixture.methodSource(reviewId, ReviewSide.AFTER, fixture.revisionB(), "place"))
                     .contains("ModernGateway", "ModernReceipt");
-            assertThat(fixture.referenceContainerNames(reviewId, ReviewSide.A, fixture.revisionA(), "LegacyReceipt"))
+            assertThat(fixture.referenceContainerNames(reviewId, ReviewSide.BEFORE, fixture.revisionA(), "LegacyReceipt"))
                     .contains("Checkout.place");
-            assertThat(fixture.referenceContainerNames(reviewId, ReviewSide.B, fixture.revisionB(), "ModernReceipt"))
+            assertThat(fixture.referenceContainerNames(reviewId, ReviewSide.AFTER, fixture.revisionB(), "ModernReceipt"))
                     .contains("Checkout.place");
-            assertThat(fixture.methodSource(reviewId, ReviewSide.A, fixture.revisionA(), "authorize"))
+            assertThat(fixture.methodSource(reviewId, ReviewSide.BEFORE, fixture.revisionA(), "authorize"))
                     .contains("int amount");
-            assertThat(fixture.methodSource(reviewId, ReviewSide.B, fixture.revisionB(), "authorize"))
+            assertThat(fixture.methodSource(reviewId, ReviewSide.AFTER, fixture.revisionB(), "authorize"))
                     .contains("String amount");
-            assertThat(fixture.hasFact(reviewId, ReviewSide.A, fixture.revisionA(), "LegacyMarker", CodeFactKind.TYPE)).isTrue();
-            assertThat(fixture.hasFact(reviewId, ReviewSide.B, fixture.revisionB(), "ModernMarker", CodeFactKind.TYPE)).isTrue();
-            assertThat(fixture.hasFact(reviewId, ReviewSide.B, fixture.revisionB(), "LegacyGateway", CodeFactKind.TYPE)).isFalse();
-            assertThat(fixture.apiRouteHandlers(reviewId, ReviewSide.A, fixture.revisionA()))
+            assertThat(fixture.hasFact(reviewId, ReviewSide.BEFORE, fixture.revisionA(), "LegacyMarker", CodeFactKind.TYPE)).isTrue();
+            assertThat(fixture.hasFact(reviewId, ReviewSide.AFTER, fixture.revisionB(), "ModernMarker", CodeFactKind.TYPE)).isTrue();
+            assertThat(fixture.hasFact(reviewId, ReviewSide.AFTER, fixture.revisionB(), "LegacyGateway", CodeFactKind.TYPE)).isFalse();
+            assertThat(fixture.apiRouteHandlers(reviewId, ReviewSide.BEFORE, fixture.revisionA()))
                     .containsExactly("CheckoutController.submit");
-            assertThat(fixture.apiRouteHandlers(reviewId, ReviewSide.B, fixture.revisionB()))
+            assertThat(fixture.apiRouteHandlers(reviewId, ReviewSide.AFTER, fixture.revisionB()))
                     .containsExactly("CheckoutController.submit");
             assertThat(review.comparisonId()).isPresent();
             assertThat(fixture.directPatch(review)).contains("LegacyGateway", "ModernGateway");
             assertThat(fixture.comparison(review).ancestry()).isEqualTo("PREVIOUS_ANCESTOR");
-            assertThat(fixture.classpathDigests(review.a().orElseThrow().generation().fingerprint().inputs()))
-                    .isNotEqualTo(fixture.classpathDigests(review.b().orElseThrow().generation().fingerprint().inputs()));
+            assertThat(fixture.classpathDigests(review.before().orElseThrow().generation().fingerprint().inputs()))
+                    .isNotEqualTo(fixture.classpathDigests(review.after().orElseThrow().generation().fingerprint().inputs()));
 
-            String reviewBGeneration = fixture.reviewDetails(reviewId).b().generationId();
+            String reviewAfterGeneration = fixture.reviewDetails(reviewId).after().generationId();
             fixture.publishCurrent(fixture.revisionB());
             String rebuiltCurrentGeneration = fixture.rebuildCurrent();
-            assertThat(rebuiltCurrentGeneration).isNotEqualTo(reviewBGeneration);
-            assertThat(fixture.reviewDetails(reviewId).b().generationId()).isEqualTo(reviewBGeneration);
+            assertThat(rebuiltCurrentGeneration).isNotEqualTo(reviewAfterGeneration);
+            assertThat(fixture.reviewDetails(reviewId).after().generationId()).isEqualTo(reviewAfterGeneration);
             assertThat(fixture.currentGeneration()).isEqualTo(rebuiltCurrentGeneration);
 
-            ReviewManifestDocument sameSha = fixture.prepareCurrentTo(fixture.revisionB());
-            ReviewQueryContract.ReviewDetails sameShaDetails = fixture.reviewDetails(sameSha.reviewId());
-            assertThat(sameShaDetails.capturedBaseline().generationId()).isEqualTo(rebuiltCurrentGeneration);
-            assertThat(fixture.comparison(sameSha).items()).isEmpty();
-            assertThat(sameShaDetails.a().generationId()).isEqualTo(sameShaDetails.b().generationId());
-            assertThat(sameShaDetails.a().snapshotId()).isNotEqualTo(sameShaDetails.b().snapshotId());
+            ReviewManifestDocument equal = fixture.prepareRange(fixture.revisionB(), fixture.revisionB());
+            assertThat(fixture.comparison(equal).items()).isEmpty();
+            ReviewQueryContract.ReviewDetails equalDetails = fixture.reviewDetails(equal.reviewId());
+            assertThat(equalDetails.before().endpoint().orElseThrow().generationId()).isEqualTo(equalDetails.after().generationId());
+            assertThat(equalDetails.before().endpoint().orElseThrow().snapshotId()).isNotEqualTo(equalDetails.after().snapshotId());
 
-            fixture.replaceEffectiveDependency();
-            ReviewManifestDocument incompatible = fixture.prepareCurrentTo(fixture.revisionB());
-            ReviewQueryContract.ReviewDetails incompatibleDetails = fixture.reviewDetails(incompatible.reviewId());
-            assertThat(incompatibleDetails.capturedBaseline().generationId()).isEqualTo(rebuiltCurrentGeneration);
-            assertThat(incompatibleDetails.a().generationId()).isNotEqualTo(rebuiltCurrentGeneration);
-            assertThat(incompatibleDetails.a().generationId()).isEqualTo(incompatibleDetails.b().generationId());
-            assertThat(incompatibleDetails.a().analysisFingerprint()).isNotEqualTo(sameShaDetails.a().analysisFingerprint());
-            assertThat(fixture.comparison(incompatible).items()).isEmpty();
-
-            fixture.publishCurrent(fixture.revisionB());
-            ReviewManifestDocument divergent = fixture.prepareCurrentTo(fixture.revisionC());
+            ReviewManifestDocument divergent = fixture.prepareRange(fixture.revisionB(), fixture.revisionC());
             assertThat(fixture.comparison(divergent).previous()).isEqualTo(fixture.revisionB());
             assertThat(fixture.comparison(divergent).current()).isEqualTo(fixture.revisionC());
             assertThat(fixture.comparison(divergent).ancestry()).isEqualTo("DIVERGED");
@@ -250,10 +239,17 @@ class SemanticReviewJdtLsIT {
         }
 
         ReviewManifestDocument prepareCurrentTo(String revision) throws Exception {
-            String jobId = accepted(post("/index/repositories/" + REPOSITORY_ID + "/reviews", Map.of("revision", revision)));
+            return prepare(Map.of("kind", "COMMIT", "revision", revision));
+        }
+
+        ReviewManifestDocument prepareRange(String before, String after) throws Exception {
+            return prepare(Map.of("kind", "RANGE", "beforeRevision", before, "afterRevision", after));
+        }
+
+        private ReviewManifestDocument prepare(Map<String, String> selection) throws Exception {
+            String jobId = accepted(post("/index/repositories/" + REPOSITORY_ID + "/reviews", Map.of("selection", selection)));
             Map<?, ?> completed = complete(jobId);
-            String reviewId = text(map(completed, "review"), "reviewId");
-            return readManifest(new ReviewId(reviewId));
+            return readManifest(new ReviewId(text(map(completed, "review"), "reviewId")));
         }
 
         List<String> callerNames(ReviewId id, ReviewSide side, String revision, String targetName) {
@@ -304,8 +300,8 @@ class SemanticReviewJdtLsIT {
         SemanticQueryContract.GitComparisonCollection comparison(ReviewManifestDocument review) {
             String comparisonId = review.comparisonId().orElseThrow().value();
             return current.compareRevisions(new SemanticQueryContract.GitComparisonRequest(REPOSITORY_ID, comparisonId,
-                    review.a().orElseThrow().generation().selected().revision().value(),
-                    review.b().orElseThrow().generation().selected().revision().value(), 0, 100));
+                    review.resolvedEndpoints().orElseThrow().beforeRevision().orElseThrow().value(),
+                    review.resolvedEndpoints().orElseThrow().afterRevision().value(), 0, 100));
         }
 
         void publishCurrent(String revision) throws Exception {

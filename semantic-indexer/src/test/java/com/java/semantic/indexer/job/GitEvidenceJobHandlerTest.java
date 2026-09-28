@@ -7,12 +7,12 @@ import com.java.semantic.model.git.GitEvidenceId;
 import com.java.semantic.model.git.GitEvidenceOwnership;
 import com.java.semantic.model.git.GitEvidenceState;
 import com.java.semantic.model.index.GenerationId;
-import com.java.semantic.model.index.ManifestDigest;
-import com.java.semantic.model.index.PublishedGenerationPointer;
 import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.model.repository.RepositoryRevision;
-import com.java.semantic.model.review.CapturedReviewBaseline;
 import com.java.semantic.model.review.ReviewId;
+import com.java.semantic.model.review.ReviewSelection;
+import com.java.semantic.model.review.ResolvedReviewEndpoints;
+import com.java.semantic.model.review.ReviewBaselineRule;
 import com.java.semantic.repository.application.RepositoryMutationException;
 import com.java.semantic.repository.application.RepositoryRuntimeRegistry;
 import com.java.semantic.repository.domain.RepositoryRuntime;
@@ -180,28 +180,6 @@ class GitEvidenceJobHandlerTest {
                 ArgumentMatchers.any(), ArgumentMatchers.any());
     }
 
-    @Test
-    void review_invalidates_before_git_and_publishes_comparison(@TempDir Path temporaryDirectory) throws IOException {
-        RepositoryId repositoryId = RepositoryId.of("orders");
-        RepositoryRuntime runtime = new RepositoryRuntime(repositoryId, "Orders",
-                Files.createDirectories(temporaryDirectory.resolve("repos")).resolve("orders"),
-                "file:///target/orders.git", "main");
-        RepositoryRuntimeRegistry repositories = mock(RepositoryRuntimeRegistry.class);
-        GitRepositoryPort git = mock(GitRepositoryPort.class);
-        GitEvidencePublicationStore evidence = mock(GitEvidencePublicationStore.class);
-        RepositoryMutationListener listener = mock(RepositoryMutationListener.class);
-        IndexJob job = reviewJob(repositoryId);
-        when(repositories.get(repositoryId)).thenReturn(runtime);
-
-        new GitEvidenceJobHandler(repositories, git, evidence, listener).prepareReview(job);
-
-        InOrder order = inOrder(listener, git, evidence);
-        order.verify(listener).beforeMutation(repositoryId);
-        order.verify(git).isCloned(runtime.workingTree());
-        order.verify(git).fetch(runtime.workingTree(), runtime.remoteUrl());
-        order.verify(evidence).publishComparison(ArgumentMatchers.eq(job), ArgumentMatchers.any(),
-                ArgumentMatchers.any(), ArgumentMatchers.any());
-    }
 
     @Test
     void failed_review_invalidation_refuses_git_and_fails_job_without_publication(@TempDir Path temporaryDirectory)
@@ -289,13 +267,12 @@ class GitEvidenceJobHandlerTest {
     private static IndexJob reviewJob(RepositoryId repositoryId) {
         RepositoryRevision previous = new RepositoryRevision("a".repeat(40));
         RepositoryRevision current = new RepositoryRevision("b".repeat(40));
-        PublishedGenerationPointer pointer = new PublishedGenerationPointer(previous, new GenerationId("baseline"),
-                new ManifestDigest("1".repeat(64)), "baseline-job", Instant.parse("2026-09-15T00:00:00Z"));
         ReviewJobPayload payload = new ReviewJobPayload(new ReviewId("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"),
-                new CapturedReviewBaseline(pointer, Instant.parse("2026-09-15T00:00:00Z")), current,
-                new ReviewBuildTargets(new IndexJobTarget(previous, new GenerationId("review-a"), 2L),
-                        new IndexJobTarget(current, new GenerationId("review-b"), 3L)),
-                ReviewPreparationStage.PREPARING_A, Optional.empty(), Optional.empty(), Optional.empty(), Optional.empty(), Optional.empty());
+                ReviewSelection.range(previous, current),
+                Optional.of(new ResolvedReviewEndpoints(Optional.of(previous), current, ReviewBaselineRule.DIRECT_RANGE)),
+                Optional.of(new ReviewBuildTargets(Optional.of(new IndexJobTarget(previous, new GenerationId("review-before"), 2L)),
+                        new IndexJobTarget(current, new GenerationId("review-after"), 3L))),
+                ReviewPreparationStage.PREPARING_GIT, Optional.empty(), Optional.empty(), Optional.empty(), Optional.empty(), Optional.empty());
         return new IndexJob(IndexJobId.create(), repositoryId, Optional.empty(), IndexJobPhase.RUNNING, true,
                 Optional.empty(), false, IndexJobOperation.REVIEW, Optional.empty(), Optional.of(payload));
     }

@@ -4,20 +4,18 @@ import com.java.semantic.model.git.GitComparisonId;
 import com.java.semantic.model.git.GitEvidenceOwnership;
 import com.java.semantic.model.git.GitPublicationScope;
 import com.java.semantic.model.git.GitSnapshotId;
-import com.java.semantic.model.index.GenerationId;
 import com.java.semantic.model.index.IndexCollections;
 import com.java.semantic.model.index.IndexSchemaContract;
-import com.java.semantic.model.index.ManifestDigest;
-import com.java.semantic.model.index.PublishedGenerationPointer;
 import com.java.semantic.model.index.SealedGeneration;
-import com.java.semantic.model.query.SelectedGeneration;
 import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.model.repository.RepositoryRevision;
-import com.java.semantic.model.review.CapturedReviewBaseline;
+import com.java.semantic.model.review.ReviewBaselineRule;
 import com.java.semantic.model.review.ReviewComparisonType;
 import com.java.semantic.model.review.ReviewEndpoint;
 import com.java.semantic.model.review.ReviewId;
 import com.java.semantic.model.review.ReviewManifestDocument;
+import com.java.semantic.model.review.ReviewSelection;
+import com.java.semantic.model.review.ResolvedReviewEndpoints;
 import com.java.semantic.model.review.ReviewState;
 import com.java.semantic.query.config.ConfiguredReadPolicy;
 import com.mongodb.MongoException;
@@ -81,7 +79,7 @@ public final class ReviewManifestReadService {
 
     public void requireGitMembership(RepositoryId repositoryId, GitEvidenceOwnership ownership, GitComparisonId comparisonId,
                                      GitSnapshotId previousSnapshotId, GitSnapshotId currentSnapshotId,
-                                     RepositoryRevision previous, RepositoryRevision current) {
+                                     Optional<RepositoryRevision> previous, RepositoryRevision current) {
         RepositoryId requiredRepositoryId = Objects.requireNonNull(repositoryId, "repository id is required");
         GitEvidenceOwnership requiredOwnership = Objects.requireNonNull(ownership, "Git evidence ownership is required");
         if (requiredOwnership.scope() == GitPublicationScope.STANDALONE) {
@@ -89,11 +87,13 @@ public final class ReviewManifestReadService {
         }
         ReviewId reviewId = requiredOwnership.reviewId().orElseThrow(IndexContractMismatchException::new);
         ReviewManifestDocument review = requireReady(requiredRepositoryId, reviewId);
+        ResolvedReviewEndpoints resolved = review.resolvedEndpoints().orElseThrow(IndexContractMismatchException::new);
         if (!review.comparisonId().orElseThrow().equals(Objects.requireNonNull(comparisonId, "comparison id is required"))
-                || !review.a().orElseThrow().snapshotId().equals(Objects.requireNonNull(previousSnapshotId, "previous snapshot id is required"))
-                || !review.b().orElseThrow().snapshotId().equals(Objects.requireNonNull(currentSnapshotId, "current snapshot id is required"))
-                || !review.a().orElseThrow().generation().selected().revision().equals(Objects.requireNonNull(previous, "previous revision is required"))
-                || !review.b().orElseThrow().generation().selected().revision().equals(Objects.requireNonNull(current, "current revision is required"))) {
+                || !review.after().orElseThrow().snapshotId().equals(Objects.requireNonNull(currentSnapshotId, "current snapshot id is required"))
+                || !resolved.beforeRevision().equals(Objects.requireNonNull(previous, "previous revision is required"))
+                || !resolved.afterRevision().equals(Objects.requireNonNull(current, "current revision is required"))
+                || review.before().isPresent() != previous.isPresent()
+                || review.before().isPresent() && !review.before().orElseThrow().snapshotId().equals(previousSnapshotId)) {
             throw new IndexContractMismatchException();
         }
     }
@@ -114,21 +114,24 @@ public final class ReviewManifestReadService {
     private ReviewManifestDocument decodeReady(Document document, RepositoryId repositoryId, ReviewId reviewId) {
         try {
             if (!repositoryId.value().equals(requiredText(document, "repoId")) || !reviewId.value().equals(requiredText(document, "reviewId"))
-                    || requiredInteger(document, "reviewContractVersion") != IndexSchemaContract.REVIEW_MANIFEST_VERSION
-                    || ReviewComparisonType.CURRENT_TO_COMMIT != ReviewComparisonType.valueOf(requiredText(document, "comparisonType"))) {
+                    || requiredInteger(document, "reviewContractVersion") != IndexSchemaContract.REVIEW_MANIFEST_VERSION) {
                 throw new IndexContractMismatchException();
             }
-            Document baselineDocument = requiredDocument(document, "capturedBaseline");
-            Document pointerDocument = requiredDocument(baselineDocument, "pointer");
-            PublishedGenerationPointer pointer = new PublishedGenerationPointer(new RepositoryRevision(requiredText(pointerDocument, "revision")),
-                    new GenerationId(requiredText(pointerDocument, "generationId")), new ManifestDigest(requiredText(pointerDocument, "manifestDigest")),
-                    requiredText(pointerDocument, "committedJobId"), requiredDate(pointerDocument, "publishedAt").toInstant());
-            CapturedReviewBaseline baseline = new CapturedReviewBaseline(pointer, requiredDate(baselineDocument, "capturedAt").toInstant());
-            ReviewEndpoint a = endpoint(requiredDocument(document, "a"));
-            ReviewEndpoint b = endpoint(requiredDocument(document, "b"));
+            Document selectionDocument = requiredDocument(document, "selection");
+            ReviewComparisonType kind = ReviewComparisonType.valueOf(requiredText(selectionDocument, "kind"));
+            ReviewSelection selection = new ReviewSelection(kind,
+                    Optional.ofNullable(selectionDocument.getString("beforeRevision")).map(RepositoryRevision::ofSha),
+                    RepositoryRevision.ofSha(requiredText(selectionDocument, kind == ReviewComparisonType.COMMIT ? "revision" : "afterRevision")));
+            Document resolvedDocument = requiredDocument(document, "resolvedEndpoints");
+            ResolvedReviewEndpoints resolved = new ResolvedReviewEndpoints(
+                    Optional.ofNullable(resolvedDocument.getString("beforeRevision")).map(RepositoryRevision::ofSha),
+                    RepositoryRevision.ofSha(requiredText(resolvedDocument, "afterRevision")),
+                    ReviewBaselineRule.valueOf(requiredText(resolvedDocument, "baselineRule")));
+            Optional<ReviewEndpoint> before = Optional.ofNullable(document.get("before", Document.class)).map(this::endpoint);
+            ReviewEndpoint after = endpoint(requiredDocument(document, "after"));
             return new ReviewManifestDocument(repositoryId, reviewId, requiredText(document, "ownerJobId"), requiredInteger(document, "reviewContractVersion"),
-                    ReviewState.READY, ReviewComparisonType.CURRENT_TO_COMMIT, baseline, new RepositoryRevision(requiredText(document, "requestedRevision")),
-                    Optional.of(a), Optional.of(b), Optional.of(new GitComparisonId(requiredText(document, "comparisonId"))), requiredDate(document, "createdAt").toInstant(),
+                    ReviewState.READY, selection, Optional.of(resolved), before, Optional.of(after),
+                    Optional.of(new GitComparisonId(requiredText(document, "comparisonId"))), requiredDate(document, "createdAt").toInstant(),
                     Optional.of(requiredDate(document, "publishedAt").toInstant()), Optional.empty());
         } catch (IndexContractMismatchException exception) {
             throw exception;

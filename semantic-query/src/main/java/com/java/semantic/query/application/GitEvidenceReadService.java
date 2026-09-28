@@ -122,7 +122,7 @@ public final class GitEvidenceReadService {
         try {
             authorize(repositoryId);
             Document manifest = comparisonManifest(repositoryId, new GitEvidenceId(required.comparisonId()));
-            if (!required.previous().equals(requiredText(manifest, "previous")) || !required.current().equals(requiredText(manifest, "current"))) {
+            if (!Objects.equals(required.previous(), manifest.getString("previous")) || !required.current().equals(requiredText(manifest, "current"))) {
                 throw new IllegalArgumentException("comparison endpoints do not match the requested revisions");
             }
             long total = comparisonTotal(manifest);
@@ -145,7 +145,7 @@ public final class GitEvidenceReadService {
         try {
             authorize(repositoryId);
             Document manifest = comparisonManifest(repositoryId, new GitEvidenceId(required.comparisonId()));
-            if (!required.previous().equals(requiredText(manifest, "previous")) || !required.current().equals(requiredText(manifest, "current"))) {
+            if (!Objects.equals(required.previous(), manifest.getString("previous")) || !required.current().equals(requiredText(manifest, "current"))) {
                 throw new IllegalArgumentException("comparison endpoints do not match the requested revisions");
             }
             long total = comparisonTotal(manifest);
@@ -326,15 +326,16 @@ public final class GitEvidenceReadService {
             GitSnapshotId requestedSnapshotId = new GitSnapshotId(snapshotId);
             GitSnapshotId previousSnapshotId = new GitSnapshotId(requiredText(parent, "previousSnapshotId"));
             GitSnapshotId currentSnapshotId = new GitSnapshotId(requiredText(parent, "currentSnapshotId"));
-            RepositoryRevision previous = new RepositoryRevision(requiredText(parent, "previous"));
+            Optional<RepositoryRevision> previous = Optional.ofNullable(parent.getString("previous")).map(RepositoryRevision::new);
             RepositoryRevision current = new RepositoryRevision(requiredText(parent, "current"));
-            boolean requestedPrevious = requestedSnapshotId.equals(previousSnapshotId) && revision.equals(previous.value());
-            boolean requestedCurrent = requestedSnapshotId.equals(currentSnapshotId) && revision.equals(current.value());
+            boolean requestedPrevious = requestedSnapshotId.equals(previousSnapshotId)
+                    && previous.map(value -> Objects.equals(revision, value.value())).orElse(Objects.isNull(revision));
+            boolean requestedCurrent = requestedSnapshotId.equals(currentSnapshotId) && Objects.equals(revision, current.value());
             if (requestedPrevious == requestedCurrent) {
                 throw new IndexContractMismatchException();
             }
             GitSnapshotId siblingSnapshotId = requestedPrevious ? currentSnapshotId : previousSnapshotId;
-            RepositoryRevision siblingRevision = requestedPrevious ? current : previous;
+            Optional<RepositoryRevision> siblingRevision = requestedPrevious ? Optional.of(current) : previous;
             requireReadySiblingSnapshot(repositoryId, siblingSnapshotId, siblingRevision, ownerJobId, ownership);
             authorizeReviewMembership(repositoryId, ownership, ownerJobId, new GitComparisonId(requiredText(parent, "evidenceId")), previousSnapshotId,
                     currentSnapshotId, previous, current);
@@ -343,12 +344,14 @@ public final class GitEvidenceReadService {
         }
     }
 
-    private void requireReadySiblingSnapshot(RepositoryId repositoryId, GitSnapshotId siblingSnapshotId, RepositoryRevision siblingRevision,
-                                             String ownerJobId, GitEvidenceOwnership ownership) {
+    private void requireReadySiblingSnapshot(RepositoryId repositoryId, GitSnapshotId siblingSnapshotId,
+                                             Optional<RepositoryRevision> siblingRevision, String ownerJobId,
+                                             GitEvidenceOwnership ownership) {
         Document sibling = findManifest(repositoryId, new GitEvidenceId(siblingSnapshotId.value()));
         if (Objects.isNull(sibling) || !"SNAPSHOT".equals(requiredText(sibling, "kind")) || !"READY".equals(requiredText(sibling, "state"))
                 || !repositoryId.value().equals(requiredText(sibling, "repoId")) || !ownerJobId.equals(requiredText(sibling, "ownerJobId"))
-                || !siblingRevision.value().equals(requiredText(sibling, "revision")) || !ownership.equals(ownership(sibling))) {
+                || !Objects.equals(siblingRevision.map(RepositoryRevision::value).orElse(null), sibling.getString("revision"))
+                || !ownership.equals(ownership(sibling))) {
             throw new IndexContractMismatchException();
         }
     }
@@ -1092,21 +1095,24 @@ public final class GitEvidenceReadService {
         String ownerJobId = requiredText(manifest, "ownerJobId");
         GitSnapshotId previousSnapshotId = new GitSnapshotId(requiredText(manifest, "previousSnapshotId"));
         GitSnapshotId currentSnapshotId = new GitSnapshotId(requiredText(manifest, "currentSnapshotId"));
-        RepositoryRevision previous = new RepositoryRevision(requiredText(manifest, "previous"));
+        Optional<RepositoryRevision> previous = Optional.ofNullable(manifest.getString("previous")).map(RepositoryRevision::ofSha);
         RepositoryRevision current = new RepositoryRevision(requiredText(manifest, "current"));
         GitEvidenceOwnership ownership = ownership(manifest);
-        Document previousSnapshot = readySnapshot(repositoryId, previousSnapshotId, previous, ownerJobId, ownership);
-        Document currentSnapshot = readySnapshot(repositoryId, currentSnapshotId, current, ownerJobId, ownership);
+        if (previous.isEmpty() != "EMPTY_TREE".equals(requiredText(manifest, "ancestry"))) {
+            throw new IndexContractMismatchException();
+        }
+        readySnapshot(repositoryId, previousSnapshotId, previous, ownerJobId, ownership);
+        readySnapshot(repositoryId, currentSnapshotId, Optional.of(current), ownerJobId, ownership);
         authorizeReviewMembership(repositoryId, ownership, ownerJobId, new GitComparisonId(requiredText(manifest, "evidenceId")), previousSnapshotId,
                 currentSnapshotId, previous, current);
         return manifest;
     }
 
-    private Document readySnapshot(RepositoryId repositoryId, GitSnapshotId snapshotId, RepositoryRevision revision, String ownerJobId,
+    private Document readySnapshot(RepositoryId repositoryId, GitSnapshotId snapshotId, Optional<RepositoryRevision> revision, String ownerJobId,
                                    GitEvidenceOwnership ownership) {
         Document snapshot = ready(findManifest(repositoryId, new GitEvidenceId(snapshotId.value())), "SNAPSHOT");
-        if (!revision.value().equals(requiredText(snapshot, "revision")) || !ownerJobId.equals(requiredText(snapshot, "ownerJobId"))
-                || !ownership.equals(ownership(snapshot))) {
+        if (!Objects.equals(revision.map(RepositoryRevision::value).orElse(null), snapshot.getString("revision"))
+                || !ownerJobId.equals(requiredText(snapshot, "ownerJobId")) || !ownership.equals(ownership(snapshot))) {
             throw new IndexContractMismatchException();
         }
         return snapshot;
@@ -1130,7 +1136,7 @@ public final class GitEvidenceReadService {
 
     private void authorizeReviewMembership(RepositoryId repositoryId, GitEvidenceOwnership ownership, String ownerJobId,
                                            GitComparisonId comparisonId, GitSnapshotId previousSnapshotId, GitSnapshotId currentSnapshotId,
-                                           RepositoryRevision previous, RepositoryRevision current) {
+                                           Optional<RepositoryRevision> previous, RepositoryRevision current) {
         try {
             if (ownership.scope() == GitPublicationScope.REVIEW
                     && !ownerJobId.equals(reviews.requireReady(repositoryId, ownership.reviewId().orElseThrow()).ownerJobId())) {
@@ -1313,7 +1319,8 @@ public final class GitEvidenceReadService {
     }
 
     private static String encodeCursor(RepositoryId repositoryId, String comparisonId, String previous, String current, String changeId, long ordinal) {
-        String payload = String.join("\u001f", DIFF_CURSOR_OPERATION, repositoryId.value(), comparisonId, previous, current, changeId, Long.toString(ordinal));
+        String payload = String.join("\u001f", DIFF_CURSOR_OPERATION, repositoryId.value(), comparisonId,
+                Objects.requireNonNullElse(previous, ""), current, changeId, Long.toString(ordinal));
         return Base64.getUrlEncoder().withoutPadding().encodeToString(payload.getBytes(StandardCharsets.UTF_8));
     }
 
@@ -1328,7 +1335,8 @@ public final class GitEvidenceReadService {
             }
             String[] values = decoded.split("\u001f", -1);
             if (values.length != 7 || !DIFF_CURSOR_OPERATION.equals(values[0]) || !repositoryId.value().equals(values[1])
-                    || !comparisonId.equals(values[2]) || !previous.equals(values[3]) || !current.equals(values[4]) || !changeId.equals(values[5])) {
+                    || !comparisonId.equals(values[2]) || !Objects.requireNonNullElse(previous, "").equals(values[3])
+                    || !current.equals(values[4]) || !changeId.equals(values[5])) {
                 throw new IllegalArgumentException("diff cursor is invalid");
             }
             long ordinal = Long.parseLong(values[6]);
