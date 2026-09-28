@@ -193,6 +193,25 @@ class IndexRepositoryControllerTest {
                 .andExpect(jsonPath("$.review.reviewId").value(payload.reviewId().value()));
     }
 
+    @Test
+    void review_http_rejects_missing_malformed_and_conflicting_selection_before_admission() throws Exception {
+        IndexRequestService service = mock(IndexRequestService.class);
+        MockMvc mvc = MockMvcBuilders.standaloneSetup(new IndexRepositoryController(service))
+                .setControllerAdvice(new IndexerApiExceptionHandler()).build();
+        String revision = "a".repeat(40);
+        for (String body : java.util.List.of(
+                "{}",
+                "{\"selection\":{}}",
+                "{\"selection\":{\"kind\":\"COMMIT\",\"revision\":\"bad\"}}",
+                "{\"selection\":{\"kind\":\"COMMIT\",\"revision\":\"" + revision + "\",\"beforeRevision\":\"" + revision + "\"}}",
+                "{\"selection\":{\"kind\":\"RANGE\",\"beforeRevision\":\"" + revision + "\"}}")) {
+            mvc.perform(post("/index/repositories/orders/reviews").contentType(MediaType.APPLICATION_JSON).content(body))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.errorCode").value("INVALID_ARGUMENT"));
+        }
+        verify(service, never()).review(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
+    }
+
     private static RollbackIndexRequest request(PublishedGenerationPointer current, PublishedGenerationPointer rollback) {
         return new RollbackIndexRequest(requestPointer(current), requestPointer(rollback));
     }

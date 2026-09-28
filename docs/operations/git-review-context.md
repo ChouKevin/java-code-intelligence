@@ -56,20 +56,24 @@ role and Query uses a separate reader role.
 ## Review-owned comparison evidence
 
 Do not use the standalone comparison endpoint to claim a semantic review was
-prepared. A private review submission accepts one B SHA, captures the current A
-once, and its single dispatcher job prepares the direct A → B comparison with
-the two semantic endpoints. The job's `review` status supplies `reviewId`,
-`comparisonId`, `previousSnapshotId`, and `currentSnapshotId` only when it is
-READY.
+prepared. A private review submission selects either a `COMMIT` SHA or explicit
+`RANGE` before/after SHAs. The dispatcher job prepares the direct comparison
+and its available semantic endpoints without reading or publishing the mutable
+current pointer. A root `COMMIT` compares the real empty tree to that commit:
+it has no before semantic generation, but does have a previous snapshot of the
+empty tree. The job's `review` status supplies `reviewId`, `comparisonId`,
+`previousSnapshotId`, and `currentSnapshotId` only when it is READY.
 
 `get_review` returns those immutable IDs to an authorized Query client. The
 ordinary `compare_revisions`, `get_file_diff`, `list_files`, `read_file`, and
-`search_text` tools still use their exact returned IDs and SHAs, but review-owned
-rows also require the owning review manifest to be READY and owned by the same
-job. IDs from a PREPARING or FAILED review cannot bypass the gate. A direct A → B
-comparison is not a PR merge-base diff, even when B is an ancestor or diverges.
-Each comparison stores its own eligible snapshot text; semantic generation reuse
-does not deduplicate it.
+`search_text` tools use exact returned IDs and SHAs. For an empty-tree root,
+omit the `previous` argument to `compare_revisions` and `get_file_diff`; their
+responses report `previous: null`, and the root file diff contains `ADD` patches.
+Review-owned rows also require the owning review manifest to be READY and owned
+by the same job. IDs from a PREPARING or FAILED review cannot bypass the gate.
+A direct before → after comparison is not a PR merge-base diff, even when
+after is an ancestor or diverges. Each comparison stores its own eligible
+snapshot text; semantic generation reuse does not deduplicate it.
 
 ## Read through HTTP or MCP
 

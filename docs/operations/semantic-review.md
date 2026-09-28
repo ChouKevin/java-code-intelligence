@@ -219,6 +219,11 @@ Neither selection reads or captures the mutable current pointer at admission.
 Both requested commits must be reachable from fetched trusted remote refs.
 Do not admit the after commit through ordinary `/ensure`, `/sync`, `/checkout`,
 or `/rebuild`: those are BUILD operations and may publish it as current.
+
+Missing `selection` or `kind`, malformed full SHA, and mixed or incomplete
+`COMMIT`/`RANGE` fields return HTTP `400` with `errorCode: INVALID_ARGUMENT`;
+no review job is admitted.
+
 The private review admin request is:
 
 ```bash
@@ -238,6 +243,12 @@ available semantic sides and Git evidence. An accepted job can still be
 `RESOLVING` and need not have reserved generation IDs yet. Review completion
 records `comparisonId`, `previousSnapshotId`, and `currentSnapshotId`; the
 root's previous snapshot is empty but real, without a fabricated revision.
+
+For a root comparison, omit `previous` when calling the ordinary
+`compare_revisions` and `get_file_diff` MCP tools (or the equivalent Query HTTP
+endpoints). Their responses carry `previous: null`; use the returned
+`comparisonId`, current SHA, and change ID to read the root `ADD` patch.
+
 If the job is `operation: BUILD` or selection/review identity differs, stop
 and investigate rather than interpreting it as review progress. An unrelated
 current-pointer update does not alter the review's resolved endpoints or

@@ -98,13 +98,13 @@ public final class SemanticMcpSchemaCatalog {
     }
 
     private static Map<String, Object> gitComparisonCollection() {
-        return schema(Map.of("repositoryId", repositoryId(), "comparisonId", gitEvidenceId(), "previous", revision(), "current", revision(),
+        return schema(Map.of("repositoryId", repositoryId(), "comparisonId", gitEvidenceId(), "previous", nullableRevision(), "current", revision(),
                 "previousSnapshotId", gitEvidenceId(), "currentSnapshotId", gitEvidenceId(), "ancestry", string(), "items", items(gitChange()), "page", page()),
                 List.of("repositoryId", "comparisonId", "previous", "current", "previousSnapshotId", "currentSnapshotId", "ancestry", "items", "page"));
     }
 
     private static Map<String, Object> gitFileDiffResult() {
-        return schema(Map.of("repositoryId", repositoryId(), "comparisonId", gitEvidenceId(), "previous", revision(), "current", revision(),
+        return schema(Map.of("repositoryId", repositoryId(), "comparisonId", gitEvidenceId(), "previous", nullableRevision(), "current", revision(),
                 "change", gitChange(), "patch", string(), "nextCursor", string()),
                 List.of("repositoryId", "comparisonId", "previous", "current", "change", "patch"));
     }
@@ -297,9 +297,9 @@ public final class SemanticMcpSchemaCatalog {
         schemas.put("list_git_commits", pagedSchema(Map.of("repositoryId", repositoryId(), "historyId", gitEvidenceId(), "revision", revision()),
                 List.of("repositoryId", "historyId", "revision")));
         schemas.put("compare_revisions", pagedSchema(Map.of("repositoryId", repositoryId(), "comparisonId", gitEvidenceId(), "previous", revision(), "current", revision()),
-                List.of("repositoryId", "comparisonId", "previous", "current")));
+                List.of("repositoryId", "comparisonId", "current")));
         schemas.put("get_file_diff", schema(Map.of("repositoryId", repositoryId(), "comparisonId", gitEvidenceId(), "previous", revision(),
-                "current", revision(), "changeId", string(), "cursor", string()), List.of("repositoryId", "comparisonId", "previous", "current", "changeId")));
+                "current", revision(), "changeId", string(), "cursor", string()), List.of("repositoryId", "comparisonId", "current", "changeId")));
         schemas.put("list_files", pagedSchema(Map.of("repositoryId", repositoryId(), "snapshotId", gitEvidenceId(), "revision", revision(),
                 "directory", string()), List.of("repositoryId", "snapshotId", "revision", "directory")));
         schemas.put("read_file", schema(Map.of("repositoryId", repositoryId(), "snapshotId", gitEvidenceId(), "revision", revision(), "path", Map.of("type", "string", "minLength", 1),
@@ -421,6 +421,10 @@ public final class SemanticMcpSchemaCatalog {
     private static Map<String, Object> revision() {
         return Map.of("type", "string", "minLength", RepositoryRevision.LENGTH, "maxLength", RepositoryRevision.LENGTH,
                 "pattern", RepositoryRevision.PATTERN, "description", "Copy revision exactly from a Semantic result.");
+    }
+
+    private static Map<String, Object> nullableRevision() {
+        return Map.of("oneOf", List.of(revision(), Map.of("type", "null")));
     }
 
     private static Map<String, Object> factId(String fieldName) {

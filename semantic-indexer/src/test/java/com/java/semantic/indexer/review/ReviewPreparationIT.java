@@ -37,18 +37,32 @@ import com.java.semantic.model.review.ReviewSide;
 import com.java.semantic.model.review.ReviewSelection;
 import com.java.semantic.model.review.ReviewBaselineRule;
 import com.java.semantic.model.review.ResolvedReviewEndpoints;
+import com.java.semantic.query.SemanticQueryApplication;
 import com.mongodb.client.MongoClients;
+import io.modelcontextprotocol.client.McpClient;
+import io.modelcontextprotocol.client.McpSyncClient;
+import io.modelcontextprotocol.client.transport.HttpClientStreamableHttpTransport;
+import io.modelcontextprotocol.json.jackson3.JacksonMcpJsonMapper;
+import io.modelcontextprotocol.spec.McpSchema;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Path;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.Date;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicReference;
 import org.bson.Document;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
+import org.springframework.boot.WebApplicationType;
+import org.springframework.boot.builder.SpringApplicationBuilder;
+import org.springframework.boot.web.server.context.WebServerApplicationContext;
+import org.springframework.context.ConfigurableApplicationContext;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.testcontainers.mongodb.MongoDBContainer;
+import tools.jackson.databind.json.JsonMapper;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -169,6 +183,62 @@ class ReviewPreparationIT {
             assertThat(fixture.template.getCollection(IndexCollections.GIT_COMPARISON_CHANGES)
                     .find(new Document("comparisonId", prepared.comparisonId())).first().getString("kind")).isEqualTo("ADD");
         }
+    }
+
+    @Test
+    void root_review_git_evidence_is_readable_over_real_mcp_transport_with_absent_previous() throws Exception {
+        try (MongoDBContainer container = container()) {
+            Fixture fixture = fixture(container);
+            PreparedReview prepared = fixture.prepare(Selection.ROOT);
+            String mongoUri = container.getConnectionString() + "/semantic";
+            Path queryConfig = Path.of("../semantic-query/src/main/resources/application.yml").toAbsolutePath();
+            try (ConfigurableApplicationContext query = new SpringApplicationBuilder(SemanticQueryApplication.class)
+                    .web(WebApplicationType.SERVLET)
+                    .run("--spring.config.location=" + queryConfig.toUri(), "--spring.mongodb.uri=" + mongoUri,
+                            "--server.address=127.0.0.1", "--server.port=0", "--semantic.query.api-token=review-query-token",
+                            "--semantic.query.git-evidence.allowed-repositories[0]=" + fixture.repositoryId.value(),
+                            "--spring.main.banner-mode=off")) {
+                int port = ((WebServerApplicationContext) query).getWebServer().getPort();
+                JsonMapper mapper = JsonMapper.builder().build();
+                HttpClientStreamableHttpTransport transport = HttpClientStreamableHttpTransport.builder("http://127.0.0.1:" + port + "/mcp")
+                        .jsonMapper(new JacksonMcpJsonMapper(mapper))
+                        .httpRequestCustomizer((request, method, uri, body, context) -> request.header("X-Api-Token", "review-query-token"))
+                        .build();
+                try (McpSyncClient client = McpClient.sync(transport).requestTimeout(Duration.ofSeconds(30))
+                        .initializationTimeout(Duration.ofSeconds(30)).build()) {
+                    client.initialize();
+                    McpSchema.Tool comparisonTool = client.listTools().tools().stream()
+                            .filter(tool -> tool.name().equals("compare_revisions")).findFirst().orElseThrow();
+                    McpSchema.Tool diffTool = client.listTools().tools().stream()
+                            .filter(tool -> tool.name().equals("get_file_diff")).findFirst().orElseThrow();
+                    Map<String, Object> arguments = Map.of("repositoryId", fixture.repositoryId.value(),
+                            "comparisonId", prepared.comparisonId(), "current", fixture.requestedRevision.value());
+                    Map<?, ?> comparison = callMcp(client, mapper, "compare_revisions", arguments);
+                    assertThat(comparison.get("previous")).isNull();
+                    assertThat(comparison.get("ancestry")).isEqualTo("EMPTY_TREE");
+                    Map<?, ?> addition = ((List<Map<?, ?>>) comparison.get("items")).getFirst();
+                    assertThat(addition.get("kind")).isEqualTo("ADD");
+                    Map<?, ?> patch = callMcp(client, mapper, "get_file_diff", Map.of("repositoryId", fixture.repositoryId.value(),
+                            "comparisonId", prepared.comparisonId(), "current", fixture.requestedRevision.value(),
+                            "changeId", addition.get("changeId")));
+                    assertThat(patch.get("previous")).isNull();
+                    assertThat(patch.get("patch")).asString().contains("+class ReviewSource");
+                    for (McpSchema.Tool tool : List.of(comparisonTool, diffTool)) {
+                        assertThat(((List<?>) tool.inputSchema().get("required")).contains("previous")).isFalse();
+                        Map<?, ?> properties = (Map<?, ?>) tool.outputSchema().get("properties");
+                        Map<?, ?> previous = (Map<?, ?>) properties.get("previous");
+                        assertThat((List<?>) previous.get("oneOf")).anySatisfy(option ->
+                                assertThat(((Map<?, ?>) option).get("type")).isEqualTo("null"));
+                    }
+                }
+            }
+        }
+    }
+
+    private static Map<?, ?> callMcp(McpSyncClient client, JsonMapper mapper, String name, Map<String, Object> arguments) {
+        McpSchema.CallToolResult result = client.callTool(McpSchema.CallToolRequest.builder(name).arguments(arguments).build());
+        assertThat(result.isError()).as("%s failed: %s", name, result.content()).isFalse();
+        return mapper.convertValue(result.structuredContent(), Map.class);
     }
 
     @Test
@@ -338,7 +408,7 @@ class ReviewPreparationIT {
                     REVIEW_SOURCE.getBytes(StandardCharsets.UTF_8));
             if (selection == Selection.ROOT) {
                 GitComparisonChange addition = new GitComparisonChange("change-0", GitChangeKind.ADD,
-                        "", REVIEW_SOURCE_PATH, "", "100644", "", "1".repeat(40),
+                        "", REVIEW_SOURCE_PATH, "0", "100644", "0".repeat(40), "1".repeat(40),
                         "@@ -0,0 +1 @@\n+" + REVIEW_SOURCE, "AVAILABLE");
                 return new GitPreparedComparison(Optional.empty(), REQUESTED_REVISION, GitComparisonAncestry.EMPTY_TREE,
                         List.of(), List.of(entry), List.of(addition));

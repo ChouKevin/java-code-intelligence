@@ -8,22 +8,41 @@ import java.util.Objects;
 /** HTTP request binds the same selection union used by the worker and Query. */
 public record ReviewIndexRequest(SelectionInput selection) {
     public ReviewSelection reviewSelection() {
-        return Objects.requireNonNull(selection, "review selection is required").toSelection();
+        if (Objects.isNull(selection)) {
+            throw new InvalidSelectionException();
+        }
+        return selection.toSelection();
     }
 
     public record SelectionInput(ReviewComparisonType kind, String revision, String beforeRevision, String afterRevision) {
         public ReviewSelection toSelection() {
-            ReviewComparisonType selectedKind = Objects.requireNonNull(kind, "review kind is required");
-            if (selectedKind == ReviewComparisonType.COMMIT) {
+            if (Objects.isNull(kind)) {
+                throw new InvalidSelectionException();
+            }
+            if (kind == ReviewComparisonType.COMMIT) {
                 if (Objects.isNull(revision) || Objects.nonNull(beforeRevision) || Objects.nonNull(afterRevision)) {
-                    throw new IllegalArgumentException("COMMIT requires revision and forbids range revisions");
+                    throw new InvalidSelectionException();
                 }
-                return ReviewSelection.commit(RepositoryRevision.ofSha(revision));
+                try {
+                    return ReviewSelection.commit(RepositoryRevision.ofSha(revision));
+                } catch (IllegalArgumentException exception) {
+                    throw new InvalidSelectionException();
+                }
             }
-            if (Objects.nonNull(revision) || Objects.isNull(beforeRevision) || Objects.isNull(afterRevision)) {
-                throw new IllegalArgumentException("RANGE requires beforeRevision and afterRevision only");
+            if (kind != ReviewComparisonType.RANGE || Objects.nonNull(revision) || Objects.isNull(beforeRevision) || Objects.isNull(afterRevision)) {
+                throw new InvalidSelectionException();
             }
-            return ReviewSelection.range(RepositoryRevision.ofSha(beforeRevision), RepositoryRevision.ofSha(afterRevision));
+            try {
+                return ReviewSelection.range(RepositoryRevision.ofSha(beforeRevision), RepositoryRevision.ofSha(afterRevision));
+            } catch (IllegalArgumentException exception) {
+                throw new InvalidSelectionException();
+            }
+        }
+    }
+
+    public static final class InvalidSelectionException extends RuntimeException {
+        public InvalidSelectionException() {
+            super("Invalid review selection");
         }
     }
 }

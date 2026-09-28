@@ -19,6 +19,11 @@ public final class IndexerApiExceptionHandler {
         return ResponseEntity.status(HttpStatus.CONFLICT).body(error);
     }
 
+    @ExceptionHandler(ReviewIndexRequest.InvalidSelectionException.class)
+    public ResponseEntity<ApiError> invalidReviewSelection(ReviewIndexRequest.InvalidSelectionException exception) {
+        ApiError error = new ApiError("INVALID_ARGUMENT", exception.getMessage(), null, List.of(), UUID.randomUUID().toString());
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(error);
+    }
 
     public record ApiError(String errorCode, String message, String repoId, List<Map<String, Object>> candidates,
                            String requestId) {

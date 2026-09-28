@@ -552,7 +552,7 @@ components:
       properties:
         repositoryId: {$ref: '#/components/schemas/RepositoryId'}
         comparisonId: {type: string, format: uuid}
-        previous: {$ref: '#/components/schemas/Revision'}
+        previous: {oneOf: [{$ref: '#/components/schemas/Revision'}, {type: 'null'}]}
         current: {$ref: '#/components/schemas/Revision'}
         previousSnapshotId: {type: string, format: uuid}
         currentSnapshotId: {type: string, format: uuid}
@@ -566,7 +566,7 @@ components:
       properties:
         repositoryId: {$ref: '#/components/schemas/RepositoryId'}
         comparisonId: {type: string, format: uuid}
-        previous: {$ref: '#/components/schemas/Revision'}
+        previous: {oneOf: [{$ref: '#/components/schemas/Revision'}, {type: 'null'}]}
         current: {$ref: '#/components/schemas/Revision'}
         change: {$ref: '#/components/schemas/GitChangeItem'}
         patch: {type: string}
