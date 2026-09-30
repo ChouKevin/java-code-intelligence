@@ -1,234 +1,58 @@
 package com.java.semantic.indexer.api;
 
-import com.java.semantic.indexer.job.GitEvidenceJob;
-import com.java.semantic.indexer.job.IndexJob;
-import com.java.semantic.indexer.job.IndexJobId;
-import com.java.semantic.indexer.job.IndexJobPhase;
-import com.java.semantic.indexer.job.IndexJobOperation;
-import com.java.semantic.indexer.job.IndexJobTarget;
-import com.java.semantic.indexer.job.IndexPublicationState;
-import com.java.semantic.indexer.job.ReviewJobPayload;
-import com.java.semantic.indexer.job.ReviewPreparationStage;
+import com.java.semantic.indexer.application.IndexerPreparationFacade;
 import com.java.semantic.indexer.job.IndexRequestService;
-import com.java.semantic.model.index.GenerationId;
-import com.java.semantic.model.index.ManifestDigest;
-import com.java.semantic.model.index.PublishedGenerationPointer;
-import com.java.semantic.model.review.ReviewId;
-import com.java.semantic.model.review.ReviewSelection;
-import com.java.semantic.model.repository.RepositoryId;
-import com.java.semantic.model.repository.RepositoryRevision;
+import java.util.List;
 import org.junit.jupiter.api.Test;
-import org.springframework.http.HttpStatus;
-import org.springframework.http.ResponseEntity;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
-
-import java.util.Optional;
-import java.time.Instant;
-
-import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.when;
-import static org.mockito.Mockito.verify;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 class IndexRepositoryControllerTest {
-    @Test
-    void ensure_returns_accepted_job_with_the_resolved_revision() {
+    private static final String REQUEST_ID = "8f899830-47bb-4dc7-a9a6-c4ad0c016bb3";
+    private static MockMvc mvc() {
         IndexRequestService service = mock(IndexRequestService.class);
-        RepositoryRevision revision = new RepositoryRevision("b".repeat(40));
-        IndexJob job = new IndexJob(IndexJobId.create(), RepositoryId.of("orders"), Optional.of(new IndexJobTarget(revision, new GenerationId("g-orders"), 1L)),
-                IndexJobPhase.ACCEPTED, true, Optional.empty(), false, IndexJobOperation.BUILD);
-        when(service.ensure(RepositoryId.of("orders"))).thenReturn(job);
-
-        ResponseEntity<IndexRepositoryController.IndexJobResponse> response = new IndexRepositoryController(service).ensure("orders");
-
-        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.ACCEPTED);
-        assertThat(response.getBody().target().revision()).isEqualTo(revision.value());
-        assertThat(response.getBody().jobId()).isEqualTo(job.id().value());
-    }
-
-    @Test
-    void sync_checkout_rebuild_and_rollback_are_all_accepted_as_jobs() {
-        IndexRequestService service = mock(IndexRequestService.class);
-        RepositoryId repositoryId = RepositoryId.of("orders");
-        IndexJob job = job("c");
-        PublishedGenerationPointer current = pointer("a", "g-current", "1", "old-current");
-        PublishedGenerationPointer rollback = pointer("b", "g-rollback", "2", "old-rollback");
-        when(service.sync(repositoryId, Optional.of("main"))).thenReturn(job);
-        when(service.checkout(repositoryId, "c".repeat(40))).thenReturn(job);
-        when(service.rebuild(repositoryId, true, current)).thenReturn(job);
-        when(service.rollback(repositoryId, current, rollback)).thenReturn(job);
-        IndexRepositoryController controller = new IndexRepositoryController(service);
-
-        assertThat(controller.sync("orders", new SyncIndexRequest("main")).getStatusCode()).isEqualTo(HttpStatus.ACCEPTED);
-        assertThat(controller.checkout("orders", new CheckoutIndexRequest("c".repeat(40))).getStatusCode()).isEqualTo(HttpStatus.ACCEPTED);
-        assertThat(controller.rebuild("orders", new RebuildIndexRequest(true, requestPointer(current))).getStatusCode())
-                .isEqualTo(HttpStatus.ACCEPTED);
-        assertThat(controller.rollback("orders", request(current, rollback)).getStatusCode()).isEqualTo(HttpStatus.ACCEPTED);
-    }
-
-    @Test
-    void job_returns_the_admin_visible_terminal_state_and_missing_jobs_are_not_found() {
-        IndexRequestService service = mock(IndexRequestService.class);
-        IndexJob job = job("d");
-        when(service.job(job.id())).thenReturn(Optional.of(job));
-        PublishedGenerationPointer current = pointer("e", "g-current", "3", "published-current");
-        when(service.currentPointer(RepositoryId.of("orders"))).thenReturn(Optional.of(current));
-        IndexRepositoryController controller = new IndexRepositoryController(service);
-
-        ResponseEntity<IndexRepositoryController.IndexJobStatusResponse> response = controller.job("orders", job.id().value());
-
-        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
-        assertThat(response.getBody().jobId()).isEqualTo(job.id().value());
-        assertThat(response.getBody().operation()).isEqualTo(job.operation().name());
-        assertThat(response.getBody().active()).isTrue();
-        assertThat(response.getBody().currentPointer().generationId()).isEqualTo(current.generationId().value());
-        assertThatThrownBy(() -> controller.job("orders", "00000000-0000-0000-0000-000000000000"))
-                .isInstanceOf(org.springframework.web.server.ResponseStatusException.class)
-                .hasMessageContaining("index job was not found");
-        assertThatThrownBy(() -> controller.job("payments", job.id().value()))
-                .isInstanceOf(org.springframework.web.server.ResponseStatusException.class)
-                .hasMessageContaining("index job was not found");
-    }
-
-    @Test
-    void publication_returns_the_exact_current_and_bounded_rollback_pointers() {
-        IndexRequestService service = mock(IndexRequestService.class);
-        RepositoryId repositoryId = RepositoryId.of("orders");
-        PublishedGenerationPointer current = pointer("e", "g-current", "3", "published-current");
-        PublishedGenerationPointer rollback = pointer("f", "g-rollback", "4", "published-rollback");
-        when(service.publicationState(repositoryId)).thenReturn(Optional.of(
-                new IndexPublicationState(Optional.of(current), Optional.of(rollback))));
-        IndexRepositoryController controller = new IndexRepositoryController(service);
-
-        ResponseEntity<IndexRepositoryController.IndexPublicationResponse> response = controller.publication("orders");
-
-        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
-        assertThat(response.getBody().currentPointer().committedJobId()).isEqualTo("published-current");
-        assertThat(response.getBody().rollbackPointer().committedJobId()).isEqualTo("published-rollback");
-        assertThatThrownBy(() -> controller.publication("missing"))
-                .isInstanceOf(org.springframework.web.server.ResponseStatusException.class)
-                .hasMessageContaining("repository publication was not found");
-    }
-
-    @Test
-    void comparison_admission_rejects_missing_null_and_invalid_shas_at_the_http_boundary_and_accepts_exact_payload() throws Exception {
-        IndexRequestService service = mock(IndexRequestService.class);
-        IndexJob comparison = new IndexJob(IndexJobId.create(), RepositoryId.of("orders"), Optional.empty(), IndexJobPhase.ACCEPTED, true,
-                Optional.empty(), false, IndexJobOperation.GIT_COMPARISON, Optional.of(GitEvidenceJob.comparison(
-                        new RepositoryRevision("a".repeat(40)), new RepositoryRevision("b".repeat(40)))));
-        String previous = "a".repeat(40);
-        String current = "b".repeat(40);
-        when(service.prepareGitComparison(RepositoryId.of("orders"), previous, current)).thenReturn(comparison);
-        MockMvc mvc = MockMvcBuilders.standaloneSetup(new IndexRepositoryController(service)).build();
-
-        mvc.perform(post("/index/repositories/orders/git/comparisons").contentType(MediaType.APPLICATION_JSON).content("{}"))
-                .andExpect(status().isBadRequest());
-        mvc.perform(post("/index/repositories/orders/git/comparisons").contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"previous\":null,\"current\":null}"))
-                .andExpect(status().isBadRequest());
-        mvc.perform(post("/index/repositories/orders/git/comparisons").contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"previous\":\"bad\",\"current\":\"bad\"}"))
-                .andExpect(status().isBadRequest());
-        mvc.perform(post("/index/repositories/orders/git/comparisons").contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"previous\":\"" + previous + "\",\"current\":\"" + current + "\"}"))
-                .andExpect(status().isAccepted());
-
-        verify(service).prepareGitComparison(RepositoryId.of("orders"), previous, current);
-    }
-
-    @Test
-    void history_admission_rejects_invalid_catalog_and_revision_before_job_admission_and_accepts_exact_payload() throws Exception {
-        IndexRequestService service = mock(IndexRequestService.class);
-        IndexJob history = mock(IndexJob.class);
-        when(history.id()).thenReturn(IndexJobId.create());
-        when(history.repositoryId()).thenReturn(RepositoryId.of("orders"));
-        when(history.target()).thenReturn(Optional.empty());
-        when(history.phase()).thenReturn(IndexJobPhase.ACCEPTED);
-        when(history.failureCategory()).thenReturn(Optional.empty());
-        String catalogId = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
-        String revision = "a".repeat(40);
-        when(service.prepareGitHistory(RepositoryId.of("orders"), catalogId, "main", revision)).thenReturn(history);
-        MockMvc mvc = MockMvcBuilders.standaloneSetup(new IndexRepositoryController(service)).build();
-
-        mvc.perform(post("/index/repositories/orders/git/history").contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"catalogId\":\"bad\",\"branch\":\"main\",\"revision\":\"bad\"}"))
-                .andExpect(status().isBadRequest());
-        verify(service, never()).prepareGitHistory(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
-                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
-        mvc.perform(post("/index/repositories/orders/git/history").contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"catalogId\":\"" + catalogId + "\",\"branch\":\"main\",\"revision\":\"" + revision + "\"}"))
-                .andExpect(status().isAccepted());
-
-        verify(service).prepareGitHistory(RepositoryId.of("orders"), catalogId, "main", revision);
-    }
-
-    @Test
-    void review_http_binds_commit_selection_without_a_published_current() throws Exception {
-        IndexRequestService service = mock(IndexRequestService.class);
-        RepositoryId repositoryId = RepositoryId.of("orders");
-        String revision = "b".repeat(40);
-        ReviewSelection selection = ReviewSelection.commit(new RepositoryRevision(revision));
-        ReviewJobPayload payload = new ReviewJobPayload(new ReviewId("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"),
-                selection, Optional.empty(), Optional.empty(), ReviewPreparationStage.RESOLVING,
-                Optional.empty(), Optional.empty(), Optional.empty(), Optional.empty(), Optional.empty());
-        IndexJob review = new IndexJob(IndexJobId.create(), repositoryId, Optional.empty(), IndexJobPhase.ACCEPTED, true,
-                Optional.empty(), false, IndexJobOperation.REVIEW, Optional.empty(), Optional.of(payload));
-        when(service.review(repositoryId, selection)).thenReturn(review);
-        MockMvc mvc = MockMvcBuilders.standaloneSetup(new IndexRepositoryController(service)).build();
-
-        mvc.perform(post("/index/repositories/orders/reviews").contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"selection\":{\"kind\":\"COMMIT\",\"revision\":\"" + revision + "\"}}"))
-                .andExpect(status().isAccepted())
-                .andExpect(jsonPath("$.review.selection.kind").value("COMMIT"))
-                .andExpect(jsonPath("$.review.selection.revision").value(revision))
-                .andExpect(jsonPath("$.review.resolvedEndpoints").doesNotExist())
-                .andExpect(jsonPath("$.review.reviewId").value(payload.reviewId().value()));
-    }
-
-    @Test
-    void review_http_rejects_missing_malformed_and_conflicting_selection_before_admission() throws Exception {
-        IndexRequestService service = mock(IndexRequestService.class);
-        MockMvc mvc = MockMvcBuilders.standaloneSetup(new IndexRepositoryController(service))
+        return MockMvcBuilders.standaloneSetup(new IndexRepositoryController(service, new IndexerPreparationFacade(service)))
                 .setControllerAdvice(new IndexerApiExceptionHandler()).build();
-        String revision = "a".repeat(40);
-        for (String body : java.util.List.of(
-                "{}",
-                "{\"selection\":{}}",
-                "{\"selection\":{\"kind\":\"COMMIT\",\"revision\":\"bad\"}}",
-                "{\"selection\":{\"kind\":\"COMMIT\",\"revision\":\"" + revision + "\",\"beforeRevision\":\"" + revision + "\"}}",
-                "{\"selection\":{\"kind\":\"RANGE\",\"beforeRevision\":\"" + revision + "\"}}")) {
-            mvc.perform(post("/index/repositories/orders/reviews").contentType(MediaType.APPLICATION_JSON).content(body))
-                    .andExpect(status().isBadRequest())
-                    .andExpect(jsonPath("$.errorCode").value("INVALID_ARGUMENT"));
+    }
+    @Test
+    void review_admission_requires_a_client_generated_request_id() throws Exception {
+        mvc().perform(post("/index/repositories/orders/reviews").contentType(MediaType.APPLICATION_JSON)
+                .content("{\"selection\":{\"kind\":\"COMMIT\",\"revision\":\"" + "b".repeat(40) + "\"}}"))
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("INVALID_ARGUMENT"));
+    }
+    @Test
+    void public_preparation_rejects_unknown_fields_wrong_types_and_conflicting_unions() throws Exception {
+        MockMvc mvc = mvc();
+        for (String body : List.of("{}", "{\"requestId\":null}", "{\"requestId\":42}",
+                "{\"requestId\":\"" + REQUEST_ID.toUpperCase() + "\"}",
+                "{\"requestId\":\"" + REQUEST_ID + "\",\"branch\":\"main\"}")) {
+            mvc.perform(post("/index/repositories/orders/codebase").contentType(MediaType.APPLICATION_JSON).content(body))
+                    .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("INVALID_ARGUMENT"));
         }
-        verify(service, never()).review(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
+        for (String selection : List.of("null", "{}", "{\"kind\":\"COMMIT\",\"revision\":\"bad\"}",
+                "{\"kind\":\"COMMIT\",\"revision\":\"" + "a".repeat(40) + "\",\"beforeRevision\":\"" + "a".repeat(40) + "\"}")) {
+            mvc.perform(post("/index/repositories/orders/reviews").contentType(MediaType.APPLICATION_JSON)
+                    .content("{\"requestId\":\"" + REQUEST_ID + "\",\"selection\":" + selection + "}"))
+                    .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("INVALID_ARGUMENT"));
+        }
     }
-
-    private static RollbackIndexRequest request(PublishedGenerationPointer current, PublishedGenerationPointer rollback) {
-        return new RollbackIndexRequest(requestPointer(current), requestPointer(rollback));
-    }
-
-    private static GenerationPointerRequest requestPointer(PublishedGenerationPointer pointer) {
-        return new GenerationPointerRequest(pointer.revision().value(), pointer.generationId().value(), pointer.manifestDigest().value(),
-                pointer.committedJobId(), pointer.publishedAt());
-    }
-
-    private static PublishedGenerationPointer pointer(String revision, String generationId, String digest, String committedJobId) {
-        return new PublishedGenerationPointer(new RepositoryRevision(revision.repeat(40)), new GenerationId(generationId),
-                new ManifestDigest(digest.repeat(64)), committedJobId, Instant.parse("2026-08-22T00:00:00Z"));
-    }
-
-    private static IndexJob job(String revision) {
-        return new IndexJob(IndexJobId.create(), RepositoryId.of("orders"),
-                Optional.of(new IndexJobTarget(new RepositoryRevision(revision.repeat(40)), new GenerationId("g-orders"), 1L)),
-                IndexJobPhase.ACCEPTED, true, Optional.empty(), false, IndexJobOperation.BUILD);
+    @Test
+    void job_lookup_requires_one_exact_selector_and_removed_routes_are_not_aliases() throws Exception {
+        MockMvc mvc = mvc();
+        for (String query : List.of("", "?jobId=" + REQUEST_ID + "&requestId=" + REQUEST_ID,
+                "?requestId=" + REQUEST_ID + "&requestId=" + REQUEST_ID, "?latest=true")) {
+            mvc.perform(get("/index/repositories/orders/jobs" + query)).andExpect(status().isBadRequest());
+        }
+        mvc.perform(get("/index/repositories/orders/jobs/" + REQUEST_ID)).andExpect(status().isNotFound());
+        for (String route : List.of("refs", "history", "comparisons")) {
+            mvc.perform(post("/index/repositories/orders/git/" + route).contentType(MediaType.APPLICATION_JSON).content("{}"))
+                    .andExpect(status().isNotFound());
+        }
     }
 }

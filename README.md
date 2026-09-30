@@ -7,7 +7,7 @@ contains two independently deployable applications and one shared model module:
   commits, runs JDT LS, and seals/publishes immutable MongoDB generations.
 - **Query** reads MongoDB only through HTTP and MCP. Current-generation calls
   use only the current sealed generation; separately prepared READY reviews can
-  read their immutable A/B membership. Query has no Git checkout, source
+  read their immutable BEFORE/AFTER membership. Query has no Git checkout, source
   fallback, JGit, JDT, JDT LS, or Indexer control.
 - **Model** defines framework-neutral identities, facts, relations, repository
   values, and persisted index contracts.
@@ -30,10 +30,33 @@ contract. Coding-agent guidance is in [AGENTS.md](AGENTS.md).
 
 ## Index and review flow
 
-An Indexer request resolves a branch, tag, or full SHA to a reachable lowercase
-40-character commit and stores a job. The HTTP request never runs a build or
-reset inline. One `index-job-dispatcher` thread polls the oldest `ACCEPTED` job,
-marks it `RUNNING`, and executes one job at a time. Its only poll setting is:
+The private Indexer exposes four MCP tools at its own `/mcp`, using
+`X-Api-Token: $SEMANTIC_INDEXER_ADMIN_TOKEN`. HTTP uses the same facade:
+
+| MCP tool | HTTP route |
+| --- | --- |
+| `refresh_repository_metadata` | `POST /index/repositories/{repositoryId}/metadata` |
+| `prepare_codebase` | `POST /index/repositories/{repositoryId}/codebase` |
+| `prepare_review` | `POST /index/repositories/{repositoryId}/reviews` |
+| `get_job` | `GET /index/repositories/{repositoryId}/jobs?jobId=…` or `?requestId=…` |
+
+Before each preparation, the client creates and saves a canonical lowercase UUID
+`requestId`. A `202` means that identity, the original request, and its job were
+persisted together. Save `jobId` and poll the returned `Location`; lookup requires
+exactly one selector and never substitutes the latest or active job.
+
+`prepare_codebase` freshly resolves only the configured default branch and pins
+its branch/SHA before acceptance. It accepts no branch, tag, or revision override.
+Private maintenance routes remain available for explicit administrator operations.
+Metadata refresh fetches once, prepares a branch catalog and history for the
+requested branch (defaulting to the configured branch), and publishes one
+`metadataPointer` only after both are READY. It runs no JDT analysis. The startup
+registry includes configured but unindexed repositories without publishing URLs
+or credentials.
+
+HTTP never runs a build or reset inline. One `index-job-dispatcher` thread polls
+the oldest `ACCEPTED` job, marks it `RUNNING`, and executes one job at a time.
+Its only poll setting is:
 
 ```yaml
 semantic:
@@ -48,22 +71,28 @@ reads only that pointer. Every successful source response identifies the
 published repository revision.
 
 A review is not a PR diff and is not an arbitrary historical-generation API.
-The private administrator submits one exact B commit to
-`POST /index/repositories/{repoId}/reviews`. Admission captures the then-current
-published A pointer once and returns `202`, `jobId`, `reviewId`, captured A, B,
-and `CURRENT_TO_COMMIT`. The one dispatcher serially prepares both semantic
-endpoints and direct A → B Git evidence. Only a complete immutable READY review
-is visible; it never moves current. B may be ancestor, descendant, equal, or
-divergent, so callers must not describe the direct comparison as a PR-only
-change set.
+Submit `requestId` with an explicit `selection`: `COMMIT` compares the first
+parent to the requested full SHA, while `RANGE` compares the supplied before/after
+SHAs directly. A root commit uses the real empty tree and has no BEFORE semantic
+generation. Admission neither captures current nor fetches Git; the dispatcher
+resolves endpoints and prepares their semantic and Git evidence. Only complete
+immutable READY membership is readable, and review preparation never moves
+current. Equal, reverse, and divergent ranges do not imply a merge-base diff.
 
 A job failure is one of `WORKER_INTERRUPTED`, `SOURCE_UNAVAILABLE`,
 `SCHEMA_REBUILD_REQUIRED`, `PUBLICATION_CONFLICT`, `VALIDATION_FAILED`,
-`ANALYSIS_UNAVAILABLE`, or `REVIEW_EVIDENCE_MISMATCH`. Retry means a new
-administrator request. The dispatcher does not retry automatically. At startup
-it reconciles a fully published target to `COMPLETE`; otherwise a leftover
-`RUNNING` job becomes `WORKER_INTERRUPTED`. It does not resume a half-prepared
-review or a client timeout.
+`ANALYSIS_UNAVAILABLE`, or `REVIEW_EVIDENCE_MISMATCH`. A lost response or timeout
+means look up the **original** `requestId`, including after terminal completion,
+a later repository job, or restart. `REQUEST_NOT_FOUND` means acceptance remains
+unknown; continue lookup or stop waiting, not resubmit. `REQUEST_ID_REUSED`
+returns the original job identity and accepts no new work.
+
+A retry after an inspected failure is an explicit new administrator intent with
+a new UUID; the dispatcher never retries automatically. At startup, configured
+registry publication precedes dispatcher activation. Recovery recognizes a
+fully published target or metadata pair as `COMPLETE`; otherwise a leftover
+`RUNNING` job becomes `WORKER_INTERRUPTED`. It never publishes an orphan READY
+metadata pair or resumes half-prepared work.
 
 ## Query contract
 
@@ -96,7 +125,7 @@ Current discovery returns the exact `repositoryId`/`revision` for the ten
 current semantic tools. A stale request returns `REVISION_OUTDATED` with
 `currentRevision`; rediscover fact IDs before a fact-bound retry.
 
-Use `get_review` to discover READY A/B revisions, side generation/snapshot IDs,
+Use `get_review` to discover READY BEFORE/AFTER revisions, side generation/snapshot IDs,
 and comparison ID. Send `repositoryId`, `reviewId`, `side`, and exact side
 `revision` to every `review_` semantic tool. Review-owned Git IDs pass the same
 READY owner gate. Query never replaces side identity with current, exposes an
@@ -107,14 +136,16 @@ Git evidence is Mongo-only and source-visible only for explicit
 default. Existing repository/package/class/method/source/fact policies remain
 fail-closed.
 
-## Schema 3 and retention
+## Schema 4 and retention
 
-The persisted release is schema version 3. Schema-2 data is not decoded as
-schema 3: there is no compatibility decoder, default, or handwritten migration.
+The persisted release is schema version 4, with review version 2, Git evidence
+version 3, and job version 3. Earlier data is not decoded into this contract:
+there is no compatibility decoder, default, or handwritten migration.
 Drain admissions, settle active jobs, back up coherent pointers/jobs/manifests/
-payloads/Git evidence/review graphs, bootstrap schema 3 with maintenance
-credentials, rebuild approved current generations, reprepare Git evidence as
-needed, verify, deploy Query, then reopen admissions.
+payloads/Git evidence/review graphs, bootstrap schema 4 with maintenance
+credentials, rebuild approved current generations, reprepare evidence as needed,
+verify, deploy Query, then reopen admissions. Bootstrap includes the durable
+repository-scoped requestId unique index; terminal request identities have no TTL.
 
 A READY review retains its manifest, both generations, comparison, and
 snapshots as one graph. There is no TTL, automatic garbage collection, or

@@ -109,13 +109,13 @@ class SemanticReviewJourneyIT {
                     assertThat(text(currentPointerA, "revision")).isEqualTo(revisionA);
                     baselineGeneration = text(currentPointerA, "generationId");
                     assertThat(post(indexerBase, "/index/repositories/" + REPOSITORY_ID + "/reviews", QUERY_TOKEN,
-                            Map.of("selection", Map.of("kind", "COMMIT", "revision", revisionB))).statusCode()).isEqualTo(401);
+                            Map.of("requestId", java.util.UUID.randomUUID().toString(), "selection", Map.of("kind", "COMMIT", "revision", revisionB))).statusCode()).isEqualTo(401);
                     Map<?, ?> acceptedReviewBody = acceptedReview(post(indexerBase,
                             "/index/repositories/" + REPOSITORY_ID + "/reviews", ADMIN_TOKEN,
-                            Map.of("selection", Map.of("kind", "COMMIT", "revision", revisionB))), mapper);
+                            Map.of("requestId", java.util.UUID.randomUUID().toString(), "selection", Map.of("kind", "COMMIT", "revision", revisionB))), mapper);
                     String reviewJob = text(acceptedReviewBody, "jobId");
                     Map<?, ?> admittedReview = successful(get(indexerBase,
-                            "/index/repositories/" + REPOSITORY_ID + "/jobs/" + reviewJob, ADMIN_TOKEN), mapper);
+                            "/index/repositories/" + REPOSITORY_ID + "/jobs?jobId=" + reviewJob, ADMIN_TOKEN), mapper);
                     assertThat(text(admittedReview, "jobId")).isEqualTo(reviewJob);
                     assertThat(text(admittedReview, "operation")).isEqualTo("REVIEW");
                     assertReviewComparisonType(admittedReview);
@@ -137,7 +137,7 @@ class SemanticReviewJourneyIT {
                             "printf 'changed installation\\n' > /opt/jdtls/reuse-fingerprint-marker").getExitCode()).isZero();
                     Map<?, ?> changedInstallationAdmission = acceptedReview(post(indexerBase,
                             "/index/repositories/" + REPOSITORY_ID + "/reviews", ADMIN_TOKEN,
-                            Map.of("selection", Map.of("kind", "COMMIT", "revision", revisionB))), mapper);
+                            Map.of("requestId", java.util.UUID.randomUUID().toString(), "selection", Map.of("kind", "COMMIT", "revision", revisionB))), mapper);
                     Map<?, ?> changedInstallationComplete = completed(indexerBase,
                             text(changedInstallationAdmission, "jobId"), mapper, indexer);
                     changedInstallationReviewId = text(map(changedInstallationComplete, "review"), "reviewId");
@@ -445,7 +445,7 @@ class SemanticReviewJourneyIT {
     private Map<?, ?> completed(String base, String jobId, JsonMapper mapper, GenericContainer<?> indexer) throws Exception {
         Instant deadline = Instant.now().plus(JOB_TIMEOUT);
         while (Instant.now().isBefore(deadline)) {
-            HttpResponse<String> response = get(base, "/index/repositories/" + REPOSITORY_ID + "/jobs/" + jobId, ADMIN_TOKEN);
+            HttpResponse<String> response = get(base, "/index/repositories/" + REPOSITORY_ID + "/jobs?jobId=" + jobId, ADMIN_TOKEN);
             if (response.statusCode() == 200) {
                 Map<?, ?> status = mapper.readValue(response.body(), Map.class);
                 if ("COMPLETE".equals(status.get("phase"))) {

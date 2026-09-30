@@ -247,7 +247,8 @@ class SemanticReviewJdtLsIT {
         }
 
         private ReviewManifestDocument prepare(Map<String, String> selection) throws Exception {
-            String jobId = accepted(post("/index/repositories/" + REPOSITORY_ID + "/reviews", Map.of("selection", selection)));
+            String jobId = accepted(post("/index/repositories/" + REPOSITORY_ID + "/reviews",
+                    Map.of("requestId", java.util.UUID.randomUUID().toString(), "selection", selection)));
             Map<?, ?> completed = complete(jobId);
             return readManifest(new ReviewId(text(map(completed, "review"), "reviewId")));
         }
@@ -388,7 +389,7 @@ class SemanticReviewJdtLsIT {
         private Map<?, ?> complete(String jobId) throws Exception {
             Instant deadline = Instant.now().plus(JOB_TIMEOUT);
             while (Instant.now().isBefore(deadline)) {
-                HttpResponse<String> status = get("/index/repositories/" + REPOSITORY_ID + "/jobs/" + jobId);
+                HttpResponse<String> status = get("/index/repositories/" + REPOSITORY_ID + "/jobs?jobId=" + jobId);
                 if (status.statusCode() == 200) {
                     Map<?, ?> body = response(status);
                     if ("COMPLETE".equals(body.get("phase"))) {

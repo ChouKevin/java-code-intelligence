@@ -2,6 +2,8 @@ package com.java.semantic.indexer.job;
 
 import com.java.semantic.indexer.store.PublicationConflictException;
 import com.java.semantic.indexer.review.ReviewPreparationException;
+import com.java.semantic.indexer.store.GitEvidencePublicationStore;
+import com.java.semantic.indexer.store.GitMetadataResultCodec;
 import com.java.semantic.indexer.review.ReviewReadinessValidator;
 import com.java.semantic.model.index.GenerationId;
 import com.java.semantic.model.index.IndexCollections;
@@ -121,33 +123,23 @@ public final class MongoIndexJobStore implements IndexJobStore {
         return from(job);
     }
 
-    @Override
-    public IndexJob admitGitRefs(RepositoryId repositoryId) {
-        return insertGitJob(repositoryId, IndexJobOperation.GIT_REFS, GitEvidenceJob.refs());
-    }
 
     @Override
-    public IndexJob admitGitHistory(RepositoryId repositoryId, GitEvidenceId catalogId, String branch, RepositoryRevision revision) {
-        return insertGitJob(repositoryId, IndexJobOperation.GIT_HISTORY, GitEvidenceJob.history(catalogId, branch, revision));
-    }
-
-    @Override
-    public IndexJob admitGitComparison(RepositoryId repositoryId, RepositoryRevision previous, RepositoryRevision current) {
-        return insertGitJob(repositoryId, IndexJobOperation.GIT_COMPARISON, GitEvidenceJob.comparison(previous, current));
-    }
-
-    @Override
-    public IndexJob admitReview(RepositoryId repositoryId, ReviewSelection selection) {
+    public IndexJob admitReview(RepositoryId repositoryId, PreparationRequest request) {
+        requireOperation(request, PreparationOperation.PREPARE_REVIEW);
+        rejectReused(repositoryId, request.requestId());
         RepositoryId requiredRepositoryId = Objects.requireNonNull(repositoryId, "repository id is required");
-        ReviewSelection requested = Objects.requireNonNull(selection, "review selection is required");
+        ReviewSelection requested = request.selection().orElseThrow();
         IndexJobId jobId = IndexJobId.create();
         Document review = new Document("reviewId", UUID.randomUUID().toString())
                 .append("selection", selectionDocument(requested))
+                .append("selectionKey", selectionKey(requested))
                 .append("stage", ReviewPreparationStage.RESOLVING.name());
         Document job = new Document(JOB_ID, jobId.value()).append(REPOSITORY_ID, requiredRepositoryId.value()).append(ACTIVE, true)
                 .append("phase", IndexJobPhase.ACCEPTED.name()).append("operation", IndexJobOperation.REVIEW.name()).append("rebuild", false)
                 .append("jobVersion", IndexSchemaContract.PERSISTED_JOB_VERSION)
                 .append("review", review).append("createdAt", new Date());
+        appendPreparation(job, request);
         insert(job, requiredRepositoryId);
         return from(job);
     }
@@ -306,6 +298,54 @@ public final class MongoIndexJobStore implements IndexJobStore {
     }
 
     @Override
+    public Optional<IndexJob> find(RepositoryId repositoryId, IndexJobId jobId) {
+        return Optional.ofNullable(template.getCollection(IndexCollections.INDEX_JOBS)
+                .find(new Document(REPOSITORY_ID, repositoryId.value()).append(JOB_ID, jobId.value())).first()).map(this::from);
+    }
+
+    @Override
+    public Optional<IndexJob> find(RepositoryId repositoryId, PreparationRequestId requestId) {
+        return Optional.ofNullable(template.getCollection(IndexCollections.INDEX_JOBS)
+                .find(new Document(REPOSITORY_ID, repositoryId.value()).append("requestId", requestId.value())).first()).map(this::from);
+    }
+
+    @Override
+    public IndexJob admitCodebase(RepositoryId repositoryId, PreparationRequest request, String branch, RepositoryRevision revision) {
+        requireOperation(request, PreparationOperation.PREPARE_CODEBASE);
+        if (Objects.requireNonNull(branch, "configured branch is required").isBlank()) {
+            throw new IllegalArgumentException("configured branch must not be blank");
+        }
+        rejectReused(repositoryId, request.requestId());
+        IndexJobId jobId = IndexJobId.create();
+        IndexJobTarget target = new IndexJobTarget(revision, new GenerationId("g-" + jobId.value().replace("-", "")), nextGeneration(repositoryId));
+        Document job = targetDocument(jobId, repositoryId, target, IndexJobOperation.BUILD, false)
+                .append("preparationBranch", branch);
+        publicationState(repositoryId).flatMap(IndexPublicationState::currentPointer)
+                .ifPresent(pointer -> job.append("expectedParent", pointerDocument(pointer)));
+        appendPreparation(job, request);
+        insert(job, repositoryId);
+        return from(job);
+    }
+
+    @Override
+    public IndexJob admitMetadata(RepositoryId repositoryId, PreparationRequest request, String effectiveBranch) {
+        requireOperation(request, PreparationOperation.REFRESH_REPOSITORY_METADATA);
+        if (Objects.requireNonNull(effectiveBranch, "effective branch is required").isBlank()
+                || request.branch().filter(branch -> !branch.equals(effectiveBranch)).isPresent()) {
+            throw new IllegalArgumentException("effective branch must match the metadata request");
+        }
+        rejectReused(repositoryId, request.requestId());
+        IndexJobId jobId = IndexJobId.create();
+        Document job = new Document(JOB_ID, jobId.value()).append(REPOSITORY_ID, repositoryId.value()).append(ACTIVE, true)
+                .append("phase", IndexJobPhase.ACCEPTED.name()).append("operation", IndexJobOperation.GIT_METADATA.name())
+                .append("rebuild", false).append("jobVersion", IndexSchemaContract.PERSISTED_JOB_VERSION)
+                .append("gitEvidence", gitEvidenceDocument(GitEvidenceJob.metadata(effectiveBranch))).append("createdAt", new Date());
+        appendPreparation(job, request);
+        insert(job, repositoryId);
+        return from(job);
+    }
+
+    @Override
     public Optional<IndexJob> startNextAccepted() {
         Document started = template.getCollection(IndexCollections.INDEX_JOBS).findOneAndUpdate(
                 new Document(ACTIVE, true).append("phase", IndexJobPhase.ACCEPTED.name()),
@@ -343,14 +383,16 @@ public final class MongoIndexJobStore implements IndexJobStore {
     public void failUnreconciledRunningJobs() {
         reconcileReadyGitJobs();
         reconcileReadyReviews();
-        for (Document reviewJob : template.getCollection(IndexCollections.INDEX_JOBS).find(new Document(ACTIVE, true)
-                .append("phase", IndexJobPhase.RUNNING.name()).append("operation", IndexJobOperation.REVIEW.name()))) {
-            String ownerJobId = reviewJob.getString(JOB_ID);
-            template.getCollection(IndexCollections.REVIEW_MANIFESTS).updateMany(new Document(REPOSITORY_ID, reviewJob.getString(REPOSITORY_ID))
-                            .append("ownerJobId", ownerJobId).append("state", "PREPARING"),
-                    Updates.combine(Updates.set("state", "FAILED"), Updates.set("failureCategory", IndexFailureCategory.WORKER_INTERRUPTED.name())));
-            template.getCollection(IndexCollections.GIT_EVIDENCE_MANIFESTS).updateMany(new Document(REPOSITORY_ID, reviewJob.getString(REPOSITORY_ID))
-                    .append("ownerJobId", ownerJobId).append("state", "PREPARING"), Updates.set("state", "FAILED"));
+        for (Document interrupted : template.getCollection(IndexCollections.INDEX_JOBS).find(new Document(ACTIVE, true)
+                .append("phase", IndexJobPhase.RUNNING.name()).append("operation",
+                        new Document("$in", List.of(IndexJobOperation.REVIEW.name(), IndexJobOperation.GIT_METADATA.name()))))) {
+            Document ownedPreparing = new Document(REPOSITORY_ID, interrupted.getString(REPOSITORY_ID))
+                    .append("ownerJobId", interrupted.getString(JOB_ID)).append("state", "PREPARING");
+            if (IndexJobOperation.REVIEW.name().equals(interrupted.getString("operation"))) {
+                template.getCollection(IndexCollections.REVIEW_MANIFESTS).updateMany(ownedPreparing,
+                        Updates.combine(Updates.set("state", "FAILED"), Updates.set("failureCategory", IndexFailureCategory.WORKER_INTERRUPTED.name())));
+            }
+            template.getCollection(IndexCollections.GIT_EVIDENCE_MANIFESTS).updateMany(ownedPreparing, Updates.set("state", "FAILED"));
         }
         template.getCollection(IndexCollections.INDEX_JOBS).updateMany(new Document(ACTIVE, true).append("phase", IndexJobPhase.RUNNING.name()),
                 new Document("$set", new Document(ACTIVE, false).append("phase", IndexJobPhase.FAILED.name())
@@ -436,32 +478,11 @@ public final class MongoIndexJobStore implements IndexJobStore {
 
     @Override
     public boolean gitEvidenceReady(IndexJob job) {
-        if (job.operation() != IndexJobOperation.GIT_REFS && job.operation() != IndexJobOperation.GIT_HISTORY
-                && job.operation() != IndexJobOperation.GIT_COMPARISON) { return false; }
-        Document document = template.getCollection(IndexCollections.INDEX_JOBS).find(new Document(JOB_ID, job.id().value())
-                .append(REPOSITORY_ID, job.repositoryId().value())).first();
-        if (Objects.isNull(document)) { return false; }
-        Document payload = document.get("gitEvidence", Document.class);
-        if (Objects.isNull(payload) || Objects.isNull(payload.getString("evidenceId"))) { return false; }
-        Document manifest = template.getCollection(IndexCollections.GIT_EVIDENCE_MANIFESTS).find(new Document(REPOSITORY_ID, job.repositoryId().value())
-                .append("evidenceId", payload.getString("evidenceId")).append("ownerJobId", job.id().value()).append("state", "READY")).first();
-        if (Objects.isNull(manifest)) { return false; }
-        if (job.operation() != IndexJobOperation.GIT_COMPARISON) { return true; }
-        String previous = payload.getString("previousRevision");
-        String current = payload.getString("revision");
-        String previousSnapshotId = manifest.getString("previousSnapshotId");
-        String currentSnapshotId = manifest.getString("currentSnapshotId");
-        if (!"COMPARISON".equals(manifest.getString("kind")) || Objects.isNull(previous) || Objects.isNull(current)
-                || !previous.equals(manifest.getString("previous")) || !current.equals(manifest.getString("current"))
-                || Objects.isNull(previousSnapshotId) || Objects.isNull(currentSnapshotId)) {
+        if (job.operation() != IndexJobOperation.GIT_METADATA) {
             return false;
         }
-        if (!previousSnapshotId.equals(payload.getString("previousSnapshotId")) || !currentSnapshotId.equals(payload.getString("currentSnapshotId"))) {
-            return false;
-        }
-        long readySnapshots = template.getCollection(IndexCollections.GIT_EVIDENCE_MANIFESTS).countDocuments(new Document(REPOSITORY_ID, job.repositoryId().value())
-                .append("kind", "SNAPSHOT").append("state", "READY").append("evidenceId", new Document("$in", List.of(previousSnapshotId, currentSnapshotId))));
-        return readySnapshots == 2L;
+        return find(job.repositoryId(), job.id())
+                .map(persisted -> new GitEvidencePublicationStore(template).metadataReady(persisted)).orElse(false);
     }
 
     @Override
@@ -485,24 +506,10 @@ public final class MongoIndexJobStore implements IndexJobStore {
         return from(job);
     }
 
-    private IndexJob insertGitJob(RepositoryId repositoryId, IndexJobOperation operation, GitEvidenceJob payload) {
-        Objects.requireNonNull(repositoryId, "repository id is required");
-        IndexJobId jobId = IndexJobId.create();
-        Document job = new Document(JOB_ID, jobId.value()).append(REPOSITORY_ID, repositoryId.value()).append(ACTIVE, true)
-                .append("phase", IndexJobPhase.ACCEPTED.name()).append("operation", operation.name()).append("rebuild", false)
-                .append("jobVersion", IndexSchemaContract.PERSISTED_JOB_VERSION)
-                .append("gitEvidence", gitEvidenceDocument(payload)).append("createdAt", new Date());
-        insert(job, repositoryId);
-        return from(job);
-    }
 
     private void reconcileReadyGitJobs() {
         for (Document job : template.getCollection(IndexCollections.INDEX_JOBS).find(new Document(ACTIVE, true)
-                .append("phase", IndexJobPhase.RUNNING.name()).append("operation", new Document("$in", List.of(IndexJobOperation.GIT_REFS.name(), IndexJobOperation.GIT_HISTORY.name(), IndexJobOperation.GIT_COMPARISON.name()))))) {
-            Document payload = job.get("gitEvidence", Document.class);
-            if (Objects.isNull(payload)) { continue; }
-            String evidenceId = payload.getString("evidenceId");
-            if (Objects.isNull(evidenceId)) { continue; }
+                .append("phase", IndexJobPhase.RUNNING.name()).append("operation", IndexJobOperation.GIT_METADATA.name()))) {
             if (gitEvidenceReady(from(job))) {
                 terminal(new IndexJobId(job.getString(JOB_ID)), IndexJobPhase.COMPLETE, Optional.empty());
             }
@@ -577,9 +584,8 @@ public final class MongoIndexJobStore implements IndexJobStore {
         payload.catalogId().ifPresent(value -> document.append("catalogId", value.value()));
         payload.branch().ifPresent(value -> document.append("branch", value));
         payload.revision().ifPresent(value -> document.append("revision", value.value()));
-        payload.previousRevision().ifPresent(value -> document.append("previousRevision", value.value()));
-        payload.previousSnapshotId().ifPresent(value -> document.append("previousSnapshotId", value.value()));
-        payload.currentSnapshotId().ifPresent(value -> document.append("currentSnapshotId", value.value()));
+        payload.evidenceId().ifPresent(value -> document.append("evidenceId", value.value()));
+        payload.metadataResult().ifPresent(value -> document.append("metadataResult", GitMetadataResultCodec.encode(value)));
         return document;
     }
 
@@ -592,12 +598,47 @@ public final class MongoIndexJobStore implements IndexJobStore {
         try {
             template.getCollection(IndexCollections.INDEX_JOBS).insertOne(job);
         } catch (DuplicateKeyException exception) {
-            throw new IndexJobAlreadyActiveException(repositoryId);
+            throw duplicateAdmission(job, repositoryId);
         } catch (MongoWriteException exception) {
             if (exception.getError().getCategory() == ErrorCategory.DUPLICATE_KEY) {
-                throw new IndexJobAlreadyActiveException(repositoryId);
+                throw duplicateAdmission(job, repositoryId);
             }
             throw exception;
+        }
+    }
+
+    private RuntimeException duplicateAdmission(Document job, RepositoryId repositoryId) {
+        String requestId = job.getString("requestId");
+        if (Objects.nonNull(requestId)) {
+            Optional<IndexJob> existing = find(repositoryId, new PreparationRequestId(requestId));
+            if (existing.isPresent()) {
+                return new PreparationRequestReusedException(existing.orElseThrow().id(), new PreparationRequestId(requestId));
+            }
+        }
+        return new IndexJobAlreadyActiveException(repositoryId);
+    }
+
+    private void rejectReused(RepositoryId repositoryId, PreparationRequestId requestId) {
+        find(repositoryId, requestId).ifPresent(job -> {
+            throw new PreparationRequestReusedException(job.id(), requestId);
+        });
+    }
+
+    private static void appendPreparation(Document job, PreparationRequest request) {
+        Document requested = new Document("operation", request.operation().name());
+        request.branch().ifPresent(branch -> requested.append("branch", branch));
+        request.selection().ifPresent(selection -> requested.append("selection", selectionDocument(selection)));
+        job.append("requestId", request.requestId().value()).append("requested", requested);
+    }
+
+    private static String selectionKey(ReviewSelection selection) {
+        return selection.kind().name() + ":" + selection.beforeRevision().map(RepositoryRevision::value).orElse("")
+                + ":" + selection.afterRevision().value();
+    }
+
+    private static void requireOperation(PreparationRequest request, PreparationOperation operation) {
+        if (Objects.requireNonNull(request, "preparation request is required").operation() != operation) {
+            throw new IllegalArgumentException("preparation request operation does not match admission");
         }
     }
 
@@ -766,30 +807,36 @@ public final class MongoIndexJobStore implements IndexJobStore {
         if (Objects.isNull(jobVersion) || jobVersion.intValue() != IndexSchemaContract.PERSISTED_JOB_VERSION) {
             throw new IllegalArgumentException("unsupported persisted index job contract");
         }
+        if (document.containsKey("requestId") != document.containsKey("requested")) {
+            throw new IllegalArgumentException("persisted preparation requires requestId and requested together");
+        }
         IndexJobOperation operation = IndexJobOperation.valueOf(document.getString("operation"));
         Optional<IndexJobTarget> target = Optional.empty();
         if (operation == IndexJobOperation.BUILD || operation == IndexJobOperation.ROLLBACK || operation == IndexJobOperation.REVIEW) {
             target = Optional.ofNullable(document.get("target", Document.class)).map(MongoIndexJobStore::targetFrom);
         }
         Optional<GitEvidenceJob> gitEvidence = Optional.empty();
-        if (operation == IndexJobOperation.GIT_REFS || operation == IndexJobOperation.GIT_HISTORY || operation == IndexJobOperation.GIT_COMPARISON) {
+        if (operation == IndexJobOperation.GIT_METADATA) {
             Document payload = Objects.requireNonNull(document.get("gitEvidence", Document.class), "git evidence payload is required");
             Optional<GitEvidenceId> catalogId = Optional.ofNullable(payload.getString("catalogId")).map(GitEvidenceId::new);
             Optional<String> branch = Optional.ofNullable(payload.getString("branch"));
             Optional<RepositoryRevision> revision = Optional.ofNullable(payload.getString("revision")).map(RepositoryRevision::new);
             Optional<GitEvidenceId> evidenceId = Optional.ofNullable(payload.getString("evidenceId")).map(GitEvidenceId::new);
-            Optional<RepositoryRevision> previousRevision = Optional.ofNullable(payload.getString("previousRevision")).map(RepositoryRevision::ofSha);
-            Optional<GitSnapshotId> previousSnapshotId = Optional.ofNullable(payload.getString("previousSnapshotId")).map(GitSnapshotId::new);
-            Optional<GitSnapshotId> currentSnapshotId = Optional.ofNullable(payload.getString("currentSnapshotId")).map(GitSnapshotId::new);
-            gitEvidence = Optional.of(new GitEvidenceJob(catalogId, branch, revision, evidenceId, previousRevision, previousSnapshotId, currentSnapshotId));
+            gitEvidence = Optional.of(new GitEvidenceJob(catalogId, branch, revision, evidenceId,
+                    Optional.ofNullable(payload.get("metadataResult", Document.class)).map(GitMetadataResultCodec::decode)));
         }
         Optional<ReviewJobPayload> review = operation == IndexJobOperation.REVIEW
                 ? Optional.of(reviewFrom(Objects.requireNonNull(document.get("review", Document.class), "review payload is required")))
                 : Optional.empty();
+        Optional<PreparationRequest> preparation = Optional.ofNullable(document.get("requested", Document.class)).map(requested ->
+                new PreparationRequest(new PreparationRequestId(document.getString("requestId")),
+                        PreparationOperation.valueOf(requested.getString("operation")),
+                        Optional.ofNullable(requested.getString("branch")),
+                        Optional.ofNullable(requested.get("selection", Document.class)).map(MongoIndexJobStore::selectionFrom)));
         return new IndexJob(new IndexJobId(document.getString(JOB_ID)), RepositoryId.of(document.getString(REPOSITORY_ID)), target,
                 IndexJobPhase.valueOf(document.getString("phase")), Boolean.TRUE.equals(document.getBoolean(ACTIVE)),
                 Optional.ofNullable(document.getString("failureCategory")).map(IndexFailureCategory::valueOf), Boolean.TRUE.equals(document.getBoolean("rebuild")),
-                operation, gitEvidence, review);
+                operation, gitEvidence, review, preparation, Optional.ofNullable(document.getString("preparationBranch")));
     }
 
     private ReviewJobPayload reviewFrom(Document payload) {

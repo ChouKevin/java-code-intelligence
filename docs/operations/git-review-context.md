@@ -4,8 +4,9 @@ Git evidence is a historical, Mongo-only Query capability. It is prepared by the
 Indexer and stays readable by its returned immutable IDs after the remote branch
 moves. It does not change a semantic generation pointer.
 
-Run Indexer and Query with separate identities. The Indexer identity may submit
-jobs under `/index/**`; the Query identity may only read Query HTTP and `/mcp`.
+Run Indexer and Query with separate identities. The Indexer identity submits
+through private `/index/**` or the Indexer's `/mcp`; the Query identity only reads
+Query HTTP and the Query's separate `/mcp`.
 Keep `semantic.query.git-evidence.allowed-repositories` empty until an
 administrator has explicitly approved whole-repository source evidence. A
 repository with a forbidden repository, package, class, or method rule remains
@@ -21,31 +22,45 @@ the new Query release. See [tool-data-evolution.md](tool-data-evolution.md) for 
 maintenance/bootstrap and rebuild order. A changed persisted meaning requires an
 explicit cutover and rebuild; this version does not use compatibility decoders.
 
-With an admin token and a configured repository, submit each job and poll its
-repository-scoped status until `phase` is `COMPLETE`:
+Before each preparation, create and durably save a fresh canonical lowercase UUID
+`requestId`. With an admin token and configured repository, submit the intent once
+and poll its repository-scoped status until `phase` is `COMPLETE`:
 
 ```bash
-curl -sS -H "X-Api-Token: $SEMANTIC_INDEXER_ADMIN_TOKEN" -X POST \
-  "http://indexer:8080/index/repositories/orders/git/refs"
-# Save jobId, then GET /index/repositories/orders/jobs/{jobId}; save gitEvidence.evidenceId as catalogId.
+curl -sS -H "X-Api-Token: $SEMANTIC_INDEXER_ADMIN_TOKEN" -H 'Content-Type: application/json' -X POST \
+  "http://indexer:8080/index/repositories/orders/metadata" \
+  -d '{"requestId":"<saved-metadata-request-uuid>"}'
+# Omitted branch uses the configured default; an explicit "branch" prepares that branch's history.
+# Save jobId and poll the returned Location: /index/repositories/orders/jobs?jobId=<jobId>.
+# On COMPLETE, save metadataResult.catalogId, historyId, headRevision and observedAt.
 
 curl -sS -H "X-Api-Token: $SEMANTIC_INDEXER_ADMIN_TOKEN" -H 'Content-Type: application/json' -X POST \
-  "http://indexer:8080/index/repositories/orders/git/history" \
-  -d '{"catalogId":"<catalogId>","branch":"main","revision":"<lowercase-40-sha>"}'
-# Save gitEvidence.evidenceId as historyId.
-
-curl -sS -H "X-Api-Token: $SEMANTIC_INDEXER_ADMIN_TOKEN" -H 'Content-Type: application/json' -X POST \
-  "http://indexer:8080/index/repositories/orders/git/comparisons" \
-  -d '{"previous":"<lowercase-40-sha>","current":"<lowercase-40-sha>"}'
-# Save gitEvidence.comparisonId, previousSnapshotId, and currentSnapshotId.
+  "http://indexer:8080/index/repositories/orders/reviews" \
+  -d '{"requestId":"<saved-review-request-uuid>","selection":{"kind":"RANGE","beforeRevision":"<lowercase-before-sha>","afterRevision":"<lowercase-after-sha>"}}'
+# On COMPLETE/READY, save review.reviewId, comparisonId, previousSnapshotId and currentSnapshotId.
 ```
 
-Each command returns `202` and a `jobId`; completion returns the typed evidence
-IDs. Retry a failed or interrupted job by submitting a new command. Query reads
-only READY evidence, so an owned pending ID returns retryable
-`GIT_EVIDENCE_NOT_READY`; unknown or denied repositories/evidence return 404.
-READY manifests are retained manually until an operator performs data maintenance:
-there is no automatic TTL or garbage collection.
+Each submission returns `202` only after persisting the original request and job.
+Metadata performs one fetch, pins the catalog and selected branch's reachable
+history to that observation, and updates `metadataPointer` only after both are
+READY. Other catalog branches need their own refresh before they have prepared
+history. Metadata runs no JDT and does not publish a semantic generation.
+Separate `/git/refs`, `/git/history`, `/git/comparisons`, and `/jobs/{jobId}` routes
+have been removed, not aliased.
+
+If a response is lost, use
+`GET /index/repositories/orders/jobs?requestId=<original-saved-uuid>`, not the latest
+job. This also finds terminal jobs after later admissions or restart. Lookup takes
+exactly one of jobId/requestId. `REQUEST_NOT_FOUND` leaves acceptance unknown and
+permits lookup only, not resubmission; reusing a UUID is `REQUEST_ID_REUSED`.
+An inspected failure needs an explicit new intent/new UUID, never an automatic
+retry. Wait for COMPLETE rather than treating prepared IDs in a failed job as
+publication. Recovery cannot publish an orphan READY metadata pair.
+
+Query reads only READY evidence; an owned pending ID returns retryable
+`GIT_EVIDENCE_NOT_READY`, while unknown or denied repositories/evidence return 404.
+READY evidence and terminal request identities have no automatic TTL or garbage
+collection; retention is an explicit operator responsibility.
 
 The schema-4 release uses `gitEvidenceVersion: 3`. Apply the schema bootstrap
 before Indexer publication, then rebuild/reprepare evidence as required by
@@ -55,14 +70,15 @@ uses its writer role and Query uses a separate reader role.
 
 ## Review-owned comparison evidence
 
-Do not use the standalone comparison endpoint to claim a semantic review was
-prepared. A private review submission selects either a `COMMIT` SHA or explicit
-`RANGE` before/after SHAs. The dispatcher job prepares the direct comparison
+Comparison preparation is review-owned; there is no standalone comparison
+preparation route. Submit `requestId` with either a `COMMIT` SHA or explicit
+`RANGE` before/after SHAs. The dispatcher prepares the direct comparison
 and its available semantic endpoints without reading or publishing the mutable
 current pointer. A root `COMMIT` compares the real empty tree to that commit:
 it has no before semantic generation, but does have a previous snapshot of the
-empty tree. The job's `review` status supplies `reviewId`, `comparisonId`,
-`previousSnapshotId`, and `currentSnapshotId` only when it is READY.
+empty tree. The job's `review` status tracks `reviewId` and prepared
+`comparisonId`, `previousSnapshotId`, and `currentSnapshotId`. These IDs are not
+permission to read evidence before COMPLETE/READY.
 
 `get_review` returns those immutable IDs to an authorized Query client. The
 ordinary `compare_revisions`, `get_file_diff`, `list_files`, `read_file`, and
@@ -116,7 +132,7 @@ An AVAILABLE guide is readable source evidence but is excluded from code text
 search and semantic facts. Its author provenance does not prove freshness.
 Non-EMPTY_TREE snapshots bind an exact `sourceGenerationId`, revision, policy,
 digest and guide membership; equivalent same-SHA generations are not substitutes.
-Standalone comparisons require already sealed source membership for both revisions.
+Review comparisons use their endpoints' sealed source membership, not guessed source roots.
 
 The configurable preparation defaults are 2 MiB text per file and 256 MiB total
 admitted text per snapshot. Candidate guide reads obey the per-file limit, but
@@ -144,12 +160,14 @@ request fields; never derive an offset from it.
 
 ## Reproducible operator check
 
-The repository-owned synthetic external-client journey has no JDT requirement and
-is deliberately opt-in because it starts temporary MongoDB and local application
-processes. It requires Java 21, Maven 3.9+, and a reachable Docker daemon for its
-temporary MongoDB container. It first packages fresh executable jars, then performs
-admin HTTP, dispatcher/READY publication, Query HTTP, and MCP SDK calls:
+The repository-owned synthetic external-client journey is deliberately opt-in
+because it starts temporary MongoDB, separate local application processes, and
+real JDT LS for review preparation. It requires Java 21, Maven 3.9+, a reachable
+Docker daemon, and an explicit `JDTLS_HOME`. It first packages fresh executable
+jars, then exercises admin HTTP, dispatcher/READY publication, Query HTTP, and
+native MCP SDK calls. The default skipped test is not acceptance evidence.
 
 ```bash
-MAVEN_CMD=/path/to/apache-maven-3.9.6/bin/mvn bash scripts/test-git-review-context-journey.sh
+JDTLS_HOME=/opt/jdtls MAVEN_CMD=/path/to/apache-maven-3.9.6/bin/mvn \
+  bash scripts/test-git-review-context-journey.sh
 ```

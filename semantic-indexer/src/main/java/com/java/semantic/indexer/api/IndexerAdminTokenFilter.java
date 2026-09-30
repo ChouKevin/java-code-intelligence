@@ -21,7 +21,8 @@ public final class IndexerAdminTokenFilter extends OncePerRequestFilter {
 
     @Override
     protected boolean shouldNotFilter(HttpServletRequest request) {
-        return !applicationRelativePath(request).startsWith("/index/");
+        String path = applicationRelativePath(request);
+        return !path.startsWith("/index/") && !path.equals("/mcp") && !path.startsWith("/mcp/");
     }
 
     private static String applicationRelativePath(HttpServletRequest request) {

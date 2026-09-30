@@ -1,4 +1,21 @@
 spring:
+  ai:
+    mcp:
+      server:
+        enabled: true
+        protocol: STATELESS
+        type: SYNC
+        stdio: false
+        tool-callback-converter: false
+        annotation-scanner:
+          enabled: false
+        streamable-http:
+          mcp-endpoint: /mcp
+        capabilities:
+          tool: true
+          resource: false
+          prompt: false
+          completion: false
   mongodb:
     uri: ${SEMANTIC_MONGODB_URI:mongodb://localhost:27017/semantic?serverSelectionTimeoutMS=2000&connectTimeoutMS=2000&socketTimeoutMS=2000}
 

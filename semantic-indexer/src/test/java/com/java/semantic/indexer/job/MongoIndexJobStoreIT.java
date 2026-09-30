@@ -31,6 +31,8 @@ import com.java.semantic.model.source.SourceStructure;
 import org.bson.Document;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.testcontainers.mongodb.MongoDBContainer;
 
@@ -62,14 +64,14 @@ class MongoIndexJobStoreIT {
             seedPublished(template, repositoryId.value(), currentC, true, IndexSchemaContract.SCHEMA_VERSION);
             ReviewSelection selection = ReviewSelection.range(revision("a"), revision("e"));
 
-            IndexJob accepted = store.admitReview(repositoryId, selection);
+            IndexJob accepted = store.admitReview(repositoryId, reviewRequest(selection));
             template.getCollection(IndexCollections.REPOSITORIES).updateOne(new Document("repoId", repositoryId.value()),
                     new Document("$set", new Document("currentPointer", pointerDocument(currentD))));
 
             assertThat(accepted.review().orElseThrow().selection()).isEqualTo(selection);
             assertThat(accepted.review().orElseThrow().resolvedEndpoints()).isEmpty();
             assertThat(store.find(accepted.id()).orElseThrow().review().orElseThrow().selection()).isEqualTo(selection);
-            assertThatThrownBy(() -> store.admitReview(repositoryId, ReviewSelection.commit(revision("f"))))
+            assertThatThrownBy(() -> store.admitReview(repositoryId, reviewRequest(ReviewSelection.commit(revision("f")))))
                     .isInstanceOf(IndexJobAlreadyActiveException.class);
         }
     }
@@ -82,7 +84,7 @@ class MongoIndexJobStoreIT {
             RepositoryId repositoryId = RepositoryId.of("root-only");
             template.getCollection(IndexCollections.REPOSITORIES).insertOne(new Document("repoId", repositoryId.value()));
 
-            IndexJob accepted = store.admitReview(repositoryId, ReviewSelection.commit(revision("a")));
+            IndexJob accepted = store.admitReview(repositoryId, reviewRequest(ReviewSelection.commit(revision("a"))));
 
             assertThat(accepted.operation()).isEqualTo(IndexJobOperation.REVIEW);
             assertThat(accepted.phase()).isEqualTo(IndexJobPhase.ACCEPTED);
@@ -317,59 +319,138 @@ class MongoIndexJobStoreIT {
         }
     }
 
-    @Test
-    void git_evidence_uses_the_existing_active_job_constraint_and_recovers_only_ready_manifests() {
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void lost_responses_recover_exact_terminal_requests_after_later_jobs_and_restart_for_every_preparation(boolean completed) {
         try (MongoDBContainer container = container()) {
             MongoTemplate template = template(container);
             MongoIndexJobStore store = store(template);
-            IndexJob accepted = store.admitGitRefs(RepositoryId.of("orders"));
-
-            assertThatThrownBy(() -> store.admit(RepositoryId.of("orders"), revision("a"), false))
-                    .isInstanceOf(IndexJobAlreadyActiveException.class);
-            IndexJob ready = store.startNextAccepted().orElseThrow();
-            String evidenceId = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
-            template.getCollection(IndexCollections.INDEX_JOBS).updateOne(new Document("jobId", ready.id().value()),
-                    new Document("$set", new Document("gitEvidence.evidenceId", evidenceId)));
-            template.getCollection(IndexCollections.GIT_EVIDENCE_MANIFESTS).insertOne(new Document("repoId", "orders")
-                    .append("evidenceId", evidenceId).append("ownerJobId", ready.id().value()).append("kind", "CATALOG")
-                    .append("state", "READY").append("gitEvidenceVersion", IndexSchemaContract.GIT_EVIDENCE_VERSION).append("scope", "STANDALONE").append("observedAt", new Date()).append("total", 0L));
-
-            store.failUnreconciledRunningJobs();
-
-            assertThat(store.find(ready.id()).orElseThrow().phase()).isEqualTo(IndexJobPhase.COMPLETE);
-            IndexJob incomplete = store.admitGitRefs(RepositoryId.of("orders"));
-            IndexJob running = store.startNextAccepted().orElseThrow();
-            store.failUnreconciledRunningJobs();
-            assertThat(incomplete.id()).isEqualTo(running.id());
-            assertThat(store.find(incomplete.id()).orElseThrow().failureCategory()).contains(IndexFailureCategory.WORKER_INTERRUPTED);
+            for (PreparationOperation operation : PreparationOperation.values()) {
+                RepositoryId repository = RepositoryId.of("repo-" + operation.name().toLowerCase(java.util.Locale.ROOT).replace('_', '-'));
+                PreparationRequest request = request(operation);
+                IndexJob oracle = admitPreparation(store, repository, request);
+                assertThat(store.find(repository, request.requestId())).contains(oracle);
+                assertThat(store.find(RepositoryId.of("other"), request.requestId())).isEmpty();
+                assertThat(store.find(RepositoryId.of("other"), oracle.id())).isEmpty();
+                store.startNextAccepted().orElseThrow();
+                assertThat(completed ? store.complete(oracle.id())
+                        : store.fail(oracle.id(), IndexFailureCategory.SOURCE_UNAVAILABLE)).isTrue();
+                IndexJob later = admitPreparation(store, repository, request(operation));
+                MongoIndexJobStore restarted = new MongoIndexJobStore(template);
+                IndexJob recovered = restarted.find(repository, request.requestId()).orElseThrow();
+                assertThat(recovered.id()).isEqualTo(oracle.id()).isNotEqualTo(later.id());
+                assertThat(recovered.preparation()).contains(request);
+                assertThat(recovered.phase()).isEqualTo(completed ? IndexJobPhase.COMPLETE : IndexJobPhase.FAILED);
+                assertThat(recovered.failureCategory()).isEqualTo(completed ? Optional.empty() : Optional.of(IndexFailureCategory.SOURCE_UNAVAILABLE));
+                Document original = template.getCollection(IndexCollections.INDEX_JOBS)
+                        .find(new Document("jobId", oracle.id().value())).first();
+                for (PreparationOperation reusedOperation : PreparationOperation.values()) {
+                    PreparationRequest reused = request(reusedOperation, request.requestId());
+                    assertThatThrownBy(() -> admitPreparation(restarted, repository, reused))
+                            .isInstanceOfSatisfying(PreparationRequestReusedException.class, failure -> {
+                                assertThat(failure.jobId()).isEqualTo(oracle.id());
+                                assertThat(failure.requestId()).isEqualTo(request.requestId());
+                            });
+                }
+                assertThat(template.getCollection(IndexCollections.INDEX_JOBS)
+                        .find(new Document("jobId", oracle.id().value())).first()).isEqualTo(original);
+                assertThat(template.getCollection(IndexCollections.INDEX_JOBS)
+                        .countDocuments(new Document("repoId", repository.value()))).isEqualTo(2L);
+                restarted.startNextAccepted().orElseThrow();
+                restarted.fail(later.id(), IndexFailureCategory.WORKER_INTERRUPTED);
+                IndexJob other = admitPreparation(restarted, RepositoryId.of(repository.value() + "-other"), request);
+                assertThat(other.id()).isNotEqualTo(oracle.id());
+                restarted.startNextAccepted().orElseThrow();
+                restarted.fail(other.id(), IndexFailureCategory.WORKER_INTERRUPTED);
+            }
         }
     }
 
     @Test
-    void comparison_recovery_requires_a_ready_matching_comparison_and_both_ready_snapshots() {
+    void concurrent_duplicate_requests_have_one_durable_winner_and_reused_identity_for_every_preparation() throws Exception {
+        try (MongoDBContainer container = container(); ExecutorService callers = Executors.newFixedThreadPool(2)) {
+            MongoTemplate template = template(container);
+            MongoIndexJobStore store = store(template);
+            for (PreparationOperation operation : PreparationOperation.values()) {
+                RepositoryId repository = RepositoryId.of("race-" + operation.name().toLowerCase(java.util.Locale.ROOT).replace('_', '-'));
+                PreparationRequest request = request(operation);
+                CountDownLatch ready = new CountDownLatch(2);
+                CountDownLatch release = new CountDownLatch(1);
+                java.util.concurrent.Callable<Object> submit = () -> {
+                    ready.countDown();
+                    if (!release.await(5L, TimeUnit.SECONDS)) {
+                        throw new IllegalStateException("admission barrier timed out");
+                    }
+                    try {
+                        return admitPreparation(new MongoIndexJobStore(template), repository, request);
+                    } catch (PreparationRequestReusedException reused) {
+                        return reused;
+                    }
+                };
+                Future<Object> first = callers.submit(submit);
+                Future<Object> second = callers.submit(submit);
+                assertThat(ready.await(5L, TimeUnit.SECONDS)).isTrue();
+                release.countDown();
+                List<Object> results = List.of(first.get(5L, TimeUnit.SECONDS), second.get(5L, TimeUnit.SECONDS));
+                IndexJob winner = results.stream().filter(IndexJob.class::isInstance).map(IndexJob.class::cast).findFirst().orElseThrow();
+                assertThat(results.stream().filter(IndexJob.class::isInstance)).hasSize(1);
+                PreparationRequestReusedException loser = results.stream().filter(PreparationRequestReusedException.class::isInstance)
+                        .map(PreparationRequestReusedException.class::cast).findFirst().orElseThrow();
+                assertThat(loser.jobId()).isEqualTo(winner.id());
+                assertThat(store.find(repository, request.requestId())).contains(winner);
+                assertThat(template.getCollection(IndexCollections.INDEX_JOBS)
+                        .countDocuments(new Document("repoId", repository.value()))).isEqualTo(1L);
+                store.startNextAccepted().orElseThrow();
+                store.fail(winner.id(), IndexFailureCategory.WORKER_INTERRUPTED);
+            }
+        }
+    }
+
+    @Test
+    void restarted_incomplete_preparations_preserve_exact_request_and_fail_without_retrying() {
         try (MongoDBContainer container = container()) {
             MongoTemplate template = template(container);
             MongoIndexJobStore store = store(template);
-            IndexJob accepted = store.admitGitComparison(RepositoryId.of("orders"), revision("a"), revision("b"));
-            IndexJob running = store.startNextAccepted().orElseThrow();
-            String comparisonId = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
-            String previousSnapshotId = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb";
-            String currentSnapshotId = "cccccccc-cccc-cccc-cccc-cccccccccccc";
-            template.getCollection(IndexCollections.INDEX_JOBS).updateOne(new Document("jobId", running.id().value()),
-                    new Document("$set", new Document("gitEvidence.evidenceId", comparisonId)));
-            template.getCollection(IndexCollections.GIT_EVIDENCE_MANIFESTS).insertMany(List.of(
-                    new Document("repoId", "orders").append("evidenceId", comparisonId).append("ownerJobId", running.id().value())
-                            .append("kind", "COMPARISON").append("state", "READY").append("previous", revision("a").value())
-                            .append("current", revision("b").value()).append("previousSnapshotId", previousSnapshotId).append("currentSnapshotId", currentSnapshotId),
-                    new Document("repoId", "orders").append("evidenceId", previousSnapshotId).append("kind", "SNAPSHOT").append("state", "READY"),
-                    new Document("repoId", "orders").append("evidenceId", currentSnapshotId).append("kind", "SNAPSHOT").append("state", "PREPARING")));
-
-            store.failUnreconciledRunningJobs();
-
-            assertThat(store.find(accepted.id()).orElseThrow().phase()).isEqualTo(IndexJobPhase.FAILED);
-            IndexJob retry = store.admitGitComparison(RepositoryId.of("orders"), revision("a"), revision("b"));
-            assertThat(retry.phase()).isEqualTo(IndexJobPhase.ACCEPTED);
+            RepositoryId repository = RepositoryId.of("orders");
+            for (PreparationOperation operation : PreparationOperation.values()) {
+                PreparationRequest request = request(operation);
+                IndexJob accepted = admitPreparation(store, repository, request);
+                store.startNextAccepted().orElseThrow();
+                MongoIndexJobStore restarted = new MongoIndexJobStore(template);
+                restarted.reconcileCommittedJobs();
+                restarted.failUnreconciledRunningJobs();
+                IndexJob recovered = restarted.find(repository, request.requestId()).orElseThrow();
+                assertThat(recovered.id()).isEqualTo(accepted.id());
+                assertThat(recovered.preparation()).contains(request);
+                assertThat(recovered.phase()).isEqualTo(IndexJobPhase.FAILED);
+                assertThat(recovered.failureCategory()).contains(IndexFailureCategory.WORKER_INTERRUPTED);
+                assertThat(restarted.startNextAccepted()).isEmpty();
+            }
         }
+    }
+
+    private static PreparationRequest reviewRequest(ReviewSelection selection) {
+        return PreparationRequest.review(new PreparationRequestId(java.util.UUID.randomUUID().toString()), selection);
+    }
+
+    private static PreparationRequest request(PreparationOperation operation) {
+        return request(operation, new PreparationRequestId(java.util.UUID.randomUUID().toString()));
+    }
+
+    private static PreparationRequest request(PreparationOperation operation, PreparationRequestId id) {
+        return switch (operation) {
+            case PREPARE_CODEBASE -> PreparationRequest.codebase(id);
+            case REFRESH_REPOSITORY_METADATA -> PreparationRequest.metadata(id, Optional.empty());
+            case PREPARE_REVIEW -> PreparationRequest.review(id, ReviewSelection.range(revision("a"), revision("b")));
+        };
+    }
+
+    private static IndexJob admitPreparation(MongoIndexJobStore store, RepositoryId repository, PreparationRequest request) {
+        return switch (request.operation()) {
+            case PREPARE_CODEBASE -> store.admitCodebase(repository, request, "configured", revision("b"));
+            case REFRESH_REPOSITORY_METADATA -> store.admitMetadata(repository, request, "configured");
+            case PREPARE_REVIEW -> store.admitReview(repository, request);
+        };
     }
 
     @Test
@@ -412,6 +493,9 @@ class MongoIndexJobStoreIT {
         return new Document("jobId", jobId).append("repoId", "orders").append("active", true)
                 .append("phase", IndexJobPhase.RUNNING.name()).append("operation", IndexJobOperation.REVIEW.name()).append("rebuild", false)
                 .append("jobVersion", IndexSchemaContract.PERSISTED_JOB_VERSION).append("generationHighWatermark", 6L)
+                .append("requestId", java.util.UUID.randomUUID().toString())
+                .append("requested", new Document("operation", PreparationOperation.PREPARE_REVIEW.name())
+                        .append("selection", review.get("selection", Document.class)))
                 .append("review", review).append("createdAt", new Date());
     }
 

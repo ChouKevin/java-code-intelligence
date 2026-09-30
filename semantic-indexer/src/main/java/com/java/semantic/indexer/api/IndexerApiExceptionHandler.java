@@ -1,31 +1,28 @@
 package com.java.semantic.indexer.api;
 
+import com.java.semantic.indexer.application.IndexerPreparationErrorMapper;
 import com.java.semantic.indexer.job.IndexJobAlreadyActiveException;
-import java.util.List;
+import com.java.semantic.indexer.job.IndexJobNotFoundException;
+import com.java.semantic.indexer.job.PreparationRequestNotFoundException;
+import com.java.semantic.indexer.job.PreparationRequestReusedException;
+import com.java.semantic.indexer.store.SemanticIndexUnavailableException;
+import com.java.semantic.repository.application.RepositoryBusyException;
+import com.java.semantic.repository.application.RepositoryMutationException;
+import com.java.semantic.repository.application.RepositoryNotFoundException;
 import java.util.Map;
-import java.util.UUID;
-import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
-/** Stable error envelope for Indexer administration failures with public machine-readable codes. */
 @RestControllerAdvice
 public final class IndexerApiExceptionHandler {
-    @ExceptionHandler(IndexJobAlreadyActiveException.class)
-    public ResponseEntity<ApiError> activeJob(IndexJobAlreadyActiveException exception) {
-        ApiError error = new ApiError("REPOSITORY_ACTIVE", exception.getMessage(), exception.repositoryId().value(),
-                List.of(), UUID.randomUUID().toString());
-        return ResponseEntity.status(HttpStatus.CONFLICT).body(error);
-    }
-
-    @ExceptionHandler(ReviewIndexRequest.InvalidSelectionException.class)
-    public ResponseEntity<ApiError> invalidReviewSelection(ReviewIndexRequest.InvalidSelectionException exception) {
-        ApiError error = new ApiError("INVALID_ARGUMENT", exception.getMessage(), null, List.of(), UUID.randomUUID().toString());
-        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(error);
-    }
-
-    public record ApiError(String errorCode, String message, String repoId, List<Map<String, Object>> candidates,
-                           String requestId) {
+    private final IndexerPreparationErrorMapper errors = new IndexerPreparationErrorMapper();
+    @ExceptionHandler({IllegalArgumentException.class, IndexJobAlreadyActiveException.class,
+            IndexJobNotFoundException.class, PreparationRequestNotFoundException.class, PreparationRequestReusedException.class,
+            RepositoryNotFoundException.class, RepositoryBusyException.class, RepositoryMutationException.class,
+            SemanticIndexUnavailableException.class, org.springframework.dao.DataAccessException.class})
+    public ResponseEntity<Map<String, Object>> applicationFailure(RuntimeException exception) {
+        IndexerPreparationErrorMapper.Failure failure = errors.map(exception);
+        return ResponseEntity.status(failure.status()).body(failure.body());
     }
 }

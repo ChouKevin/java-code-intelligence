@@ -1,6 +1,13 @@
 package com.java.semantic.indexer.job;
 
 import com.java.semantic.indexer.build.RepositoryBuildRunner;
+import com.java.semantic.indexer.config.ConfiguredRepositoryPublisher;
+import com.java.semantic.indexer.review.ReviewPreparationService;
+import com.java.semantic.indexer.review.ReviewPublicationStore;
+import com.java.semantic.indexer.review.ReviewReadinessValidator;
+import com.java.semantic.indexer.review.ReviewGitEvidencePort;
+import com.java.semantic.model.review.ReviewSelection;
+import com.java.semantic.model.review.ResolvedReviewEndpoints;
 import com.java.semantic.indexer.build.FullIndexPlan;
 import com.java.semantic.indexer.build.FullIndexPlanner;
 import com.java.semantic.indexer.build.GenerationValidator;
@@ -110,16 +117,26 @@ class DispatchedGitEvidenceIT {
             GitEvidenceJobHandler handler = new GitEvidenceJobHandler(repositories, new JGitRepositoryAdapter(
                     properties(remotePath), JdtLsTestProperties.linuxUid()),
                     new GitEvidencePublicationStore(template), mock(RepositoryMutationListener.class));
-            IndexJobExecutor executor = new IndexJobExecutor(jobs, mock(RepositoryBuildRunner.class), mock(PublicationPort.class), Optional.empty(),
-                    Optional.of(handler));
+            ReviewPreparationService reviews = new ReviewPreparationService(jobs,
+                    (job, side, candidates) -> candidates.stream().filter(candidate ->
+                            new GenerationValidator(template).validatePersistedSealed(candidate.selected()).valid())
+                            .findFirst().orElseThrow(), new ReviewGitEvidencePort() {
+                        @Override
+                        public ResolvedReviewEndpoints resolve(IndexJob job) { return handler.resolveReview(job); }
+                        @Override
+                        public void prepare(IndexJob job) { handler.prepareReview(job); }
+                    }, new ReviewPublicationStore(template, new ReviewReadinessValidator(template), jobs), template);
+            IndexJobExecutor executor = new IndexJobExecutor(jobs, mock(RepositoryBuildRunner.class), mock(PublicationPort.class),
+                    Optional.empty(), Optional.of(handler), Optional.of(reviews));
             IndexJobDispatcher dispatcher = new IndexJobDispatcher(jobs, executor, new IndexJobProperties(Duration.ofMillis(5)));
             IndexRequestService requests = new IndexRequestService(mock(RepositoryRevisionResolver.class), repositories, jobs);
+            new ConfiguredRepositoryPublisher(template, repositories).publish();
 
-            IndexJob catalogJob = requests.prepareGitRefs(RepositoryId.of("orders"));
+            IndexJob catalogJob = requests.refreshRepositoryMetadata(RepositoryId.of("orders"), requestId(), Optional.empty());
             dispatcher.dispatchOnce();
             IndexJob catalogComplete = jobs.find(catalogJob.id()).orElseThrow();
             assertThat(catalogComplete.phase()).isEqualTo(IndexJobPhase.COMPLETE);
-            String catalogId = catalogComplete.gitEvidence().orElseThrow().evidenceId().orElseThrow().value();
+            String catalogId = catalogComplete.gitEvidence().orElseThrow().catalogId().orElseThrow().value();
             GitEvidenceReadService reader = reader(template);
             SemanticQueryContract.GitBranchCollection catalog = reader.branches(
                     new SemanticQueryContract.GitBranchRequest("orders", Optional.of(catalogId), 0, 20));
@@ -129,10 +146,10 @@ class DispatchedGitEvidenceIT {
                     .andExpect(status().isOk()).andExpect(jsonPath("$.catalogId").value(catalogId))
                     .andExpect(jsonPath("$.items[0].head").value(head.value()));
 
-            IndexJob historyJob = requests.prepareGitHistory(RepositoryId.of("orders"), catalogId, "main", head.value());
-            dispatcher.dispatchOnce();
-            IndexJob historyComplete = jobs.find(historyJob.id()).orElseThrow();
+            IndexJob historyComplete = catalogComplete;
             String historyId = historyComplete.gitEvidence().orElseThrow().evidenceId().orElseThrow().value();
+            assertThat(historyComplete.gitEvidence().orElseThrow().metadataResult().orElseThrow().total()).isEqualTo(2L);
+            assertThat(new GitEvidencePublicationStore(template).metadataReady(catalogJob)).isTrue();
             SemanticQueryContract.GitCommitCollection history = reader.commits(
                     new SemanticQueryContract.GitCommitRequest("orders", historyId, head.value(), 0, 20));
             assertThat(history.items()).extracting(SemanticQueryContract.GitCommitItem::revision).containsExactly(head.value(), first.value());
@@ -143,43 +160,42 @@ class DispatchedGitEvidenceIT {
             push(seed, "main");
             seedPreparedSource(template, jobs, seedPath, head, List.of(EVIDENCE_SOURCE));
             seedPreparedSource(template, jobs, seedPath, added, List.of(ADDED_SOURCE, EVIDENCE_SOURCE));
-            IndexJob addComparisonJob = requests.prepareGitComparison(RepositoryId.of("orders"), head.value(), added.value());
+            IndexJob addComparisonJob = requests.prepareReview(RepositoryId.of("orders"), requestId(), ReviewSelection.range(head, added));
             dispatcher.dispatchOnce();
             IndexJob addComparisonComplete = jobs.find(addComparisonJob.id()).orElseThrow();
-            String addComparisonId = addComparisonComplete.gitEvidence().orElseThrow().evidenceId().orElseThrow().value();
-            SemanticQueryContract.GitComparisonCollection additions = reader.comparisons(new SemanticQueryContract.GitComparisonRequest("orders",
-                    addComparisonId, head.value(), added.value(), 0, 20));
-            assertThat(additions.items()).extracting(SemanticQueryContract.GitChangeItem::kind).contains("ADD");
-            String snapshotId = addComparisonComplete.gitEvidence().orElseThrow().currentSnapshotId().orElseThrow().value();
-            SemanticQueryContract.GitFileCollection snapshotFiles = reader.listFiles(new SemanticQueryContract.GitFileListRequest("orders",
-                    snapshotId, added.value(), SOURCE_ROOT, 0, 20));
-            assertThat(snapshotFiles.items()).extracting(SemanticQueryContract.GitFileItem::path).contains(ADDED_SOURCE, EVIDENCE_SOURCE);
-            SemanticQueryContract.GitFileContent snapshotFile = reader.readFile(new SemanticQueryContract.GitFileReadRequest("orders", snapshotId,
-                    added.value(), ADDED_SOURCE, Optional.empty(), 20, Optional.empty()));
-            assertThat(snapshotFile.content()).contains("class Added");
-            SemanticQueryContract.GitTextSearchResult snapshotSearch = reader.searchText(new SemanticQueryContract.GitTextSearchRequest("orders", snapshotId,
-                    added.value(), "class", Optional.empty(), Optional.empty(), 20));
-            assertThat(snapshotSearch.items()).extracting(SemanticQueryContract.GitTextMatch::path).contains(ADDED_SOURCE, EVIDENCE_SOURCE);
+            assertThat(addComparisonComplete.phase()).isEqualTo(IndexJobPhase.COMPLETE);
+            String addComparisonId = addComparisonComplete.review().orElseThrow().comparisonId().orElseThrow().value();
+            assertThat(template.getCollection(IndexCollections.GIT_COMPARISON_CHANGES)
+                    .find(new Document("comparisonId", addComparisonId)).into(new java.util.ArrayList<>()))
+                    .anySatisfy(change -> assertThat(change.getString("kind")).isEqualTo("ADD"));
+            String snapshotId = addComparisonComplete.review().orElseThrow().currentSnapshotId().orElseThrow().value();
+            assertThat(template.getCollection(IndexCollections.GIT_SNAPSHOT_FILES)
+                    .find(new Document("snapshotId", snapshotId)).into(new java.util.ArrayList<>()))
+                    .extracting(file -> file.getString("path")).contains(ADDED_SOURCE, EVIDENCE_SOURCE);
+            assertThat(template.getCollection(IndexCollections.GIT_SNAPSHOT_CHUNKS)
+                    .find(new Document("snapshotId", snapshotId)).into(new java.util.ArrayList<>()))
+                    .anySatisfy(chunk -> assertThat(new String(chunk.get("bytes", org.bson.types.Binary.class).getData(),
+                            java.nio.charset.StandardCharsets.UTF_8)).contains("class Added"));
 
             RepositoryRevision deleted = deleteAdditional(seed, seedPath, "delete", ADDED_SOURCE);
             push(seed, "main");
             seedPreparedSource(template, jobs, seedPath, deleted, List.of(EVIDENCE_SOURCE));
-            IndexJob deleteComparisonJob = requests.prepareGitComparison(RepositoryId.of("orders"), added.value(), deleted.value());
+            IndexJob deleteComparisonJob = requests.prepareReview(RepositoryId.of("orders"), requestId(), ReviewSelection.range(added, deleted));
             dispatcher.dispatchOnce();
-            String deleteComparisonId = jobs.find(deleteComparisonJob.id()).orElseThrow().gitEvidence().orElseThrow().evidenceId().orElseThrow().value();
-            SemanticQueryContract.GitComparisonCollection deletions = reader.comparisons(new SemanticQueryContract.GitComparisonRequest("orders",
-                    deleteComparisonId, added.value(), deleted.value(), 0, 20));
-            assertThat(deletions.items()).extracting(SemanticQueryContract.GitChangeItem::kind).contains("DELETE");
+            String deleteComparisonId = jobs.find(deleteComparisonJob.id()).orElseThrow().review().orElseThrow().comparisonId().orElseThrow().value();
+            assertThat(template.getCollection(IndexCollections.GIT_COMPARISON_CHANGES)
+                    .find(new Document("comparisonId", deleteComparisonId)).into(new java.util.ArrayList<>()))
+                    .anySatisfy(change -> assertThat(change.getString("kind")).isEqualTo("DELETE"));
 
             RepositoryRevision modeAndContent = commitModeAndContent(seed, seedPath);
             push(seed, "main");
             seedPreparedSource(template, jobs, seedPath, modeAndContent, List.of(EVIDENCE_SOURCE));
-            IndexJob modeComparisonJob = requests.prepareGitComparison(RepositoryId.of("orders"), deleted.value(), modeAndContent.value());
+            IndexJob modeComparisonJob = requests.prepareReview(RepositoryId.of("orders"), requestId(), ReviewSelection.range(deleted, modeAndContent));
             dispatcher.dispatchOnce();
-            String modeComparisonId = jobs.find(modeComparisonJob.id()).orElseThrow().gitEvidence().orElseThrow().evidenceId().orElseThrow().value();
-            SemanticQueryContract.GitComparisonCollection modeChanges = reader.comparisons(new SemanticQueryContract.GitComparisonRequest("orders",
-                    modeComparisonId, deleted.value(), modeAndContent.value(), 0, 20));
-            assertThat(modeChanges.items()).extracting(SemanticQueryContract.GitChangeItem::kind).contains("MODE");
+            String modeComparisonId = jobs.find(modeComparisonJob.id()).orElseThrow().review().orElseThrow().comparisonId().orElseThrow().value();
+            assertThat(template.getCollection(IndexCollections.GIT_COMPARISON_CHANGES)
+                    .find(new Document("comparisonId", modeComparisonId)).into(new java.util.ArrayList<>()))
+                    .anySatisfy(change -> assertThat(change.getString("kind")).isEqualTo("MODE"));
 
             commit(seed, seedPath, "third", "class Evidence { int version; int later; }");
             push(seed, "main");
@@ -188,6 +204,10 @@ class DispatchedGitEvidenceIT {
             assertThat(reader.commits(new SemanticQueryContract.GitCommitRequest("orders", historyId, head.value(), 0, 20)).items())
                     .extracting(SemanticQueryContract.GitCommitItem::revision).containsExactly(head.value(), first.value());
         }
+    }
+
+    private static PreparationRequestId requestId() {
+        return new PreparationRequestId(java.util.UUID.randomUUID().toString());
     }
 
     private RepositoryRuntimeRegistry registry(Path remotePath) {

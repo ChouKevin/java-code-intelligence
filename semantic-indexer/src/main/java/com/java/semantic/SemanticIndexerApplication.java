@@ -21,7 +21,7 @@ import org.springframework.data.mongodb.core.convert.MongoCustomConversions;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.core.convert.converter.Converter;
 
-/** Indexer runs administrative index mutations only; read APIs and MCP live in semantic-query. */
+/** Indexer owns asynchronous preparation through authenticated HTTP and MCP. */
 @SpringBootApplication
 public class SemanticIndexerApplication {
 

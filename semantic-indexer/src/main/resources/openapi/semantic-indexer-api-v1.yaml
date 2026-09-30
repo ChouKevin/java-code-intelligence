@@ -1,4 +1,4 @@
-openapi: 3.0.3
+openapi: 3.1.0
 info:
   title: Semantic Indexer Admin API
   version: v1
@@ -52,52 +52,46 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/RepositoryNotFound' }
         '409': { $ref: '#/components/responses/IndexConflict' }
-  /index/repositories/{repoId}/git/refs:
+  /index/repositories/{repoId}/metadata:
     post:
-      operationId: prepareRepositoryGitRefs
-      parameters: [ { $ref: '#/components/parameters/RepositoryId' } ]
-      responses:
-        '202': { $ref: '#/components/responses/IndexJobAccepted' }
-        '400': { $ref: '#/components/responses/BadRequest' }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-        '403': { $ref: '#/components/responses/Forbidden' }
-        '404': { $ref: '#/components/responses/RepositoryNotFound' }
-        '409': { $ref: '#/components/responses/IndexConflict' }
-  /index/repositories/{repoId}/git/history:
-    post:
-      operationId: prepareRepositoryGitHistory
+      operationId: refresh_repository_metadata
+      description: Omitted branch uses configured default; save requestId before submission and poll the accepted job. Unknown acceptance permits lookup only.
       parameters: [ { $ref: '#/components/parameters/RepositoryId' } ]
       requestBody:
         required: true
         content:
           application/json:
-            schema: { $ref: '#/components/schemas/GitHistoryIndexRequest' }
+            schema: { $ref: '#/components/schemas/MetadataRequest' }
       responses:
-        '202': { $ref: '#/components/responses/IndexJobAccepted' }
+        '202': { $ref: '#/components/responses/PreparationAccepted' }
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/RepositoryNotFound' }
         '409': { $ref: '#/components/responses/IndexConflict' }
-  /index/repositories/{repoId}/git/comparisons:
+        '503': { $ref: '#/components/responses/Unavailable' }
+  /index/repositories/{repoId}/codebase:
     post:
-      operationId: prepareRepositoryGitComparison
+      operationId: prepare_codebase
+      description: Resolve configured fixed branch freshly and persist exact target before acceptance. No arbitrary branch, tag or revision; no JDT in admission.
       parameters: [ { $ref: '#/components/parameters/RepositoryId' } ]
       requestBody:
         required: true
         content:
           application/json:
-            schema: { $ref: '#/components/schemas/GitComparisonIndexRequest' }
+            schema: { $ref: '#/components/schemas/CodebaseRequest' }
       responses:
-        '202': { $ref: '#/components/responses/IndexJobAccepted' }
+        '202': { $ref: '#/components/responses/PreparationAccepted' }
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/RepositoryNotFound' }
         '409': { $ref: '#/components/responses/IndexConflict' }
+        '503': { $ref: '#/components/responses/Unavailable' }
   /index/repositories/{repoId}/reviews:
     post:
-      operationId: prepareRepositoryCurrentToCommitReview
+      operationId: prepare_review
+      description: Save requestId before submitting explicit selection; admission does not fetch or analyze. Poll get_job, never implicitly resubmit.
       parameters: [ { $ref: '#/components/parameters/RepositoryId' } ]
       requestBody:
         required: true
@@ -105,12 +99,13 @@ paths:
           application/json:
             schema: { $ref: '#/components/schemas/ReviewIndexRequest' }
       responses:
-        '202': { $ref: '#/components/responses/IndexJobAccepted' }
+        '202': { $ref: '#/components/responses/PreparationAccepted' }
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/RepositoryNotFound' }
         '409': { $ref: '#/components/responses/IndexConflict' }
+        '503': { $ref: '#/components/responses/Unavailable' }
   /index/repositories/{repoId}/publication:
     get:
       operationId: getRepositoryPublication
@@ -120,15 +115,21 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/RepositoryNotFound' }
-  /index/repositories/{repoId}/jobs/{jobId}:
+  /index/repositories/{repoId}/jobs:
     get:
-      operationId: getRepositoryIndexJob
-      parameters: [ { $ref: '#/components/parameters/RepositoryId' }, { $ref: '#/components/parameters/IndexJobId' } ]
+      operationId: get_job
+      description: Exactly one of jobId or requestId, each occurring once. Exact repository-scoped lookup includes terminal jobs. REQUEST_NOT_FOUND means acceptance unknown; retry lookup only, never resubmit.
+      parameters:
+        - { $ref: '#/components/parameters/RepositoryId' }
+        - { name: jobId, in: query, schema: { type: string, minLength: 1 } }
+        - { name: requestId, in: query, schema: { $ref: '#/components/schemas/CanonicalUuid' } }
       responses:
         '200': { $ref: '#/components/responses/IndexJobStatus' }
+        '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/IndexJobNotFound' }
+        '503': { $ref: '#/components/responses/Unavailable' }
   /index/repositories/{repoId}/ensure:
     post:
       operationId: ensureRepositoryIndex
@@ -216,13 +217,22 @@ components:
       name: repoId
       in: path
       required: true
-      schema: { type: string, minLength: 1 }
-    IndexJobId:
-      name: jobId
-      in: path
-      required: true
-      schema: { type: string, minLength: 1 }
+      schema: { $ref: '#/components/schemas/RepositoryIdentity' }
   responses:
+    PreparationAccepted:
+      description: Original request and job persisted atomically; processing is asynchronous.
+      headers:
+        Location:
+          description: Exact polling URL /index/repositories/{repositoryId}/jobs?jobId={jobId}
+          schema: { type: string }
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/IndexJobStatusResponse' }
+    Unavailable:
+      description: Dependency unavailable; unknown acceptance permits lookup of the original requestId only.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ApiError' }
     IndexJobAccepted:
       description: Source revision selected and asynchronous job accepted.
       content:
@@ -245,21 +255,15 @@ components:
           schema: { $ref: '#/components/schemas/IndexPublicationResponse' }
     Unauthorized:
       description: Missing or invalid Indexer-admin credential.
-      content:
-        application/json:
-          schema: { $ref: '#/components/schemas/ApiError' }
     Forbidden:
       description: Indexer administration is disabled because no admin credential is configured.
-      content:
-        application/json:
-          schema: { $ref: '#/components/schemas/ApiError' }
     RepositoryNotFound:
       description: The repository is not configured.
       content:
         application/json:
           schema: { $ref: '#/components/schemas/ApiError' }
     IndexJobNotFound:
-      description: The requested asynchronous job does not exist.
+      description: JOB_NOT_FOUND or REQUEST_NOT_FOUND. The latter means acceptance unknown and permits repeated lookup only, never blind resubmission.
       content:
         application/json:
           schema: { $ref: '#/components/schemas/ApiError' }
@@ -269,7 +273,7 @@ components:
         application/json:
           schema: { $ref: '#/components/schemas/ApiError' }
     IndexConflict:
-      description: An active job, required schema rebuild, or expected pointer prevents the operation.
+      description: REQUEST_ID_REUSED or active repository work. Reuse returns the original authorized jobId/requestId without modifying the job.
       content:
         application/json:
           schema: { $ref: '#/components/schemas/ApiError' }
@@ -301,27 +305,25 @@ components:
     IndexJobStatusResponse:
       type: object
       additionalProperties: false
-      required: [jobId, repositoryId, operation, phase, active, gitEvidence]
+      required: [jobId, repositoryId, operation, phase, active]
       properties:
         jobId: { type: string }
-        repositoryId: { type: string }
-        target: { $ref: '#/components/schemas/IndexJobTarget', nullable: true }
-        operation: { type: string, enum: [BUILD, ROLLBACK, RESET, NO_WORK, GIT_REFS, GIT_HISTORY, GIT_COMPARISON, REVIEW] }
+        repositoryId: { $ref: '#/components/schemas/RepositoryIdentity' }
+        target: { $ref: '#/components/schemas/IndexJobTarget' }
+        operation: { type: string, enum: [BUILD, ROLLBACK, RESET, NO_WORK, GIT_METADATA, REVIEW] }
         phase: { type: string, enum: [ACCEPTED, RUNNING, COMPLETE, FAILED] }
         active: { type: boolean }
         failureCategory:
           type: string
-          nullable: true
           enum: [WORKER_INTERRUPTED, SOURCE_UNAVAILABLE, SCHEMA_REBUILD_REQUIRED, PUBLICATION_CONFLICT, VALIDATION_FAILED, ANALYSIS_UNAVAILABLE, REVIEW_EVIDENCE_MISMATCH, REVIEW_BASELINE_UNAVAILABLE]
-        currentPointer:
-          allOf: [{ $ref: '#/components/schemas/GenerationPointer' }]
-          nullable: true
-        gitEvidence:
-          allOf: [{ $ref: '#/components/schemas/GitEvidenceResult' }]
-          nullable: true
-        review:
-          allOf: [{ $ref: '#/components/schemas/ReviewJob' }]
-          nullable: true
+        currentPointer: { $ref: '#/components/schemas/GenerationPointer' }
+        requestId: { $ref: '#/components/schemas/CanonicalUuid' }
+        requested: { $ref: '#/components/schemas/RequestedPreparation' }
+        preparationBranch: { type: string }
+        branch: { type: string }
+        headRevision: { type: string, pattern: '^[0-9a-f]{40}$' }
+        metadataResult: { $ref: '#/components/schemas/MetadataResult' }
+        review: { $ref: '#/components/schemas/ReviewJob' }
     IndexPublicationResponse:
       type: object
       additionalProperties: false
@@ -336,16 +338,13 @@ components:
     ApiError:
       type: object
       additionalProperties: false
-      required: [errorCode, message, candidates, requestId]
+      required: [code, message, retryable]
       properties:
-        errorCode: { type: string }
+        code: { type: string }
         message: { type: string }
-        repoId: { type: string, nullable: true }
-        expectedRevision: { type: string, nullable: true }
-        currentRevision: { type: string, nullable: true }
-        target: { type: object, nullable: true }
-        candidates: { type: array, items: { type: object } }
-        requestId: { type: string }
+        retryable: { type: boolean, description: REQUEST_NOT_FOUND retryability authorizes lookup only, not resubmission. }
+        jobId: { type: string, minLength: 1 }
+        requestId: { $ref: '#/components/schemas/CanonicalUuid' }
     ReviewSelection:
       oneOf:
         - type: object
@@ -372,8 +371,9 @@ components:
     ReviewIndexRequest:
       type: object
       additionalProperties: false
-      required: [selection]
+      required: [requestId, selection]
       properties:
+        requestId: { $ref: '#/components/schemas/CanonicalUuid' }
         selection: { $ref: '#/components/schemas/ReviewSelection' }
     ReviewJob:
       type: object
@@ -384,37 +384,66 @@ components:
         selection: { $ref: '#/components/schemas/ReviewSelection' }
         resolvedEndpoints: { $ref: '#/components/schemas/ResolvedReviewEndpoints' }
         stage: { type: string, enum: [RESOLVING, PREPARING_BEFORE, BUILDING_BEFORE, PREPARING_AFTER, BUILDING_AFTER, PREPARING_GIT, VALIDATING, READY] }
-        beforeGenerationId: { type: string, nullable: true }
-        afterGenerationId: { type: string, nullable: true }
-        comparisonId: { type: string, format: uuid, nullable: true }
-        previousSnapshotId: { type: string, format: uuid, nullable: true }
-        currentSnapshotId: { type: string, format: uuid, nullable: true }
-    GitHistoryIndexRequest:
+        beforeGenerationId: { type: string }
+        afterGenerationId: { type: string }
+        comparisonId: { type: string }
+        previousSnapshotId: { type: string }
+        currentSnapshotId: { type: string }
+    CanonicalUuid:
+      type: string
+      pattern: '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+    CodebaseRequest:
       type: object
       additionalProperties: false
-      required: [catalogId, branch, revision]
+      required: [requestId]
       properties:
-        catalogId: { type: string, format: uuid }
-        branch: { type: string, minLength: 1 }
-        revision: { type: string, pattern: '^[0-9a-f]{40}$' }
-    GitComparisonIndexRequest:
+        requestId: { $ref: '#/components/schemas/CanonicalUuid' }
+    MetadataRequest:
       type: object
       additionalProperties: false
-      required: [previous, current]
+      required: [requestId]
       properties:
-        previous: { type: string, pattern: '^[0-9a-f]{40}$' }
-        current: { type: string, pattern: '^[0-9a-f]{40}$' }
-    GitEvidenceResult:
+        requestId: { $ref: '#/components/schemas/CanonicalUuid' }
+        branch: { type: string, minLength: 1, pattern: '\S' }
+    RequestedPreparation:
+      oneOf:
+        - type: object
+          additionalProperties: false
+          required: [operation]
+          properties:
+            operation: { const: PREPARE_CODEBASE }
+        - type: object
+          additionalProperties: false
+          required: [operation]
+          properties:
+            operation: { const: REFRESH_REPOSITORY_METADATA }
+            branch: { type: string }
+        - type: object
+          additionalProperties: false
+          required: [operation, selection]
+          properties:
+            operation: { const: PREPARE_REVIEW }
+            selection: { $ref: '#/components/schemas/ReviewSelection' }
+    MetadataResult:
       type: object
       additionalProperties: false
-      required: [evidenceId]
+      required: [historyId, catalogId, repositoryId, branch, headRevision, observedAt, coverage]
       properties:
-        evidenceId: { type: string, format: uuid }
-        branch: { type: string, nullable: true }
-        revision: { type: string, nullable: true, pattern: '^[0-9a-f]{40}$' }
-        comparisonId: { type: string, nullable: true, format: uuid }
-        previousSnapshotId: { type: string, nullable: true, format: uuid }
-        currentSnapshotId: { type: string, nullable: true, format: uuid }
+        historyId: { $ref: '#/components/schemas/CanonicalUuid' }
+        catalogId: { $ref: '#/components/schemas/CanonicalUuid' }
+        repositoryId: { $ref: '#/components/schemas/RepositoryIdentity' }
+        branch: { type: string }
+        headRevision: { type: string, pattern: '^[0-9a-f]{40}$' }
+        observedAt: { type: string, format: date-time }
+        coverage:
+          type: object
+          additionalProperties: false
+          required: [total]
+          properties:
+            total: { type: integer, minimum: 0 }
+    RepositoryIdentity:
+      type: string
+      pattern: '^[a-z0-9][a-z0-9._-]{0,63}$'
     SyncRequest:
       type: object
       additionalProperties: false

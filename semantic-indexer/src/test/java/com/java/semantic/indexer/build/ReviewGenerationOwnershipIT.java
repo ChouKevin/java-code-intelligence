@@ -147,6 +147,8 @@ class ReviewGenerationOwnershipIT {
         template.getCollection(IndexCollections.INDEX_JOBS).insertOne(new Document("jobId", "review-job").append("repoId", "orders")
                 .append("active", true).append("phase", IndexJobPhase.RUNNING.name()).append("operation", IndexJobOperation.REVIEW.name())
                 .append("rebuild", false).append("jobVersion", IndexSchemaContract.PERSISTED_JOB_VERSION).append("generationHighWatermark", 6L)
+                .append("requestId", "8f899830-47bb-4dc7-a9a6-c4ad0c016bb3")
+                .append("requested", new Document("operation", "PREPARE_REVIEW").append("selection", review.get("selection", Document.class)))
                 .append("review", review).append("createdAt", Date.from(Instant.now())));
     }
 

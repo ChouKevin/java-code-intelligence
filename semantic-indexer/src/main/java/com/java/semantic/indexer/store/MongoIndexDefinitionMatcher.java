@@ -25,7 +25,29 @@ public final class MongoIndexDefinitionMatcher {
         return Objects.nonNull(key)
                 && List.copyOf(key.entrySet()).equals(List.copyOf(required.keys().entrySet()))
                 && unique == required.unique()
-                && actualPartial.equals(required.partialFilter());
+                && sameFilter(actualPartial, required.partialFilter());
+    }
+
+    private static boolean sameFilter(Map<?, ?> actual, Map<?, ?> required) {
+        if (actual.size() != required.size()) {
+            return false;
+        }
+        for (Map.Entry<?, ?> entry : actual.entrySet()) {
+            if (!required.containsKey(entry.getKey())) {
+                return false;
+            }
+            Object actualValue = entry.getValue();
+            Object requiredValue = required.get(entry.getKey());
+            // BSON Document equality is not Map equality, even for identical nested operators.
+            if (actualValue instanceof Map<?, ?> actualMap && requiredValue instanceof Map<?, ?> requiredMap) {
+                if (!sameFilter(actualMap, requiredMap)) {
+                    return false;
+                }
+            } else if (!Objects.equals(actualValue, requiredValue)) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private static Map<String, Object> canonicalFilter(Document filter) {

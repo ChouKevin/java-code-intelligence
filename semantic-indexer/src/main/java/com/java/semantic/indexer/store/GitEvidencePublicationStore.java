@@ -1,6 +1,7 @@
 package com.java.semantic.indexer.store;
 
 import com.java.semantic.indexer.job.IndexJob;
+import com.java.semantic.indexer.job.IndexJobOperation;
 import com.java.semantic.repository.config.RepositoryProperties;
 import com.java.semantic.model.git.GitBranch;
 import com.java.semantic.model.git.GitCatalogManifest;
@@ -38,6 +39,7 @@ import com.java.semantic.model.source.SourceSnapshotMembership;
 import com.mongodb.client.model.Filters;
 import com.mongodb.client.model.Sorts;
 import com.mongodb.client.model.Updates;
+import com.mongodb.client.model.UpdateOptions;
 import org.bson.Document;
 import org.bson.types.Binary;
 import org.springframework.data.mongodb.core.MongoTemplate;
@@ -86,7 +88,7 @@ public final class GitEvidencePublicationStore {
                 .append("gitEvidenceVersion", GitCatalogManifest.VERSION).append("observedAt", java.util.Date.from(observedAt))
                 .append("ownerJobId", job.id().value()).append("contentDigest", emptyDigest()).append("total", 0L), manifest.ownership());
         template.getCollection(IndexCollections.GIT_EVIDENCE_MANIFESTS).insertOne(catalogDocument);
-        bind(job, id);
+        bindMetadata(job, "catalogId", id.value());
         return manifest;
     }
 
@@ -101,7 +103,11 @@ public final class GitEvidencePublicationStore {
                 .append("revision", revision.value()).append("preparedAt", java.util.Date.from(preparedAt)).append("ownerJobId", job.id().value())
                 .append("contentDigest", emptyDigest()).append("total", 0L), manifest.ownership());
         template.getCollection(IndexCollections.GIT_EVIDENCE_MANIFESTS).insertOne(historyDocument);
-        bind(job, id);
+        bindMetadata(job, "evidenceId", id.value());
+        template.getCollection(IndexCollections.INDEX_JOBS).updateOne(Filters.and(Filters.eq("jobId", job.id().value()),
+                Filters.eq("repoId", job.repositoryId().value()), Filters.eq("active", true)),
+                Updates.combine(Updates.set("gitEvidence.catalogId", catalogId.value()),
+                        Updates.set("gitEvidence.branch", branch), Updates.set("gitEvidence.revision", revision.value())));
         return manifest;
     }
 
@@ -136,6 +142,93 @@ public final class GitEvidencePublicationStore {
 
     public void readyHistory(GitHistoryManifest manifest, long total) {
         ready(manifest.repositoryId(), manifest.historyId(), total);
+    }
+
+    /** Saves the pinned result before atomically exposing the complete pair on the repository. */
+    public void publishMetadata(IndexJob job, GitHistoryManifest result) {
+        Document encoded = GitMetadataResultCodec.encode(result);
+        if (!job.repositoryId().equals(result.repositoryId()) || !metadataPairReady(job, result)) {
+            throw new PublicationConflictException();
+        }
+        long matched = template.getCollection(IndexCollections.INDEX_JOBS).updateOne(Filters.and(
+                Filters.eq("repoId", job.repositoryId().value()), Filters.eq("jobId", job.id().value()),
+                Filters.eq("operation", "GIT_METADATA"), Filters.eq("active", true), Filters.eq("phase", "RUNNING")),
+                Updates.set("gitEvidence.metadataResult", encoded)).getMatchedCount();
+        if (matched != 1L) {
+            throw new PublicationConflictException();
+        }
+        Document pointer = new Document("catalogId", result.catalogId().value())
+                .append("historyId", result.historyId().value()).append("branch", result.branch())
+                .append("headRevision", result.revision().value()).append("observedAt", Date.from(result.preparedAt()));
+        template.getCollection(IndexCollections.REPOSITORIES).updateOne(Filters.eq("repoId", job.repositoryId().value()),
+                Updates.set("metadataPointer", pointer), new UpdateOptions().upsert(true));
+    }
+
+    /** Read-only reconciliation: reload durable IDs because the executor may hold the admission payload. */
+    public boolean metadataReady(IndexJob job) {
+        if (job.operation() != IndexJobOperation.GIT_METADATA) {
+            return false;
+        }
+        Document persisted = template.getCollection(IndexCollections.INDEX_JOBS).find(Filters.and(
+                Filters.eq("repoId", job.repositoryId().value()), Filters.eq("jobId", job.id().value()),
+                Filters.eq("operation", "GIT_METADATA"))).first();
+        if (Objects.isNull(persisted) || !(persisted.get("gitEvidence") instanceof Document payload)
+                || !(payload.get("metadataResult") instanceof Document encoded)) {
+            return false;
+        }
+        try {
+            GitHistoryManifest result = GitMetadataResultCodec.decode(encoded);
+            if (!result.repositoryId().equals(job.repositoryId())
+                    || !result.catalogId().value().equals(payload.get("catalogId"))
+                    || !result.historyId().value().equals(payload.get("evidenceId"))
+                    || !result.branch().equals(payload.get("branch")) || !result.revision().value().equals(payload.get("revision"))
+                    || !metadataPairReady(job, result)) {
+                return false;
+            }
+            Document repository = template.getCollection(IndexCollections.REPOSITORIES)
+                    .find(Filters.eq("repoId", job.repositoryId().value())).first();
+            if (Objects.isNull(repository) || !(repository.get("metadataPointer") instanceof Document pointer)) {
+                return false;
+            }
+            return result.catalogId().value().equals(pointer.get("catalogId"))
+                    && result.historyId().value().equals(pointer.get("historyId"))
+                    && result.branch().equals(pointer.get("branch")) && result.revision().value().equals(pointer.get("headRevision"))
+                    && Date.from(result.preparedAt()).equals(pointer.get("observedAt"));
+        } catch (IllegalArgumentException | ClassCastException | PublicationConflictException exception) {
+            return false;
+        }
+    }
+
+    private boolean metadataPairReady(IndexJob job, GitHistoryManifest result) {
+        if (job.operation() != IndexJobOperation.GIT_METADATA || !job.repositoryId().equals(result.repositoryId())
+                || !job.gitEvidence().flatMap(payload -> payload.branch()).equals(Optional.of(result.branch()))) {
+            return false;
+        }
+        Document catalog = readyMetadataManifest(job, result.catalogId(), "CATALOG");
+        Document history = readyMetadataManifest(job, result.historyId(), "HISTORY");
+        if (Objects.isNull(catalog) || Objects.isNull(history)
+                || !Date.from(result.preparedAt()).equals(catalog.get("observedAt"))
+                || !Date.from(result.preparedAt()).equals(history.get("preparedAt"))
+                || !result.catalogId().value().equals(history.get("catalogId"))
+                || !result.branch().equals(history.get("branch")) || !result.revision().value().equals(history.get("revision"))
+                || !Long.valueOf(result.total()).equals(history.get("total"))
+                || !catalogContainsHead(job.repositoryId(), result.catalogId(), result.branch(), result.revision())) {
+            return false;
+        }
+        if (!(catalog.get("total") instanceof Long total)) {
+            return false;
+        }
+        validateRows(job.repositoryId(), result.catalogId(), total, catalog);
+        validateRows(job.repositoryId(), result.historyId(), result.total(), history);
+        return true;
+    }
+
+    private Document readyMetadataManifest(IndexJob job, GitEvidenceId id, String kind) {
+        return template.getCollection(IndexCollections.GIT_EVIDENCE_MANIFESTS).find(Filters.and(
+                Filters.eq("repoId", job.repositoryId().value()), Filters.eq("evidenceId", id.value()),
+                Filters.eq("kind", kind), Filters.eq("state", "READY"), Filters.eq("scope", "STANDALONE"),
+                Filters.exists("reviewId", false), Filters.eq("gitEvidenceVersion", GitHistoryManifest.VERSION),
+                Filters.eq("ownerJobId", job.id().value()))).first();
     }
 
     public boolean catalogContainsHead(RepositoryId repositoryId, GitEvidenceId catalogId, String branch, RepositoryRevision revision) {
@@ -228,15 +321,14 @@ public final class GitEvidencePublicationStore {
         verifySchemaBeforeEvidence();
         IndexJob requiredJob = Objects.requireNonNull(job, "job is required");
         GitEvidenceOwnership requiredOwnership = Objects.requireNonNull(ownership, "Git evidence ownership is required");
-        if (requiredOwnership.scope() == GitPublicationScope.REVIEW) {
-            ResolvedReviewEndpoints resolved = requiredJob.review().orElseThrow()
-                    .resolvedEndpoints().orElseThrow();
-            if (!resolved.beforeRevision().equals(comparison.previous())
-                    || !resolved.afterRevision().equals(comparison.current())
-                    || !requiredOwnership.reviewId().orElseThrow().equals(requiredJob.review().orElseThrow().reviewId())) {
-                throw new PublicationConflictException();
-            }
-        } else if (comparison.previous().isEmpty()) {
+        if (requiredOwnership.scope() != GitPublicationScope.REVIEW
+                || requiredJob.operation() != IndexJobOperation.REVIEW) {
+            throw new PublicationConflictException();
+        }
+        ResolvedReviewEndpoints resolved = requiredJob.review().orElseThrow().resolvedEndpoints().orElseThrow();
+        if (!resolved.beforeRevision().equals(comparison.previous())
+                || !resolved.afterRevision().equals(comparison.current())
+                || !requiredOwnership.reviewId().orElseThrow().equals(requiredJob.review().orElseThrow().reviewId())) {
             throw new PublicationConflictException();
         }
         if (comparison.previous().isPresent() != beforeSource.isPresent()
@@ -276,8 +368,7 @@ public final class GitEvidencePublicationStore {
                 .append("evidenceId", comparisonId.value()).append("kind", "COMPARISON").append("state", "PREPARING")
                 .append("gitEvidenceVersion", IndexSchemaContract.GIT_EVIDENCE_VERSION)
                 .append("current", comparison.current().value())
-                .append("baselineRule", requiredOwnership.scope() == GitPublicationScope.REVIEW
-                        ? requiredJob.review().orElseThrow().resolvedEndpoints().orElseThrow().baselineRule().name() : "DIRECT_RANGE")
+                .append("baselineRule", resolved.baselineRule().name())
                 .append("previousSnapshotId", previousSnapshot.value()).append("currentSnapshotId", currentSnapshot.value())
                 .append("ancestry", comparison.ancestry().name()).append("preparedAt", Date.from(preparedAt))
                 .append("ownerJobId", requiredJob.id().value()).append("total", (long) comparison.changes().size())
@@ -900,20 +991,17 @@ public final class GitEvidencePublicationStore {
         }
     }
 
-    private void bind(IndexJob job, GitEvidenceId evidenceId) {
-        template.getCollection(IndexCollections.INDEX_JOBS).updateOne(Filters.and(Filters.eq("jobId", job.id().value()),
-                Filters.eq("repoId", job.repositoryId().value()), Filters.eq("active", true)), Updates.set("gitEvidence.evidenceId", evidenceId.value()));
+    private void bindMetadata(IndexJob job, String field, String value) {
+        long matched = template.getCollection(IndexCollections.INDEX_JOBS).updateOne(Filters.and(Filters.eq("jobId", job.id().value()),
+                Filters.eq("repoId", job.repositoryId().value()), Filters.eq("operation", "GIT_METADATA"),
+                Filters.eq("active", true), Filters.eq("phase", "RUNNING")), Updates.set("gitEvidence." + field, value)).getMatchedCount();
+        if (matched != 1L) {
+            throw new PublicationConflictException();
+        }
     }
 
     private void bindComparison(IndexJob job, GitComparisonId comparisonId, GitSnapshotId previousSnapshot, GitSnapshotId currentSnapshot,
                                 GitEvidenceOwnership ownership) {
-        if (ownership.scope().name().equals("STANDALONE")) {
-            template.getCollection(IndexCollections.INDEX_JOBS).updateOne(Filters.and(Filters.eq("jobId", job.id().value()),
-                    Filters.eq("repoId", job.repositoryId().value()), Filters.eq("active", true)), Updates.combine(
-                    Updates.set("gitEvidence.evidenceId", comparisonId.value()), Updates.set("gitEvidence.previousSnapshotId", previousSnapshot.value()),
-                    Updates.set("gitEvidence.currentSnapshotId", currentSnapshot.value())));
-            return;
-        }
         String reviewId = ownership.reviewId().orElseThrow().value();
         long modified = template.getCollection(IndexCollections.INDEX_JOBS).updateOne(Filters.and(Filters.eq("jobId", job.id().value()),
                         Filters.eq("repoId", job.repositoryId().value()), Filters.eq("active", true), Filters.eq("phase", "RUNNING"),
@@ -961,6 +1049,10 @@ public final class GitEvidencePublicationStore {
         if (Objects.isNull(manifest)) {
             throw new PublicationConflictException();
         }
+        validateRows(repositoryId, evidenceId, total, manifest);
+    }
+
+    private void validateRows(RepositoryId repositoryId, GitEvidenceId evidenceId, long total, Document manifest) {
         String kind = manifest.getString("kind");
         if (!"CATALOG".equals(kind) && !"HISTORY".equals(kind)) {
             throw new PublicationConflictException();

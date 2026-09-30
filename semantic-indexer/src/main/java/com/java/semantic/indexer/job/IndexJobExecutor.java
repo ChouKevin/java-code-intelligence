@@ -60,12 +60,16 @@ public final class IndexJobExecutor {
             case REVIEW -> reviewPreparationService.orElseThrow(() -> new IllegalStateException("review preparation service is not registered")).prepare(job);
             case ROLLBACK -> rollback(job);
             case RESET -> resetHandler.orElseThrow(() -> new IllegalStateException("RESET handler is not registered")).reset(job);
-            case GIT_REFS, GIT_HISTORY, GIT_COMPARISON -> gitEvidenceHandler.orElseThrow(() -> new IllegalStateException("Git evidence handler is not registered")).prepare(job);
+            case GIT_METADATA -> gitEvidenceHandler.orElseThrow(() -> new IllegalStateException("Git evidence handler is not registered")).prepare(job);
             case NO_WORK -> throw new IllegalArgumentException("NO_WORK is not runnable");
         }
     }
 
     private void complete(IndexJob job) {
+        if (job.operation() == IndexJobOperation.GIT_METADATA && !jobs.gitEvidenceReady(job)) {
+            jobs.fail(job.id(), IndexFailureCategory.WORKER_INTERRUPTED);
+            throw new CompletionTransitionException(job.id());
+        }
         if (jobs.complete(job.id())) {
             return;
         }
@@ -88,6 +92,10 @@ public final class IndexJobExecutor {
     }
 
     private boolean reconcileCommitted(IndexJob job) {
+        if (job.operation() == IndexJobOperation.GIT_METADATA && jobs.gitEvidenceReady(job)) {
+            return jobs.complete(job.id()) || jobs.find(job.repositoryId(), job.id())
+                    .filter(persisted -> persisted.phase() == IndexJobPhase.COMPLETE && !persisted.active()).isPresent();
+        }
         return jobs.reconcileCommitted(job.repositoryId())
                 .filter(reconciled -> reconciled.id().equals(job.id())
                         && reconciled.target().equals(job.target())

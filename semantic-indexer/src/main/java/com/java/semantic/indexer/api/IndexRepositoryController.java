@@ -1,19 +1,14 @@
 package com.java.semantic.indexer.api;
 
 import com.java.semantic.indexer.job.IndexJob;
-import com.java.semantic.indexer.job.IndexJobId;
+import com.java.semantic.indexer.application.IndexerPreparationFacade;
 import com.java.semantic.indexer.job.IndexPublicationState;
 import com.java.semantic.indexer.job.IndexRequestService;
 import com.java.semantic.indexer.job.IndexJobTarget;
-import com.java.semantic.indexer.job.ReviewJobPayload;
-import com.java.semantic.model.git.GitComparisonId;
-import com.java.semantic.model.git.GitSnapshotId;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.util.MultiValueMap;
 import com.java.semantic.model.index.PublishedGenerationPointer;
 import com.java.semantic.model.repository.RepositoryId;
-import com.java.semantic.model.repository.RepositoryRevision;
-import com.java.semantic.model.review.ReviewComparisonType;
-import com.java.semantic.model.review.ReviewSelection;
-import com.java.semantic.model.review.ResolvedReviewEndpoints;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import jakarta.validation.Valid;
@@ -36,9 +31,11 @@ import java.util.Optional;
 @RequestMapping("/index/repositories/{repoId}")
 public final class IndexRepositoryController {
     private final IndexRequestService requests;
+    private final IndexerPreparationFacade preparation;
 
-    public IndexRepositoryController(IndexRequestService requests) {
+    public IndexRepositoryController(IndexRequestService requests, IndexerPreparationFacade preparation) {
         this.requests = Objects.requireNonNull(requests, "requests is required");
+        this.preparation = Objects.requireNonNull(preparation, "preparation is required");
     }
 
     @PostMapping("/ensure")
@@ -57,24 +54,34 @@ public final class IndexRepositoryController {
         return accepted(requests.checkout(RepositoryId.of(repoId), request.revision()));
     }
 
-    @PostMapping("/git/refs")
-    public ResponseEntity<IndexJobResponse> gitRefs(@PathVariable String repoId) {
-        return accepted(requests.prepareGitRefs(RepositoryId.of(repoId)));
+    @PostMapping("/metadata")
+    public ResponseEntity<Map<String, Object>> metadata(@PathVariable String repoId, @RequestBody Map<String, Object> body) {
+        return acceptedPreparation(preparation.refreshRepositoryMetadata(inputs(repoId, body)));
     }
 
-    @PostMapping("/git/history")
-    public ResponseEntity<IndexJobResponse> gitHistory(@PathVariable String repoId, @Valid @RequestBody GitHistoryIndexRequest request) {
-        return accepted(requests.prepareGitHistory(RepositoryId.of(repoId), request.catalogId(), request.branch(), request.revision()));
-    }
-
-    @PostMapping("/git/comparisons")
-    public ResponseEntity<IndexJobResponse> gitComparison(@PathVariable String repoId, @Valid @RequestBody GitComparisonIndexRequest request) {
-        return accepted(requests.prepareGitComparison(RepositoryId.of(repoId), request.previous(), request.current()));
+    @PostMapping("/codebase")
+    public ResponseEntity<Map<String, Object>> codebase(@PathVariable String repoId, @RequestBody Map<String, Object> body) {
+        return acceptedPreparation(preparation.prepareCodebase(inputs(repoId, body)));
     }
 
     @PostMapping("/reviews")
-    public ResponseEntity<IndexJobResponse> review(@PathVariable String repoId, @Valid @RequestBody ReviewIndexRequest request) {
-        return accepted(requests.review(RepositoryId.of(repoId), request.reviewSelection()));
+    public ResponseEntity<Map<String, Object>> review(@PathVariable String repoId, @RequestBody Map<String, Object> body) {
+        return acceptedPreparation(preparation.prepareReview(inputs(repoId, body)));
+    }
+
+    private static Map<String, Object> inputs(String repoId, Map<String, Object> body) {
+        if (body.containsKey("repositoryId")) {
+            throw new IllegalArgumentException("repositoryId belongs in the HTTP path");
+        }
+        Map<String, Object> fields = new java.util.LinkedHashMap<>(body);
+        fields.put("repositoryId", repoId);
+        return fields;
+    }
+
+    private static ResponseEntity<Map<String, Object>> acceptedPreparation(Map<String, Object> result) {
+        java.net.URI location = java.net.URI.create("/index/repositories/" + result.get("repositoryId")
+                + "/jobs?jobId=" + result.get("jobId"));
+        return ResponseEntity.accepted().location(location).body(result);
     }
 
     @PostMapping("/rebuild")
@@ -89,15 +96,17 @@ public final class IndexRepositoryController {
                 request.expectedRollback().toPointer()));
     }
 
-    @GetMapping("/jobs/{jobId}")
-    public ResponseEntity<IndexJobStatusResponse> job(@PathVariable String repoId, @PathVariable String jobId) {
-        RepositoryId repositoryId = RepositoryId.of(repoId);
-        IndexJob job = requests.job(new IndexJobId(jobId))
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "index job was not found"));
-        if (!job.repositoryId().equals(repositoryId)) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "index job was not found");
-        }
-        return ResponseEntity.ok(IndexJobStatusResponse.from(job, requests.currentPointer(repositoryId)));
+    @GetMapping("/jobs")
+    public ResponseEntity<Map<String, Object>> job(@PathVariable String repoId,
+            @RequestParam MultiValueMap<String, String> selectors) {
+        Map<String, Object> fields = new java.util.LinkedHashMap<>();
+        selectors.forEach((key, values) -> {
+            if (values.size() != 1) {
+                throw new IllegalArgumentException("a job selector must occur exactly once");
+            }
+            fields.put(key, values.getFirst());
+        });
+        return ResponseEntity.ok(preparation.getJob(inputs(repoId, fields)));
     }
 
     @GetMapping("/publication")
@@ -113,52 +122,10 @@ public final class IndexRepositoryController {
     }
 
     public record IndexJobResponse(String jobId, String repositoryId, IndexJobTargetResponse target, String phase,
-                                   String failureCategory, ReviewJobResponse review) {
+                                   String failureCategory, Map<String, Object> review) {
         public static IndexJobResponse from(IndexJob job) {
             return new IndexJobResponse(job.id().value(), job.repositoryId().value(), job.target().map(IndexJobTargetResponse::from).orElse(null),
-                    job.phase().name(), job.failureCategory().map(Enum::name).orElse(null),
-                    job.review().map(ReviewJobResponse::from).orElse(null));
-        }
-    }
-
-    public record IndexJobStatusResponse(String jobId, String repositoryId, IndexJobTargetResponse target,
-                                         String operation, String phase, boolean active, String failureCategory,
-                                         GenerationPointerResponse currentPointer, GitEvidenceResultResponse gitEvidence,
-                                         ReviewJobResponse review) {
-        static IndexJobStatusResponse from(IndexJob job, Optional<PublishedGenerationPointer> currentPointer) {
-            return new IndexJobStatusResponse(job.id().value(), job.repositoryId().value(), job.target().map(IndexJobTargetResponse::from).orElse(null),
-                    job.operation().name(), job.phase().name(), job.active(),
-                    job.failureCategory().map(Enum::name).orElse(null),
-                    currentPointer.map(GenerationPointerResponse::from).orElse(null),
-                    job.gitEvidence().flatMap(payload -> payload.evidenceId().map(id -> new GitEvidenceResultResponse(id.value(), payload.branch().orElse(null),
-                            payload.revision().map(RepositoryRevision::value).orElse(null),
-                            payload.previousRevision().isPresent() ? id.value() : null,
-                            payload.previousSnapshotId().map(GitSnapshotId::value).orElse(null),
-                            payload.currentSnapshotId().map(GitSnapshotId::value).orElse(null))))
-                            .orElse(null),
-                    job.review().map(ReviewJobResponse::from).orElse(null));
-        }
-    }
-
-    public record GitEvidenceResultResponse(String evidenceId, String branch, String revision, String comparisonId,
-                                            String previousSnapshotId, String currentSnapshotId) { }
-
-    public record ReviewJobResponse(String reviewId, Map<String, String> selection, ResolvedReviewEndpoints resolvedEndpoints,
-                                    String stage, String beforeGenerationId, String afterGenerationId,
-                                    String comparisonId, String previousSnapshotId, String currentSnapshotId) {
-        static ReviewJobResponse from(ReviewJobPayload review) {
-            ReviewSelection selected = review.selection();
-            Map<String, String> selection = selected.kind() == ReviewComparisonType.COMMIT
-                    ? Map.of("kind", "COMMIT", "revision", selected.afterRevision().value())
-                    : Map.of("kind", "RANGE", "beforeRevision", selected.beforeRevision().orElseThrow().value(),
-                            "afterRevision", selected.afterRevision().value());
-            return new ReviewJobResponse(review.reviewId().value(), selection, review.resolvedEndpoints().orElse(null),
-                    review.stage().name(),
-                    review.before().map(generation -> generation.selected().generationId().value()).orElse(null),
-                    review.after().map(generation -> generation.selected().generationId().value()).orElse(null),
-                    review.comparisonId().map(GitComparisonId::value).orElse(null),
-                    review.previousSnapshotId().map(GitSnapshotId::value).orElse(null),
-                    review.currentSnapshotId().map(GitSnapshotId::value).orElse(null));
+                    job.phase().name(), job.failureCategory().map(Enum::name).orElse(null), null);
         }
     }
 

@@ -6,14 +6,13 @@ import com.java.semantic.repository.application.RepositoryRuntimeRegistry;
 import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.model.repository.RepositoryRevision;
 import com.java.semantic.model.index.PublishedGenerationPointer;
-import com.java.semantic.model.git.GitEvidenceId;
 import org.springframework.stereotype.Service;
 import com.java.semantic.model.review.ReviewSelection;
 
 import java.util.Objects;
 import java.util.Optional;
 
-/** Accepts administrative requests after resolving repository revisions; indexing itself is deliberately deferred to a worker. */
+/** Admits durable preparations and private maintenance; all analysis runs later in the worker. */
 @Service
 public final class IndexRequestService {
     private final RepositoryRevisionResolver revisionResolver;
@@ -51,8 +50,20 @@ public final class IndexRequestService {
         return jobs.admitRebuild(repositoryId, revision, expectedCurrent);
     }
 
-    public Optional<IndexJob> job(IndexJobId jobId) {
-        return jobs.find(jobId);
+    public IndexJob getJob(RepositoryId repositoryId, Optional<IndexJobId> jobId,
+                           Optional<PreparationRequestId> requestId) {
+        repositories.get(repositoryId);
+        Objects.requireNonNull(jobId, "job selector is required");
+        Objects.requireNonNull(requestId, "request selector is required");
+        if (jobId.isPresent() == requestId.isPresent()) {
+            throw new IllegalArgumentException("exactly one jobId or requestId is required");
+        }
+        if (jobId.isPresent()) {
+            return jobs.find(repositoryId, jobId.orElseThrow())
+                    .orElseThrow(IndexJobNotFoundException::new);
+        }
+        return jobs.find(repositoryId, requestId.orElseThrow())
+                .orElseThrow(PreparationRequestNotFoundException::new);
     }
 
     public Optional<PublishedGenerationPointer> currentPointer(RepositoryId repositoryId) {
@@ -69,24 +80,36 @@ public final class IndexRequestService {
         return jobs.admitRollback(repositoryId, expectedCurrent, expectedRollback);
     }
 
-    public IndexJob prepareGitRefs(RepositoryId repositoryId) {
-        repositories.get(repositoryId);
-        return jobs.admitGitRefs(repositoryId);
+    public IndexJob refreshRepositoryMetadata(RepositoryId repositoryId, PreparationRequestId requestId,
+                                              Optional<String> requestedBranch) {
+        PreparationRequest request = PreparationRequest.metadata(requestId, requestedBranch);
+        String effectiveBranch = requestedBranch.orElse(repositories.get(repositoryId).defaultBranch());
+        rejectReused(repositoryId, requestId);
+        jobs.reconcileCommitted(repositoryId);
+        return jobs.admitMetadata(repositoryId, request, effectiveBranch);
     }
 
-    public IndexJob prepareGitHistory(RepositoryId repositoryId, String catalogId, String branch, String revision) {
-        repositories.get(repositoryId);
-        return jobs.admitGitHistory(repositoryId, new GitEvidenceId(catalogId), branch, RepositoryRevision.ofSha(revision));
+    public IndexJob prepareCodebase(RepositoryId repositoryId, PreparationRequestId requestId) {
+        PreparationRequest request = PreparationRequest.codebase(requestId);
+        String branch = repositories.get(repositoryId).defaultBranch();
+        rejectReused(repositoryId, requestId);
+        jobs.reconcileCommitted(repositoryId);
+        RepositoryRevision revision = revisionResolver.sync(repositoryId, Optional.of(branch));
+        return jobs.admitCodebase(repositoryId, request, branch, revision);
     }
 
-    public IndexJob prepareGitComparison(RepositoryId repositoryId, String previous, String current) {
+    public IndexJob prepareReview(RepositoryId repositoryId, PreparationRequestId requestId, ReviewSelection selection) {
+        PreparationRequest request = PreparationRequest.review(requestId, selection);
         repositories.get(repositoryId);
-        return jobs.admitGitComparison(repositoryId, RepositoryRevision.ofSha(previous), RepositoryRevision.ofSha(current));
+        rejectReused(repositoryId, requestId);
+        jobs.reconcileCommitted(repositoryId);
+        return jobs.admitReview(repositoryId, request);
     }
 
-    public IndexJob review(RepositoryId repositoryId, ReviewSelection selection) {
-        repositories.get(repositoryId);
-        return jobs.admitReview(repositoryId, selection);
+    private void rejectReused(RepositoryId repositoryId, PreparationRequestId requestId) {
+        jobs.find(repositoryId, requestId).ifPresent(job -> {
+            throw new PreparationRequestReusedException(job.id(), requestId);
+        });
     }
 
     private IndexJob admit(RepositoryId repositoryId, RepositoryRevision revision, boolean rebuild) {

@@ -140,25 +140,25 @@ class IndexJobExecutorTest {
     }
 
     @Test
-    void dispatches_git_comparisons_to_the_handler_before_the_terminal_completion_transition() {
+    void metadata_cannot_complete_without_a_fully_published_result() {
         IndexJobStore jobs = mock(IndexJobStore.class);
         RepositoryBuildRunner runner = mock(RepositoryBuildRunner.class);
         GitEvidenceJobHandler handler = mock(GitEvidenceJobHandler.class);
-        IndexJob job = runningJob(IndexJobOperation.GIT_COMPARISON);
-        when(jobs.complete(job.id())).thenReturn(true);
+        IndexJob job = runningJob(IndexJobOperation.GIT_METADATA);
+        when(jobs.gitEvidenceReady(job)).thenReturn(false);
 
-        new IndexJobExecutor(jobs, runner, mock(PublicationPort.class), Optional.empty(), Optional.of(handler)).execute(job);
-
-        verify(handler).prepare(job);
-        verify(jobs).complete(job.id());
+        assertThatThrownBy(() -> new IndexJobExecutor(jobs, runner, mock(PublicationPort.class), Optional.empty(), Optional.of(handler)).execute(job))
+                .isInstanceOf(IllegalStateException.class);
+        verify(jobs, never()).complete(job.id());
+        verify(jobs).fail(job.id(), IndexFailureCategory.WORKER_INTERRUPTED);
     }
 
     @Test
-    void failed_git_comparison_handler_never_reports_a_false_complete_terminal_state() {
+    void failed_metadata_handler_never_reports_a_false_complete_terminal_state() {
         IndexJobStore jobs = mock(IndexJobStore.class);
         RepositoryBuildRunner runner = mock(RepositoryBuildRunner.class);
         GitEvidenceJobHandler handler = mock(GitEvidenceJobHandler.class);
-        IndexJob job = runningJob(IndexJobOperation.GIT_COMPARISON);
+        IndexJob job = runningJob(IndexJobOperation.GIT_METADATA);
         RuntimeException failure = new RuntimeException("comparison preparation failed");
         doThrow(failure).when(handler).prepare(job);
         when(jobs.reconcileCommitted(job.repositoryId())).thenReturn(Optional.empty());
@@ -190,9 +190,11 @@ class IndexJobExecutorTest {
 
     private static IndexJob runningJob(IndexJobOperation operation) {
         RepositoryRevision revision = new RepositoryRevision("a".repeat(40));
-        if (operation == IndexJobOperation.GIT_COMPARISON) {
+        if (operation == IndexJobOperation.GIT_METADATA) {
             return new IndexJob(new IndexJobId("job-1"), RepositoryId.of("orders"), Optional.empty(), IndexJobPhase.RUNNING, true,
-                    Optional.empty(), false, operation, Optional.of(GitEvidenceJob.comparison(revision, new RepositoryRevision("b".repeat(40)))));
+                    Optional.empty(), false, operation, Optional.of(GitEvidenceJob.metadata("main")), Optional.empty(),
+                    Optional.of(PreparationRequest.metadata(new PreparationRequestId("8f899830-47bb-4dc7-a9a6-c4ad0c016bb3"), Optional.empty())),
+                    Optional.empty());
         }
         return new IndexJob(new IndexJobId("job-1"), RepositoryId.of("orders"), Optional.of(new IndexJobTarget(
                 revision, new GenerationId("g-1"), 1L)), IndexJobPhase.RUNNING, true, Optional.empty(), false, operation);

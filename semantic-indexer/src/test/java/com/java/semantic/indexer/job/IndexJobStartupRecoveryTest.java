@@ -1,5 +1,6 @@
 package com.java.semantic.indexer.job;
 
+import com.java.semantic.indexer.config.ConfiguredRepositoryPublisher;
 import java.time.Duration;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
@@ -25,9 +26,11 @@ class IndexJobStartupRecoveryTest {
     void startup_reconciles_commits_then_fails_unreconciled_running_jobs() throws Exception {
         IndexJobStore jobs = mock(IndexJobStore.class);
 
-        new IndexJobStartupRecovery(jobs).run(new DefaultApplicationArguments());
+        ConfiguredRepositoryPublisher publisher = mock(ConfiguredRepositoryPublisher.class);
+        new IndexJobStartupRecovery(jobs, publisher).run(new DefaultApplicationArguments());
 
-        org.mockito.InOrder order = org.mockito.Mockito.inOrder(jobs);
+        org.mockito.InOrder order = org.mockito.Mockito.inOrder(publisher, jobs);
+        order.verify(publisher).publish();
         order.verify(jobs).reconcileCommittedJobs();
         order.verify(jobs).failUnreconciledRunningJobs();
     }
@@ -78,7 +81,7 @@ class IndexJobStartupRecoveryTest {
 
         @Bean
         IndexJobStartupRecovery indexJobStartupRecovery(IndexJobStore jobs) {
-            return new IndexJobStartupRecovery(jobs);
+            return new IndexJobStartupRecovery(jobs, lifecycleFixture.publisher);
         }
 
         @Bean
@@ -91,6 +94,7 @@ class IndexJobStartupRecoveryTest {
 
     private static final class LifecycleFixture {
         private final IndexJobStore jobs = mock(IndexJobStore.class);
+        private final ConfiguredRepositoryPublisher publisher = mock(ConfiguredRepositoryPublisher.class);
         private final CompletableFuture<Void> recoveryStarted = new CompletableFuture<>();
         private final CountDownLatch allowRecovery = new CountDownLatch(1);
         private final CountDownLatch pollStarted = new CountDownLatch(1);
@@ -104,7 +108,7 @@ class IndexJobStartupRecoveryTest {
                     Thread.currentThread().interrupt();
                 }
                 return null;
-            }).when(jobs).reconcileCommittedJobs();
+            }).when(publisher).publish();
             when(jobs.startNextAccepted()).thenAnswer(invocation -> {
                 pollStarted.countDown();
                 return Optional.empty();

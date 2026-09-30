@@ -38,10 +38,13 @@ Release and rebuild in this exact order:
    indexes: the unique review `(repoId, reviewId)` index, review owner lookup,
    sealed-generation reuse partial index on the persisted flat
    `analysisFingerprint` field, generation identity uniqueness, active-job
-   uniqueness, and Git ordinal/ID indexes. Preserve the existing global semantic
-   source-artifact unique indexes on `sourceArtifactId` and `contentHash`.
-   There is no TTL index or new unique commit-SHA constraint on generations,
-   reviews, or Git snapshots; Git snapshot deduplication is not introduced.
+   uniqueness, and Git ordinal/ID indexes. Also verify
+   `preparation_request_unique`, `metadata_job_latest_branch`, and
+   `review_job_latest_selection` for durable admission and discovery.
+   Preserve the existing global semantic source-artifact unique indexes on
+   `sourceArtifactId` and `contentHash`. There is no TTL index or new unique
+   commit-SHA constraint on generations, reviews, or Git snapshots;
+   Git snapshot deduplication is not introduced.
 5. Deploy the schema-4 Indexer. Rebuild every approved repository current
    generation with projection version 4, v1 analysis fingerprint/evidence, and
    the sealed source contract below. A pre-cutover manifest is never reused.
@@ -68,6 +71,44 @@ compatible generation; schema rollback remains a separate, non-destructive
 maintenance operation. Retain a READY review's generations, snapshots, and
 comparison as a graph; cleanup is manual and must first account for active jobs
 and review references.
+
+## Durable preparation and metadata
+
+Job version 3 stores a preparation's canonical UUID `requestId` and original
+`requested` input in the same insert as the job. `requested.operation` distinguishes
+the three public preparation intents; an omitted metadata branch remains omitted,
+and review selection remains exactly COMMIT or RANGE. Codebase preparation records
+its configured `preparationBranch` and freshly resolved target SHA before
+acceptance. Private maintenance jobs have no fabricated requestId.
+
+`preparation_request_unique` is unique on `(repoId, requestId)` with the partial
+filter `{requestId: {$type: "string"}}`; it applies to terminal as well as active
+preparations and is independent of one-active-job-per-repository uniqueness.
+Keep the original ledger rows without TTL. Never recover a lost response by
+substituting the latest job. `createdAt` is BSON Date;
+`metadata_job_latest_branch` supports operation/branch/phase ordering, and
+`review_job_latest_selection` uses the persisted `review.selectionKey`.
+
+`GIT_METADATA` replaces separate refs/history/comparison preparation operations.
+Its flat `gitEvidence` stores the effective branch, pinned revision, catalogId,
+history identity (`evidenceId`), and a typed READY `metadataResult`. That result
+uses scalar IDs, BSON Date `preparedAt`, int32 version, int64 total, and explicit
+STANDALONE publication scope; no Optional/value-object documents or legacy
+coercions are accepted. The public result exposes the snapshot time as
+`observedAt`, not a second timestamp alias.
+
+After both catalog and selected-head history are READY, one repository update
+sets `metadataPointer={catalogId,historyId,branch,headRevision,observedAt}`.
+The job result may precede this update: its presence alone is not publication.
+Recovery requires the exact persisted result, pointer, owned manifests, rows,
+counts, and digests; it neither publishes orphan READY pairs nor retries Git.
+Comparison preparation belongs to REVIEW; BUILD source snapshots remain valid.
+
+Startup publishes configured repository metadata before dispatcher activation.
+Only configured/displayName/defaultBranch/projectGuidePath/configuredAt fields
+change; current, rollback, and metadata pointers are preserved. Removed
+configurations become `configured=false` without deleting evidence. Registry
+publication does not write remote URLs, checkout paths, or credentials.
 
 ## Sealed source membership
 

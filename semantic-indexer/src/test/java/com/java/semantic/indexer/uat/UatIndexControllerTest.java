@@ -60,10 +60,9 @@ class UatIndexControllerTest {
 
         mvc.perform(post("/index/uat/repositories/payment/reset"))
                 .andExpect(status().isConflict())
-                .andExpect(jsonPath("$.errorCode").value("REPOSITORY_ACTIVE"))
-                .andExpect(jsonPath("$.repoId").value("payment"))
-                .andExpect(jsonPath("$.candidates").isArray())
-                .andExpect(jsonPath("$.requestId").isNotEmpty());
+                .andExpect(jsonPath("$.code").value("REPOSITORY_ACTIVE"))
+                .andExpect(jsonPath("$.retryable").value(false))
+                .andExpect(jsonPath("$.requestId").doesNotExist());
     }
 
     @Test

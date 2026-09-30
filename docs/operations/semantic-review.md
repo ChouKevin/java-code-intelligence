@@ -83,9 +83,10 @@ must not exclude ordinary production sources. Generated/build/test subtrees,
 source-root containment, and exact declaration/URI evidence remain enforced.
 
 Mongo and Indexer admin must bind only to the private management interface or
-private container network. Do not publish MongoDB or `/index/**` on a public
-address. Query may be exposed only through the approved ingress. For a direct
-Spring Boot TLS deployment, mount private certificate files and set:
+private container network. Do not publish MongoDB, `/index/**`, or the Indexer's
+`/mcp` on a public address. Query's separate HTTP/MCP service may be exposed only
+through approved ingress. For a direct Spring Boot TLS deployment, mount private
+certificate files and set:
 
 ```bash
 SERVER_SSL_ENABLED=true
@@ -110,9 +111,9 @@ Create these identities through the VM's approved secret/DB provisioning path;
 do not put passwords in command history, examples, images, or this repository.
 The roles must be least-privilege equivalents of schema-maintenance DDL, Indexer
 collection writes, and Query collection reads. Do not give Query write,
-`dbAdmin`, Git, or JDT permissions. Use different bearer tokens:
-`SEMANTIC_INDEXER_ADMIN_TOKEN` for `/index/**` and
-`SEMANTIC_QUERY_API_TOKEN` for Query HTTP and `/mcp`.
+`dbAdmin`, Git, or JDT permissions. Use separate `X-Api-Token` credentials:
+`SEMANTIC_INDEXER_ADMIN_TOKEN` for Indexer `/index/**` and `/mcp`, and
+`SEMANTIC_QUERY_API_TOKEN` for Query HTTP and its own `/mcp`.
 
 The following shows separate container env files, with secret-file references
 rather than secret values. Substitute the secret manager's file-loading
@@ -173,6 +174,10 @@ package, class, method, source, or fact policies. `SEMANTIC_API_TOKEN` is a
 legacy **acceptance-client** variable (for example, `-Pdeployed-it`); it is not
 the Query server binding. The server reads `SEMANTIC_QUERY_API_TOKEN`.
 
+Pre-create `SEMANTIC_DATA_ROOT` as a real canonical directory owned by Indexer.
+The managed checkout boundary rejects symbolic-link ancestors and does not
+silently relax that protection for a first metadata refresh.
+
 Start schema bootstrap only with the maintenance Mongo URI, before either
 runtime application:
 
@@ -204,14 +209,16 @@ exact current `revision`, and use them with the ten semantic tools. A stale
 request receives `REVISION_OUTDATED` and `currentRevision`; rediscover
 revision-scoped fact IDs before a fact-bound retry.
 
-A review is separate immutable READY membership. Choose one of two explicit
-selection forms for `POST /index/repositories/{repositoryId}/reviews`:
+A review is separate immutable READY membership. Before submitting, the client
+creates and durably saves a canonical lowercase UUID `requestId`. Choose one
+explicit selection for `POST /index/repositories/{repositoryId}/reviews`
+(or the Indexer's `prepare_review` tool):
 
-- `{"selection":{"kind":"COMMIT","revision":"<full-lowercase-sha>"}}`
+- `{"requestId":"<saved-client-uuid>","selection":{"kind":"COMMIT","revision":"<full-lowercase-sha>"}}`
   compares the first parent to the requested commit. For a root commit it
   compares the real Git empty tree to that commit; there is no before semantic
   generation and `before.kind` is `EMPTY_TREE`.
-- `{"selection":{"kind":"RANGE","beforeRevision":"<full-lowercase-sha>","afterRevision":"<full-lowercase-sha>"}}`
+- `{"requestId":"<saved-client-uuid>","selection":{"kind":"RANGE","beforeRevision":"<full-lowercase-sha>","afterRevision":"<full-lowercase-sha>"}}`
   compares precisely those two reachable commits in that order, including
   equal or divergent commits. It does not calculate a merge base.
 
@@ -220,9 +227,12 @@ Both requested commits must be reachable from fetched trusted remote refs.
 Do not admit the after commit through ordinary `/ensure`, `/sync`, `/checkout`,
 or `/rebuild`: those are BUILD operations and may publish it as current.
 
-Missing `selection` or `kind`, malformed full SHA, and mixed or incomplete
-`COMMIT`/`RANGE` fields return HTTP `400` with `errorCode: INVALID_ARGUMENT`;
-no review job is admitted.
+Missing or noncanonical `requestId`, missing `selection`/`kind`, malformed full
+SHA, unknown fields, and mixed or incomplete COMMIT/RANGE fields return HTTP
+`400` with `code: INVALID_ARGUMENT`; no review job is admitted. HTTP and MCP use
+the same strict application contract and `code`, `message`, `retryable` errors.
+MCP supplies identical application JSON in structuredContent and TextContent;
+authentication and malformed transport failures remain transport errors.
 
 The private review admin request is:
 
@@ -230,12 +240,13 @@ The private review admin request is:
 curl --fail-with-body -sS -i \
   -H "X-Api-Token: $SEMANTIC_INDEXER_ADMIN_TOKEN" \
   -H 'Content-Type: application/json' \
-  -d '{"selection":{"kind":"COMMIT","revision":"<full-lowercase-sha>"}}' \
+  -d '{"requestId":"<saved-client-uuid>","selection":{"kind":"COMMIT","revision":"<full-lowercase-sha>"}}' \
   https://indexer.private/index/repositories/orders/reviews
 ```
 
-Require HTTP `202` with a nonempty `jobId`, `review.reviewId`, and exactly the
-requested `review.selection`. Immediately GET the returned job, then poll it
+Require HTTP `202` with the original `requestId`, nonempty `jobId`,
+`review.reviewId`, and exactly the requested `review.selection`. Follow the
+returned `Location`, `/index/repositories/{repositoryId}/jobs?jobId=…`, and poll
 until terminal `phase: COMPLETE` and `review.stage: READY`. The worker first
 fetches and resolves the endpoints, persists `review.resolvedEndpoints` with
 `baselineRule` (`FIRST_PARENT`, `EMPTY_TREE`, or `DIRECT_RANGE`), then prepares
@@ -252,8 +263,18 @@ endpoints). Their responses carry `previous: null`; use the returned
 If the job is `operation: BUILD` or selection/review identity differs, stop
 and investigate rather than interpreting it as review progress. An unrelated
 current-pointer update does not alter the review's resolved endpoints or
-READY membership. An interruption or timeout means inspect that same job;
-do not silently retry or resubmit.
+READY membership. An interruption, lost response, or timeout means look up the
+original `requestId` with
+`GET /index/repositories/{repositoryId}/jobs?requestId=…` or `get_job`. Lookup
+requires jobId XOR requestId and includes terminal jobs after later admissions
+and process restart; it never picks the latest or active job.
+
+`REQUEST_NOT_FOUND` means acceptance remains unknown, not proof that submission
+failed. Continue looking up that UUID or stop waiting; do not silently resubmit.
+Submitting a reused UUID returns `REQUEST_ID_REUSED` with its original job
+identity, without Git resolution or new work. A retry after an inspected failure
+requires explicit new intent and a new UUID. Terminal request identities have
+no automatic TTL.
 
 Give OMP the Query base/MCP endpoint, a secure reference to the Query-token
 file, `repositoryId`, and `reviewId`. It first calls `get_review`: the response

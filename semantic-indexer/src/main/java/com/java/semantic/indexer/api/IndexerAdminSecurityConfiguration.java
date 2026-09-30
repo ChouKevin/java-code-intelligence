@@ -13,7 +13,7 @@ public class IndexerAdminSecurityConfiguration {
     @Bean
     public FilterRegistrationBean<IndexerAdminTokenFilter> indexerAdminTokenFilter(IndexerAdminSecurityProperties properties) {
         FilterRegistrationBean<IndexerAdminTokenFilter> registration = new FilterRegistrationBean<>(new IndexerAdminTokenFilter(properties));
-        registration.addUrlPatterns("/index/*");
+        registration.addUrlPatterns("/index/*", "/mcp", "/mcp/*");
         registration.setOrder(Ordered.HIGHEST_PRECEDENCE);
         return registration;
     }

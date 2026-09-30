@@ -46,7 +46,8 @@ class GitReviewContextJourneyIT {
     private static final String QUERY_TOKEN = "journey-query-token";
     private static final String TOKEN_HEADER = "X-Api-Token";
     private static final Duration STARTUP_TIMEOUT = Duration.ofSeconds(45);
-    private static final Duration JOB_TIMEOUT = Duration.ofSeconds(45);
+    // Two full review endpoints, including multi-MiB paging fixtures, need the real analysis deadline.
+    private static final Duration JOB_TIMEOUT = Duration.ofMinutes(10);
     private static final List<String> TOOL_NAMES = List.of(
             "list_repositories", "get_repository", "search_code", "get_fact_source", "list_entry_points", "find_api_routes",
             "find_event_listeners", "list_type_members", "find_method_implementations", "find_references", "find_callers", "find_callees",
@@ -59,14 +60,17 @@ class GitReviewContextJourneyIT {
     Path temporaryDirectory;
 
     @Test
-    void follows_the_real_admin_dispatcher_mongo_http_and_mcp_git_review_journey_without_jdt() throws Exception {
+    void follows_the_real_admin_dispatcher_mongo_http_and_mcp_git_review_journey() throws Exception {
         Assumptions.assumeTrue(Boolean.getBoolean("git.review.journey.enabled"),
                 "the external process journey is opt-in and requires fresh executable jars");
         Path indexerJar = requiredJar("git.review.journey.indexer.jar");
         Path queryJar = requiredJar("git.review.journey.query.jar");
         Path remotePath = temporaryDirectory.resolve("review-remote.git");
         Path seedPath = temporaryDirectory.resolve("review-seed");
-        Path missingJdtHome = temporaryDirectory.resolve("missing-jdt-home");
+        String jdtHomeValue = System.getenv("JDTLS_HOME");
+        assertThat(jdtHomeValue).as("opt-in journey requires explicit JDTLS_HOME").isNotBlank();
+        Path jdtHome = Path.of(jdtHomeValue);
+        assertThat(Files.isDirectory(jdtHome)).as("real JDT LS installation").isTrue();
         Path jdtWorkspace = temporaryDirectory.resolve("jdt-workspace");
         int indexerPort = availablePort();
         int queryPort = availablePort();
@@ -75,44 +79,46 @@ class GitReviewContextJourneyIT {
              Git seed = Git.init().setInitialBranch("main").setDirectory(seedPath.toFile()).call()) {
             mongo.start();
             String mongoUri = mongo.getConnectionString() + "/git_review_journey";
-            bootstrapSchema(indexerJar, mongoUri, missingJdtHome);
+            bootstrapSchema(indexerJar, mongoUri, jdtHome);
             String previous = seedFixture(seed, seedPath, remotePath);
             remote.getRepository().updateRef("HEAD", true).link("refs/heads/main");
             String current = updateFixture(seed, seedPath);
             System.out.println("GRC4 fixture revisions previous=" + previous + " current=" + current + " review=" + previous);
-            RunningProcess indexer = startIndexer(indexerJar, mongoUri, remotePath, indexerPort, missingJdtHome, jdtWorkspace);
+            RunningProcess indexer = startIndexer(indexerJar, mongoUri, remotePath, indexerPort, jdtHome, jdtWorkspace);
             try {
                 String indexerBase = "http://127.0.0.1:" + indexerPort;
-                awaitHttp(indexerBase + "/index/repositories/" + REPOSITORY_ID + "/git/refs", QUERY_TOKEN, indexer);
-                assertThat(post(indexerBase, "/index/repositories/" + REPOSITORY_ID + "/git/refs", QUERY_TOKEN, Map.of()).statusCode())
+                awaitHttp(indexerBase + "/index/repositories/" + REPOSITORY_ID + "/metadata", QUERY_TOKEN, indexer);
+                assertThat(post(indexerBase, "/index/repositories/" + REPOSITORY_ID + "/metadata", QUERY_TOKEN,
+                        Map.of("requestId", java.util.UUID.randomUUID().toString())).statusCode())
                         .isEqualTo(401);
 
                 JsonMapper mapper = JsonMapper.builder().build();
-                String catalogJob = acceptedJob(post(indexerBase, "/index/repositories/" + REPOSITORY_ID + "/git/refs", ADMIN_TOKEN, Map.of()), mapper);
+                String metadataRequestId = java.util.UUID.randomUUID().toString();
+                String catalogJob = acceptedJob(post(indexerBase, "/index/repositories/" + REPOSITORY_ID + "/metadata",
+                        ADMIN_TOKEN, Map.of("requestId", metadataRequestId)), mapper);
                 Map<?, ?> catalogStatus = completedJob(indexerBase, catalogJob, mapper, indexer);
-                String catalogId = text(map(catalogStatus, "gitEvidence"), "evidenceId");
+                String catalogId = text(map(catalogStatus, "metadataResult"), "catalogId");
+                String historyId = text(map(catalogStatus, "metadataResult"), "historyId");
+                assertThat(text(map(catalogStatus, "metadataResult"), "headRevision")).isEqualTo(current);
 
-                String historyJob = acceptedJob(post(indexerBase, "/index/repositories/" + REPOSITORY_ID + "/git/history", ADMIN_TOKEN,
-                        Map.of("catalogId", catalogId, "branch", "main", "revision", current)), mapper);
-                Map<?, ?> historyStatus = completedJob(indexerBase, historyJob, mapper, indexer);
-                String historyId = text(map(historyStatus, "gitEvidence"), "evidenceId");
-
-                String comparisonJob = acceptedJob(post(indexerBase, "/index/repositories/" + REPOSITORY_ID + "/git/comparisons", ADMIN_TOKEN,
-                        Map.of("previous", previous, "current", current)), mapper);
+                String reviewRequestId = java.util.UUID.randomUUID().toString();
+                String comparisonJob = acceptedJob(post(indexerBase, "/index/repositories/" + REPOSITORY_ID + "/reviews", ADMIN_TOKEN,
+                        Map.of("requestId", reviewRequestId, "selection",
+                                Map.of("kind", "RANGE", "beforeRevision", previous, "afterRevision", current))), mapper);
                 Map<?, ?> comparisonStatus = completedJob(indexerBase, comparisonJob, mapper, indexer);
-                Map<?, ?> comparisonEvidence = map(comparisonStatus, "gitEvidence");
+                Map<?, ?> comparisonEvidence = map(comparisonStatus, "review");
                 String comparisonId = text(comparisonEvidence, "comparisonId");
                 String previousSnapshotId = text(comparisonEvidence, "previousSnapshotId");
                 String currentSnapshotId = text(comparisonEvidence, "currentSnapshotId");
-                assertThat(text(comparisonEvidence, "revision")).isEqualTo(current);
+                assertThat(text(map(comparisonEvidence, "resolvedEndpoints"), "afterRevision")).isEqualTo(current);
 
                 seed.commit().setMessage("remote moved after evidence preparation").setAuthor("Fixture", "fixture@example.test")
                         .setCommitter("Fixture", "fixture@example.test").call();
                 push(seed, "main");
 
                 indexer.close();
-                assertThat(Files.notExists(missingJdtHome)).isTrue();
-                assertThat(Files.notExists(jdtWorkspace)).isTrue();
+                assertThat(Files.isDirectory(jdtHome)).isTrue();
+                assertThat(Files.isDirectory(jdtWorkspace)).isTrue();
                 Files.move(remotePath, temporaryDirectory.resolve("remote-unavailable"));
                 Files.move(seedPath, temporaryDirectory.resolve("seed-unavailable"));
                 Files.move(temporaryDirectory.resolve("checkouts"), temporaryDirectory.resolve("checkouts-unavailable"));
@@ -178,9 +184,9 @@ class GitReviewContextJourneyIT {
         return jar;
     }
 
-    private void bootstrapSchema(Path indexerJar, String mongoUri, Path missingJdtHome) throws Exception {
+    private void bootstrapSchema(Path indexerJar, String mongoUri, Path jdtHome) throws Exception {
         RunningProcess bootstrap = start(indexerJar, List.of("--semantic.schema-bootstrap=true", "--spring.mongodb.uri=" + mongoUri,
-                "--semantic.jdtls.home=" + missingJdtHome, "--spring.main.banner-mode=off"));
+                "--semantic.jdtls.home=" + jdtHome, "--spring.main.banner-mode=off"));
         try {
             assertThat(bootstrap.await(Duration.ofSeconds(30))).isZero();
         } finally {
@@ -189,6 +195,14 @@ class GitReviewContextJourneyIT {
     }
 
     private String seedFixture(Git seed, Path seedPath, Path remotePath) throws Exception {
+        write(seedPath, "pom.xml", """
+                <project xmlns="http://maven.apache.org/POM/4.0.0">
+                  <modelVersion>4.0.0</modelVersion>
+                  <groupId>fixture</groupId><artifactId>git-review</artifactId><version>1</version>
+                  <build><sourceDirectory>src</sourceDirectory></build>
+                  <properties><maven.compiler.release>21</maven.compiler.release></properties>
+                </project>
+                """);
         write(seedPath, "src/Caller.java", "class Caller { int call() { return Service.version(); } }\n");
         write(seedPath, "src/Service.java", serviceSource("previous"));
         write(seedPath, "src/LargeDiff.java", largeDiffSource("previous"));
@@ -227,6 +241,8 @@ class GitReviewContextJourneyIT {
         for (int index = 0; index < 30; index++) {
             source.append("  // stable-token ").append(value).append(' ').append(index).append("\n");
         }
+        // One regular Java comment exceeds a 64-KiB source page without exceeding the file policy.
+        source.append("  // ").append("來源證據".repeat(10_000)).append("\n");
         return source.append("}\n").toString();
     }
 
@@ -262,14 +278,14 @@ class GitReviewContextJourneyIT {
         return source.append("}\n").toString();
     }
 
-    private RunningProcess startIndexer(Path jar, String mongoUri, Path remotePath, int port, Path missingJdtHome, Path jdtWorkspace)
+    private RunningProcess startIndexer(Path jar, String mongoUri, Path remotePath, int port, Path jdtHome, Path jdtWorkspace)
             throws IOException {
         Path checkoutRoot = Files.createDirectories(temporaryDirectory.resolve("checkouts"));
         JdtLsProperties isolation = JdtLsTestProperties.linuxUid();
         return start(jar, List.of("--spring.mongodb.uri=" + mongoUri, "--server.address=127.0.0.1", "--server.port=" + port,
                 "--semantic.indexer.admin-token=" + ADMIN_TOKEN, "--semantic.repositories." + REPOSITORY_ID + ".url=" + remotePath.toUri(),
                 "--semantic.repositories." + REPOSITORY_ID + ".default-branch=main", "--semantic.data-root=" + checkoutRoot,
-                "--semantic.jdtls.home=" + missingJdtHome, "--semantic.jdtls.workspace-data-root=" + jdtWorkspace,
+                "--semantic.jdtls.home=" + jdtHome, "--semantic.jdtls.workspace-data-root=" + jdtWorkspace,
                 "--semantic.jdtls.isolation-mode=" + isolation.getIsolationMode(),
                 "--semantic.jdtls.analysis-uid=" + isolation.getAnalysisUid(),
                 "--semantic.jdtls.analysis-gid=" + isolation.getAnalysisGid(),
@@ -511,7 +527,8 @@ class GitReviewContextJourneyIT {
     private Map<?, ?> completedJob(String base, String jobId, JsonMapper mapper, RunningProcess indexer) throws Exception {
         Instant deadline = Instant.now().plus(JOB_TIMEOUT);
         while (Instant.now().isBefore(deadline)) {
-            HttpResponse<String> response = get(base, "/index/repositories/" + REPOSITORY_ID + "/jobs/" + jobId, ADMIN_TOKEN);
+            assertThat(indexer.process().isAlive()).as("Indexer exited while polling: %s", Files.readString(indexer.log())).isTrue();
+            HttpResponse<String> response = get(base, "/index/repositories/" + REPOSITORY_ID + "/jobs?jobId=" + jobId, ADMIN_TOKEN);
             if (response.statusCode() == 200) {
                 Map<?, ?> status = mapper.readValue(response.body(), Map.class);
                 if ("COMPLETE".equals(status.get("phase"))) {

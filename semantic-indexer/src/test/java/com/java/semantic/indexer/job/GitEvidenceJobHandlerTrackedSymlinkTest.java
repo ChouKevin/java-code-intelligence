@@ -80,12 +80,18 @@ class GitEvidenceJobHandlerTrackedSymlinkTest {
         RepositoryRuntimeRegistry repositories = mock(RepositoryRuntimeRegistry.class);
         GitEvidencePublicationStore evidence = mock(GitEvidencePublicationStore.class);
         IndexJob job = new IndexJob(IndexJobId.create(), repositoryId, Optional.empty(), IndexJobPhase.RUNNING, true,
-                Optional.empty(), false, IndexJobOperation.GIT_REFS, Optional.of(GitEvidenceJob.refs()));
+                Optional.empty(), false, IndexJobOperation.GIT_METADATA, Optional.of(GitEvidenceJob.metadata("main")),
+                Optional.empty(), Optional.of(PreparationRequest.metadata(
+                        new PreparationRequestId("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"), Optional.empty())), Optional.empty());
         GitCatalogManifest catalog = new GitCatalogManifest(GitEvidenceId.create(), repositoryId,
                 Instant.parse("2026-09-15T00:00:00Z"), GitEvidenceState.PREPARING, GitCatalogManifest.VERSION,
                 GitEvidenceOwnership.standalone());
         when(repositories.get(repositoryId)).thenReturn(runtime);
         when(evidence.beginCatalog(eq(job), any(Instant.class))).thenReturn(catalog);
+        when(evidence.beginHistory(eq(job), eq(catalog.catalogId()), eq("main"), eq(head), any(Instant.class)))
+                .thenReturn(new com.java.semantic.model.git.GitHistoryManifest(GitEvidenceId.create(), catalog.catalogId(),
+                        repositoryId, "main", head, catalog.observedAt(), GitEvidenceState.PREPARING,
+                        com.java.semantic.model.git.GitHistoryManifest.VERSION, 0L, GitEvidenceOwnership.standalone()));
 
         assertThatCode(() -> new GitEvidenceJobHandler(repositories, git, evidence,
                 mock(RepositoryMutationListener.class)).prepare(job))

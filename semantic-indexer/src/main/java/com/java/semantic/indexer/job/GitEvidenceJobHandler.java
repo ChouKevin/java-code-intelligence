@@ -2,6 +2,9 @@ package com.java.semantic.indexer.job;
 
 import com.java.semantic.indexer.store.GitEvidencePublicationStore;
 import com.java.semantic.model.git.GitCatalogManifest;
+import com.java.semantic.model.git.GitBranch;
+import com.java.semantic.model.git.GitEvidenceState;
+import com.java.semantic.model.source.SourceEvidencePolicy;
 import com.java.semantic.model.git.GitHistoryManifest;
 import com.java.semantic.model.repository.RepositoryRevision;
 import com.java.semantic.model.git.GitEvidenceOwnership;
@@ -18,6 +21,10 @@ import org.springframework.stereotype.Component;
 import java.io.IOException;
 import java.time.Instant;
 import java.util.Objects;
+import java.util.List;
+import java.util.Set;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.stream.Collectors;
 import java.util.Optional;
 
 /** Runs Git evidence preparation inside the existing serialized dispatcher. */
@@ -44,12 +51,10 @@ public final class GitEvidenceJobHandler {
             try {
                 mutationListener.beforeMutation(job.repositoryId());
                 validateCheckout(runtime);
-                switch (job.operation()) {
-                    case GIT_REFS -> refs(job, runtime);
-                    case GIT_HISTORY -> history(job, runtime);
-                    case GIT_COMPARISON -> comparison(job, runtime);
-                    default -> throw new IllegalArgumentException("not a Git evidence job");
+                if (job.operation() != IndexJobOperation.GIT_METADATA) {
+                    throw new IllegalArgumentException("not a metadata refresh job");
                 }
+                metadata(job, runtime);
             } catch (RuntimeException exception) {
                 evidence.fail(job);
                 throw exception;
@@ -93,15 +98,13 @@ public final class GitEvidenceJobHandler {
             validateCheckout(runtime);
             Optional<GitEvidencePublicationStore.PreparedSource> before = payload.before().map(evidence::preparedSource);
             GitEvidencePublicationStore.PreparedSource after = evidence.preparedSource(payload.after().orElseThrow());
-            com.java.semantic.model.source.SourceEvidencePolicy beforePolicy = before.map(
+            SourceEvidencePolicy beforePolicy = before.map(
                     GitEvidencePublicationStore.PreparedSource::policy).orElseGet(() ->
-                    new com.java.semantic.model.source.SourceEvidencePolicy(
-                            com.java.semantic.model.source.SourceEvidencePolicy.VERSION, java.util.List.of(),
-                            java.util.Set.of(), Optional.empty()));
+                    new SourceEvidencePolicy(SourceEvidencePolicy.VERSION, List.of(), Set.of(), Optional.empty()));
             GitPreparedComparison comparison = git.prepareComparison(runtime.workingTree(), endpoints.beforeRevision(),
                     endpoints.afterRevision(), beforePolicy, after.policy(),
-                    before.flatMap(source -> source.guide().path()).stream().collect(java.util.stream.Collectors.toSet()),
-                    after.guide().path().stream().collect(java.util.stream.Collectors.toSet()));
+                    before.flatMap(source -> source.guide().path()).stream().collect(Collectors.toSet()),
+                    after.guide().path().stream().collect(Collectors.toSet()));
             evidence.publishComparison(requiredJob, comparison, Instant.now(),
                     new GitEvidenceOwnership(GitPublicationScope.REVIEW, Optional.of(payload.reviewId())), before, after);
         } catch (RuntimeException exception) {
@@ -120,46 +123,25 @@ public final class GitEvidenceJobHandler {
         }
     }
 
-    private void refs(IndexJob job, RepositoryRuntime runtime) {
+    private void metadata(IndexJob job, RepositoryRuntime runtime) {
+        String branch = job.gitEvidence().orElseThrow().branch().orElseThrow();
         if (!git.isCloned(runtime.workingTree())) {
             git.clone(runtime.workingTree(), runtime.remoteUrl());
         }
-        GitCatalogManifest manifest = evidence.beginCatalog(job, Instant.now());
-        evidence.appendBranches(manifest, git.fetchRemoteBranches(runtime.workingTree(), runtime.remoteUrl()));
-    }
-
-    private void history(IndexJob job, RepositoryRuntime runtime) {
-        GitEvidenceJob payload = job.gitEvidence().orElseThrow(() -> new IllegalStateException("Git history payload is required"));
-        String branch = payload.branch().orElseThrow(() -> new IllegalArgumentException("Git history branch is required"));
-        RepositoryRevision revision = payload.revision().orElseThrow(() -> new IllegalArgumentException("Git history revision is required"));
-        com.java.semantic.model.git.GitEvidenceId catalogId = payload.catalogId().orElseThrow(() -> new IllegalArgumentException("Git history catalog is required"));
-        if (!evidence.catalogContainsHead(job.repositoryId(), catalogId, branch, revision)) {
-            throw new IllegalArgumentException("Git history catalog, branch and revision do not match");
-        }
-        GitHistoryManifest manifest = evidence.beginHistory(job, catalogId, branch, revision, Instant.now());
-        // JGit invokes this callback serially while the one dispatcher worker owns the repository lock.
-        java.util.concurrent.atomic.AtomicLong ordinal = new java.util.concurrent.atomic.AtomicLong();
-        git.streamReachableHistory(runtime.workingTree(), revision, commit -> {
-            evidence.appendCommit(manifest, ordinal.getAndIncrement(), commit);
-        });
-        evidence.readyHistory(manifest, ordinal.get());
-    }
-
-    private void comparison(IndexJob job, RepositoryRuntime runtime) {
-        GitEvidenceJob payload = job.gitEvidence().orElseThrow(() -> new IllegalStateException("Git comparison payload is required"));
-        RepositoryRevision previous = payload.previousRevision().orElseThrow(() -> new IllegalArgumentException("Git comparison previous is required"));
-        RepositoryRevision current = payload.revision().orElseThrow(() -> new IllegalArgumentException("Git comparison current is required"));
-        if (!git.isCloned(runtime.workingTree())) {
-            git.clone(runtime.workingTree(), runtime.remoteUrl());
-        }
-        git.fetch(runtime.workingTree(), runtime.remoteUrl());
-        git.verifyComparisonEndpoints(runtime.workingTree(), previous, current);
-        GitEvidencePublicationStore.PreparedSource before = evidence.preparedSource(job.repositoryId(), previous);
-        GitEvidencePublicationStore.PreparedSource after = evidence.preparedSource(job.repositoryId(), current);
-        GitPreparedComparison comparison = git.prepareComparison(runtime.workingTree(), Optional.of(previous), current,
-                before.policy(), after.policy(),
-                before.guide().path().stream().collect(java.util.stream.Collectors.toSet()),
-                after.guide().path().stream().collect(java.util.stream.Collectors.toSet()));
-        evidence.publishComparison(job, comparison, Instant.now(), GitEvidenceOwnership.standalone(), Optional.of(before), after);
+        List<GitBranch> branches = git.fetchRemoteBranches(runtime.workingTree(), runtime.remoteUrl());
+        RepositoryRevision head = branches.stream().filter(candidate -> candidate.name().equals(branch))
+                .map(GitBranch::head).findFirst()
+                .orElseThrow(() -> new IllegalArgumentException("requested metadata branch is unavailable"));
+        Instant observedAt = Instant.ofEpochMilli(Instant.now().toEpochMilli());
+        GitCatalogManifest catalog = evidence.beginCatalog(job, observedAt);
+        evidence.appendBranches(catalog, branches);
+        GitHistoryManifest history = evidence.beginHistory(job, catalog.catalogId(), branch, head, observedAt);
+        AtomicLong ordinal = new AtomicLong();
+        git.streamReachableHistory(runtime.workingTree(), head,
+                commit -> evidence.appendCommit(history, ordinal.getAndIncrement(), commit));
+        evidence.readyHistory(history, ordinal.get());
+        evidence.publishMetadata(job, new GitHistoryManifest(history.historyId(), catalog.catalogId(),
+                job.repositoryId(), branch, head, observedAt, GitEvidenceState.READY,
+                GitHistoryManifest.VERSION, ordinal.get(), GitEvidenceOwnership.standalone()));
     }
 }

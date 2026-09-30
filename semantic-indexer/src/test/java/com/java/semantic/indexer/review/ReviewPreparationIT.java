@@ -7,6 +7,8 @@ import com.java.semantic.indexer.job.IndexJobOperation;
 import com.java.semantic.indexer.job.IndexJobPhase;
 import com.java.semantic.indexer.job.IndexJobTarget;
 import com.java.semantic.indexer.job.MongoIndexJobStore;
+import com.java.semantic.indexer.job.PreparationRequest;
+import com.java.semantic.indexer.job.PreparationRequestId;
 import com.java.semantic.indexer.store.GitEvidencePublicationStore;
 import com.java.semantic.indexer.store.IndexSchemaBootstrap;
 import com.java.semantic.model.git.GitComparisonAncestry;
@@ -356,7 +358,8 @@ class ReviewPreparationIT {
                 template.getCollection(IndexCollections.REPOSITORIES).updateOne(new Document("repoId", repositoryId.value()),
                         new Document("$unset", new Document("currentPointer", "")));
             }
-            IndexJob accepted = jobs.admitReview(repositoryId, requested);
+            IndexJob accepted = jobs.admitReview(repositoryId, PreparationRequest.review(
+                    new PreparationRequestId(java.util.UUID.randomUUID().toString()), requested));
             if (selection != Selection.ROOT) {
                 template.getCollection(IndexCollections.REPOSITORIES).updateOne(new Document("repoId", repositoryId.value()),
                         new Document("$set", new Document("currentPointer", pointer(movedCurrent))));

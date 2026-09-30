@@ -23,7 +23,8 @@ class IndexAdminSecurityTest {
                 "/index/repositories/orders/checkout", "/index/repositories/orders/rebuild",
                 "/index/repositories/orders/rollback", "/index/repositories/orders/publication",
                 "/index/uat/publication/arm", "/index/uat/publication/await", "/index/uat/publication/release",
-                "/index/uat/repositories/orders/reset"};
+                "/index/uat/repositories/orders/reset", "/mcp", "/mcp/", "/index/repositories/orders/metadata",
+                "/index/repositories/orders/codebase", "/index/repositories/orders/reviews", "/index/repositories/orders/jobs"};
         for (String path : paths) {
             MockHttpServletRequest absentTokenRequest = new MockHttpServletRequest(methodFor(path), path);
             MockHttpServletResponse absentTokenResponse = new MockHttpServletResponse();

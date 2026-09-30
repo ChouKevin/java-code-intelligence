@@ -1,11 +1,19 @@
 package com.java.semantic.indexer.store;
 
-import com.java.semantic.indexer.job.GitEvidenceJob;
 import com.java.semantic.indexer.job.IndexJob;
 import com.java.semantic.indexer.job.IndexJobId;
 import com.java.semantic.indexer.job.IndexJobOperation;
 import com.java.semantic.indexer.job.IndexJobPhase;
 import com.java.semantic.indexer.job.IndexJobTarget;
+import com.java.semantic.indexer.job.PreparationRequest;
+import com.java.semantic.indexer.job.PreparationRequestId;
+import com.java.semantic.indexer.job.ReviewJobPayload;
+import com.java.semantic.indexer.job.ReviewPreparationStage;
+import com.java.semantic.model.review.ReviewId;
+import com.java.semantic.model.review.ReviewSelection;
+import com.java.semantic.model.review.ResolvedReviewEndpoints;
+import com.java.semantic.model.review.ReviewBaselineRule;
+import com.java.semantic.model.git.GitPublicationScope;
 import com.java.semantic.indexer.build.FullIndexPlan;
 import com.java.semantic.indexer.build.FullIndexPlanner;
 import com.java.semantic.indexer.build.SourceSnapshotPublication;
@@ -93,7 +101,7 @@ class GitComparisonPublicationIT {
             GitPreparedComparison comparison = adapter.prepareComparison(repositoryDirectory, Optional.of(before), after,
                     beforePolicy, afterPolicy, Set.of(GUIDE), Set.of(GUIDE));
             GitEvidencePublicationStore store = new GitEvidencePublicationStore(template);
-            store.publishComparison(comparisonJob(before, after), comparison, Instant.now(), GitEvidenceOwnership.standalone(),
+            publishComparison(store, template, comparison,
                     Optional.of(source(template, store, before, beforePolicy, beforeGuide, comparison.previousEntries())),
                     source(template, store, after, afterPolicy, afterGuide, comparison.currentEntries()));
 
@@ -142,14 +150,12 @@ class GitComparisonPublicationIT {
             GitEvidencePublicationStore.PreparedSource afterSource = source(template, store, after, policy, guide, List.of());
             GitEvidencePublicationStore.PreparedSource wrongGeneration = new GitEvidencePublicationStore.PreparedSource(
                     afterSource.policy(), afterSource.guide(), afterSource.snapshot(), beforeSource.sourceGenerationId());
-            assertThatThrownBy(() -> store.publishComparison(comparisonJob(before, after), comparison, Instant.now(),
-                    GitEvidenceOwnership.standalone(), Optional.of(beforeSource), wrongGeneration))
+            assertThatThrownBy(() -> publishComparison(store, template, comparison, Optional.of(beforeSource), wrongGeneration))
                     .isInstanceOf(PublicationConflictException.class);
             template.getCollection(IndexCollections.GIT_EVIDENCE_MANIFESTS).deleteOne(
                     new Document("evidenceId", beforeSource.snapshot().snapshotId().value()));
 
-            assertThatThrownBy(() -> store.publishComparison(comparisonJob(before, after), comparison, Instant.now(),
-                    GitEvidenceOwnership.standalone(), Optional.of(beforeSource), afterSource))
+            assertThatThrownBy(() -> publishComparison(store, template, comparison, Optional.of(beforeSource), afterSource))
                     .isInstanceOf(PublicationConflictException.class);
             assertThat(template.getCollection(IndexCollections.GIT_EVIDENCE_MANIFESTS)
                     .countDocuments(new Document("kind", "COMPARISON").append("state", "READY"))).isZero();
@@ -228,8 +234,7 @@ class GitComparisonPublicationIT {
             GitEvidencePublicationStore.PreparedSource previous = source(template, store, before, policy(Set.of()), guide, List.of());
             GitPreparedComparison comparison = adapter.prepareComparison(repositoryDirectory, Optional.of(before), revision,
                     policy(Set.of()), policy, Set.of(), Set.of());
-            store.publishComparison(comparisonJob(before, revision), comparison, Instant.now(), GitEvidenceOwnership.standalone(),
-                    Optional.of(previous), prepared);
+            publishComparison(store, template, comparison, Optional.of(previous), prepared);
             List<String> patches = template.getCollection(IndexCollections.GIT_COMPARISON_PATCHES).find()
                     .sort(new Document("ordinal", 1)).map(row -> row.getString("patch")).into(new ArrayList<>());
             assertThat(String.join("", patches).lines().filter(line -> line.equals("+// é😀")).count()).isEqualTo(12000L);
@@ -281,8 +286,7 @@ class GitComparisonPublicationIT {
                     ProjectGuideMembership.unavailable(ProjectGuideState.ABSENT), List.of());
             GitPreparedComparison comparison = adapter.prepareComparison(repositoryDirectory, Optional.of(before), revision,
                     policy(Set.of()), candidates, Set.of(), Set.of());
-            store.publishComparison(comparisonJob(before, revision), comparison, Instant.now(), GitEvidenceOwnership.standalone(),
-                    Optional.of(previous), prepared);
+            publishComparison(store, template, comparison, Optional.of(previous), prepared);
             assertThat(template.getCollection(IndexCollections.GIT_SNAPSHOT_FILES).find().into(new ArrayList<>()))
                     .allSatisfy(file -> assertThat(file.getString("path")).isEqualTo(JAVA));
             assertThat(template.getCollection(IndexCollections.GIT_SNAPSHOT_CHUNKS).find().into(new ArrayList<>()))
@@ -300,8 +304,7 @@ class GitComparisonPublicationIT {
             GitPreparedComparison comparison, GitEvidencePublicationStore.PreparedSource previous, GitEvidencePublicationStore.PreparedSource source) {
         long ready = template.getCollection(IndexCollections.GIT_EVIDENCE_MANIFESTS)
                 .countDocuments(new Document("kind", "COMPARISON").append("state", "READY"));
-        assertThatThrownBy(() -> store.publishComparison(comparisonJob(previous.snapshot().revision(), source.snapshot().revision()),
-                comparison, Instant.now(), GitEvidenceOwnership.standalone(), Optional.of(previous), source))
+        assertThatThrownBy(() -> publishComparison(store, template, comparison, Optional.of(previous), source))
                 .isInstanceOf(PublicationConflictException.class);
         assertThat(template.getCollection(IndexCollections.GIT_EVIDENCE_MANIFESTS)
                 .countDocuments(new Document("kind", "COMPARISON").append("state", "READY"))).isEqualTo(ready);
@@ -422,9 +425,32 @@ class GitComparisonPublicationIT {
         return new GitEvidencePublicationStore.PreparedSource(policy, guide, membership, generationId);
     }
 
-    private static IndexJob comparisonJob(RepositoryRevision before, RepositoryRevision after) {
-        return new IndexJob(IndexJobId.create(), REPOSITORY, Optional.empty(), IndexJobPhase.RUNNING, true,
-                Optional.empty(), false, IndexJobOperation.GIT_COMPARISON,
-                Optional.of(GitEvidenceJob.comparison(before, after)));
+    private static void publishComparison(GitEvidencePublicationStore store, MongoTemplate template,
+            GitPreparedComparison comparison, Optional<GitEvidencePublicationStore.PreparedSource> before,
+            GitEvidencePublicationStore.PreparedSource after) {
+        ReviewId reviewId = new ReviewId(java.util.UUID.randomUUID().toString());
+        ReviewSelection selection = ReviewSelection.range(comparison.previous().orElseThrow(), comparison.current());
+        ReviewJobPayload payload = new ReviewJobPayload(reviewId, selection,
+                Optional.of(new ResolvedReviewEndpoints(comparison.previous(), comparison.current(), ReviewBaselineRule.DIRECT_RANGE)),
+                Optional.of(new com.java.semantic.indexer.job.ReviewBuildTargets(
+                        Optional.of(new IndexJobTarget(comparison.previous().orElseThrow(), new GenerationId("review-before-" + reviewId.value()), 1L)),
+                        new IndexJobTarget(comparison.current(), new GenerationId("review-after-" + reviewId.value()), 2L))),
+                ReviewPreparationStage.PREPARING_GIT, Optional.empty(), Optional.empty(),
+                Optional.empty(), Optional.empty(), Optional.empty());
+        IndexJob job = new IndexJob(IndexJobId.create(), REPOSITORY, Optional.empty(), IndexJobPhase.RUNNING, true,
+                Optional.empty(), false, IndexJobOperation.REVIEW, Optional.empty(), Optional.of(payload),
+                Optional.of(PreparationRequest.review(new PreparationRequestId(java.util.UUID.randomUUID().toString()), selection)),
+                Optional.empty());
+        template.getCollection(IndexCollections.INDEX_JOBS).insertOne(new Document("repoId", REPOSITORY.value())
+                .append("jobId", job.id().value()).append("operation", "REVIEW").append("phase", "RUNNING").append("active", true)
+                .append("review", new Document("reviewId", reviewId.value()).append("stage", "PREPARING_GIT")));
+        try {
+            store.publishComparison(job, comparison, Instant.now(),
+                    new GitEvidenceOwnership(GitPublicationScope.REVIEW, Optional.of(reviewId)), before, after);
+        } finally {
+            // This store-boundary fixture stops before review READY; it must not claim full review completion.
+            template.getCollection(IndexCollections.INDEX_JOBS).updateOne(new Document("jobId", job.id().value()),
+                    new Document("$set", new Document("active", false).append("phase", "FAILED")));
+        }
     }
 }

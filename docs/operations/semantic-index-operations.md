@@ -62,18 +62,20 @@ Query does not silently read an older or newer semantic revision. One of the oth
 
 ## READY review operation
 
-`POST /index/repositories/{repositoryId}/reviews` is the **only** admission
-route for a captured-current review, not a Query operation. An ordinary BUILD
-of B is not a review and can move current. Submit one exact lowercase
-40-character B SHA, then immediately check the typed `202` review identity
-and persisted `operation: REVIEW`/captured A/current-pointer postconditions
-before long polling. An absent review ID, BUILD operation, or moved current
-is an incident, not review progress. A client outage does not authorize
-automatic retry. Follow the [review admission and stop procedure](semantic-review.md#current-generations-and-review-preparation)
-for the complete checks and recovery boundary.
+`POST /index/repositories/{repositoryId}/reviews` and the private Indexer's
+`prepare_review` MCP tool admit an explicit `COMMIT` or `RANGE` selection with a
+client-generated canonical UUID `requestId`. They are not Query operations and
+never capture or move current. Ordinary BUILD preparation is not a review.
+Save requestId before submission, require the typed `202` job/review identity,
+and check `operation: REVIEW` plus the original selection before polling.
+After a lost response, look up that same requestId with
+`GET /index/repositories/{repositoryId}/jobs?requestId=…`; do not select a later
+or merely active job. A client outage does not authorize resubmission.
+Follow the [review admission and stop procedure](semantic-review.md#current-generations-and-review-preparation)
+for exact selector, terminal recovery, and explicit retry rules.
 
 `get_review` is the only public review discovery operation. It returns immutable
-A/B revisions, side generation identities, comparison ID, and snapshot IDs after
+BEFORE/AFTER revisions, side generation identities, comparison ID, and snapshot IDs after
 the review is READY. Use those values unchanged. The ten side operations are
 `review_search_code`, `review_get_fact_source`, `review_list_entry_points`,
 `review_find_api_routes`, `review_find_event_listeners`,
@@ -82,8 +84,9 @@ the review is READY. Use those values unchanged. The ten side operations are
 Every side request requires `repositoryId`, `reviewId`, `side`, and its exact
 side `revision`; Query rejects a mismatch rather than selecting current.
 
-Review direction is direct A → B for `CURRENT_TO_COMMIT`, not a PR-diff claim or
-a merge-base result. Query exposes neither PREPARING/FAILED review semantic data
+`COMMIT` uses first-parent → commit (or empty tree for a root); `RANGE` uses the
+exact before → after direction, including equal, reverse, and divergent commits.
+Neither is a merge-base or PR-diff claim. Query exposes neither PREPARING/FAILED review semantic data
 nor review-owned Git snapshots/comparisons until the owner/READY membership gate
 passes. A known Git ID is not a bypass. Unknown/denied, preparing, failed, and
 wrong-context requests map respectively to `REVIEW_NOT_FOUND`,
