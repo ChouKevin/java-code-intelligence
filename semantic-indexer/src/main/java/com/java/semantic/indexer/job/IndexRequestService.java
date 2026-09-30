@@ -94,7 +94,7 @@ public final class IndexRequestService {
         String branch = repositories.get(repositoryId).defaultBranch();
         rejectReused(repositoryId, requestId);
         jobs.reconcileCommitted(repositoryId);
-        RepositoryRevision revision = revisionResolver.sync(repositoryId, Optional.of(branch));
+        RepositoryRevision revision = revisionResolver.sync(repositoryId, Optional.of("refs/heads/" + branch));
         return jobs.admitCodebase(repositoryId, request, branch, revision);
     }
 

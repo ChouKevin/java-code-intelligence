@@ -285,17 +285,20 @@ components:
       properties:
         jobId: { type: string }
         repositoryId: { type: string }
-        target: { $ref: '#/components/schemas/IndexJobTarget', nullable: true }
+        target:
+          oneOf:
+            - { $ref: '#/components/schemas/IndexJobTarget' }
+            - { type: 'null' }
         phase:
           type: string
           enum: [ACCEPTED, RUNNING, COMPLETE, FAILED]
         failureCategory:
-          type: string
-          nullable: true
-          enum: [WORKER_INTERRUPTED, SOURCE_UNAVAILABLE, SCHEMA_REBUILD_REQUIRED, PUBLICATION_CONFLICT, VALIDATION_FAILED, ANALYSIS_UNAVAILABLE, REVIEW_EVIDENCE_MISMATCH, REVIEW_BASELINE_UNAVAILABLE]
+          type: [string, 'null']
+          enum: [WORKER_INTERRUPTED, SOURCE_UNAVAILABLE, SCHEMA_REBUILD_REQUIRED, PUBLICATION_CONFLICT, VALIDATION_FAILED, ANALYSIS_UNAVAILABLE, REVIEW_EVIDENCE_MISMATCH, REVIEW_BASELINE_UNAVAILABLE, null]
         review:
-          allOf: [{ $ref: '#/components/schemas/ReviewJob' }]
-          nullable: true
+          oneOf:
+            - { $ref: '#/components/schemas/ReviewJob' }
+            - { type: 'null' }
     PublicationCycle:
       type: object
       additionalProperties: false
@@ -330,11 +333,13 @@ components:
       required: [currentPointer, rollbackPointer]
       properties:
         currentPointer:
-          allOf: [{ $ref: '#/components/schemas/GenerationPointer' }]
-          nullable: true
+          oneOf:
+            - { $ref: '#/components/schemas/GenerationPointer' }
+            - { type: 'null' }
         rollbackPointer:
-          allOf: [{ $ref: '#/components/schemas/GenerationPointer' }]
-          nullable: true
+          oneOf:
+            - { $ref: '#/components/schemas/GenerationPointer' }
+            - { type: 'null' }
     ApiError:
       type: object
       additionalProperties: false

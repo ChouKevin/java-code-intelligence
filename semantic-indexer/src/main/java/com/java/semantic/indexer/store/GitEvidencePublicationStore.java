@@ -19,13 +19,7 @@ import com.java.semantic.model.git.GitComparisonChange;
 import com.java.semantic.model.git.GitChangeKind;
 import com.java.semantic.model.git.GitFileContentStatus;
 import com.java.semantic.model.index.IndexCollections;
-import com.java.semantic.model.index.AnalysisInputs;
-import com.java.semantic.model.index.AnalysisFingerprint;
-import com.java.semantic.model.index.SemanticAnalysisEvidence;
-import com.java.semantic.model.index.ManifestDigest;
 import com.java.semantic.model.index.GenerationId;
-import com.java.semantic.model.query.SelectedGeneration;
-import com.java.semantic.indexer.build.GenerationValidator;
 import com.java.semantic.model.index.SealedGeneration;
 import com.java.semantic.model.index.IndexSchemaContract;
 import com.java.semantic.model.repository.RepositoryId;
@@ -288,31 +282,6 @@ public final class GitEvidencePublicationStore {
 
     public record PreparedSource(SourceEvidencePolicy policy, ProjectGuideMembership guide,
             SourceSnapshotMembership snapshot, GenerationId sourceGenerationId) { }
-
-    public PreparedSource preparedSource(RepositoryId repositoryId, RepositoryRevision revision) {
-        List<Document> manifests = template.getCollection(IndexCollections.GENERATION_MANIFESTS)
-                .find(Filters.and(Filters.eq("repoId", repositoryId.value()),
-                        Filters.eq("sourceRevision", revision.value()), Filters.eq("schemaVersion", IndexSchemaContract.SCHEMA_VERSION),
-                        Filters.eq("writeState", "SEALED_VALID"))).sort(Sorts.descending("generationId"))
-                .into(new ArrayList<>());
-        for (Document manifest : manifests) {
-            Document inputs = manifest.get("analysisInputs", Document.class);
-            Document evidence = manifest.get("analysisEvidence", Document.class);
-            if (Objects.isNull(inputs) || Objects.isNull(evidence)) {
-                continue;
-            }
-            SelectedGeneration selected = new SelectedGeneration(repositoryId, revision,
-                    new GenerationId(manifest.getString("generationId")), new ManifestDigest(manifest.getString("identityDigest")));
-            if (!new GenerationValidator(template).validatePersistedSealed(selected).valid()) {
-                continue;
-            }
-            SealedGeneration sealed = new SealedGeneration(selected,
-                    AnalysisFingerprint.from(template.getConverter().read(AnalysisInputs.class, inputs)),
-                    template.getConverter().read(SemanticAnalysisEvidence.class, evidence));
-            return preparedSource(sealed);
-        }
-        throw new PublicationConflictException();
-    }
 
     /** Publishes full immutable snapshots first, then makes their direct comparison visible last. */
     public ComparisonPublication publishComparison(IndexJob job, GitPreparedComparison comparison, Instant preparedAt,

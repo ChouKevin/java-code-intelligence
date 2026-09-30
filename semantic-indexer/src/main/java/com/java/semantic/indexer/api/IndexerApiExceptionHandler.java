@@ -9,6 +9,7 @@ import com.java.semantic.indexer.store.SemanticIndexUnavailableException;
 import com.java.semantic.repository.application.RepositoryBusyException;
 import com.java.semantic.repository.application.RepositoryMutationException;
 import com.java.semantic.repository.application.RepositoryNotFoundException;
+import com.mongodb.MongoException;
 import java.util.Map;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -20,7 +21,7 @@ public final class IndexerApiExceptionHandler {
     @ExceptionHandler({IllegalArgumentException.class, IndexJobAlreadyActiveException.class,
             IndexJobNotFoundException.class, PreparationRequestNotFoundException.class, PreparationRequestReusedException.class,
             RepositoryNotFoundException.class, RepositoryBusyException.class, RepositoryMutationException.class,
-            SemanticIndexUnavailableException.class, org.springframework.dao.DataAccessException.class})
+            SemanticIndexUnavailableException.class, org.springframework.dao.DataAccessException.class, MongoException.class})
     public ResponseEntity<Map<String, Object>> applicationFailure(RuntimeException exception) {
         IndexerPreparationErrorMapper.Failure failure = errors.map(exception);
         return ResponseEntity.status(failure.status()).body(failure.body());

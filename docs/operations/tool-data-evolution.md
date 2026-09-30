@@ -86,8 +86,10 @@ filter `{requestId: {$type: "string"}}`; it applies to terminal as well as activ
 preparations and is independent of one-active-job-per-repository uniqueness.
 Keep the original ledger rows without TTL. Never recover a lost response by
 substituting the latest job. `createdAt` is BSON Date;
-`metadata_job_latest_branch` supports operation/branch/phase ordering, and
-`review_job_latest_selection` uses the persisted `review.selectionKey`.
+`metadata_job_latest_branch` supports operation/branch/phase ordering.
+`review_job_latest_selection` uses the persisted `review.selectionKey` and orders
+attempts by `createdAt DESC, review.reviewId DESC`, not jobId. Discovery must
+include newer preparing/failed attempts rather than falling back to an older READY review.
 
 `GIT_METADATA` replaces separate refs/history/comparison preparation operations.
 Its flat `gitEvidence` stores the effective branch, pinned revision, catalogId,

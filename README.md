@@ -47,6 +47,8 @@ exactly one selector and never substitutes the latest or active job.
 
 `prepare_codebase` freshly resolves only the configured default branch and pins
 its branch/SHA before acceptance. It accepts no branch, tag, or revision override.
+The configured name resolves in `refs/heads/`; a tag never substitutes for a
+missing branch.
 Private maintenance routes remain available for explicit administrator operations.
 Metadata refresh fetches once, prepares a branch catalog and history for the
 requested branch (defaulting to the configured branch), and publishes one
@@ -86,6 +88,9 @@ means look up the **original** `requestId`, including after terminal completion,
 a later repository job, or restart. `REQUEST_NOT_FOUND` means acceptance remains
 unknown; continue lookup or stop waiting, not resubmit. `REQUEST_ID_REUSED`
 returns the original job identity and accepts no new work.
+Indexer storage failures use the same safe `INDEX_UNAVAILABLE` (HTTP 503) body
+over HTTP and MCP. If acceptance is unknown, retain the original UUID and
+continue lookup only; do not turn storage recovery into another submission.
 
 A retry after an inspected failure is an explicit new administrator intent with
 a new UUID; the dispatcher never retries automatically. At startup, configured

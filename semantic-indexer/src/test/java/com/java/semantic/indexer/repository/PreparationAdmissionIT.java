@@ -17,6 +17,7 @@ import com.java.semantic.model.repository.RepositoryRevision;
 import com.java.semantic.model.review.ReviewSelection;
 import com.java.semantic.repository.adapter.jgit.JGitRepositoryAdapter;
 import com.java.semantic.repository.application.RepositoryRuntimeRegistry;
+import com.java.semantic.repository.application.RepositoryMutationException;
 import com.java.semantic.repository.config.RepositoryProperties;
 import com.java.semantic.support.JdtLsTestProperties;
 import com.mongodb.client.MongoClient;
@@ -31,6 +32,8 @@ import org.eclipse.jgit.api.Git;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.testcontainers.mongodb.MongoDBContainer;
 
@@ -46,7 +49,11 @@ class PreparationAdmissionIT {
         try (MongoDBContainer mongo = new MongoDBContainer("mongo:8.0.4");
                 Git remote = Git.init().setInitialBranch("fixed").setDirectory(remotePath.toFile()).call()) {
             mongo.start();
+            RepositoryRevision tagged = commit(remote, remotePath, "tag-only");
+            remote.tag().setName("fixed").setAnnotated(false).call();
+            remote.tag().setName("refs/heads/fixed").setAnnotated(false).call();
             RepositoryRevision first = commit(remote, remotePath, "first");
+            assertThat(first).isNotEqualTo(tagged);
             RepositoryProperties properties = new RepositoryProperties();
             properties.setDataRoot(managed.toString());
             RepositoryProperties.RepositoryConfig config = new RepositoryProperties.RepositoryConfig();
@@ -112,6 +119,44 @@ class PreparationAdmissionIT {
                 IndexJob metadata = service.refreshRepositoryMetadata(repository, requestId(), Optional.empty());
                 assertThat(metadata.gitEvidence().orElseThrow().branch()).contains("fixed");
                 assertThat(metadata.preparation().orElseThrow().branch()).isEmpty();
+                assertThat(template.getCollection(IndexCollections.GENERATION_MANIFESTS).countDocuments()).isZero();
+            }
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"fixed", "refs/heads/fixed"})
+    void missing_configured_branch_rejects_tag_alias_without_admitting_a_job(
+            String tagName, @TempDir Path temporary) throws Exception {
+        Path remotePath = temporary.resolve("remote");
+        Path managed = Files.createDirectories(temporary.resolve("managed"));
+        try (MongoDBContainer mongo = new MongoDBContainer("mongo:8.0.4");
+                Git remote = Git.init().setInitialBranch("other").setDirectory(remotePath.toFile()).call()) {
+            mongo.start();
+            commit(remote, remotePath, "tag-only");
+            remote.tag().setName(tagName).setAnnotated(false).call();
+            RepositoryProperties properties = new RepositoryProperties();
+            properties.setDataRoot(managed.toString());
+            RepositoryProperties.RepositoryConfig config = new RepositoryProperties.RepositoryConfig();
+            config.setUrl(remotePath.toUri().toString());
+            config.setDefaultBranch("fixed");
+            properties.setRepositories(Map.of("orders", config));
+            RepositoryRuntimeRegistry registry = new RepositoryRuntimeRegistry(properties);
+            RepositoryId repository = RepositoryId.of("orders");
+            JGitRepositoryAdapter git = new JGitRepositoryAdapter(properties, JdtLsTestProperties.linuxUid());
+            try (MongoClient client = MongoClients.create(mongo.getConnectionString())) {
+                MongoTemplate template = new MongoTemplate(client, "preparation_branch_namespace");
+                new IndexSchemaBootstrap(template).bootstrap();
+                MongoIndexJobStore store = new MongoIndexJobStore(template);
+                IndexRequestService service = new IndexRequestService(new GitRevisionResolver(registry, git), registry, store);
+                PreparationRequestId id = requestId();
+
+                assertThatThrownBy(() -> service.prepareCodebase(repository, id))
+                        .isInstanceOf(RepositoryMutationException.class);
+                assertThat(template.getCollection(IndexCollections.INDEX_JOBS).countDocuments()).isZero();
+                assertThatThrownBy(() -> service.getJob(repository, Optional.empty(), Optional.of(id)))
+                        .isInstanceOf(PreparationRequestNotFoundException.class);
+                assertThat(Files.exists(registry.get(repository).workingTree())).isFalse();
                 assertThat(template.getCollection(IndexCollections.GENERATION_MANIFESTS).countDocuments()).isZero();
             }
         }

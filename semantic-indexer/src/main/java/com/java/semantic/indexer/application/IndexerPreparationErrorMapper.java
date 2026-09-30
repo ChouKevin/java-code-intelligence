@@ -8,6 +8,7 @@ import com.java.semantic.indexer.store.SemanticIndexUnavailableException;
 import com.java.semantic.repository.application.RepositoryBusyException;
 import com.java.semantic.repository.application.RepositoryMutationException;
 import com.java.semantic.repository.application.RepositoryNotFoundException;
+import com.mongodb.MongoException;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
@@ -31,7 +32,8 @@ public final class IndexerPreparationErrorMapper {
         if (exception instanceof IndexJobAlreadyActiveException || exception instanceof RepositoryBusyException) {
             return failure(409, "REPOSITORY_ACTIVE", "The repository has active work. Look up the accepted job; no new work was accepted.", false, Map.of());
         }
-        if (exception instanceof SemanticIndexUnavailableException || exception instanceof org.springframework.dao.DataAccessException) {
+        if (exception instanceof SemanticIndexUnavailableException || exception instanceof org.springframework.dao.DataAccessException
+                || exception instanceof MongoException) {
             return failure(503, "INDEX_UNAVAILABLE", "Preparation storage is unavailable. If submission acceptance is unknown, look up the original requestId; do not resubmit.", true, Map.of());
         }
         if (exception instanceof RepositoryMutationException) {

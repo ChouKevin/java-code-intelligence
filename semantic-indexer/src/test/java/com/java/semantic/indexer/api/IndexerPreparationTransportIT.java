@@ -25,6 +25,8 @@ import io.modelcontextprotocol.client.McpClient;
 import io.modelcontextprotocol.client.McpSyncClient;
 import io.modelcontextprotocol.client.transport.HttpClientStreamableHttpTransport;
 import io.modelcontextprotocol.json.jackson3.JacksonMcpJsonMapper;
+import io.modelcontextprotocol.json.McpJsonDefaults;
+import io.modelcontextprotocol.json.schema.JsonSchemaValidator;
 import io.modelcontextprotocol.spec.McpSchema;
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -52,6 +54,8 @@ import org.springframework.context.annotation.Import;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.testcontainers.mongodb.MongoDBContainer;
 import tools.jackson.databind.JsonNode;
+import tools.jackson.core.type.TypeReference;
+import tools.jackson.dataformat.yaml.YAMLMapper;
 import tools.jackson.databind.json.JsonMapper;
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -217,6 +221,126 @@ class IndexerPreparationTransportIT {
                 }
             }
         }
+    }
+
+    @Test
+    void native_mongo_outage_returns_safe_lookup_only_errors_over_http_and_sdk() throws Exception {
+        try (MongoDBContainer mongo = new MongoDBContainer("mongo:8.0.4")) {
+            mongo.start();
+            String mongoPort = Integer.toString(mongo.getMappedPort(27017));
+            try (ConfigurableApplicationContext context = nativeApplication(mongo, "preparation_outage")) {
+                String base = "http://127.0.0.1:" + ((WebServerApplicationContext) context).getWebServer().getPort();
+                String savedRequestId = UUID.randomUUID().toString();
+                HttpResponse<String> accepted = http(base, "/index/repositories/orders/metadata", "POST",
+                        Map.of("requestId", savedRequestId), "admin-token");
+                assertThat(accepted.statusCode()).isEqualTo(202);
+                String jobId = mapper.readTree(accepted.body()).get("jobId").asString();
+                try (McpSyncClient client = nativeClient(base)) {
+                    client.initialize();
+                    // Stop the actual dependency after servlet/SDK initialization; no exception is mocked.
+                    mongo.stop();
+                    List<String> operations = List.of("prepare_codebase", "refresh_repository_metadata", "prepare_review", "get_job");
+                    for (String operation : operations) {
+                        String requestId = operation.equals("get_job") ? savedRequestId : UUID.randomUUID().toString();
+                        Map<String, Object> body = operation.equals("prepare_review")
+                                ? Map.of("requestId", requestId, "selection", Map.of("kind", "COMMIT", "revision", "a".repeat(40)))
+                                : Map.of("requestId", requestId);
+                        String route = switch (operation) {
+                            case "prepare_codebase" -> "/codebase";
+                            case "refresh_repository_metadata" -> "/metadata";
+                            case "prepare_review" -> "/reviews";
+                            default -> "/jobs?requestId=" + requestId;
+                        };
+                        HttpResponse<String> response = http(base, "/index/repositories/orders" + route,
+                                operation.equals("get_job") ? "GET" : "POST", body, "admin-token");
+                        assertThat(response.statusCode()).as(operation).isEqualTo(503);
+                        Map<String, Object> arguments = new java.util.LinkedHashMap<>(body);
+                        arguments.put("repositoryId", "orders");
+                        McpSchema.CallToolResult result = client.callTool(McpSchema.CallToolRequest.builder(operation)
+                                .arguments(arguments).build());
+                        assertThat(result.isError()).isTrue();
+                        JsonNode failure = applicationJson(result);
+                        assertThat(mapper.readTree(response.body())).isEqualTo(failure);
+                        assertThat(failure.get("code").asString()).isEqualTo("INDEX_UNAVAILABLE");
+                        assertThat(failure.get("retryable").asBoolean()).isTrue();
+                        assertThat(mapper.readValue(response.body(), new TypeReference<Map<String, Object>>() { }).keySet())
+                                .containsExactlyInAnyOrder("code", "message", "retryable");
+                        assertThat(response.body()).doesNotContain("Mongo", "localhost", "127.0.0.1", "topology",
+                                "credential", "Cluster", mongoPort);
+                    }
+                    HttpResponse<String> byJob = http(base, "/index/repositories/orders/jobs?jobId=" + jobId,
+                            "GET", Map.of(), "admin-token");
+                    assertThat(byJob.statusCode()).isEqualTo(503);
+                    McpSchema.CallToolResult lookup = client.callTool(McpSchema.CallToolRequest.builder("get_job")
+                            .arguments(Map.of("repositoryId", "orders", "jobId", jobId)).build());
+                    assertThat(lookup.isError()).isTrue();
+                    assertThat(applicationJson(lookup)).isEqualTo(mapper.readTree(byJob.body()));
+                }
+            }
+        }
+    }
+
+    @Test
+    void actual_unindexed_publication_and_accepted_maintenance_json_conform_to_openapi_31() throws Exception {
+        Path remote = directory.resolve("maintenance-remote");
+        try (Git git = Git.init().setInitialBranch("main").setDirectory(remote.toFile()).call();
+             MongoDBContainer mongo = new MongoDBContainer("mongo:8.0.4")) {
+            Files.writeString(remote.resolve("pom.xml"), "<project><modelVersion>4.0.0</modelVersion><groupId>fixture</groupId><artifactId>fixture</artifactId><version>1</version></project>");
+            git.add().addFilepattern(".").call();
+            git.commit().setMessage("fixture").setAuthor("Fixture", "fixture@example.test").call();
+            mongo.start();
+            try (ConfigurableApplicationContext context = nativeApplication(mongo, "maintenance_schema", remote)) {
+                String base = "http://127.0.0.1:" + ((WebServerApplicationContext) context).getWebServer().getPort();
+                HttpResponse<String> publication = http(base, "/index/repositories/orders/publication", "GET", Map.of(), "admin-token");
+                assertThat(publication.statusCode()).isEqualTo(200);
+                JsonNode publicationJson = mapper.readTree(publication.body());
+                assertThat(publicationJson.get("currentPointer").isNull()).isTrue();
+                assertThat(publicationJson.get("rollbackPointer").isNull()).isTrue();
+                assertConformsToOpenApi("IndexPublicationResponse", publication.body());
+                HttpResponse<String> maintenance = http(base, "/index/repositories/orders/sync", "POST", Map.of(), "admin-token");
+                assertThat(maintenance.statusCode()).isEqualTo(202);
+                JsonNode maintenanceJson = mapper.readTree(maintenance.body());
+                assertThat(maintenanceJson.get("phase").asString()).isEqualTo("ACCEPTED");
+                assertThat(maintenanceJson.get("failureCategory").isNull()).isTrue();
+                assertThat(maintenanceJson.get("review").isNull()).isTrue();
+                assertConformsToOpenApi("IndexJobResponse", maintenance.body());
+            }
+        }
+    }
+
+    private void assertConformsToOpenApi(String responseSchema, String json) throws Exception {
+        try (java.io.InputStream input = getClass().getResourceAsStream("/openapi/semantic-indexer-api-v1.yaml")) {
+            Map<String, Object> document = YAMLMapper.builder().build().readValue(input, new TypeReference<Map<String, Object>>() { });
+            Map<String, Object> schema = Map.of("$schema", "https://json-schema.org/draft/2020-12/schema",
+                    "$ref", "#/components/schemas/" + responseSchema, "components", document.get("components"));
+            JsonSchemaValidator validator = McpJsonDefaults.getSchemaValidator();
+            JsonSchemaValidator.ValidationResponse validation = validator.validate(schema,
+                    mapper.readValue(json, new TypeReference<Map<String, Object>>() { }));
+            assertThat(validation.valid()).as("%s: %s", responseSchema, validation.errorMessage()).isTrue();
+        }
+    }
+
+    private ConfigurableApplicationContext nativeApplication(MongoDBContainer mongo, String database) throws Exception {
+        return nativeApplication(mongo, database, directory.resolve("unused-remote"));
+    }
+
+    private ConfigurableApplicationContext nativeApplication(MongoDBContainer mongo, String database, Path remote) throws Exception {
+        Files.createDirectories(directory.resolve("checkouts"));
+        SpringApplication application = new SpringApplication(NativeApplication.class);
+        application.setDefaultProperties(Map.of("server.port", "0", "server.address", "127.0.0.1",
+                "semantic.repositories.orders.url", remote.toUri().toString(),
+                "semantic.repositories.orders.default-branch", "main"));
+        return application.run("--spring.mongodb.uri=" + mongo.getConnectionString() + "/" + database
+                        + "?serverSelectionTimeoutMS=750&connectTimeoutMS=750&socketTimeoutMS=10000",
+                "--semantic.indexer.admin-token=admin-token", "--semantic.data-root=" + directory.resolve("checkouts"),
+                "--semantic.jdtls.isolation-mode=LOCAL_TRUSTED");
+    }
+
+    private McpSyncClient nativeClient(String base) {
+        return McpClient.sync(HttpClientStreamableHttpTransport.builder(base + "/mcp")
+                        .jsonMapper(new JacksonMcpJsonMapper(mapper))
+                        .httpRequestCustomizer((request, method, uri, body, callContext) -> request.header("X-Api-Token", "admin-token")).build())
+                .requestTimeout(Duration.ofSeconds(20)).build();
     }
     private JsonNode applicationJson(McpSchema.CallToolResult result) {
         JsonNode structured = mapper.valueToTree(result.structuredContent());

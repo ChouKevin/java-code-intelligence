@@ -184,6 +184,40 @@ class JGitRepositoryAdapterTest {
     }
 
     @Test
+    void fully_qualified_branch_ref_cannot_resolve_a_nested_tag_alias() throws Exception {
+        try (RemoteFixture fixture = createRemote()) {
+            String taggedRevision = fixture.seed().getRepository().resolve("refs/heads/main").getName();
+            fixture.seed().tag().setName("refs/heads/missing").setAnnotated(false).call();
+            fixture.seed().push().setRemote("origin").setPushTags().call();
+            String remoteUrl = fixture.remote().toUri().toString();
+            JGitRepositoryAdapter adapter = adapter();
+
+            assertThat(adapter.resolveRemoteRef(remoteUrl, "refs/tags/refs/heads/missing").value())
+                    .isEqualTo(taggedRevision);
+            assertThatThrownBy(() -> adapter.resolveRemoteRef(remoteUrl, "refs/heads/missing"))
+                    .isInstanceOf(RepositoryMutationException.class);
+        }
+    }
+
+    @Test
+    void fully_qualified_branch_ref_selects_the_head_while_bare_tag_selection_remains_available() throws Exception {
+        try (RemoteFixture fixture = createRemote()) {
+            String taggedRevision = fixture.seed().getRepository().resolve("refs/heads/main").getName();
+            fixture.seed().tag().setName("main").setAnnotated(false).call();
+            fixture.seed().tag().setName("release").setAnnotated(false).call();
+            fixture.seed().push().setRemote("origin").setPushTags().call();
+            String headRevision = commit(fixture.seed(), fixture.seedRoot(), "branch-only");
+            pushBranch(fixture.seed(), "main");
+            String remoteUrl = fixture.remote().toUri().toString();
+            JGitRepositoryAdapter adapter = adapter();
+
+            assertThat(adapter.resolveRemoteRef(remoteUrl, "refs/heads/main").value()).isEqualTo(headRevision);
+            assertThat(adapter.resolveRemoteRef(remoteUrl, "release").value()).isEqualTo(taggedRevision);
+            assertThat(adapter.resolveRemoteRef(remoteUrl, "refs/tags/main").value()).isEqualTo(taggedRevision);
+        }
+    }
+
+    @Test
     void rejects_a_locally_retained_endpoint_after_the_trusted_remote_ref_is_rewritten() throws Exception {
         try (RemoteFixture fixture = createRemote()) {
             JGitRepositoryAdapter adapter = adapter();

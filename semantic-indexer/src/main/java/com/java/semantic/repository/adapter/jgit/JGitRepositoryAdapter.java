@@ -711,6 +711,9 @@ public class JGitRepositoryAdapter implements GitRepositoryPort {
     }
 
     private static boolean matchesAdvertisedRef(Ref reference, String ref) {
+        if (ref.startsWith("refs/")) {
+            return ref.equals(reference.getName());
+        }
         return ref.equals(reference.getName()) || ("refs/heads/" + ref).equals(reference.getName())
                 || ("refs/tags/" + ref).equals(reference.getName());
     }

@@ -49,7 +49,7 @@ public final class IndexSchemaContract {
                     index("metadata_job_latest_branch", keys("repoId", 1, "operation", 1, "gitEvidence.branch", 1,
                             "phase", 1, "createdAt", -1, "jobId", -1), false, Map.of("operation", "GIT_METADATA")),
                     index("review_job_latest_selection", keys("repoId", 1, "operation", 1, "review.selectionKey", 1,
-                            "createdAt", -1, "jobId", -1), false, Map.of("operation", "REVIEW")),
+                            "createdAt", -1, "review.reviewId", -1), false, Map.of("operation", "REVIEW")),
                     index("accepted_job_queue", keys("active", 1, "phase", 1, "createdAt", 1, "jobId", 1), false,
                             Map.of("active", true, "phase", "ACCEPTED"))),
             collection(IndexCollections.REVIEW_MANIFESTS,
