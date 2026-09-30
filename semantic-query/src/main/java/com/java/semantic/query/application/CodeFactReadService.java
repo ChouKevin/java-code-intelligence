@@ -7,6 +7,13 @@ import com.java.semantic.model.codefact.CodeFactIdentity;
 import com.java.semantic.model.codefact.CodeFactKind;
 import com.java.semantic.model.codefact.CodeFactReadQuery;
 import com.java.semantic.model.codefact.CodeFactScope;
+import com.java.semantic.model.codefact.CanonicalIdentity;
+import com.java.semantic.model.codefact.EntryPointIdentity;
+import com.java.semantic.model.codefact.MapperStatementIdentity;
+import com.java.semantic.model.codefact.MemberIdentity;
+import com.java.semantic.model.codefact.MethodTarget;
+import com.java.semantic.model.codefact.RelationTarget;
+import com.java.semantic.model.codefact.SourceTypeIdentity;
 import com.java.semantic.model.codefact.RelationIdentity;
 import com.java.semantic.model.codefact.SourceRange;
 import com.java.semantic.model.index.EntryPointDocument;
@@ -173,7 +180,8 @@ public final class CodeFactReadService {
             CodeFactScope scope = new CodeFactScope(requiredString(stored, "scopePackage"), requiredText(stored, "scopeClass"),
                     optionalText(stored, "scopeMethod"), requiredTextList(stored, "scopeParameters"), optionalText(stored, "scopePath"));
             if (!authorityFor(kind).equals(authority)) { throw new IndexContractMismatchException(); }
-            return new SearchRow(factId, kind, authority, requiredText(stored, "canonical"), scope);
+            return new SearchRow(factId, kind, authority, requiredText(stored, "canonical"),
+                    requiredText(stored, "displayName"), requiredString(stored, "signature"), scope);
         } catch (IllegalArgumentException exception) {
             throw new IndexContractMismatchException();
         }
@@ -184,6 +192,8 @@ public final class CodeFactReadService {
         if (!current.repositoryId().equals(fact.identity().repositoryId()) || !current.revision().equals(fact.identity().repositoryRevision())
                 || !row.factId().equals(fact.id()) || row.kind() != fact.identity().kind()
                 || !row.canonical().equals(fact.identity().canonicalForm()) || !row.scope().equals(CodeFactScope.from(fact.identity()))
+                || !row.displayName().equals(displayName(fact.identity().canonicalIdentity()))
+                || !row.signature().equals(signature(fact.identity().canonicalIdentity()))
                 || row.authority() != authorityFor(fact.identity().kind())) { throw new IndexContractMismatchException(); }
     }
 
@@ -286,5 +296,39 @@ public final class CodeFactReadService {
         return List.copyOf(result);
     }
 
-    private record SearchRow(CodeFactId factId, CodeFactKind kind, ProjectionName authority, String canonical, CodeFactScope scope) { }
+    private record SearchRow(CodeFactId factId, CodeFactKind kind, ProjectionName authority, String canonical,
+            String displayName, String signature, CodeFactScope scope) { }
+
+    private static String displayName(CanonicalIdentity identity) {
+        if (identity instanceof EntryPointIdentity entry) {
+            return entry.method().methodName();
+        }
+        if (identity instanceof MethodTarget method) {
+            return method.methodName();
+        }
+        if (identity instanceof SourceTypeIdentity type) {
+            return type.javaType().className();
+        }
+        if (identity instanceof MemberIdentity member) {
+            return member.name();
+        }
+        if (identity instanceof MapperStatementIdentity mapper) {
+            return mapper.statementId();
+        }
+        if (identity instanceof RelationIdentity relation) {
+            if (relation.target() instanceof RelationTarget.Internal internal) {
+                return displayName(internal.identity().canonicalIdentity());
+            }
+            if (relation.target() instanceof RelationTarget.External external) {
+                return external.target().canonicalForm();
+            }
+        }
+        throw new IndexContractMismatchException();
+    }
+
+    private static String signature(CanonicalIdentity identity) {
+        MethodTarget method = identity instanceof EntryPointIdentity entry ? entry.method()
+                : identity instanceof MethodTarget target ? target : null;
+        return Objects.isNull(method) ? "" : method.methodName() + "(" + String.join(", ", method.parameterTypes()) + ")";
+    }
 }

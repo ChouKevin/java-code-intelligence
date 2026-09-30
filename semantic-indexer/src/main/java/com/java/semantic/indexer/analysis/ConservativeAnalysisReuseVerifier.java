@@ -1,17 +1,14 @@
 package com.java.semantic.indexer.analysis;
 
-import com.java.semantic.model.index.AnalysisFingerprint;
-import com.java.semantic.model.index.AnalysisInputs;
 import com.java.semantic.model.index.SealedGeneration;
 import java.util.Objects;
-import java.util.Optional;
 
 /** Reuses only a candidate whose independently reproduced effective inputs are identical. */
 public final class ConservativeAnalysisReuseVerifier implements AnalysisReuseVerifier {
-    private final EffectiveInputReproducer reproducer;
+    private final CandidateMatcher matcher;
 
-    public ConservativeAnalysisReuseVerifier(EffectiveInputReproducer reproducer) {
-        this.reproducer = Objects.requireNonNull(reproducer, "reproducer is required");
+    public ConservativeAnalysisReuseVerifier(CandidateMatcher matcher) {
+        this.matcher = Objects.requireNonNull(matcher, "candidate matcher is required");
     }
 
     @Override
@@ -23,15 +20,11 @@ public final class ConservativeAnalysisReuseVerifier implements AnalysisReuseVer
                 || !candidate.fingerprint().digest().equals(candidate.analysisEvidence().fingerprintDigest())) {
             return false;
         }
-        Optional<AnalysisInputs> reproduced = reproducer.reproduce(target);
-        if (reproduced.isEmpty()) {
-            return false;
-        }
-        return candidate.fingerprint().equals(AnalysisFingerprint.from(reproduced.orElseThrow()));
+        return matcher.matches(candidate, target);
     }
 
     @FunctionalInterface
-    public interface EffectiveInputReproducer {
-        Optional<AnalysisInputs> reproduce(AnalysisTarget target);
+    public interface CandidateMatcher {
+        boolean matches(SealedGeneration candidate, AnalysisTarget target);
     }
 }

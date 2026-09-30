@@ -18,6 +18,8 @@ import com.java.semantic.model.review.ReviewBaselineRule;
 import com.java.semantic.model.review.ReviewComparisonType;
 import com.java.semantic.model.review.ReviewSelection;
 import com.java.semantic.model.review.ResolvedReviewEndpoints;
+import com.java.semantic.model.source.SourceEvidencePolicy;
+import com.java.semantic.model.source.TrackedSourceInventory;
 import org.eclipse.jgit.api.CloneCommand;
 import org.eclipse.jgit.api.FetchCommand;
 import org.eclipse.jgit.api.Git;
@@ -318,13 +320,29 @@ public class JGitRepositoryAdapter implements GitRepositoryPort {
     }
 
     @Override
-    public GitPreparedComparison prepareComparison(Path workingTree, Optional<RepositoryRevision> previous, RepositoryRevision current) {
+    public TrackedSourceInventory prepareSnapshot(Path workingTree, RepositoryRevision revision, SourceEvidencePolicy policy) {
+        try (Git git = JGitWorktreeRepository.open(workingTree, jdtLsProperties);
+                RevWalk walk = new RevWalk(git.getRepository())) {
+            return snapshot(git.getRepository(), walk.parseCommit(ObjectId.fromString(revision.value())), policy);
+        } catch (IOException | RuntimeException exception) {
+            throw new RepositoryMutationException("cannot prepare authorized Git snapshot", exception);
+        }
+    }
+
+    @Override
+    public GitPreparedComparison prepareComparison(Path workingTree, Optional<RepositoryRevision> previous, RepositoryRevision current,
+            SourceEvidencePolicy previousPolicy, SourceEvidencePolicy currentPolicy,
+            Set<String> availableGuidesBefore, Set<String> availableGuidesAfter) {
         try (Git git = JGitWorktreeRepository.open(workingTree, jdtLsProperties); RevWalk walk = new RevWalk(git.getRepository())) {
             RevCommit previousCommit = previous.isPresent() ? walk.parseCommit(ObjectId.fromString(previous.orElseThrow().value())) : null;
             RevCommit currentCommit = walk.parseCommit(ObjectId.fromString(current.value()));
-            List<GitSnapshotEntry> previousEntries = Objects.isNull(previousCommit) ? List.of() : snapshot(git.getRepository(), previousCommit);
-            List<GitSnapshotEntry> currentEntries = snapshot(git.getRepository(), currentCommit);
-            List<GitComparisonChange> changes = changes(git.getRepository(), previousCommit, currentCommit);
+            List<GitSnapshotEntry> previousEntries = Objects.isNull(previousCommit) ? List.of()
+                    : snapshot(git.getRepository(), previousCommit, previousPolicy).candidates().stream()
+                            .filter(entry -> previousPolicy.allowsCode(entry.path()) || availableGuidesBefore.contains(entry.path())).toList();
+            List<GitSnapshotEntry> currentEntries = snapshot(git.getRepository(), currentCommit, currentPolicy).candidates().stream()
+                    .filter(entry -> currentPolicy.allowsCode(entry.path()) || availableGuidesAfter.contains(entry.path())).toList();
+            List<GitComparisonChange> changes = changes(git.getRepository(), previousCommit, currentCommit,
+                    previousPolicy, currentPolicy, availableGuidesBefore, availableGuidesAfter);
             GitComparisonAncestry relationship = Objects.isNull(previousCommit) ? GitComparisonAncestry.EMPTY_TREE
                     : ancestry(walk, previousCommit, currentCommit);
             return new GitPreparedComparison(previous, current, relationship, previousEntries, currentEntries, changes);
@@ -333,29 +351,40 @@ public class JGitRepositoryAdapter implements GitRepositoryPort {
         }
     }
 
-    private List<GitSnapshotEntry> snapshot(org.eclipse.jgit.lib.Repository repository, RevCommit commit) throws IOException {
+    private TrackedSourceInventory snapshot(org.eclipse.jgit.lib.Repository repository, RevCommit commit,
+            SourceEvidencePolicy policy) throws IOException {
         List<GitSnapshotEntry> entries = new java.util.ArrayList<>();
         long storedTextBytes = 0L;
+        long excluded = 0L;
         try (TreeWalk walk = new TreeWalk(repository)) {
             walk.addTree(commit.getTree());
             walk.setRecursive(true);
             while (walk.next()) {
                 FileMode mode = walk.getFileMode(0);
                 SnapshotPath snapshotPath = snapshotPath(walk.getRawPath());
-                if (!snapshotPath.supported()) {
-                    long byteLength = FileMode.GITLINK.equals(mode) ? 0L : repository.open(walk.getObjectId(0)).getSize();
-                    entries.add(new GitSnapshotEntry(snapshotPath.value(), mode.toString(), walk.getObjectId(0).name(),
-                            GitFileContentStatus.UNSUPPORTED_PATH, byteLength, new byte[0], walk.getRawPath()));
+                if (!snapshotPath.supported() || !SourceEvidencePolicy.validPath(snapshotPath.value())
+                        || !(policy.allowsCode(snapshotPath.value()) || policy.allowsGuide(snapshotPath.value()))) {
+                    excluded++;
                     continue;
                 }
                 if (FileMode.GITLINK.equals(mode)) {
-                    entries.add(new GitSnapshotEntry(snapshotPath.value(), mode.toString(), walk.getObjectId(0).name(), GitFileContentStatus.SUBMODULE, 0L, new byte[0]));
+                    if (policy.allowsGuide(snapshotPath.value())) {
+                        entries.add(new GitSnapshotEntry(snapshotPath.value(), mode.toString(), walk.getObjectId(0).name(),
+                                GitFileContentStatus.SUBMODULE, 0L, new byte[0]));
+                    } else {
+                        excluded++;
+                    }
                     continue;
                 }
                 ObjectLoader loader = repository.open(walk.getObjectId(0));
                 long size = loader.getSize();
                 if (FileMode.SYMLINK.equals(mode)) {
-                    entries.add(new GitSnapshotEntry(snapshotPath.value(), mode.toString(), walk.getObjectId(0).name(), GitFileContentStatus.SYMLINK, size, new byte[0]));
+                    if (policy.allowsGuide(snapshotPath.value())) {
+                        entries.add(new GitSnapshotEntry(snapshotPath.value(), mode.toString(), walk.getObjectId(0).name(),
+                                GitFileContentStatus.SYMLINK, size, new byte[0]));
+                    } else {
+                        excluded++;
+                    }
                     continue;
                 }
                 if (size > properties.getGitEvidenceFileTextBytes()) {
@@ -375,10 +404,12 @@ public class JGitRepositoryAdapter implements GitRepositoryPort {
                 entries.add(new GitSnapshotEntry(snapshotPath.value(), mode.toString(), walk.getObjectId(0).name(), contentStatus, size, new byte[0]));
             }
         }
-        return List.copyOf(entries);
+        return new TrackedSourceInventory(entries, excluded);
     }
 
-    private List<GitComparisonChange> changes(org.eclipse.jgit.lib.Repository repository, RevCommit previous, RevCommit current) throws IOException {
+    private List<GitComparisonChange> changes(org.eclipse.jgit.lib.Repository repository, RevCommit previous, RevCommit current,
+            SourceEvidencePolicy previousPolicy, SourceEvidencePolicy currentPolicy,
+            Set<String> availableGuidesBefore, Set<String> availableGuidesAfter) throws IOException {
         List<GitComparisonChange> changes = new java.util.ArrayList<>();
         try (ChunkingOutputStream output = new ChunkingOutputStream(); DiffFormatter formatter = new DiffFormatter(output)) {
             formatter.setRepository(repository);
@@ -387,6 +418,16 @@ public class JGitRepositoryAdapter implements GitRepositoryPort {
                 output.reset();
                 SnapshotPath oldPath = comparisonPath(entry.getOldPath());
                 SnapshotPath newPath = comparisonPath(entry.getNewPath());
+                if (!oldPath.supported() || !newPath.supported()
+                        || entry.getOldMode().equals(FileMode.SYMLINK) || entry.getNewMode().equals(FileMode.SYMLINK)
+                        || entry.getOldMode().equals(FileMode.GITLINK) || entry.getNewMode().equals(FileMode.GITLINK)
+                        || !SourceEvidencePolicy.allowsChange(
+                                entry.getOldMode().equals(FileMode.MISSING) ? Optional.empty() : Optional.of(oldPath.value()),
+                                previousPolicy, availableGuidesBefore,
+                                entry.getNewMode().equals(FileMode.MISSING) ? Optional.empty() : Optional.of(newPath.value()),
+                                currentPolicy, availableGuidesAfter)) {
+                    continue;
+                }
                 String diffStatus = !oldPath.supported() || !newPath.supported() ? GitFileContentStatus.UNSUPPORTED_PATH.name() : diffStatus(repository, entry);
                 List<String> patchChunks = List.of();
                 if ("AVAILABLE".equals(diffStatus)) {

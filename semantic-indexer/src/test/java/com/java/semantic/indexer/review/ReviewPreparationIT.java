@@ -2,6 +2,8 @@ package com.java.semantic.indexer.review;
 
 import com.java.semantic.indexer.build.GenerationValidator;
 import com.java.semantic.indexer.job.IndexJob;
+import com.java.semantic.indexer.job.IndexJobId;
+import com.java.semantic.indexer.job.IndexJobOperation;
 import com.java.semantic.indexer.job.IndexJobPhase;
 import com.java.semantic.indexer.job.IndexJobTarget;
 import com.java.semantic.indexer.job.MongoIndexJobStore;
@@ -21,6 +23,7 @@ import com.java.semantic.model.index.AnalysisInputs;
 import com.java.semantic.model.index.GenerationId;
 import com.java.semantic.model.index.IndexCollections;
 import com.java.semantic.model.index.IndexSchemaContract;
+import com.java.semantic.model.source.SourceEvidenceDocumentCodec;
 import com.java.semantic.model.index.ManifestDigest;
 import com.java.semantic.model.index.PublishedGenerationPointer;
 import com.java.semantic.model.index.SealedGeneration;
@@ -37,6 +40,12 @@ import com.java.semantic.model.review.ReviewSide;
 import com.java.semantic.model.review.ReviewSelection;
 import com.java.semantic.model.review.ReviewBaselineRule;
 import com.java.semantic.model.review.ResolvedReviewEndpoints;
+import com.java.semantic.model.source.ProjectGuideMembership;
+import com.java.semantic.model.source.ProjectGuideState;
+import com.java.semantic.model.source.SourceCoverage;
+import com.java.semantic.model.source.SourceEvidencePolicy;
+import com.java.semantic.model.source.SourceSnapshotMembership;
+import com.java.semantic.model.source.SourceStructure;
 import com.java.semantic.query.SemanticQueryApplication;
 import com.mongodb.client.MongoClients;
 import io.modelcontextprotocol.client.McpClient;
@@ -52,6 +61,7 @@ import java.util.Date;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
 import org.bson.Document;
 import org.junit.jupiter.api.Tag;
@@ -380,8 +390,11 @@ class ReviewPreparationIT {
 
                 @Override
                 public void prepare(IndexJob job) {
-                    new GitEvidencePublicationStore(template).publishComparison(job, comparison(selection), Instant.now(),
-                            new GitEvidenceOwnership(GitPublicationScope.REVIEW, Optional.of(job.review().orElseThrow().reviewId())));
+                    GitEvidencePublicationStore store = new GitEvidencePublicationStore(template);
+                    store.publishComparison(job, comparison(selection), Instant.now(),
+                            new GitEvidenceOwnership(GitPublicationScope.REVIEW, Optional.of(job.review().orElseThrow().reviewId())),
+                            selection == Selection.ROOT ? Optional.empty() : Optional.of(store.preparedSource(before.get())),
+                            store.preparedSource(after.get()));
                 }
             };
             new ReviewPreparationService(jobs, endpoints, git, reviews, template).prepare(running);
@@ -426,12 +439,28 @@ class ReviewPreparationIT {
             AnalysisFingerprint fingerprint = AnalysisFingerprint.from(inputs);
             SemanticAnalysisEvidence evidence = new SemanticAnalysisEvidence(IndexSchemaContract.ANALYSIS_EVIDENCE_VERSION, fingerprint.digest(), "SUCCESS",
                     List.of(), new SemanticAnalysisEvidence.ResolutionCoverage(0, 0, 0, 0, 0), List.of());
+            GitEvidencePublicationStore store = new GitEvidencePublicationStore(template);
+            SourceEvidencePolicy policy = new SourceEvidencePolicy(SourceEvidencePolicy.VERSION, List.of("src"),
+                    Set.of(REVIEW_SOURCE_PATH), Optional.empty());
+            ProjectGuideMembership guide = ProjectGuideMembership.unavailable(ProjectGuideState.DISABLED);
+            IndexJob sourceJob = new IndexJob(IndexJobId.create(), repositoryId,
+                    Optional.of(new IndexJobTarget(revision, generationId, 1L)), IndexJobPhase.RUNNING,
+                    true, Optional.empty(), false, IndexJobOperation.BUILD);
+            GitSnapshotEntry sourceEntry = new GitSnapshotEntry(REVIEW_SOURCE_PATH, "100644", "1".repeat(40),
+                    GitFileContentStatus.TEXT, REVIEW_SOURCE.getBytes(StandardCharsets.UTF_8));
+            SourceSnapshotMembership source = store.publishSourceSnapshot(sourceJob, revision, List.of(sourceEntry),
+                    policy, guide, Instant.now());
             template.getCollection(IndexCollections.GENERATION_MANIFESTS).insertOne(new Document("repoId", repositoryId.value())
                     .append("sourceRevision", revision.value()).append("generationId", generationId.value()).append("identityDigest", digest.value())
                     .append("ownerJobId", ownerJobId).append("writeState", "SEALED_VALID").append("schemaVersion", IndexSchemaContract.SCHEMA_VERSION)
                     .append("projectionVersions", projectionVersions()).append("sealedCollectionCounts", sealedCounts())
                     .append("analysisFingerprint", fingerprint.digest()).append("analysisInputs", template.getConverter().convertToMongoType(inputs))
-                    .append("analysisEvidence", template.getConverter().convertToMongoType(evidence)));
+                    .append("analysisEvidence", template.getConverter().convertToMongoType(evidence))
+                    .append("sourceSnapshot", template.getConverter().convertToMongoType(source))
+                    .append("sourcePolicy", new Document(SourceEvidenceDocumentCodec.encodePolicy(policy)))
+                    .append("projectGuide", new Document(SourceEvidenceDocumentCodec.encodeGuide(guide)))
+                    .append("coverage", template.getConverter().convertToMongoType(new SourceCoverage(1, 0, 0, 0)))
+                    .append("structure", template.getConverter().convertToMongoType(new SourceStructure(List.of("src"), Map.of(), Map.of()))));
             seedSourceArtifact(generationId);
             SelectedGeneration initial = new SelectedGeneration(repositoryId, revision, generationId, digest);
             GenerationValidator.ValidationResult initialValidation = new GenerationValidator(template).validatePersistedSealed(initial);

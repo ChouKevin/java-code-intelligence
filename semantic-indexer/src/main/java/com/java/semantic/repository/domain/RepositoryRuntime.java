@@ -16,6 +16,7 @@ public final class RepositoryRuntime {
     private final String remoteUrl;
     private final String defaultBranch;
     private final ReentrantReadWriteLock lock = new ReentrantReadWriteLock(true);
+    private final Optional<String> projectGuidePath;
 
     private final Path managedCheckoutParent;
     private RepositorySnapshot snapshot;
@@ -36,12 +37,24 @@ public final class RepositoryRuntime {
             String remoteUrl,
             String defaultBranch,
             Path managedCheckoutParent) {
+        this(repositoryId, displayName, workingTree, remoteUrl, defaultBranch, managedCheckoutParent, Optional.empty());
+    }
+
+    public RepositoryRuntime(
+            RepositoryId repositoryId,
+            String displayName,
+            Path workingTree,
+            String remoteUrl,
+            String defaultBranch,
+            Path managedCheckoutParent,
+            Optional<String> projectGuidePath) {
         this.repositoryId = Objects.requireNonNull(repositoryId, "repositoryId is required");
         this.displayName = Objects.requireNonNull(displayName, "displayName is required");
         this.workingTree = Objects.requireNonNull(workingTree, "workingTree is required");
         this.remoteUrl = Objects.requireNonNull(remoteUrl, "remoteUrl is required");
         this.defaultBranch = Objects.requireNonNull(defaultBranch, "defaultBranch is required");
         this.managedCheckoutParent = Objects.requireNonNull(managedCheckoutParent, "managed checkout parent is required");
+        this.projectGuidePath = Objects.requireNonNull(projectGuidePath, "guide path is required");
     }
 
     public RepositoryId repositoryId() {
@@ -62,6 +75,9 @@ public final class RepositoryRuntime {
 
     public String defaultBranch() {
         return defaultBranch;
+    }
+    public Optional<String> projectGuidePath() {
+        return projectGuidePath;
     }
 
     public ReentrantReadWriteLock lock() {

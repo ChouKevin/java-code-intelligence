@@ -1,6 +1,9 @@
 package com.java.semantic.indexer.store;
 
 import com.java.semantic.model.index.GenerationWriteState;
+import com.java.semantic.indexer.build.GenerationValidator;
+import com.java.semantic.model.query.SelectedGeneration;
+import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.model.index.IndexCollections;
 import com.java.semantic.model.index.IndexSchemaContract;
 import com.java.semantic.model.index.PublishGenerationCommand;
@@ -109,7 +112,9 @@ public final class MongoPublicationWriter implements PublicationPort {
         Document filter = sealedManifestFilter(command.repositoryId().value(), command.targetRevision().value(), command.targetGenerationId().value(),
                 command.sealedManifestDigest().value()).append("ownerJobId", command.jobId());
         Document manifest = template.getCollection(IndexCollections.GENERATION_MANIFESTS).find(filter).first();
-        if (!compatibleAndValidated(manifest)) {
+        if (!compatibleAndValidated(manifest) || !new GenerationValidator(template).validatePersistedSealed(
+                new SelectedGeneration(command.repositoryId(), command.targetRevision(), command.targetGenerationId(),
+                        command.sealedManifestDigest())).valid()) {
             throw new PublicationConflictException();
         }
     }
@@ -117,7 +122,9 @@ public final class MongoPublicationWriter implements PublicationPort {
     private void requireSealedPointer(String repositoryId, PublishedGenerationPointer pointer) {
         Document manifest = template.getCollection(IndexCollections.GENERATION_MANIFESTS)
                 .find(sealedManifestFilter(repositoryId, pointer.revision().value(), pointer.generationId().value(), pointer.manifestDigest().value())).first();
-        if (!compatibleAndValidated(manifest)) {
+        if (!compatibleAndValidated(manifest) || !new GenerationValidator(template).validatePersistedSealed(
+                new SelectedGeneration(new RepositoryId(repositoryId), pointer.revision(), pointer.generationId(),
+                        pointer.manifestDigest())).valid()) {
             throw new PublicationConflictException();
         }
     }
@@ -148,6 +155,9 @@ public final class MongoPublicationWriter implements PublicationPort {
         Object writeEpoch = manifest.get("writeEpoch");
         return IndexSchemaContract.requiredProjectionVersions().equals(Map.copyOf(actual)) && validSealedCounts(sealedCounts)
                 && writeEpoch instanceof Number && ((Number) writeEpoch).longValue() >= 0L
+                && manifest.get("sourceSnapshot") instanceof Document && manifest.get("projectGuide") instanceof Document
+                && manifest.get("sourcePolicy") instanceof Document && manifest.get("coverage") instanceof Document
+                && manifest.get("structure") instanceof Document
                 && "VALID".equals(manifest.getString("validationResult")) && Objects.nonNull(manifest.getDate("validatedAt"));
     }
 

@@ -10,6 +10,7 @@ import com.java.semantic.model.codefact.CodeFactSearchQuery;
 import com.java.semantic.model.codefact.CodeFactSearchResult;
 import com.java.semantic.model.codefact.CodeFactReadQuery;
 import com.java.semantic.model.codefact.ExternalTarget;
+import com.java.semantic.model.codefact.MethodTarget;
 import com.java.semantic.model.codefact.RelationIdentity;
 import com.java.semantic.model.codefact.RelationKind;
 import com.java.semantic.model.codefact.RelationTarget;
@@ -118,7 +119,9 @@ class PublishedCodeFactContractIT extends PublishedMongoITSupport {
             template.getCollection("search").insertOne(new Document("repoId", "orders").append("generationId", "g1")
                     .append("factId", com.java.semantic.model.codefact.CodeFactId.from(identity).value()).append("kind", "METHOD")
                     .append("tokens", java.util.List.of("find", "payment", "findpayment")).append("package", "example.payment")
-                    .append("authority", "SYMBOLS").append("canonical", identity.canonicalForm()).append("scopePackage", scope.packageName())
+                    .append("authority", "SYMBOLS").append("canonical", identity.canonicalForm())
+                    .append("displayName", "findPayment").append("signature", "findPayment(example.events.VideoReady)")
+                    .append("scopePackage", scope.packageName())
                     .append("scopeClass", scope.className()).append("scopeMethod", scope.methodName().orElse(""))
                     .append("scopeParameters", scope.parameterTypes()).append("scopePath", scope.sourcePath().orElse("")));
             CodeFactSearchQuery query = new CodeFactSearchQuery(new RepositoryId("orders"), new RepositoryRevision(REVISION), "findPayment");
@@ -313,10 +316,17 @@ class PublishedCodeFactContractIT extends PublishedMongoITSupport {
 
     private static void seedSearch(MongoTemplate template, CodeFactIdentity identity, String authority, List<String> tokens) {
         CodeFactScope scope = CodeFactScope.from(identity);
+        String displayName = identity.canonicalIdentity() instanceof RelationIdentity relation
+                ? ((RelationTarget.External) relation.target()).target().canonicalForm()
+                : scope.methodName().orElse(scope.className());
+        String signature = identity.canonicalIdentity() instanceof MethodTarget method
+                ? method.methodName() + "(" + String.join(", ", method.parameterTypes()) + ")" : "";
         template.getCollection("search").insertOne(new Document("repoId", "orders").append("generationId", "g1")
                 .append("factId", CodeFactId.from(identity).value()).append("kind", identity.kind().name())
                 .append("tokens", tokens).append("package", scope.packageName()).append("authority", authority)
-                .append("canonical", identity.canonicalForm()).append("scopePackage", scope.packageName())
+                .append("canonical", identity.canonicalForm()).append("displayName", displayName)
+                .append("signature", signature)
+                .append("scopePackage", scope.packageName())
                 .append("scopeClass", scope.className()).append("scopeMethod", scope.methodName().orElse(""))
                 .append("scopeParameters", scope.parameterTypes()).append("scopePath", scope.sourcePath().orElse("")));
     }

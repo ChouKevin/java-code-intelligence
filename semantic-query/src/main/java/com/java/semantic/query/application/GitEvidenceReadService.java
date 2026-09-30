@@ -1,5 +1,6 @@
 package com.java.semantic.query.application;
 
+import com.java.semantic.model.source.SourceEvidenceDocumentCodec;
 import com.java.semantic.model.git.GitEvidenceId;
 import com.java.semantic.model.git.GitChangeKind;
 import com.java.semantic.model.git.GitEvidenceOwnership;
@@ -9,9 +10,16 @@ import com.java.semantic.model.git.GitComparisonId;
 import com.java.semantic.model.git.GitSnapshotId;
 import com.java.semantic.model.index.IndexCollections;
 import com.java.semantic.model.index.IndexSchemaContract;
+import com.java.semantic.model.index.GenerationId;
+import com.java.semantic.model.index.ManifestDigest;
+import com.java.semantic.model.query.SelectedGeneration;
 import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.model.repository.RepositoryRevision;
 import com.java.semantic.model.review.ReviewId;
+import com.java.semantic.model.source.SourceEvidencePolicy;
+import com.java.semantic.model.source.SourceSnapshotMembership;
+import com.java.semantic.model.source.ProjectGuideMembership;
+import com.java.semantic.model.review.ReviewManifestDocument;
 import com.java.semantic.query.config.ConfiguredReadPolicy;
 import com.mongodb.client.model.Filters;
 import com.mongodb.client.model.Sorts;
@@ -50,6 +58,7 @@ public final class GitEvidenceReadService {
     private final ConfiguredReadPolicy readPolicy;
     private final Duration storageTimeout;
     private final ReviewManifestReadService reviews;
+    private final SelectedGenerationGuard generations;
 
     public GitEvidenceReadService(MongoTemplate template, ConfiguredReadPolicy readPolicy, Duration storageTimeout) {
         this(template, readPolicy, storageTimeout, new ReviewManifestReadService(template, readPolicy, storageTimeout));
@@ -61,6 +70,7 @@ public final class GitEvidenceReadService {
         this.readPolicy = Objects.requireNonNull(readPolicy, "read policy is required");
         this.storageTimeout = Objects.requireNonNull(storageTimeout, "storage timeout is required");
         this.reviews = Objects.requireNonNull(reviews, "review manifest reader is required");
+        this.generations = new SelectedGenerationGuard(template, readPolicy, storageTimeout);
     }
 
     public SemanticQueryContract.GitBranchCollection branches(SemanticQueryContract.GitBranchRequest request) {
@@ -126,7 +136,7 @@ public final class GitEvidenceReadService {
                 throw new IllegalArgumentException("comparison endpoints do not match the requested revisions");
             }
             long total = comparisonTotal(manifest);
-            List<SemanticQueryContract.GitChangeItem> changes = comparisonPage(repositoryId, required.comparisonId(), required.offset(), required.limit(), total);
+            List<SemanticQueryContract.GitChangeItem> changes = comparisonPage(repositoryId, manifest, required.comparisonId(), required.offset(), required.limit(), total);
             return new SemanticQueryContract.GitComparisonCollection(repositoryId.value(), required.comparisonId(), required.previous(), required.current(),
                     requiredText(manifest, "previousSnapshotId"), requiredText(manifest, "currentSnapshotId"), requiredText(manifest, "ancestry"),
                     List.copyOf(changes), page(required.offset(), required.limit(), changes.size(), total));
@@ -155,6 +165,7 @@ public final class GitEvidenceReadService {
                 throw new IndexContractMismatchException();
             }
             SemanticQueryContract.GitChangeItem change = change(row);
+            requireAllowedChange(repositoryId, manifest, change);
             if (!required.changeId().equals(change.changeId()) || requiredLong(row, "ordinal") >= total) {
                 throw new IndexContractMismatchException();
             }
@@ -179,7 +190,7 @@ public final class GitEvidenceReadService {
         try {
             authorize(repositoryId);
             Document manifest = snapshotManifest(repositoryId, required.snapshotId(), required.revision());
-            FileEntries entries = directEntries(repositoryId, required.snapshotId(), required.directory(), required.offset(), required.limit());
+            FileEntries entries = directEntries(repositoryId, required.snapshotId(), required.directory(), required.offset(), required.limit(), manifest);
             return new SemanticQueryContract.GitFileCollection(repositoryId.value(), required.snapshotId(), required.revision(), entries.items(),
                     new SemanticQueryContract.Page(required.offset(), required.limit(), entries.items().size(), entries.total(), entries.hasMore()),
                     coverage(repositoryId, required.snapshotId(), required.directory(), manifest));
@@ -229,13 +240,14 @@ public final class GitEvidenceReadService {
             SearchBudget budget = new SearchBudget();
             String directory = required.directory().orElse("");
             Bson searchScope = Filters.and(Filters.eq("repoId", repositoryId.value()), Filters.eq("snapshotId", required.snapshotId()),
-                    Filters.eq("contentStatus", "TEXT"), Filters.gte("ordinal", position.fileOrdinal()), directoryFilter(directory));
+                    Filters.eq("contentStatus", "TEXT"), Filters.eq("contentKind", "CODE"),
+                    Filters.gte("ordinal", position.fileOrdinal()), directoryFilter(directory));
             if (required.cursor().isPresent()) {
-                validateSearchCursorTarget(repositoryId, required.snapshotId(), position, directory);
+                validateSearchCursorTarget(repositoryId, required.snapshotId(), position, directory, manifest);
             }
             for (Document row : template.getCollection(IndexCollections.GIT_SNAPSHOT_FILES).find(searchScope).sort(Sorts.ascending("ordinal"))
                     .maxTime(storageTimeout.toMillis(), TimeUnit.MILLISECONDS)) {
-                SnapshotFile file = snapshotFile(row);
+                SnapshotFile file = validatedFile(row, manifest);
                 if (file.ordinal() == position.fileOrdinal()) {
                     if (file.chunkCount() == 0L) {
                         position = new SearchPosition(file.ordinal() + 1L, 0L, 0);
@@ -258,7 +270,7 @@ public final class GitEvidenceReadService {
                             coverage(repositoryId, required.snapshotId(), required.directory().orElse(""), manifest));
                 }
                 if (matches.size() >= required.limit()) {
-                    Optional<SnapshotFile> next = nextSearchFile(repositoryId, required.snapshotId(), directory, file.ordinal());
+                    Optional<SnapshotFile> next = nextSearchFile(repositoryId, required.snapshotId(), directory, file.ordinal(), manifest);
                     if (next.isPresent()) {
                         return searchResult(repositoryId, required, matches, false, next.orElseThrow().ordinal(), 0L, 0,
                                 coverage(repositoryId, required.snapshotId(), required.directory().orElse(""), manifest));
@@ -293,8 +305,76 @@ public final class GitEvidenceReadService {
                 || requiredLong(manifest, "snapshotTextBytesLimit") < 0L) {
             throw new IndexContractMismatchException();
         }
+        if ("STANDALONE".equals(requiredText(manifest, "scope"))
+                && currentSourceSnapshot(repositoryId, snapshotId, revision, manifest)) {
+            return manifest;
+        }
         requireReadyComparisonOwner(repositoryId, snapshotId, revision, manifest);
         return manifest;
+    }
+
+    private boolean currentSourceSnapshot(RepositoryId repositoryId, String snapshotId, String revision, Document snapshot) {
+        Document repository = template.getCollection(IndexCollections.REPOSITORIES).find(Filters.eq("repoId", repositoryId.value()))
+                .maxTime(storageTimeout.toMillis(), TimeUnit.MILLISECONDS).first();
+        if (Objects.isNull(repository)) {
+            return false;
+        }
+        Document pointer = repository.get("currentPointer", Document.class);
+        if (Objects.isNull(pointer) || !revision.equals(pointer.getString("revision"))) {
+            return false;
+        }
+        Document generation = generation(repositoryId, revision, pointer.getString("generationId"), pointer.getString("manifestDigest"));
+        if (Objects.isNull(generation)) {
+            throw new IndexContractMismatchException();
+        }
+        snapshot.put("_selectedPolicy", requireBoundSource(repositoryId, revision, snapshot, generation, Optional.of(snapshotId)));
+        return true;
+    }
+
+    private Document generation(RepositoryId repositoryId, String revision, String generationId, String digest) {
+        if (Objects.isNull(generationId) || Objects.isNull(digest)) {
+            throw new IndexContractMismatchException();
+        }
+        return template.getCollection(IndexCollections.GENERATION_MANIFESTS).find(Filters.and(
+                Filters.eq("repoId", repositoryId.value()), Filters.eq("sourceRevision", revision),
+                Filters.eq("generationId", generationId), Filters.eq("identityDigest", digest),
+                Filters.eq("schemaVersion", IndexSchemaContract.SCHEMA_VERSION), Filters.eq("writeState", "SEALED_VALID")))
+                .maxTime(storageTimeout.toMillis(), TimeUnit.MILLISECONDS).first();
+    }
+
+    private SourceEvidencePolicy requireBoundSource(RepositoryId repositoryId, String revision, Document snapshot,
+            Document generation, Optional<String> sourceSnapshotId) {
+        if (Objects.isNull(generation)) {
+            throw new IndexContractMismatchException();
+        }
+        generations.require(
+                new SelectedGeneration(repositoryId, new RepositoryRevision(revision),
+                        new GenerationId(requiredText(generation, "generationId")),
+                        new ManifestDigest(requiredText(generation, "identityDigest"))),
+                SelectedGenerationGuard.ALL_PROJECTIONS);
+        try {
+            SourceSnapshotMembership membership = template.getConverter().read(SourceSnapshotMembership.class,
+                    requiredDocument(generation, "sourceSnapshot"));
+            SourceEvidencePolicy policy = SourceEvidenceDocumentCodec.decodePolicy(
+                    requiredDocument(generation, "sourcePolicy"));
+            ProjectGuideMembership guide = SourceEvidenceDocumentCodec.decodeGuide(
+                    requiredDocument(generation, "projectGuide"));
+            if (!revision.equals(membership.revision().value())
+                    || !requiredText(generation, "generationId").equals(requiredText(snapshot, "sourceGenerationId"))
+                    || !membership.policyFingerprint().equals(policy.fingerprint())
+                    || !membership.policyFingerprint().equals(requiredText(snapshot, "policyFingerprint"))
+                    || !membership.contentDigest().equals(requiredText(snapshot, "contentDigest"))
+                    || !Objects.equals(snapshot.get("projectGuide"), generation.get("projectGuide"))
+                    || guide.path().isPresent() && !guide.path().equals(policy.projectGuidePath())
+                    || (guide.state() == com.java.semantic.model.source.ProjectGuideState.DISABLED) != policy.projectGuidePath().isEmpty()
+                    || guide.importedRevision().filter(value -> !revision.equals(value.value())).isPresent()
+                    || sourceSnapshotId.filter(id -> !id.equals(membership.snapshotId().value())).isPresent()) {
+                throw new IndexContractMismatchException();
+            }
+            return policy;
+        } catch (IllegalArgumentException exception) {
+            throw new IndexContractMismatchException();
+        }
     }
 
     private void requireReadyComparisonOwner(RepositoryId repositoryId, String snapshotId, String revision, Document snapshot) {
@@ -339,6 +419,8 @@ public final class GitEvidenceReadService {
             requireReadySiblingSnapshot(repositoryId, siblingSnapshotId, siblingRevision, ownerJobId, ownership);
             authorizeReviewMembership(repositoryId, ownership, ownerJobId, new GitComparisonId(requiredText(parent, "evidenceId")), previousSnapshotId,
                     currentSnapshotId, previous, current);
+            bindComparisonSources(repositoryId, parent, previousSnapshotId, currentSnapshotId, previous, current, ownership);
+            snapshot.put("_selectedPolicy", requiredPolicy(parent, requestedPrevious ? "beforePolicy" : "afterPolicy"));
         } catch (IllegalArgumentException exception) {
             throw new IndexContractMismatchException();
         }
@@ -356,6 +438,61 @@ public final class GitEvidenceReadService {
         }
     }
 
+    private void bindComparisonSources(RepositoryId repositoryId, Document comparison, GitSnapshotId beforeId,
+            GitSnapshotId afterId, Optional<RepositoryRevision> before, RepositoryRevision after, GitEvidenceOwnership ownership) {
+        Document afterSnapshot = readySnapshot(repositoryId, afterId, Optional.of(after), requiredText(comparison, "ownerJobId"), ownership);
+        Document beforeGeneration = null;
+        Document afterGeneration;
+        if (ownership.scope() == GitPublicationScope.REVIEW) {
+            ReviewManifestDocument review = reviews.requireReady(repositoryId, ownership.reviewId().orElseThrow());
+            if (before.isPresent()) {
+                beforeGeneration = sealedEndpoint(repositoryId, before.orElseThrow().value(),
+                        review.before().orElseThrow(IndexContractMismatchException::new).generation().selected());
+            }
+            afterGeneration = sealedEndpoint(repositoryId, after.value(), review.after().orElseThrow().generation().selected());
+        } else {
+            if (before.isPresent()) {
+                beforeGeneration = sealedSourceForSnapshot(repositoryId, before.orElseThrow().value(), beforeId.value());
+            }
+            afterGeneration = sealedSourceForSnapshot(repositoryId, after.value(), afterId.value());
+        }
+        if (before.isPresent()) {
+            Document beforeSnapshot = readySnapshot(repositoryId, beforeId, before, requiredText(comparison, "ownerJobId"), ownership);
+            comparison.put("beforePolicy", requireBoundSource(repositoryId, before.orElseThrow().value(), beforeSnapshot,
+                    beforeGeneration, Optional.empty()));
+        } else if (beforeId.equals(afterId)) {
+            throw new IndexContractMismatchException();
+        }
+        comparison.put("afterPolicy", requireBoundSource(repositoryId, after.value(), afterSnapshot,
+                afterGeneration, Optional.empty()));
+    }
+
+    private Document sealedEndpoint(RepositoryId repositoryId, String revision,
+            SelectedGeneration selected) {
+        return generation(repositoryId, revision, selected.generationId().value(), selected.manifestDigest().value());
+    }
+
+    private Document sealedSourceForSnapshot(RepositoryId repositoryId, String revision, String snapshotId) {
+        Document snapshot = ready(findManifest(repositoryId, new GitEvidenceId(snapshotId)), "SNAPSHOT");
+        Document generation = template.getCollection(IndexCollections.GENERATION_MANIFESTS).find(Filters.and(
+                Filters.eq("repoId", repositoryId.value()), Filters.eq("sourceRevision", revision),
+                Filters.eq("generationId", requiredText(snapshot, "sourceGenerationId")),
+                Filters.eq("schemaVersion", IndexSchemaContract.SCHEMA_VERSION), Filters.eq("writeState", "SEALED_VALID")))
+                .maxTime(storageTimeout.toMillis(), TimeUnit.MILLISECONDS).first();
+        if (Objects.isNull(generation)) {
+            throw new IndexContractMismatchException();
+        }
+        return generation;
+    }
+
+    private static SourceEvidencePolicy requiredPolicy(Document document, String field) {
+        Object value = document.get(field);
+        if (!(value instanceof SourceEvidencePolicy policy)) {
+            throw new IndexContractMismatchException();
+        }
+        return policy;
+    }
+
     private static GitEvidenceId canonicalGitEvidenceId(String value) {
         try {
             return new GitEvidenceId(value);
@@ -364,11 +501,18 @@ public final class GitEvidenceReadService {
         }
     }
 
-    private FileEntries directEntries(RepositoryId repositoryId, String snapshotId, String directory, int offset, int limit) {
+    private FileEntries directEntries(RepositoryId repositoryId, String snapshotId, String directory, int offset, int limit, Document manifest) {
         validateDirectory(directory);
+        SourceEvidencePolicy policy = requiredPolicy(manifest, "_selectedPolicy");
+        List<String> allowed = new ArrayList<>(policy.selectedCodePaths());
+        ProjectGuideMembership guide = SourceEvidenceDocumentCodec.decodeGuide(requiredDocument(manifest, "projectGuide"));
+        if (guide.state() == com.java.semantic.model.source.ProjectGuideState.AVAILABLE) {
+            allowed.add(guide.path().orElseThrow());
+        }
         String prefix = directory.isEmpty() ? "" : directory + "/";
         List<Bson> pipeline = new ArrayList<>();
-        pipeline.add(new Document("$match", Filters.and(Filters.eq("repoId", repositoryId.value()), Filters.eq("snapshotId", snapshotId), directoryFilter(directory))));
+        pipeline.add(new Document("$match", Filters.and(Filters.eq("repoId", repositoryId.value()),
+                Filters.eq("snapshotId", snapshotId), Filters.in("path", allowed), directoryFilter(directory))));
         Object remaining = directory.isEmpty() ? "$path" : new Document("$cond", List.of(
                 new Document("$eq", List.of(new Document("$indexOfCP", List.of("$path", prefix)), 0)),
                 new Document("$substrCP", List.of("$path", prefix.codePointCount(0, prefix.length()), 2_147_483_647)), "$path"));
@@ -399,13 +543,13 @@ public final class GitEvidenceReadService {
             if ("DIRECTORY".equals(entryType)) {
                 items.add(new SemanticQueryContract.GitFileItem(path, java.util.HexFormat.of().formatHex(path.getBytes(StandardCharsets.UTF_8)), "DIRECTORY", 0L, "DIRECTORY"));
             } else if ("FILE".equals(entryType)) {
-                String contentStatus = requiredText(row, "contentStatus");
-                try {
-                    GitFileContentStatus.valueOf(contentStatus);
-                } catch (IllegalArgumentException exception) {
+                SnapshotFile file = file(repositoryId, snapshotId, path, manifest);
+                if (!file.pathKey().equals(requiredText(row, "pathKey"))
+                        || file.byteLength() != requiredLong(row, "byteLength")
+                        || !file.contentStatus().equals(requiredText(row, "contentStatus"))) {
                     throw new IndexContractMismatchException();
                 }
-                items.add(new SemanticQueryContract.GitFileItem(path, requiredText(row, "pathKey"), "FILE", requiredLong(row, "byteLength"), contentStatus));
+                items.add(new SemanticQueryContract.GitFileItem(path, file.pathKey(), "FILE", file.byteLength(), file.contentStatus()));
             } else {
                 throw new IndexContractMismatchException();
             }
@@ -440,12 +584,37 @@ public final class GitEvidenceReadService {
         if (rows.size() != 1) {
             throw new IndexContractMismatchException();
         }
-        SnapshotFile file = snapshotFile(rows.getFirst());
+        SnapshotFile file = validatedFile(rows.getFirst(), manifest);
         if (file.ordinal() >= requiredLong(manifest, "total") || ("TEXT".equals(file.contentStatus())
                 && file.byteLength() > requiredLong(manifest, "fileTextBytesLimit"))) {
             throw new IndexContractMismatchException();
         }
         return file;
+    }
+
+    private SnapshotFile validatedFile(Document row, Document manifest) {
+        SnapshotFile file = snapshotFile(row);
+        SourceEvidencePolicy policy = requiredPolicy(manifest, "_selectedPolicy");
+        String kind = requiredText(row, "contentKind");
+        if (!policy.fingerprint().equals(requiredText(row, "policyFingerprint"))
+                || !List.of("100644", "100755").contains(requiredText(row, "mode"))) {
+            throw new IndexContractMismatchException();
+        }
+        if ("CODE".equals(kind) && policy.allowsCode(file.path()) && "TEXT".equals(file.contentStatus())) {
+            return file;
+        }
+        if ("PROJECT_GUIDE".equals(kind) && policy.allowsGuide(file.path())) {
+            ProjectGuideMembership guide = SourceEvidenceDocumentCodec.decodeGuide(
+                    requiredDocument(manifest, "projectGuide"));
+            if (guide.state() == com.java.semantic.model.source.ProjectGuideState.AVAILABLE
+                    && guide.path().filter(file.path()::equals).isPresent()
+                    && guide.digest().filter(requiredText(row, "checksum")::equals).isPresent()
+                    && guide.importedRevision().filter(revision -> revision.value().equals(requiredText(manifest, "revision"))).isPresent()
+                    && "TEXT".equals(file.contentStatus())) {
+                return file;
+            }
+        }
+        throw new IndexContractMismatchException();
     }
 
     private static SnapshotFile snapshotFile(Document row) {
@@ -683,10 +852,11 @@ public final class GitEvidenceReadService {
         return new SearchStart(actual, Optional.of(chunk));
     }
 
-    private void validateSearchCursorTarget(RepositoryId repositoryId, String snapshotId, SearchPosition position, String directory) {
+    private void validateSearchCursorTarget(RepositoryId repositoryId, String snapshotId, SearchPosition position, String directory, Document manifest) {
         List<Document> rows = new ArrayList<>();
         Bson target = Filters.and(Filters.eq("repoId", repositoryId.value()), Filters.eq("snapshotId", snapshotId),
-                Filters.eq("contentStatus", "TEXT"), Filters.eq("ordinal", position.fileOrdinal()), directoryFilter(directory));
+                Filters.eq("contentStatus", "TEXT"), Filters.eq("contentKind", "CODE"),
+                Filters.eq("ordinal", position.fileOrdinal()), directoryFilter(directory));
         for (Document row : template.getCollection(IndexCollections.GIT_SNAPSHOT_FILES).find(target).limit(2)
                 .maxTime(storageTimeout.toMillis(), TimeUnit.MILLISECONDS)) {
             rows.add(row);
@@ -694,7 +864,7 @@ public final class GitEvidenceReadService {
         if (rows.size() != 1) {
             throw new IllegalArgumentException("search cursor is invalid");
         }
-        SnapshotFile file = snapshotFile(rows.getFirst());
+        SnapshotFile file = validatedFile(rows.getFirst(), manifest);
         if (file.chunkCount() == 0L) {
             if (position.chunkOrdinal() != 0L || position.byteOffset() != 0) {
                 throw new IllegalArgumentException("search cursor is invalid");
@@ -706,12 +876,12 @@ public final class GitEvidenceReadService {
         }
     }
 
-    private Optional<SnapshotFile> nextSearchFile(RepositoryId repositoryId, String snapshotId, String directory, long ordinal) {
+    private Optional<SnapshotFile> nextSearchFile(RepositoryId repositoryId, String snapshotId, String directory, long ordinal, Document manifest) {
         Bson next = Filters.and(Filters.eq("repoId", repositoryId.value()), Filters.eq("snapshotId", snapshotId), Filters.eq("contentStatus", "TEXT"),
-                Filters.gt("ordinal", ordinal), directoryFilter(directory));
+                Filters.eq("contentKind", "CODE"), Filters.gt("ordinal", ordinal), directoryFilter(directory));
         Document row = template.getCollection(IndexCollections.GIT_SNAPSHOT_FILES).find(next).sort(Sorts.ascending("ordinal")).limit(1)
                 .maxTime(storageTimeout.toMillis(), TimeUnit.MILLISECONDS).first();
-        return Objects.isNull(row) ? Optional.empty() : Optional.of(snapshotFile(row));
+        return Objects.isNull(row) ? Optional.empty() : Optional.of(validatedFile(row, manifest));
     }
 
     private SemanticQueryContract.GitTextSearchResult searchResult(RepositoryId repositoryId, SemanticQueryContract.GitTextSearchRequest request,
@@ -739,18 +909,18 @@ public final class GitEvidenceReadService {
 
     private static String encodeReadCursor(RepositoryId repositoryId, SemanticQueryContract.GitFileReadRequest request, SnapshotFile file, ReadPosition position) {
         return cursor(FILE_CURSOR_OPERATION, repositoryId.value(), request.snapshotId(), request.revision(), digest(file.pathKey()),
-                Long.toString(position.chunkOrdinal()), Integer.toString(position.byteOffset()));
+                Integer.toString(request.maxLines()), Long.toString(position.chunkOrdinal()), Integer.toString(position.byteOffset()));
     }
 
     private ReadPosition decodeReadCursor(String cursor, RepositoryId repositoryId, SemanticQueryContract.GitFileReadRequest request, SnapshotFile file) {
-        List<String> values = cursor(cursor, 7, FILE_CURSOR_OPERATION);
+        List<String> values = cursor(cursor, 8, FILE_CURSOR_OPERATION);
         if (!repositoryId.value().equals(values.get(1)) || !request.snapshotId().equals(values.get(2)) || !request.revision().equals(values.get(3))
-                || !digest(file.pathKey()).equals(values.get(4))) {
+                || !digest(file.pathKey()).equals(values.get(4)) || !Integer.toString(request.maxLines()).equals(values.get(5))) {
             throw new IllegalArgumentException("file cursor is invalid");
         }
         try {
-            long chunkOrdinal = Long.parseLong(values.get(5));
-            int offset = Integer.parseInt(values.get(6));
+            long chunkOrdinal = Long.parseLong(values.get(6));
+            int offset = Integer.parseInt(values.get(7));
             if (chunkOrdinal < 0L || chunkOrdinal >= file.chunkCount() || offset < 0 || offset >= file.byteLength()) {
                 throw new IllegalArgumentException("file cursor is invalid");
             }
@@ -889,19 +1059,20 @@ public final class GitEvidenceReadService {
 
     private static String encodeSearchCursor(RepositoryId repositoryId, SemanticQueryContract.GitTextSearchRequest request, SearchPosition position) {
         return cursor(SEARCH_CURSOR_OPERATION, repositoryId.value(), request.snapshotId(), request.revision(), digest(request.query()), digest(request.directory().orElse("")),
-                Long.toString(position.fileOrdinal()), Long.toString(position.chunkOrdinal()), Integer.toString(position.byteOffset()));
+                Integer.toString(request.limit()), Long.toString(position.fileOrdinal()), Long.toString(position.chunkOrdinal()), Integer.toString(position.byteOffset()));
     }
 
     private static SearchPosition decodeSearchCursor(String cursor, RepositoryId repositoryId, SemanticQueryContract.GitTextSearchRequest request) {
-        List<String> values = cursor(cursor, 9, SEARCH_CURSOR_OPERATION);
+        List<String> values = cursor(cursor, 10, SEARCH_CURSOR_OPERATION);
         if (!repositoryId.value().equals(values.get(1)) || !request.snapshotId().equals(values.get(2)) || !request.revision().equals(values.get(3))
-                || !digest(request.query()).equals(values.get(4)) || !digest(request.directory().orElse("")).equals(values.get(5))) {
+                || !digest(request.query()).equals(values.get(4)) || !digest(request.directory().orElse("")).equals(values.get(5))
+                || !Integer.toString(request.limit()).equals(values.get(6))) {
             throw new IllegalArgumentException("search cursor is invalid");
         }
         try {
-            long fileOrdinal = Long.parseLong(values.get(6));
-            long chunkOrdinal = Long.parseLong(values.get(7));
-            int offset = Integer.parseInt(values.get(8));
+            long fileOrdinal = Long.parseLong(values.get(7));
+            long chunkOrdinal = Long.parseLong(values.get(8));
+            int offset = Integer.parseInt(values.get(9));
             if (fileOrdinal < 0L || chunkOrdinal < 0L || offset < 0) {
                 throw new IllegalArgumentException("search cursor is invalid");
             }
@@ -1105,6 +1276,7 @@ public final class GitEvidenceReadService {
         readySnapshot(repositoryId, currentSnapshotId, Optional.of(current), ownerJobId, ownership);
         authorizeReviewMembership(repositoryId, ownership, ownerJobId, new GitComparisonId(requiredText(manifest, "evidenceId")), previousSnapshotId,
                 currentSnapshotId, previous, current);
+        bindComparisonSources(repositoryId, manifest, previousSnapshotId, currentSnapshotId, previous, current, ownership);
         return manifest;
     }
 
@@ -1114,6 +1286,11 @@ public final class GitEvidenceReadService {
         if (!Objects.equals(revision.map(RepositoryRevision::value).orElse(null), snapshot.getString("revision"))
                 || !ownerJobId.equals(requiredText(snapshot, "ownerJobId")) || !ownership.equals(ownership(snapshot))) {
             throw new IndexContractMismatchException();
+        }
+        if (revision.isEmpty()) {
+            if (snapshot.containsKey("sourceGenerationId") || requiredLong(snapshot, "total") != 0L) {
+                throw new IndexContractMismatchException();
+            }
         }
         return snapshot;
     }
@@ -1154,7 +1331,8 @@ public final class GitEvidenceReadService {
         return requiredLong(manifest, "total");
     }
 
-    private List<SemanticQueryContract.GitChangeItem> comparisonPage(RepositoryId repositoryId, String comparisonId, int offset, int limit, long total) {
+    private List<SemanticQueryContract.GitChangeItem> comparisonPage(RepositoryId repositoryId, Document manifest,
+            String comparisonId, int offset, int limit, long total) {
         long expectedRows = pageRows(offset, limit, total);
         if (expectedRows == 0L) {
             return List.of();
@@ -1170,6 +1348,7 @@ public final class GitEvidenceReadService {
                     || !comparisonId.equals(requiredText(row, "comparisonId"))) {
                 throw new IndexContractMismatchException();
             }
+            requireAllowedChange(repositoryId, manifest, change);
             changes.add(change);
             expectedOrdinal++;
         }
@@ -1177,6 +1356,38 @@ public final class GitEvidenceReadService {
             throw new IndexContractMismatchException();
         }
         return List.copyOf(changes);
+    }
+
+    private void requireAllowedChange(RepositoryId repositoryId, Document manifest, SemanticQueryContract.GitChangeItem change) {
+        if (!change.oldPath().isEmpty()) {
+            requireAllowedEndpoint(repositoryId, manifest, change.oldPath(), change.oldMode(), change.oldBlobId(),
+                    "previousSnapshotId", "beforePolicy");
+        }
+        if (!change.newPath().isEmpty()) {
+            requireAllowedEndpoint(repositoryId, manifest, change.newPath(), change.newMode(), change.newBlobId(),
+                    "currentSnapshotId", "afterPolicy");
+        }
+    }
+
+    private void requireAllowedEndpoint(RepositoryId repositoryId, Document comparison, String path, String mode,
+            String blobId, String snapshotField, String policyField) {
+        String snapshotId = requiredText(comparison, snapshotField);
+        Document snapshot = ready(findManifest(repositoryId, new GitEvidenceId(snapshotId)), "SNAPSHOT");
+        snapshot.put("_selectedPolicy", requiredPolicy(comparison, policyField));
+        List<Document> matches = new ArrayList<>();
+        for (Document row : template.getCollection(IndexCollections.GIT_SNAPSHOT_FILES).find(Filters.and(
+                Filters.eq("repoId", repositoryId.value()), Filters.eq("snapshotId", snapshotId), Filters.eq("path", path)))
+                .limit(2).maxTime(storageTimeout.toMillis(), TimeUnit.MILLISECONDS)) {
+            matches.add(row);
+        }
+        if (matches.size() != 1) {
+            throw new IndexContractMismatchException();
+        }
+        validatedFile(matches.getFirst(), snapshot);
+        if (!mode.equals(requiredText(matches.getFirst(), "mode"))
+                || !blobId.equals(requiredText(matches.getFirst(), "blobId"))) {
+            throw new IndexContractMismatchException();
+        }
     }
 
     private PatchPage patchPage(RepositoryId repositoryId, String comparisonId, String changeId, Document change, long ordinal, boolean hasCursor) {
@@ -1372,6 +1583,14 @@ public final class GitEvidenceReadService {
     private static SemanticQueryContract.Page page(int offset, int limit, int returned, long total) {
         return new SemanticQueryContract.Page(offset, limit, returned, total, offset + returned < total);
     }
+    private static Document requiredDocument(Document document, String field) {
+        Document value = document.get(field, Document.class);
+        if (Objects.isNull(value)) {
+            throw new IndexContractMismatchException();
+        }
+        return value;
+    }
+
     private static String requiredText(Document document, String field) {
         String value = document.getString(field);
         if (Objects.isNull(value) || value.isBlank()) { throw new IndexContractMismatchException(); }

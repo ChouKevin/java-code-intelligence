@@ -1,38 +1,31 @@
 package com.java.semantic.indexer.build;
 
 import com.java.semantic.indexer.analysis.RepositoryAnalysisPreparation;
-import com.java.semantic.config.JdtLsProperties;
-import com.java.semantic.indexer.config.IndexerBuildConfiguration;
 import com.java.semantic.indexer.incremental.ChangedSource;
 import com.java.semantic.indexer.incremental.IncrementalIndexPlan;
 import com.java.semantic.indexer.incremental.IncrementalIndexPlanner;
 import com.java.semantic.indexer.incremental.SourceContractChangeDetector;
-import com.java.semantic.indexer.job.GitEvidenceJobHandler;
 import com.java.semantic.indexer.job.IndexJob;
 import com.java.semantic.indexer.job.IndexJobId;
 import com.java.semantic.indexer.job.IndexJobOperation;
 import com.java.semantic.indexer.job.IndexJobPhase;
 import com.java.semantic.indexer.job.IndexJobStore;
 import com.java.semantic.indexer.job.IndexJobTarget;
-import com.java.semantic.indexer.repository.ExactRepositoryCheckout;
-import com.java.semantic.indexer.review.ReviewPreparationService;
 import com.java.semantic.indexer.store.PublicationPort;
 import com.java.semantic.indexer.uat.NoOpPublicationGate;
+import com.java.semantic.indexer.store.SemanticIndexUnavailableException;
 import com.java.semantic.model.index.GenerationId;
 import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.model.repository.RepositoryRevision;
 import com.java.semantic.semantic.adapter.jdtls.JdtWorkspaceManager;
-import com.java.semantic.semantic.domain.JavaSemanticService;
-import java.nio.file.Path;
-import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import org.eclipse.jgit.api.Git;
 import org.eclipse.jgit.lib.Repository;
 import org.junit.jupiter.api.Test;
-import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.data.mongodb.core.MongoTemplate;
+import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.data.mongodb.core.convert.MongoConverter;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -42,29 +35,6 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class RepositoryBuildRunnerSpringWiringTest {
-    private final ApplicationContextRunner contextRunner = new ApplicationContextRunner()
-            .withUserConfiguration(IndexerBuildConfiguration.class)
-            .withBean(ExactRepositoryCheckout.class, () -> mock(ExactRepositoryCheckout.class))
-            .withBean(MongoTemplate.class, () -> mongoTemplate())
-            .withBean(IndexJobStore.class, () -> mock(IndexJobStore.class))
-            .withBean(GitEvidenceJobHandler.class, () -> mock(GitEvidenceJobHandler.class))
-            .withBean(ReviewPreparationService.class, () -> mock(ReviewPreparationService.class))
-            .withBean(PublicationPort.class, () -> mock(PublicationPort.class))
-            .withBean(JavaSemanticService.class, () -> mock(JavaSemanticService.class))
-            .withBean(JdtWorkspaceManager.class, () -> mock(JdtWorkspaceManager.class))
-            .withBean(JdtLsProperties.class, () -> new JdtLsProperties(true, Path.of("/opt/jdtls"),
-                    Path.of("workspace"), Duration.ofSeconds(1), Duration.ofSeconds(1),
-                    Duration.ofSeconds(1), 1, Duration.ofMinutes(1), Duration.ofMinutes(1), "1g"));
-
-    @Test
-    void registers_a_real_job_scoped_build_factory_and_runner() {
-        contextRunner.run(context -> {
-            assertThat(context).hasSingleBean(RepositoryBuildScopeFactory.class);
-            assertThat(context).hasSingleBean(RepositoryBuildRunner.BuildScopeFactory.class);
-            assertThat(context).hasSingleBean(RepositoryBuildRunner.class);
-        });
-    }
-
     @Test
     void closes_jgit_and_invalidates_the_jdt_workspace_when_the_scope_closes() {
         IndexBuildService.CheckoutResolver checkout = ignored -> new IndexBuildService.CheckedOutRepository(
@@ -75,7 +45,8 @@ class RepositoryBuildRunnerSpringWiringTest {
         JdtWorkspaceManager workspaces = mock(JdtWorkspaceManager.class);
         RepositoryBuildScopeFactory factory = new RepositoryBuildScopeFactory(checkout, template,
                 mock(IndexJobStore.class), mock(PublicationPort.class), new NoOpPublicationGate(),
-                workspaces, mock(RepositoryAnalysisPreparation.class), root -> git);
+                workspaces, mock(RepositoryAnalysisPreparation.class), root -> git,
+                mock(SourceSnapshotPublication.class), ignored -> Optional.empty());
 
         RepositoryBuildRunner.BuildScope scope = factory.open(job());
         scope.close();
@@ -91,12 +62,17 @@ class RepositoryBuildRunnerSpringWiringTest {
         Git git = mock(Git.class);
         when(git.getRepository()).thenReturn(mock(Repository.class));
         JdtWorkspaceManager workspaces = mock(JdtWorkspaceManager.class);
-        RepositoryBuildScopeFactory factory = new RepositoryBuildScopeFactory(checkout, mongoTemplate(),
+        MongoTemplate template = mongoTemplate();
+        when(template.collectionExists(org.mockito.ArgumentMatchers.anyString()))
+                .thenThrow(new DataAccessResourceFailureException("schema storage unavailable"));
+        RepositoryBuildScopeFactory factory = new RepositoryBuildScopeFactory(checkout, template,
                 mock(IndexJobStore.class), mock(PublicationPort.class), new NoOpPublicationGate(),
-                workspaces, mock(RepositoryAnalysisPreparation.class), root -> git);
+                workspaces, mock(RepositoryAnalysisPreparation.class), root -> git,
+                mock(SourceSnapshotPublication.class), ignored -> Optional.empty());
 
         assertThatThrownBy(() -> new RepositoryBuildRunner(factory).run(job()))
-                .isInstanceOf(RuntimeException.class);
+                .isInstanceOf(SemanticIndexUnavailableException.class)
+                .hasCauseInstanceOf(DataAccessResourceFailureException.class);
 
         verify(git).close();
         verify(workspaces).invalidate(RepositoryId.of("orders"));

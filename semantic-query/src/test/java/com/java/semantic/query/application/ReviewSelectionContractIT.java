@@ -1,5 +1,6 @@
 package com.java.semantic.query.application;
 
+import com.java.semantic.model.source.SourceEvidenceDocumentCodec;
 import com.java.semantic.model.codefact.CodeFact;
 import com.java.semantic.model.codefact.CodeFactId;
 import com.java.semantic.model.codefact.CodeFactIdentity;
@@ -29,10 +30,19 @@ import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.model.repository.RepositoryRevision;
 import com.java.semantic.model.review.ReviewId;
 import com.java.semantic.model.review.ReviewSide;
+import com.java.semantic.model.source.ProjectGuideMembership;
+import com.java.semantic.model.source.ProjectGuideState;
+import com.java.semantic.model.source.SourceCoverage;
+import com.java.semantic.model.source.SourceEvidencePolicy;
+import com.java.semantic.model.source.SourceSnapshotMembership;
+import com.java.semantic.model.source.SourceStructure;
 import com.java.semantic.query.config.ConfiguredReadPolicy;
 import com.java.semantic.query.config.ReadPolicyProperties;
 import com.mongodb.client.MongoClients;
 import java.time.Duration;
+import java.nio.charset.StandardCharsets;
+import java.util.Map;
+import java.util.UUID;
 import java.util.Date;
 import java.util.List;
 import java.util.Optional;
@@ -81,6 +91,11 @@ class ReviewSelectionContractIT extends PublishedMongoITSupport {
                     "orders", REVISION_B, factId(REVISION_B), 0))).isInstanceOf(IllegalArgumentException.class);
             assertThatThrownBy(() -> selector.select(new RepositoryId("orders"), new ReviewId(REVIEW_ID), ReviewSide.BEFORE,
                     new RepositoryRevision(REVISION_B))).isInstanceOf(ReviewContextMismatchException.class);
+            String beforeSnapshotId = selected.manifest().before().orElseThrow().snapshotId().value();
+            template.getCollection("git_evidence_manifests").updateOne(new Document("evidenceId", beforeSnapshotId),
+                    new Document("$set", new Document("sourceGenerationId", "g-a-rebuilt")));
+            assertThatThrownBy(() -> selector.select(new RepositoryId("orders"), new ReviewId(REVIEW_ID), ReviewSide.BEFORE,
+                    new RepositoryRevision(REVISION_A))).isInstanceOf(IndexContractMismatchException.class);
         }
     }
 
@@ -119,9 +134,25 @@ class ReviewSelectionContractIT extends PublishedMongoITSupport {
         AnalysisFingerprint fingerprint = AnalysisFingerprint.from(inputs);
         SemanticAnalysisEvidence evidence = new SemanticAnalysisEvidence(IndexSchemaContract.ANALYSIS_EVIDENCE_VERSION, fingerprint.digest(),
                 "SUCCESS", List.of(), new SemanticAnalysisEvidence.ResolutionCoverage(0, 0, 0, 0, 0), List.of());
+        String snapshotId = UUID.nameUUIDFromBytes(generationId.getBytes(StandardCharsets.UTF_8)).toString();
+        SourceEvidencePolicy policy = new SourceEvidencePolicy(SourceEvidencePolicy.VERSION,
+                List.of("src"), Set.of("src/Order.java"), Optional.empty());
+        ProjectGuideMembership guide = ProjectGuideMembership.unavailable(ProjectGuideState.DISABLED);
+        template.getCollection("git_evidence_manifests").insertOne(new Document("repoId", "orders")
+                .append("evidenceId", snapshotId).append("kind", "SNAPSHOT").append("state", "READY")
+                .append("gitEvidenceVersion", IndexSchemaContract.GIT_EVIDENCE_VERSION).append("scope", "STANDALONE")
+                .append("sourceGenerationId", generationId)
+                .append("revision", revision).append("policyFingerprint", policy.fingerprint())
+                .append("contentDigest", "c".repeat(64)).append("projectGuide", new Document(SourceEvidenceDocumentCodec.encodeGuide(guide))));
         template.getCollection("generation_manifests").insertOne(new Document("repoId", "orders").append("sourceRevision", revision)
                 .append("generationId", generationId).append("identityDigest", digest).append("writeState", "SEALED_VALID")
                 .append("schemaVersion", IndexSchemaContract.SCHEMA_VERSION).append("projectionVersions", projectionVersions())
+                .append("sourceSnapshot", template.getConverter().convertToMongoType(new SourceSnapshotMembership(
+                        new GitSnapshotId(snapshotId), new RepositoryRevision(revision), policy.fingerprint(), "c".repeat(64))))
+                .append("sourcePolicy", new Document(SourceEvidenceDocumentCodec.encodePolicy(policy)))
+                .append("projectGuide", new Document(SourceEvidenceDocumentCodec.encodeGuide(guide)))
+                .append("coverage", template.getConverter().convertToMongoType(new SourceCoverage(1, 0, 0, 0)))
+                .append("structure", template.getConverter().convertToMongoType(new SourceStructure(policy.includedRoots(), Map.of(), Map.of())))
                 .append("analysisFingerprint", fingerprint.digest()).append("analysisInputs", template.getConverter().convertToMongoType(inputs))
                 .append("analysisEvidence", template.getConverter().convertToMongoType(evidence)));
         seedReadRows(template, revision, generationId);
@@ -132,6 +163,12 @@ class ReviewSelectionContractIT extends PublishedMongoITSupport {
         String path = "src/Order.java";
         String content = "class Order { String value() { return \"" + (REVISION_A.equals(revision) ? "A-" : "B-") + generationId + "\"; } }";
         SourceArtifactDocument artifact = SourceArtifactDocument.create(content);
+        String snapshotId = UUID.nameUUIDFromBytes(generationId.getBytes(StandardCharsets.UTF_8)).toString();
+        Document snapshot = template.getCollection("git_evidence_manifests").find(new Document("evidenceId", snapshotId)).first();
+        template.getCollection("git_snapshot_files").insertOne(new Document("repoId", "orders")
+                .append("snapshotId", snapshotId).append("path", path).append("contentKind", "CODE")
+                .append("mode", "100644").append("contentStatus", "TEXT").append("checksum", artifact.contentHash())
+                .append("policyFingerprint", snapshot.getString("policyFingerprint")));
         template.getCollection("source_artifacts").insertOne(new Document("sourceArtifactId", artifact.id().value())
                 .append("contentHash", artifact.contentHash()).append("utf8Content", content));
         GenerationFileDocument file = new GenerationFileDocument(new RepositoryId("orders"), new GenerationId(generationId), path, artifact.id(),
@@ -158,7 +195,8 @@ class ReviewSelectionContractIT extends PublishedMongoITSupport {
         template.getCollection("symbols").insertOne(storedSymbol);
         template.getCollection("search").insertOne(new Document("repoId", "orders").append("generationId", generationId)
                 .append("factId", fact.id().value()).append("kind", "TYPE").append("tokens", List.of("order")).append("package", "")
-                .append("authority", "SYMBOLS").append("canonical", identity.canonicalForm()).append("scopePackage", "")
+                .append("authority", "SYMBOLS").append("canonical", identity.canonicalForm())
+                .append("displayName", "Order").append("signature", "").append("scopePackage", "")
                 .append("scopeClass", "Order").append("scopeMethod", "").append("scopeParameters", List.of()).append("scopePath", path));
     }
 
@@ -172,6 +210,8 @@ class ReviewSelectionContractIT extends PublishedMongoITSupport {
                 .append("snapshotId", "aaaaaaaa-1111-1111-1111-111111111111");
         Document afterEndpoint = new Document("generation", template.getConverter().convertToMongoType(after))
                 .append("snapshotId", "bbbbbbbb-2222-2222-2222-222222222222");
+        seedReviewSnapshot(template, before, beforeEndpoint.getString("snapshotId"));
+        seedReviewSnapshot(template, after, afterEndpoint.getString("snapshotId"));
         template.getCollection("review_manifests").insertOne(new Document("repoId", "orders").append("reviewId", REVIEW_ID)
                 .append("ownerJobId", "review-job").append("reviewContractVersion", IndexSchemaContract.REVIEW_MANIFEST_VERSION)
                 .append("state", "READY")
@@ -180,6 +220,21 @@ class ReviewSelectionContractIT extends PublishedMongoITSupport {
                         .append("baselineRule", "DIRECT_RANGE"))
                 .append("before", beforeEndpoint).append("after", afterEndpoint)
                 .append("comparisonId", "cccccccc-3333-3333-3333-333333333333").append("createdAt", new Date()).append("publishedAt", new Date()));
+    }
+
+    private static void seedReviewSnapshot(MongoTemplate template, SealedGeneration generation, String snapshotId) {
+        SelectedGeneration selected = generation.selected();
+        Document source = template.getCollection("generation_manifests").find(new Document("repoId", "orders")
+                .append("generationId", selected.generationId().value())).first();
+        Document membership = source.get("sourceSnapshot", Document.class);
+        template.getCollection("git_evidence_manifests").insertOne(new Document("repoId", "orders")
+                .append("evidenceId", snapshotId).append("kind", "SNAPSHOT").append("state", "READY")
+                .append("gitEvidenceVersion", IndexSchemaContract.GIT_EVIDENCE_VERSION)
+                .append("sourceGenerationId", selected.generationId().value())
+                .append("scope", "REVIEW").append("reviewId", REVIEW_ID).append("ownerJobId", "review-job")
+                .append("revision", selected.revision().value()).append("projectGuide", source.get("projectGuide"))
+                .append("contentDigest", membership.getString("contentDigest"))
+                .append("policyFingerprint", membership.getString("policyFingerprint")));
     }
 
     private static Document pointer(String revision, String generationId, String digest) {

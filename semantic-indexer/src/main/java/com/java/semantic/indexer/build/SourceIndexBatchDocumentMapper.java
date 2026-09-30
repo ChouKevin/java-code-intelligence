@@ -3,9 +3,16 @@ package com.java.semantic.indexer.build;
 import com.java.semantic.indexer.store.MongoGenerationWriter.StoredDocument;
 import com.java.semantic.model.codefact.CodeFact;
 import com.java.semantic.model.codefact.CodeFactScope;
+import com.java.semantic.model.codefact.CanonicalIdentity;
+import com.java.semantic.model.codefact.EntryPointIdentity;
+import com.java.semantic.model.codefact.MapperStatementIdentity;
+import com.java.semantic.model.codefact.MemberIdentity;
+import com.java.semantic.model.codefact.MethodTarget;
+import com.java.semantic.model.codefact.RelationTarget;
 import com.java.semantic.model.codefact.RelationIdentity;
 import com.java.semantic.model.codefact.RelationKind;
 import com.java.semantic.model.codefact.SourceRange;
+import com.java.semantic.model.codefact.SourceTypeIdentity;
 import com.java.semantic.model.index.GenerationFileDocument;
 import com.java.semantic.model.index.GenerationId;
 import com.java.semantic.model.index.IndexCollections;
@@ -144,6 +151,9 @@ public final class SourceIndexBatchDocumentMapper {
             document.put("tokens", search.normalizedTokens());
             document.put("package", search.packageName().orElse(""));
             document.put("authority", search.authoritativeProjection().name());
+            CanonicalIdentity identity = search.authoritativeIdentity().canonicalIdentity();
+            document.put("displayName", displayName(identity));
+            document.put("signature", signature(identity));
             document.put("canonical", search.authoritativeIdentity().canonicalForm());
             document.put("scopePackage", search.scope().packageName());
             document.put("scopeClass", search.scope().className());
@@ -152,6 +162,39 @@ public final class SourceIndexBatchDocumentMapper {
             document.put("scopePath", search.scope().sourcePath().orElse(""));
             document.put("sourcePath", batch.sourcePath());
         })).toList();
+    }
+
+    private static String displayName(CanonicalIdentity identity) {
+        if (identity instanceof EntryPointIdentity entry) {
+            return entry.method().methodName();
+        }
+        if (identity instanceof MethodTarget method) {
+            return method.methodName();
+        }
+        if (identity instanceof SourceTypeIdentity type) {
+            return type.javaType().className();
+        }
+        if (identity instanceof MemberIdentity member) {
+            return member.name();
+        }
+        if (identity instanceof MapperStatementIdentity mapper) {
+            return mapper.statementId();
+        }
+        if (identity instanceof RelationIdentity relation) {
+            if (relation.target() instanceof RelationTarget.Internal internal) {
+                return displayName(internal.identity().canonicalIdentity());
+            }
+            if (relation.target() instanceof RelationTarget.External external) {
+                return external.target().canonicalForm();
+            }
+        }
+        throw new IllegalArgumentException("unsupported indexed search identity");
+    }
+
+    private static String signature(CanonicalIdentity identity) {
+        MethodTarget method = identity instanceof EntryPointIdentity entry ? entry.method()
+                : identity instanceof MethodTarget target ? target : null;
+        return Objects.isNull(method) ? "" : method.methodName() + "(" + String.join(", ", method.parameterTypes()) + ")";
     }
 
     private StoredDocument stored(String collection, Object value, java.util.function.Consumer<Document> enrich) {

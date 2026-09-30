@@ -7,6 +7,7 @@ import com.java.semantic.model.codefact.CodeFactReadQuery;
 import com.java.semantic.model.codefact.CodeFactScope;
 import com.java.semantic.model.codefact.ExternalTarget;
 import com.java.semantic.model.codefact.RelationKind;
+import com.java.semantic.model.codefact.RelationIdentity;
 import com.java.semantic.model.codefact.RelationTarget;
 import com.java.semantic.model.codefact.SourceRange;
 import com.java.semantic.model.codefact.SourceSegmentQuery;
@@ -186,10 +187,14 @@ class SourceSliceContractIT extends PublishedMongoITSupport {
             assertThatThrownBy(() -> service.sourceSegment(context, new SourceSegmentQuery(new RepositoryId("orders"),
                     new RepositoryRevision(REVISION), type, invalid))).isInstanceOf(IndexContractMismatchException.class);
             String mapperPath = "src/main/resources/VideoMapper.xml";
-            com.java.semantic.model.index.SourceArtifactDocument mapperArtifact = seedSource(template, mapperPath, "<select>");
+            String mapperXml = """
+                    <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+                    <mapper namespace="example.mapper.VideoMapper"><select id="find">SELECT 1</select></mapper>
+                    """;
+            com.java.semantic.model.index.SourceArtifactDocument mapperArtifact = seedSource(template, mapperPath, mapperXml);
             CodeFactIdentity mapper = seedMapper(template, mapperPath, mapperArtifact.id());
             PublishedSourceSegment mapperEvidence = service.evidenceSource(context, mapper);
-            assertThat(mapperEvidence.content()).isEqualTo("<select>");
+            assertThat(mapperEvidence.content()).isEqualTo(mapperXml.substring(0, 8));
             assertThat(mapperEvidence.location().sourceFile()).isEqualTo(mapperPath);
             assertThat(mapperEvidence.location().range()).isEqualTo(new SyntaxRange(new SyntaxPosition(0, 0), new SyntaxPosition(0, 8)));
             assertThat(mapperEvidence.generation().repositoryId()).isEqualTo(new RepositoryId("orders"));
@@ -245,7 +250,12 @@ class SourceSliceContractIT extends PublishedMongoITSupport {
         template.getCollection("search").insertOne(new Document("repoId", "orders").append("generationId", "g1")
                 .append("factId", CodeFactId.from(identity).value()).append("kind", identity.kind().name())
                 .append("tokens", tokens).append("package", scope.packageName()).append("authority", authority)
-                .append("canonical", identity.canonicalForm()).append("scopePackage", scope.packageName())
+                .append("canonical", identity.canonicalForm())
+                .append("displayName", identity.canonicalIdentity() instanceof RelationIdentity relation
+                        ? ((RelationTarget.External) relation.target()).target().canonicalForm() : scope.methodName().orElse(scope.className()))
+                .append("signature", identity.canonicalIdentity() instanceof RelationIdentity ? ""
+                        : scope.methodName().map(name -> name + "(" + String.join(", ", scope.parameterTypes()) + ")").orElse(""))
+                .append("scopePackage", scope.packageName())
                 .append("scopeClass", scope.className()).append("scopeMethod", scope.methodName().orElse(""))
                 .append("scopeParameters", scope.parameterTypes()).append("scopePath", scope.sourcePath().orElse("")));
     }

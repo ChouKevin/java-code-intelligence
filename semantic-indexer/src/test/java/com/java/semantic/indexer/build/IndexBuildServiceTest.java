@@ -22,6 +22,13 @@ import com.java.semantic.model.index.ManifestDigest;
 import com.java.semantic.model.index.SealedGeneration;
 import com.java.semantic.model.index.SemanticAnalysisEvidence;
 import com.java.semantic.model.repository.RepositoryId;
+import com.java.semantic.model.git.GitSnapshotId;
+import com.java.semantic.model.source.ProjectGuideMembership;
+import com.java.semantic.model.source.ProjectGuideState;
+import com.java.semantic.model.source.SourceCoverage;
+import com.java.semantic.model.source.SourceEvidencePolicy;
+import com.java.semantic.model.source.SourceSnapshotMembership;
+import com.java.semantic.model.source.SourceStructure;
 import com.java.semantic.model.repository.RepositoryRevision;
 import com.java.semantic.repository.application.RepositoryMutationException;
 import com.java.semantic.semantic.domain.JavaSemanticService;
@@ -54,7 +61,8 @@ class IndexBuildServiceTest {
                 mock(SourceIndexBatchDocumentMapper.class),
                 mock(GenerationValidator.class),
                 ignored -> { throw new RepositoryMutationException("checkout failed"); },
-                mock(IncrementalGenerationBuilder.class), mock(IndexJobStore.class), mock(PublicationPort.class), gate);
+                mock(IncrementalGenerationBuilder.class), mock(IndexJobStore.class), mock(PublicationPort.class), gate,
+                mock(RepositoryAnalysisPreparation.class), mock(SourceSnapshotPublication.class), ignored -> Optional.empty());
         IndexJob job = job();
 
         assertThatThrownBy(() -> service.build(job))
@@ -91,8 +99,7 @@ class IndexBuildServiceTest {
         AnalysisFingerprint fingerprint = mock(AnalysisFingerprint.class);
         when(preparedAnalysis.fingerprint()).thenReturn(fingerprint);
         when(fingerprint.digest()).thenReturn("f".repeat(64));
-        SemanticAnalysisEvidence analysisEvidence = mock(SemanticAnalysisEvidence.class);
-        when(analysisEvidence.fingerprintDigest()).thenReturn("f".repeat(64));
+        SemanticAnalysisEvidence analysisEvidence = analysisEvidence();
         when(preparedAnalysis.forExportPlan(preparedPlan)).thenReturn(preparedAnalysis);
         when(incrementalBuilder.assemble(any(), any(), any(), eq(fingerprint)))
                 .thenReturn(new IncrementalGenerationBuilder.BuildSelection(
@@ -101,8 +108,10 @@ class IndexBuildServiceTest {
                 .thenReturn(new RepositoryIndexExport(List.of(), analysisEvidence));
         when(validator.validate(any(), eq(target.revision()),
                 eq(target.revision()), eq(preparedPlan))).thenReturn(validation);
+        SourceSnapshotPublication sourcePublication = sourcePublication(job, preparedPlan, generationWriter);
         IndexBuildService service = new IndexBuildService(planner, exporter, generationWriter, mock(SourceIndexBatchDocumentMapper.class),
-                validator, ignored -> checkout, incrementalBuilder, jobs, publication, gate, preparation);
+                validator, ignored -> checkout, incrementalBuilder, jobs, publication, gate, preparation,
+                sourcePublication, ignored -> Optional.empty());
 
         SealedGeneration sealed = service.seal(job);
 
@@ -117,6 +126,7 @@ class IndexBuildServiceTest {
         verifyNoInteractions(planner);
         assertThat(sealed.selected().generationId()).isEqualTo(target.generationId());
         verifyNoInteractions(publication);
+        verify(preparedAnalysis).close();
     }
 
     @Test
@@ -147,7 +157,8 @@ class IndexBuildServiceTest {
         GenerationValidator validator = mock(GenerationValidator.class);
         IncrementalGenerationBuilder incrementalBuilder = mock(IncrementalGenerationBuilder.class);
         IndexJobStore jobs = mock(IndexJobStore.class);
-        FullIndexPlan plan = new FullIndexPlan(Path.of("."), List.of());
+        FullIndexPlan plan = new FullIndexPlan(Path.of(".").toAbsolutePath().normalize(), List.of(),
+                List.of(Path.of(".").toAbsolutePath().normalize()), Map.of());
         IncrementalGenerationBuilder.BuildSelection selection = new IncrementalGenerationBuilder.BuildSelection(false,
                 mock(com.java.semantic.indexer.incremental.IncrementalIndexPlan.class), plan);
         ManifestDigest digest = new ManifestDigest("1".repeat(64));
@@ -158,8 +169,7 @@ class IndexBuildServiceTest {
         when(preparedAnalysis.plan()).thenReturn(plan);
         when(preparedAnalysis.fingerprint()).thenReturn(fingerprint);
         when(fingerprint.digest()).thenReturn("f".repeat(64));
-        SemanticAnalysisEvidence analysisEvidence = mock(SemanticAnalysisEvidence.class);
-        when(analysisEvidence.fingerprintDigest()).thenReturn("f".repeat(64));
+        SemanticAnalysisEvidence analysisEvidence = analysisEvidence();
         when(preparedAnalysis.forExportPlan(plan)).thenReturn(preparedAnalysis);
         GenerationValidator.ValidationResult result = new GenerationValidator.ValidationResult(digest, Map.of(), List.of());
         IndexJobTarget target = job.target().orElseThrow();
@@ -175,7 +185,29 @@ class IndexBuildServiceTest {
                 eq(target.revision()), eq(plan))).thenReturn(result);
         when(jobs.prepareBuildPublication(job, digest)).thenReturn(Optional.of(intent));
         return new IndexBuildService(planner, exporter, generationWriter, mapper, validator, ignored -> checkout,
-                incrementalBuilder, jobs, publication, gate, preparation);
+                incrementalBuilder, jobs, publication, gate, preparation,
+                sourcePublication(job, plan, generationWriter), ignored -> Optional.empty());
+    }
+
+    private static SourceSnapshotPublication sourcePublication(IndexJob job, FullIndexPlan plan,
+            MongoGenerationWriter writer) {
+        SourceSnapshotPublication publication = mock(SourceSnapshotPublication.class);
+        SourceEvidencePolicy policy = ImportedSourcePolicy.from(plan, Optional.empty());
+        ProjectGuideMembership guide = ProjectGuideMembership.unavailable(ProjectGuideState.DISABLED);
+        SourceSnapshotMembership snapshot = new SourceSnapshotMembership(new GitSnapshotId("00000000-0000-4000-8000-000000000001"),
+                job.target().orElseThrow().revision(), policy.fingerprint(), "c".repeat(64));
+        SourceCoverage coverage = new SourceCoverage(0, 0, 0, 0);
+        SourceStructure structure = new SourceStructure(policy.includedRoots(), Map.of(), Map.of());
+        when(publication.publish(eq(job), eq(plan.repositoryRoot()), eq(snapshot.revision()), eq(plan), eq(Optional.empty())))
+                .thenReturn(new SourceSnapshotPublication.PublishedSource(snapshot, guide, policy, 0));
+        when(writer.sourceOverview(any(), eq(policy.includedRoots()), eq(0L), eq(0L)))
+                .thenReturn(new MongoGenerationWriter.SourceOverview(coverage, structure));
+        return publication;
+    }
+
+    private static SemanticAnalysisEvidence analysisEvidence() {
+        return new SemanticAnalysisEvidence(1, "f".repeat(64), "SUCCESS", List.of(),
+                new SemanticAnalysisEvidence.ResolutionCoverage(0, 0, 0, 0, 0), List.of());
     }
 
     private static IndexJob job() {

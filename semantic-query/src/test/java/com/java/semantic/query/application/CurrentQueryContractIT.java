@@ -1,5 +1,6 @@
 package com.java.semantic.query.application;
 
+import com.java.semantic.model.source.SourceEvidenceDocumentCodec;
 import com.java.semantic.model.codefact.CodeFactId;
 import com.java.semantic.model.codefact.CodeFactIdentity;
 import com.java.semantic.model.codefact.CodeFactKind;
@@ -22,6 +23,13 @@ import com.java.semantic.model.index.SourceArtifactId;
 import com.java.semantic.model.index.SymbolDocument;
 import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.model.repository.RepositoryRevision;
+import com.java.semantic.model.git.GitSnapshotId;
+import com.java.semantic.model.source.ProjectGuideMembership;
+import com.java.semantic.model.source.ProjectGuideState;
+import com.java.semantic.model.source.SourceCoverage;
+import com.java.semantic.model.source.SourceEvidencePolicy;
+import com.java.semantic.model.source.SourceSnapshotMembership;
+import com.java.semantic.model.source.SourceStructure;
 import com.java.semantic.query.config.ConfiguredReadPolicy;
 import com.java.semantic.query.config.ReadPolicyProperties;
 import com.mongodb.ConnectionString;
@@ -45,6 +53,8 @@ import org.testcontainers.utility.DockerImageName;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -368,9 +378,33 @@ class CurrentQueryContractIT {
                 .map(entry -> new Document("name", entry.getKey()).append("version", entry.getValue()))
                 .toList()
                 : List.of(new Document("name", "SOURCES").append("version", 0));
+        String snapshotId = snapshotId(generationId);
+        SourceEvidencePolicy policy = new SourceEvidencePolicy(SourceEvidencePolicy.VERSION,
+                List.of("src/main/java", "src/main/resources"), Set.of(), Optional.empty());
+        ProjectGuideMembership guide = ProjectGuideMembership.unavailable(ProjectGuideState.DISABLED);
+        template.getCollection("git_evidence_manifests").insertOne(new Document("repoId", repositoryId)
+                .append("evidenceId", snapshotId).append("kind", "SNAPSHOT").append("state", "READY")
+                .append("gitEvidenceVersion", IndexSchemaContract.GIT_EVIDENCE_VERSION)
+                .append("sourceGenerationId", generationId)
+                .append("scope", "STANDALONE").append("revision", revision)
+                .append("policyFingerprint", policy.fingerprint()).append("contentDigest", "a".repeat(64))
+                .append("projectGuide", new Document(SourceEvidenceDocumentCodec.encodeGuide(guide))));
         template.getCollection("generation_manifests").insertOne(new Document("repoId", repositoryId).append("sourceRevision", revision)
                 .append("generationId", generationId).append("identityDigest", digest).append("writeState", "SEALED_VALID")
-                .append("schemaVersion", IndexSchemaContract.SCHEMA_VERSION).append("projectionVersions", projections));
+                .append("schemaVersion", IndexSchemaContract.SCHEMA_VERSION).append("projectionVersions", projections)
+                .append("sourceSnapshot", bson(new SourceSnapshotMembership(new GitSnapshotId(snapshotId),
+                        new RepositoryRevision(revision), policy.fingerprint(), "a".repeat(64))))
+                .append("sourcePolicy", new Document(SourceEvidenceDocumentCodec.encodePolicy(policy))).append("projectGuide", new Document(SourceEvidenceDocumentCodec.encodeGuide(guide)))
+                .append("coverage", bson(new SourceCoverage(0, 0, 0, 0)))
+                .append("structure", bson(new SourceStructure(policy.includedRoots(), Map.of(), Map.of()))));
+    }
+
+    private static String snapshotId(String generationId) {
+        return "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa" + generationId.substring(1);
+    }
+
+    private Document bson(Object value) {
+        return (Document) template.getConverter().convertToMongoType(value);
     }
 
     private static SourceTypeIdentity sourceType() {
@@ -395,6 +429,28 @@ class CurrentQueryContractIT {
         stored.put("repoId", repositoryId);
         stored.put("generationId", generationId);
         template.getCollection("generation_files").insertOne(stored);
+        Document generation = template.getCollection("generation_manifests").find(new Document("repoId", repositoryId)
+                .append("generationId", generationId)).first();
+        SourceEvidencePolicy oldPolicy = SourceEvidenceDocumentCodec.decodePolicy(
+                generation.get("sourcePolicy", Document.class));
+        Set<String> paths = new java.util.HashSet<>(oldPolicy.selectedCodePaths());
+        paths.add(sourcePath);
+        SourceEvidencePolicy policy = new SourceEvidencePolicy(SourceEvidencePolicy.VERSION,
+                oldPolicy.includedRoots(), paths, Optional.empty());
+        String revision = generation.getString("sourceRevision");
+        String snapshotId = snapshotId(generationId);
+        template.getCollection("generation_manifests").updateOne(new Document("repoId", repositoryId).append("generationId", generationId),
+                new Document("$set", new Document("sourcePolicy", new Document(SourceEvidenceDocumentCodec.encodePolicy(policy)))
+                        .append("sourceSnapshot", bson(new SourceSnapshotMembership(new GitSnapshotId(snapshotId),
+                                new RepositoryRevision(revision), policy.fingerprint(), "a".repeat(64))))));
+        template.getCollection("git_evidence_manifests").updateOne(new Document("repoId", repositoryId).append("evidenceId", snapshotId),
+                new Document("$set", new Document("policyFingerprint", policy.fingerprint())));
+        template.getCollection("git_snapshot_files").updateMany(new Document("repoId", repositoryId).append("snapshotId", snapshotId),
+                new Document("$set", new Document("policyFingerprint", policy.fingerprint())));
+        template.getCollection("git_snapshot_files").insertOne(new Document("repoId", repositoryId)
+                .append("snapshotId", snapshotId).append("path", sourcePath).append("contentKind", "CODE")
+                .append("mode", "100644").append("contentStatus", "TEXT").append("checksum", artifact.contentHash())
+                .append("policyFingerprint", policy.fingerprint()));
     }
 
     private void seedTypeSymbol(String repositoryId, String revision, String generationId, SourceTypeIdentity sourceType,

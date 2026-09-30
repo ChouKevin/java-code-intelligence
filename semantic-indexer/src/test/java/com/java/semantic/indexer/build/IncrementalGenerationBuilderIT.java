@@ -6,6 +6,7 @@ import com.java.semantic.indexer.incremental.IncrementalIndexPlan;
 import com.java.semantic.indexer.incremental.IncrementalIndexPlanner;
 import com.java.semantic.indexer.incremental.ModuleLocator;
 import com.java.semantic.indexer.store.IndexSchemaBootstrap;
+import com.java.semantic.indexer.store.GitEvidencePublicationStore;
 import com.java.semantic.indexer.store.GenerationWriteContext;
 import com.java.semantic.indexer.store.MongoGenerationWriter;
 import com.java.semantic.model.index.AnalysisFingerprint;
@@ -17,12 +18,28 @@ import com.java.semantic.model.index.IndexSchemaContract;
 import com.java.semantic.model.index.SourceArtifactDocument;
 import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.model.repository.RepositoryRevision;
+import com.java.semantic.indexer.job.IndexJob;
+import com.java.semantic.indexer.job.IndexJobId;
+import com.java.semantic.indexer.job.IndexJobOperation;
+import com.java.semantic.indexer.job.IndexJobPhase;
+import com.java.semantic.indexer.job.IndexJobTarget;
+import com.java.semantic.model.git.GitFileContentStatus;
+import com.java.semantic.model.git.GitSnapshotEntry;
+import com.java.semantic.model.source.ProjectGuideMembership;
+import com.java.semantic.model.source.ProjectGuideState;
+import com.java.semantic.model.source.SourceCoverage;
+import com.java.semantic.model.source.SourceEvidencePolicy;
+import com.java.semantic.model.source.SourceSnapshotMembership;
+import com.java.semantic.model.source.SourceStructure;
 import com.java.semantic.repository.domain.RepositorySnapshot;
 import com.mongodb.client.MongoClients;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Date;
 import java.util.List;
+import java.nio.charset.StandardCharsets;
+import java.time.Instant;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import org.bson.Document;
@@ -110,6 +127,7 @@ class IncrementalGenerationBuilderIT {
                     .append("generationId", "g2").append("sourcePath", "src/Order.java"))).isEqualTo(1L);
             assertThat(template.getCollection(IndexCollections.SYMBOLS).countDocuments(new Document("repoId", "orders")
                     .append("generationId", "g2"))).isEqualTo(1L);
+            seedChildSource(template, childLease, parentArtifact);
             assertThat(validator.validate(childLease, new RepositoryRevision("b".repeat(40)),
                     new RepositoryRevision("b".repeat(40)), selected).valid()).isTrue();
         }
@@ -253,6 +271,23 @@ class IncrementalGenerationBuilderIT {
         return TestPreparedAnalysis.forSnapshot(new RepositorySnapshot(
                 RepositoryId.of("orders"), Path.of("."), new RepositoryRevision("b".repeat(40))),
                 new FullIndexPlan(Path.of("."), List.of()));
+    }
+
+    private static void seedChildSource(MongoTemplate template, GenerationWriteContext context,
+            SourceArtifactDocument artifact) {
+        RepositoryRevision revision = new RepositoryRevision("b".repeat(40));
+        SourceEvidencePolicy policy = new SourceEvidencePolicy(1, List.of("src"),
+                Set.of("src/Order.java"), Optional.empty());
+        ProjectGuideMembership guide = ProjectGuideMembership.unavailable(ProjectGuideState.DISABLED);
+        IndexJob sourceJob = new IndexJob(new IndexJobId(context.jobId()), context.repositoryId(),
+                Optional.of(new IndexJobTarget(revision, context.generationId(), 2L)),
+                IndexJobPhase.RUNNING, true, Optional.empty(), false, IndexJobOperation.BUILD);
+        SourceSnapshotMembership snapshot = new GitEvidencePublicationStore(template).publishSourceSnapshot(sourceJob,
+                revision, List.of(new GitSnapshotEntry("src/Order.java", "100644", "1".repeat(40),
+                        GitFileContentStatus.TEXT, artifact.utf8Content().getBytes(StandardCharsets.UTF_8))),
+                policy, guide, Instant.now());
+        new MongoGenerationWriter(template).recordSourceMembership(context, snapshot, guide, policy,
+                new SourceCoverage(1, 0, 0, 0), new SourceStructure(List.of("src"), Map.of(), Map.of()));
     }
 
     private static void preparePublishedParent(MongoTemplate template) {

@@ -60,7 +60,8 @@ public class RepositoryRuntimeRegistry {
                 workingTree,
                 config.getUrl(),
                 config.getDefaultBranch(),
-                dataRoot);
+                dataRoot,
+                config.getProjectGuidePath().isEmpty() ? Optional.empty() : Optional.of(config.getProjectGuidePath()));
     }
 
     private Path resolveWorkingTree(

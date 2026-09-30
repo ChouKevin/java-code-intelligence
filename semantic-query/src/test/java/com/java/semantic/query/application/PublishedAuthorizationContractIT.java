@@ -1,5 +1,6 @@
 package com.java.semantic.query.application;
 
+import com.java.semantic.model.source.SourceEvidenceDocumentCodec;
 import com.java.semantic.model.codefact.CodeFactIdentity;
 import com.java.semantic.model.codefact.CodeFactSearchQuery;
 import com.java.semantic.model.codefact.DeclarationResolutionQuery;
@@ -25,6 +26,13 @@ import com.mongodb.event.CommandStartedEvent;
 import java.time.Duration;
 import java.util.Optional;
 import java.util.Set;
+import java.util.List;
+import org.bson.Document;
+import com.java.semantic.model.source.ProjectGuideMembership;
+import com.java.semantic.model.source.ProjectGuideState;
+import com.java.semantic.model.source.SourceEvidencePolicy;
+import com.java.semantic.model.source.SourceSnapshotMembership;
+import com.java.semantic.model.git.GitSnapshotId;
 import java.util.concurrent.CopyOnWriteArrayList;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -79,6 +87,52 @@ class PublishedAuthorizationContractIT extends PublishedMongoITSupport {
                 assertThatThrownBy(() -> source.evidenceSource(context, method)).isInstanceOf(RepositoryNotFoundException.class);
             }
             assertThat(reads).isEmpty();
+        }
+    }
+
+    @Test
+    void reads_sealed_code_with_invalid_guide_but_rejects_a_reclassified_source_row() {
+        try (org.testcontainers.mongodb.MongoDBContainer container = new org.testcontainers.mongodb.MongoDBContainer(
+                org.testcontainers.utility.DockerImageName.parse("mongo:8.0.4"))) {
+            container.start();
+            MongoTemplate template = new MongoTemplate(MongoClients.create(container.getConnectionString()), "published_source_membership");
+            seedCurrent(template, "orders");
+            String javaPath = "src/main/java/example/payment/PaymentService.java";
+            String mapperPath = "src/main/resources/PaymentMapper.xml";
+            seedSource(template, javaPath, "class PaymentService {}");
+            seedSource(template, mapperPath, """
+                    <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+                    <mapper namespace="example.payment.PaymentMapper"><select id="find">SELECT 1</select></mapper>
+                    """);
+            Document sealed = template.getCollection("generation_manifests").find(new Document("repoId", "orders")).first();
+            SourceEvidencePolicy original = SourceEvidenceDocumentCodec.decodePolicy(
+                    sealed.get("sourcePolicy", Document.class));
+            SourceEvidencePolicy configuredGuide = new SourceEvidencePolicy(SourceEvidencePolicy.VERSION,
+                    original.includedRoots(), original.selectedCodePaths(), Optional.of("docs/codebase/overview.md"));
+            template.getCollection("generation_manifests").updateOne(new Document("repoId", "orders"),
+                    new Document("$set", new Document("sourcePolicy", new Document(SourceEvidenceDocumentCodec.encodePolicy(configuredGuide)))
+                            .append("sourceSnapshot", template.getConverter().convertToMongoType(new SourceSnapshotMembership(
+                                    new GitSnapshotId(SOURCE_SNAPSHOT), new RepositoryRevision(REVISION),
+                                    configuredGuide.fingerprint(), SOURCE_DIGEST)))));
+            template.getCollection("git_evidence_manifests").updateOne(new Document("evidenceId", SOURCE_SNAPSHOT),
+                    new Document("$set", new Document("policyFingerprint", configuredGuide.fingerprint())));
+            template.getCollection("git_snapshot_files").updateMany(new Document("snapshotId", SOURCE_SNAPSHOT),
+                    new Document("$set", new Document("policyFingerprint", configuredGuide.fingerprint())));
+            Document invalidGuide = new Document(SourceEvidenceDocumentCodec.encodeGuide(
+                    ProjectGuideMembership.unavailable(ProjectGuideState.INVALID)));
+            template.getCollection("generation_manifests").updateOne(new Document("repoId", "orders"),
+                    new Document("$set", new Document("projectGuide", invalidGuide)));
+            template.getCollection("git_evidence_manifests").updateOne(new Document("evidenceId", SOURCE_SNAPSHOT),
+                    new Document("$set", new Document("projectGuide", invalidGuide)));
+            ConfiguredReadPolicy visible = policy();
+            CurrentSourceQueryService source = new CurrentSourceQueryService(template, guard(template, visible), Duration.ofSeconds(2));
+            SelectedGeneration selected = selected(template, visible, "orders", REVISION, SelectedGenerationGuard.SOURCES);
+
+            assertThat(source.getSource(selected, javaPath).utf8Content()).contains("PaymentService");
+            assertThat(source.getSource(selected, mapperPath).utf8Content()).contains("<mapper");
+            template.getCollection("git_snapshot_files").updateOne(new Document("snapshotId", SOURCE_SNAPSHOT).append("path", javaPath),
+                    new Document("$set", new Document("contentKind", "PROJECT_GUIDE")));
+            assertThatThrownBy(() -> source.getSource(selected, javaPath)).isInstanceOf(IndexContractMismatchException.class);
         }
     }
 }

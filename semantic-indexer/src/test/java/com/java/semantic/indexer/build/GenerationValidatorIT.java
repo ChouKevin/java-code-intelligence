@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.java.semantic.indexer.store.IndexSchemaBootstrap;
+import com.java.semantic.indexer.store.GitEvidencePublicationStore;
 import com.java.semantic.indexer.store.GenerationWriteContext;
 import com.java.semantic.indexer.store.MongoGenerationWriter;
 import com.java.semantic.model.index.GenerationId;
@@ -13,12 +14,29 @@ import com.java.semantic.model.index.SourceArtifactDocument;
 import com.java.semantic.repository.domain.RepositorySnapshot;
 import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.model.repository.RepositoryRevision;
+import com.java.semantic.model.git.GitFileContentStatus;
+import com.java.semantic.model.git.GitSnapshotEntry;
+import com.java.semantic.model.source.ProjectGuideMembership;
+import com.java.semantic.model.source.ProjectGuideState;
+import com.java.semantic.model.source.SourceCoverage;
+import com.java.semantic.model.source.SourceEvidencePolicy;
+import com.java.semantic.model.source.SourceSnapshotMembership;
+import com.java.semantic.model.source.SourceStructure;
+import com.java.semantic.indexer.job.IndexJob;
+import com.java.semantic.indexer.job.IndexJobId;
+import com.java.semantic.indexer.job.IndexJobOperation;
+import com.java.semantic.indexer.job.IndexJobPhase;
+import com.java.semantic.indexer.job.IndexJobTarget;
 import com.mongodb.client.MongoClients;
 import com.mongodb.client.model.IndexOptions;
 import java.nio.file.Path;
 import java.util.Date;
 import java.util.List;
+import java.time.Instant;
+import java.nio.charset.StandardCharsets;
 import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
 import java.util.function.Consumer;
 import java.util.stream.Stream;
 import org.bson.Document;
@@ -217,6 +235,17 @@ class GenerationValidatorIT {
         SourceIndexBatch batch = FullIndexPublicationIT.validBatch(RepositoryId.of("orders"), revision(), new GenerationId("g1"));
         new MongoIndexBatchWriter(new MongoGenerationWriter(template), lease(),
                 new SourceIndexBatchDocumentMapper(template.getConverter())).write(batch);
+        SourceEvidencePolicy policy = new SourceEvidencePolicy(1, List.of("src"), Set.of(batch.sourcePath()), Optional.empty());
+        ProjectGuideMembership guide = ProjectGuideMembership.unavailable(ProjectGuideState.DISABLED);
+        IndexJob sourceJob = new IndexJob(IndexJobId.create(), RepositoryId.of("orders"),
+                Optional.of(new IndexJobTarget(revision(), new GenerationId("g1"), 1L)),
+                IndexJobPhase.RUNNING, true, Optional.empty(), false, IndexJobOperation.BUILD);
+        SourceSnapshotMembership snapshot = new GitEvidencePublicationStore(template).publishSourceSnapshot(sourceJob,
+                revision(), List.of(new GitSnapshotEntry(batch.sourcePath(), "100644", "1".repeat(40),
+                        GitFileContentStatus.TEXT, batch.sourceArtifact().utf8Content().getBytes(StandardCharsets.UTF_8))),
+                policy, guide, Instant.now());
+        new MongoGenerationWriter(template).recordSourceMembership(lease(), snapshot, guide, policy,
+                new SourceCoverage(1, 0, 0, 0), new SourceStructure(List.of("src"), Map.of(), Map.of()));
     }
 
     private static Document duplicateSymbol(MongoTemplate template) {

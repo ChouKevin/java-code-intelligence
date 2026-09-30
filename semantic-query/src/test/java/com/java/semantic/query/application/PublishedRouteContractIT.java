@@ -105,6 +105,7 @@ class PublishedRouteContractIT extends PublishedMongoITSupport {
                     .append("factId", entryPoint.fact().id().value()).append("kind", "API_ROUTE")
                     .append("tokens", java.util.List.of("payment", "get")).append("package", scope.packageName())
                     .append("authority", "ENTRY_POINTS").append("canonical", identity.canonicalForm())
+                    .append("displayName", "get").append("signature", "get()")
                     .append("scopePackage", scope.packageName()).append("scopeClass", scope.className())
                     .append("scopeMethod", scope.methodName().orElse("")).append("scopeParameters", scope.parameterTypes())
                     .append("scopePath", scope.sourcePath().orElse("")));

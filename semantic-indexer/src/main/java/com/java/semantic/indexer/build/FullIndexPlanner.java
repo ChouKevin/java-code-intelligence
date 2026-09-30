@@ -109,14 +109,19 @@ public final class FullIndexPlanner {
         XMLInputFactory factory = XMLInputFactory.newFactory();
         factory.setProperty(XMLInputFactory.SUPPORT_DTD, false);
         factory.setProperty("javax.xml.stream.isSupportingExternalEntities", false);
+        factory.setXMLResolver((publicId, systemId, baseUri, namespace) -> new StringReader(""));
         try {
             XMLStreamReader reader = factory.createXMLStreamReader(new StringReader(content));
-            while (reader.hasNext()) {
-                if (reader.next() == XMLStreamConstants.START_ELEMENT) {
-                    return "mapper".equals(reader.getLocalName());
+            try {
+                while (reader.hasNext()) {
+                    if (reader.next() == XMLStreamConstants.START_ELEMENT) {
+                        return "mapper".equals(reader.getLocalName());
+                    }
                 }
+                return false;
+            } finally {
+                reader.close();
             }
-            return false;
         } catch (XMLStreamException exception) {
             return false;
         }

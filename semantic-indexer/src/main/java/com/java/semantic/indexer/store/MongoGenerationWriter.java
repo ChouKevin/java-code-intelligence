@@ -3,6 +3,13 @@ package com.java.semantic.indexer.store;
 import com.java.semantic.model.index.GenerationWriteState;
 import com.java.semantic.model.index.AnalysisFingerprint;
 import com.java.semantic.model.index.SemanticAnalysisEvidence;
+import com.java.semantic.model.codefact.EntryPointKind;
+import com.java.semantic.model.source.SourceSnapshotMembership;
+import com.java.semantic.model.source.ProjectGuideMembership;
+import com.java.semantic.model.source.SourceEvidencePolicy;
+import com.java.semantic.model.source.SourceEvidenceDocumentCodec;
+import com.java.semantic.model.source.SourceCoverage;
+import com.java.semantic.model.source.SourceStructure;
 import com.java.semantic.model.index.IndexCollections;
 import com.java.semantic.model.index.IndexSchemaContract;
 import com.java.semantic.model.index.IndexSchemaContract.ImmutablePayloadCollectionSpec;
@@ -16,6 +23,11 @@ import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.data.mongodb.core.MongoTemplate;
 
 import java.util.List;
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.Map;
+import java.util.Set;
+import java.util.TreeMap;
 import java.util.Objects;
 import java.util.Optional;
 
@@ -71,6 +83,60 @@ public final class MongoGenerationWriter {
             throw new IllegalStateException("analysis evidence recording lost generation ownership");
         }
     }
+
+    public void recordSourceMembership(GenerationWriteContext context, SourceSnapshotMembership snapshot,
+            ProjectGuideMembership guide, SourceEvidencePolicy policy, SourceCoverage coverage, SourceStructure structure) {
+        Objects.requireNonNull(context, "generation write context is required");
+        verifyRunningBuild(context);
+        if (!snapshot.policyFingerprint().equals(policy.fingerprint())) {
+            throw new IllegalArgumentException("snapshot and source plan policy differ");
+        }
+        Document fields = new Document("sourceSnapshot", template.getConverter().convertToMongoType(snapshot))
+                .append("projectGuide", new Document(SourceEvidenceDocumentCodec.encodeGuide(guide)))
+                .append("sourcePolicy", new Document(SourceEvidenceDocumentCodec.encodePolicy(policy)))
+                .append("coverage", template.getConverter().convertToMongoType(coverage))
+                .append("structure", new Document("importedSourceRoots", structure.importedSourceRoots())
+                        .append("packageCounts", new Document(structure.packageCounts()))
+                        .append("entryPointKindCounts", new Document(structure.entryPointKindCounts())));
+        long changed = template.getCollection(IndexCollections.GENERATION_MANIFESTS).updateOne(
+                ownedWritingManifest(context).append("sourceSnapshot", new Document("$exists", false)),
+                new Document("$set", fields)).getModifiedCount();
+        if (changed != 1L) {
+            throw new IllegalStateException("source membership recording lost generation ownership");
+        }
+    }
+
+    public SourceOverview sourceOverview(GenerationWriteContext context, List<String> includedRoots,
+            long excludedOrUnsupported, long unresolved) {
+        verifyRunningBuild(context);
+        Document filter = new Document("repoId", context.repositoryId().value())
+                .append("generationId", context.generationId().value());
+        List<Document> files = template.getCollection(IndexCollections.GENERATION_FILES)
+                .find(filter).into(new ArrayList<>());
+        Map<String, Set<String>> packageFiles = new TreeMap<>();
+        long extractionIssues = 0L;
+        for (Document file : files) {
+            if (!file.getString("extractionIssueCode").isEmpty()) {
+                extractionIssues++;
+            }
+            for (String packageName : file.getList("scopePackages", String.class)) {
+                packageFiles.computeIfAbsent(packageName, ignored -> new HashSet<>()).add(file.getString("sourcePath"));
+            }
+        }
+        Map<String, Long> packageCounts = new TreeMap<>();
+        packageFiles.forEach((name, paths) -> packageCounts.put(name, (long) paths.size()));
+        Map<String, Long> entryKinds = new TreeMap<>();
+        for (Document entry : template.getCollection(IndexCollections.ENTRY_POINTS).find(filter)) {
+            Document storedEntryPoint = Objects.requireNonNull(entry.get("entryPoint", Document.class),
+                    "persisted entry point payload is required");
+            String kind = EntryPointKind.valueOf(storedEntryPoint.getString("kind")).name();
+            entryKinds.merge(kind, 1L, Long::sum);
+        }
+        return new SourceOverview(new SourceCoverage(files.size(), excludedOrUnsupported, extractionIssues, unresolved),
+                new SourceStructure(includedRoots, packageCounts, entryKinds));
+    }
+
+    public record SourceOverview(SourceCoverage coverage, SourceStructure structure) { }
 
 
     public void writeBatch(GenerationWriteContext context, String batchId, List<StoredDocument> documents) {

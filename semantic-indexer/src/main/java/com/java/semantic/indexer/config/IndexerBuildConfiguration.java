@@ -6,6 +6,8 @@ import com.java.semantic.indexer.analysis.ConservativeAnalysisReuseVerifier;
 import com.java.semantic.indexer.analysis.DefaultRepositoryAnalysisPreparation;
 import com.java.semantic.indexer.analysis.RepositoryAnalysisPreparation;
 import com.java.semantic.indexer.build.FullIndexPlanner;
+import com.java.semantic.indexer.build.ImportedSourcePolicy;
+import com.java.semantic.indexer.analysis.PreparedAnalysis;
 import com.java.semantic.indexer.build.RepositoryBuildRunner;
 import com.java.semantic.indexer.build.RepositoryBuildScopeFactory;
 import com.java.semantic.indexer.job.GitEvidenceJobHandler;
@@ -18,14 +20,16 @@ import com.java.semantic.indexer.review.ReviewPreparationService;
 import com.java.semantic.indexer.review.DefaultReviewEndpointPreparation;
 import com.java.semantic.indexer.review.ReviewEndpointPreparationPort;
 import com.java.semantic.indexer.review.ReviewGitEvidencePort;
+import com.java.semantic.indexer.store.GitEvidencePublicationStore;
+import com.java.semantic.repository.application.RepositoryRuntimeRegistry;
+import com.java.semantic.repository.config.RepositoryProperties;
+import com.java.semantic.repository.port.GitRepositoryPort;
 import com.java.semantic.indexer.store.PublicationPort;
 import com.java.semantic.indexer.uat.NoOpPublicationGate;
 import com.java.semantic.indexer.uat.PublicationGate;
 import com.java.semantic.indexer.uat.UatPublicationGate;
-import com.java.semantic.semantic.adapter.jdtls.AnalysisWorkspaceKey;
 import com.java.semantic.semantic.adapter.jdtls.JdtLsEffectiveEnvironmentInspector;
 import com.java.semantic.semantic.adapter.jdtls.JdtWorkspaceManager;
-import com.java.semantic.semantic.adapter.jdtls.WorkspaceLease;
 import java.time.Duration;
 import java.util.Optional;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
@@ -51,13 +55,14 @@ public class IndexerBuildConfiguration {
     }
 
     @Bean
-    public AnalysisReuseVerifier analysisReuseVerifier(JdtWorkspaceManager workspaces, JdtLsEffectiveEnvironmentInspector inspector) {
-        return new ConservativeAnalysisReuseVerifier(target -> {
-            try (WorkspaceLease lease = workspaces.acquire(new AnalysisWorkspaceKey(target.snapshot().repositoryId(),
-                    target.snapshot().revision(), target.jobId(), target.stage()), target.snapshot(), target.managedCheckout())) {
-                return Optional.of(inspector.inspect(lease.session(), target.snapshot()));
-            } catch (RuntimeException exception) {
-                return Optional.empty();
+    public AnalysisReuseVerifier analysisReuseVerifier(
+            RepositoryAnalysisPreparation preparation, GitEvidencePublicationStore evidence,
+            RepositoryRuntimeRegistry repositories) {
+        return new ConservativeAnalysisReuseVerifier((candidate, target) -> {
+            try (PreparedAnalysis analysis = preparation.prepare(target)) {
+                return candidate.fingerprint().equals(analysis.fingerprint())
+                        && evidence.preparedSource(candidate).policy().equals(ImportedSourcePolicy.from(analysis.plan(),
+                                repositories.get(target.snapshot().repositoryId()).projectGuidePath()));
             }
         });
     }
@@ -68,9 +73,13 @@ public class IndexerBuildConfiguration {
                                                                                  PublicationPort publication, PublicationGate publicationGate,
                                                                                  JdtWorkspaceManager workspaces,
                                                                                  RepositoryAnalysisPreparation analysisPreparation,
-                                                                                 JdtLsProperties jdtLsProperties) {
+                                                                                 JdtLsProperties jdtLsProperties,
+                                                                                 GitRepositoryPort git,
+                                                                                 GitEvidencePublicationStore evidence,
+                                                                                 RepositoryProperties properties,
+                                                                                 RepositoryRuntimeRegistry repositories) {
         return new RepositoryBuildScopeFactory(checkout, template, jobs, publication, publicationGate, workspaces,
-                analysisPreparation, jdtLsProperties);
+                analysisPreparation, jdtLsProperties, git, evidence, properties, repositories);
     }
 
     @Bean

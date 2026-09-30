@@ -17,6 +17,7 @@ import com.java.semantic.model.review.ResolvedReviewEndpoints;
 import com.java.semantic.model.review.ReviewEndpoint;
 import com.java.semantic.model.review.ReviewManifestDocument;
 import com.java.semantic.model.review.ReviewState;
+import com.java.semantic.model.source.SourceEvidenceDocumentCodec;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -119,14 +120,38 @@ public final class ReviewReadinessValidator {
         if (!generations.validatePersistedSealed(generation.selected()).valid()) {
             throw mismatch("review generation persisted semantic graph does not match its sealed identity");
         }
+        GitEvidencePublicationStore.PreparedSource prepared = gitEvidence.preparedSource(generation);
+        Document publishedSnapshot = template.getCollection(IndexCollections.GIT_EVIDENCE_MANIFESTS)
+                .find(new Document("repoId", job.repositoryId().value())
+                        .append("evidenceId", snapshotId.value()).append("kind", "SNAPSHOT")
+                        .append("state", "READY").append("revision", generation.selected().revision().value())
+                        .append("policyFingerprint", prepared.policy().fingerprint())
+                        .append("sourceGenerationId", generation.selected().generationId().value())
+                        .append("contentDigest", prepared.snapshot().contentDigest())
+                        .append("projectGuide", new Document(SourceEvidenceDocumentCodec.encodeGuide(prepared.guide())))).first();
+        if (Objects.isNull(publishedSnapshot)) {
+            throw mismatch("review side Git snapshot differs from its sealed source policy");
+        }
         List<Document> sources = template.getCollection(IndexCollections.GENERATION_FILES).find(new Document("repoId", job.repositoryId().value())
                 .append("generationId", generation.selected().generationId().value())).into(new ArrayList<>());
         for (Document source : sources) {
             Document snapshotFile = template.getCollection(IndexCollections.GIT_SNAPSHOT_FILES).find(new Document("repoId", job.repositoryId().value())
                     .append("snapshotId", snapshotId.value()).append("path", source.getString("sourcePath"))
                     .append("contentStatus", "TEXT")).first();
-            if (Objects.isNull(snapshotFile) || !Objects.equals(source.getString("contentHash"), snapshotFile.getString("checksum"))) {
+            if (Objects.isNull(snapshotFile) || !"CODE".equals(snapshotFile.getString("contentKind"))
+                    || !prepared.policy().fingerprint().equals(snapshotFile.getString("policyFingerprint"))
+                    || !Objects.equals(source.getString("contentHash"), snapshotFile.getString("checksum"))) {
                 throw mismatch("semantic source content does not match its exact Git snapshot");
+            }
+        }
+        if (prepared.guide().path().isPresent()) {
+            Document guide = template.getCollection(IndexCollections.GIT_SNAPSHOT_FILES)
+                    .find(new Document("repoId", job.repositoryId().value()).append("snapshotId", snapshotId.value())
+                            .append("path", prepared.guide().path().orElseThrow())
+                            .append("contentKind", "PROJECT_GUIDE")
+                            .append("checksum", prepared.guide().digest().orElseThrow())).first();
+            if (Objects.isNull(guide)) {
+                throw mismatch("review side guide differs from its sealed source membership");
             }
         }
     }
@@ -156,6 +181,7 @@ public final class ReviewReadinessValidator {
         Document snapshot = evidence(job, snapshotId.value(), "SNAPSHOT", reviewId);
         Number total = snapshot.get("total", Number.class);
         if (!Objects.equals(revision.orElse(null), snapshot.getString("revision"))
+                || revision.isPresent() != Objects.nonNull(snapshot.getString("sourceGenerationId"))
                 || revision.isEmpty() && (Objects.nonNull(snapshot.getString("revision")) || Objects.isNull(total) || total.longValue() != 0L)
                 || Objects.isNull(total) || total.longValue() < 0L
                 || Objects.isNull(snapshot.getString("contentDigest")) || Objects.isNull(snapshot.get("contentCoverage", Document.class))) {

@@ -9,6 +9,9 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import org.junit.jupiter.api.Test;
+import com.java.semantic.model.source.SourceEvidencePolicy;
+import java.util.Optional;
+import java.util.Set;
 import org.junit.jupiter.api.io.TempDir;
 
 class FullIndexPlannerTest {
@@ -43,6 +46,58 @@ class FullIndexPlannerTest {
         assertFalse(plan.sources().stream().map(FullIndexPlan.SourceInput::sourcePath).anyMatch(path -> path.endsWith("GeneratedService.java")));
         assertTrue(plan.sources().stream().allMatch(source -> source.contentArtifact().contentHash().matches("[0-9a-f]{64}")));
     }
+    @Test
+    void imported_source_plan_rejects_guessed_root_and_preserves_exact_selected_files() throws Exception {
+        Path selected = repository.resolve("src/main/java/example/Order.java");
+        Path unrelated = repository.resolve("src/test/java/example/Hidden.java");
+        Files.createDirectories(selected.getParent());
+        Files.createDirectories(unrelated.getParent());
+        Files.writeString(selected, "class Order {}");
+        Files.writeString(unrelated, "class Hidden {}");
+        FullIndexPlanner planner = new FullIndexPlanner();
+
+        assertThrows(IllegalArgumentException.class, () -> ImportedSourcePolicy.from(
+                planner.plan(repository), Optional.empty()));
+        SourceEvidencePolicy policy = ImportedSourcePolicy.from(
+                planner.plan(repository, List.of(repository.resolve("src/main/java"))), Optional.empty());
+        assertEquals(Set.of("src/main/java/example/Order.java"), policy.selectedCodePaths());
+        assertTrue(policy.allowsCode("src/main/java/example/Order.java"));
+        assertFalse(policy.allowsCode("src/test/java/example/Hidden.java"));
+    }
+
+
+    @Test
+    void admits_standard_mybatis_public_doctype_without_resolving_external_entities() throws Exception {
+        Path mapper = repository.resolve("src/main/resources/org/mybatis/jpetstore/persistence/OrderMapper.xml");
+        Path config = repository.resolve("src/main/resources/config.xml");
+        Files.createDirectories(mapper.getParent());
+        Files.writeString(mapper, """
+                <?xml version="1.0" encoding="UTF-8"?>
+                <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+                    "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+                <mapper namespace="org.mybatis.jpetstore.persistence.OrderMapper">
+                  <select id="read">select 1</select>
+                </mapper>
+                """);
+        Files.writeString(config, "<configuration><secret>SECRET_MARKER</secret></configuration>");
+
+        assertEquals(List.of("src/main/resources/org/mybatis/jpetstore/persistence/OrderMapper.xml"),
+                new FullIndexPlanner().plan(repository).sources().stream()
+                        .map(FullIndexPlan.SourceInput::sourcePath).toList());
+    }
+    @Test
+    void mapper_eligibility_never_expands_external_entity_into_imported_content() throws Exception {
+        Path secret = repository.resolve("private.txt");
+        Path mapper = repository.resolve("src/main/resources/OrderMapper.xml");
+        Files.createDirectories(mapper.getParent());
+        Files.writeString(secret, "SECRET_MARKER");
+        Files.writeString(mapper, "<!DOCTYPE mapper [<!ENTITY secret SYSTEM \"" + secret.toUri()
+                + "\">]><mapper namespace=\"example.Order\">&secret;</mapper>");
+
+        assertFalse(new FullIndexPlanner().plan(repository).sources().stream()
+                .anyMatch(source -> source.contentArtifact().utf8Content().contains("SECRET_MARKER")));
+    }
+
 
     @Test
     void rejects_a_supported_file_symlink_before_reading_an_escape() throws Exception {

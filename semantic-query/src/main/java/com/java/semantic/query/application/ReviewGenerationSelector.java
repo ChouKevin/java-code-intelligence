@@ -39,6 +39,8 @@ public final class ReviewGenerationSelector {
         if (!requiredRepositoryId.equals(selected.repositoryId()) || !requiredRevision.equals(selected.revision())) {
             throw new ReviewContextMismatchException();
         }
-        return new ReviewSelection(manifest, requiredSide, guard.require(selected, requiredRequirements));
+        SelectedGeneration authorized = guard.require(selected, requiredRequirements);
+        guard.requireReviewSnapshot(authorized, endpoint.snapshotId(), manifest.reviewId(), manifest.ownerJobId());
+        return new ReviewSelection(manifest, requiredSide, authorized);
     }
 }

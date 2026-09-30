@@ -91,10 +91,19 @@ public final class GitEvidenceJobHandler {
         try {
             mutationListener.beforeMutation(requiredJob.repositoryId());
             validateCheckout(runtime);
+            Optional<GitEvidencePublicationStore.PreparedSource> before = payload.before().map(evidence::preparedSource);
+            GitEvidencePublicationStore.PreparedSource after = evidence.preparedSource(payload.after().orElseThrow());
+            com.java.semantic.model.source.SourceEvidencePolicy beforePolicy = before.map(
+                    GitEvidencePublicationStore.PreparedSource::policy).orElseGet(() ->
+                    new com.java.semantic.model.source.SourceEvidencePolicy(
+                            com.java.semantic.model.source.SourceEvidencePolicy.VERSION, java.util.List.of(),
+                            java.util.Set.of(), Optional.empty()));
             GitPreparedComparison comparison = git.prepareComparison(runtime.workingTree(), endpoints.beforeRevision(),
-                    endpoints.afterRevision());
+                    endpoints.afterRevision(), beforePolicy, after.policy(),
+                    before.flatMap(source -> source.guide().path()).stream().collect(java.util.stream.Collectors.toSet()),
+                    after.guide().path().stream().collect(java.util.stream.Collectors.toSet()));
             evidence.publishComparison(requiredJob, comparison, Instant.now(),
-                    new GitEvidenceOwnership(GitPublicationScope.REVIEW, Optional.of(payload.reviewId())));
+                    new GitEvidenceOwnership(GitPublicationScope.REVIEW, Optional.of(payload.reviewId())), before, after);
         } catch (RuntimeException exception) {
             evidence.fail(requiredJob);
             throw exception;
@@ -145,7 +154,12 @@ public final class GitEvidenceJobHandler {
         }
         git.fetch(runtime.workingTree(), runtime.remoteUrl());
         git.verifyComparisonEndpoints(runtime.workingTree(), previous, current);
-        GitPreparedComparison comparison = git.prepareComparison(runtime.workingTree(), Optional.of(previous), current);
-        evidence.publishComparison(job, comparison, Instant.now(), GitEvidenceOwnership.standalone());
+        GitEvidencePublicationStore.PreparedSource before = evidence.preparedSource(job.repositoryId(), previous);
+        GitEvidencePublicationStore.PreparedSource after = evidence.preparedSource(job.repositoryId(), current);
+        GitPreparedComparison comparison = git.prepareComparison(runtime.workingTree(), Optional.of(previous), current,
+                before.policy(), after.policy(),
+                before.guide().path().stream().collect(java.util.stream.Collectors.toSet()),
+                after.guide().path().stream().collect(java.util.stream.Collectors.toSet()));
+        evidence.publishComparison(job, comparison, Instant.now(), GitEvidenceOwnership.standalone(), Optional.of(before), after);
     }
 }

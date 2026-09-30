@@ -3,6 +3,10 @@ package com.java.semantic.model.index;
 import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.model.repository.RepositoryRevision;
 import com.java.semantic.model.support.ModelValidation;
+import com.java.semantic.model.source.SourceSnapshotMembership;
+import com.java.semantic.model.source.ProjectGuideMembership;
+import com.java.semantic.model.source.SourceCoverage;
+import com.java.semantic.model.source.SourceStructure;
 
 import java.time.Instant;
 import java.util.List;
@@ -24,7 +28,11 @@ public record GenerationManifestDocument(
         Optional<String> validationResult,
         Optional<Instant> validatedAt,
         AnalysisFingerprint analysisFingerprint,
-        Optional<SemanticAnalysisEvidence> analysisEvidence) {
+        Optional<SemanticAnalysisEvidence> analysisEvidence,
+        Optional<SourceSnapshotMembership> sourceSnapshot,
+        Optional<ProjectGuideMembership> projectGuide,
+        Optional<SourceCoverage> coverage,
+        Optional<SourceStructure> structure) {
 
     public GenerationManifestDocument {
         repositoryId = Objects.requireNonNull(repositoryId, "repository id is required");
@@ -41,6 +49,10 @@ public record GenerationManifestDocument(
         validatedAt = Objects.requireNonNull(validatedAt, "validation time is required");
         analysisFingerprint = Objects.requireNonNull(analysisFingerprint, "analysis fingerprint is required");
         analysisEvidence = Objects.requireNonNull(analysisEvidence, "analysis evidence is required");
+        sourceSnapshot = Objects.requireNonNull(sourceSnapshot, "source snapshot is required");
+        projectGuide = Objects.requireNonNull(projectGuide, "project guide is required");
+        coverage = Objects.requireNonNull(coverage, "source coverage is required");
+        structure = Objects.requireNonNull(structure, "source structure is required");
         if (analysisEvidence.isPresent()) {
             ModelValidation.require(analysisFingerprint.digest().equals(analysisEvidence.orElseThrow().fingerprintDigest()),
                     "analysis evidence fingerprint must match analysis fingerprint");
@@ -53,6 +65,11 @@ public record GenerationManifestDocument(
         if (validated || writeState == GenerationWriteState.SEALED_VALID) {
             ModelValidation.require(analysisEvidence.isPresent(),
                     "validated generation requires semantic analysis evidence");
+            ModelValidation.require(sourceSnapshot.isPresent() && projectGuide.isPresent()
+                            && coverage.isPresent() && structure.isPresent(),
+                    "validated generation requires sealed source membership and objective coverage");
+            ModelValidation.require(sourceRevision.equals(sourceSnapshot.orElseThrow().revision()),
+                    "source snapshot revision must match semantic generation");
         }
     }
 }

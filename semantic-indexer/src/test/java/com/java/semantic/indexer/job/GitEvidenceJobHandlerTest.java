@@ -97,7 +97,7 @@ class GitEvidenceJobHandlerTest {
         verifyNoInteractions(git);
         verify(evidence, never()).beginCatalog(ArgumentMatchers.any(), ArgumentMatchers.any());
         verify(evidence, never()).publishComparison(ArgumentMatchers.any(), ArgumentMatchers.any(),
-                ArgumentMatchers.any(), ArgumentMatchers.any());
+                ArgumentMatchers.any(), ArgumentMatchers.any(), ArgumentMatchers.any(), ArgumentMatchers.any());
     }
 
     @Test
@@ -123,7 +123,7 @@ class GitEvidenceJobHandlerTest {
         verifyNoInteractions(git);
         verify(evidence, never()).beginCatalog(ArgumentMatchers.any(), ArgumentMatchers.any());
         verify(evidence, never()).publishComparison(ArgumentMatchers.any(), ArgumentMatchers.any(),
-                ArgumentMatchers.any(), ArgumentMatchers.any());
+                ArgumentMatchers.any(), ArgumentMatchers.any(), ArgumentMatchers.any(), ArgumentMatchers.any());
     }
 
     @Test
@@ -177,7 +177,7 @@ class GitEvidenceJobHandlerTest {
         verifyNoInteractions(git);
         verify(evidence, never()).beginCatalog(ArgumentMatchers.any(), ArgumentMatchers.any());
         verify(evidence, never()).publishComparison(ArgumentMatchers.any(), ArgumentMatchers.any(),
-                ArgumentMatchers.any(), ArgumentMatchers.any());
+                ArgumentMatchers.any(), ArgumentMatchers.any(), ArgumentMatchers.any(), ArgumentMatchers.any());
     }
 
 
@@ -203,7 +203,7 @@ class GitEvidenceJobHandlerTest {
         verify(evidence).fail(job);
         verifyNoInteractions(git);
         verify(evidence, never()).publishComparison(ArgumentMatchers.any(), ArgumentMatchers.any(),
-                ArgumentMatchers.any(), ArgumentMatchers.any());
+                ArgumentMatchers.any(), ArgumentMatchers.any(), ArgumentMatchers.any(), ArgumentMatchers.any());
     }
 
     @Test
@@ -261,7 +261,7 @@ class GitEvidenceJobHandlerTest {
         verify(evidence).fail(job);
         verifyNoInteractions(git);
         verify(evidence, never()).publishComparison(ArgumentMatchers.any(), ArgumentMatchers.any(),
-                ArgumentMatchers.any(), ArgumentMatchers.any());
+                ArgumentMatchers.any(), ArgumentMatchers.any(), ArgumentMatchers.any(), ArgumentMatchers.any());
     }
 
     private static IndexJob reviewJob(RepositoryId repositoryId) {

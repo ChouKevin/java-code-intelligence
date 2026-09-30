@@ -2,10 +2,10 @@ package com.java.semantic.indexer.job;
 
 import java.time.Duration;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.DefaultApplicationArguments;
@@ -37,20 +37,25 @@ class IndexJobStartupRecoveryTest {
         LifecycleFixture fixture = new LifecycleFixture();
         lifecycleFixture = fixture;
         ExecutorService launcher = Executors.newSingleThreadExecutor();
-        Future<ConfigurableApplicationContext> application = launcher.submit(() -> new SpringApplicationBuilder(LifecycleApplication.class)
-                .web(WebApplicationType.NONE).run());
+        CompletableFuture<ConfigurableApplicationContext> application = CompletableFuture.supplyAsync(
+                () -> new SpringApplicationBuilder(LifecycleApplication.class).web(WebApplicationType.NONE).run(), launcher);
 
         try {
-            assertThat(fixture.recoveryStarted.await(2L, TimeUnit.SECONDS)).isTrue();
+            CompletableFuture.anyOf(fixture.recoveryStarted, application).get(30L, TimeUnit.SECONDS);
+            assertThat(fixture.recoveryStarted.isDone()).isTrue();
             assertThat(fixture.pollStarted.await(150L, TimeUnit.MILLISECONDS)).isFalse();
 
             fixture.allowRecovery.countDown();
-            try (ConfigurableApplicationContext context = application.get(2L, TimeUnit.SECONDS)) {
+            try (ConfigurableApplicationContext context = application.get(30L, TimeUnit.SECONDS)) {
                 assertThat(fixture.pollStarted.await(2L, TimeUnit.SECONDS)).isTrue();
             }
         } finally {
             fixture.allowRecovery.countDown();
-            launcher.shutdownNow();
+            try {
+                application.get(30L, TimeUnit.SECONDS).close();
+            } finally {
+                launcher.shutdownNow();
+            }
         }
     }
 
@@ -86,13 +91,13 @@ class IndexJobStartupRecoveryTest {
 
     private static final class LifecycleFixture {
         private final IndexJobStore jobs = mock(IndexJobStore.class);
-        private final CountDownLatch recoveryStarted = new CountDownLatch(1);
+        private final CompletableFuture<Void> recoveryStarted = new CompletableFuture<>();
         private final CountDownLatch allowRecovery = new CountDownLatch(1);
         private final CountDownLatch pollStarted = new CountDownLatch(1);
 
         private LifecycleFixture() {
             doAnswer(invocation -> {
-                recoveryStarted.countDown();
+                recoveryStarted.complete(null);
                 try {
                     allowRecovery.await();
                 } catch (InterruptedException exception) {

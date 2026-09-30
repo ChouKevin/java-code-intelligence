@@ -1,6 +1,24 @@
 package com.java.semantic.indexer.job;
 
 import com.java.semantic.indexer.build.RepositoryBuildRunner;
+import com.java.semantic.indexer.build.FullIndexPlan;
+import com.java.semantic.indexer.build.FullIndexPlanner;
+import com.java.semantic.indexer.build.GenerationValidator;
+import com.java.semantic.indexer.build.SourceSnapshotPublication;
+import com.java.semantic.indexer.build.SourceIndexBatch;
+import com.java.semantic.indexer.build.SourceIndexBatchDocumentMapper;
+import com.java.semantic.indexer.build.SyntaxSymbolProjector;
+import com.java.semantic.indexer.build.SearchProjector;
+import com.java.semantic.indexer.store.GenerationWriteContext;
+import com.java.semantic.indexer.store.MongoGenerationWriter;
+import com.java.semantic.indexer.build.MongoIndexBatchWriter;
+import com.java.semantic.model.index.AnalysisInputs;
+import com.java.semantic.model.index.AnalysisFingerprint;
+import com.java.semantic.model.index.SemanticAnalysisEvidence;
+import com.java.semantic.model.index.IndexSchemaContract;
+import com.java.semantic.model.index.SymbolDocument;
+import com.java.semantic.syntax.adapter.jdt.JdtSyntaxExtractionService;
+import com.java.semantic.syntax.domain.RepositorySyntax;
 import com.java.semantic.indexer.repository.RepositoryRevisionResolver;
 import com.java.semantic.indexer.store.GitEvidencePublicationStore;
 import com.java.semantic.indexer.store.IndexSchemaBootstrap;
@@ -63,6 +81,10 @@ import static org.springframework.test.web.servlet.setup.MockMvcBuilders.standal
 /** A real JGit/Mongo slice of the normal dispatcher, reusable by later transport journeys. */
 @Tag("mongo-it")
 class DispatchedGitEvidenceIT {
+    private static final String SOURCE_ROOT = "src/main/java";
+    private static final String EVIDENCE_SOURCE = SOURCE_ROOT + "/Evidence.java";
+    private static final String ADDED_SOURCE = SOURCE_ROOT + "/Added.java";
+
     @TempDir
     Path temporaryDirectory;
 
@@ -117,8 +139,10 @@ class DispatchedGitEvidenceIT {
             assertThat(history.items().getFirst().parents()).containsExactly(first.value());
             assertThat(history.items().get(1).subject()).isEmpty();
 
-            RepositoryRevision added = commitAdditional(seed, seedPath, "add", "Added.java", "class Added { }");
+            RepositoryRevision added = commitAdditional(seed, seedPath, "add", ADDED_SOURCE, "class Added { }");
             push(seed, "main");
+            seedPreparedSource(template, jobs, seedPath, head, List.of(EVIDENCE_SOURCE));
+            seedPreparedSource(template, jobs, seedPath, added, List.of(ADDED_SOURCE, EVIDENCE_SOURCE));
             IndexJob addComparisonJob = requests.prepareGitComparison(RepositoryId.of("orders"), head.value(), added.value());
             dispatcher.dispatchOnce();
             IndexJob addComparisonComplete = jobs.find(addComparisonJob.id()).orElseThrow();
@@ -128,17 +152,18 @@ class DispatchedGitEvidenceIT {
             assertThat(additions.items()).extracting(SemanticQueryContract.GitChangeItem::kind).contains("ADD");
             String snapshotId = addComparisonComplete.gitEvidence().orElseThrow().currentSnapshotId().orElseThrow().value();
             SemanticQueryContract.GitFileCollection snapshotFiles = reader.listFiles(new SemanticQueryContract.GitFileListRequest("orders",
-                    snapshotId, added.value(), "", 0, 20));
-            assertThat(snapshotFiles.items()).extracting(SemanticQueryContract.GitFileItem::path).contains("Added.java", "Evidence.java");
+                    snapshotId, added.value(), SOURCE_ROOT, 0, 20));
+            assertThat(snapshotFiles.items()).extracting(SemanticQueryContract.GitFileItem::path).contains(ADDED_SOURCE, EVIDENCE_SOURCE);
             SemanticQueryContract.GitFileContent snapshotFile = reader.readFile(new SemanticQueryContract.GitFileReadRequest("orders", snapshotId,
-                    added.value(), "Added.java", Optional.empty(), 20, Optional.empty()));
+                    added.value(), ADDED_SOURCE, Optional.empty(), 20, Optional.empty()));
             assertThat(snapshotFile.content()).contains("class Added");
             SemanticQueryContract.GitTextSearchResult snapshotSearch = reader.searchText(new SemanticQueryContract.GitTextSearchRequest("orders", snapshotId,
                     added.value(), "class", Optional.empty(), Optional.empty(), 20));
-            assertThat(snapshotSearch.items()).extracting(SemanticQueryContract.GitTextMatch::path).contains("Added.java", "Evidence.java");
+            assertThat(snapshotSearch.items()).extracting(SemanticQueryContract.GitTextMatch::path).contains(ADDED_SOURCE, EVIDENCE_SOURCE);
 
-            RepositoryRevision deleted = deleteAdditional(seed, seedPath, "delete", "Added.java");
+            RepositoryRevision deleted = deleteAdditional(seed, seedPath, "delete", ADDED_SOURCE);
             push(seed, "main");
+            seedPreparedSource(template, jobs, seedPath, deleted, List.of(EVIDENCE_SOURCE));
             IndexJob deleteComparisonJob = requests.prepareGitComparison(RepositoryId.of("orders"), added.value(), deleted.value());
             dispatcher.dispatchOnce();
             String deleteComparisonId = jobs.find(deleteComparisonJob.id()).orElseThrow().gitEvidence().orElseThrow().evidenceId().orElseThrow().value();
@@ -148,6 +173,7 @@ class DispatchedGitEvidenceIT {
 
             RepositoryRevision modeAndContent = commitModeAndContent(seed, seedPath);
             push(seed, "main");
+            seedPreparedSource(template, jobs, seedPath, modeAndContent, List.of(EVIDENCE_SOURCE));
             IndexJob modeComparisonJob = requests.prepareGitComparison(RepositoryId.of("orders"), deleted.value(), modeAndContent.value());
             dispatcher.dispatchOnce();
             String modeComparisonId = jobs.find(modeComparisonJob.id()).orElseThrow().gitEvidence().orElseThrow().evidenceId().orElseThrow().value();
@@ -195,8 +221,70 @@ class DispatchedGitEvidenceIT {
         return standaloneSetup(new SemanticQueryController(facade)).setControllerAdvice(new QueryApiExceptionHandler()).build();
     }
 
+    private static void seedPreparedSource(MongoTemplate template, MongoIndexJobStore jobs, Path fixture,
+            RepositoryRevision revision, List<String> selectedPaths) throws Exception {
+        try (Git git = Git.open(fixture.toFile())) {
+            git.checkout().setName(revision.value()).call();
+        }
+        JdtLsTestProperties.prepareSafeCheckoutRoot(fixture);
+        RepositoryId repository = RepositoryId.of("orders");
+        FullIndexPlan plan = new FullIndexPlanner().plan(fixture, List.of(fixture.resolve(SOURCE_ROOT)));
+        assertThat(plan.sources()).extracting(FullIndexPlan.SourceInput::sourcePath)
+                .containsExactlyElementsOf(selectedPaths);
+        jobs.admit(repository, revision, false);
+        IndexJob job = jobs.startNextAccepted().orElseThrow();
+        IndexJobTarget target = job.target().orElseThrow();
+        GenerationWriteContext context = new GenerationWriteContext(repository, target.generationId(), job.id().value());
+        MongoGenerationWriter writer = new MongoGenerationWriter(template);
+        writer.insertManifest(context, new Document("repoId", repository.value())
+                .append("generationId", target.generationId().value()).append("sourceRevision", revision.value())
+                .append("ownerJobId", job.id().value()).append("writeState", "WRITING").append("writeEpoch", 0L)
+                .append("schemaVersion", IndexSchemaContract.SCHEMA_VERSION)
+                .append("projectionVersions", IndexSchemaContract.requiredProjectionVersions().entrySet().stream()
+                        .map(entry -> new Document("name", entry.getKey()).append("version", entry.getValue())).toList())
+                .append("identityDigest", "0".repeat(64)).append("outstandingBatches", List.of())
+                .append("acknowledgedBatches", List.of()).append("failedOrAmbiguousBatches", List.of()));
+        AnalysisInputs inputs = new AnalysisInputs(1, "e".repeat(64), "e".repeat(64), "e".repeat(64), "e".repeat(64),
+                List.of(new AnalysisInputs.Project(".", "e".repeat(64), Map.of(), List.of(),
+                        List.of(new AnalysisInputs.Root(SOURCE_ROOT, "MAIN", true, List.of())), List.of(), List.of())));
+        AnalysisFingerprint fingerprint = AnalysisFingerprint.from(inputs);
+        SemanticAnalysisEvidence evidence = new SemanticAnalysisEvidence(1, fingerprint.digest(), "SUCCESS",
+                List.of(new SemanticAnalysisEvidence.ProjectProof(".", true, List.of(SOURCE_ROOT))),
+                new SemanticAnalysisEvidence.ResolutionCoverage(0, 0, 0, 0, 0), List.of());
+        writer.recordAnalysis(context, fingerprint, evidence);
+        RepositorySyntax syntax = new JdtSyntaxExtractionService().extract(fixture);
+        MongoIndexBatchWriter batches = new MongoIndexBatchWriter(writer, context,
+                new SourceIndexBatchDocumentMapper(template.getConverter()));
+        for (FullIndexPlan.SourceInput source : plan.sources()) {
+            List<SymbolDocument> symbols = new SyntaxSymbolProjector().project(repository, revision, target.generationId(),
+                    syntax, source.sourcePath(), source.contentArtifact());
+            batches.write(new SourceIndexBatch(repository, target.generationId(), source.sourcePath(), 0,
+                    source.contentArtifact(), Optional.empty(), symbols, List.of(), List.of(),
+                    new SearchProjector().project(symbols, List.of(), List.of())));
+        }
+        RepositoryProperties properties = new RepositoryProperties();
+        SourceSnapshotPublication.PublishedSource source = new SourceSnapshotPublication(
+                new JGitRepositoryAdapter(properties, JdtLsTestProperties.linuxUid()),
+                new GitEvidencePublicationStore(template), properties.getGitEvidenceFileTextBytes())
+                .publish(job, fixture, revision, plan, Optional.empty());
+        MongoGenerationWriter.SourceOverview overview = writer.sourceOverview(context, source.policy().includedRoots(),
+                source.excludedOrUnsupported(), 0);
+        writer.recordSourceMembership(context, source.snapshot(), source.guide(), source.policy(),
+                overview.coverage(), overview.structure());
+        GenerationValidator validator = new GenerationValidator(template);
+        GenerationValidator.ValidationResult result = validator.validate(context, revision, revision, plan);
+        assertThat(result.valid()).as("prepared source validation: %s", result.issues()).isTrue();
+        validator.recordValid(context, result);
+        writer.seal(context, result.identityDigest().value());
+        assertThat(jobs.complete(job.id())).isTrue();
+        try (Git git = Git.open(fixture.toFile())) {
+            git.checkout().setName("main").call();
+        }
+    }
+
     private static RepositoryRevision commit(Git seed, Path seedPath, String subject, String source) throws Exception {
-        Files.writeString(seedPath.resolve("Evidence.java"), source);
+        Files.createDirectories(seedPath.resolve(SOURCE_ROOT));
+        Files.writeString(seedPath.resolve(EVIDENCE_SOURCE), source);
         seed.add().addFilepattern(".").call();
         return RepositoryRevision.ofSha(seed.commit().setMessage(subject).setAuthor("Test", "test@example.test")
                 .setCommitter("Test", "test@example.test").call().getId().name());
@@ -217,12 +305,12 @@ class DispatchedGitEvidenceIT {
     }
 
     private static RepositoryRevision commitModeAndContent(Git seed, Path seedPath) throws Exception {
-        Path evidence = seedPath.resolve("Evidence.java");
+        Path evidence = seedPath.resolve(EVIDENCE_SOURCE);
         Files.writeString(evidence, "class Evidence { int version; int modeChanged; }");
         Files.setPosixFilePermissions(evidence, Set.of(PosixFilePermission.OWNER_READ, PosixFilePermission.OWNER_WRITE,
                 PosixFilePermission.OWNER_EXECUTE, PosixFilePermission.GROUP_READ, PosixFilePermission.GROUP_EXECUTE,
                 PosixFilePermission.OTHERS_READ, PosixFilePermission.OTHERS_EXECUTE));
-        seed.add().addFilepattern("Evidence.java").call();
+        seed.add().addFilepattern(EVIDENCE_SOURCE).call();
         return RepositoryRevision.ofSha(seed.commit().setMessage("mode and content").setAuthor("Test", "test@example.test")
                 .setCommitter("Test", "test@example.test").call().getId().name());
     }

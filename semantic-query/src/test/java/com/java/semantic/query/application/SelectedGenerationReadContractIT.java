@@ -1,5 +1,6 @@
 package com.java.semantic.query.application;
 
+import com.java.semantic.model.source.SourceEvidenceDocumentCodec;
 import com.java.semantic.model.codefact.CodeFact;
 import com.java.semantic.model.codefact.CodeFactId;
 import com.java.semantic.model.codefact.CodeFactIdentity;
@@ -22,6 +23,13 @@ import com.java.semantic.model.index.SymbolDocument;
 import com.java.semantic.model.query.SelectedGeneration;
 import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.model.repository.RepositoryRevision;
+import com.java.semantic.model.git.GitSnapshotId;
+import com.java.semantic.model.source.ProjectGuideMembership;
+import com.java.semantic.model.source.ProjectGuideState;
+import com.java.semantic.model.source.SourceCoverage;
+import com.java.semantic.model.source.SourceEvidencePolicy;
+import com.java.semantic.model.source.SourceSnapshotMembership;
+import com.java.semantic.model.source.SourceStructure;
 import com.mongodb.client.MongoClients;
 import com.mongodb.client.model.ReplaceOptions;
 import org.bson.Document;
@@ -78,16 +86,67 @@ class SelectedGenerationReadContractIT extends PublishedMongoITSupport {
         }
     }
 
+    @Test
+    void current_selection_rejects_snapshot_rebinding_and_changed_sealed_source_identity() {
+        try (MongoDBContainer container = new MongoDBContainer(DockerImageName.parse("mongo:8.0.4"))) {
+            container.start();
+            MongoTemplate template = new MongoTemplate(MongoClients.create(container.getConnectionString()), "current_source_identity");
+            RepositoryId repositoryId = new RepositoryId("orders");
+            RepositoryRevision revision = new RepositoryRevision("1".repeat(40));
+            seedGeneration(template, repositoryId, revision, "g1", "2".repeat(64), "return \"A\";");
+            seedGeneration(template, repositoryId, revision, "g2", "4".repeat(64), "return \"B\";");
+            seedPointer(template, repositoryId, pointer(revision, "g1", "2".repeat(64)));
+            CurrentGenerationSelector selector = selector(template, policy());
+            String snapshotId = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa1";
+            Document original = template.getCollection("git_evidence_manifests").find(new Document("evidenceId", snapshotId)).first();
+            for (Document mutation : List.of(
+                    new Document("sourceGenerationId", "g2"),
+                    new Document("revision", "3".repeat(40)),
+                    new Document("policyFingerprint", "f".repeat(64)),
+                    new Document("contentDigest", "f".repeat(64)))) {
+                template.getCollection("git_evidence_manifests").updateOne(new Document("evidenceId", snapshotId),
+                        new Document("$set", mutation));
+                assertThrows(IndexContractMismatchException.class,
+                        () -> selector.select("orders", revision.value(), SelectedGenerationGuard.SOURCES));
+                template.getCollection("git_evidence_manifests").replaceOne(new Document("evidenceId", snapshotId), original);
+            }
+            template.getCollection("git_evidence_manifests").deleteOne(new Document("evidenceId", snapshotId));
+            assertThrows(IndexContractMismatchException.class,
+                    () -> selector.select("orders", revision.value(), SelectedGenerationGuard.SOURCES));
+        }
+    }
+
     private static void seedGeneration(MongoTemplate template, RepositoryId repositoryId, RepositoryRevision revision,
                                        String generationId, String digest, String body) {
+        String path = "src/main/java/example/orders/Order.java";
+        String snapshotId = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa" + generationId.substring(1);
+        SourceEvidencePolicy policy = new SourceEvidencePolicy(SourceEvidencePolicy.VERSION,
+                List.of("src/main/java"), Set.of(path), Optional.empty());
+        ProjectGuideMembership guide = ProjectGuideMembership.unavailable(ProjectGuideState.DISABLED);
+        String snapshotDigest = "a".repeat(64);
+        template.getCollection("git_evidence_manifests").insertOne(new Document("repoId", repositoryId.value())
+                .append("evidenceId", snapshotId).append("kind", "SNAPSHOT").append("state", "READY")
+                .append("gitEvidenceVersion", IndexSchemaContract.GIT_EVIDENCE_VERSION).append("scope", "STANDALONE")
+                .append("sourceGenerationId", generationId)
+                .append("revision", revision.value()).append("policyFingerprint", policy.fingerprint())
+                .append("contentDigest", snapshotDigest).append("projectGuide", new Document(SourceEvidenceDocumentCodec.encodeGuide(guide))));
         template.getCollection("generation_manifests").insertOne(new Document("repoId", repositoryId.value())
                 .append("sourceRevision", revision.value()).append("generationId", generationId).append("identityDigest", digest)
                 .append("writeState", "SEALED_VALID").append("schemaVersion", IndexSchemaContract.SCHEMA_VERSION)
+                .append("sourceSnapshot", template.getConverter().convertToMongoType(new SourceSnapshotMembership(
+                        new GitSnapshotId(snapshotId), revision, policy.fingerprint(), snapshotDigest)))
+                .append("sourcePolicy", new Document(SourceEvidenceDocumentCodec.encodePolicy(policy)))
+                .append("projectGuide", new Document(SourceEvidenceDocumentCodec.encodeGuide(guide)))
+                .append("coverage", template.getConverter().convertToMongoType(new SourceCoverage(1, 0, 0, 0)))
+                .append("structure", template.getConverter().convertToMongoType(new SourceStructure(policy.includedRoots(), Map.of(), Map.of())))
                 .append("projectionVersions", projectionVersions()));
-        String path = "src/main/java/example/orders/Order.java";
         String content = "package example.orders; class Order { String code() { " + body + " } }";
         SourceTypeIdentity type = new SourceTypeIdentity(new JavaTypeIdentity("example.orders", "Order"), path);
         SourceArtifactDocument artifact = SourceArtifactDocument.create(content);
+        template.getCollection("git_snapshot_files").insertOne(new Document("repoId", repositoryId.value())
+                .append("snapshotId", snapshotId).append("path", path).append("contentKind", "CODE")
+                .append("mode", "100644").append("contentStatus", "TEXT").append("policyFingerprint", policy.fingerprint())
+                .append("checksum", artifact.contentHash()));
         template.getCollection("source_artifacts").insertOne(new Document("sourceArtifactId", artifact.id().value())
                 .append("contentHash", artifact.contentHash()).append("utf8Content", content));
         GenerationFileDocument generationFile = new GenerationFileDocument(repositoryId, new GenerationId(generationId), path, artifact.id(),
@@ -125,6 +184,7 @@ class SelectedGenerationReadContractIT extends PublishedMongoITSupport {
         template.getCollection("search").insertOne(new Document("repoId", repositoryId.value()).append("generationId", generationId)
                 .append("factId", fact.id().value()).append("kind", CodeFactKind.TYPE.name()).append("tokens", List.of("order"))
                 .append("package", scope.packageName()).append("authority", "SYMBOLS").append("canonical", identity.canonicalForm())
+                .append("displayName", "Order").append("signature", "")
                 .append("scopePackage", scope.packageName()).append("scopeClass", scope.className()).append("scopeMethod", "")
                 .append("scopeParameters", List.of()).append("scopePath", scope.sourcePath().orElse("")));
     }

@@ -11,6 +11,7 @@ import com.java.semantic.indexer.build.RepositoryBuildScopeFactory;
 import com.java.semantic.indexer.repository.ExactRepositoryCheckout;
 import com.java.semantic.indexer.store.IndexSchemaBootstrap;
 import com.java.semantic.indexer.store.MongoPublicationWriter;
+import com.java.semantic.indexer.store.GitEvidencePublicationStore;
 import com.java.semantic.indexer.uat.NoOpPublicationGate;
 import com.java.semantic.model.index.IndexCollections;
 import com.java.semantic.model.repository.RepositoryId;
@@ -124,12 +125,13 @@ class DispatchedBuildIT {
         JdtLsProperties jdtLsProperties = jdtLsProperties(jdtLsHome);
         JGitRepositoryAdapter git = new JGitRepositoryAdapter(properties, jdtLsProperties);
         DefaultJdtWorkspaceManager workspaces = workspaceManager(jdtLsProperties);
-        ExactRepositoryCheckout checkout = new ExactRepositoryCheckout(new RepositoryRuntimeRegistry(properties), git, workspaces);
+        RepositoryRuntimeRegistry repositories = new RepositoryRuntimeRegistry(properties);
+        ExactRepositoryCheckout checkout = new ExactRepositoryCheckout(repositories, git, workspaces);
         DefaultRepositoryAnalysisPreparation preparation = new DefaultRepositoryAnalysisPreparation(workspaces,
                 new JdtLsEffectiveEnvironmentInspector(jdtLsProperties), new FullIndexPlanner());
         RepositoryBuildScopeFactory scopes = new RepositoryBuildScopeFactory(checkout, template, jobs,
                 new MongoPublicationWriter(template), new NoOpPublicationGate(), workspaces, preparation,
-                jdtLsProperties);
+                jdtLsProperties, git, new GitEvidencePublicationStore(template), properties, repositories);
         return new BuildHarness(new RepositoryBuildRunner(scopes), workspaces);
     }
 

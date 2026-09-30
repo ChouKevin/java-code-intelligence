@@ -18,6 +18,7 @@ import com.java.semantic.model.index.IndexSchemaContract;
 import com.java.semantic.model.index.SealedGeneration;
 import com.java.semantic.model.query.SelectedGeneration;
 import com.java.semantic.model.repository.RepositoryRevision;
+import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.repository.domain.RepositorySnapshot;
 import com.java.semantic.repository.domain.ManagedDisposableCheckout;
 import java.nio.file.Path;
@@ -38,34 +39,17 @@ public final class IndexBuildService {
     private final PublicationGate publicationGate;
     private final CheckoutResolver checkedOutRepository;
     private final IncrementalGenerationBuilder incrementalBuilder;
-    private final Optional<RepositoryAnalysisPreparation> analysisPreparation;
+    private final RepositoryAnalysisPreparation analysisPreparation;
+    private final SourceSnapshotPublication sourcePublication;
+    private final java.util.function.Function<RepositoryId, Optional<String>> guidePath;
 
-    /** Adds incremental assembly and a bounded publication boundary to the full-build path. */
     public IndexBuildService(FullIndexPlanner planner, RepositoryIndexExporter exporter,
                              MongoGenerationWriter generationWriter, SourceIndexBatchDocumentMapper documentMapper,
                              GenerationValidator validator, CheckoutResolver checkedOutRepository,
                              IncrementalGenerationBuilder incrementalBuilder, IndexJobStore jobs, PublicationPort publication,
-                             PublicationGate publicationGate) {
-        this(planner, exporter, generationWriter, documentMapper, validator, checkedOutRepository, incrementalBuilder,
-                jobs, publication, publicationGate, Optional.empty());
-    }
-
-    /** Prepared production builds use their lease-attested source plan rather than rediscovering inputs. */
-    public IndexBuildService(FullIndexPlanner planner, RepositoryIndexExporter exporter,
-                             MongoGenerationWriter generationWriter, SourceIndexBatchDocumentMapper documentMapper,
-                             GenerationValidator validator, CheckoutResolver checkedOutRepository,
-                             IncrementalGenerationBuilder incrementalBuilder, IndexJobStore jobs, PublicationPort publication,
-                             PublicationGate publicationGate, RepositoryAnalysisPreparation analysisPreparation) {
-        this(planner, exporter, generationWriter, documentMapper, validator, checkedOutRepository, incrementalBuilder,
-                jobs, publication, publicationGate, Optional.of(Objects.requireNonNull(analysisPreparation,
-                        "analysis preparation is required")));
-    }
-
-    private IndexBuildService(FullIndexPlanner planner, RepositoryIndexExporter exporter,
-                              MongoGenerationWriter generationWriter, SourceIndexBatchDocumentMapper documentMapper,
-                              GenerationValidator validator, CheckoutResolver checkedOutRepository,
-                              IncrementalGenerationBuilder incrementalBuilder, IndexJobStore jobs, PublicationPort publication,
-                              PublicationGate publicationGate, Optional<RepositoryAnalysisPreparation> analysisPreparation) {
+                             PublicationGate publicationGate, RepositoryAnalysisPreparation analysisPreparation,
+                             SourceSnapshotPublication sourcePublication,
+                             java.util.function.Function<RepositoryId, Optional<String>> guidePath) {
         this.planner = Objects.requireNonNull(planner, "planner is required");
         this.exporter = Objects.requireNonNull(exporter, "exporter is required");
         this.generationWriter = Objects.requireNonNull(generationWriter, "generation writer is required");
@@ -77,6 +61,8 @@ public final class IndexBuildService {
         this.publication = Objects.requireNonNull(publication, "publication is required");
         this.publicationGate = Objects.requireNonNull(publicationGate, "publication gate is required");
         this.analysisPreparation = Objects.requireNonNull(analysisPreparation, "analysis preparation is required");
+        this.sourcePublication = Objects.requireNonNull(sourcePublication, "source publication is required");
+        this.guidePath = Objects.requireNonNull(guidePath, "guide path lookup is required");
     }
 
     /** Seals a normal BUILD generation and only then publishes its current-pointer intent. */
@@ -113,8 +99,7 @@ public final class IndexBuildService {
         if (!target.revision().equals(checkout.revision())) {
             throw new GenerationValidationException("CHECKOUT_CHANGED");
         }
-        PreparedAnalysis preparedAnalysis = analysisPreparation.orElseThrow(
-                () -> new IllegalStateException("production index builds require prepared semantic analysis")).prepare(
+        PreparedAnalysis preparedAnalysis = analysisPreparation.prepare(
                 new AnalysisTarget(new RepositorySnapshot(requiredJob.repositoryId(), checkout.root(), target.revision()),
                         requiredJob.id().value(), "CODEBASE", checkout.managedCheckout()));
         try {
@@ -129,6 +114,13 @@ public final class IndexBuildService {
                 writer.write(batch);
             }
             preparedAnalysis.verifyUnchangedInputs();
+            SourceSnapshotPublication.PublishedSource source = sourcePublication
+                    .publish(requiredJob, checkout.root(), target.revision(), plan, guidePath.apply(requiredJob.repositoryId()));
+            MongoGenerationWriter.SourceOverview overview = generationWriter.sourceOverview(context,
+                    source.policy().includedRoots(), source.excludedOrUnsupported(),
+                    export.analysisEvidence().resolution().unresolved());
+            generationWriter.recordSourceMembership(context, source.snapshot(), source.guide(), source.policy(),
+                    overview.coverage(), overview.structure());
             GenerationValidator.ValidationResult result = validator.validate(context, target.revision(), checkout.revision(), plan);
             if (!result.valid()) {
                 throw new GenerationValidationException(result.issues().getFirst().code());

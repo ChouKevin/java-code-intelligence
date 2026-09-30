@@ -13,13 +13,23 @@ import com.java.semantic.model.codefact.RelationKind;
 import com.java.semantic.model.codefact.RelationTarget;
 import com.java.semantic.indexer.store.IndexSchemaBootstrap;
 import com.java.semantic.indexer.store.MongoGenerationWriter;
+import com.java.semantic.indexer.store.GitEvidencePublicationStore;
+import com.java.semantic.indexer.job.IndexJob;
+import com.java.semantic.indexer.job.IndexJobId;
+import com.java.semantic.indexer.job.IndexJobOperation;
+import com.java.semantic.indexer.job.IndexJobPhase;
+import com.java.semantic.indexer.job.IndexJobTarget;
 import com.java.semantic.indexer.store.GenerationWriteContext;
 import com.java.semantic.indexer.store.MongoPublicationWriter;
 import com.java.semantic.model.index.ManifestDigest;
 import com.java.semantic.model.index.PublishGenerationCommand;
 import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.model.repository.RepositoryRevision;
+import com.java.semantic.model.source.SourceStructure;
 import com.java.semantic.repository.domain.RepositorySnapshot;
+import com.java.semantic.repository.adapter.jgit.JGitRepositoryAdapter;
+import com.java.semantic.repository.config.RepositoryProperties;
+import com.java.semantic.support.JdtLsTestProperties;
 import com.java.semantic.semantic.adapter.jdtls.DefaultJdtWorkspaceManager;
 import com.java.semantic.semantic.adapter.jdtls.JdtLsHomeRequirement;
 import com.java.semantic.semantic.adapter.jdtls.JdtLsProcessFactory;
@@ -43,6 +53,8 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Stream;
+import java.util.Optional;
+import org.eclipse.jgit.api.Git;
 import org.bson.Document;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.utility.DockerImageName;
@@ -86,7 +98,7 @@ class FixtureFullIndexJdtLsIT {
 
     @Test
     void exports_framework_api_contract_stub_fixture_with_complete_isolated_generations_after_starting_a_real_jdt_language_server()
-            throws IOException {
+            throws Exception {
         Path jdtLsHome = JdtLsHomeRequirement.requireHome(System.getenv("JDTLS_HOME"));
         DefaultJdtWorkspaceManager manager = manager(jdtLsHome);
         try (GenericContainer<?> mongo = new GenericContainer<>(DockerImageName.parse("mongo:8.0.4"))) {
@@ -95,12 +107,27 @@ class FixtureFullIndexJdtLsIT {
             try (MongoClient client = MongoClients.create("mongodb://" + mongo.getHost() + ":" + mongo.getMappedPort(27017))) {
                 org.springframework.data.mongodb.core.MongoTemplate template = new org.springframework.data.mongodb.core.MongoTemplate(client, "fixture_index");
                 new IndexSchemaBootstrap(template).bootstrap();
-                List<SourceIndexBatch> payment = exportAndPersist(manager, template, PAYMENT_FIXTURE, "payment-service", "a".repeat(40), "payment-generation");
-                List<SourceIndexBatch> video = exportAndPersist(manager, template, VIDEO_FIXTURE, "video-service", "b".repeat(40), "video-generation");
-                List<SourceIndexBatch> order = exportAndPersist(manager, template, ORDER_FIXTURE, "order-service", "c".repeat(40), "order-generation");
-                publish(template, "payment-service", "a".repeat(40), "payment-generation", temporaryDirectory.resolve("payment-service"));
-                publish(template, "video-service", "b".repeat(40), "video-generation", temporaryDirectory.resolve("video-service"));
-                publish(template, "order-service", "c".repeat(40), "order-generation", temporaryDirectory.resolve("order-service"));
+                Path paymentRoot = copyFixture(PAYMENT_FIXTURE, temporaryDirectory.resolve("payment-service"));
+                Path videoRoot = copyFixture(VIDEO_FIXTURE, temporaryDirectory.resolve("video-service"));
+                Path orderRoot = copyFixture(ORDER_FIXTURE, temporaryDirectory.resolve("order-service"));
+                String paymentRevision = commitFixture(paymentRoot);
+                String videoRevision = commitFixture(videoRoot);
+                String orderRevision = commitFixture(orderRoot);
+                List<SourceIndexBatch> payment = exportAndPersist(manager, template, paymentRoot, "payment-service",
+                        paymentRevision, "payment-generation");
+                List<SourceIndexBatch> video = exportAndPersist(manager, template, videoRoot, "video-service",
+                        videoRevision, "video-generation");
+                List<SourceIndexBatch> order = exportAndPersist(manager, template, orderRoot, "order-service",
+                        orderRevision, "order-generation");
+                publish(template, "payment-service", paymentRevision, "payment-generation", paymentRoot);
+                publish(template, "video-service", videoRevision, "video-generation", videoRoot);
+                publish(template, "order-service", orderRevision, "order-generation", orderRoot);
+                Document paymentManifest = template.getCollection(IndexCollections.GENERATION_MANIFESTS)
+                        .find(new Document("repoId", "payment-service").append("generationId", "payment-generation")).first();
+                SourceStructure paymentStructure = template.getConverter().read(SourceStructure.class,
+                        paymentManifest.get("structure", Document.class));
+                // Eight Java files and one mapper XML share the package namespace.
+                assertThat(paymentStructure.packageCounts()).containsExactlyEntriesOf(Map.of("com.example.payment", 9L));
 
                 assertThat(video).flatMap(SourceIndexBatch::symbols).extracting(document -> document.name())
                         .contains("VideoFormat", "MP4", "WEBM", "MOV", "upload");
@@ -403,8 +430,22 @@ class FixtureFullIndexJdtLsIT {
         RepositoryId id = new RepositoryId(repositoryId);
         GenerationId generation = new GenerationId(generationId);
         GenerationWriteContext lease = new GenerationWriteContext(id, generation, generationId + "-job");
+        FullIndexPlan plan = new FullIndexPlanner().plan(repositoryRoot, List.of(repositoryRoot.resolve("src")));
+        IndexJob job = new IndexJob(new IndexJobId(generationId + "-job"), id,
+                Optional.of(new IndexJobTarget(new RepositoryRevision(revision), generation, 1L)),
+                IndexJobPhase.RUNNING, true, Optional.empty(), false, IndexJobOperation.BUILD);
+        SourceSnapshotPublication source = new SourceSnapshotPublication(
+                new JGitRepositoryAdapter(new RepositoryProperties(), JdtLsTestProperties.linuxUid()),
+                new GitEvidencePublicationStore(template), new RepositoryProperties().getGitEvidenceFileTextBytes());
+        SourceSnapshotPublication.PublishedSource published = source.publish(job, repositoryRoot,
+                new RepositoryRevision(revision), plan, Optional.empty());
+        MongoGenerationWriter generationWriter = new MongoGenerationWriter(template);
+        MongoGenerationWriter.SourceOverview overview = generationWriter.sourceOverview(lease,
+                published.policy().includedRoots(), published.excludedOrUnsupported(), 0);
+        generationWriter.recordSourceMembership(lease, published.snapshot(), published.guide(),
+                published.policy(), overview.coverage(), overview.structure());
         GenerationValidator.ValidationResult result = new GenerationValidator(template).validate(lease,
-                new RepositoryRevision(revision), new RepositoryRevision(revision), new FullIndexPlanner().plan(repositoryRoot));
+                new RepositoryRevision(revision), new RepositoryRevision(revision), plan);
 
         assertThat(result.valid()).as("validation issues: %s", result.issues()).isTrue();
         new GenerationValidator(template).recordValid(lease, result);
@@ -415,14 +456,13 @@ class FixtureFullIndexJdtLsIT {
     }
 
     private List<SourceIndexBatch> exportAndPersist(DefaultJdtWorkspaceManager manager,
-                                                     org.springframework.data.mongodb.core.MongoTemplate template, Path fixture,
+                                                     org.springframework.data.mongodb.core.MongoTemplate template, Path repositoryRoot,
                                                      String repositoryName, String revisionValue, String generationValue) throws IOException {
-        Path repositoryRoot = copyFixture(fixture, temporaryDirectory.resolve(repositoryName));
         RepositoryId repositoryId = new RepositoryId(repositoryName);
         RepositoryRevision revision = new RepositoryRevision(revisionValue);
         GenerationId generationId = new GenerationId(generationValue);
         RepositorySnapshot snapshot = new RepositorySnapshot(repositoryId, repositoryRoot, revision);
-        FullIndexPlan plan = new FullIndexPlanner().plan(repositoryRoot);
+        FullIndexPlan plan = new FullIndexPlanner().plan(repositoryRoot, List.of(repositoryRoot.resolve("src")));
         GenerationWriteContext lease = new GenerationWriteContext(repositoryId, generationId, generationValue + "-job");
         try (TestPreparedAnalysis preparedAnalysis = TestPreparedAnalysis.forSession(snapshot, plan,
                 new Lsp4jJavaSemanticService(snapshot, manager.getOrStart(snapshot)))) {
@@ -483,6 +523,16 @@ class FixtureFullIndexJdtLsIT {
         }
         return target;
     }
+    private static String commitFixture(Path root) throws Exception {
+        JdtLsTestProperties.prepareSafeCheckoutRoot(root);
+        try (Git git = Git.init().setDirectory(root.toFile()).call()) {
+            git.add().addFilepattern(".").call();
+            return git.commit().setMessage("fixture source")
+                    .setAuthor("Fixture", "fixture@example.test")
+                    .setCommitter("Fixture", "fixture@example.test").call().name();
+        }
+    }
+
 
     private static void applyPatch(Path fixtureRoot, Path patch) throws IOException, InterruptedException {
         Process process = new ProcessBuilder("git", "apply", "--check", patch.toString())

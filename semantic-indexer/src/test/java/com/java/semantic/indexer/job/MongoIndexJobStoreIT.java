@@ -1,6 +1,8 @@
 package com.java.semantic.indexer.job;
 
 import com.java.semantic.indexer.store.IndexSchemaBootstrap;
+import com.java.semantic.indexer.store.GitEvidencePublicationStore;
+import com.java.semantic.indexer.build.GenerationValidator;
 import com.java.semantic.indexer.store.MongoPublicationWriter;
 import com.java.semantic.indexer.store.PublicationConflictException;
 import com.java.semantic.model.index.IndexCollections;
@@ -8,6 +10,10 @@ import com.java.semantic.model.index.GenerationId;
 import com.java.semantic.model.index.IndexSchemaContract;
 import com.java.semantic.model.index.ManifestDigest;
 import com.java.semantic.model.index.PublishGenerationCommand;
+import com.java.semantic.model.index.AnalysisFingerprint;
+import com.java.semantic.model.index.AnalysisInputs;
+import com.java.semantic.model.index.SemanticAnalysisEvidence;
+import com.java.semantic.model.query.SelectedGeneration;
 import com.java.semantic.model.index.PublishedGenerationPointer;
 import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.model.repository.RepositoryRevision;
@@ -15,6 +21,13 @@ import com.java.semantic.model.review.ReviewSide;
 import com.java.semantic.model.review.ReviewSelection;
 import com.java.semantic.model.review.ResolvedReviewEndpoints;
 import com.java.semantic.model.review.ReviewBaselineRule;
+import com.java.semantic.model.source.ProjectGuideMembership;
+import com.java.semantic.model.source.SourceEvidenceDocumentCodec;
+import com.java.semantic.model.source.ProjectGuideState;
+import com.java.semantic.model.source.SourceCoverage;
+import com.java.semantic.model.source.SourceEvidencePolicy;
+import com.java.semantic.model.source.SourceSnapshotMembership;
+import com.java.semantic.model.source.SourceStructure;
 import org.bson.Document;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -25,6 +38,8 @@ import java.time.Instant;
 import java.util.Date;
 import java.util.List;
 import java.util.Optional;
+import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -251,11 +266,10 @@ class MongoIndexJobStoreIT {
         try (MongoDBContainer container = container()) {
             MongoTemplate template = template(container);
             MongoIndexJobStore store = store(template);
-            PublishedGenerationPointer previous = pointer("a", "g-previous", "job-previous");
+            PublishedGenerationPointer previous = seedValidGeneration(template, RepositoryId.of("orders"),
+                    revision("a"), new GenerationId("g-previous"), "job-previous");
             PublishedGenerationPointer current = pointer("b", "g-current", "job-current");
             seedRepositoryWithRollback(template, "orders", current, previous);
-            seedManifest(template, "orders", previous, true, IndexSchemaContract.SCHEMA_VERSION);
-
             assertThatThrownBy(() -> store.admitRollback(RepositoryId.of("orders"), previous, current))
                     .isInstanceOf(PublicationConflictException.class);
             IndexJob accepted = store.admitRollback(RepositoryId.of("orders"), current, previous);
@@ -281,8 +295,10 @@ class MongoIndexJobStoreIT {
             MongoIndexJobStore store = store(template);
             store.admit(RepositoryId.of("committed"), revision("c"), false);
             IndexJob committed = store.startNextAccepted().orElseThrow();
-            ManifestDigest digest = new ManifestDigest("c".repeat(64));
-            template.getCollection(IndexCollections.GENERATION_MANIFESTS).insertOne(sealedManifest(committed, digest));
+            PublishedGenerationPointer result = seedValidGeneration(template, committed.repositoryId(),
+                    committed.target().orElseThrow().revision(), committed.target().orElseThrow().generationId(),
+                    committed.id().value());
+            ManifestDigest digest = result.manifestDigest();
             IndexPublicationIntent intent = store.prepareBuildPublication(committed, digest).orElseThrow();
             new MongoPublicationWriter(template).publish(buildCommand(committed, intent));
             store.admit(RepositoryId.of("uncommitted"), revision("d"), false);
@@ -361,15 +377,18 @@ class MongoIndexJobStoreIT {
         try (MongoDBContainer container = container()) {
             MongoTemplate template = template(container);
             MongoIndexJobStore store = store(template);
-            PublishedGenerationPointer parent = pointer("a", "g-parent", "job-parent");
-            seedPublished(template, "orders", parent, true, IndexSchemaContract.SCHEMA_VERSION);
+            PublishedGenerationPointer parent = seedValidGeneration(template, RepositoryId.of("orders"),
+                    revision("a"), new GenerationId("g-parent"), "job-parent");
+            template.getCollection(IndexCollections.REPOSITORIES).insertOne(repositoryDocument("orders", parent));
             IndexJob accepted = store.admitRebuild(RepositoryId.of("orders"), revision("b"), parent);
             ManifestDigest digest = new ManifestDigest("b".repeat(64));
 
             assertThat(store.prepareBuildPublication(accepted, digest)).isEmpty();
             IndexJob running = store.startNextAccepted().orElseThrow();
-            template.getCollection(IndexCollections.GENERATION_MANIFESTS).insertOne(sealedManifest(running, digest));
-            IndexPublicationIntent intent = store.prepareBuildPublication(running, digest).orElseThrow();
+            PublishedGenerationPointer built = seedValidGeneration(template, running.repositoryId(),
+                    running.target().orElseThrow().revision(), running.target().orElseThrow().generationId(),
+                    running.id().value());
+            IndexPublicationIntent intent = store.prepareBuildPublication(running, built.manifestDigest()).orElseThrow();
             PublishedGenerationPointer winner = pointer("c", "g-winner", "job-winner");
             template.getCollection(IndexCollections.REPOSITORIES).updateOne(new Document("repoId", "orders"), new Document("$set",
                     new Document("currentPointer", pointerDocument(winner))));
@@ -426,13 +445,43 @@ class MongoIndexJobStoreIT {
         return new RepositoryRevision(character.repeat(40));
     }
 
-    private static Document sealedManifest(IndexJob job, ManifestDigest digest) {
-        IndexJobTarget target = job.target().orElseThrow();
-        return new Document("repoId", job.repositoryId().value()).append("sourceRevision", target.revision().value())
-                .append("generationId", target.generationId().value()).append("ownerJobId", job.id().value())
-                .append("writeState", "SEALED_VALID").append("writeEpoch", 1L).append("schemaVersion", IndexSchemaContract.SCHEMA_VERSION)
-                .append("projectionVersions", projectionVersions()).append("sealedCollectionCounts", new Document("symbols", 1L))
-                .append("identityDigest", digest.value()).append("validationResult", "VALID").append("validatedAt", new Date());
+    private static PublishedGenerationPointer seedValidGeneration(MongoTemplate template, RepositoryId repository,
+            RepositoryRevision revision, GenerationId generation, String owner) {
+        SourceEvidencePolicy policy = new SourceEvidencePolicy(1, List.of(), Set.of(), Optional.empty());
+        ProjectGuideMembership guide = ProjectGuideMembership.unavailable(ProjectGuideState.DISABLED);
+        IndexJob sourceJob = new IndexJob(IndexJobId.create(), repository,
+                Optional.of(new IndexJobTarget(revision, generation, 1L)), IndexJobPhase.RUNNING,
+                true, Optional.empty(), false, IndexJobOperation.BUILD);
+        SourceSnapshotMembership snapshot = new GitEvidencePublicationStore(template)
+                .publishSourceSnapshot(sourceJob, revision, List.of(), policy, guide, Instant.now());
+        AnalysisInputs inputs = new AnalysisInputs(IndexSchemaContract.ANALYSIS_EVIDENCE_VERSION,
+                "e".repeat(64), "e".repeat(64), "e".repeat(64), "e".repeat(64), List.of());
+        AnalysisFingerprint fingerprint = AnalysisFingerprint.from(inputs);
+        SemanticAnalysisEvidence evidence = new SemanticAnalysisEvidence(IndexSchemaContract.ANALYSIS_EVIDENCE_VERSION,
+                fingerprint.digest(), "SUCCESS", List.of(),
+                new SemanticAnalysisEvidence.ResolutionCoverage(0, 0, 0, 0, 0), List.of());
+        template.getCollection(IndexCollections.GENERATION_MANIFESTS).insertOne(new Document("repoId", repository.value())
+                .append("sourceRevision", revision.value()).append("generationId", generation.value()).append("ownerJobId", owner)
+                .append("writeState", "SEALED_VALID").append("writeEpoch", 0L)
+                .append("schemaVersion", IndexSchemaContract.SCHEMA_VERSION).append("projectionVersions", projectionVersions())
+                .append("sealedCollectionCounts", new Document()).append("identityDigest", "0".repeat(64))
+                .append("validationResult", "VALID").append("validatedAt", new Date())
+                .append("analysisFingerprint", fingerprint.digest())
+                .append("analysisInputs", template.getConverter().convertToMongoType(inputs))
+                .append("analysisEvidence", template.getConverter().convertToMongoType(evidence))
+                .append("sourceSnapshot", template.getConverter().convertToMongoType(snapshot))
+                .append("sourcePolicy", new Document(SourceEvidenceDocumentCodec.encodePolicy(policy)))
+                .append("projectGuide", new Document(SourceEvidenceDocumentCodec.encodeGuide(guide)))
+                .append("coverage", template.getConverter().convertToMongoType(new SourceCoverage(0, 0, 0, 0)))
+                .append("structure", template.getConverter().convertToMongoType(new SourceStructure(List.of(), Map.of(), Map.of()))));
+        SelectedGeneration provisional = new SelectedGeneration(repository, revision, generation, new ManifestDigest("0".repeat(64)));
+        GenerationValidator.ValidationResult computed = new GenerationValidator(template).validatePersistedSealed(provisional);
+        template.getCollection(IndexCollections.GENERATION_MANIFESTS).updateOne(new Document("generationId", generation.value()),
+                new Document("$set", new Document("identityDigest", computed.identityDigest().value())
+                        .append("sealedCollectionCounts", new Document(computed.collectionCounts()))));
+        assertThat(new GenerationValidator(template).validatePersistedSealed(
+                new SelectedGeneration(repository, revision, generation, computed.identityDigest())).valid()).isTrue();
+        return new PublishedGenerationPointer(revision, generation, computed.identityDigest(), owner, new Date().toInstant());
     }
 
     private static PublishedGenerationPointer pointer(String revisionCharacter, String generationId, String committedJobId) {
@@ -442,8 +491,14 @@ class MongoIndexJobStoreIT {
 
     private static void seedPublished(MongoTemplate template, String repositoryId, PublishedGenerationPointer pointer,
                                       boolean requiredProjections, int schemaVersion) {
-        template.getCollection(IndexCollections.REPOSITORIES).insertOne(repositoryDocument(repositoryId, pointer));
-        seedManifest(template, repositoryId, pointer, requiredProjections, schemaVersion);
+        if (requiredProjections && schemaVersion == IndexSchemaContract.SCHEMA_VERSION) {
+            PublishedGenerationPointer complete = seedValidGeneration(template, RepositoryId.of(repositoryId),
+                    pointer.revision(), pointer.generationId(), pointer.committedJobId());
+            template.getCollection(IndexCollections.REPOSITORIES).insertOne(repositoryDocument(repositoryId, complete));
+        } else {
+            template.getCollection(IndexCollections.REPOSITORIES).insertOne(repositoryDocument(repositoryId, pointer));
+            seedManifest(template, repositoryId, pointer, requiredProjections, schemaVersion);
+        }
     }
 
     private static void seedRepositoryWithRollback(MongoTemplate template, String repositoryId,

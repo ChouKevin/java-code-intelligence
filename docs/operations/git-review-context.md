@@ -47,11 +47,11 @@ only READY evidence, so an owned pending ID returns retryable
 READY manifests are retained manually until an operator performs data maintenance:
 there is no automatic TTL or garbage collection.
 
-The schema-3 release uses `gitEvidenceVersion: 2`. Apply the schema bootstrap
+The schema-4 release uses `gitEvidenceVersion: 3`. Apply the schema bootstrap
 before Indexer publication, then rebuild/reprepare evidence as required by
-[tool-data-evolution.md](tool-data-evolution.md). Version-2 data is not decoded
-as schema 3 and bootstrap is maintenance-only; runtime Indexer uses its writer
-role and Query uses a separate reader role.
+[tool-data-evolution.md](tool-data-evolution.md). Earlier schema/evidence versions
+are not decoded into this contract. Bootstrap is maintenance-only; runtime Indexer
+uses its writer role and Query uses a separate reader role.
 
 ## Review-owned comparison evidence
 
@@ -105,12 +105,21 @@ and exact SHA. The seven matching HTTP routes and MCP tools are:
 Continue whenever a response supplies `nextCursor`; a `search_text` result is
 complete only when `scanComplete` is true and it has no continuation. List and
 search pages default to 20 and allow at most 100 items; reads default to 200 and
-allow at most 500 lines. `coverage` reports inventory entries that cannot provide
-searchable text, including binary, unsupported encoding, oversized, symlink,
-submodule, LFS pointer, and unsupported path entries. The configurable preparation
-defaults are 2 MiB text per file and 256 MiB total text per snapshot. A file over
-its effective per-file limit is retained as `TOO_LARGE` coverage rather than
-readable text; a snapshot exceeding its effective total limit fails preparation and
+allow at most 500 lines. Source payloads are code-only: selected Java and mapper-root
+XML from the imported plan, plus at most one configured, admitted Markdown project
+guide. Configuration, unrelated text/XML, binary or oversized content, symlinks,
+submodules, LFS pointers and unsupported paths do not become readable file rows.
+Sealed generation coverage records excluded/unsupported counts, not their paths
+or bodies. Both rename endpoints must qualify before a patch is persisted.
+
+An AVAILABLE guide is readable source evidence but is excluded from code text
+search and semantic facts. Its author provenance does not prove freshness.
+Non-EMPTY_TREE snapshots bind an exact `sourceGenerationId`, revision, policy,
+digest and guide membership; equivalent same-SHA generations are not substitutes.
+Standalone comparisons require already sealed source membership for both revisions.
+
+The configurable preparation defaults are 2 MiB text per file and 256 MiB total
+text per snapshot. A snapshot exceeding its total limit fails preparation and
 never publishes READY. Each READY manifest records its effective limits and
 coverage, so later configuration changes do not reinterpret sealed evidence. Read
 and patch payloads are capped at 64 KiB; search scans at most 4 MiB per call and

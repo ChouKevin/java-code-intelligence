@@ -55,6 +55,14 @@ import com.java.semantic.model.review.ReviewEndpoint;
 import com.java.semantic.model.review.ReviewId;
 import com.java.semantic.model.review.ReviewManifestDocument;
 import com.java.semantic.model.review.ReviewState;
+import com.java.semantic.model.source.SourceSnapshotMembership;
+import com.java.semantic.model.source.SourceCoverage;
+import com.java.semantic.model.source.SourceStructure;
+import com.java.semantic.model.source.ProjectGuideMembership;
+import com.java.semantic.model.source.ProjectGuideProvenance;
+import com.java.semantic.model.source.ProjectGuideState;
+import com.java.semantic.model.source.SourceEvidencePolicy;
+import com.java.semantic.model.source.SourceEvidenceDocumentCodec;
 import java.time.Instant;
 import java.util.List;
 import java.util.LinkedHashMap;
@@ -102,6 +110,56 @@ class IndexDocumentContractTest {
                 Arguments.of("empty projection requirements", (Runnable) () -> new ProjectionRequirements(Set.of())),
                 Arguments.of("negative collection count", (Runnable) () -> manifest(Map.of("symbols", -1L))));
     }
+    @Test
+    void source_policy_fingerprint_distinguishes_newline_path_from_two_distinct_paths() {
+        SourceEvidencePolicy separate = new SourceEvidencePolicy(1, List.of("src"),
+                Set.of("src/A.java", "src/B.java"), Optional.empty());
+        SourceEvidencePolicy embedded = new SourceEvidencePolicy(1, List.of("src"),
+                Set.of("src/A.java\ncode:src/B.java"), Optional.empty());
+        assertNotEquals(separate.fingerprint(), embedded.fingerprint());
+        assertNotEquals(separate.fingerprint(), new SourceEvidencePolicy(1, List.of("src"),
+                separate.selectedCodePaths(), Optional.of("docs/codebase/overview.md")).fingerprint());
+    }
+
+    @Test
+    void unavailable_guide_rejects_partial_readable_membership() {
+        ProjectGuideProvenance provenance = new ProjectGuideProvenance(1, 1, new RepositoryId("orders"),
+                new RepositoryRevision("a".repeat(40)), Instant.parse("2026-09-28T12:30:00Z"),
+                new ProjectGuideProvenance.SourceScope(List.of("src"), List.of(), List.of()));
+        for (ProjectGuideState state : List.of(ProjectGuideState.DISABLED, ProjectGuideState.ABSENT,
+                ProjectGuideState.INVALID)) {
+            assertThrows(IllegalArgumentException.class, () -> new ProjectGuideMembership(state,
+                    Optional.of("docs/codebase/overview.md"), Optional.empty(), Optional.empty(),
+                    Optional.empty(), "NOT_VERIFIED"));
+            assertThrows(IllegalArgumentException.class, () -> new ProjectGuideMembership(state,
+                    Optional.empty(), Optional.of("b".repeat(64)), Optional.empty(), Optional.empty(), "NOT_VERIFIED"));
+            assertThrows(IllegalArgumentException.class, () -> new ProjectGuideMembership(state,
+                    Optional.empty(), Optional.empty(), Optional.of(new RepositoryRevision("a".repeat(40))),
+                    Optional.empty(), "NOT_VERIFIED"));
+            assertThrows(IllegalArgumentException.class, () -> new ProjectGuideMembership(state,
+                    Optional.empty(), Optional.empty(), Optional.empty(), Optional.of(provenance), "NOT_VERIFIED"));
+        }
+    }
+
+    @Test
+    void persisted_source_metadata_rejects_null_membership_and_wrong_scalar_or_list_types() {
+        Map<String, Object> unavailable = new LinkedHashMap<>(Map.of("state", "INVALID", "freshness", "NOT_VERIFIED"));
+        unavailable.put("provenance", null);
+        assertThrows(IllegalArgumentException.class, () -> SourceEvidenceDocumentCodec.decodeGuide(unavailable));
+        assertThrows(IllegalArgumentException.class, () -> SourceEvidenceDocumentCodec.decodeGuide(
+                Map.of("state", "AVAILABLE", "freshness", "NOT_VERIFIED", "path", "docs/overview.md")));
+        Map<String, Object> policy = new LinkedHashMap<>(Map.of("version", 1, "includedRoots", List.of("src"),
+                "selectedCodePaths", List.of("src/Order.java")));
+        policy.put("projectGuidePath", null);
+        assertThrows(IllegalArgumentException.class, () -> SourceEvidenceDocumentCodec.decodePolicy(policy));
+        policy.remove("projectGuidePath");
+        policy.put("version", 1L);
+        assertThrows(IllegalArgumentException.class, () -> SourceEvidenceDocumentCodec.decodePolicy(policy));
+        policy.put("version", 1);
+        policy.put("selectedCodePaths", List.of(17));
+        assertThrows(IllegalArgumentException.class, () -> SourceEvidenceDocumentCodec.decodePolicy(policy));
+    }
+
 
     @Test
     void source_artifact_hash_and_offsets_are_content_derived_and_utf16_preserving() {
@@ -491,7 +549,12 @@ class IndexDocumentContractTest {
                 validationResult,
                 Optional.of(Instant.parse("2026-08-23T00:00:00Z")),
                 fingerprint,
-                evidence);
+                evidence,
+                Optional.of(new SourceSnapshotMembership(new GitSnapshotId("snapshot-1"),
+                        new RepositoryRevision("a".repeat(40)), "b".repeat(64), "c".repeat(64))),
+                Optional.of(ProjectGuideMembership.unavailable(ProjectGuideState.DISABLED)),
+                Optional.of(new SourceCoverage(0, 0, 0, 0)),
+                Optional.of(new SourceStructure(List.of(), Map.of(), Map.of())));
     }
 
     private static GenerationManifestDocument manifest(Map<String, Long> counts) {
@@ -517,6 +580,11 @@ class IndexDocumentContractTest {
                 Optional.of("valid"),
                 Optional.of(Instant.parse("2026-08-23T00:00:00Z")),
                 fingerprint,
-                Optional.of(evidence));
+                Optional.of(evidence),
+                Optional.of(new SourceSnapshotMembership(new GitSnapshotId("snapshot-1"),
+                        new RepositoryRevision("a".repeat(40)), "b".repeat(64), "c".repeat(64))),
+                Optional.of(ProjectGuideMembership.unavailable(ProjectGuideState.DISABLED)),
+                Optional.of(new SourceCoverage(0, 0, 0, 0)),
+                Optional.of(new SourceStructure(List.of(), Map.of(), Map.of())));
     }
 }

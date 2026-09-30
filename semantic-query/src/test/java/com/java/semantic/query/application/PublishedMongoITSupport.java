@@ -1,5 +1,6 @@
 package com.java.semantic.query.application;
 
+import com.java.semantic.model.source.SourceEvidenceDocumentCodec;
 import com.java.semantic.model.codefact.CodeFact;
 import com.java.semantic.model.codefact.CodeFactId;
 import com.java.semantic.model.codefact.CodeFactIdentity;
@@ -20,6 +21,15 @@ import com.java.semantic.model.index.SourceIndexScope;
 import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.model.index.ProjectionRequirements;
 import com.java.semantic.model.query.SelectedGeneration;
+import com.java.semantic.model.source.ProjectGuideMembership;
+import com.java.semantic.model.source.ProjectGuideState;
+import com.java.semantic.model.source.SourceEvidencePolicy;
+import com.java.semantic.model.source.SourceSnapshotMembership;
+import com.java.semantic.model.source.SourceCoverage;
+import com.java.semantic.model.source.SourceStructure;
+import com.java.semantic.model.git.GitSnapshotId;
+import java.util.Optional;
+import java.util.Set;
 import com.java.semantic.model.repository.RepositoryRevision;
 import com.java.semantic.query.config.ConfiguredReadPolicy;
 import com.java.semantic.query.config.ReadPolicyProperties;
@@ -34,6 +44,8 @@ import java.util.Map;
 abstract class PublishedMongoITSupport {
     static final String REVISION = "1".repeat(40);
     static final String DIGEST = "2".repeat(64);
+    static final String SOURCE_SNAPSHOT = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
+    static final String SOURCE_DIGEST = "a".repeat(64);
 
     static ConfiguredReadPolicy policy() {
         return new ConfiguredReadPolicy(new ReadPolicyProperties(List.of(), List.of(), List.of(), List.of()));
@@ -62,13 +74,31 @@ abstract class PublishedMongoITSupport {
         template.getCollection("repositories").replaceOne(new Document("repoId", repositoryId),
                 new Document("repoId", repositoryId).append("currentPointer", currentPointer),
                 new ReplaceOptions().upsert(true));
+        SourceEvidencePolicy sourcePolicy = new SourceEvidencePolicy(SourceEvidencePolicy.VERSION,
+                List.of("src/main/java", "src/main/resources"), Set.of(), Optional.empty());
+        ProjectGuideMembership guide = ProjectGuideMembership.unavailable(ProjectGuideState.DISABLED);
+        template.getCollection("git_evidence_manifests").insertOne(new Document("repoId", repositoryId)
+                .append("evidenceId", SOURCE_SNAPSHOT).append("kind", "SNAPSHOT").append("state", "READY")
+                .append("gitEvidenceVersion", IndexSchemaContract.GIT_EVIDENCE_VERSION).append("scope", "STANDALONE")
+                .append("sourceGenerationId", "g1")
+                .append("revision", REVISION).append("policyFingerprint", sourcePolicy.fingerprint())
+                .append("contentDigest", SOURCE_DIGEST).append("projectGuide", new Document(SourceEvidenceDocumentCodec.encodeGuide(guide))));
         template.getCollection("generation_manifests").insertOne(new Document("repoId", repositoryId).append("sourceRevision", REVISION)
                 .append("generationId", "g1").append("identityDigest", DIGEST).append("writeState", "SEALED_VALID")
                 .append("schemaVersion", IndexSchemaContract.SCHEMA_VERSION)
+                .append("sourceSnapshot", bson(template, new SourceSnapshotMembership(
+                        new GitSnapshotId(SOURCE_SNAPSHOT), new RepositoryRevision(REVISION), sourcePolicy.fingerprint(), SOURCE_DIGEST)))
+                .append("sourcePolicy", new Document(SourceEvidenceDocumentCodec.encodePolicy(sourcePolicy))).append("projectGuide", new Document(SourceEvidenceDocumentCodec.encodeGuide(guide)))
+                .append("coverage", bson(template, new SourceCoverage(0, 0, 0, 0)))
+                .append("structure", bson(template, new SourceStructure(sourcePolicy.includedRoots(), Map.of(), Map.of())))
                 .append("projectionVersions", IndexSchemaContract.requiredProjectionVersions().entrySet().stream()
                         .sorted(Map.Entry.comparingByKey())
                         .map(entry -> new Document("name", entry.getKey()).append("version", entry.getValue()))
                         .toList()));
+    }
+
+    private static Document bson(MongoTemplate template, Object value) {
+        return (Document) template.getConverter().convertToMongoType(value);
     }
 
     static CodeFactIdentity methodIdentity(String packageName, String className, String methodName, String sourcePath) {
@@ -130,7 +160,31 @@ abstract class PublishedMongoITSupport {
         stored.put("sourcePath", sourcePath); stored.put("extractionIssueCode", ""); stored.put("scopeUsable", false);
         stored.put("scopePackages", List.of()); stored.put("scopeClassKeys", List.of()); stored.put("scopeMethodKeys", List.of());
         template.getCollection("generation_files").insertOne(stored);
+        seedCodeMembership(template, sourcePath, artifact.contentHash());
         return artifact;
+    }
+
+    private static void seedCodeMembership(MongoTemplate template, String path, String checksum) {
+        Document manifest = template.getCollection("generation_manifests").find(new Document("repoId", "orders")
+                .append("generationId", "g1")).first();
+        SourceEvidencePolicy existing = SourceEvidenceDocumentCodec.decodePolicy(
+                manifest.get("sourcePolicy", Document.class));
+        Set<String> selected = new java.util.HashSet<>(existing.selectedCodePaths());
+        selected.add(path);
+        SourceEvidencePolicy policy = new SourceEvidencePolicy(SourceEvidencePolicy.VERSION,
+                existing.includedRoots(), selected, existing.projectGuidePath());
+        template.getCollection("generation_manifests").updateOne(new Document("repoId", "orders").append("generationId", "g1"),
+                new Document("$set", new Document("sourcePolicy", new Document(SourceEvidenceDocumentCodec.encodePolicy(policy)))
+                        .append("sourceSnapshot", bson(template, new SourceSnapshotMembership(
+                                new GitSnapshotId(SOURCE_SNAPSHOT), new RepositoryRevision(REVISION), policy.fingerprint(), SOURCE_DIGEST)))
+                        .append("coverage", bson(template, new SourceCoverage(selected.size(), 0, 0, 0)))));
+        template.getCollection("git_evidence_manifests").updateOne(new Document("repoId", "orders").append("evidenceId", SOURCE_SNAPSHOT),
+                new Document("$set", new Document("policyFingerprint", policy.fingerprint())));
+        template.getCollection("git_snapshot_files").updateMany(new Document("repoId", "orders").append("snapshotId", SOURCE_SNAPSHOT),
+                new Document("$set", new Document("policyFingerprint", policy.fingerprint())));
+        template.getCollection("git_snapshot_files").insertOne(new Document("repoId", "orders")
+                .append("snapshotId", SOURCE_SNAPSHOT).append("path", path).append("contentKind", "CODE")
+                .append("mode", "100644").append("contentStatus", "TEXT").append("policyFingerprint", policy.fingerprint()).append("checksum", checksum));
     }
 
     static void seedCoverageSource(MongoTemplate template, String sourcePath, String issueCode, SourceIndexScope scope) {

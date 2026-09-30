@@ -8,6 +8,7 @@ import com.java.semantic.indexer.job.MongoIndexJobStore;
 import com.java.semantic.indexer.job.ReviewPreparationStage;
 import com.java.semantic.indexer.store.GenerationWriteContext;
 import com.java.semantic.indexer.store.IndexSchemaBootstrap;
+import com.java.semantic.indexer.store.GitEvidencePublicationStore;
 import com.java.semantic.indexer.store.MongoGenerationWriter;
 import com.java.semantic.model.index.GenerationId;
 import com.java.semantic.model.index.GenerationWriteState;
@@ -20,12 +21,23 @@ import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.model.repository.RepositoryRevision;
 import com.java.semantic.model.review.ReviewSide;
 import com.java.semantic.repository.domain.RepositorySnapshot;
+import com.java.semantic.model.git.GitFileContentStatus;
+import com.java.semantic.model.git.GitSnapshotEntry;
+import com.java.semantic.model.source.ProjectGuideMembership;
+import com.java.semantic.model.source.ProjectGuideState;
+import com.java.semantic.model.source.SourceCoverage;
+import com.java.semantic.model.source.SourceEvidencePolicy;
+import com.java.semantic.model.source.SourceSnapshotMembership;
+import com.java.semantic.model.source.SourceStructure;
 import com.mongodb.client.MongoClients;
 import java.nio.file.Path;
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.Date;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
 import org.bson.Document;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -78,6 +90,15 @@ class ReviewGenerationOwnershipIT {
                 job.target().orElseThrow().generationId());
         FullIndexPlan plan = new FullIndexPlan(Path.of("."), List.of(new FullIndexPlan.SourceInput(batch.sourcePath(),
                 Path.of(batch.sourcePath()), batch.sourceArtifact())));
+        SourceEvidencePolicy policy = new SourceEvidencePolicy(1, List.of("src"),
+                Set.of(batch.sourcePath()), Optional.empty());
+        ProjectGuideMembership guide = ProjectGuideMembership.unavailable(ProjectGuideState.DISABLED);
+        SourceSnapshotMembership snapshot = new GitEvidencePublicationStore(template).publishSourceSnapshot(job,
+                job.target().orElseThrow().revision(), List.of(new GitSnapshotEntry(batch.sourcePath(), "100644",
+                        "1".repeat(40), GitFileContentStatus.TEXT,
+                        batch.sourceArtifact().utf8Content().getBytes(StandardCharsets.UTF_8))), policy, guide, Instant.now());
+        writer.recordSourceMembership(context, snapshot, guide, policy, new SourceCoverage(1, 0, 0, 0),
+                new SourceStructure(List.of("src"), Map.of(), Map.of()));
         GenerationValidator.ValidationResult result = validator.validate(context, job.target().orElseThrow().revision(),
                 job.target().orElseThrow().revision(), plan);
         assertThat(result.valid()).isTrue();

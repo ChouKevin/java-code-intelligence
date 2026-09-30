@@ -10,6 +10,7 @@ import com.java.semantic.indexer.incremental.IncrementalIndexPlanner;
 import com.java.semantic.indexer.incremental.ModuleLocator;
 import com.java.semantic.indexer.incremental.SourceContractChangeDetector;
 import com.java.semantic.indexer.store.IndexSchemaBootstrap;
+import com.java.semantic.indexer.store.GitEvidencePublicationStore;
 import com.java.semantic.indexer.store.MongoGenerationWriter;
 import com.java.semantic.indexer.store.MongoPublicationWriter;
 import com.java.semantic.indexer.uat.PublicationGate;
@@ -42,6 +43,9 @@ import com.java.semantic.model.index.SourceArtifactId;
 import com.java.semantic.model.index.SymbolDocument;
 import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.model.repository.RepositoryRevision;
+import com.java.semantic.repository.adapter.jgit.JGitRepositoryAdapter;
+import com.java.semantic.repository.config.RepositoryProperties;
+import com.java.semantic.support.JdtLsTestProperties;
 import com.mongodb.client.MongoClients;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -58,6 +62,7 @@ import java.util.function.Consumer;
 import java.util.function.UnaryOperator;
 import java.util.stream.Stream;
 import org.bson.Document;
+import org.eclipse.jgit.api.Git;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -86,8 +91,9 @@ class FullIndexPublicationIT {
             MongoTemplate template = template(container);
             seedPreviousPointer(template);
             MongoIndexJobStore store = new MongoIndexJobStore(template);
-            IndexJob job = claimedJob(store);
-            IndexBuildService service = service(template, store, exporter(template, mutation), checkout(scenario, revision()));
+            IndexBuildService.CheckedOutRepository selected = checkout(scenario);
+            IndexJob job = claimedJob(store, selected.revision());
+            IndexBuildService service = service(template, store, exporter(template, mutation), selected);
 
             assertThatThrownBy(() -> service.build(job)).isInstanceOf(RuntimeException.class)
                     .satisfies(FullIndexPublicationIT::assertSafeMessage);
@@ -108,11 +114,12 @@ class FullIndexPublicationIT {
             MongoTemplate template = template(container);
             seedPreviousPointer(template);
             MongoIndexJobStore store = new MongoIndexJobStore(template);
-            IndexJob job = claimedJob(store);
+            IndexBuildService.CheckedOutRepository selected = checkout(scenario);
+            IndexJob job = claimedJob(store, selected.revision());
             RepositoryIndexExporter exporter = (context, analysis) ->
                     new RepositoryIndexExport(List.of(mutation.apply(validBatch(context.repositoryId(), analysis.snapshot().revision(),
                             context.generationId()))), analysis.readinessEvidence());
-            IndexBuildService service = service(template, store, exporter, checkout(scenario, revision()));
+            IndexBuildService service = service(template, store, exporter, selected);
 
             assertThatThrownBy(() -> service.build(job)).isInstanceOf(RuntimeException.class)
                     .satisfies(FullIndexPublicationIT::assertSafeMessage);
@@ -131,12 +138,13 @@ class FullIndexPublicationIT {
             MongoTemplate template = template(container);
             seedPreviousPointer(template);
             MongoIndexJobStore store = new MongoIndexJobStore(template);
-            IndexJob job = claimedJob(store);
-            Path root = checkout("fixed-checkout", revision()).root();
+            IndexBuildService.CheckedOutRepository selected = checkout("fixed-checkout");
+            IndexJob job = claimedJob(store, selected.revision());
+            Path root = selected.root();
             java.util.concurrent.atomic.AtomicInteger calls = new java.util.concurrent.atomic.AtomicInteger();
             IndexBuildService service = service(template, store, exporter(template, ignored -> { }), ignored -> {
                 calls.incrementAndGet();
-                return new IndexBuildService.CheckedOutRepository(root, revision());
+                return new IndexBuildService.CheckedOutRepository(root, selected.revision());
             });
 
             service.build(job);
@@ -154,11 +162,11 @@ class FullIndexPublicationIT {
             MongoTemplate template = template(container);
             seedPreviousPointer(template);
             MongoIndexJobStore store = new MongoIndexJobStore(template);
-            IndexJob job = claimedJob(store);
+            IndexBuildService.CheckedOutRepository checkout = checkout("success");
+            IndexJob job = claimedJob(store, checkout.revision());
             RepositoryIndexExporter exporter = (context, analysis) ->
                     new RepositoryIndexExport(List.of(validBatch(context.repositoryId(), analysis.snapshot().revision(),
                             context.generationId())), analysis.readinessEvidence());
-            IndexBuildService.CheckedOutRepository checkout = checkout("success", revision());
             IndexBuildService service = service(template, store, exporter, ignored -> checkout);
             service.build(job);
 
@@ -172,6 +180,8 @@ class FullIndexPublicationIT {
             assertThat(counts).containsEntry(IndexCollections.SOURCE_ARTIFACTS, 1L).containsEntry(IndexCollections.GENERATION_FILES, 1L)
                     .containsEntry(IndexCollections.SYMBOLS, 1L).containsEntry(IndexCollections.RELATIONS, 1L)
                     .containsEntry(IndexCollections.ENTRY_POINTS, 1L).containsEntry(IndexCollections.SEARCH, 3L);
+            assertThat(manifest.get("structure", Document.class).get("entryPointKindCounts", Document.class))
+                    .containsOnlyKeys("HTTP").containsEntry("HTTP", 1L);
             assertThat(manifest.getString("validationResult")).isEqualTo("VALID");
             assertThat(manifest.getString("identityDigest")).isEqualTo(repository.get("currentPointer", Document.class).getString("manifestDigest"))
                     .isNotEqualTo("0".repeat(64));
@@ -190,21 +200,25 @@ class FullIndexPublicationIT {
             MongoTemplate template = template(container);
             seedPreviousPointer(template);
             MongoIndexJobStore store = new MongoIndexJobStore(template);
-            IndexJob job = claimedJob(store);
-            IndexBuildService.CheckedOutRepository checkout = checkout("publication-gate", revision());
-            CountDownLatch reached = new CountDownLatch(1);
+            IndexBuildService.CheckedOutRepository checkout = checkout("publication-gate");
+            IndexJob job = claimedJob(store, checkout.revision());
+            CompletableFuture<Void> reached = new CompletableFuture<>();
             CountDownLatch released = new CountDownLatch(1);
             PublicationGate gate = blockingGate(reached, released);
             IndexBuildService service = service(template, store, exporter(template, ignored -> { }), ignored -> checkout, gate);
 
             CompletableFuture<Void> build = CompletableFuture.runAsync(() -> service.build(job));
 
-            assertThat(reached.await(10L, TimeUnit.SECONDS)).isTrue();
-            assertPreviousPointer(template);
-            assertThat(manifest(template, target(job)).getString("writeState"))
-                    .isEqualTo(GenerationWriteState.SEALED_VALID.name());
-            released.countDown();
-            build.get(10L, TimeUnit.SECONDS);
+            try {
+                CompletableFuture.anyOf(reached, build).get(10L, TimeUnit.SECONDS);
+                assertThat(reached.isDone()).isTrue();
+                assertPreviousPointer(template);
+                assertThat(manifest(template, target(job)).getString("writeState"))
+                        .isEqualTo(GenerationWriteState.SEALED_VALID.name());
+            } finally {
+                released.countDown();
+                build.get(10L, TimeUnit.SECONDS);
+            }
             Document current = template.getCollection(IndexCollections.REPOSITORIES)
                     .find(new Document("repoId", "orders")).first();
             assertThat(current.get("currentPointer", Document.class).getString("generationId"))
@@ -212,11 +226,11 @@ class FullIndexPublicationIT {
         }
     }
 
-    private static PublicationGate blockingGate(CountDownLatch reached, CountDownLatch released) {
+    private static PublicationGate blockingGate(CompletableFuture<Void> reached, CountDownLatch released) {
         return new PublicationGate() {
             @Override
             public void awaitPublication() {
-                reached.countDown();
+                reached.complete(null);
                 try {
                     if (!released.await(10L, TimeUnit.SECONDS)) {
                         throw new IllegalStateException("test publication gate timed out");
@@ -294,10 +308,17 @@ class FullIndexPublicationIT {
         return template;
     }
 
-    private IndexBuildService.CheckedOutRepository checkout(String name, RepositoryRevision checkoutRevision) throws IOException {
+    private IndexBuildService.CheckedOutRepository checkout(String name) throws Exception {
         Path root = Files.createDirectories(temporaryDirectory.resolve(name));
         writeCheckoutSource(root);
-        return new IndexBuildService.CheckedOutRepository(root, checkoutRevision);
+        JdtLsTestProperties.prepareSafeCheckoutRoot(root);
+        try (Git git = Git.init().setDirectory(root.toFile()).call()) {
+            git.add().addFilepattern(".").call();
+            RepositoryRevision revision = RepositoryRevision.ofSha(git.commit().setMessage("source")
+                    .setAuthor("Fixture", "fixture@example.test")
+                    .setCommitter("Fixture", "fixture@example.test").call().name());
+            return new IndexBuildService.CheckedOutRepository(root, revision);
+        }
     }
 
     static void writeCheckoutSource(Path root) throws IOException {
@@ -317,10 +338,16 @@ class FullIndexPublicationIT {
 
     private static IndexBuildService service(MongoTemplate template, MongoIndexJobStore store, RepositoryIndexExporter exporter,
                                              IndexBuildService.CheckoutResolver checkoutResolver, PublicationGate publicationGate) {
+        RepositoryProperties properties = new RepositoryProperties();
+        SourceSnapshotPublication source = new SourceSnapshotPublication(
+                new JGitRepositoryAdapter(properties, JdtLsTestProperties.linuxUid()),
+                new GitEvidencePublicationStore(template), properties.getGitEvidenceFileTextBytes());
         return new IndexBuildService(new FullIndexPlanner(), exporter, new MongoGenerationWriter(template),
                 new SourceIndexBatchDocumentMapper(template.getConverter()), new GenerationValidator(template),
                 checkoutResolver, incrementalBuilder(template), store, new MongoPublicationWriter(template), publicationGate,
-                target -> TestPreparedAnalysis.forSnapshot(target.snapshot(), new FullIndexPlanner().plan(target.snapshot().root())));
+                target -> TestPreparedAnalysis.forSnapshot(target.snapshot(), new FullIndexPlanner().plan(
+                        target.snapshot().root(), List.of(target.snapshot().root().resolve("src")))),
+                source, ignored -> Optional.empty());
     }
 
     private static IncrementalGenerationBuilder incrementalBuilder(MongoTemplate template) {
@@ -354,8 +381,8 @@ class FullIndexPublicationIT {
         };
     }
 
-    private static IndexJob claimedJob(MongoIndexJobStore store) {
-        store.admit(RepositoryId.of("orders"), revision(), false);
+    private static IndexJob claimedJob(MongoIndexJobStore store, RepositoryRevision revision) {
+        store.admit(RepositoryId.of("orders"), revision, false);
         return store.startNextAccepted().orElseThrow();
     }
 

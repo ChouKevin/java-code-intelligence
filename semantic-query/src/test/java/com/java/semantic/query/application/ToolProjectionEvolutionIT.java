@@ -47,9 +47,23 @@ class ToolProjectionEvolutionIT extends PublishedMongoITSupport {
             CodeFactIdentity identity = methodIdentity("example.payment", "PaymentService", "findPayment",
                     "src/main/java/example/payment/PaymentService.java");
             seedG2SearchAndAuthoritativeMethod(template, identity);
+            Document g1 = template.getCollection("generation_manifests").find(new Document("repoId", "orders")
+                    .append("generationId", "g1")).first();
+            String snapshotId = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa2";
+            Document snapshot = new Document(template.getCollection("git_evidence_manifests")
+                    .find(new Document("repoId", "orders").append("evidenceId", SOURCE_SNAPSHOT)).first());
+            snapshot.remove("_id");
+            snapshot.put("evidenceId", snapshotId);
+            snapshot.put("sourceGenerationId", "g2");
+            template.getCollection("git_evidence_manifests").insertOne(snapshot);
+            Document membership = new Document(g1.get("sourceSnapshot", Document.class));
+            membership.put("snapshotId", snapshotId);
             template.getCollection("generation_manifests").insertOne(new Document("repoId", "orders").append("sourceRevision", REVISION)
                     .append("generationId", "g2").append("identityDigest", "3".repeat(64)).append("writeState", "SEALED_VALID")
-                    .append("schemaVersion", IndexSchemaContract.SCHEMA_VERSION).append("projectionVersions", currentVersions()));
+                    .append("schemaVersion", IndexSchemaContract.SCHEMA_VERSION).append("projectionVersions", currentVersions())
+                    .append("sourceSnapshot", membership).append("sourcePolicy", g1.get("sourcePolicy"))
+                    .append("projectGuide", g1.get("projectGuide")).append("coverage", g1.get("coverage"))
+                    .append("structure", g1.get("structure")));
             template.getCollection("repositories").updateOne(new Document("repoId", "orders"), new Document("$set",
                     new Document("currentPointer.generationId", "g2").append("currentPointer.manifestDigest", "3".repeat(64))
                             .append("currentPointer.committedJobId", "job-g2").append("currentPointer.publishedAt", new java.util.Date())));
@@ -98,6 +112,8 @@ class ToolProjectionEvolutionIT extends PublishedMongoITSupport {
                 .append("factId", g1Method.fact().id().value()).append("kind", CodeFactKind.METHOD.name())
                 .append("tokens", List.of("payment")).append("package", "example.payment")
                 .append("authority", ProjectionName.SYMBOLS.name()).append("canonical", identity.canonicalForm())
+                .append("displayName", target.methodName())
+                .append("signature", target.methodName() + "(" + String.join(", ", target.parameterTypes()) + ")")
                 .append("scopePackage", scope.packageName()).append("scopeClass", scope.className())
                 .append("scopeMethod", scope.methodName().orElse("")).append("scopeParameters", scope.parameterTypes())
                 .append("scopePath", scope.sourcePath().orElse("")).append("sourcePath", target.sourceFile());

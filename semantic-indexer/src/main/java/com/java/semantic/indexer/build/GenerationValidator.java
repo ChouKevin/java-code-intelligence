@@ -1,6 +1,7 @@
 package com.java.semantic.indexer.build;
 
 import com.java.semantic.indexer.store.GenerationWriteContext;
+import com.java.semantic.indexer.store.GitEvidencePublicationStore;
 import com.java.semantic.indexer.store.GenerationBuildOwnership;
 import com.java.semantic.model.index.AnalysisFingerprint;
 import com.java.semantic.model.index.AnalysisInputs;
@@ -18,6 +19,12 @@ import com.java.semantic.model.index.RelationDocument;
 import com.java.semantic.model.index.SearchDocument;
 import com.java.semantic.model.index.SymbolDocument;
 import com.java.semantic.model.repository.RepositoryRevision;
+import com.java.semantic.model.source.SourceEvidencePolicy;
+import com.java.semantic.model.source.SourceEvidenceDocumentCodec;
+import com.java.semantic.model.source.SourceSnapshotMembership;
+import com.java.semantic.model.source.ProjectGuideMembership;
+import com.java.semantic.model.source.SourceCoverage;
+import com.java.semantic.model.source.SourceStructure;
 import com.java.semantic.model.query.SelectedGeneration;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.model.FindOneAndUpdateOptions;
@@ -57,10 +64,12 @@ public final class GenerationValidator {
     private final SourceIndexBatchDocumentMapper projectionMapper;
     private final GenerationBuildOwnership ownership;
 
+    private final GitEvidencePublicationStore sourceEvidence;
     public GenerationValidator(MongoTemplate template) {
         this.template = Objects.requireNonNull(template, "mongo template is required");
         projectionMapper = new SourceIndexBatchDocumentMapper(template.getConverter());
         ownership = new GenerationBuildOwnership(template);
+        sourceEvidence = new GitEvidencePublicationStore(template);
     }
 
     public ValidationResult validate(GenerationWriteContext context, RepositoryRevision requestedRevision,
@@ -136,6 +145,7 @@ public final class GenerationValidator {
         List<Document> search = persistedProjections.get(ProjectionName.SEARCH);
         expectedPlan.ifPresent(plan -> validateSourceInventory(plan, files, issues));
         Map<String, Document> artifacts = artifactsById(files, issues);
+        validateSourceMembership(context, requestedRevision, manifest, files, issues);
         validateAnalysisEvidence(manifest, files, issues);
         validateCanonicalIdentities(symbols, issues);
         validateRelations(symbols, relations, issues);
@@ -151,6 +161,43 @@ public final class GenerationValidator {
         Map<String, Long> counts = collectionCounts(persistedProjections, artifacts);
         ManifestDigest digest = digest(persistedProjections, manifest);
         return new ValidationResult(digest, counts, issues);
+    }
+
+    private void validateSourceMembership(GenerationWriteContext context, RepositoryRevision revision, Document manifest,
+            List<Document> files, List<GenerationValidationIssue> issues) {
+        try {
+            Document snapshotDocument = Objects.requireNonNull(manifest.get("sourceSnapshot", Document.class));
+            Document policyDocument = Objects.requireNonNull(manifest.get("sourcePolicy", Document.class));
+            Document guideDocument = Objects.requireNonNull(manifest.get("projectGuide", Document.class));
+            Document coverageDocument = Objects.requireNonNull(manifest.get("coverage", Document.class));
+            Document structureDocument = Objects.requireNonNull(manifest.get("structure", Document.class));
+            SourceSnapshotMembership snapshot = template.getConverter().read(SourceSnapshotMembership.class, snapshotDocument);
+            SourceEvidencePolicy policy = SourceEvidenceDocumentCodec.decodePolicy(policyDocument);
+            ProjectGuideMembership guide = SourceEvidenceDocumentCodec.decodeGuide(guideDocument);
+            SourceCoverage coverage = template.getConverter().read(SourceCoverage.class, coverageDocument);
+            SourceStructure structure = template.getConverter().read(SourceStructure.class, structureDocument);
+            if (!revision.equals(snapshot.revision()) || !snapshot.policyFingerprint().equals(policy.fingerprint())
+                    || coverage.readableCode() != files.size()
+                    || !structure.importedSourceRoots().equals(policy.includedRoots())
+                    || files.stream().anyMatch(file -> !policy.allowsCode(file.getString("sourcePath")))) {
+                issues.add(issue("SOURCE_POLICY_MISMATCH", "sealed source policy does not match selected source inputs"));
+                return;
+            }
+            sourceEvidence.validateReadySourceSnapshot(context.repositoryId(), context.generationId(), snapshot, policy, guide);
+            for (Document file : files) {
+                Document evidenceFile = template.getCollection(IndexCollections.GIT_SNAPSHOT_FILES)
+                        .find(new Document("repoId", context.repositoryId().value())
+                                .append("snapshotId", snapshot.snapshotId().value())
+                                .append("path", file.getString("sourcePath"))
+                                .append("contentKind", "CODE")).first();
+                if (Objects.isNull(evidenceFile) || !file.getString("contentHash").equals(evidenceFile.getString("checksum"))) {
+                    issues.add(issue("SOURCE_GIT_INTEGRITY_MISMATCH", "semantic source differs from exact Git evidence"));
+                    return;
+                }
+            }
+        } catch (RuntimeException exception) {
+            issues.add(issue("SOURCE_MEMBERSHIP_INVALID", "sealed source snapshot is missing or invalid"));
+        }
     }
 
     private static void validateSourceInventory(FullIndexPlan plan, List<Document> files,
@@ -726,6 +773,11 @@ public final class GenerationValidator {
         Document evidence = manifest.get("analysisEvidence", Document.class);
         identities.add("analysisInputs|" + canonicalAnalysisValue(inputs, "analysisInputs"));
         identities.add("analysisEvidence|" + canonicalAnalysisValue(evidence, "analysisEvidence"));
+        identities.add("sourceSnapshot|" + canonicalAnalysisValue(manifest.get("sourceSnapshot"), "sourceSnapshot"));
+        identities.add("projectGuide|" + canonicalAnalysisValue(manifest.get("projectGuide"), "projectGuide"));
+        identities.add("sourcePolicy|" + canonicalAnalysisValue(manifest.get("sourcePolicy"), "sourcePolicy"));
+        identities.add("coverage|" + canonicalAnalysisValue(manifest.get("coverage"), "coverage"));
+        identities.add("structure|" + canonicalAnalysisValue(manifest.get("structure"), "structure"));
         identities.sort(Comparator.naturalOrder());
         try {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");

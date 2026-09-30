@@ -18,10 +18,23 @@ import com.java.semantic.model.git.GitComparisonChange;
 import com.java.semantic.model.git.GitChangeKind;
 import com.java.semantic.model.git.GitFileContentStatus;
 import com.java.semantic.model.index.IndexCollections;
+import com.java.semantic.model.index.AnalysisInputs;
+import com.java.semantic.model.index.AnalysisFingerprint;
+import com.java.semantic.model.index.SemanticAnalysisEvidence;
+import com.java.semantic.model.index.ManifestDigest;
+import com.java.semantic.model.index.GenerationId;
+import com.java.semantic.model.query.SelectedGeneration;
+import com.java.semantic.indexer.build.GenerationValidator;
+import com.java.semantic.model.index.SealedGeneration;
 import com.java.semantic.model.index.IndexSchemaContract;
 import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.model.review.ResolvedReviewEndpoints;
 import com.java.semantic.model.repository.RepositoryRevision;
+import com.java.semantic.model.source.SourceEvidencePolicy;
+import com.java.semantic.model.source.SourceEvidenceDocumentCodec;
+import com.java.semantic.model.source.SourceContentKind;
+import com.java.semantic.model.source.ProjectGuideMembership;
+import com.java.semantic.model.source.SourceSnapshotMembership;
 import com.mongodb.client.model.Filters;
 import com.mongodb.client.model.Sorts;
 import com.mongodb.client.model.Updates;
@@ -139,9 +152,79 @@ public final class GitEvidencePublicationStore {
                 Filters.eq("ownerJobId", job.id().value()), Filters.eq("state", "PREPARING")), Updates.set("state", "FAILED"));
     }
 
+    public SourceSnapshotMembership publishSourceSnapshot(IndexJob job, RepositoryRevision revision,
+            List<GitSnapshotEntry> entries, SourceEvidencePolicy policy, ProjectGuideMembership guide, Instant preparedAt) {
+        verifySchemaBeforeEvidence();
+        if (job.target().isEmpty() || !revision.equals(job.target().orElseThrow().revision())) {
+            throw new PublicationConflictException();
+        }
+        validateGuideIdentity(job.repositoryId(), revision, policy, guide);
+        validatePreparedEntries(entries, policy, guide);
+        GitSnapshotId id = GitSnapshotId.create();
+        publishSnapshot(job, id, Optional.of(revision.value()), entries, preparedAt, GitEvidenceOwnership.standalone(),
+                policy.fingerprint(), guide, Optional.of(job.target().orElseThrow().generationId()));
+        Document manifest = snapshotManifest(job.repositoryId(), id, "READY");
+        return new SourceSnapshotMembership(id, revision, policy.fingerprint(), manifest.getString("contentDigest"));
+    }
+
+    public PreparedSource preparedSource(SealedGeneration generation) {
+        com.java.semantic.model.query.SelectedGeneration selected = generation.selected();
+        Document manifest = template.getCollection(IndexCollections.GENERATION_MANIFESTS).find(Filters.and(
+                Filters.eq("repoId", selected.repositoryId().value()),
+                Filters.eq("generationId", selected.generationId().value()),
+                Filters.eq("sourceRevision", selected.revision().value()),
+                Filters.eq("identityDigest", selected.manifestDigest().value()),
+                Filters.eq("analysisFingerprint", generation.fingerprint().digest()),
+                Filters.eq("schemaVersion", IndexSchemaContract.SCHEMA_VERSION),
+                Filters.eq("writeState", "SEALED_VALID"))).first();
+        if (Objects.isNull(manifest)) {
+            throw new PublicationConflictException();
+        }
+        Document source = manifest.get("sourceSnapshot", Document.class);
+        Document policy = manifest.get("sourcePolicy", Document.class);
+        Document guide = manifest.get("projectGuide", Document.class);
+        if (Objects.isNull(source) || Objects.isNull(policy) || Objects.isNull(guide)) {
+            throw new PublicationConflictException();
+        }
+        SourceSnapshotMembership membership = template.getConverter().read(SourceSnapshotMembership.class, source);
+        SourceEvidencePolicy selection = SourceEvidenceDocumentCodec.decodePolicy(policy);
+        ProjectGuideMembership projectGuide = SourceEvidenceDocumentCodec.decodeGuide(guide);
+        validateReadySourceSnapshot(selected.repositoryId(), selected.generationId(), membership, selection, projectGuide);
+        return new PreparedSource(selection, projectGuide, membership, selected.generationId());
+    }
+
+    public record PreparedSource(SourceEvidencePolicy policy, ProjectGuideMembership guide,
+            SourceSnapshotMembership snapshot, GenerationId sourceGenerationId) { }
+
+    public PreparedSource preparedSource(RepositoryId repositoryId, RepositoryRevision revision) {
+        List<Document> manifests = template.getCollection(IndexCollections.GENERATION_MANIFESTS)
+                .find(Filters.and(Filters.eq("repoId", repositoryId.value()),
+                        Filters.eq("sourceRevision", revision.value()), Filters.eq("schemaVersion", IndexSchemaContract.SCHEMA_VERSION),
+                        Filters.eq("writeState", "SEALED_VALID"))).sort(Sorts.descending("generationId"))
+                .into(new ArrayList<>());
+        for (Document manifest : manifests) {
+            Document inputs = manifest.get("analysisInputs", Document.class);
+            Document evidence = manifest.get("analysisEvidence", Document.class);
+            if (Objects.isNull(inputs) || Objects.isNull(evidence)) {
+                continue;
+            }
+            SelectedGeneration selected = new SelectedGeneration(repositoryId, revision,
+                    new GenerationId(manifest.getString("generationId")), new ManifestDigest(manifest.getString("identityDigest")));
+            if (!new GenerationValidator(template).validatePersistedSealed(selected).valid()) {
+                continue;
+            }
+            SealedGeneration sealed = new SealedGeneration(selected,
+                    AnalysisFingerprint.from(template.getConverter().read(AnalysisInputs.class, inputs)),
+                    template.getConverter().read(SemanticAnalysisEvidence.class, evidence));
+            return preparedSource(sealed);
+        }
+        throw new PublicationConflictException();
+    }
+
     /** Publishes full immutable snapshots first, then makes their direct comparison visible last. */
     public ComparisonPublication publishComparison(IndexJob job, GitPreparedComparison comparison, Instant preparedAt,
-                                                   GitEvidenceOwnership ownership) {
+                                                   GitEvidenceOwnership ownership, Optional<PreparedSource> beforeSource,
+                                                   PreparedSource afterSource) {
         verifySchemaBeforeEvidence();
         IndexJob requiredJob = Objects.requireNonNull(job, "job is required");
         GitEvidenceOwnership requiredOwnership = Objects.requireNonNull(ownership, "Git evidence ownership is required");
@@ -155,6 +238,31 @@ public final class GitEvidencePublicationStore {
             }
         } else if (comparison.previous().isEmpty()) {
             throw new PublicationConflictException();
+        }
+        if (comparison.previous().isPresent() != beforeSource.isPresent()
+                || !comparison.current().equals(afterSource.snapshot().revision())
+                || beforeSource.filter(source -> !source.snapshot().revision().equals(comparison.previous().orElseThrow())).isPresent()) {
+            throw new PublicationConflictException();
+        }
+        SourceEvidencePolicy beforePolicy = beforeSource.map(PreparedSource::policy).orElseGet(() ->
+                new SourceEvidencePolicy(SourceEvidencePolicy.VERSION, List.of(), java.util.Set.of(), Optional.empty()));
+        ProjectGuideMembership beforeGuide = beforeSource.map(PreparedSource::guide).orElseGet(() ->
+                ProjectGuideMembership.unavailable(com.java.semantic.model.source.ProjectGuideState.DISABLED));
+        validatePreparedEntries(comparison.previousEntries(), beforePolicy, beforeGuide);
+        validatePreparedEntries(comparison.currentEntries(), afterSource.policy(), afterSource.guide());
+        beforeSource.ifPresent(source -> validateBoundSnapshotEntries(requiredJob.repositoryId(), source,
+                comparison.previousEntries()));
+        validateBoundSnapshotEntries(requiredJob.repositoryId(), afterSource, comparison.currentEntries());
+        for (GitComparisonChange change : comparison.changes()) {
+            if (!SourceEvidencePolicy.allowsChange(
+                    change.oldMode().equals("0") ? Optional.empty() : Optional.of(change.oldPath()),
+                    beforePolicy, beforeGuide.path().stream().collect(java.util.stream.Collectors.toSet()),
+                    change.newMode().equals("0") ? Optional.empty() : Optional.of(change.newPath()),
+                    afterSource.policy(), afterSource.guide().path().stream().collect(java.util.stream.Collectors.toSet()))
+                    || change.oldMode().equals("120000") || change.newMode().equals("120000")
+                    || change.oldMode().equals("160000") || change.newMode().equals("160000")) {
+                throw new PublicationConflictException();
+            }
         }
         GitComparisonId comparisonId = GitComparisonId.create();
         GitSnapshotId previousSnapshot = GitSnapshotId.create();
@@ -177,8 +285,10 @@ public final class GitEvidencePublicationStore {
         comparison.previous().ifPresent(revision -> comparisonManifest.append("previous", revision.value()));
         template.getCollection(IndexCollections.GIT_EVIDENCE_MANIFESTS).insertOne(comparisonManifest);
         publishSnapshot(requiredJob, previousSnapshot, comparison.previous().map(RepositoryRevision::value),
-                comparison.previousEntries(), preparedAt, requiredOwnership);
-        publishSnapshot(requiredJob, currentSnapshot, Optional.of(comparison.current().value()), comparison.currentEntries(), preparedAt, requiredOwnership);
+                comparison.previousEntries(), preparedAt, requiredOwnership, beforePolicy.fingerprint(), beforeGuide,
+                beforeSource.map(PreparedSource::sourceGenerationId));
+        publishSnapshot(requiredJob, currentSnapshot, Optional.of(comparison.current().value()), comparison.currentEntries(), preparedAt,
+                requiredOwnership, afterSource.policy().fingerprint(), afterSource.guide(), Optional.of(afterSource.sourceGenerationId()));
         long ordinal = 0L;
         for (GitComparisonChange change : comparison.changes()) {
             template.getCollection(IndexCollections.GIT_COMPARISON_CHANGES).insertOne(new Document("repoId", requiredJob.repositoryId().value())
@@ -196,8 +306,56 @@ public final class GitEvidencePublicationStore {
         return new ComparisonPublication(comparisonId, previousSnapshot, currentSnapshot);
     }
 
+    private void validateBoundSnapshotEntries(RepositoryId repositoryId, PreparedSource source,
+            List<GitSnapshotEntry> entries) {
+        validateReadySourceSnapshot(repositoryId, source.sourceGenerationId(), source.snapshot(), source.policy(), source.guide());
+        Document generation = template.getCollection(IndexCollections.GENERATION_MANIFESTS).find(Filters.and(
+                Filters.eq("repoId", repositoryId.value()),
+                Filters.eq("generationId", source.sourceGenerationId().value()),
+                Filters.eq("sourceRevision", source.snapshot().revision().value()),
+                Filters.eq("schemaVersion", IndexSchemaContract.SCHEMA_VERSION),
+                Filters.eq("writeState", "SEALED_VALID"))).first();
+        if (Objects.isNull(generation)
+                || !Objects.equals(template.getConverter().convertToMongoType(source.snapshot()), generation.get("sourceSnapshot"))
+                || !Objects.equals(SourceEvidenceDocumentCodec.encodePolicy(source.policy()), generation.get("sourcePolicy"))
+                || !Objects.equals(SourceEvidenceDocumentCodec.encodeGuide(source.guide()), generation.get("projectGuide"))) {
+            throw new PublicationConflictException();
+        }
+        String digest = emptyDigest();
+        for (int ordinal = 0; ordinal < entries.size(); ordinal++) {
+            GitSnapshotEntry entry = entries.get(ordinal);
+            digest = digest(digest, snapshotRow(ordinal, entry, checksum(entry.bytes())));
+        }
+        if (!source.snapshot().contentDigest().equals(digest)) {
+            throw new PublicationConflictException();
+        }
+    }
+
+    private static void validatePreparedEntries(List<GitSnapshotEntry> entries, SourceEvidencePolicy policy,
+            ProjectGuideMembership guide) {
+        java.util.Set<String> seen = new java.util.HashSet<>();
+        for (GitSnapshotEntry entry : entries) {
+            if (entry.contentStatus() != GitFileContentStatus.TEXT || !seen.add(entry.path())
+                    || !(policy.allowsCode(entry.path()) || guide.path().filter(entry.path()::equals).isPresent())) {
+                throw new PublicationConflictException();
+            }
+            if (guide.path().filter(entry.path()::equals).isPresent()
+                    && !guide.digest().orElseThrow().equals(checksum(entry.bytes()))) {
+                throw new PublicationConflictException();
+            }
+        }
+        if (!seen.containsAll(policy.selectedCodePaths())
+                || guide.path().isPresent() != seen.contains(guide.path().orElse(""))) {
+            throw new PublicationConflictException();
+        }
+    }
+
     private void publishSnapshot(IndexJob job, GitSnapshotId snapshotId, Optional<String> revision, List<GitSnapshotEntry> entries,
-                                 Instant preparedAt, GitEvidenceOwnership ownership) {
+                                 Instant preparedAt, GitEvidenceOwnership ownership, String policyFingerprint,
+                                 ProjectGuideMembership guide, Optional<GenerationId> sourceGenerationId) {
+        if (revision.isPresent() != sourceGenerationId.isPresent()) {
+            throw new PublicationConflictException();
+        }
         EvidenceLimits limits = evidenceLimits();
         long totalText = 0L;
         long textEntries = 0L;
@@ -207,8 +365,11 @@ public final class GitEvidencePublicationStore {
                 .append("preparedAt", Date.from(preparedAt)).append("ownerJobId", job.id().value()).append("total", (long) entries.size())
                 .append("contentDigest", emptyDigest()).append("fileTextBytesLimit", limits.fileTextBytes())
                 .append("snapshotTextBytesLimit", limits.snapshotTextBytes()).append("contentCoverage", new Document("textBytes", 0L)
-                        .append("textEntries", 0L).append("entryCount", (long) entries.size())), ownership);
+                        .append("textEntries", 0L).append("entryCount", (long) entries.size()))
+                .append("policyFingerprint", policyFingerprint)
+                .append("projectGuide", new Document(SourceEvidenceDocumentCodec.encodeGuide(guide))), ownership);
         revision.ifPresent(value -> snapshotManifest.append("revision", value));
+        sourceGenerationId.ifPresent(value -> snapshotManifest.append("sourceGenerationId", value.value()));
         template.getCollection(IndexCollections.GIT_EVIDENCE_MANIFESTS).insertOne(snapshotManifest);
         long ordinal = 0L;
         String digest = emptyDigest();
@@ -229,6 +390,9 @@ public final class GitEvidencePublicationStore {
             template.getCollection(IndexCollections.GIT_SNAPSHOT_FILES).insertOne(new Document("repoId", job.repositoryId().value()).append("snapshotId", snapshotId.value())
                     .append("ordinal", ordinal).append("path", entry.path()).append("rawPath", entry.rawPath()).append("pathKey", pathKey)
                     .append("mode", entry.mode()).append("blobId", entry.blobId()).append("contentStatus", entry.contentStatus().name())
+                    .append("contentKind", guide.path().filter(entry.path()::equals).isPresent()
+                            ? SourceContentKind.PROJECT_GUIDE.name() : SourceContentKind.CODE.name())
+                    .append("policyFingerprint", policyFingerprint)
                     .append("byteLength", entry.byteLength()).append("checksum", checksum).append("chunkCount", (long) chunks.size()));
             for (SnapshotChunk chunk : chunks) {
                 template.getCollection(IndexCollections.GIT_SNAPSHOT_CHUNKS).insertOne(new Document("repoId", job.repositoryId().value()).append("snapshotId", snapshotId.value())
@@ -260,6 +424,45 @@ public final class GitEvidencePublicationStore {
         validateReadySnapshot(repositoryId, previousSnapshot, expected.previous().map(RepositoryRevision::value), expected.previousEntries());
         validateReadySnapshot(repositoryId, currentSnapshot, Optional.of(expected.current().value()), expected.currentEntries());
         validateChanges(repositoryId, comparisonId, expected.changes());
+    }
+
+    public void validateReadySourceSnapshot(RepositoryId repositoryId, GenerationId sourceGenerationId,
+            SourceSnapshotMembership membership, SourceEvidencePolicy policy, ProjectGuideMembership guide) {
+        validateGuideIdentity(repositoryId, membership.revision(), policy, guide);
+        Document manifest = snapshotManifest(repositoryId, membership.snapshotId(), "READY");
+        if (Objects.isNull(manifest) || !membership.revision().value().equals(manifest.getString("revision"))
+                || !sourceGenerationId.value().equals(manifest.getString("sourceGenerationId"))
+                || !policy.fingerprint().equals(membership.policyFingerprint())
+                || !membership.policyFingerprint().equals(manifest.getString("policyFingerprint"))
+                || !membership.contentDigest().equals(manifest.getString("contentDigest"))
+                || !Objects.equals(SourceEvidenceDocumentCodec.encodeGuide(guide), manifest.get("projectGuide"))) {
+            throw new PublicationConflictException();
+        }
+        List<GitSnapshotEntry> entries = storedSnapshotEntries(repositoryId, membership.snapshotId());
+        for (GitSnapshotEntry entry : entries) {
+            Document row = template.getCollection(IndexCollections.GIT_SNAPSHOT_FILES).find(Filters.and(
+                    Filters.eq("repoId", repositoryId.value()), Filters.eq("snapshotId", membership.snapshotId().value()),
+                    Filters.eq("path", entry.path()))).first();
+            boolean isGuide = guide.path().filter(entry.path()::equals).isPresent();
+            if (Objects.isNull(row) || entry.contentStatus() != GitFileContentStatus.TEXT
+                    || !membership.policyFingerprint().equals(row.getString("policyFingerprint"))
+                    || !(isGuide ? SourceContentKind.PROJECT_GUIDE.name().equals(row.getString("contentKind"))
+                            : SourceContentKind.CODE.name().equals(row.getString("contentKind")))
+                    || !(isGuide ? policy.allowsGuide(entry.path()) : policy.allowsCode(entry.path()))) {
+                throw new PublicationConflictException();
+            }
+        }
+        validatePreparedEntries(entries, policy, guide);
+        validateReadySnapshot(repositoryId, membership.snapshotId(), Optional.of(membership.revision().value()), entries);
+    }
+
+    private static void validateGuideIdentity(RepositoryId repositoryId, RepositoryRevision revision,
+            SourceEvidencePolicy policy, ProjectGuideMembership guide) {
+        if (guide.path().filter(path -> !policy.allowsGuide(path)).isPresent()
+                || guide.importedRevision().filter(imported -> !revision.equals(imported)).isPresent()
+                || guide.provenance().filter(provenance -> !repositoryId.equals(provenance.repositoryId())).isPresent()) {
+            throw new PublicationConflictException();
+        }
     }
 
     /** Recomputes persisted READY review evidence before its semantic review manifest becomes visible. */

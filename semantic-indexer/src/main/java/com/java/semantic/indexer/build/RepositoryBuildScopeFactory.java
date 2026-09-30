@@ -10,12 +10,16 @@ import com.java.semantic.indexer.incremental.SourceContractChangeDetector;
 import com.java.semantic.indexer.job.IndexJob;
 import com.java.semantic.indexer.job.IndexJobStore;
 import com.java.semantic.indexer.store.MongoGenerationWriter;
+import com.java.semantic.indexer.store.GitEvidencePublicationStore;
 import com.java.semantic.indexer.store.PublicationPort;
 import com.java.semantic.indexer.uat.PublicationGate;
 import com.java.semantic.model.index.SealedGeneration;
 import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.repository.adapter.jgit.JGitWorktreeRepository;
 import com.java.semantic.semantic.adapter.jdtls.JdtWorkspaceManager;
+import com.java.semantic.repository.application.RepositoryRuntimeRegistry;
+import com.java.semantic.repository.config.RepositoryProperties;
+import com.java.semantic.repository.port.GitRepositoryPort;
 import java.nio.file.Path;
 import java.util.Objects;
 import java.util.Optional;
@@ -35,19 +39,26 @@ public final class RepositoryBuildScopeFactory implements RepositoryBuildRunner.
     private final JdtWorkspaceManager workspaces;
     private final RepositoryAnalysisPreparation analysisPreparation;
     private final GitResourceFactory gitResources;
+    private final SourceSnapshotPublication sourcePublication;
+    private final java.util.function.Function<RepositoryId, Optional<String>> guidePath;
 
     public RepositoryBuildScopeFactory(IndexBuildService.CheckoutResolver checkout, MongoTemplate template,
                                        IndexJobStore jobs, PublicationPort publication, PublicationGate publicationGate,
                                        JdtWorkspaceManager workspaces, RepositoryAnalysisPreparation analysisPreparation,
-                                       JdtLsProperties jdtLsProperties) {
+                                       JdtLsProperties jdtLsProperties, GitRepositoryPort git,
+                                       GitEvidencePublicationStore evidence, RepositoryProperties properties,
+                                       RepositoryRuntimeRegistry repositories) {
         this(checkout, template, jobs, publication, publicationGate, workspaces, analysisPreparation,
-                configuredGitResources(jdtLsProperties));
+                configuredGitResources(jdtLsProperties),
+                new SourceSnapshotPublication(git, evidence, properties.getGitEvidenceFileTextBytes()),
+                repositoryId -> repositories.get(repositoryId).projectGuidePath());
     }
 
     RepositoryBuildScopeFactory(IndexBuildService.CheckoutResolver checkout, MongoTemplate template,
                                 IndexJobStore jobs, PublicationPort publication, PublicationGate publicationGate,
                                 JdtWorkspaceManager workspaces, RepositoryAnalysisPreparation analysisPreparation,
-                                GitResourceFactory gitResources) {
+                                GitResourceFactory gitResources, SourceSnapshotPublication sourcePublication,
+                                java.util.function.Function<RepositoryId, Optional<String>> guidePath) {
         this.checkout = Objects.requireNonNull(checkout, "checkout is required");
         this.template = Objects.requireNonNull(template, "mongo template is required");
         this.jobs = Objects.requireNonNull(jobs, "jobs is required");
@@ -56,6 +67,8 @@ public final class RepositoryBuildScopeFactory implements RepositoryBuildRunner.
         this.workspaces = Objects.requireNonNull(workspaces, "JDT workspaces are required");
         this.analysisPreparation = Objects.requireNonNull(analysisPreparation, "analysis preparation is required");
         this.gitResources = Objects.requireNonNull(gitResources, "Git resources are required");
+        this.sourcePublication = Objects.requireNonNull(sourcePublication, "source publication is required");
+        this.guidePath = Objects.requireNonNull(guidePath, "guide path lookup is required");
     }
 
     @Override
@@ -80,8 +93,8 @@ public final class RepositoryBuildScopeFactory implements RepositoryBuildRunner.
         IncrementalGenerationBuilder incrementalBuilder = new IncrementalGenerationBuilder(template, incrementalPlanner,
                 new ParentGenerationCopier(template, generationWriter));
         return new IndexBuildService(new FullIndexPlanner(), JdtLsRepositoryIndexExporter.production(),
-                generationWriter, documentMapper, new GenerationValidator(template), ignored -> selectedCheckout, incrementalBuilder, jobs, publication,
-                publicationGate, analysisPreparation);
+                generationWriter, documentMapper, new GenerationValidator(template), ignored -> selectedCheckout,
+                incrementalBuilder, jobs, publication, publicationGate, analysisPreparation, sourcePublication, guidePath);
     }
 
     /**

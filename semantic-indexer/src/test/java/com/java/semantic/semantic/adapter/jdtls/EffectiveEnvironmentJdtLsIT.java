@@ -179,7 +179,8 @@ class EffectiveEnvironmentJdtLsIT {
             SealedGeneration current = new SealedGeneration(selected, analysis.fingerprint(), evidence);
             SealedGeneration historical = new SealedGeneration(selected, historicalFingerprint, historicalEvidence);
             ConservativeAnalysisReuseVerifier verifier = new ConservativeAnalysisReuseVerifier(
-                    target -> Optional.of(inputs));
+                    (candidate, target) -> candidate.fingerprint().equals(AnalysisFingerprint.from(inputs))
+                            && candidate.equals(current));
             AnalysisTarget target = new AnalysisTarget(analysis.snapshot(), "analyzer-reuse", "BEFORE");
 
             assertThat(verifier.matches(current, target)).isTrue();

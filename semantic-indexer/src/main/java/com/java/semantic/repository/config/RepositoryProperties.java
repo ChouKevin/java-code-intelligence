@@ -94,6 +94,8 @@ public class RepositoryProperties {
         private String displayName = "";
         private String url = "";
         private String defaultBranch = "main";
+        private String projectGuidePath = "";
+
 
         public String getDisplayName() {
             return displayName;
@@ -117,6 +119,19 @@ public class RepositoryProperties {
 
         public void setDefaultBranch(String defaultBranch) {
             this.defaultBranch = defaultBranch;
+        }
+
+        public String getProjectGuidePath() {
+            return projectGuidePath;
+        }
+
+        public void setProjectGuidePath(String projectGuidePath) {
+            if (Objects.nonNull(projectGuidePath) && !projectGuidePath.isEmpty()
+                    && (!com.java.semantic.model.source.SourceEvidencePolicy.validPath(projectGuidePath)
+                            || !projectGuidePath.endsWith(".md"))) {
+                throw new IllegalArgumentException("project guide must be a relative Markdown path");
+            }
+            this.projectGuidePath = Objects.requireNonNull(projectGuidePath, "guide path is required");
         }
 
     }
