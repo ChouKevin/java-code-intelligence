@@ -801,7 +801,7 @@ public final class GitEvidencePublicationStore {
                     line++;
                     column = 1L;
                 } else {
-                    column++;
+                    column += Character.charCount(codePoint);
                 }
             }
             return Optional.of(new SourcePosition(line, column));
@@ -811,6 +811,7 @@ public final class GitEvidencePublicationStore {
     }
 
     private record SnapshotChunk(long ordinal, long byteOffset, long line, long column, byte[] bytes) { }
+    /** One-based lines/UTF-16 columns; snapshot byte offsets remain UTF-8 offsets. */
     private record SourcePosition(long line, long column) {
         private static SourcePosition initial() { return new SourcePosition(1L, 1L); }
     }

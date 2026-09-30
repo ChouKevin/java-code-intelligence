@@ -25,6 +25,12 @@ public final class SemanticQueryErrorMapper {
         if (exception instanceof ReviewContextMismatchException) {
             return new SemanticQueryError("REVIEW_CONTEXT_MISMATCH", "The review context does not match immutable membership.", false, Optional.empty());
         }
+        if (exception instanceof MetadataNotPreparedException) {
+            return new SemanticQueryError("METADATA_NOT_PREPARED",
+                    "Refresh metadata with Indexer refresh_repository_metadata for the requested repository and branch, "
+                            + "saving a new requestId first; then query the returned get_job identity. Query does not prepare evidence.",
+                    false, Optional.empty());
+        }
         if (exception instanceof GitEvidenceNotFoundException) {
             return new SemanticQueryError("GIT_EVIDENCE_NOT_FOUND", "The requested Git evidence was not found.", false, Optional.empty());
         }
@@ -38,7 +44,8 @@ public final class SemanticQueryErrorMapper {
             return new SemanticQueryError("FACT_KIND_MISMATCH", "The fact is not valid for this operation.", false, Optional.empty());
         }
         if (exception instanceof IndexNotReadyException || exception instanceof IndexContractMismatchException
-                || exception instanceof SemanticIndexUnavailableException) {
+                || exception instanceof SemanticIndexUnavailableException || exception instanceof com.mongodb.MongoException
+                || exception instanceof org.springframework.dao.DataAccessException) {
             return new SemanticQueryError("INDEX_UNAVAILABLE", "The semantic index is temporarily unavailable.", true, Optional.empty());
         }
         if (exception instanceof InvalidCodeFactQueryException || exception instanceof CodeFactKindUnsupportedException

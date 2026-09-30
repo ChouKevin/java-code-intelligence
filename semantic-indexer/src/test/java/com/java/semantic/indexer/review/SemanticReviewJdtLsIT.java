@@ -12,8 +12,6 @@ import com.java.semantic.model.review.ReviewId;
 import com.java.semantic.model.review.ReviewManifestDocument;
 import com.java.semantic.model.review.ReviewSide;
 import com.java.semantic.query.SemanticQueryApplication;
-import com.java.semantic.query.application.ReviewQueryContract;
-import com.java.semantic.query.application.ReviewQueryFacade;
 import com.java.semantic.query.application.SemanticQueryContract;
 import com.java.semantic.query.application.SemanticQueryFacade;
 import com.java.semantic.semantic.adapter.jdtls.JdtLsHomeRequirement;
@@ -110,24 +108,23 @@ class SemanticReviewJdtLsIT {
             assertThat(fixture.classpathDigests(review.before().orElseThrow().generation().fingerprint().inputs()))
                     .isNotEqualTo(fixture.classpathDigests(review.after().orElseThrow().generation().fingerprint().inputs()));
 
-            String reviewAfterGeneration = fixture.reviewDetails(reviewId).after().generationId();
+            String reviewAfterGeneration = review.after().orElseThrow().generation().selected().generationId().value();
             fixture.publishCurrent(fixture.revisionB());
             String rebuiltCurrentGeneration = fixture.rebuildCurrent();
             assertThat(rebuiltCurrentGeneration).isNotEqualTo(reviewAfterGeneration);
-            assertThat(fixture.reviewDetails(reviewId).after().generationId()).isEqualTo(reviewAfterGeneration);
+            assertThat(fixture.readManifest(reviewId).after().orElseThrow().generation().selected().generationId().value()).isEqualTo(reviewAfterGeneration);
             assertThat(fixture.currentGeneration()).isEqualTo(rebuiltCurrentGeneration);
 
             ReviewManifestDocument equal = fixture.prepareRange(fixture.revisionB(), fixture.revisionB());
             assertThat(fixture.comparison(equal).items()).isEmpty();
-            ReviewQueryContract.ReviewDetails equalDetails = fixture.reviewDetails(equal.reviewId());
-            assertThat(equalDetails.before().endpoint().orElseThrow().generationId()).isEqualTo(equalDetails.after().generationId());
-            assertThat(equalDetails.before().endpoint().orElseThrow().snapshotId()).isNotEqualTo(equalDetails.after().snapshotId());
+            assertThat(equal.before().orElseThrow().generation().selected().generationId()).isEqualTo(equal.after().orElseThrow().generation().selected().generationId());
+            assertThat(equal.before().orElseThrow().snapshotId()).isNotEqualTo(equal.after().orElseThrow().snapshotId());
 
             ReviewManifestDocument divergent = fixture.prepareRange(fixture.revisionB(), fixture.revisionC());
-            assertThat(fixture.comparison(divergent).previous()).isEqualTo(fixture.revisionB());
-            assertThat(fixture.comparison(divergent).current()).isEqualTo(fixture.revisionC());
+            assertThat(fixture.comparison(divergent).comparisonContext().before().revision()).contains(fixture.revisionB());
+            assertThat(fixture.comparison(divergent).comparisonContext().after().revision()).contains(fixture.revisionC());
             assertThat(fixture.comparison(divergent).ancestry()).isEqualTo("DIVERGED");
-            assertThat(fixture.directPatch(divergent, fixture.revisionB(), fixture.revisionC())).contains("divergent");
+            assertThat(fixture.directPatch(divergent)).contains("divergent");
         }
     }
 
@@ -144,15 +141,14 @@ class SemanticReviewJdtLsIT {
         private final ConfigurableApplicationContext indexer;
         private final ConfigurableApplicationContext query;
         private final String indexerBase;
-        private final ReviewQueryFacade reviews;
-        private final SemanticQueryFacade current;
+        private final SemanticQueryFacade reviews;
         private final MongoTemplate template;
         private final JsonMapper mapper = JsonMapper.builder().build();
 
         private SemanticReviewFixture(Path root, MongoDBContainer mongo, Git bare, Git seed, String revisionA, String revisionB,
                                       String revisionC, Path effectiveDependency, ConfigurableApplicationContext indexer,
-                                      ConfigurableApplicationContext query, String indexerBase, ReviewQueryFacade reviews,
-                                      SemanticQueryFacade current, MongoTemplate template) {
+                                      ConfigurableApplicationContext query, String indexerBase, SemanticQueryFacade reviews,
+                                      MongoTemplate template) {
             this.root = root;
             this.mongo = mongo;
             this.bare = bare;
@@ -165,7 +161,6 @@ class SemanticReviewJdtLsIT {
             this.query = query;
             this.indexerBase = indexerBase;
             this.reviews = reviews;
-            this.current = current;
             this.template = template;
         }
 
@@ -209,11 +204,12 @@ class SemanticReviewJdtLsIT {
                         .web(WebApplicationType.NONE)
                         .run("--spring.config.location=" + queryConfig.toUri(), "--spring.mongodb.uri=" + mongoUri,
                                 "--semantic.query.git-evidence.allowed-repositories[0]=" + REPOSITORY_ID,
+                                "--spring.ai.mcp.server.enabled=false",
                                 "--spring.main.banner-mode=off");
                 query = Optional.of(queryContext);
                 SemanticReviewFixture fixture = new SemanticReviewFixture(temporaryDirectory, mongo, bare, seed, revisionA, revisionB,
-                        revisionC, effectiveDependency, indexer, queryContext, indexerBase, queryContext.getBean(ReviewQueryFacade.class),
-                        queryContext.getBean(SemanticQueryFacade.class), queryContext.getBean(MongoTemplate.class));
+                        revisionC, effectiveDependency, indexer, queryContext, indexerBase, queryContext.getBean(SemanticQueryFacade.class),
+                        queryContext.getBean(MongoTemplate.class));
                 fixture.publishCurrent(revisionA);
                 return fixture;
             } catch (Exception | AssertionError exception) {
@@ -253,56 +249,61 @@ class SemanticReviewJdtLsIT {
             return readManifest(new ReviewId(text(map(completed, "review"), "reviewId")));
         }
 
+        private static SemanticQueryContract.PageRequest page() {
+            return new SemanticQueryContract.PageRequest(Optional.empty(), 100);
+        }
+
+        private static SemanticQueryContract.ReadContext context(ReviewId id, ReviewSide side, String revision) {
+            return SemanticQueryContract.ReadContext.review(REPOSITORY_ID, id.value(), side, revision);
+        }
+
+        private SemanticQueryContract.RelationCollection relations(ReviewId id, ReviewSide side, String revision,
+                String factId, SemanticQueryContract.RelationMode mode) {
+            return reviews.findRelations(new SemanticQueryContract.RelationRequest(context(id, side, revision), mode, factId, page()));
+        }
+
         List<String> callerNames(ReviewId id, ReviewSide side, String revision, String targetName) {
-            String factId = methodFact(id, side, revision, targetName);
-            ReviewQueryContract.ReviewResult<SemanticQueryContract.CollectionResult> result = reviews.findCallers(
-                    new ReviewQueryContract.ReviewRelationRequest(REPOSITORY_ID, id.value(), side, revision, factId, 0, 100));
-            return result.result().items().stream().map(SemanticQueryContract.CallerItem.class::cast)
-                    .map(item -> shortMethodName(item.caller().displayName())).sorted().toList();
+            return relations(id, side, revision, methodFact(id, side, revision, targetName), SemanticQueryContract.RelationMode.CALLERS)
+                    .items().stream().map(item -> shortMethodName(item.origin().canonical().orElseThrow())).sorted().toList();
         }
 
         List<String> implementationNames(ReviewId id, ReviewSide side, String revision, String methodName) {
-            String factId = methodFact(id, side, revision, methodName);
-            ReviewQueryContract.ReviewResult<SemanticQueryContract.CollectionResult> result = reviews.findMethodImplementations(
-                    new ReviewQueryContract.ReviewRelationRequest(REPOSITORY_ID, id.value(), side, revision, factId, 0, 100));
-            return result.result().items().stream().map(SemanticQueryContract.ImplementationItem.class::cast)
-                    .map(item -> declaringType(item.implementation().displayName())).sorted().toList();
+            return relations(id, side, revision, methodFact(id, side, revision, methodName), SemanticQueryContract.RelationMode.IMPLEMENTATIONS)
+                    .items().stream().map(item -> declaringType(item.origin().canonical().orElseThrow())).sorted().toList();
         }
 
         String methodSource(ReviewId id, ReviewSide side, String revision, String methodName) {
-            String factId = methodFact(id, side, revision, methodName);
-            return reviews.getFactSource(new ReviewQueryContract.ReviewFactSourceRequest(REPOSITORY_ID, id.value(), side, revision, factId, 0))
-                    .result().source().code();
+            return reviews.readSource(new SemanticQueryContract.SourceRequest(context(id, side, revision),
+                    new SemanticQueryContract.SourceTarget(SemanticQueryContract.SourceTargetKind.FACT,
+                            Optional.of(methodFact(id, side, revision, methodName)), Optional.empty(), Optional.empty(), Optional.of(0)),
+                    200, Optional.empty())).content().orElseThrow();
         }
 
         List<String> referenceContainerNames(ReviewId id, ReviewSide side, String revision, String typeName) {
-            String factId = fact(id, side, revision, typeName, CodeFactKind.TYPE);
-            return reviews.findReferences(new ReviewQueryContract.ReviewRelationRequest(REPOSITORY_ID, id.value(), side, revision, factId, 0, 100))
-                    .result().items().stream().map(SemanticQueryContract.ReferenceItem.class::cast)
-                    .map(item -> shortMethodName(item.container().displayName())).sorted().toList();
+            return relations(id, side, revision, fact(id, side, revision, typeName, CodeFactKind.TYPE), SemanticQueryContract.RelationMode.REFERENCES)
+                    .items().stream().map(item -> shortMethodName(item.origin().canonical().orElseThrow())).sorted().toList();
         }
 
         List<String> apiRouteHandlers(ReviewId id, ReviewSide side, String revision) {
-            return reviews.findApiRoutes(new ReviewQueryContract.ReviewApiRouteRequest(REPOSITORY_ID, id.value(), side, revision,
-                    SemanticQueryContract.HttpMethod.POST, "/checkout/submit", 0, 100)).result().items().stream()
-                    .map(SemanticQueryContract.EntryPointItem.class::cast).map(item -> shortMethodName(item.handler().displayName())).toList();
+            return reviews.listEntryPoints(new SemanticQueryContract.EntryPointRequest(context(id, side, revision),
+                    Optional.of(SemanticQueryContract.EntryKind.HTTP), Optional.empty(), Optional.empty(),
+                    Optional.of(SemanticQueryContract.HttpMethod.POST), Optional.of("/checkout/submit"), Optional.empty(),
+                    Optional.empty(), Optional.empty(), page())).items().stream()
+                    .map(item -> shortMethodName(item.handler().canonical().orElseThrow())).toList();
         }
 
         String directPatch(ReviewManifestDocument review) {
-            return directPatch(review, revisionA, revisionB);
+            SemanticQueryContract.ComparisonResult comparison = comparison(review);
+            String change = comparison.items().stream()
+                    .filter(item -> item.after().map(endpoint -> endpoint.path().equals("src/main/java/example/Checkout.java")).orElse(false))
+                    .findFirst().orElseThrow().changeId();
+            return reviews.getFileDiff(new SemanticQueryContract.FileDiffRequest(comparison.comparisonContext(), change, Optional.empty()))
+                    .patch().orElseThrow();
         }
 
-        String directPatch(ReviewManifestDocument review, String previous, String currentRevision) {
-            String comparisonId = review.comparisonId().orElseThrow().value();
-            return current.getFileDiff(new SemanticQueryContract.GitFileDiffRequest(REPOSITORY_ID, comparisonId, previous, currentRevision,
-                    changedCheckoutId(comparisonId, previous, currentRevision), Optional.empty())).patch();
-        }
-
-        SemanticQueryContract.GitComparisonCollection comparison(ReviewManifestDocument review) {
-            String comparisonId = review.comparisonId().orElseThrow().value();
-            return current.compareRevisions(new SemanticQueryContract.GitComparisonRequest(REPOSITORY_ID, comparisonId,
-                    review.resolvedEndpoints().orElseThrow().beforeRevision().orElseThrow().value(),
-                    review.resolvedEndpoints().orElseThrow().afterRevision().value(), 0, 100));
+        SemanticQueryContract.ComparisonResult comparison(ReviewManifestDocument review) {
+            return reviews.compareRevisions(new SemanticQueryContract.ComparisonRequest(
+                    reviewDetails(review.reviewId()).comparisonContext().orElseThrow(), page()));
         }
 
         void publishCurrent(String revision) throws Exception {
@@ -327,35 +328,38 @@ class SemanticReviewJdtLsIT {
             writeJar(effectiveDependency, "example.dependency.ExternalReviewDependency", "replacement");
         }
 
-        ReviewQueryContract.ReviewDetails reviewDetails(ReviewId id) {
-            return reviews.getReview(new ReviewQueryContract.ReviewRequest(REPOSITORY_ID, id.value()));
+        SemanticQueryContract.ReviewContextResult reviewDetails(ReviewId id) {
+            return (SemanticQueryContract.ReviewContextResult) reviews.getContext(new SemanticQueryContract.ContextRequest(REPOSITORY_ID,
+                    new SemanticQueryContract.ContextSelector(SemanticQueryContract.SelectorKind.REVIEW, Optional.of(id.value()),
+                            Optional.empty(), Optional.empty(), Optional.empty()), 100));
         }
 
         private String methodFact(ReviewId id, ReviewSide side, String revision, String name) {
             int ownerSeparator = name.lastIndexOf('.');
             String methodName = ownerSeparator < 0 ? name : name.substring(ownerSeparator + 1);
             String owner = ownerSeparator < 0 ? "" : name.substring(0, ownerSeparator);
-            ReviewQueryContract.ReviewResult<SemanticQueryContract.SearchCodeResult> result = reviews.searchCode(
-                    new ReviewQueryContract.ReviewSearchCodeRequest(REPOSITORY_ID, id.value(), side, revision, methodName,
-                            Set.of(CodeFactKind.METHOD), Optional.empty(), 0, 100));
-            return result.result().items().stream()
+            SemanticQueryContract.FactCollection result = reviews.searchCode(
+                    new SemanticQueryContract.SearchCodeRequest(context(id, side, revision), methodName,
+                            Set.of(CodeFactKind.METHOD), Optional.empty(), Optional.empty(), page()));
+            return result.items().stream()
                     .filter(item -> item.displayName().contains(methodName)
-                            && (owner.isEmpty() || item.displayName().contains(owner)))
+                            && (owner.isEmpty() || item.canonical().orElseThrow().contains(owner)))
                     .findFirst().orElseThrow(() -> new AssertionError("missing method fact: " + name)).factId();
         }
 
         private String fact(ReviewId id, ReviewSide side, String revision, String search, CodeFactKind kind) {
-            ReviewQueryContract.ReviewResult<SemanticQueryContract.SearchCodeResult> result = reviews.searchCode(
-                    new ReviewQueryContract.ReviewSearchCodeRequest(REPOSITORY_ID, id.value(), side, revision, search, Set.of(kind), Optional.empty(), 0, 100));
-            return result.result().items().stream().filter(item -> item.displayName().contains(search))
+            SemanticQueryContract.FactCollection result = reviews.searchCode(
+                    new SemanticQueryContract.SearchCodeRequest(context(id, side, revision), search, Set.of(kind),
+                            Optional.empty(), Optional.empty(), page()));
+            return result.items().stream().filter(item -> item.displayName().contains(search))
                     .findFirst().orElseThrow(() -> new AssertionError("missing " + kind + " fact: " + search)).factId();
         }
 
         boolean hasFact(ReviewId id, ReviewSide side, String revision, String search, CodeFactKind kind) {
-            ReviewQueryContract.ReviewResult<SemanticQueryContract.SearchCodeResult> result = reviews.searchCode(
-                    new ReviewQueryContract.ReviewSearchCodeRequest(REPOSITORY_ID, id.value(), side, revision, search, Set.of(kind),
-                            Optional.empty(), 0, 100));
-            return result.result().items().stream().anyMatch(item -> item.displayName().contains(search));
+            SemanticQueryContract.FactCollection result = reviews.searchCode(
+                    new SemanticQueryContract.SearchCodeRequest(context(id, side, revision), search, Set.of(kind),
+                            Optional.empty(), Optional.empty(), page()));
+            return result.items().stream().anyMatch(item -> item.displayName().contains(search));
         }
 
         List<String> classpathDigests(AnalysisInputs inputs) {
@@ -369,12 +373,6 @@ class SemanticReviewJdtLsIT {
                     .findReady(new RepositoryId(REPOSITORY_ID), id);
         }
 
-        private String changedCheckoutId(String comparisonId, String previous, String currentRevision) {
-            SemanticQueryContract.GitComparisonCollection comparison = current.compareRevisions(
-                    new SemanticQueryContract.GitComparisonRequest(REPOSITORY_ID, comparisonId, previous, currentRevision, 0, 100));
-            return comparison.items().stream().filter(item -> "src/main/java/example/Checkout.java".equals(item.newPath()))
-                    .findFirst().orElseThrow().changeId();
-        }
 
         private void waitForCheckout(String base, String revision) throws Exception {
             String jobId = accepted(post("/index/repositories/" + REPOSITORY_ID + "/checkout", Map.of("revision", revision)));

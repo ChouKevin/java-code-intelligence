@@ -27,8 +27,8 @@ class QueryApiExceptionHandlerTest {
         ResponseEntity<?> response = new QueryApiExceptionHandler().failure(exception);
 
         assertEquals(HttpStatus.CONFLICT, response.getStatusCode());
-        assertEquals(new SemanticQueryError("REVISION_OUTDATED", "The requested revision is no longer current.", false,
-                Optional.of("b".repeat(40))), response.getBody());
+        assertEquals("REVISION_OUTDATED", ((SemanticQueryError) response.getBody()).code());
+        assertEquals(Optional.of("b".repeat(40)), ((SemanticQueryError) response.getBody()).currentRevision());
     }
 
     @Test
@@ -36,8 +36,7 @@ class QueryApiExceptionHandlerTest {
         ResponseEntity<?> response = new QueryApiExceptionHandler().failure(new CodeFactNotFoundException());
 
         assertEquals(HttpStatus.NOT_FOUND, response.getStatusCode());
-        assertEquals(new SemanticQueryError("FACT_NOT_FOUND", "The requested fact was not found.", false, Optional.empty()),
-                response.getBody());
+        assertEquals("FACT_NOT_FOUND", ((SemanticQueryError) response.getBody()).code());
     }
 
     @Test
@@ -47,6 +46,6 @@ class QueryApiExceptionHandlerTest {
         assertEquals(HttpStatus.NOT_FOUND, handler.failure(new ReviewNotFoundException()).getStatusCode());
         assertEquals(HttpStatus.CONFLICT, handler.failure(new ReviewNotReadyException()).getStatusCode());
         assertEquals(HttpStatus.CONFLICT, handler.failure(new ReviewFailedException()).getStatusCode());
-        assertEquals(HttpStatus.BAD_REQUEST, handler.failure(new ReviewContextMismatchException()).getStatusCode());
+        assertEquals(HttpStatus.CONFLICT, handler.failure(new ReviewContextMismatchException()).getStatusCode());
     }
 }

@@ -48,13 +48,6 @@ class GitReviewContextJourneyIT {
     private static final Duration STARTUP_TIMEOUT = Duration.ofSeconds(45);
     // Two full review endpoints, including multi-MiB paging fixtures, need the real analysis deadline.
     private static final Duration JOB_TIMEOUT = Duration.ofMinutes(10);
-    private static final List<String> TOOL_NAMES = List.of(
-            "list_repositories", "get_repository", "search_code", "get_fact_source", "list_entry_points", "find_api_routes",
-            "find_event_listeners", "list_type_members", "find_method_implementations", "find_references", "find_callers", "find_callees",
-            "list_git_branches", "list_git_commits", "compare_revisions", "get_file_diff", "list_files", "read_file", "search_text",
-            "get_review", "review_search_code", "review_get_fact_source", "review_list_entry_points", "review_find_api_routes",
-            "review_find_event_listeners", "review_list_type_members", "review_find_method_implementations", "review_find_references",
-            "review_find_callers", "review_find_callees");
 
     @TempDir
     Path temporaryDirectory;
@@ -107,9 +100,7 @@ class GitReviewContextJourneyIT {
                                 Map.of("kind", "RANGE", "beforeRevision", previous, "afterRevision", current))), mapper);
                 Map<?, ?> comparisonStatus = completedJob(indexerBase, comparisonJob, mapper, indexer);
                 Map<?, ?> comparisonEvidence = map(comparisonStatus, "review");
-                String comparisonId = text(comparisonEvidence, "comparisonId");
-                String previousSnapshotId = text(comparisonEvidence, "previousSnapshotId");
-                String currentSnapshotId = text(comparisonEvidence, "currentSnapshotId");
+                String reviewId = text(comparisonEvidence, "reviewId");
                 assertThat(text(map(comparisonEvidence, "resolvedEndpoints"), "afterRevision")).isEqualTo(current);
 
                 seed.commit().setMessage("remote moved after evidence preparation").setAuthor("Fixture", "fixture@example.test")
@@ -129,44 +120,44 @@ class GitReviewContextJourneyIT {
                     String queryBase = "http://127.0.0.1:" + queryPort;
                     awaitHttp(queryBase + "/api/v1/git/branches", QUERY_TOKEN, query);
                     Map<?, ?> branches = successful(post(queryBase, "/api/v1/git/branches", QUERY_TOKEN,
-                            Map.of("repositoryId", REPOSITORY_ID, "catalogId", catalogId, "offset", 0, "limit", 1)), mapper);
-                    assertThat(text(branches, "catalogId")).isEqualTo(catalogId);
+                            Map.of("repositoryId", REPOSITORY_ID, "limit", 1)), mapper);
+                    assertThat(text(map(branches, "metadata"), "catalogId")).isEqualTo(catalogId);
                     assertThat(map(branches, "page").get("hasMore")).isEqualTo(Boolean.TRUE);
                     List<Map<?, ?>> branchItems = exhaustBranches(queryBase, catalogId, mapper);
-                    assertThat(branchItems).extracting(item -> text(item, "head")).contains(current, previous);
+                    assertThat(branchItems).extracting(item -> text(item, "headRevision")).contains(current, previous);
                     Map<?, ?> commits = successful(post(queryBase, "/api/v1/git/commits", QUERY_TOKEN,
-                            Map.of("repositoryId", REPOSITORY_ID, "historyId", historyId, "revision", current, "offset", 0, "limit", 1)), mapper);
-                    assertThat(text(commits, "historyId")).isEqualTo(historyId);
-                    List<Map<?, ?>> history = exhaustHistory(queryBase, historyId, current, mapper);
+                            Map.of("repositoryId", REPOSITORY_ID, "branch", "main", "limit", 1)), mapper);
+                    assertThat(text(map(commits, "metadata"), "historyId")).isEqualTo(historyId);
+                    List<Map<?, ?>> history = exhaustHistory(queryBase, historyId, mapper);
                     assertThat(history).extracting(item -> text(item, "revision")).contains(current, previous);
+                    Map<?, ?> discovery = successful(post(queryBase, "/api/v1/context", QUERY_TOKEN,
+                            Map.of("repositoryId", REPOSITORY_ID, "selector", Map.of("kind", "REVIEW", "reviewId", reviewId))), mapper);
+                    Map<?, ?> beforeContext = map(map(discovery, "before"), "context");
+                    Map<?, ?> afterContext = map(map(discovery, "after"), "context");
+                    Map<?, ?> comparisonContext = map(discovery, "comparisonContext");
                     Map<?, ?> comparison = successful(post(queryBase, "/api/v1/git/comparisons", QUERY_TOKEN,
-                            Map.of("repositoryId", REPOSITORY_ID, "comparisonId", comparisonId, "previous", previous, "current", current,
-                                    "offset", 0, "limit", 100)), mapper);
-                    assertThat(text(comparison, "previousSnapshotId")).isEqualTo(previousSnapshotId);
-                    assertThat(text(comparison, "currentSnapshotId")).isEqualTo(currentSnapshotId);
+                            Map.of("comparisonContext", comparisonContext, "limit", 100)), mapper);
                     Map<?, ?> deleted = matching(mapList(comparison, "items"), "kind", "DELETE");
-                    assertThat(text(deleted, "oldPath")).isEqualTo("src/DeletedPrevious.java");
-                    String largeDiff = exhaustDiff(queryBase, comparisonId, previous, current,
+                    assertThat(text(map(deleted, "before"), "path")).isEqualTo("src/DeletedPrevious.java");
+                    String largeDiff = exhaustDiff(queryBase, comparisonContext,
                             text(matchingPath(mapList(comparison, "items"), "src/LargeDiff.java"), "changeId"), mapper);
                     assertThat(largeDiff).contains("changed-diff previous 0", "changed-diff current 6999");
-                    Map<?, ?> files = successful(post(queryBase, "/api/v1/git/files", QUERY_TOKEN,
-                            Map.of("repositoryId", REPOSITORY_ID, "snapshotId", currentSnapshotId, "revision", current, "directory", "", "offset", 0,
-                                    "limit", 1)), mapper);
-                    assertThat(map(files, "coverage").get("readableTextCount")).isNotNull();
-                    assertThat(map(files, "coverage").get("binaryCount")).isEqualTo(1);
-                    assertThat(map(files, "coverage").get("tooLargeCount")).isEqualTo(1);
-                    assertThat(exhaustFile(queryBase, currentSnapshotId, current, mapper)).isEqualTo(serviceSource("current"));
-                    List<Map<?, ?>> stableMatches = exhaustSearch(queryBase, currentSnapshotId, current, "stable-token", mapper).items();
+                    Map<?, ?> files = successful(post(queryBase, "/api/v1/files", QUERY_TOKEN,
+                            Map.of("context", afterContext, "directory", "", "limit", 1)), mapper);
+                    assertThat(map(files, "page").get("hasMore")).isEqualTo(Boolean.TRUE);
+                    assertThat(exhaustFile(queryBase, afterContext, mapper)).isEqualTo(serviceSource("current"));
+                    List<Map<?, ?>> stableMatches = exhaustSearch(queryBase, afterContext, "stable-token", mapper).items();
                     assertThat(stableMatches).hasSize(30);
                     assertThat(stableMatches).allSatisfy(match -> assertThat(text(match, "snippet")).contains("stable-token current"));
-                    SearchTraversal noHitSearch = exhaustSearch(queryBase, currentSnapshotId, current, "definitely-absent", mapper);
+                    SearchTraversal noHitSearch = exhaustSearch(queryBase, afterContext, "definitely-absent", mapper);
                     assertThat(noHitSearch.items()).isEmpty();
                     assertThat(noHitSearch.pages()).isGreaterThan(1);
-                    assertUnchangedAndDeletedFiles(queryBase, previousSnapshotId, currentSnapshotId, previous, current, mapper);
+                    assertUnchangedAndDeletedFiles(queryBase, beforeContext, afterContext, mapper);
                     assertThat(post(queryBase, "/api/v1/git/branches", "wrong-token", Map.of("repositoryId", REPOSITORY_ID)).statusCode()).isEqualTo(401);
                     assertPendingEvidence(queryBase, mongoUri, mapper);
-                    assertMcpJourney(queryBase, catalogId, historyId, comparisonId, previousSnapshotId, currentSnapshotId, previous, current, mapper);
-                    assertPinnedCatalogAndHistory(queryBase, catalogId, historyId, current, branchItems, history, mapper);
+                    assertMcpJourney(queryBase, catalogId, historyId, comparisonContext, beforeContext, afterContext, mapper);
+                    assertThat(exhaustBranches(queryBase, catalogId, mapper)).isEqualTo(branchItems);
+                    assertThat(exhaustHistory(queryBase, historyId, mapper)).isEqualTo(history);
                 } finally {
                     query.close();
                 }
@@ -342,72 +333,63 @@ class GitReviewContextJourneyIT {
     }
 
     private void assertPendingEvidence(String queryBase, String mongoUri, JsonMapper mapper) throws Exception {
-        String pendingId = "11111111-1111-1111-1111-111111111111";
+        String pendingId = "pending-review";
         try (MongoClient client = MongoClients.create(mongoUri)) {
-            MongoDatabase database = client.getDatabase("git_review_journey");
-            database.getCollection(IndexCollections.GIT_EVIDENCE_MANIFESTS).insertOne(new org.bson.Document("repoId", REPOSITORY_ID)
-                    .append("evidenceId", pendingId).append("kind", "CATALOG").append("state", "PREPARING").append("gitEvidenceVersion", IndexSchemaContract.GIT_EVIDENCE_VERSION).append("scope", "STANDALONE"));
+            client.getDatabase("git_review_journey").getCollection(IndexCollections.REVIEW_MANIFESTS)
+                    .insertOne(new org.bson.Document("repoId", REPOSITORY_ID).append("reviewId", pendingId).append("state", "PREPARING"));
         }
-        HttpResponse<String> response = post(queryBase, "/api/v1/git/branches", QUERY_TOKEN,
-                Map.of("repositoryId", REPOSITORY_ID, "catalogId", pendingId, "offset", 0, "limit", 1));
+        HttpResponse<String> response = post(queryBase, "/api/v1/source", QUERY_TOKEN,
+                Map.of("context", Map.of("kind", "REVIEW", "repositoryId", REPOSITORY_ID, "reviewId", pendingId, "side", "AFTER",
+                        "revision", "a".repeat(40)), "target", Map.of("kind", "FILE", "path", "src/Service.java")));
         assertThat(response.statusCode()).isEqualTo(409);
-        assertThat(mapper.readTree(response.body()).get("code").asString()).isEqualTo("GIT_EVIDENCE_NOT_READY");
+        assertThat(mapper.readTree(response.body()).get("code").asString()).isEqualTo("REVIEW_NOT_READY");
     }
 
-    private void assertMcpJourney(String queryBase, String catalogId, String historyId, String comparisonId, String previousSnapshotId,
-                                  String currentSnapshotId, String previous, String current, JsonMapper mapper) {
+    private void assertMcpJourney(String queryBase, String catalogId, String historyId, Map<?, ?> comparisonContext,
+            Map<?, ?> beforeContext, Map<?, ?> afterContext, JsonMapper mapper) {
         HttpClientStreamableHttpTransport transport = HttpClientStreamableHttpTransport.builder(queryBase + "/mcp")
                 .jsonMapper(new JacksonMcpJsonMapper(mapper))
                 .httpRequestCustomizer((request, method, uri, body, context) -> request.header(TOKEN_HEADER, QUERY_TOKEN)).build();
         try (McpSyncClient client = McpClient.sync(transport).requestTimeout(Duration.ofSeconds(30)).initializationTimeout(Duration.ofSeconds(30)).build()) {
-            assertThat(client.initialize().serverInfo()).isNotNull();
-            McpSchema.ListToolsResult tools = client.listTools();
-            assertThat(tools.tools()).extracting(McpSchema.Tool::name).containsExactlyInAnyOrderElementsOf(TOOL_NAMES);
-            Map<?, ?> branches = mcpBody(client, "list_git_branches", Map.of("repositoryId", REPOSITORY_ID, "catalogId", catalogId), mapper);
-            assertThat(text(branches, "catalogId")).isEqualTo(catalogId);
-            Map<?, ?> commits = mcpBody(client, "list_git_commits", Map.of("repositoryId", REPOSITORY_ID, "historyId", historyId, "revision", current), mapper);
-            assertThat(text(commits, "historyId")).isEqualTo(historyId);
-            Map<?, ?> comparison = mcpBody(client, "compare_revisions", Map.of("repositoryId", REPOSITORY_ID, "comparisonId", comparisonId,
-                    "previous", previous, "current", current), mapper);
+            client.initialize();
+            Map<?, ?> branches = mcpBody(client, "list_git_branches", Map.of("repositoryId", REPOSITORY_ID), mapper);
+            assertThat(text(map(branches, "metadata"), "catalogId")).isEqualTo(catalogId);
+            Map<?, ?> commits = mcpBody(client, "list_git_commits", Map.of("repositoryId", REPOSITORY_ID, "branch", "main"), mapper);
+            assertThat(text(map(commits, "metadata"), "historyId")).isEqualTo(historyId);
+            Map<?, ?> comparison = mcpBody(client, "compare_revisions", Map.of("comparisonContext", comparisonContext), mapper);
             Map<?, ?> modified = matchingPath(mapList(comparison, "items"), "src/LargeDiff.java");
-            mcpBody(client, "get_file_diff", Map.of("repositoryId", REPOSITORY_ID, "comparisonId", comparisonId, "previous", previous,
-                    "current", current, "changeId", text(modified, "changeId")), mapper);
-            Map<?, ?> files = mcpBody(client, "list_files", Map.of("repositoryId", REPOSITORY_ID, "snapshotId", currentSnapshotId,
-                    "revision", current, "directory", ""), mapper);
-            assertThat(map(files, "coverage").get("inventoryCount")).isNotNull();
-            Map<?, ?> file = mcpBody(client, "read_file", Map.of("repositoryId", REPOSITORY_ID, "snapshotId", previousSnapshotId,
-                    "revision", previous, "path", "src/Service.java", "startLine", 3, "maxLines", 1), mapper);
-            assertThat(text(file, "content")).contains("stable-token");
-            Map<?, ?> search = mcpBody(client, "search_text", Map.of("repositoryId", REPOSITORY_ID, "snapshotId", currentSnapshotId,
-                    "revision", current, "query", "stable-token", "limit", 1), mapper);
-            assertThat(mapList(search, "items")).isNotEmpty();
+            Map<?, ?> patch = mcpBody(client, "get_file_diff", Map.of("comparisonContext", comparisonContext, "changeId", text(modified, "changeId")), mapper);
+            assertThat(text(patch, "patch")).contains("changed-diff previous");
+            Map<?, ?> file = mcpBody(client, "read_source", Map.of("context", beforeContext,
+                    "target", Map.of("kind", "FILE", "path", "src/Service.java", "startLine", 3), "maxLines", 1), mapper);
+            assertThat(text(file, "content")).contains("stable-token previous");
             Map<?, ?> deleted = matching(mapList(comparison, "items"), "kind", "DELETE");
-            Map<?, ?> terminalDiff = mcpBody(client, "get_file_diff", Map.of("repositoryId", REPOSITORY_ID, "comparisonId", comparisonId,
-                    "previous", previous, "current", current, "changeId", text(deleted, "changeId")), mapper);
+            Map<?, ?> terminalDiff = mcpBody(client, "get_file_diff", Map.of("comparisonContext", comparisonContext, "changeId", text(deleted, "changeId")), mapper);
+            assertThat(terminalDiff.get("complete")).isEqualTo(Boolean.TRUE);
             assertNoCursor(terminalDiff);
-            Map<?, ?> terminalFile = mcpBody(client, "read_file", Map.of("repositoryId", REPOSITORY_ID, "snapshotId", previousSnapshotId,
-                    "revision", previous, "path", "src/DeletedPrevious.java"), mapper);
+            Map<?, ?> terminalFile = mcpBody(client, "read_source", Map.of("context", beforeContext,
+                    "target", Map.of("kind", "FILE", "path", "src/DeletedPrevious.java")), mapper);
+            assertThat(text(terminalFile, "content")).contains("class DeletedPrevious");
             assertNoCursor(terminalFile);
-            McpSearchTraversal terminalSearch = exhaustMcpSearch(client, currentSnapshotId, current, "stable-token", mapper);
+            McpSearchTraversal terminalSearch = exhaustMcpSearch(client, afterContext, "stable-token", mapper);
             assertThat(terminalSearch.items()).hasSize(30);
             assertThat(terminalSearch.items()).allSatisfy(match -> assertThat(text(match, "snippet")).contains("stable-token current"));
             assertThat(terminalSearch.finalPage().get("scanComplete")).isEqualTo(Boolean.TRUE);
-            assertNoCursor(terminalSearch.finalPage());
+            assertNoCursor(map(terminalSearch.finalPage(), "page"));
         }
     }
 
     private static Map<?, ?> mcpBody(McpSyncClient client, String toolName, Map<String, Object> arguments, JsonMapper mapper) {
         McpSchema.CallToolResult response = client.callTool(McpSchema.CallToolRequest.builder(toolName).arguments(arguments).build());
         assertThat(response.isError()).as("%s must succeed: structured=%s content=%s", toolName, response.structuredContent(), response.content()).isFalse();
+        assertThat(mapper.readTree(((McpSchema.TextContent) response.content().getFirst()).text()))
+                .isEqualTo(mapper.readTree(mapper.writeValueAsString(response.structuredContent())));
         return mapper.convertValue(response.structuredContent(), Map.class);
     }
 
-    private static McpSearchTraversal exhaustMcpSearch(McpSyncClient client, String snapshotId, String revision, String query,
-                                                        JsonMapper mapper) {
+    private static McpSearchTraversal exhaustMcpSearch(McpSyncClient client, Map<?, ?> context, String query, JsonMapper mapper) {
         Map<String, Object> arguments = new java.util.HashMap<>();
-        arguments.put("repositoryId", REPOSITORY_ID);
-        arguments.put("snapshotId", snapshotId);
-        arguments.put("revision", revision);
+        arguments.put("context", context);
         arguments.put("query", query);
         arguments.put("limit", 1);
         List<Map<?, ?>> items = new ArrayList<>();
@@ -417,7 +399,7 @@ class GitReviewContextJourneyIT {
             if (Boolean.TRUE.equals(page.get("scanComplete"))) {
                 return new McpSearchTraversal(List.copyOf(items), page);
             }
-            arguments.put("cursor", text(page, "nextCursor"));
+            arguments.put("cursor", text(map(page, "page"), "nextCursor"));
         }
     }
 
@@ -425,9 +407,8 @@ class GitReviewContextJourneyIT {
         assertThat(body.containsKey("nextCursor")).isFalse();
     }
 
-    private String exhaustDiff(String base, String comparisonId, String previous, String current, String changeId, JsonMapper mapper) throws Exception {
-        Map<String, Object> request = Map.of("repositoryId", REPOSITORY_ID, "comparisonId", comparisonId, "previous", previous, "current", current,
-                "changeId", changeId);
+    private String exhaustDiff(String base, Map<?, ?> comparisonContext, String changeId, JsonMapper mapper) throws Exception {
+        Map<String, Object> request = new java.util.HashMap<>(Map.of("comparisonContext", comparisonContext, "changeId", changeId));
         Map<?, ?> page = successful(post(base, "/api/v1/git/file-diff", QUERY_TOKEN, request), mapper);
         StringBuilder patch = new StringBuilder();
         while (true) {
@@ -436,28 +417,28 @@ class GitReviewContextJourneyIT {
             if (!page.containsKey("nextCursor")) {
                 return patch.toString();
             }
-            page = successful(post(base, "/api/v1/git/file-diff", QUERY_TOKEN, Map.of("repositoryId", REPOSITORY_ID, "comparisonId", comparisonId,
-                    "previous", previous, "current", current, "changeId", changeId, "cursor", text(page, "nextCursor"))), mapper);
+            request.put("cursor", text(page, "nextCursor"));
+            page = successful(post(base, "/api/v1/git/file-diff", QUERY_TOKEN, request), mapper);
         }
     }
 
-    private String exhaustFile(String base, String snapshotId, String revision, JsonMapper mapper) throws Exception {
-        Map<?, ?> page = successful(post(base, "/api/v1/git/file", QUERY_TOKEN, Map.of("repositoryId", REPOSITORY_ID, "snapshotId", snapshotId,
-                "revision", revision, "path", "src/Service.java", "maxLines", 1)), mapper);
+    private String exhaustFile(String base, Map<?, ?> context, JsonMapper mapper) throws Exception {
+        Map<String, Object> request = new java.util.HashMap<>(Map.of("context", context, "target", Map.of("kind", "FILE", "path", "src/Service.java"), "maxLines", 1));
+        Map<?, ?> page = successful(post(base, "/api/v1/source", QUERY_TOKEN, request), mapper);
         StringBuilder content = new StringBuilder();
         while (true) {
             content.append(text(page, "content"));
             if (!page.containsKey("nextCursor")) {
                 return content.toString();
             }
-            page = successful(post(base, "/api/v1/git/file", QUERY_TOKEN, Map.of("repositoryId", REPOSITORY_ID, "snapshotId", snapshotId,
-                    "revision", revision, "path", "src/Service.java", "maxLines", 1, "cursor", text(page, "nextCursor"))), mapper);
+            request.put("cursor", text(page, "nextCursor"));
+            page = successful(post(base, "/api/v1/source", QUERY_TOKEN, request), mapper);
         }
     }
 
-    private SearchTraversal exhaustSearch(String base, String snapshotId, String revision, String query, JsonMapper mapper) throws Exception {
-        Map<?, ?> page = successful(post(base, "/api/v1/git/search", QUERY_TOKEN, Map.of("repositoryId", REPOSITORY_ID, "snapshotId", snapshotId,
-                "revision", revision, "query", query, "limit", 1)), mapper);
+    private SearchTraversal exhaustSearch(String base, Map<?, ?> context, String query, JsonMapper mapper) throws Exception {
+        Map<String, Object> request = new java.util.HashMap<>(Map.of("context", context, "query", query, "limit", 1));
+        Map<?, ?> page = successful(post(base, "/api/v1/search-text", QUERY_TOKEN, request), mapper);
         List<Map<?, ?>> items = new ArrayList<>();
         int pages = 0;
         while (true) {
@@ -466,61 +447,55 @@ class GitReviewContextJourneyIT {
             if (Boolean.TRUE.equals(page.get("scanComplete"))) {
                 return new SearchTraversal(List.copyOf(items), pages);
             }
-            String cursor = text(page, "nextCursor");
-            HttpResponse<String> continuation = post(base, "/api/v1/git/search", QUERY_TOKEN, Map.of("repositoryId", REPOSITORY_ID,
-                    "snapshotId", snapshotId, "revision", revision, "query", query, "limit", 1, "cursor", cursor));
+            String cursor = text(map(page, "page"), "nextCursor");
+            request.put("cursor", cursor);
+            HttpResponse<String> continuation = post(base, "/api/v1/search-text", QUERY_TOKEN, request);
             assertThat(continuation.statusCode()).as("query=%s cursor=%s body=%s", query, cursor, continuation.body()).isEqualTo(200);
             page = mapper.readValue(continuation.body(), Map.class);
         }
     }
 
     private List<Map<?, ?>> exhaustBranches(String base, String catalogId, JsonMapper mapper) throws Exception {
-        return exhaustOffsetPages(base, "/api/v1/git/branches", Map.of("repositoryId", REPOSITORY_ID, "catalogId", catalogId), "catalogId", catalogId, mapper);
+        return exhaustPages(base, "/api/v1/git/branches", Map.of("repositoryId", REPOSITORY_ID), "catalogId", catalogId, mapper);
     }
 
-    private List<Map<?, ?>> exhaustHistory(String base, String historyId, String revision, JsonMapper mapper) throws Exception {
-        return exhaustOffsetPages(base, "/api/v1/git/commits", Map.of("repositoryId", REPOSITORY_ID, "historyId", historyId, "revision", revision),
-                "historyId", historyId, mapper);
+    private List<Map<?, ?>> exhaustHistory(String base, String historyId, JsonMapper mapper) throws Exception {
+        return exhaustPages(base, "/api/v1/git/commits", Map.of("repositoryId", REPOSITORY_ID, "branch", "main"), "historyId", historyId, mapper);
     }
 
-    private List<Map<?, ?>> exhaustOffsetPages(String base, String path, Map<String, String> identity, String identityKey, String identityValue,
-                                                 JsonMapper mapper) throws Exception {
+    private List<Map<?, ?>> exhaustPages(String base, String path, Map<String, String> identity, String identityKey, String identityValue,
+            JsonMapper mapper) throws Exception {
         List<Map<?, ?>> items = new ArrayList<>();
-        int offset = 0;
+        Map<String, Object> request = new java.util.HashMap<>(identity);
+        request.put("limit", 1);
         while (true) {
-            Map<String, Object> request = new java.util.HashMap<>(identity);
-            request.put("offset", offset);
-            request.put("limit", 1);
             Map<?, ?> page = successful(post(base, path, QUERY_TOKEN, request), mapper);
-            assertThat(text(page, identityKey)).isEqualTo(identityValue);
-            List<Map<?, ?>> pageItems = mapList(page, "items");
-            items.addAll(pageItems);
-            if (!Boolean.TRUE.equals(map(page, "page").get("hasMore"))) {
-                return List.copyOf(items);
-            }
-            offset += pageItems.size();
+            assertThat(text(map(page, "metadata"), identityKey)).isEqualTo(identityValue);
+            items.addAll(mapList(page, "items"));
+            if (!Boolean.TRUE.equals(map(page, "page").get("hasMore"))) return List.copyOf(items);
+            request.put("cursor", text(map(page, "page"), "nextCursor"));
         }
     }
 
-    private void assertPinnedCatalogAndHistory(String base, String catalogId, String historyId, String revision, List<Map<?, ?>> branches,
-                                                List<Map<?, ?>> history, JsonMapper mapper) throws Exception {
-        assertThat(exhaustBranches(base, catalogId, mapper)).isEqualTo(branches);
-        assertThat(exhaustHistory(base, historyId, revision, mapper)).isEqualTo(history);
+    private void assertUnchangedAndDeletedFiles(String base, Map<?, ?> beforeContext, Map<?, ?> afterContext, JsonMapper mapper) throws Exception {
+        assertThat(readFile(base, afterContext, "src/Caller.java", mapper)).isEqualTo("class Caller { int call() { return Service.version(); } }\n");
+        assertThat(readFile(base, afterContext, "src/ServiceTest.java", mapper)).isEqualTo("class ServiceTest { }\n");
+        assertThat(readFile(base, beforeContext, "src/DeletedPrevious.java", mapper)).isEqualTo("class DeletedPrevious { }\n");
+        for (String path : List.of("config/review.properties", "docs/review.md", "assets/binary.dat")) {
+            HttpResponse<String> excluded = post(base, "/api/v1/source", QUERY_TOKEN,
+                    Map.of("context", afterContext, "target", Map.of("kind", "FILE", "path", path)));
+            assertThat(excluded.statusCode()).isEqualTo(404);
+            assertThat(excluded.body()).doesNotContain("synthetic", "Synthetic review fixture");
+        }
+        Map<?, ?> codeFiles = successful(post(base, "/api/v1/files", QUERY_TOKEN, Map.of("context", afterContext, "directory", "src")), mapper);
+        assertThat(mapList(codeFiles, "items")).extracting(item -> text(item, "path"))
+                .contains("src/Caller.java", "src/Service.java").doesNotContain("config/review.properties", "docs/review.md");
     }
 
-    private void assertUnchangedAndDeletedFiles(String base, String previousSnapshotId, String currentSnapshotId, String previous, String current,
-                                                JsonMapper mapper) throws Exception {
-        assertThat(readFile(base, currentSnapshotId, current, "src/Caller.java", mapper)).isEqualTo("class Caller { int call() { return Service.version(); } }\n");
-        assertThat(readFile(base, currentSnapshotId, current, "src/ServiceTest.java", mapper)).isEqualTo("class ServiceTest { }\n");
-        assertThat(readFile(base, currentSnapshotId, current, "config/review.properties", mapper)).isEqualTo("review.mode=synthetic\n");
-        assertThat(readFile(base, currentSnapshotId, current, "docs/review.md", mapper)).isEqualTo("# Synthetic review fixture\n");
-        assertThat(readFile(base, previousSnapshotId, previous, "src/DeletedPrevious.java", mapper)).isEqualTo("class DeletedPrevious { }\n");
-    }
-
-    private String readFile(String base, String snapshotId, String revision, String path, JsonMapper mapper) throws Exception {
-        Map<?, ?> page = successful(post(base, "/api/v1/git/file", QUERY_TOKEN, Map.of("repositoryId", REPOSITORY_ID, "snapshotId", snapshotId,
-                "revision", revision, "path", path)), mapper);
-        assertThat(page.containsKey("nextCursor")).isFalse();
+    private String readFile(String base, Map<?, ?> context, String path, JsonMapper mapper) throws Exception {
+        Map<?, ?> page = successful(post(base, "/api/v1/source", QUERY_TOKEN,
+                Map.of("context", context, "target", Map.of("kind", "FILE", "path", path))), mapper);
+        assertNoCursor(page);
         return text(page, "content");
     }
 
@@ -617,7 +592,7 @@ class GitReviewContextJourneyIT {
     }
 
     private static Map<?, ?> matchingPath(List<Map<?, ?>> items, String path) {
-        return items.stream().filter(item -> path.equals(item.get("newPath"))).findFirst()
+        return items.stream().filter(item -> item.get("after") instanceof Map<?, ?> after && path.equals(after.get("path"))).findFirst()
                 .orElseThrow(() -> new AssertionError("missing changed path " + path));
     }
 

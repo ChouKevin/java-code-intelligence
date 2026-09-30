@@ -1,8 +1,6 @@
 package com.java.semantic.query.application;
 
 import com.java.semantic.model.git.GitComparisonId;
-import com.java.semantic.model.git.GitEvidenceOwnership;
-import com.java.semantic.model.git.GitPublicationScope;
 import com.java.semantic.model.git.GitSnapshotId;
 import com.java.semantic.model.index.IndexCollections;
 import com.java.semantic.model.index.IndexSchemaContract;
@@ -77,27 +75,6 @@ public final class ReviewManifestReadService {
         }
     }
 
-    public void requireGitMembership(RepositoryId repositoryId, GitEvidenceOwnership ownership, GitComparisonId comparisonId,
-                                     GitSnapshotId previousSnapshotId, GitSnapshotId currentSnapshotId,
-                                     Optional<RepositoryRevision> previous, RepositoryRevision current) {
-        RepositoryId requiredRepositoryId = Objects.requireNonNull(repositoryId, "repository id is required");
-        GitEvidenceOwnership requiredOwnership = Objects.requireNonNull(ownership, "Git evidence ownership is required");
-        if (requiredOwnership.scope() == GitPublicationScope.STANDALONE) {
-            return;
-        }
-        ReviewId reviewId = requiredOwnership.reviewId().orElseThrow(IndexContractMismatchException::new);
-        ReviewManifestDocument review = requireReady(requiredRepositoryId, reviewId);
-        ResolvedReviewEndpoints resolved = review.resolvedEndpoints().orElseThrow(IndexContractMismatchException::new);
-        if (!review.comparisonId().orElseThrow().equals(Objects.requireNonNull(comparisonId, "comparison id is required"))
-                || !review.after().orElseThrow().snapshotId().equals(Objects.requireNonNull(currentSnapshotId, "current snapshot id is required"))
-                || !resolved.beforeRevision().equals(Objects.requireNonNull(previous, "previous revision is required"))
-                || !resolved.afterRevision().equals(Objects.requireNonNull(current, "current revision is required"))
-                || review.before().isPresent() != previous.isPresent()
-                || review.before().isPresent() && !review.before().orElseThrow().snapshotId().equals(previousSnapshotId)) {
-            throw new IndexContractMismatchException();
-        }
-    }
-
     private RuntimeException stateFromReviewJob(RepositoryId repositoryId, ReviewId reviewId) {
         Document job = template.getCollection(IndexCollections.INDEX_JOBS).find(Filters.and(
                 Filters.eq("repoId", repositoryId.value()), Filters.eq("operation", "REVIEW"),
@@ -111,7 +88,7 @@ public final class ReviewManifestReadService {
         return new ReviewNotReadyException();
     }
 
-    private ReviewManifestDocument decodeReady(Document document, RepositoryId repositoryId, ReviewId reviewId) {
+    ReviewManifestDocument decodeReady(Document document, RepositoryId repositoryId, ReviewId reviewId) {
         try {
             if (!repositoryId.value().equals(requiredText(document, "repoId")) || !reviewId.value().equals(requiredText(document, "reviewId"))
                     || requiredInteger(document, "reviewContractVersion") != IndexSchemaContract.REVIEW_MANIFEST_VERSION) {

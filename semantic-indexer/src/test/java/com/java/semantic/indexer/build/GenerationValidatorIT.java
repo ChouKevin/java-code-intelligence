@@ -11,6 +11,7 @@ import com.java.semantic.model.index.GenerationId;
 import com.java.semantic.model.index.IndexCollections;
 import com.java.semantic.model.index.IndexSchemaContract;
 import com.java.semantic.model.index.SourceArtifactDocument;
+import com.java.semantic.model.index.SemanticAnalysisEvidence;
 import com.java.semantic.repository.domain.RepositorySnapshot;
 import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.model.repository.RepositoryRevision;
@@ -30,6 +31,7 @@ import com.java.semantic.indexer.job.IndexJobTarget;
 import com.mongodb.client.MongoClients;
 import com.mongodb.client.model.IndexOptions;
 import java.nio.file.Path;
+import java.nio.file.Files;
 import java.util.Date;
 import java.util.List;
 import java.time.Instant;
@@ -137,8 +139,49 @@ class GenerationValidatorIT {
         }
     }
 
+    @ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {"UPDATE", "MISSING", "", "UPSERT"})
+    void validates_mapper_operation_before_publication(String malformed,
+            @org.junit.jupiter.api.io.TempDir Path repository) throws Exception {
+        Path source = repository.resolve("src/main/resources/mapper/OrderMapper.xml");
+        Files.createDirectories(source.getParent());
+        Files.createDirectories(repository.resolve("src/main/java"));
+        Files.writeString(source, "<mapper namespace=\"orders.OrderMapper\"><update id=\"change\">update orders set status = 1</update></mapper>");
+        FullIndexPlan plan = new FullIndexPlanner().plan(repository);
+        SourceIndexBatch batch = new TestSyntaxRepositoryIndexExporter().export(RepositoryId.of("orders"), revision(),
+                lease().generationId(), plan).getFirst();
+        try (MongoDBContainer container = new MongoDBContainer("mongo:8.0.4")) {
+            container.start();
+            MongoTemplate template = new MongoTemplate(MongoClients.create(container.getConnectionString()), "semantic");
+            new IndexSchemaBootstrap(template).bootstrap();
+            seedWritingGeneration(template, batch);
+            Document mutation = "MISSING".equals(malformed)
+                    ? new Document("$unset", new Document("mapperStatementKind", ""))
+                    : new Document("$set", new Document("mapperStatementKind", malformed));
+            assertThat(template.getCollection(IndexCollections.SYMBOLS)
+                    .updateMany(new Document("generationId", "g1"), mutation).getMatchedCount()).isEqualTo(1);
+
+            GenerationValidator.ValidationResult result = new GenerationValidator(template).validate(lease(), revision(), revision(), plan);
+            assertThat(result.valid()).isEqualTo("UPDATE".equals(malformed));
+            if (!"UPDATE".equals(malformed)) {
+                assertThat(result.issues()).extracting(GenerationValidationIssue::code).contains("INVALID_PROJECTION_DOCUMENT");
+            }
+            assertThat(template.getCollection(IndexCollections.REPOSITORIES).find(new Document("repoId", "orders")).first()
+                    .get("currentPointer", Document.class).getString("generationId")).isEqualTo("old-generation");
+        }
+    }
+
     private static Stream<Arguments> invalidGenerationMutations() {
         return Stream.of(
+                Arguments.of("missing symbol operation", (Consumer<MongoTemplate>) template ->
+                        template.getCollection(IndexCollections.SYMBOLS).updateOne(new Document(),
+                                new Document("$unset", new Document("mapperStatementKind", ""))), "INVALID_PROJECTION_DOCUMENT"),
+                Arguments.of("unknown symbol operation", (Consumer<MongoTemplate>) template ->
+                        template.getCollection(IndexCollections.SYMBOLS).updateOne(new Document(),
+                                new Document("$set", new Document("mapperStatementKind", "UPSERT"))), "INVALID_PROJECTION_DOCUMENT"),
+                Arguments.of("mapper operation on method", (Consumer<MongoTemplate>) template ->
+                        template.getCollection(IndexCollections.SYMBOLS).updateOne(new Document(),
+                                new Document("$set", new Document("mapperStatementKind", "UPDATE"))), "INVALID_PROJECTION_DOCUMENT"),
                 Arguments.of("missing semantic evidence", (Consumer<MongoTemplate>) template ->
                         template.getCollection(IndexCollections.GENERATION_MANIFESTS).updateOne(new Document("generationId", "g1"),
                                 new Document("$unset", new Document("analysisEvidence", ""))), "MISSING_ANALYSIS_EVIDENCE"),
@@ -215,6 +258,10 @@ class GenerationValidatorIT {
     }
 
     static void seedValidWritingGeneration(MongoTemplate template) {
+        seedWritingGeneration(template, FullIndexPublicationIT.validBatch(RepositoryId.of("orders"), revision(), new GenerationId("g1")));
+    }
+
+    static void seedWritingGeneration(MongoTemplate template, SourceIndexBatch batch) {
         template.getCollection(IndexCollections.REPOSITORIES).insertOne(new Document("repoId", "orders").append("currentPointer",
                 new Document("revision", "b".repeat(40)).append("generationId", "old-generation").append("manifestDigest", "c".repeat(64))
                         .append("committedJobId", "old-job").append("publishedAt", new Date(0L))));
@@ -231,8 +278,13 @@ class GenerationValidatorIT {
                 .append("failedOrAmbiguousBatches", List.of()));
         TestPreparedAnalysis analysis = TestPreparedAnalysis.forSnapshot(new RepositorySnapshot(
                 RepositoryId.of("orders"), Path.of("."), revision()), new FullIndexPlan(Path.of("."), List.of()));
-        new MongoGenerationWriter(template).recordAnalysis(lease(), analysis.fingerprint(), analysis.readinessEvidence());
-        SourceIndexBatch batch = FullIndexPublicationIT.validBatch(RepositoryId.of("orders"), revision(), new GenerationId("g1"));
+        SemanticAnalysisEvidence evidence = analysis.readinessEvidence();
+        List<SemanticAnalysisEvidence.ProjectProof> projects = evidence.projects().stream()
+                .map(project -> new SemanticAnalysisEvidence.ProjectProof(project.projectPath(), project.imported(),
+                        batch.sourcePath().endsWith(".java") ? project.verifiedSourcePaths() : List.of())).toList();
+        new MongoGenerationWriter(template).recordAnalysis(lease(), analysis.fingerprint(),
+                new SemanticAnalysisEvidence(evidence.contractVersion(), evidence.fingerprintDigest(), evidence.buildStatus(),
+                        projects, evidence.resolution(), evidence.limitations()));
         new MongoIndexBatchWriter(new MongoGenerationWriter(template), lease(),
                 new SourceIndexBatchDocumentMapper(template.getConverter())).write(batch);
         SourceEvidencePolicy policy = new SourceEvidencePolicy(1, List.of("src"), Set.of(batch.sourcePath()), Optional.empty());

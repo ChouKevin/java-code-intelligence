@@ -463,7 +463,7 @@ class IndexDocumentContractTest {
     private static SymbolDocument symbolDocument(RepositoryId repositoryId, CodeFact fact, CodeFactKind kind) {
         return new SymbolDocument(repositoryId, new GenerationId("generation-1"), fact, kind, "com.example.Order",
                 "method", "method()", new com.java.semantic.model.codefact.DeclaredType("void"), Set.of(), List.of(),
-                new SourceArtifactId("a".repeat(64)), range(4));
+                new SourceArtifactId("a".repeat(64)), range(4), Optional.empty());
     }
 
     private static RelationDocument relationDocument(

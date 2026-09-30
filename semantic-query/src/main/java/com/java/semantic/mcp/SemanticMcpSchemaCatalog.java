@@ -1,484 +1,253 @@
 package com.java.semantic.mcp;
 
-import com.java.semantic.model.codefact.CodeFactId;
 import com.java.semantic.model.codefact.CodeFactKind;
-import com.java.semantic.model.codefact.CodeFactSearchQuery;
-import com.java.semantic.model.codefact.EntryPointKind;
-import com.java.semantic.model.codefact.TypeMemberQuery;
-import com.java.semantic.model.repository.RepositoryId;
-import com.java.semantic.model.repository.RepositoryRevision;
-import com.java.semantic.model.review.ReviewSide;
 import com.java.semantic.query.application.SemanticQueryContract;
-
-import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.Set;
 
-/** The single MCP SDK schema-map catalog when generated schemas cannot express this contract. */
+/** Explicit wire schemas: unions reject unrelated identities and never advertise aliases. */
 public final class SemanticMcpSchemaCatalog {
-
-    private static final Map<String, Map<String, Object>> INPUT_SCHEMAS = inputSchemas();
-    private static final Map<String, Map<String, Object>> OUTPUT_SCHEMAS = outputSchemas();
-
-    private SemanticMcpSchemaCatalog() {
-    }
-
-    public static Map<String, Object> inputSchema(String toolName) {
-        return Optional.ofNullable(INPUT_SCHEMAS.get(toolName))
-                .orElseThrow(() -> new IllegalArgumentException("unknown Semantic MCP tool"));
-    }
-
-    public static Map<String, Object> outputSchema(String toolName) {
-        return Optional.ofNullable(OUTPUT_SCHEMAS.get(toolName))
-                .orElseThrow(() -> new IllegalArgumentException("unknown Semantic MCP tool"));
-    }
-
-    public static Set<String> allowedFields(String toolName) {
-        return properties(inputSchema(toolName)).keySet();
-    }
-
-    @SuppressWarnings("unchecked")
-    public static List<String> requiredFields(String toolName) {
-        return (List<String>) inputSchema(toolName).get("required");
-    }
-
-    private static Map<String, Map<String, Object>> outputSchemas() {
-        Map<String, Map<String, Object>> schemas = new LinkedHashMap<>();
-        schemas.put("list_git_branches", gitBranchCollection());
-        schemas.put("list_git_commits", gitCommitCollection());
-        schemas.put("compare_revisions", gitComparisonCollection());
-        schemas.put("get_file_diff", gitFileDiffResult());
-        schemas.put("list_files", gitFileCollection());
-        schemas.put("read_file", gitFileContent());
-        schemas.put("search_text", gitTextSearchResult());
-        schemas.put("list_repositories", repositoryCollection());
-        schemas.put("get_repository", repositoryItem());
-        schemas.put("search_code", searchCodeResult());
-        schemas.put("get_fact_source", factSourceResult());
-        schemas.put("list_entry_points", collection(entryPointItem()));
-        schemas.put("find_api_routes", collection(entryPointItem()));
-        schemas.put("find_event_listeners", collection(eventListenerItem()));
-        schemas.put("list_type_members", collection(internalProgramElement()));
-        schemas.put("find_method_implementations", collection(implementationItem()));
-        schemas.put("find_references", collection(referenceItem()));
-        schemas.put("find_callers", collection(callerItem()));
-        schemas.put("find_callees", collection(calleeItem()));
-        schemas.put("get_review", reviewDetails());
-        schemas.put("review_search_code", reviewResult(searchCodeResult()));
-        schemas.put("review_get_fact_source", reviewResult(factSourceResult()));
-        schemas.put("review_list_entry_points", reviewResult(collection(entryPointItem())));
-        schemas.put("review_find_api_routes", reviewResult(collection(entryPointItem())));
-        schemas.put("review_find_event_listeners", reviewResult(collection(eventListenerItem())));
-        schemas.put("review_list_type_members", reviewResult(collection(internalProgramElement())));
-        schemas.put("review_find_method_implementations", reviewResult(collection(implementationItem())));
-        schemas.put("review_find_references", reviewResult(collection(referenceItem())));
-        schemas.put("review_find_callers", reviewResult(collection(callerItem())));
-        schemas.put("review_find_callees", reviewResult(collection(calleeItem())));
-        return Map.copyOf(schemas);
-    }
-
-    private static Map<String, Object> repositoryCollection() {
-        return schema(Map.of("items", items(repositoryItem()), "page", page()), List.of("items", "page"));
-    }
-
-    private static Map<String, Object> gitBranchCollection() {
-        Map<String, Object> item = schema(Map.of("branch", string(), "head", revision()), List.of("branch", "head"));
-        return schema(Map.of("repositoryId", repositoryId(), "catalogId", gitEvidenceId(), "observedAt", string(),
-                "items", items(item), "page", page()), List.of("repositoryId", "catalogId", "observedAt", "items", "page"));
-    }
-
-    private static Map<String, Object> gitCommitCollection() {
-        Map<String, Object> item = schema(Map.of("revision", revision(), "parents", items(revision()), "subject", string(),
-                "committedAt", string()), List.of("revision", "parents", "subject", "committedAt"));
-        return schema(Map.of("repositoryId", repositoryId(), "historyId", gitEvidenceId(), "revision", revision(), "preparedAt", string(),
-                "items", items(item), "page", page()), List.of("repositoryId", "historyId", "revision", "preparedAt", "items", "page"));
-    }
-
-    private static Map<String, Object> gitComparisonCollection() {
-        return schema(Map.of("repositoryId", repositoryId(), "comparisonId", gitEvidenceId(), "previous", nullableRevision(), "current", revision(),
-                "previousSnapshotId", gitEvidenceId(), "currentSnapshotId", gitEvidenceId(), "ancestry", string(), "items", items(gitChange()), "page", page()),
-                List.of("repositoryId", "comparisonId", "previous", "current", "previousSnapshotId", "currentSnapshotId", "ancestry", "items", "page"));
-    }
-
-    private static Map<String, Object> gitFileDiffResult() {
-        return schema(Map.of("repositoryId", repositoryId(), "comparisonId", gitEvidenceId(), "previous", nullableRevision(), "current", revision(),
-                "change", gitChange(), "patch", string(), "nextCursor", string()),
-                List.of("repositoryId", "comparisonId", "previous", "current", "change", "patch"));
-    }
-
-    private static Map<String, Object> gitFileCollection() {
-        return schema(Map.of("repositoryId", repositoryId(), "snapshotId", gitEvidenceId(), "revision", revision(), "items", items(gitFileItem()),
-                "page", page(), "coverage", gitSnapshotCoverage()), List.of("repositoryId", "snapshotId", "revision", "items", "page", "coverage"));
-    }
-
-    private static Map<String, Object> gitFileContent() {
-        return schema(Map.ofEntries(Map.entry("repositoryId", repositoryId()), Map.entry("snapshotId", gitEvidenceId()),
-                Map.entry("revision", revision()), Map.entry("path", string()), Map.entry("pathKey", string()),
-                Map.entry("contentStatus", string()), Map.entry("content", string()), Map.entry("startLine", nonNegativeInteger()),
-                Map.entry("endLine", nonNegativeInteger()), Map.entry("startLineComplete", Map.of("type", "boolean")),
-                Map.entry("endLineComplete", Map.of("type", "boolean")), Map.entry("nextCursor", string())),
-                List.of("repositoryId", "snapshotId", "revision", "path", "pathKey", "contentStatus", "content", "startLine", "endLine", "startLineComplete", "endLineComplete"));
-    }
-
-    private static Map<String, Object> gitTextSearchResult() {
-        return schema(Map.of("repositoryId", repositoryId(), "snapshotId", gitEvidenceId(), "revision", revision(), "items", items(gitTextMatch()),
-                "scanComplete", Map.of("type", "boolean"), "nextCursor", string(), "coverage", gitSnapshotCoverage()),
-                List.of("repositoryId", "snapshotId", "revision", "items", "scanComplete", "coverage"));
-    }
-
-    private static Map<String, Object> gitFileItem() {
-        return schema(Map.of("path", string(), "pathKey", string(), "entryType", Map.of("type", "string", "enum", List.of("FILE", "DIRECTORY")), "byteLength", nonNegativeInteger(), "contentStatus", string()),
-                List.of("path", "pathKey", "entryType", "byteLength", "contentStatus"));
-    }
-
-    private static Map<String, Object> gitTextMatch() {
-        return schema(Map.of("path", string(), "pathKey", string(), "line", positiveInteger(), "column", positiveInteger(), "snippet", string(),
-                "snippetTruncated", Map.of("type", "boolean")), List.of("path", "pathKey", "line", "column", "snippet", "snippetTruncated"));
-    }
-
-    private static Map<String, Object> gitSnapshotCoverage() {
-        return schema(Map.of("inventoryCount", nonNegativeInteger(), "readableTextCount", nonNegativeInteger(), "binaryCount", nonNegativeInteger(),
-                "unsupportedEncodingCount", nonNegativeInteger(), "tooLargeCount", nonNegativeInteger(), "symlinkCount", nonNegativeInteger(),
-                "submoduleCount", nonNegativeInteger(), "lfsPointerCount", nonNegativeInteger(), "unsupportedPathCount", nonNegativeInteger()),
-                List.of("inventoryCount", "readableTextCount", "binaryCount", "unsupportedEncodingCount", "tooLargeCount", "symlinkCount", "submoduleCount", "lfsPointerCount", "unsupportedPathCount"));
-    }
-
-    private static Map<String, Object> gitChange() {
-        return schema(Map.of("changeId", string(), "kind", string(), "oldPath", string(), "newPath", string(), "oldMode", string(),
-                "newMode", string(), "oldBlobId", string(), "newBlobId", string(), "diffStatus", string()), List.of("changeId", "kind", "diffStatus"));
-    }
-
-    private static Map<String, Object> repositoryItem() {
-        return schema(Map.of("repositoryId", string(), "revision", string()), List.of("repositoryId", "revision"));
-    }
-
-    private static Map<String, Object> searchCodeResult() {
-        return schema(Map.of("repositoryId", string(), "revision", string(), "items", items(internalProgramElement()), "page", page(),
-                "sourceCoverage", sourceCoverage()), List.of("repositoryId", "revision", "items", "page", "sourceCoverage"));
-    }
-
-    private static Map<String, Object> factSourceResult() {
-        return schema(Map.of("repositoryId", string(), "revision", string(), "factId", string(), "source", sourceSnippet(),
-                "factRange", factRange()), List.of("repositoryId", "revision", "factId", "source", "factRange"));
-    }
-
-    private static Map<String, Object> collection(Map<String, Object> item) {
-        return schema(Map.of("repositoryId", string(), "revision", string(), "items", items(item), "page", page()),
-                List.of("repositoryId", "revision", "items", "page"));
-    }
-
-    private static Map<String, Object> page() {
-        return schema(Map.of("offset", nonNegativeInteger(), "limit", positiveInteger(), "returned", nonNegativeInteger(),
-                "total", nonNegativeInteger(), "hasMore", Map.of("type", "boolean")),
-                List.of("offset", "limit", "returned", "total", "hasMore"));
-    }
-
-    private static Map<String, Object> sourceCoverage() {
-        return schema(Map.of("indexedSourceCount", nonNegativeInteger(), "issueCount", nonNegativeInteger(),
-                "issueCodes", items(string())), List.of("indexedSourceCount", "issueCount", "issueCodes"));
-    }
-
-    private static Map<String, Object> reviewResult(Map<String, Object> result) {
-        return schema(Map.of("context", reviewContext(), "result", result), List.of("context", "result"));
-    }
-
-    private static Map<String, Object> reviewContext() {
-        return schema(Map.of("repositoryId", repositoryId(), "reviewId", reviewId(), "side", enumValue(ReviewSide.values()),
-                "revision", revision(), "generationId", string(), "coverage", reviewCoverage()),
-                List.of("repositoryId", "reviewId", "side", "revision", "generationId", "coverage"));
-    }
-
-    private static Map<String, Object> reviewCoverage() {
-        return schema(Map.of("sourceCoverage", sourceCoverage(), "semanticLimitations", items(string())),
-                List.of("sourceCoverage", "semanticLimitations"));
-    }
-
-    private static Map<String, Object> reviewDetails() {
-        Map<String, Object> endpoint = schema(Map.of("revision", revision(), "generationId", string(), "manifestDigest", string(),
-                "analysisFingerprint", string(), "snapshotId", string(), "coverage", reviewCoverage()),
-                List.of("revision", "generationId", "manifestDigest", "analysisFingerprint", "snapshotId", "coverage"));
-        Map<String, Object> commit = schema(Map.of("kind", Map.of("type", "string", "const", "COMMIT"),
-                "revision", revision()), List.of("kind", "revision"));
-        Map<String, Object> range = schema(Map.of("kind", Map.of("type", "string", "const", "RANGE"),
-                "beforeRevision", revision(), "afterRevision", revision()), List.of("kind", "beforeRevision", "afterRevision"));
-        Map<String, Object> selection = Map.of("oneOf", List.of(commit, range));
-        Map<String, Object> resolved = schema(Map.of("beforeRevision", revision(), "afterRevision", revision(),
-                "baselineRule", Map.of("type", "string", "enum", List.of("FIRST_PARENT", "EMPTY_TREE", "DIRECT_RANGE"))),
-                List.of("afterRevision", "baselineRule"));
-        Map<String, Object> before = schema(Map.of("kind", Map.of("type", "string",
-                "enum", List.of("FIRST_PARENT", "EMPTY_TREE", "DIRECT_RANGE")), "endpoint", endpoint), List.of("kind"));
-        return schema(Map.of("repositoryId", repositoryId(), "reviewId", reviewId(), "selection", selection,
-                "resolvedEndpoints", resolved, "before", before, "after", endpoint,
-                "comparisonId", string(), "publishedAt", string()),
-                List.of("repositoryId", "reviewId", "selection", "resolvedEndpoints", "before", "after", "comparisonId", "publishedAt"));
-    }
-
-    private static Map<String, Object> sourceSnippet() {
-        return schema(Map.of("path", string(), "startLine", positiveInteger(), "endLine", positiveInteger(), "code", string()),
-                List.of("path", "startLine", "endLine", "code"));
-    }
-
-    private static Map<String, Object> factRange() {
-        return schema(Map.of("startLine", positiveInteger(), "endLine", positiveInteger()), List.of("startLine", "endLine"));
-    }
-
-    private static Map<String, Object> internalProgramElement() {
-        return schema(Map.of("factId", string(), "kind", enumValue(CodeFactKind.values()), "displayName", string(),
-                "source", sourceSnippet()), List.of("factId", "kind", "displayName", "source"));
-    }
-
-    private static Map<String, Object> externalCallee() {
-        return schema(Map.of("displayName", string()), List.of("displayName"));
-    }
-
-    private static Map<String, Object> entryPointItem() {
-        return schema(Map.of("factId", string(), "handler", internalProgramElement(), "trigger", trigger()),
-                List.of("factId", "handler", "trigger"));
-    }
-
-    private static Map<String, Object> trigger() {
-        return schema(Map.of("kind", string(), "method", string(), "value", string()), List.of("kind"));
-    }
-
-    private static Map<String, Object> eventListenerItem() {
-        return schema(Map.of("eventType", string(), "handler", internalProgramElement()), List.of("eventType", "handler"));
-    }
-
-    private static Map<String, Object> implementationItem() {
-        return schema(Map.of("implementation", internalProgramElement(), "relationKind", Map.of("type", "string", "enum",
-                List.of("IMPLEMENTS", "OVERRIDES"))), List.of("implementation", "relationKind"));
-    }
-
-    private static Map<String, Object> referenceItem() {
-        return schema(Map.of("container", internalProgramElement(), "referenceSite", relationSite()), List.of("container", "referenceSite"));
-    }
-
-    private static Map<String, Object> callerItem() {
-        return schema(Map.of("caller", internalProgramElement(), "callSite", relationSite()), List.of("caller", "callSite"));
-    }
-
-    private static Map<String, Object> calleeItem() {
-        return schema(Map.of("callee", Map.of("oneOf", List.of(internalProgramElement(), externalCallee())), "callSite", relationSite(),
-                        "resolutionStatus", enumValue(SemanticQueryContract.CalleeResolutionStatus.values())),
-                List.of("callee", "callSite", "resolutionStatus"));
-    }
-
-    private static Map<String, Object> relationSite() {
-        return schema(Map.of("factId", string(), "source", sourceSnippet()), List.of("factId", "source"));
-    }
-
-    private static Map<String, Object> items(Map<String, Object> item) {
-        return Map.of("type", "array", "items", item);
-    }
-
-    private static Map<String, Object> string() {
-        return Map.of("type", "string");
-    }
-
-    private static Map<String, Object> nonNegativeInteger() {
-        return Map.of("type", "integer", "minimum", 0);
-    }
-
-    private static Map<String, Object> positiveInteger() {
-        return Map.of("type", "integer", "minimum", 1);
-    }
-
-    private static Map<String, Object> enumValue(Enum<?>[] values) {
-        return Map.of("type", "string", "enum", enumNames(values));
-    }
-
-    private static Map<String, Map<String, Object>> inputSchemas() {
-        Map<String, Map<String, Object>> schemas = new LinkedHashMap<>();
-        schemas.put("list_git_branches", pagedSchema(Map.of("repositoryId", repositoryId(), "catalogId", gitEvidenceId()),
-                List.of("repositoryId")));
-        schemas.put("list_git_commits", pagedSchema(Map.of("repositoryId", repositoryId(), "historyId", gitEvidenceId(), "revision", revision()),
-                List.of("repositoryId", "historyId", "revision")));
-        schemas.put("compare_revisions", pagedSchema(Map.of("repositoryId", repositoryId(), "comparisonId", gitEvidenceId(), "previous", revision(), "current", revision()),
-                List.of("repositoryId", "comparisonId", "current")));
-        schemas.put("get_file_diff", schema(Map.of("repositoryId", repositoryId(), "comparisonId", gitEvidenceId(), "previous", revision(),
-                "current", revision(), "changeId", string(), "cursor", string()), List.of("repositoryId", "comparisonId", "current", "changeId")));
-        schemas.put("list_files", pagedSchema(Map.of("repositoryId", repositoryId(), "snapshotId", gitEvidenceId(), "revision", revision(),
-                "directory", string()), List.of("repositoryId", "snapshotId", "revision", "directory")));
-        schemas.put("read_file", schema(Map.of("repositoryId", repositoryId(), "snapshotId", gitEvidenceId(), "revision", revision(), "path", Map.of("type", "string", "minLength", 1),
-                "startLine", positiveInteger(), "maxLines", Map.of("type", "integer", "minimum", 1, "maximum", SemanticQueryContract.MAX_FILE_LINES,
-                        "default", SemanticQueryContract.DEFAULT_FILE_LINES), "cursor", Map.of("type", "string", "minLength", 1)), List.of("repositoryId", "snapshotId", "revision", "path")));
-        schemas.put("search_text", schema(Map.of("repositoryId", repositoryId(), "snapshotId", gitEvidenceId(), "revision", revision(),
-                "query", Map.of("type", "string", "minLength", 1, "maxLength", 256), "directory", string(), "cursor", Map.of("type", "string", "minLength", 1), "limit", Map.of("type", "integer", "minimum", 1,
-                        "maximum", SemanticQueryContract.MAX_LIMIT, "default", SemanticQueryContract.DEFAULT_LIMIT)),
-                List.of("repositoryId", "snapshotId", "revision", "query")));
-        schemas.put("list_repositories", pagedSchema(Map.of(), List.of()));
-        schemas.put("get_repository", schema(Map.of("repositoryId", repositoryId()), List.of("repositoryId")));
-        schemas.put("search_code", pagedSchema(Map.of(
-                "repositoryId", repositoryId(), "revision", revision(), "query", query(), "kinds", codeFactKinds(),
-                "packagePrefix", Map.of("type", "string", "description", "Optional fully qualified prefix used only to narrow search.")),
-                List.of("repositoryId", "revision", "query")));
-        schemas.put("get_fact_source", schema(Map.of(
-                "repositoryId", repositoryId(), "revision", revision(), "factId", factId("factId"), "contextLines", contextLines()),
-                List.of("repositoryId", "revision", "factId")));
-        schemas.put("list_entry_points", pagedSchema(Map.of(
-                "repositoryId", repositoryId(), "revision", revision(), "kinds", entryPointKinds()),
-                List.of("repositoryId", "revision")));
-        schemas.put("find_api_routes", pagedSchema(Map.of(
-                "repositoryId", repositoryId(), "revision", revision(), "httpMethod", httpMethod(), "path", path()),
-                List.of("repositoryId", "revision", "httpMethod", "path")));
-        schemas.put("get_review", schema(Map.of("repositoryId", repositoryId(), "reviewId", reviewId()),
-                List.of("repositoryId", "reviewId")));
-        schemas.put("review_search_code", reviewPagedSchema(Map.of("query", query(), "kinds", codeFactKinds(),
-                "packagePrefix", Map.of("type", "string", "description", "Optional fully qualified prefix used only to narrow search.")),
-                List.of("query")));
-        schemas.put("review_get_fact_source", reviewSchema(Map.of("factId", factId("factId"), "contextLines", contextLines()),
-                List.of("factId")));
-        schemas.put("review_list_entry_points", reviewPagedSchema(Map.of("kinds", entryPointKinds()), List.of()));
-        schemas.put("review_find_api_routes", reviewPagedSchema(Map.of("httpMethod", httpMethod(), "path", path()),
-                List.of("httpMethod", "path")));
-        schemas.put("review_find_event_listeners", reviewPagedSchema(Map.of("eventType", eventType()), List.of("eventType")));
-        schemas.put("review_list_type_members", reviewPagedSchema(Map.of("typeFactId", factId("typeFactId"), "kinds", memberKinds()),
-                List.of("typeFactId")));
-        schemas.put("review_find_method_implementations", reviewRelationSchema("methodFactId"));
-        schemas.put("review_find_references", reviewRelationSchema("factId"));
-        schemas.put("review_find_callers", reviewRelationSchema("methodFactId"));
-        schemas.put("review_find_callees", reviewRelationSchema("methodFactId"));
-        schemas.put("find_event_listeners", pagedSchema(Map.of(
-                "repositoryId", repositoryId(), "revision", revision(), "eventType", eventType()),
-                List.of("repositoryId", "revision", "eventType")));
-        schemas.put("list_type_members", pagedSchema(Map.of(
-                "repositoryId", repositoryId(), "revision", revision(), "typeFactId", factId("typeFactId"), "kinds", memberKinds()),
-                List.of("repositoryId", "revision", "typeFactId")));
-        schemas.put("find_method_implementations", relationSchema("methodFactId"));
-
-        schemas.put("find_references", relationSchema("factId"));
-        schemas.put("find_callers", relationSchema("methodFactId"));
-        schemas.put("find_callees", relationSchema("methodFactId"));
-        return Map.copyOf(schemas);
-    }
-
-    private static Map<String, Object> relationSchema(String fieldName) {
-        return pagedSchema(Map.of("repositoryId", repositoryId(), "revision", revision(), fieldName, factId(fieldName)),
-                List.of("repositoryId", "revision", fieldName));
-    }
-    private static Map<String, Object> reviewRelationSchema(String fieldName) {
-        return reviewPagedSchema(Map.of(fieldName, factId(fieldName)), List.of(fieldName));
-    }
-
-    private static Map<String, Object> reviewPagedSchema(Map<String, Object> fields, List<String> required) {
-        Map<String, Object> properties = reviewProperties(fields);
-        properties.put("offset", Map.of("type", "integer", "minimum", 0, "default", 0));
-        properties.put("limit", Map.of("type", "integer", "minimum", 1, "maximum", SemanticQueryContract.MAX_LIMIT,
-                "default", SemanticQueryContract.DEFAULT_LIMIT));
-        return schema(properties, reviewRequired(required));
-    }
-
-    private static Map<String, Object> reviewSchema(Map<String, Object> fields, List<String> required) {
-        return schema(reviewProperties(fields), reviewRequired(required));
-    }
-
-    private static Map<String, Object> reviewProperties(Map<String, Object> fields) {
-        Map<String, Object> properties = new LinkedHashMap<>();
-        properties.put("repositoryId", repositoryId());
-        properties.put("reviewId", reviewId());
-        properties.put("side", enumValue(ReviewSide.values()));
-        properties.put("revision", revision());
-        properties.putAll(fields);
-        return properties;
-    }
-
-    private static List<String> reviewRequired(List<String> fields) {
-        List<String> required = new ArrayList<>(List.of("repositoryId", "reviewId", "side", "revision"));
-        required.addAll(fields);
-        return List.copyOf(required);
-    }
-
-    private static Map<String, Object> pagedSchema(Map<String, Object> fields, List<String> required) {
-        Map<String, Object> properties = new LinkedHashMap<>(fields);
-        properties.put("offset", Map.of("type", "integer", "minimum", 0, "default", 0));
-        properties.put("limit", Map.of("type", "integer", "minimum", 1, "maximum", SemanticQueryContract.MAX_LIMIT,
-                "default", SemanticQueryContract.DEFAULT_LIMIT));
-        return schema(properties, required);
-    }
-
-    private static Map<String, Object> schema(Map<String, Object> properties, List<String> required) {
-        return Map.of("type", "object", "properties", Map.copyOf(properties), "required", List.copyOf(required),
-                "additionalProperties", false);
-    }
-
-    @SuppressWarnings("unchecked")
-    private static Map<String, Object> properties(Map<String, Object> schema) {
-        return (Map<String, Object>) schema.get("properties");
-    }
-
-    private static Map<String, Object> repositoryId() {
-        return Map.of("type", "string", "minLength", RepositoryId.MIN_LENGTH, "maxLength", RepositoryId.MAX_LENGTH,
-                "pattern", RepositoryId.PATTERN, "description", "Copy repositoryId exactly from a Semantic result.");
-    }
-
-    private static Map<String, Object> reviewId() {
-        return Map.of("type", "string", "minLength", 1, "description", "Copy reviewId exactly from a Semantic review result.");
-    }
-
-    private static Map<String, Object> revision() {
-        return Map.of("type", "string", "minLength", RepositoryRevision.LENGTH, "maxLength", RepositoryRevision.LENGTH,
-                "pattern", RepositoryRevision.PATTERN, "description", "Copy revision exactly from a Semantic result.");
-    }
-
-    private static Map<String, Object> nullableRevision() {
-        return Map.of("oneOf", List.of(revision(), Map.of("type", "null")));
-    }
-
-    private static Map<String, Object> factId(String fieldName) {
-        return Map.of("type", "string", "minLength", CodeFactId.LENGTH, "maxLength", CodeFactId.LENGTH, "pattern", CodeFactId.PATTERN,
-                "description", "Copy " + fieldName + " exactly from a Semantic result.");
-    }
-
-    private static Map<String, Object> gitEvidenceId() {
-        return Map.of("type", "string", "format", "uuid", "description", "Copy the immutable Git evidence ID exactly from a Git result.");
-    }
-
-    private static Map<String, Object> query() {
-        return Map.of("type", "string", "minLength", CodeFactSearchQuery.MIN_QUERY_LENGTH,
-                "maxLength", CodeFactSearchQuery.MAX_QUERY_LENGTH);
-    }
-
-    private static Map<String, Object> codeFactKinds() {
-        return enumArray(CodeFactKind.values());
-    }
-
-    private static Map<String, Object> memberKinds() {
-        return enumArray(TypeMemberQuery.MEMBER_KINDS.toArray(CodeFactKind[]::new));
-    }
-
-    private static Map<String, Object> entryPointKinds() {
-        return enumArray(EntryPointKind.values());
-    }
-
-    private static Map<String, Object> httpMethod() {
-        return Map.of("type", "string", "enum", enumNames(SemanticQueryContract.HttpMethod.values()));
-    }
-
-    private static Map<String, Object> contextLines() {
-        return Map.of("type", "integer", "minimum", 0, "maximum", SemanticQueryContract.MAX_CONTEXT_LINES, "default", 0);
-    }
-
-    private static Map<String, Object> path() {
-        return Map.of("type", "string", "minLength", 1, "description", "Exact indexed route path.");
-    }
-
-    private static Map<String, Object> eventType() {
-        return Map.of("type", "string", "minLength", 1,
-                "description", "Exact fully qualified event type; do not guess an external type.");
-    }
-
-    private static Map<String, Object> enumArray(Enum<?>[] values) {
-        return Map.of("type", "array", "items", Map.of("type", "string", "enum", enumNames(values)));
-    }
-
-    private static List<String> enumNames(Enum<?>[] values) {
-        List<String> names = new ArrayList<>();
-        for (Enum<?> value : values) {
-            names.add(value.name());
+    private SemanticMcpSchemaCatalog() { }
+
+    public static Map<String, Object> inputSchema(String operation) {
+        Map<String, Object> fields = new LinkedHashMap<>();
+        List<String> required;
+        switch (operation) {
+            case "list_repositories" -> { fields.put("nameFilter", text()); required = List.of(); }
+            case "get_context" -> {
+                fields.put("repositoryId", text()); fields.put("selector", selector());
+                fields.put("limit", integer(1, 100, 20));
+                return object(fields, List.of("repositoryId", "selector"));
+            }
+            case "search_code" -> {
+                fields.put("context", context()); fields.put("query", Map.of("type", "string", "minLength", 2, "maxLength", 256)); fields.put("kinds", kinds());
+                fields.put("packagePrefix", packagePrefix()); fields.put("path", text()); required = List.of("context", "query");
+            }
+            case "list_files" -> {
+                fields.put("context", context()); fields.put("directory", string());
+                fields.put("nameFilter", text()); fields.put("pathFilter", text()); required = List.of("context");
+            }
+            case "search_text" -> {
+                fields.put("context", context()); fields.put("query", Map.of("type", "string", "minLength", 1, "maxLength", 256,
+                        "pattern", "^[^\\r\\n]+$", "description", "One literal line, at most 256 Unicode code points."));
+                fields.put("directory", string()); required = List.of("context", "query");
+            }
+            case "read_source" -> {
+                fields.put("context", context());
+                fields.put("target", union(object(Map.of("kind", constant("FACT"), "factId", text(),
+                                "contextLines", integer(0, 20, 0)), List.of("kind", "factId")),
+                        object(Map.of("kind", constant("FILE"), "path", text(), "startLine", integer(1, Integer.MAX_VALUE, 1)),
+                                List.of("kind", "path"))));
+                fields.put("maxLines", integer(1, 500, 200)); fields.put("cursor", text());
+                return object(fields, List.of("context", "target"));
+            }
+            case "list_entry_points" -> {
+                fields.put("context", context()); fields.put("kind", enumeration("HTTP", "EVENT", "MQ", "SCHEDULE"));
+                fields.put("handlerName", text()); fields.put("packagePrefix", packagePrefix());
+                fields.put("httpMethod", enums(SemanticQueryContract.HttpMethod.values())); fields.put("path", text());
+                fields.put("eventType", text()); fields.put("destination", destination()); fields.put("trigger", text());
+                required = List.of("context");
+            }
+            case "get_outline" -> {
+                fields.put("context", context()); fields.put("target", union(
+                        object(Map.of("kind", constant("TYPE"), "factId", text()), List.of("kind", "factId")),
+                        object(Map.of("kind", constant("FILE"), "path", text()), List.of("kind", "path"))));
+                fields.put("kinds", Map.of("type", "array", "uniqueItems", true, "items",
+                        enumeration("TYPE", "METHOD", "FIELD", "ENUM_CONSTANT", "RECORD_COMPONENT", "MAPPER_STATEMENT")));
+                required = List.of("context", "target");
+            }
+            case "find_relations" -> {
+                fields.put("context", context()); fields.put("relation", enums(SemanticQueryContract.RelationMode.values()));
+                fields.put("factId", text()); required = List.of("context", "relation", "factId");
+            }
+            case "list_git_branches" -> { fields.put("repositoryId", text()); required = List.of("repositoryId"); }
+            case "list_git_commits" -> {
+                fields.put("repositoryId", text()); fields.put("branch", text()); required = List.of("repositoryId", "branch");
+            }
+            case "compare_revisions" -> { fields.put("comparisonContext", comparison()); required = List.of("comparisonContext"); }
+            case "get_file_diff" -> {
+                return object(Map.of("comparisonContext", comparison(), "changeId", text(), "cursor", text()),
+                        List.of("comparisonContext", "changeId"));
+            }
+            default -> throw new IllegalArgumentException("unknown Semantic operation");
         }
-        return List.copyOf(names);
+        fields.put("cursor", text()); fields.put("limit", integer(1, 100, operation.equals("list_git_commits") ? 10 : 20));
+        Map<String, Object> schema = new LinkedHashMap<>(object(fields, required));
+        if (operation.equals("list_entry_points")) schema.put("allOf", List.of(
+                filterKind("httpMethod", "HTTP"), filterKind("path", "HTTP"), filterKind("eventType", "EVENT"),
+                filterKind("destination", "MQ"), filterKind("trigger", "SCHEDULE")));
+        return schema;
+    }
+
+    public static Map<String, Object> outputSchema(String operation) {
+        if (!SemanticQueryContract.OPERATIONS.contains(operation)) throw new IllegalArgumentException("unknown Semantic operation");
+        Map<String, Object> success = switch (operation) {
+            case "list_repositories" -> object(Map.of("items", array(object(Map.of("repositoryId", text(), "displayName", string(),
+                    "defaultBranch", text(), "configured", bool(), "publishedRevision", revision()),
+                    List.of("repositoryId", "displayName", "defaultBranch", "configured"))), "page", page()), List.of("items", "page"));
+            case "get_context" -> contextResult();
+            case "search_code", "get_outline" -> collection(fact());
+            case "list_files" -> collection(object(Map.of("path", text(), "entryType", enumeration("FILE", "DIRECTORY"),
+                    "contentKind", enumeration("CODE", "PROJECT_GUIDE"), "contentStatus", text(), "byteLength", count(),
+                    "projectGuide", guide()), List.of("path", "entryType")));
+            case "search_text" -> extend(collection(object(Map.of("path", text(), "range", range(), "snippet", string(),
+                    "snippetTruncated", bool()), List.of("path", "range", "snippet", "snippetTruncated"))), Map.of("scanComplete", bool()), List.of("scanComplete"));
+            case "read_source" -> source();
+            case "list_entry_points" -> collection(object(Map.of("kind", enums(SemanticQueryContract.EntryKind.values()), "factId", text(),
+                    "handler", fact(), "trigger", object(Map.of("httpMethod", enums(SemanticQueryContract.HttpMethod.values()), "path", text(),
+                    "eventType", text(), "destination", destination(), "trigger", text()), List.of())), List.of("kind", "handler", "trigger")));
+            case "find_relations" -> relations();
+            case "list_git_branches", "list_git_commits" -> metadataCollection(operation);
+            case "compare_revisions" -> object(Map.of("comparisonContext", comparison(), "ancestry", text(), "items", array(change()), "page", page()),
+                    List.of("comparisonContext", "ancestry", "items", "page"));
+            case "get_file_diff" -> object(Map.of("comparisonContext", comparison(), "change", change(), "patch", string(), "complete", bool(), "nextCursor", text()),
+                    List.of("comparisonContext", "change", "complete"));
+            default -> throw new IllegalArgumentException("unknown Semantic operation");
+        };
+        return Map.of("type", "object", "oneOf", List.of(success, error()));
+    }
+
+    public static Set<String> allowedFields(String operation) { return properties(inputSchema(operation)).keySet(); }
+    public static List<String> requiredFields(String operation) {
+        Object required = inputSchema(operation).get("required");
+        if (!(required instanceof List<?> values)) throw new IllegalStateException("invalid schema");
+        return values.stream().map(String.class::cast).toList();
+    }
+    private static Map<String, Object> context() {
+        return union(object(Map.of("kind", constant("CURRENT"), "repositoryId", text(), "revision", revision()), List.of("kind", "repositoryId", "revision")),
+                object(Map.of("kind", constant("REVIEW"), "repositoryId", text(), "revision", revision(), "reviewId", text(),
+                        "side", enumeration("BEFORE", "AFTER")), List.of("kind", "repositoryId", "revision", "reviewId", "side")));
+    }
+    private static Map<String, Object> selector() {
+        return union(object(Map.of("kind", constant("CURRENT")), List.of("kind")),
+                object(Map.of("kind", constant("REVIEW"), "reviewId", text()), List.of("kind", "reviewId")),
+                object(Map.of("kind", constant("COMMIT"), "revision", revision()), List.of("kind", "revision")),
+                object(Map.of("kind", constant("RANGE"), "beforeRevision", revision(), "afterRevision", revision()),
+                        List.of("kind", "beforeRevision", "afterRevision")));
+    }
+    private static Map<String, Object> endpoint() {
+        return union(object(Map.of("kind", constant("EMPTY_TREE")), List.of("kind")),
+                object(Map.of("kind", constant("REVISION"), "revision", revision()), List.of("kind", "revision")));
+    }
+    private static Map<String, Object> comparison() {
+        return object(Map.of("repositoryId", text(), "reviewId", text(), "before", endpoint(), "after",
+                object(Map.of("kind", constant("REVISION"), "revision", revision()), List.of("kind", "revision"))),
+                List.of("repositoryId", "reviewId", "before", "after"));
+    }
+    private static Map<String, Object> destination() { return object(Map.of("broker", text(), "destination", text()), List.of("broker", "destination")); }
+    private static Map<String, Object> page() { return object(Map.of("returned", count(), "hasMore", bool(), "nextCursor", text()), List.of("returned", "hasMore")); }
+    private static Map<String, Object> position() { return object(Map.of("line", count(), "character", count()), List.of("line", "character")); }
+    private static Map<String, Object> range() { return object(Map.of("start", position(), "end", position()), List.of("start", "end")); }
+    private static Map<String, Object> fact() {
+        return object(Map.of("factId", text(), "kind", enums(CodeFactKind.values()), "displayName", string(), "signature", string(),
+                "path", text(), "range", range(), "canonical", text(), "mapperStatementKind", enumeration("SELECT", "INSERT", "UPDATE", "DELETE", "ANNOTATION")),
+                List.of("factId", "kind", "displayName", "path", "range"));
+    }
+    private static Map<String, Object> collection(Map<String, Object> item) { return object(Map.of("context", context(), "items", array(item), "page", page()), List.of("context", "items", "page")); }
+    private static Map<String, Object> source() {
+        Map<String, Object> fields = new LinkedHashMap<>();
+        fields.put("context", context()); fields.put("target", properties(inputSchema("read_source")).get("target"));
+        fields.put("path", text()); fields.put("contentKind", enumeration("CODE", "PROJECT_GUIDE")); fields.put("contentStatus", text());
+        fields.put("content", string()); fields.put("factRange", range()); fields.put("window", object(Map.of("start", position(), "end", position()), List.of("start")));
+        fields.put("pageRange", range()); fields.put("rangeComplete", bool()); fields.put("startLineComplete", bool()); fields.put("endLineComplete", bool());
+        fields.put("nextCursor", text()); fields.put("projectGuide", guide());
+        return object(fields, List.of("context", "target", "path", "contentKind", "contentStatus", "rangeComplete", "startLineComplete", "endLineComplete"));
+    }
+    private static Map<String, Object> relations() {
+        Map<String, Object> external = object(Map.of("kind", text(), "displayName", string(), "canonical", text(), "arity", count()), List.of("kind", "displayName"));
+        Map<String, Object> target = object(Map.of("resolution", enumeration("INTERNAL", "EXTERNAL", "UNRESOLVED"), "fact", fact(), "external", external), List.of("resolution"));
+        Map<String, Object> occurrence = object(Map.of("factId", text(), "path", text(), "range", range()), List.of("factId", "path", "range"));
+        return extend(collection(object(Map.of("relationKind", text(), "origin", fact(), "target", target, "occurrence", occurrence),
+                List.of("relationKind", "origin", "target", "occurrence"))), Map.of("relation", enums(SemanticQueryContract.RelationMode.values()),
+                "evidenceScope", enums(SemanticQueryContract.RelationEvidenceScope.values())), List.of("relation", "evidenceScope"));
+    }
+    private static Map<String, Object> metadataCollection(String operation) {
+        Map<String, Object> metadata = object(Map.of("jobId", text(), "catalogId", text(), "historyId", text(), "branch", text(),
+                "headRevision", revision(), "observedAt", timestamp()), List.of("jobId", "catalogId", "historyId", "branch", "headRevision", "observedAt"));
+        Map<String, Object> item = operation.equals("list_git_branches")
+                ? object(Map.of("branch", text(), "headRevision", revision()), List.of("branch", "headRevision"))
+                : object(Map.of("revision", revision(), "shortRevision", text(), "parents", array(revision()), "subject", string(), "committedAt", timestamp()),
+                        List.of("revision", "shortRevision", "parents", "subject", "committedAt"));
+        return object(Map.of("repositoryId", text(), "metadata", metadata, "items", array(item), "page", page()), List.of("repositoryId", "metadata", "items", "page"));
+    }
+    private static Map<String, Object> change() {
+        Map<String, Object> side = object(Map.of("path", text(), "mode", text(), "blobId", text(), "contentKind", enumeration("CODE", "PROJECT_GUIDE"),
+                "projectGuide", guide()), List.of("path", "mode", "blobId", "contentKind"));
+        return object(Map.of("changeId", text(), "kind", text(), "before", side, "after", side, "diffStatus", text()), List.of("changeId", "kind", "diffStatus"));
+    }
+    private static Map<String, Object> guide() {
+        Map<String, Object> scope = object(Map.of("includedPaths", array(string()), "excludedPaths", array(string()), "limitations", array(string())),
+                List.of("includedPaths", "excludedPaths", "limitations"));
+        Map<String, Object> provenance = object(Map.of("formatVersion", count(), "promptVersion", count(), "repositoryId", text(), "analyzedRevision", revision(),
+                "generatedAt", timestamp(), "sourceScope", scope), List.of("formatVersion", "promptVersion", "repositoryId", "analyzedRevision", "generatedAt", "sourceScope"));
+        return object(Map.of("state", enumeration("DISABLED", "ABSENT", "INVALID", "AVAILABLE"), "reason", string(), "path", text(), "digest", text(),
+                "importedRevision", revision(), "provenance", provenance, "freshness", text()), List.of("state", "freshness"));
+    }
+    private static Map<String, Object> overview() {
+        Map<String, Object> coverage = object(Map.of("scope", enumeration("GENERATION", "AUTHORIZED_SOURCE_FILES"), "readableCode", count(), "excludedOrUnsupported", count(),
+                "extractionIssues", count(), "unresolvedSemanticEvidence", count(), "omittedMetrics", array(text())), List.of("scope", "readableCode", "extractionIssues", "omittedMetrics"));
+        Map<String, Object> module = object(Map.of("path", string(), "sourceRoots", bounded(string())), List.of("path", "sourceRoots"));
+        Map<String, Object> pkg = object(Map.of("name", string(), "sourceCount", count()), List.of("name", "sourceCount"));
+        Map<String, Object> entry = object(Map.of("kind", enums(SemanticQueryContract.EntryKind.values()), "count", count()), List.of("kind", "count"));
+        return object(Map.of("modules", bounded(module), "sourceRoots", bounded(string()), "packages", bounded(pkg), "entryPoints", bounded(entry),
+                "uncountedEntryKinds", array(enums(SemanticQueryContract.EntryKind.values())), "coverage", coverage),
+                List.of("modules", "sourceRoots", "packages", "entryPoints", "uncountedEntryKinds", "coverage"));
+    }
+    private static Map<String, Object> bounded(Map<String, Object> item) { return object(Map.of("items", array(item), "omitted", bool()), List.of("items", "omitted")); }
+    private static Map<String, Object> contextResult() {
+        Map<String, Object> common = Map.of("repositoryId", text(), "selector", selector(), "state", enums(SemanticQueryContract.ContextState.values()));
+        Map<String, Object> current = new LinkedHashMap<>(common);
+        current.put("selector", object(Map.of("kind", constant("CURRENT")), List.of("kind")));
+        current.put("configuredBranch", text()); current.put("activeJob", object(Map.of("jobId", text(), "operation", text(), "phase", text(), "requestId", text()), List.of("jobId", "operation", "phase")));
+        current.put("revision", revision()); current.put("indexedAt", timestamp()); current.put("preparationBranch", text()); current.put("context", context());
+        current.put("overview", overview()); current.put("projectGuide", guide());
+        Map<String, Object> review = new LinkedHashMap<>(common);
+        review.put("selector", union(
+                object(Map.of("kind", constant("REVIEW"), "reviewId", text()), List.of("kind", "reviewId")),
+                object(Map.of("kind", constant("COMMIT"), "revision", revision()), List.of("kind", "revision")),
+                object(Map.of("kind", constant("RANGE"), "beforeRevision", revision(), "afterRevision", revision()),
+                        List.of("kind", "beforeRevision", "afterRevision"))));
+        Map<String, Object> side = object(Map.of("kind", enumeration("EMPTY_TREE", "REVISION"), "revision", revision(), "context", context(), "overview", overview(), "projectGuide", guide()), List.of("kind"));
+        review.put("reviewId", text()); review.put("jobId", text()); review.put("failureCategory", text()); review.put("before", side); review.put("after", side); review.put("comparisonContext", comparison());
+        return union(object(current, List.of("repositoryId", "selector", "state")), object(review, List.of("repositoryId", "selector", "state")));
+    }
+    private static Map<String, Object> error() { return object(Map.of("code", text(), "message", string(), "retryable", bool(), "currentRevision", revision()), List.of("code", "message", "retryable")); }
+    private static Map<String, Object> text() { return Map.of("type", "string", "minLength", 1); }
+    private static Map<String, Object> string() { return Map.of("type", "string"); }
+    private static Map<String, Object> revision() { return Map.of("type", "string", "pattern", "^[a-f0-9]{40}$"); }
+    private static Map<String, Object> packagePrefix() {
+        return Map.of("type", "string", "pattern", "^[A-Za-z_$][A-Za-z0-9_$]*(?:\\.[A-Za-z_$][A-Za-z0-9_$]*)*$");
+    }
+    private static Map<String, Object> filterKind(String field, String kind) {
+        return Map.of("if", Map.of("required", List.of(field)),
+                "then", Map.of("required", List.of("kind"), "properties", Map.of("kind", constant(kind))));
+    }
+    private static Map<String, Object> timestamp() { return Map.of("type", "string", "format", "date-time"); }
+    private static Map<String, Object> bool() { return Map.of("type", "boolean"); }
+    private static Map<String, Object> count() { return Map.of("type", "integer", "minimum", 0); }
+    private static Map<String, Object> integer(int minimum, int maximum, int fallback) { return Map.of("type", "integer", "minimum", minimum, "maximum", maximum, "default", fallback); }
+    private static Map<String, Object> constant(String value) { return Map.of("type", "string", "const", value); }
+    private static Map<String, Object> enumeration(String... values) { return Map.of("type", "string", "enum", List.of(values)); }
+    private static Map<String, Object> enums(Enum<?>[] values) { return Map.of("type", "string", "enum", Arrays.stream(values).map(Enum::name).toList()); }
+    private static Map<String, Object> kinds() { return Map.of("type", "array", "items", enums(CodeFactKind.values()), "uniqueItems", true); }
+    private static Map<String, Object> array(Map<String, Object> item) { return Map.of("type", "array", "items", item); }
+    @SafeVarargs
+    private static Map<String, Object> union(Map<String, Object>... alternatives) { return Map.of("oneOf", List.of(alternatives)); }
+    private static Map<String, Object> object(Map<String, Object> fields, List<String> required) { return Map.of("type", "object", "properties", fields, "required", required, "additionalProperties", false); }
+    private static Map<String, Object> extend(Map<String, Object> schema, Map<String, Object> fields, List<String> required) {
+        Map<String, Object> merged = new LinkedHashMap<>(properties(schema)); merged.putAll(fields);
+        Object value = schema.get("required");
+        if (!(value instanceof List<?> existing)) throw new IllegalStateException("invalid schema");
+        List<String> all = java.util.stream.Stream.concat(existing.stream().map(String.class::cast), required.stream()).toList();
+        return object(merged, all);
+    }
+    private static Map<String, Object> properties(Map<String, Object> schema) {
+        Object value = schema.get("properties");
+        if (!(value instanceof Map<?, ?> fields)) throw new IllegalStateException("invalid schema");
+        Map<String, Object> result = new LinkedHashMap<>(); fields.forEach((key, field) -> result.put(String.class.cast(key), field));
+        return result;
     }
 }

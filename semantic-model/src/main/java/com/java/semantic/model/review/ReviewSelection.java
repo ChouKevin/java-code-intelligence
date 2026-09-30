@@ -17,6 +17,12 @@ public record ReviewSelection(ReviewComparisonType kind, Optional<RepositoryRevi
         }
     }
 
+    /** Stable persisted identity shared by review admission and publication. */
+    public String selectionKey() {
+        return kind.name() + ":" + beforeRevision.map(RepositoryRevision::value).orElse("")
+                + ":" + afterRevision.value();
+    }
+
     public static ReviewSelection commit(RepositoryRevision revision) {
         return new ReviewSelection(ReviewComparisonType.COMMIT, Optional.empty(), revision);
     }

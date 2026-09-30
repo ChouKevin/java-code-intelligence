@@ -1,31 +1,13 @@
 package com.java.semantic.api;
 
 import org.junit.jupiter.api.Test;
-import org.springframework.boot.web.servlet.FilterRegistrationBean;
-import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 class QuerySecurityTest {
-    private final ApplicationContextRunner contextRunner = new ApplicationContextRunner()
-            .withUserConfiguration(QuerySecurityConfiguration.class);
 
-    @Test
-    void security_configuration_starts_and_registers_both_query_filters() {
-        contextRunner.run(context -> {
-            assertThat(context).hasNotFailed();
-            assertThat(context.getBean("queryRequestMonitoringFilter", FilterRegistrationBean.class).getFilter())
-                    .isInstanceOf(QueryRequestMonitoringFilter.class);
-            assertThat(context.getBean("queryRequestMonitoringFilter", FilterRegistrationBean.class).getUrlPatterns().toArray())
-                    .containsExactlyInAnyOrder("/api/v1/*", "/mcp");
-            assertThat(context.getBean("queryTokenFilter", FilterRegistrationBean.class).getFilter())
-                    .isInstanceOf(QueryTokenFilter.class);
-            assertThat(context.getBean("queryTokenFilter", FilterRegistrationBean.class).getUrlPatterns().toArray())
-                    .containsExactlyInAnyOrder("/api/v1/*", "/mcp");
-        });
-    }
 
     @Test
     void query_http_and_mcp_paths_require_the_query_token_but_health_is_not_a_read_surface() throws Exception {

@@ -6,6 +6,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import com.java.semantic.config.JdtLsProperties;
 import com.java.semantic.model.index.GenerationId;
 import com.java.semantic.model.index.IndexCollections;
+import com.java.semantic.model.index.IndexSchemaContract;
 import com.java.semantic.model.index.GenerationWriteState;
 import com.java.semantic.model.index.RelationDocument;
 import com.java.semantic.model.codefact.ExternalTarget;
@@ -19,6 +20,7 @@ import com.java.semantic.indexer.job.IndexJobId;
 import com.java.semantic.indexer.job.IndexJobOperation;
 import com.java.semantic.indexer.job.IndexJobPhase;
 import com.java.semantic.indexer.job.IndexJobTarget;
+import com.java.semantic.indexer.job.MongoIndexJobStore;
 import com.java.semantic.indexer.store.GenerationWriteContext;
 import com.java.semantic.indexer.store.MongoPublicationWriter;
 import com.java.semantic.model.index.ManifestDigest;
@@ -121,6 +123,16 @@ class FixtureFullIndexJdtLsIT {
                         orderRevision, "order-generation");
                 publish(template, "payment-service", paymentRevision, "payment-generation", paymentRoot);
                 publish(template, "video-service", videoRevision, "video-generation", videoRoot);
+                RepositoryProperties repositories = new RepositoryProperties();
+                Map<String, RepositoryProperties.RepositoryConfig> configs = new java.util.HashMap<>();
+                for (Path fixtureRoot : List.of(paymentRoot, videoRoot, orderRoot)) {
+                    RepositoryProperties.RepositoryConfig config = new RepositoryProperties.RepositoryConfig();
+                    config.setUrl(fixtureRoot.toUri().toString()); config.setDefaultBranch("main");
+                    configs.put(fixtureRoot.getFileName().toString(), config);
+                }
+                repositories.setRepositories(configs);
+                new com.java.semantic.indexer.config.ConfiguredRepositoryPublisher(template,
+                        new com.java.semantic.repository.application.RepositoryRuntimeRegistry(repositories)).publish();
                 publish(template, "order-service", orderRevision, "order-generation", orderRoot);
                 Document paymentManifest = template.getCollection(IndexCollections.GENERATION_MANIFESTS)
                         .find(new Document("repoId", "payment-service").append("generationId", "payment-generation")).first();
@@ -216,80 +228,70 @@ class FixtureFullIndexJdtLsIT {
                     .initializationTimeout(Duration.ofSeconds(30))
                     .build()) {
                 assertThat(client.initialize().serverInfo()).isNotNull();
-                McpSchema.ListToolsResult tools = client.listTools();
-                assertThat(tools.tools()).allSatisfy(tool -> {
-                    assertThat(tool.inputSchema()).isNotEmpty();
-                    assertThat(tool.outputSchema()).isNotEmpty();
-                    assertThat(schemaProperties(tool.outputSchema())).isNotEmpty();
-                });
-                McpSchema.Tool searchTool = tools.tools().stream().filter(tool -> tool.name().equals("search_code")).findFirst().orElseThrow();
-                assertThat(schemaProperties(searchTool.outputSchema()).containsKey("sourceCoverage")).isTrue();
 
                 JourneyRecorder discovery = new JourneyRecorder("fixture-discovery");
                 Map<?, ?> repositories = successfulBody(client, "list_repositories", Map.of(), mapper, discovery);
                 Map<?, ?> paymentRepository = repository(repositories, "payment-service");
                 Map<?, ?> videoRepository = repository(repositories, "video-service");
-                String paymentRevision = String.valueOf(paymentRepository.get("revision"));
-                String videoRevision = String.valueOf(videoRepository.get("revision"));
+                String paymentRevision = String.valueOf(paymentRepository.get("publishedRevision"));
+                String videoRevision = String.valueOf(videoRepository.get("publishedRevision"));
+                Map<?, ?> paymentSelection = successfulBody(client, "get_context",
+                        Map.of("repositoryId", "payment-service", "selector", Map.of("kind", "CURRENT")), mapper, discovery);
+                Map<?, ?> videoSelection = successfulBody(client, "get_context",
+                        Map.of("repositoryId", "video-service", "selector", Map.of("kind", "CURRENT")), mapper, discovery);
+                assertThat(paymentSelection.get("state")).isEqualTo("READY");
+                assertThat(videoSelection.get("state")).isEqualTo("READY");
+                Map<?, ?> paymentContext = mapValue(paymentSelection, "context");
+                Map<?, ?> videoContext = mapValue(videoSelection, "context");
+                assertThat(paymentContext.get("revision")).isEqualTo(paymentRevision);
+                assertThat(videoContext.get("revision")).isEqualTo(videoRevision);
+                Map<?, ?> coverage = mapValue(mapValue(paymentSelection, "overview"), "coverage");
+                assertThat(coverage.get("scope")).isEqualTo("GENERATION");
+                assertThat(((Number) coverage.get("extractionIssues")).longValue()).isZero();
                 discovery.print();
 
                 JourneyRecorder paymentJourney = new JourneyRecorder("payment-search-source");
                 Map<?, ?> paymentSearch = successfulBody(client, "search_code", Map.of(
-                        "repositoryId", "payment-service", "revision", paymentRevision, "query", "paymentMethods",
+                        "context", paymentContext, "query", "paymentMethods",
                         "kinds", List.of("METHOD")), mapper, paymentJourney);
-                assertCoverageWithoutIssues(paymentSearch);
-                Map<?, ?> paymentMethod = programElementAt(paymentSearch, "items", "src/main/java/com/example/payment/PaymentQueryController.java",
-                        "METHOD");
-                assertThat(paymentMethod.get("kind")).isEqualTo("METHOD");
-                assertThat(String.valueOf(paymentMethod.get("displayName"))).contains("PaymentQueryController", "paymentMethods");
-                assertSource(source(paymentMethod), "src/main/java/com/example/payment/PaymentQueryController.java", 13, 16, "paymentMethods");
+                Map<?, ?> paymentMethod = programElementAt(paymentSearch, "items", "src/main/java/com/example/payment/PaymentQueryController.java", "METHOD");
+                assertThat(paymentMethod.get("displayName")).isEqualTo("paymentMethods");
                 String paymentFactId = String.valueOf(paymentMethod.get("factId"));
-                Map<?, ?> paymentSource = successfulBody(client, "get_fact_source", Map.of(
-                        "repositoryId", "payment-service", "revision", paymentRevision, "factId", paymentFactId), mapper, paymentJourney);
-                assertFactSource(paymentSource, paymentFactId, "src/main/java/com/example/payment/PaymentQueryController.java", 13, 16,
-                        "paymentMethods");
+                Map<?, ?> paymentSource = successfulBody(client, "read_source", Map.of(
+                        "context", paymentContext, "target", factTarget(paymentFactId)), mapper, paymentJourney);
+                assertFactSource(paymentSource, paymentFactId, "src/main/java/com/example/payment/PaymentQueryController.java", 13, 16, "paymentMethods");
                 paymentJourney.print();
 
                 JourneyRecorder videoJourney = new JourneyRecorder("video-route-handler-callee-implementation-source");
-                Map<?, ?> routeResult = successfulBody(client, "find_api_routes", Map.of(
-                        "repositoryId", "video-service", "revision", videoRevision, "httpMethod", "POST", "path", "/videos"), mapper,
-                        videoJourney);
-                Map<?, ?> route = itemAt(routeResult, "items", "find_api_routes");
-                Map<?, ?> handler = mapValue(route, "handler");
-                assertThat(String.valueOf(handler.get("displayName"))).contains("VideoController", "upload");
-                assertSource(source(handler), "src/main/java/com/example/video/VideoController.java", 10, 13, "videoService.upload");
+                Map<?, ?> routeResult = successfulBody(client, "list_entry_points", Map.of(
+                        "context", videoContext, "kind", "HTTP", "httpMethod", "POST", "path", "/videos"),
+                        mapper, videoJourney);
+                Map<?, ?> handler = mapValue(itemAt(routeResult, "items", "list_entry_points"), "handler");
+                assertThat(handler.get("displayName")).isEqualTo("upload");
                 String handlerFactId = String.valueOf(handler.get("factId"));
-                Map<?, ?> callees = successfulBody(client, "find_callees", Map.of(
-                        "repositoryId", "video-service", "revision", videoRevision, "methodFactId", handlerFactId), mapper, videoJourney);
-                Map<?, ?> videoServiceCallee = relationItemAt(callees, "callee", "src/main/java/com/example/video/VideoService.java");
-                Map<?, ?> callee = mapValue(videoServiceCallee, "callee");
-                assertThat(String.valueOf(callee.get("displayName"))).contains("VideoService", "upload");
-                assertSource(source(callee), "src/main/java/com/example/video/VideoService.java", 4, 4, "upload");
+                Map<?, ?> callees = successfulBody(client, "find_relations", Map.of(
+                        "context", videoContext, "relation", "CALLEES", "factId", handlerFactId), mapper, videoJourney);
+                Map<?, ?> videoServiceCallee = relationItemAt(callees, "target", "src/main/java/com/example/video/VideoService.java");
+                Map<?, ?> callee = mapValue(mapValue(videoServiceCallee, "target"), "fact");
+                assertThat(callee.get("displayName")).isEqualTo("upload");
                 String videoServiceFactId = String.valueOf(callee.get("factId"));
-                Map<?, ?> implementations = successfulBody(client, "find_method_implementations", Map.of(
-                        "repositoryId", "video-service", "revision", videoRevision, "methodFactId", videoServiceFactId), mapper, videoJourney);
-                Map<?, ?> implementationItem = relationItemAt(implementations, "implementation",
-                        "src/main/java/com/example/video/DefaultVideoService.java");
+                Map<?, ?> implementations = successfulBody(client, "find_relations", Map.of(
+                        "context", videoContext, "relation", "IMPLEMENTATIONS", "factId", videoServiceFactId), mapper, videoJourney);
+                Map<?, ?> implementationItem = relationItemAt(implementations, "origin", "src/main/java/com/example/video/DefaultVideoService.java");
                 assertThat(implementationItem.get("relationKind")).isEqualTo("OVERRIDES");
-                Map<?, ?> implementation = mapValue(implementationItem, "implementation");
-                assertThat(String.valueOf(implementation.get("displayName"))).contains("DefaultVideoService", "upload");
-                assertSource(source(implementation), "src/main/java/com/example/video/DefaultVideoService.java", 7, 11,
-                        "catalog.createTranscodingJob");
+                Map<?, ?> implementation = mapValue(implementationItem, "origin");
                 String implementationFactId = String.valueOf(implementation.get("factId"));
-                Map<?, ?> implementationSource = successfulBody(client, "get_fact_source", Map.of(
-                        "repositoryId", "video-service", "revision", videoRevision, "factId", implementationFactId), mapper, videoJourney);
-                assertFactSource(implementationSource, implementationFactId, "src/main/java/com/example/video/DefaultVideoService.java", 7, 11,
-                        "catalog.createTranscodingJob");
+                Map<?, ?> implementationSource = successfulBody(client, "read_source", Map.of(
+                        "context", videoContext, "target", factTarget(implementationFactId)), mapper, videoJourney);
+                assertFactSource(implementationSource, implementationFactId, "src/main/java/com/example/video/DefaultVideoService.java", 7, 11, "catalog.createTranscodingJob");
                 videoJourney.print();
 
                 JourneyRecorder emptyAndRecovery = new JourneyRecorder("empty-search-and-revision-recovery");
                 Map<?, ?> emptySearch = successfulBody(client, "search_code", Map.of(
-                        "repositoryId", "payment-service", "revision", paymentRevision, "query", "unindexedFixtureToken"), mapper,
-                        emptyAndRecovery);
+                        "context", paymentContext, "query", "unindexedFixtureToken"), mapper, emptyAndRecovery);
                 assertThat(items(emptySearch, "search_code")).isEmpty();
-                assertCoverageWithoutIssues(emptySearch);
                 McpSchema.CallToolResult outdatedResult = client.callTool(McpSchema.CallToolRequest.builder("search_code").arguments(Map.of(
-                        "repositoryId", "payment-service", "revision", "0".repeat(40), "query", "paymentMethods")).build());
+                        "context", currentContext("payment-service", "0".repeat(40)), "query", "paymentMethods")).build());
                 assertThat(outdatedResult.isError()).isTrue();
                 Map<?, ?> outdated = mapper.convertValue(outdatedResult.structuredContent(), Map.class);
                 emptyAndRecovery.record(outdated, mapper);
@@ -297,49 +299,39 @@ class FixtureFullIndexJdtLsIT {
                 String currentRevision = String.valueOf(outdated.get("currentRevision"));
                 assertThat(currentRevision).isEqualTo(paymentRevision);
                 Map<?, ?> recoveredSearch = successfulBody(client, "search_code", Map.of(
-                        "repositoryId", "payment-service", "revision", currentRevision, "query", "paymentMethods",
-                        "kinds", List.of("METHOD")), mapper, emptyAndRecovery);
-                Map<?, ?> recoveredPaymentMethod = programElementAt(recoveredSearch, "items",
-                        "src/main/java/com/example/payment/PaymentQueryController.java", "METHOD");
-                String recoveredFactId = String.valueOf(recoveredPaymentMethod.get("factId"));
-                Map<?, ?> recoveredSource = successfulBody(client, "get_fact_source", Map.of(
-                        "repositoryId", "payment-service", "revision", currentRevision, "factId", recoveredFactId), mapper,
-                        emptyAndRecovery);
-                assertFactSource(recoveredSource, recoveredFactId, "src/main/java/com/example/payment/PaymentQueryController.java", 13, 16,
-                        "paymentMethods");
+                        "context", currentContext("payment-service", currentRevision), "query", "paymentMethods", "kinds", List.of("METHOD")), mapper, emptyAndRecovery);
+                String recoveredFactId = String.valueOf(programElementAt(recoveredSearch, "items",
+                        "src/main/java/com/example/payment/PaymentQueryController.java", "METHOD").get("factId"));
+                Map<?, ?> recoveredSource = successfulBody(client, "read_source", Map.of(
+                        "context", currentContext("payment-service", currentRevision), "target", factTarget(recoveredFactId)), mapper, emptyAndRecovery);
+                assertFactSource(recoveredSource, recoveredFactId, "src/main/java/com/example/payment/PaymentQueryController.java", 13, 16, "paymentMethods");
                 emptyAndRecovery.print();
             }
         }
     }
 
-    private static void assertCoverageWithoutIssues(Map<?, ?> result) {
-        Map<?, ?> coverage = mapValue(result, "sourceCoverage");
-        assertThat(coverage.get("indexedSourceCount")).isInstanceOf(Number.class);
-        assertThat(((Number) coverage.get("indexedSourceCount")).longValue()).isPositive();
-        assertThat(coverage.get("issueCount")).isEqualTo(0);
-        assertThat(coverage.get("issueCodes")).isEqualTo(List.of());
+    private static Map<String, Object> currentContext(String repository, String revision) {
+        return Map.of("kind", "CURRENT", "repositoryId", repository, "revision", revision);
     }
+
+    private static Map<String, Object> factTarget(String factId) { return Map.of("kind", "FACT", "factId", factId); }
 
     private static void assertFactSource(Map<?, ?> result, String factId, String path, int startLine, int endLine, String codeToken) {
-        assertThat(result.get("factId")).isEqualTo(factId);
-        assertSource(mapValue(result, "source"), path, startLine, endLine, codeToken);
+        assertThat(mapValue(result, "target").get("factId")).isEqualTo(factId);
+        assertThat(result.get("path")).isEqualTo(path);
+        assertThat(String.valueOf(result.get("content"))).contains(codeToken);
         Map<?, ?> factRange = mapValue(result, "factRange");
-        assertThat(factRange.get("startLine")).isEqualTo(startLine);
-        assertThat(factRange.get("endLine")).isEqualTo(endLine);
-    }
-
-    private static void assertSource(Map<?, ?> source, String path, int startLine, int endLine, String codeToken) {
-        assertThat(source.get("path")).isEqualTo(path);
-        assertThat(source.get("startLine")).isEqualTo(startLine);
-        assertThat(source.get("endLine")).isEqualTo(endLine);
-        assertThat(String.valueOf(source.get("code"))).contains(codeToken);
+        assertThat(mapValue(factRange, "start").get("line")).isEqualTo(startLine - 1);
+        assertThat(mapValue(factRange, "end").get("line")).isEqualTo(endLine - 1);
     }
 
     private static Map<?, ?> successfulBody(McpSyncClient client, String toolName, Map<String, Object> arguments, JsonMapper mapper,
                                               JourneyRecorder journey) {
         McpSchema.CallToolResult result = client.callTool(McpSchema.CallToolRequest.builder(toolName).arguments(arguments).build());
-        assertThat(result.isError()).as("%s must succeed", toolName).isFalse();
+        assertThat(result.isError()).as("%s must succeed: %s", toolName, result.structuredContent()).isFalse();
         Map<?, ?> body = mapper.convertValue(result.structuredContent(), Map.class);
+        assertThat(mapper.readTree(((McpSchema.TextContent) result.content().getFirst()).text()))
+                .isEqualTo(mapper.readTree(mapper.writeValueAsString(body)));
         journey.record(body, mapper);
         return body;
     }
@@ -357,7 +349,7 @@ class FixtureFullIndexJdtLsIT {
         return items(result, itemKey).stream()
                 .filter(Map.class::isInstance)
                 .map(Map.class::cast)
-                .filter(item -> sourcePath.equals(source(item).get("path")))
+                .filter(item -> sourcePath.equals(item.get("path")))
                 .filter(item -> kind.equals(item.get("kind")))
                 .findFirst()
                 .orElseThrow(() -> new AssertionError(itemKey + " did not return " + kind + " at " + sourcePath));
@@ -367,7 +359,8 @@ class FixtureFullIndexJdtLsIT {
         return items(result, programElementKey).stream()
                 .filter(Map.class::isInstance)
                 .map(Map.class::cast)
-                .filter(item -> sourcePath.equals(source(mapValue(item, programElementKey)).get("path")))
+                .filter(item -> sourcePath.equals((programElementKey.equals("target")
+                        ? mapValue(mapValue(item, "target"), "fact") : mapValue(item, programElementKey)).get("path")))
                 .findFirst()
                 .orElseThrow(() -> new AssertionError(programElementKey + " did not return " + sourcePath));
     }
@@ -392,15 +385,6 @@ class FixtureFullIndexJdtLsIT {
         return (Map<?, ?>) nested;
     }
 
-    private static Map<?, ?> source(Map<?, ?> programElement) {
-        return mapValue(programElement, "source");
-    }
-
-    private static Map<?, ?> schemaProperties(Map<String, Object> schema) {
-        Object properties = schema.get("properties");
-        assertThat(properties).isInstanceOf(Map.class);
-        return (Map<?, ?>) properties;
-    }
 
     private static final class JourneyRecorder {
         private final String name;
@@ -453,6 +437,7 @@ class FixtureFullIndexJdtLsIT {
         writer.seal(lease, result.identityDigest().value());
         new MongoPublicationWriter(template).publish(new PublishGenerationCommand(id, new RepositoryRevision(revision), generation,
                 generationId + "-job", java.util.Optional.empty(), new ManifestDigest(result.identityDigest().value())));
+        assertThat(new MongoIndexJobStore(template).complete(job.id())).isTrue();
     }
 
     private List<SourceIndexBatch> exportAndPersist(DefaultJdtWorkspaceManager manager,
@@ -481,6 +466,7 @@ class FixtureFullIndexJdtLsIT {
                                                RepositoryId repositoryId, RepositoryRevision revision, GenerationId generationId) {
         String jobId = generationId.value() + "-job";
         template.getCollection(IndexCollections.INDEX_JOBS).insertOne(new Document("jobId", jobId)
+                .append("jobVersion", IndexSchemaContract.PERSISTED_JOB_VERSION)
                 .append("repoId", repositoryId.value()).append("target", new Document("revision", revision.value())
                         .append("generationId", generationId.value()).append("generation", 1L)).append("operation", "BUILD")
                 .append("phase", "RUNNING").append("active", true).append("outstandingBatches", List.of()).append("acknowledgedBatches", List.of())

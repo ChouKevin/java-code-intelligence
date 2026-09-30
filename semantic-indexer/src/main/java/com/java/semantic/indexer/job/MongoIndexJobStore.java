@@ -133,7 +133,7 @@ public final class MongoIndexJobStore implements IndexJobStore {
         IndexJobId jobId = IndexJobId.create();
         Document review = new Document("reviewId", UUID.randomUUID().toString())
                 .append("selection", selectionDocument(requested))
-                .append("selectionKey", selectionKey(requested))
+                .append("selectionKey", requested.selectionKey())
                 .append("stage", ReviewPreparationStage.RESOLVING.name());
         Document job = new Document(JOB_ID, jobId.value()).append(REPOSITORY_ID, requiredRepositoryId.value()).append(ACTIVE, true)
                 .append("phase", IndexJobPhase.ACCEPTED.name()).append("operation", IndexJobOperation.REVIEW.name()).append("rebuild", false)
@@ -629,11 +629,6 @@ public final class MongoIndexJobStore implements IndexJobStore {
         request.branch().ifPresent(branch -> requested.append("branch", branch));
         request.selection().ifPresent(selection -> requested.append("selection", selectionDocument(selection)));
         job.append("requestId", request.requestId().value()).append("requested", requested);
-    }
-
-    private static String selectionKey(ReviewSelection selection) {
-        return selection.kind().name() + ":" + selection.beforeRevision().map(RepositoryRevision::value).orElse("")
-                + ":" + selection.afterRevision().value();
     }
 
     private static void requireOperation(PreparationRequest request, PreparationOperation operation) {

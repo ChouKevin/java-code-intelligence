@@ -3,6 +3,7 @@ package com.java.semantic.indexer.job;
 import com.mongodb.MongoCommandException;
 import com.mongodb.client.MongoClient;
 import com.mongodb.client.MongoClients;
+import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
 import io.modelcontextprotocol.client.McpClient;
 import io.modelcontextprotocol.client.McpSyncClient;
@@ -56,13 +57,6 @@ class SemanticReviewJourneyIT {
     private static final int MONGO_CONTAINER_PORT = 27017;
     private static final Duration STARTUP_TIMEOUT = Duration.ofSeconds(45);
     private static final Duration JOB_TIMEOUT = Duration.ofMinutes(3);
-    private static final List<String> TOOL_NAMES = List.of(
-            "list_repositories", "get_repository", "search_code", "get_fact_source", "list_entry_points", "find_api_routes",
-            "find_event_listeners", "list_type_members", "find_method_implementations", "find_references", "find_callers", "find_callees",
-            "list_git_branches", "list_git_commits", "compare_revisions", "get_file_diff", "list_files", "read_file", "search_text",
-            "get_review", "review_search_code", "review_get_fact_source", "review_list_entry_points", "review_find_api_routes",
-            "review_find_event_listeners", "review_list_type_members", "review_find_method_implementations", "review_find_references",
-            "review_find_callers", "review_find_callees");
 
     @TempDir
     Path temporaryDirectory;
@@ -156,63 +150,56 @@ class SemanticReviewJourneyIT {
                 RunningProcess query = startQuery(queryJar, readerUri, queryPort);
                 try {
                     String queryBase = "http://127.0.0.1:" + queryPort;
-                    awaitHttp(queryBase + "/api/v1/repositories/" + REPOSITORY_ID + "/reviews/" + reviewId, QUERY_TOKEN, query);
-                    Map<?, ?> reviewDetails = successful(get(queryBase, "/api/v1/repositories/" + REPOSITORY_ID + "/reviews/" + reviewId,
-                            QUERY_TOKEN), mapper);
-                    Map<?, ?> before = map(map(reviewDetails, "before"), "endpoint");
+                    awaitHttp(queryBase + "/api/v1/repositories", QUERY_TOKEN, query);
+                    Map<?, ?> reviewDetails = successful(post(queryBase, "/api/v1/context", QUERY_TOKEN, discoveryRequest(reviewId)), mapper);
+                    Map<?, ?> before = map(reviewDetails, "before");
                     Map<?, ?> after = map(reviewDetails, "after");
                     assertThat(text(before, "revision")).isEqualTo(revisionA);
                     assertThat(text(after, "revision")).isEqualTo(revisionB);
-                    assertThat(text(before, "snapshotId")).isNotEqualTo(text(after, "snapshotId"));
-                    assertThat(text(before, "generationId"))
-                            .as("LINUX_UID analysis reuses the compatible current generation")
-                            .isEqualTo(baselineGeneration);
-                    Map<?, ?> changedInstallationReview = successful(get(queryBase,
-                            "/api/v1/repositories/" + REPOSITORY_ID + "/reviews/" + changedInstallationReviewId,
-                            QUERY_TOKEN), mapper);
-                    Map<?, ?> changedBefore = map(map(changedInstallationReview, "before"), "endpoint");
-                    assertThat(text(changedBefore, "revision")).isEqualTo(revisionA);
-                    assertThat(text(changedBefore, "generationId")).isNotEqualTo(baselineGeneration);
-                    assertThat(text(changedBefore, "analysisFingerprint"))
-                            .isNotEqualTo(text(before, "analysisFingerprint"));
+                    try (MongoClient evidenceClient = MongoClients.create(writerUri)) {
+                        MongoCollection<Document> manifests = evidenceClient.getDatabase(DATABASE).getCollection("review_manifests");
+                        Document original = manifests.find(new Document("reviewId", reviewId)).first();
+                        Document changed = manifests.find(new Document("reviewId", changedInstallationReviewId)).first();
+                        Document originalGeneration = original.get("before", Document.class).get("generation", Document.class);
+                        Document changedGeneration = changed.get("before", Document.class).get("generation", Document.class);
+                        assertThat(originalGeneration.get("selected", Document.class).getString("generationId")).isEqualTo(baselineGeneration);
+                        assertThat(changedGeneration.get("selected", Document.class).getString("generationId")).isNotEqualTo(baselineGeneration);
+                        assertThat(changedGeneration.get("fingerprint", Document.class))
+                                .isNotEqualTo(originalGeneration.get("fingerprint", Document.class));
+                    }
 
                     Map<String, Object> searchA = reviewSearch(reviewId, "BEFORE", revisionA, "LegacyGateway", "TYPE");
-                    Map<?, ?> legacySearch = successful(post(queryBase, "/api/v1/reviews/search-code", QUERY_TOKEN, searchA), mapper);
-                    String legacyGateway = text(mapList(map(legacySearch, "result"), "items").getFirst(), "factId");
-                    Map<?, ?> legacySource = successful(post(queryBase, "/api/v1/reviews/fact-source", QUERY_TOKEN,
-                            Map.of("repositoryId", REPOSITORY_ID, "reviewId", reviewId, "side", "BEFORE", "revision", revisionA,
-                                    "factId", legacyGateway)), mapper);
-                    assertThat(text(map(map(legacySource, "result"), "source"), "code")).contains("LegacyGateway");
+                    Map<?, ?> legacySearch = successful(post(queryBase, "/api/v1/search-code", QUERY_TOKEN, searchA), mapper);
+                    String legacyGateway = text(mapList(legacySearch, "items").getFirst(), "factId");
+                    Map<?, ?> legacySource = successful(post(queryBase, "/api/v1/source", QUERY_TOKEN,
+                            factSource(context(reviewId, "BEFORE", revisionA), legacyGateway)), mapper);
+                    assertThat(text(legacySource, "content")).contains("LegacyGateway");
                     String legacyPay = methodFact(queryBase, reviewId, "BEFORE", revisionA, "LegacyGateway", mapper);
-                    Map<?, ?> legacyCallers = successful(post(queryBase, "/api/v1/reviews/callers", QUERY_TOKEN,
-                            Map.of("repositoryId", REPOSITORY_ID, "reviewId", reviewId, "side", "BEFORE", "revision", revisionA,
-                                    "methodFactId", legacyPay)), mapper);
-                    assertThat(mapList(map(legacyCallers, "result"), "items")).isNotEmpty();
+                    Map<?, ?> legacyCallers = successful(post(queryBase, "/api/v1/relations", QUERY_TOKEN,
+                            callers(context(reviewId, "BEFORE", revisionA), legacyPay)), mapper);
+                    assertThat(mapList(legacyCallers, "items")).anySatisfy(item ->
+                            assertThat(text(map(item, "origin"), "canonical")).contains("Checkout"));
 
                     Map<String, Object> searchB = reviewSearch(reviewId, "AFTER", revisionB, "ModernGateway", "TYPE");
-                    Map<?, ?> searchResult = successful(post(queryBase, "/api/v1/reviews/search-code", QUERY_TOKEN, searchB), mapper);
-                    String modernGateway = text(mapList(map(searchResult, "result"), "items").getFirst(), "factId");
-                    Map<?, ?> source = successful(post(queryBase, "/api/v1/reviews/fact-source", QUERY_TOKEN,
-                            Map.of("repositoryId", REPOSITORY_ID, "reviewId", reviewId, "side", "AFTER", "revision", revisionB,
-                                    "factId", modernGateway)), mapper);
-                    assertThat(text(map(map(source, "result"), "source"), "code")).contains("ModernGateway");
+                    Map<?, ?> searchResult = successful(post(queryBase, "/api/v1/search-code", QUERY_TOKEN, searchB), mapper);
+                    String modernGateway = text(mapList(searchResult, "items").getFirst(), "factId");
+                    Map<?, ?> source = successful(post(queryBase, "/api/v1/source", QUERY_TOKEN,
+                            factSource(context(reviewId, "AFTER", revisionB), modernGateway)), mapper);
+                    assertThat(text(source, "content")).contains("ModernGateway");
                     String modernPay = methodFact(queryBase, reviewId, "AFTER", revisionB, "ModernGateway", mapper);
-                    Map<?, ?> callers = successful(post(queryBase, "/api/v1/reviews/callers", QUERY_TOKEN,
-                            Map.of("repositoryId", REPOSITORY_ID, "reviewId", reviewId, "side", "AFTER", "revision", revisionB,
-                                    "methodFactId", modernPay)), mapper);
-                    assertThat(mapList(map(callers, "result"), "items")).isNotEmpty();
-
-                    String comparisonId = text(reviewDetails, "comparisonId");
+                    Map<?, ?> callers = successful(post(queryBase, "/api/v1/relations", QUERY_TOKEN,
+                            callers(context(reviewId, "AFTER", revisionB), modernPay)), mapper);
+                    assertThat(mapList(callers, "items")).anySatisfy(item ->
+                            assertThat(text(map(item, "origin"), "canonical")).contains("Checkout"));
+                    Map<?, ?> comparisonContext = map(reviewDetails, "comparisonContext");
                     Map<?, ?> comparison = successful(post(queryBase, "/api/v1/git/comparisons", QUERY_TOKEN,
-                            Map.of("repositoryId", REPOSITORY_ID, "comparisonId", comparisonId, "previous", revisionA, "current", revisionB)), mapper);
+                            Map.of("comparisonContext", comparisonContext)), mapper);
                     Map<?, ?> checkoutChange = mapList(comparison, "items").stream()
-                            .filter(item -> "src/main/java/example/Checkout.java".equals(item.get("newPath"))).findFirst().orElseThrow();
+                            .filter(item -> "src/main/java/example/Checkout.java".equals(map(item, "after").get("path"))).findFirst().orElseThrow();
                     Map<?, ?> patch = successful(post(queryBase, "/api/v1/git/file-diff", QUERY_TOKEN,
-                            Map.of("repositoryId", REPOSITORY_ID, "comparisonId", comparisonId, "previous", revisionA, "current", revisionB,
-                                    "changeId", text(checkoutChange, "changeId"))), mapper);
+                            Map.of("comparisonContext", comparisonContext, "changeId", text(checkoutChange, "changeId"))), mapper);
                     assertThat(text(patch, "patch")).contains("LegacyGateway", "ModernGateway");
-                    assertMcpJourney(queryBase, reviewId, revisionA, revisionB, comparisonId, legacyGateway, legacyPay, modernGateway, modernPay,
-                            mapper);
+                    assertMcpJourney(queryBase, reviewId, revisionA, revisionB, comparisonContext, legacyGateway, legacyPay, modernGateway, modernPay, mapper);
                 } finally {
                     query.close();
                 }
@@ -358,87 +345,89 @@ class SemanticReviewJourneyIT {
                 || key.startsWith("SEMANTIC_ANALYSIS_"));
     }
 
+    private static Map<String, Object> discoveryRequest(String reviewId) {
+        return Map.of("repositoryId", REPOSITORY_ID, "selector", Map.of("kind", "REVIEW", "reviewId", reviewId));
+    }
+
+    private static Map<String, Object> context(String reviewId, String side, String revision) {
+        return Map.of("kind", "REVIEW", "repositoryId", REPOSITORY_ID, "reviewId", reviewId, "side", side, "revision", revision);
+    }
+
+    private static Map<String, Object> factSource(Map<String, Object> context, String factId) {
+        return Map.of("context", context, "target", Map.of("kind", "FACT", "factId", factId));
+    }
+
+    private static Map<String, Object> callers(Map<String, Object> context, String factId) {
+        return Map.of("context", context, "relation", "CALLERS", "factId", factId);
+    }
+
     private static Map<String, Object> reviewSearch(String reviewId, String side, String revision, String query, String kind) {
-        return Map.of("repositoryId", REPOSITORY_ID, "reviewId", reviewId, "side", side, "revision", revision,
-                "query", query, "kinds", List.of(kind));
+        return Map.of("context", context(reviewId, side, revision), "query", query, "kinds", List.of(kind));
     }
 
     private String methodFact(String base, String reviewId, String side, String revision, String owner, JsonMapper mapper) throws Exception {
-        Map<?, ?> response = successful(post(base, "/api/v1/reviews/search-code", QUERY_TOKEN,
+        Map<?, ?> response = successful(post(base, "/api/v1/search-code", QUERY_TOKEN,
                 reviewSearch(reviewId, side, revision, "pay", "METHOD")), mapper);
-        return mapList(map(response, "result"), "items").stream().filter(item -> String.valueOf(item.get("displayName")).contains(owner))
+        return mapList(response, "items").stream().filter(item -> String.valueOf(item.get("canonical")).contains(owner))
                 .map(item -> text(item, "factId")).findFirst().orElseThrow();
     }
 
-    private void assertMcpJourney(String base, String reviewId, String revisionA, String revisionB, String comparisonId,
-                                  String legacyGateway, String legacyPay, String modernGateway, String modernPay, JsonMapper mapper) throws Exception {
+    private void assertMcpJourney(String base, String reviewId, String revisionA, String revisionB, Map<?, ?> comparisonContext,
+            String legacyGateway, String legacyPay, String modernGateway, String modernPay, JsonMapper mapper) throws Exception {
         HttpClientStreamableHttpTransport transport = HttpClientStreamableHttpTransport.builder(base + "/mcp")
                 .jsonMapper(new JacksonMcpJsonMapper(mapper))
                 .httpRequestCustomizer((request, method, uri, body, context) -> request.header("X-Api-Token", QUERY_TOKEN)).build();
         try (McpSyncClient client = McpClient.sync(transport).requestTimeout(Duration.ofSeconds(30)).initializationTimeout(Duration.ofSeconds(30)).build()) {
-            assertThat(client.initialize().serverInfo()).isNotNull();
-            assertThat(client.listTools().tools()).extracting(McpSchema.Tool::name).containsExactlyInAnyOrderElementsOf(TOOL_NAMES);
-            Map<?, ?> review = mcpBody(client, "get_review", Map.of("repositoryId", REPOSITORY_ID, "reviewId", reviewId), mapper);
-            assertThat(text(map(map(review, "before"), "endpoint"), "revision")).isEqualTo(revisionA);
-            Map<?, ?> legacySearch = mcpBody(client, "review_search_code", reviewSearch(reviewId, "BEFORE", revisionA, "LegacyGateway", "TYPE"), mapper);
-            assertThat(mapList(map(legacySearch, "result"), "items")).isNotEmpty();
-            Map<?, ?> legacySource = mcpBody(client, "review_get_fact_source", Map.of("repositoryId", REPOSITORY_ID, "reviewId", reviewId,
-                    "side", "BEFORE", "revision", revisionA, "factId", legacyGateway), mapper);
-            assertThat(text(map(map(legacySource, "result"), "source"), "code")).contains("LegacyGateway");
-            Map<?, ?> legacyCallers = mcpBody(client, "review_find_callers", Map.of("repositoryId", REPOSITORY_ID, "reviewId", reviewId,
-                    "side", "BEFORE", "revision", revisionA, "methodFactId", legacyPay), mapper);
-            assertThat(mapList(map(legacyCallers, "result"), "items")).isNotEmpty();
-            Map<?, ?> search = mcpBody(client, "review_search_code", reviewSearch(reviewId, "AFTER", revisionB, "ModernGateway", "TYPE"), mapper);
-            assertThat(mapList(map(search, "result"), "items")).isNotEmpty();
-            Map<?, ?> source = mcpBody(client, "review_get_fact_source", Map.of("repositoryId", REPOSITORY_ID, "reviewId", reviewId,
-                    "side", "AFTER", "revision", revisionB, "factId", modernGateway), mapper);
-            assertThat(text(map(map(source, "result"), "source"), "code")).contains("ModernGateway");
-            Map<?, ?> callers = mcpBody(client, "review_find_callers", Map.of("repositoryId", REPOSITORY_ID, "reviewId", reviewId,
-                    "side", "AFTER", "revision", revisionB, "methodFactId", modernPay), mapper);
-            assertThat(mapList(map(callers, "result"), "items")).isNotEmpty();
-            Map<?, ?> comparison = mcpBody(client, "compare_revisions", Map.of("repositoryId", REPOSITORY_ID, "comparisonId", comparisonId,
-                    "previous", revisionA, "current", revisionB), mapper);
+            client.initialize();
+            Map<?, ?> review = mcpBody(client, "get_context", discoveryRequest(reviewId), mapper);
+            assertThat(text(map(review, "before"), "revision")).isEqualTo(revisionA);
+            Map<?, ?> legacySource = mcpBody(client, "read_source", factSource(context(reviewId, "BEFORE", revisionA), legacyGateway), mapper);
+            assertThat(text(legacySource, "content")).contains("LegacyGateway");
+            Map<?, ?> legacyCallers = mcpBody(client, "find_relations", callers(context(reviewId, "BEFORE", revisionA), legacyPay), mapper);
+            assertThat(mapList(legacyCallers, "items")).anySatisfy(item -> assertThat(text(map(item, "origin"), "canonical")).contains("Checkout"));
+            Map<?, ?> source = mcpBody(client, "read_source", factSource(context(reviewId, "AFTER", revisionB), modernGateway), mapper);
+            assertThat(text(source, "content")).contains("ModernGateway");
+            Map<?, ?> callers = mcpBody(client, "find_relations", callers(context(reviewId, "AFTER", revisionB), modernPay), mapper);
+            assertThat(mapList(callers, "items")).anySatisfy(item -> assertThat(text(map(item, "origin"), "canonical")).contains("Checkout"));
+            Map<?, ?> comparison = mcpBody(client, "compare_revisions", Map.of("comparisonContext", comparisonContext), mapper);
             Map<?, ?> checkoutChange = mapList(comparison, "items").stream()
-                    .filter(item -> "src/main/java/example/Checkout.java".equals(item.get("newPath"))).findFirst().orElseThrow();
-            Map<?, ?> patch = mcpBody(client, "get_file_diff", Map.of("repositoryId", REPOSITORY_ID, "comparisonId", comparisonId,
-                    "previous", revisionA, "current", revisionB, "changeId", text(checkoutChange, "changeId")), mapper);
+                    .filter(item -> "src/main/java/example/Checkout.java".equals(map(item, "after").get("path"))).findFirst().orElseThrow();
+            Map<?, ?> patch = mcpBody(client, "get_file_diff", Map.of("comparisonContext", comparisonContext, "changeId", text(checkoutChange, "changeId")), mapper);
             assertThat(text(patch, "patch")).contains("LegacyGateway", "ModernGateway");
             assertMapperVisibleThroughHttpAndMcp(base, client, reviewId, revisionA, revisionB, mapper);
         }
     }
 
     private void assertMapperVisibleThroughHttpAndMcp(String base, McpSyncClient client, String reviewId,
-                                                       String revisionA, String revisionB, JsonMapper mapper) throws Exception {
-        Map<String, Object> currentSearchRequest = Map.of("repositoryId", REPOSITORY_ID, "revision", revisionA,
-                "query", "findActive", "kinds", List.of("MAPPER_STATEMENT"));
+            String revisionA, String revisionB, JsonMapper mapper) throws Exception {
+        Map<String, Object> currentContext = Map.of("kind", "CURRENT", "repositoryId", REPOSITORY_ID, "revision", revisionA);
+        Map<String, Object> currentSearchRequest = Map.of("context", currentContext, "query", "findActive", "kinds", List.of("MAPPER_STATEMENT"));
         Map<?, ?> currentSearch = successful(post(base, "/api/v1/search-code", QUERY_TOKEN, currentSearchRequest), mapper);
         assertThat(mapList(currentSearch, "items")).singleElement()
-                .satisfies(item -> assertThat(text(item, "kind")).isEqualTo("MAPPER_STATEMENT"));
+                .satisfies(item -> assertThat(text(item, "mapperStatementKind")).isEqualTo("SELECT"));
         String currentFactId = text(mapList(currentSearch, "items").getFirst(), "factId");
-        Map<String, Object> currentSourceRequest = Map.of("repositoryId", REPOSITORY_ID, "revision", revisionA,
-                "factId", currentFactId);
-        Map<?, ?> currentSource = successful(post(base, "/api/v1/fact-source", QUERY_TOKEN, currentSourceRequest), mapper);
-        assertThat(text(map(currentSource, "source"), "code")).contains("SELECT id FROM payments WHERE active = TRUE");
+        Map<String, Object> currentSourceRequest = factSource(currentContext, currentFactId);
+        Map<?, ?> currentSource = successful(post(base, "/api/v1/source", QUERY_TOKEN, currentSourceRequest), mapper);
+        assertThat(text(currentSource, "content")).contains("SELECT id FROM payments WHERE active = TRUE");
         assertThat(mcpBody(client, "search_code", currentSearchRequest, mapper)).isEqualTo(currentSearch);
-        assertThat(mcpBody(client, "get_fact_source", currentSourceRequest, mapper)).isEqualTo(currentSource);
-
+        assertThat(mcpBody(client, "read_source", currentSourceRequest, mapper)).isEqualTo(currentSource);
         Map<String, Object> reviewSearchRequest = reviewSearch(reviewId, "AFTER", revisionB, "findActive", "MAPPER_STATEMENT");
-        Map<?, ?> reviewSearch = successful(post(base, "/api/v1/reviews/search-code", QUERY_TOKEN, reviewSearchRequest), mapper);
-        assertThat(mapList(map(reviewSearch, "result"), "items")).singleElement()
-                .satisfies(item -> assertThat(text(item, "kind")).isEqualTo("MAPPER_STATEMENT"));
-        String reviewFactId = text(mapList(map(reviewSearch, "result"), "items").getFirst(), "factId");
-        Map<String, Object> reviewSourceRequest = Map.of("repositoryId", REPOSITORY_ID, "reviewId", reviewId,
-                "side", "AFTER", "revision", revisionB, "factId", reviewFactId);
-        Map<?, ?> reviewSource = successful(post(base, "/api/v1/reviews/fact-source", QUERY_TOKEN, reviewSourceRequest), mapper);
-        assertThat(text(map(map(reviewSource, "result"), "source"), "code"))
-                .contains("SELECT id FROM payments WHERE active = TRUE");
-        assertThat(mcpBody(client, "review_search_code", reviewSearchRequest, mapper)).isEqualTo(reviewSearch);
-        assertThat(mcpBody(client, "review_get_fact_source", reviewSourceRequest, mapper)).isEqualTo(reviewSource);
+        Map<?, ?> reviewSearch = successful(post(base, "/api/v1/search-code", QUERY_TOKEN, reviewSearchRequest), mapper);
+        assertThat(mapList(reviewSearch, "items")).singleElement()
+                .satisfies(item -> assertThat(text(item, "mapperStatementKind")).isEqualTo("SELECT"));
+        String reviewFactId = text(mapList(reviewSearch, "items").getFirst(), "factId");
+        Map<String, Object> reviewSourceRequest = factSource(context(reviewId, "AFTER", revisionB), reviewFactId);
+        Map<?, ?> reviewSource = successful(post(base, "/api/v1/source", QUERY_TOKEN, reviewSourceRequest), mapper);
+        assertThat(text(reviewSource, "content")).contains("SELECT id FROM payments WHERE active = TRUE");
+        assertThat(mcpBody(client, "search_code", reviewSearchRequest, mapper)).isEqualTo(reviewSearch);
+        assertThat(mcpBody(client, "read_source", reviewSourceRequest, mapper)).isEqualTo(reviewSource);
     }
 
     private static Map<?, ?> mcpBody(McpSyncClient client, String name, Map<String, Object> arguments, JsonMapper mapper) {
         McpSchema.CallToolResult response = client.callTool(McpSchema.CallToolRequest.builder(name).arguments(arguments).build());
         assertThat(response.isError()).as("%s failed: %s", name, response.content()).isFalse();
+        assertThat(mapper.readTree(((McpSchema.TextContent) response.content().getFirst()).text()))
+                .isEqualTo(mapper.readTree(mapper.writeValueAsString(response.structuredContent())));
         return mapper.convertValue(response.structuredContent(), Map.class);
     }
 

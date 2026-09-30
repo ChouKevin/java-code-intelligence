@@ -29,10 +29,14 @@ public final class CodeFactDisplay {
                 return displayName(internal.identity().canonicalIdentity());
             }
             if (relation.target() instanceof RelationTarget.External external) {
-                return external.target().canonicalForm();
+                return displayName(external.target());
             }
         }
         throw new IllegalArgumentException("unsupported indexed search identity");
+    }
+
+    public static String displayName(ExternalTarget target) {
+        return target instanceof ExternalTarget.UnresolvedCall call ? call.methodName() : target.canonicalForm();
     }
 
     public static String signature(CanonicalIdentity identity) {

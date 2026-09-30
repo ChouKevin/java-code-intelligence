@@ -5,6 +5,8 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.java.semantic.model.codefact.CodeFactKind;
+import com.java.semantic.model.codefact.MapperStatementKind;
+import com.java.semantic.model.index.SymbolDocument;
 import com.java.semantic.model.codefact.ExternalTarget;
 import com.java.semantic.model.codefact.RelationKind;
 import com.java.semantic.model.codefact.RelationTarget;
@@ -18,6 +20,8 @@ import com.java.semantic.syntax.domain.SourceExtractionOutcome;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -47,15 +51,38 @@ class IndexProjectionContractTest {
         Path mapper = repository.resolve("src/main/resources/mapper/OrderMapper.xml");
         Files.createDirectories(javaSource.getParent());
         Files.createDirectories(mapper.getParent());
-        Files.writeString(javaSource, "package example; interface OrderMapper { void find(); }\n");
-        Files.writeString(mapper, "<mapper namespace=\"example.OrderMapper\"><select id=\"find\">select 1</select></mapper>");
+        Files.writeString(javaSource, """
+                package example;
+                import org.apache.ibatis.annotations.Select;
+                interface OrderMapper {
+                    void find();
+                    @Select("UPDATE orders SET status = 1") void annotated();
+                }
+                """);
+        Path annotation = repository.resolve("src/main/java/org/apache/ibatis/annotations/Select.java");
+        Files.createDirectories(annotation.getParent());
+        Files.writeString(annotation, "package org.apache.ibatis.annotations; public @interface Select { String value(); }");
+        Files.writeString(mapper, """
+                <mapper namespace="example.OrderMapper">
+                  <select id="find">select 1</select>
+                  <insert id="create">insert into orders values (1)</insert>
+                  <update id="change">update orders set status = 1</update>
+                  <delete id="remove">delete from orders</delete>
+                </mapper>
+                """);
 
         List<SourceIndexBatch> batches = new TestSyntaxRepositoryIndexExporter().export(new RepositoryId("orders"),
                 new RepositoryRevision("a".repeat(40)), new GenerationId("g1"), new FullIndexPlanner().plan(repository));
 
+        Map<String, MapperStatementKind> operations = batches.stream().flatMap(batch -> batch.symbols().stream())
+                .filter(symbol -> symbol.kind() == CodeFactKind.MAPPER_STATEMENT)
+                .collect(Collectors.toMap(SymbolDocument::name, symbol -> symbol.mapperStatementKind().orElseThrow()));
+        assertEquals(Map.of("find", MapperStatementKind.SELECT, "create", MapperStatementKind.INSERT,
+                "change", MapperStatementKind.UPDATE, "remove", MapperStatementKind.DELETE,
+                "annotated", MapperStatementKind.ANNOTATION), operations);
         assertTrue(batches.stream().flatMap(batch -> batch.symbols().stream())
-                .anyMatch(symbol -> symbol.kind() == com.java.semantic.model.codefact.CodeFactKind.MAPPER_STATEMENT
-                        && "find".equals(symbol.name())));
+                .filter(symbol -> symbol.kind() != CodeFactKind.MAPPER_STATEMENT)
+                .allMatch(symbol -> symbol.mapperStatementKind().isEmpty()));
         assertTrue(batches.stream().filter(batch -> batch.sourcePath().equals("src/main/resources/mapper/OrderMapper.xml"))
                 .allMatch(batch -> batch.extractionIssue().isEmpty()));
     }

@@ -1,197 +1,138 @@
 package com.java.semantic.query.application;
 
 import com.java.semantic.model.codefact.CodeFactIdentity;
-import com.java.semantic.model.codefact.RelationIdentity;
+import com.java.semantic.model.codefact.CodeFactId;
+import com.java.semantic.model.codefact.ExternalTarget;
 import com.java.semantic.model.codefact.RelationKind;
 import com.java.semantic.model.codefact.RelationTarget;
 import com.java.semantic.model.codefact.SourceRange;
 import com.java.semantic.model.codefact.SyntaxPosition;
 import com.java.semantic.model.codefact.SyntaxRange;
-import com.java.semantic.model.query.SelectedGeneration;
-import com.java.semantic.model.query.PublishedRelationQuery;
-import com.java.semantic.model.query.PublishedRelationResult;
-import com.java.semantic.model.repository.RepositoryId;
-import com.java.semantic.model.repository.RepositoryRevision;
+import com.java.semantic.model.index.RelationDocument;
 import com.java.semantic.query.config.ReadPolicyProperties;
-import org.bson.Document;
-import org.junit.jupiter.api.AfterAll;
-import org.junit.jupiter.api.BeforeAll;
-import org.junit.jupiter.api.Tag;
-import org.junit.jupiter.api.Test;
-import org.springframework.data.mongodb.core.MongoTemplate;
-
-import java.time.Duration;
 import java.util.List;
-
-import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import java.util.Optional;
+import java.util.Set;
+import org.bson.Document;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Tag;
+import org.springframework.data.mongodb.core.MongoTemplate;
+import static com.java.semantic.query.application.SemanticQueryContract.*;
+import static org.assertj.core.api.Assertions.*;
 
 @Tag("mongo-it")
 class PublishedRelationContractIT extends PublishedMongoITSupport {
-
-    private static PublishedMongoLifecycle lifecycle;
-
-    @BeforeAll
-    static void startMongo() {
-        lifecycle = PublishedMongoLifecycle.start();
-    }
-
-    @AfterAll
-    static void stopMongo() {
-        lifecycle.close();
-    }
+    private static final String PATH = "src/main/java/example/Service.java";
 
     @Test
-    void returns_deterministically_paged_references_and_implementation_facts_from_the_current_generation() {
-        try (PublishedMongoLifecycle.Invocation invocation = lifecycle.openInvocation()) {
-            MongoTemplate template = invocation.template();
-            seedCurrent(template, "orders");
-            CodeFactIdentity declaration = methodIdentity("example.api", "Port", "handle", "src/main/java/example/api/Port.java");
-            CodeFactIdentity alpha = methodIdentity("example.service", "AlphaService", "handle", "src/main/java/example/service/AlphaService.java");
-            CodeFactIdentity beta = methodIdentity("example.service", "BetaService", "handle", "src/main/java/example/service/BetaService.java");
-            seedMethod(template, declaration, List.of());
-            seedMethod(template, alpha, List.of());
-            seedMethod(template, beta, List.of());
-            SourceRange alphaRange = range(alpha, 8);
-            SourceRange betaRange = range(beta, 3);
-            seedRelation(template, beta, RelationKind.REFERENCES, new RelationTarget.Internal(declaration), betaRange);
-            seedRelation(template, alpha, RelationKind.REFERENCES, new RelationTarget.Internal(declaration), alphaRange);
-            seedRelation(template, beta, RelationKind.IMPLEMENTS, new RelationTarget.Internal(declaration), betaRange);
-            seedRelation(template, alpha, RelationKind.OVERRIDES, new RelationTarget.Internal(declaration), alphaRange);
-            CurrentGenerationSelector selector = selector(template, policy());
-            SelectedGeneration context = selector.selectCodeFact("orders", REVISION, declaration, SelectedGenerationGuard.RELATIONS);
-            PublishedRelationQueryService service = new PublishedRelationQueryService(template, guard(template, policy()), Duration.ofSeconds(2));
-            PublishedRelationQuery query = new PublishedRelationQuery(new RepositoryId("orders"), new RepositoryRevision(REVISION), declaration, 0, 1);
-
-            PublishedRelationResult references = service.findReferences(context, query);
-            PublishedRelationResult implementations = service.findImplementations(context, new PublishedRelationQuery(
-                    new RepositoryId("orders"), new RepositoryRevision(REVISION), declaration, 0, 20));
-
-            assertThat(references.generation().generationId().value()).isEqualTo("g1");
-            assertThat(references.relations()).extracting(relation -> relation.from().canonicalForm())
-                    .containsExactly(alpha.canonicalForm());
-            assertThat(references.page().totalCount()).isEqualTo(2);
-            assertThat(references.page().hasMore()).isTrue();
-            assertThat(implementations.relations()).extracting(relation -> relation.kind().name(), relation -> relation.from().canonicalForm())
-                    .containsExactly(org.assertj.core.groups.Tuple.tuple("OVERRIDES", alpha.canonicalForm()),
-                            org.assertj.core.groups.Tuple.tuple("IMPLEMENTS", beta.canonicalForm()));
+    void callers_fill_sparse_authorized_pages_and_preserve_distinct_occurrences() {
+        try (PublishedMongoLifecycle lifecycle = PublishedMongoLifecycle.start(); PublishedMongoLifecycle.Invocation invocation = lifecycle.openInvocation()) {
+            MongoTemplate template = invocation.template(); seedCurrent(template, "orders"); seedSource(template, PATH, "class Service {}\n");
+            CodeFactIdentity target = methodIdentity("example", "Service", "target", PATH);
+            CodeFactIdentity visible = methodIdentity("example", "Service", "caller", PATH);
+            CodeFactIdentity denied = methodIdentity("example.privatecode", "Hidden", "caller", PATH);
+            for (CodeFactIdentity identity : List.of(target, visible, denied)) seedMethod(template, identity, List.of());
+            seedSearch(template, target, "SYMBOLS", List.of("target"));
+            for (int line = 0; line < 130; line++) seedRelation(template, denied, RelationKind.CALLS, new RelationTarget.Internal(target), range(line));
+            for (int line = 200; line < 203; line++) seedRelation(template, visible, RelationKind.CALLS, new RelationTarget.Internal(target), range(line));
+            com.java.semantic.query.config.ConfiguredReadPolicy policy = policy(new ReadPolicyProperties.PackageRule("orders", "example.privatecode"));
+            SelectedSemanticQueryService service = semantic(template, policy);
+            ReadContextSelector.AdmittedContext context = admitted(template, policy, SelectedGenerationGuard.ALL_PROJECTIONS);
+            RelationCollection first = service.findRelations(context, request(target, RelationMode.CALLERS, Optional.empty(), 2));
+            assertThat(first.items()).hasSize(2).allSatisfy(item -> {
+                assertThat(item.origin().displayName()).isEqualTo("caller");
+                assertThat(item.target().resolution()).isEqualTo(TargetResolution.INTERNAL);
+                assertThat(item.occurrence().path()).isEqualTo(PATH);
+            });
+            RelationCollection second = service.findRelations(context, request(target, RelationMode.CALLERS, first.page().nextCursor(), 2));
+            assertThat(second.items()).hasSize(1);
+            assertThat(second.page().hasMore()).isFalse();
+            assertThat(first.items().stream().map(item -> item.occurrence().factId()).toList()).doesNotContain(second.items().getFirst().occurrence().factId());
+            assertThatThrownBy(() -> service.findRelations(context, request(target, RelationMode.CALLEES, first.page().nextCursor(), 2))).isInstanceOf(IllegalArgumentException.class);
         }
     }
 
     @Test
-    void omits_forbidden_relation_sources_without_disclosing_them() {
-        try (PublishedMongoLifecycle.Invocation invocation = lifecycle.openInvocation()) {
-            MongoTemplate template = invocation.template();
-            seedCurrent(template, "orders");
-            CodeFactIdentity declaration = methodIdentity("example.api", "Port", "handle", "src/main/java/example/api/Port.java");
-            CodeFactIdentity privateSource = methodIdentity("example.privatecode", "PrivateService", "handle",
-                    "src/main/java/example/privatecode/PrivateService.java");
-            seedMethod(template, declaration, List.of());
-            seedMethod(template, privateSource, List.of());
-            seedRelation(template, privateSource, RelationKind.REFERENCES, new RelationTarget.Internal(declaration), range(privateSource, 4));
-            CurrentGenerationSelector selector = selector(template,
-                    policy(new ReadPolicyProperties.PackageRule("orders", "example.privatecode")));
-            SelectedGeneration context = selector.selectCodeFact("orders", REVISION, declaration, SelectedGenerationGuard.RELATIONS);
-            PublishedRelationQueryService service = new PublishedRelationQueryService(template, guard(template,
-                    policy(new ReadPolicyProperties.PackageRule("orders", "example.privatecode"))),
-                    Duration.ofSeconds(2));
-            PublishedRelationQuery query = new PublishedRelationQuery(new RepositoryId("orders"),
-                    new RepositoryRevision(REVISION), declaration, 0, 20);
-            PublishedRelationResult result = service.findReferences(context, query);
-
-            assertThat(result.relations()).isEmpty();
-            assertThat(result.page().totalCount()).isZero();
-            assertThat(result.page().hasMore()).isFalse();
+    void callees_keep_external_unresolved_and_internal_targets_distinct_and_missing_authority_fails() {
+        try (PublishedMongoLifecycle lifecycle = PublishedMongoLifecycle.start(); PublishedMongoLifecycle.Invocation invocation = lifecycle.openInvocation()) {
+            MongoTemplate template = invocation.template(); seedCurrent(template, "orders"); seedSource(template, PATH, "class Service {}\n");
+            CodeFactIdentity caller = methodIdentity("example", "Service", "caller", PATH);
+            CodeFactIdentity target = methodIdentity("example", "Service", "target", PATH);
+            seedMethod(template, caller, List.of()); seedMethod(template, target, List.of()); seedSearch(template, caller, "SYMBOLS", List.of("caller"));
+            seedRelation(template, caller, RelationKind.CALLS, new RelationTarget.Internal(target), range(1));
+            seedRelation(template, caller, RelationKind.CALLS, new RelationTarget.External(new ExternalTarget.NominalType(new com.java.semantic.model.codefact.DeclaredType("external.Client"))), range(2));
+            RelationDocument unresolved = seedRelation(template, caller, RelationKind.CALLS,
+                    new RelationTarget.External(new ExternalTarget.UnresolvedCall(
+                            "client.charge(() -> { inlineBodyOnlyInSource(); })", "client", "charge", 1)), range(3));
+            seedSearch(template, unresolved.fact().identity(), "RELATIONS", List.of("charge"));
+            SelectedSemanticQueryService service = semantic(template, policy()); ReadContextSelector.AdmittedContext context = admitted(template, policy(), SelectedGenerationGuard.ALL_PROJECTIONS);
+            RelationCollection result = service.findRelations(context, request(caller, RelationMode.CALLEES, Optional.empty(), 20));
+            assertThat(result.items()).extracting(item -> item.target().resolution()).containsExactlyInAnyOrder(TargetResolution.INTERNAL, TargetResolution.EXTERNAL, TargetResolution.UNRESOLVED);
+            assertThat(result.toString()).doesNotContain("inlineBodyOnlyInSource");
+            ExternalTargetInfo unresolvedTarget = result.items().stream()
+                    .filter(item -> item.target().resolution() == TargetResolution.UNRESOLVED)
+                    .findFirst().orElseThrow().target().external().orElseThrow();
+            assertThat(unresolvedTarget.displayName()).isEqualTo("charge");
+            assertThat(unresolvedTarget.arity()).contains(1);
+            FactCollection search = service.searchCode(context, new SearchCodeRequest(context.context(), "charge",
+                    Set.of(unresolved.fact().identity().kind()), Optional.empty(), Optional.empty(),
+                    new PageRequest(Optional.empty(), 20)));
+            assertThat(search.toString()).doesNotContain("inlineBodyOnlyInSource");
+            assertThat(search.items()).singleElement().satisfies(item -> {
+                assertThat(item.factId()).isEqualTo(unresolved.fact().id().value());
+                assertThat(item.displayName()).isEqualTo("charge");
+            });
+            template.getCollection("symbols").deleteOne(new Document("symbolId", CodeFactId.from(target).value()));
+            assertThatThrownBy(() -> service.findRelations(context, request(caller, RelationMode.CALLEES, Optional.empty(), 20))).isInstanceOf(CodeFactNotFoundException.class);
         }
     }
 
     @Test
-    void reads_direct_callers_by_target_and_callees_by_source() {
-        try (PublishedMongoLifecycle.Invocation invocation = lifecycle.openInvocation()) {
-            MongoTemplate template = invocation.template();
-            seedCurrent(template, "orders");
-            CodeFactIdentity method = methodIdentity("example.service", "OrderService", "charge",
-                    "src/main/java/example/service/OrderService.java");
-            CodeFactIdentity caller = methodIdentity("example.service", "CheckoutService", "checkout",
-                    "src/main/java/example/service/CheckoutService.java");
-            CodeFactIdentity callee = methodIdentity("example.gateway", "PaymentGateway", "charge",
-                    "src/main/java/example/gateway/PaymentGateway.java");
-            seedMethod(template, method, List.of());
-            seedMethod(template, caller, List.of());
-            seedMethod(template, callee, List.of());
-            seedRelation(template, caller, RelationKind.CALLS, new RelationTarget.Internal(method), range(caller, 4));
-            seedRelation(template, method, RelationKind.CALLS, new RelationTarget.Internal(callee), range(method, 8));
-            CurrentGenerationSelector selector = selector(template, policy());
-            SelectedGeneration context = selector.selectCodeFact("orders", REVISION, method, SelectedGenerationGuard.RELATIONS);
-            PublishedRelationQueryService service = new PublishedRelationQueryService(template, guard(template, policy()), Duration.ofSeconds(2));
-            PublishedRelationQuery query = new PublishedRelationQuery(new RepositoryId("orders"), new RepositoryRevision(REVISION), method, 0, 20);
-
-            PublishedRelationResult callers = service.findCallers(context, query);
-            PublishedRelationResult callees = service.findCallees(context, query);
-
-            assertThat(callers.relations()).extracting(relation -> relation.from().canonicalForm()).containsExactly(caller.canonicalForm());
-            assertThat(callees.relations()).extracting(relation -> relation.target().canonicalForm())
-                    .containsExactly(new RelationTarget.Internal(callee).canonicalForm());
+    void forged_flattened_origin_cannot_convert_a_relation_into_other_evidence() {
+        try (PublishedMongoLifecycle lifecycle = PublishedMongoLifecycle.start(); PublishedMongoLifecycle.Invocation invocation = lifecycle.openInvocation()) {
+            MongoTemplate template = invocation.template(); seedCurrent(template, "orders"); seedSource(template, PATH, "class Service {}\n");
+            CodeFactIdentity target = methodIdentity("example", "Service", "target", PATH); seedMethod(template, target, List.of()); seedSearch(template, target, "SYMBOLS", List.of("target"));
+            seedRelation(template, target, RelationKind.CALLS, new RelationTarget.Internal(target), range(1));
+            template.getCollection("relations").updateOne(new Document(), new Document("$set", new Document("from", "forged")));
+            assertThatThrownBy(() -> semantic(template, policy()).findRelations(admitted(template, policy(), SelectedGenerationGuard.ALL_PROJECTIONS), request(target, RelationMode.CALLERS, Optional.empty(), 20))).isInstanceOf(IndexContractMismatchException.class);
         }
     }
 
     @Test
-    void fails_closed_before_disclosing_a_relation_with_inconsistent_flattened_fields() {
-        try (PublishedMongoLifecycle.Invocation invocation = lifecycle.openInvocation()) {
-            MongoTemplate template = invocation.template();
-            seedCurrent(template, "orders");
-            CodeFactIdentity declaration = methodIdentity("example.api", "Port", "handle", "src/main/java/example/api/Port.java");
-            CodeFactIdentity source = methodIdentity("example.service", "Service", "handle", "src/main/java/example/service/Service.java");
-            seedMethod(template, declaration, List.of());
-            seedMethod(template, source, List.of());
-            seedRelation(template, source, RelationKind.REFERENCES, new RelationTarget.Internal(declaration), range(source, 4));
-            template.getCollection("relations").updateOne(new Document("from", source.canonicalForm()),
-                    new Document("$set", new Document("canonical", "forged-canonical")));
-            CurrentGenerationSelector selector = selector(template, policy());
-            SelectedGeneration current = selector.selectCodeFact("orders", REVISION, declaration, SelectedGenerationGuard.RELATIONS);
-            PublishedRelationQueryService service = new PublishedRelationQueryService(template, guard(template, policy()), Duration.ofSeconds(2));
-            PublishedRelationQuery query = new PublishedRelationQuery(new RepositoryId("orders"),
-                    new RepositoryRevision(REVISION), declaration, 0, 20);
-
-            assertThatThrownBy(() -> service.findReferences(current, query))
-                    .isInstanceOf(IndexContractMismatchException.class)
-                    .hasMessage("INDEX_CONTRACT_MISMATCH");
-            template.getCollection("relations").updateOne(new Document("from", source.canonicalForm()),
-                    new Document("$set", new Document("canonical", seedRelationCanonical(source, declaration))));
-            Document stored = template.getCollection("relations").find().first();
-
-            for (Document mutation : List.of(
-                    new Document("repoId", "billing"),
-                    new Document("generationId", "g2"),
-                    new Document("relationId", "forged-relation-id"),
-                    new Document("canonical", "forged-canonical"),
-                    new Document("from", "forged-from"),
-                    new Document("target", "forged-target"),
-                    new Document("kind", RelationKind.CALLS.name()),
-                    new Document("sourcePath", "forged-source-path"))) {
-                template.getCollection("relations").updateOne(new Document("_id", stored.get("_id")),
-                        new Document("$set", mutation));
-                Document mutated = template.getCollection("relations").find().first();
-
-                assertThatThrownBy(() -> service.decode(mutated, current))
-                        .isInstanceOf(IndexContractMismatchException.class)
-                        .hasMessage("INDEX_CONTRACT_MISMATCH");
-
-                String field = mutation.keySet().iterator().next();
-                template.getCollection("relations").updateOne(new Document("_id", stored.get("_id")),
-                        new Document("$set", new Document(field, stored.get(field))));
-            }
+    void implementations_accept_type_and_method_and_references_disclose_projected_occurrences() {
+        try (PublishedMongoLifecycle lifecycle = PublishedMongoLifecycle.start(); PublishedMongoLifecycle.Invocation invocation = lifecycle.openInvocation()) {
+            MongoTemplate template = invocation.template(); seedCurrent(template, "orders");
+            com.java.semantic.model.index.SourceArtifactId artifact = seedSource(template, PATH, "class Service {}\n").id();
+            com.java.semantic.model.codefact.SourceTypeIdentity api = new com.java.semantic.model.codefact.SourceTypeIdentity(
+                    new com.java.semantic.model.codefact.JavaTypeIdentity("example", "Api"), PATH);
+            com.java.semantic.model.codefact.SourceTypeIdentity implementation = new com.java.semantic.model.codefact.SourceTypeIdentity(
+                    new com.java.semantic.model.codefact.JavaTypeIdentity("example", "Service"), PATH);
+            seedType(template, api, artifact); seedType(template, implementation, artifact);
+            CodeFactIdentity targetType = new CodeFactIdentity(new com.java.semantic.model.repository.RepositoryId("orders"),
+                    new com.java.semantic.model.repository.RepositoryRevision(REVISION), com.java.semantic.model.codefact.CodeFactKind.TYPE, api);
+            CodeFactIdentity fromType = new CodeFactIdentity(targetType.repositoryId(), targetType.repositoryRevision(), targetType.kind(), implementation);
+            CodeFactIdentity targetMethod = methodIdentity("example", "Api", "execute", PATH);
+            CodeFactIdentity fromMethod = methodIdentity("example", "Service", "execute", PATH);
+            seedMethod(template, targetMethod, List.of()); seedMethod(template, fromMethod, List.of());
+            seedSearch(template, targetType, "SYMBOLS", List.of("api")); seedSearch(template, targetMethod, "SYMBOLS", List.of("execute"));
+            seedRelation(template, fromType, RelationKind.IMPLEMENTS, new RelationTarget.Internal(targetType), range(1));
+            seedRelation(template, fromMethod, RelationKind.OVERRIDES, new RelationTarget.Internal(targetMethod), range(2));
+            seedRelation(template, fromMethod, RelationKind.REFERENCES, new RelationTarget.Internal(targetType), range(3));
+            SelectedSemanticQueryService service = semantic(template, policy());
+            ReadContextSelector.AdmittedContext context = admitted(template, policy(), SelectedGenerationGuard.ALL_PROJECTIONS);
+            assertThat(service.findRelations(context, request(targetType, RelationMode.IMPLEMENTATIONS, Optional.empty(), 20)).items())
+                    .singleElement().satisfies(item -> { assertThat(item.relationKind()).isEqualTo(RelationKind.IMPLEMENTS); assertThat(item.occurrence().range().start().line()).isEqualTo(1); });
+            assertThat(service.findRelations(context, request(targetMethod, RelationMode.IMPLEMENTATIONS, Optional.empty(), 20)).items())
+                    .singleElement().satisfies(item -> assertThat(item.relationKind()).isEqualTo(RelationKind.OVERRIDES));
+            RelationCollection references = service.findRelations(context, request(targetType, RelationMode.REFERENCES, Optional.empty(), 20));
+            assertThat(references.evidenceScope()).isEqualTo(RelationEvidenceScope.PROJECTED_REFERENCES);
+            assertThat(references.items()).singleElement().satisfies(item -> assertThat(item.occurrence().range().start().line()).isEqualTo(3));
+            assertThatThrownBy(() -> service.findRelations(context, request(targetType, RelationMode.CALLERS, Optional.empty(), 20))).isInstanceOf(CodeFactKindMismatchException.class);
         }
     }
 
-    private static String seedRelationCanonical(CodeFactIdentity source, CodeFactIdentity declaration) {
-        SourceRange range = range(source, 4);
-        return new RelationIdentity(source, RelationKind.REFERENCES,
-                new RelationTarget.Internal(declaration), range).canonicalForm();
-    }
-
-    private static SourceRange range(CodeFactIdentity identity, int line) {
-        com.java.semantic.model.codefact.MethodTarget method = (com.java.semantic.model.codefact.MethodTarget) identity.canonicalIdentity();
-        return new SourceRange(method.sourceFile(), new SyntaxRange(new SyntaxPosition(line, 1), new SyntaxPosition(line, 5)));
+    private static SourceRange range(int line) { return new SourceRange(PATH, new SyntaxRange(new SyntaxPosition(line, 0), new SyntaxPosition(line, 1))); }
+    private static RelationRequest request(CodeFactIdentity target, RelationMode mode, Optional<String> cursor, int limit) {
+        return new RelationRequest(ReadContext.current("orders", REVISION), mode, CodeFactId.from(target).value(), new PageRequest(cursor, limit));
     }
 }

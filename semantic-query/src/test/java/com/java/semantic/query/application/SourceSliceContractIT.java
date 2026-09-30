@@ -2,273 +2,287 @@ package com.java.semantic.query.application;
 
 import com.java.semantic.model.codefact.CodeFactIdentity;
 import com.java.semantic.model.codefact.CodeFactId;
-import com.java.semantic.model.codefact.PublishedSourceSegment;
-import com.java.semantic.model.codefact.CodeFactReadQuery;
-import com.java.semantic.model.codefact.CodeFactScope;
 import com.java.semantic.model.codefact.ExternalTarget;
+import com.java.semantic.model.codefact.MapperStatementKind;
 import com.java.semantic.model.codefact.RelationKind;
-import com.java.semantic.model.codefact.RelationIdentity;
 import com.java.semantic.model.codefact.RelationTarget;
 import com.java.semantic.model.codefact.SourceRange;
-import com.java.semantic.model.codefact.SourceSegmentQuery;
-import com.java.semantic.model.codefact.SourceTypeIdentity;
 import com.java.semantic.model.codefact.SyntaxPosition;
 import com.java.semantic.model.codefact.SyntaxRange;
-import com.java.semantic.model.index.GenerationId;
-import com.java.semantic.model.index.IndexSchemaContract;
-import com.java.semantic.model.index.ManifestDigest;
-import com.java.semantic.model.query.SelectedGeneration;
-import com.java.semantic.model.repository.RepositoryId;
-import com.java.semantic.model.repository.RepositoryRevision;
+import com.java.semantic.query.application.ReadContextSelector.AdmittedContext;
+import com.java.semantic.query.application.SemanticQueryContract.*;
 import com.java.semantic.query.config.ConfiguredReadPolicy;
 import com.java.semantic.query.config.ReadPolicyProperties;
-import com.mongodb.ConnectionString;
-import com.mongodb.MongoClientSettings;
-import com.mongodb.client.MongoClient;
 import com.mongodb.client.MongoClients;
-import com.mongodb.event.CommandListener;
-import com.mongodb.event.CommandStartedEvent;
+import org.bson.Document;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.data.mongodb.core.MongoTemplate;
-import org.bson.Document;
 import org.testcontainers.mongodb.MongoDBContainer;
 import org.testcontainers.utility.DockerImageName;
-
 import java.time.Duration;
 import java.util.List;
-import java.util.Map;
-import java.util.Set;
-import java.util.concurrent.CopyOnWriteArrayList;
-
+import java.util.Optional;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 @Tag("mongo-it")
 class SourceSliceContractIT extends PublishedMongoITSupport {
+    private static final String PATH = "src/main/java/example/payment/PaymentClient.java";
+
     @Test
-    void resolves_relation_fact_source_by_opaque_id_and_keeps_fact_and_context_ranges_distinct() {
-        try (MongoDBContainer container = new MongoDBContainer(DockerImageName.parse("mongo:8.0.4"))) {
+    void exact_relation_fence_and_neighboring_context_keep_original_utf16_range() {
+        try (MongoDBContainer container = container()) {
             container.start();
-            MongoTemplate template = new MongoTemplate(MongoClients.create(container.getConnectionString()), "published_relation_source");
+            MongoTemplate template = template(container, "source_exact_context");
             seedCurrent(template, "orders");
-            String path = "src/main/java/example/payment/PaymentClient.java";
-            SourceRange factRange = new SourceRange(path,
-                    new SyntaxRange(new SyntaxPosition(41, 4), new SyntaxPosition(41, 26)));
-            seedSource(template, path, relationSource());
-            CodeFactIdentity from = methodIdentity("example.payment", "PaymentClient", "charge", path);
-            CodeFactIdentity relation = seedRelation(template, from, RelationKind.CALLS_OUTBOUND_API,
-                    new RelationTarget.External(new ExternalTarget.Endpoint("POST", "https://payments.example/charge")), factRange)
-                    .fact().identity();
-            seedSearch(template, relation, "RELATIONS", List.of("charge"));
-            CurrentGenerationSelector selector = selector(template, policy());
-            SelectedGeneration context = selector.selectCodeFact("orders", REVISION, relation,
-                    CodeFactReadService.requirementsForSearchKinds(Set.of(relation.kind())));
-            SelectedGenerationGuard guard = guard(template, policy());
-            SourceSliceService service = new SourceSliceService(
-                    new CurrentSourceQueryService(template, guard, Duration.ofSeconds(2)),
-                    new CodeFactReadService(template, guard, Duration.ofSeconds(2)));
-            CodeFactReadQuery query = new CodeFactReadQuery(new RepositoryId("orders"), new RepositoryRevision(REVISION), CodeFactId.from(relation));
-
-            FactSourceSlice exact = service.factSource(context, query, 0);
-            FactSourceSlice expanded = service.factSource(context, query, 2);
-
-
-            assertThat(SourceSnippetMapper.toSnippet(exact.sourceRange(), exact.fileContent()).code()).isEqualTo("client.charge(request)");
-            assertThat(SourceSnippetMapper.toFactRange(exact.factRange())).isEqualTo(new SemanticQueryContract.FactRange(42, 42));
-            assertThat(SourceSnippetMapper.toSnippet(expanded.sourceRange(), expanded.fileContent()).startLine()).isEqualTo(40);
-            assertThat(SourceSnippetMapper.toSnippet(expanded.sourceRange(), expanded.fileContent()).endLine()).isEqualTo(44);
-            assertThat(SourceSnippetMapper.toFactRange(expanded.factRange())).isEqualTo(new SemanticQueryContract.FactRange(42, 42));
+            seedSource(template, PATH, "before\r\n  😀charge(); tail\r\nafter\r\nlast\n");
+            SyntaxRange range = new SyntaxRange(new SyntaxPosition(1, 2), new SyntaxPosition(1, 13));
+            CodeFactIdentity relation = relation(template, range);
+            GitEvidenceReadService reader = reader(template, policy());
+            AdmittedContext admitted = admitted(template, policy());
+            SourceResult exact = reader.readSource(admitted, request(relation, 0, 200, Optional.empty()));
+            SourceResult expanded = reader.readSource(admitted, request(relation, 1, 200, Optional.empty()));
+            assertThat(exact.content()).contains("😀charge();");
+            assertThat(exact.factRange()).contains(range);
+            assertThat(exact.pageRange()).contains(range);
+            assertThat(exact.rangeComplete()).isTrue();
+            assertThat(exact.startLineComplete()).isFalse();
+            assertThat(exact.endLineComplete()).isFalse();
+            assertThat(expanded.content()).contains("before\r\n  😀charge(); tail\r\nafter\r\n");
+            assertThat(expanded.factRange()).contains(range);
+            assertThat(expanded.window().orElseThrow().start()).isEqualTo(new SyntaxPosition(0, 0));
+            assertThat(expanded.window().orElseThrow().end()).contains(new SyntaxPosition(3, 0));
         }
     }
 
     @Test
-    void rejects_fact_context_when_its_source_file_contains_a_forbidden_method() {
-        try (MongoDBContainer container = new MongoDBContainer(DockerImageName.parse("mongo:8.0.4"))) {
+    void long_fact_pages_reconstruct_utf8_without_losing_exclusive_fence_or_partial_line_flags() {
+        try (MongoDBContainer container = container()) {
             container.start();
-            MongoTemplate template = new MongoTemplate(MongoClients.create(container.getConnectionString()), "published_relation_source_authorization");
+            MongoTemplate template = template(container, "source_long_fact");
             seedCurrent(template, "orders");
-            String path = "src/main/java/example/payment/PaymentClient.java";
-            SourceRange relationRange = new SourceRange(path,
-                    new SyntaxRange(new SyntaxPosition(0, 0), new SyntaxPosition(0, 10)));
-            seedSource(template, path, "visible();\nforbidden();\n");
-            CodeFactIdentity visibleMethod = methodIdentity("example.payment", "PaymentClient", "visible", path);
-            CodeFactIdentity forbiddenMethod = methodIdentity("example.payment", "PaymentClient", "forbidden", path);
-            seedMethod(template, visibleMethod, List.of());
-            seedMethod(template, forbiddenMethod, List.of());
-            CodeFactIdentity relation = seedRelation(template, visibleMethod, RelationKind.CALLS_OUTBOUND_API,
-                    new RelationTarget.External(new ExternalTarget.Endpoint("POST", "https://payments.example/charge")), relationRange)
-                    .fact().identity();
-            seedSearch(template, relation, "RELATIONS", List.of("visible"));
-            ConfiguredReadPolicy forbiddenMethodPolicy = new ConfiguredReadPolicy(new ReadPolicyProperties(List.of(), List.of(), List.of(),
+            String wanted = "😀".repeat(20_000);
+            seedSource(template, PATH, "prefix" + wanted + "SECRET_AFTER_FENCE");
+            SyntaxRange range = new SyntaxRange(new SyntaxPosition(0, 6), new SyntaxPosition(0, 40_006));
+            CodeFactIdentity relation = relation(template, range);
+            GitEvidenceReadService reader = reader(template, policy());
+            AdmittedContext admitted = admitted(template, policy());
+            SourceResult first = reader.readSource(admitted, request(relation, 0, 500, Optional.empty()));
+            assertThat(first.content().orElseThrow().getBytes(java.nio.charset.StandardCharsets.UTF_8).length).isEqualTo(65_536);
+            assertThat(first.rangeComplete()).isFalse();
+            assertThat(first.endLineComplete()).isFalse();
+            SourceResult second = reader.readSource(admitted, request(relation, 0, 500, first.nextCursor()));
+            assertThat(first.content().orElseThrow() + second.content().orElseThrow()).isEqualTo(wanted);
+            assertThat(second.startLineComplete()).isFalse();
+            assertThat(second.endLineComplete()).isFalse();
+            assertThat(second.rangeComplete()).isTrue();
+            assertThat(second.factRange()).contains(range);
+            assertThat(second.window()).isEqualTo(first.window());
+            assertThat(second.pageRange().orElseThrow().end()).isEqualTo(range.end());
+            assertThat(second.nextCursor()).isEmpty();
+            assertThatThrownBy(() -> reader.readSource(admitted, request(relation, 1, 500, first.nextCursor())))
+                    .isInstanceOf(IllegalArgumentException.class);
+        }
+    }
+
+    @Test
+    void line_limited_fact_pages_do_not_leak_following_source() {
+        try (MongoDBContainer container = container()) {
+            container.start();
+            MongoTemplate template = template(container, "source_line_fence");
+            seedCurrent(template, "orders");
+            String wanted = "line\r\n".repeat(600);
+            seedSource(template, PATH, wanted + "outside\n");
+            SyntaxRange range = new SyntaxRange(new SyntaxPosition(0, 0), new SyntaxPosition(600, 0));
+            CodeFactIdentity relation = relation(template, range);
+            GitEvidenceReadService reader = reader(template, policy());
+            AdmittedContext admitted = admitted(template, policy());
+            SourceResult first = reader.readSource(admitted, request(relation, 0, 500, Optional.empty()));
+            SourceResult last = reader.readSource(admitted, request(relation, 0, 500, first.nextCursor()));
+            assertThat(first.content()).contains("line\r\n".repeat(500));
+            assertThat(last.content()).contains("line\r\n".repeat(100));
+            assertThat(last.rangeComplete()).isTrue();
+            assertThat(last.pageRange().orElseThrow().end()).isEqualTo(range.end());
+        }
+    }
+
+    @Test
+    void malformed_surrogate_and_crlf_coordinates_fail_instead_of_widening_source() {
+        try (MongoDBContainer container = container()) {
+            container.start();
+            MongoTemplate template = template(container, "source_invalid_fence");
+            seedCurrent(template, "orders");
+            seedSource(template, PATH, "😀a\r\nnext\n");
+            CodeFactIdentity relation = relation(template, new SyntaxRange(new SyntaxPosition(0, 1), new SyntaxPosition(0, 3)));
+            GitEvidenceReadService reader = reader(template, policy());
+            AdmittedContext admitted = admitted(template, policy());
+            assertThatThrownBy(() -> reader.readSource(admitted, request(relation, 0, 200, Optional.empty())))
+                    .isInstanceOf(IndexContractMismatchException.class);
+            CodeFactIdentity crlf = relation(template, new SyntaxRange(new SyntaxPosition(0, 3), new SyntaxPosition(0, 4)));
+            assertThatThrownBy(() -> reader.readSource(admitted, request(crlf, 0, 200, Optional.empty())))
+                    .isInstanceOf(IndexContractMismatchException.class);
+        }
+    }
+
+    @Test
+    void fact_read_does_not_require_git_allowlist_but_rejects_other_forbidden_symbols_in_file() {
+        try (MongoDBContainer container = container()) {
+            container.start();
+            MongoTemplate template = template(container, "source_symbol_gate");
+            seedCurrent(template, "orders");
+            seedSource(template, PATH, "visible();\nforbidden();\n");
+            CodeFactIdentity visible = methodIdentity("example.payment", "PaymentClient", "visible", PATH);
+            CodeFactIdentity forbidden = methodIdentity("example.payment", "PaymentClient", "forbidden", PATH);
+            seedMethod(template, visible, List.of());
+            seedMethod(template, forbidden, List.of());
+            CodeFactIdentity relation = relation(template, new SyntaxRange(new SyntaxPosition(0, 0), new SyntaxPosition(0, 10)));
+            assertThat(reader(template, policy()).readSource(admitted(template, policy()), request(relation, 0, 200, Optional.empty())).content())
+                    .contains("visible();");
+            ConfiguredReadPolicy denied = new ConfiguredReadPolicy(new ReadPolicyProperties(List.of(), List.of(), List.of(),
                     List.of(new ReadPolicyProperties.MethodRule("orders", "example.payment", "PaymentClient", "forbidden",
                             List.of("example.events.VideoReady")))));
-            CurrentGenerationSelector selector = selector(template, forbiddenMethodPolicy);
-            SelectedGeneration context = selector.selectCodeFact("orders", REVISION, relation,
-                    CodeFactReadService.requirementsForSearchKinds(Set.of(relation.kind())));
-            SelectedGenerationGuard guard = guard(template, forbiddenMethodPolicy);
-            SourceSliceService service = new SourceSliceService(
-                    new CurrentSourceQueryService(template, guard, Duration.ofSeconds(2)),
-                    new CodeFactReadService(template, guard, Duration.ofSeconds(2)));
-            CodeFactReadQuery query = new CodeFactReadQuery(new RepositoryId("orders"), new RepositoryRevision(REVISION), CodeFactId.from(relation));
-
-            assertThatThrownBy(() -> service.factSource(context, query, 1)).isInstanceOf(RepositoryNotFoundException.class);
+            assertThatThrownBy(() -> reader(template, denied).readSource(admitted(template, denied), request(relation, 0, 200, Optional.empty())))
+                    .isInstanceOf(RepositoryNotFoundException.class);
         }
     }
 
     @Test
-    void rejects_fact_source_when_the_resolved_generation_lacks_a_compatible_sources_projection() {
-        try (MongoDBContainer container = new MongoDBContainer(DockerImageName.parse("mongo:8.0.4"))) {
+    void mapper_fact_reads_authoritative_range_and_sources_projection_is_required() {
+        try (MongoDBContainer container = container()) {
             container.start();
-            MongoTemplate template = new MongoTemplate(MongoClients.create(container.getConnectionString()), "published_fact_source_projection");
+            MongoTemplate template = template(container, "source_mapper_projection");
             seedCurrent(template, "orders");
-            String path = "src/main/java/example/payment/PaymentService.java";
-            seedSource(template, path, "line zero\nmethod();\n");
-            CodeFactIdentity method = methodIdentity("example.payment", "PaymentService", "method", path);
-            seedMethod(template, method, List.of());
-            seedSearch(template, method, "SYMBOLS", List.of("method"));
-            Map<String, Integer> currentVersions = IndexSchemaContract.requiredProjectionVersions();
-            template.getCollection("generation_manifests").updateOne(new Document("repoId", "orders"),
-                    new Document("$set", new Document("projectionVersions", List.of(
-                            new Document("name", "SOURCES").append("version", 1),
-                            new Document("name", "SYMBOLS").append("version", currentVersions.get("SYMBOLS")),
-                            new Document("name", "RELATIONS").append("version", currentVersions.get("RELATIONS")),
-                            new Document("name", "ENTRY_POINTS").append("version", currentVersions.get("ENTRY_POINTS")),
-                            new Document("name", "SEARCH").append("version", currentVersions.get("SEARCH"))))));
-            CurrentGenerationSelector selector = selector(template, policy());
-            SelectedGenerationGuard guard = guard(template, policy());
-            SourceSliceService service = new SourceSliceService(
-                    new CurrentSourceQueryService(template, guard, Duration.ofSeconds(2)),
-                    new CodeFactReadService(template, guard, Duration.ofSeconds(2)));
-            CodeFactReadQuery query = new CodeFactReadQuery(new RepositoryId("orders"), new RepositoryRevision(REVISION), CodeFactId.from(method));
-
-            assertThatThrownBy(() -> service.factSource(selector.select("orders", REVISION,
-                    SelectedGenerationGuard.SEARCH_WITH_SOURCES), query, 0)).isInstanceOf(IndexContractMismatchException.class);
+            String path = "src/main/resources/VideoMapper.xml";
+            com.java.semantic.model.index.SourceArtifactDocument artifact = seedSource(template, path, "<mapper><select id=\"find\">SELECT 1</select></mapper>");
+            CodeFactIdentity mapper = seedMapper(template, path, artifact.id(), MapperStatementKind.SELECT);
+            seedSearch(template, mapper, "SYMBOLS", List.of("find"));
+            assertThat(reader(template, policy()).readSource(admitted(template, policy()), request(mapper, 0, 200, Optional.empty())).content())
+                    .contains("<mapper>");
+            template.getCollection("generation_manifests").updateOne(new Document("generationId", "g1"),
+                    new Document("$set", new Document("projectionVersions.$[projection].version", 1)),
+                    new com.mongodb.client.model.UpdateOptions().arrayFilters(List.of(new Document("projection.name", "SOURCES"))));
+            assertThatThrownBy(() -> admitted(template, policy())).isInstanceOf(IndexContractMismatchException.class);
         }
     }
 
     @Test
-    void slices_only_selected_generation_stored_source_with_utf16_crlf_boundaries() {
-        try (MongoDBContainer container = new MongoDBContainer(DockerImageName.parse("mongo:8.0.4"))) {
+    void zero_width_authoritative_fact_returns_an_empty_complete_range_without_widening() {
+        try (MongoDBContainer container = container()) {
             container.start();
-            MongoTemplate template = new MongoTemplate(com.mongodb.client.MongoClients.create(container.getConnectionString()), "published_source");
+            MongoTemplate template = template(container, "source_zero_width");
             seedCurrent(template, "orders");
-            String path = "src/main/java/example/video/VideoListener.java";
-            String content = "a\r\n😀method\r\n";
-            SourceTypeIdentity type = new SourceTypeIdentity(new com.java.semantic.model.codefact.JavaTypeIdentity("example.video", "VideoListener"), path);
-            com.java.semantic.model.index.SourceArtifactDocument artifact = seedSource(template, path, content);
-            seedType(template, type, artifact.id());
-            CodeFactIdentity method = methodIdentity("example.video", "VideoListener", "onReady", path);
-            seedMethod(template, method, List.of());
-            CurrentGenerationSelector selector = selector(template, policy());
-            SelectedGeneration context = selector.select("orders", REVISION, SelectedGenerationGuard.SEARCH_WITH_SOURCES);
-            SelectedGenerationGuard guard = guard(template, policy());
-            SourceSliceService service = new SourceSliceService(new CurrentSourceQueryService(template, guard, Duration.ofSeconds(2)),
-                    new CodeFactReadService(template, guard, Duration.ofSeconds(2)));
+            seedSource(template, PATH, "😀tail\n");
+            SyntaxPosition point = new SyntaxPosition(0, 2);
+            SyntaxRange range = new SyntaxRange(point, point);
+            CodeFactIdentity relation = relation(template, range);
+            SourceResult result = reader(template, policy()).readSource(admitted(template, policy()), request(relation, 0, 200, Optional.empty()));
+            assertThat(result.content()).contains("");
+            assertThat(result.factRange()).contains(range);
+            assertThat(result.pageRange()).contains(range);
+            assertThat(result.rangeComplete()).isTrue();
+            assertThat(result.nextCursor()).isEmpty();
+        }
+    }
 
-            assertThat(service.methodSource(context, method).content()).isEqualTo("😀method");
-            SourceRange emojiAndMethod = new SourceRange(path, new SyntaxRange(new SyntaxPosition(1, 0), new SyntaxPosition(1, 8)));
-            assertThat(service.sourceSegment(context, new SourceSegmentQuery(new RepositoryId("orders"),
-                    new RepositoryRevision(REVISION), type, emojiAndMethod)).content()).isEqualTo("😀method");
-            SourceRange callerCrossLine = new SourceRange(path, new SyntaxRange(new SyntaxPosition(0, 2), new SyntaxPosition(1, 0)));
-            assertThatThrownBy(() -> service.sourceSegment(context, new SourceSegmentQuery(new RepositoryId("orders"),
-                    new RepositoryRevision(REVISION), type, callerCrossLine))).isInstanceOf(IndexContractMismatchException.class);
-            SourceRange callerCrLf = new SourceRange(path, new SyntaxRange(new SyntaxPosition(1, 8), new SyntaxPosition(1, 9)));
-            assertThatThrownBy(() -> service.sourceSegment(context, new SourceSegmentQuery(new RepositoryId("orders"),
-                    new RepositoryRevision(REVISION), type, callerCrLf))).isInstanceOf(IndexContractMismatchException.class);
-            Document malformedRange = new Document("sourceFile", path).append("range", new Document("start",
-                    new Document("line", 0).append("character", 2)).append("end",
-                    new Document("line", 1).append("character", 0)));
-            template.getCollection("symbols").updateOne(new Document("symbolId", CodeFactId.from(method).value()),
-                    new Document("$set", new Document("range", malformedRange)));
-            assertThatThrownBy(() -> service.methodSource(context, method))
+    @Test
+    void shared_artifact_body_does_not_authorize_rebound_snapshot_membership() {
+        try (MongoDBContainer container = container()) {
+            container.start();
+            MongoTemplate template = template(container, "source_shared_artifact_membership");
+            seedCurrent(template, "orders");
+            seedSource(template, PATH, "visible();\n");
+            CodeFactIdentity relation = relation(template, new SyntaxRange(new SyntaxPosition(0, 0), new SyntaxPosition(0, 10)));
+            AdmittedContext admitted = admitted(template, policy());
+            Document unrelated = new Document(template.getCollection("generation_files").find(new Document("repoId", "orders")).first());
+            unrelated.remove("_id");
+            unrelated.put("repoId", "other");
+            unrelated.put("generationId", "foreign-generation");
+            template.getCollection("generation_files").insertOne(unrelated);
+            template.getCollection("git_snapshot_files").updateOne(new Document("snapshotId", SOURCE_SNAPSHOT).append("path", PATH),
+                    new Document("$set", new Document("checksum", "f".repeat(64))));
+            assertThatThrownBy(() -> reader(template, policy()).readSource(admitted, request(relation, 0, 200, Optional.empty())))
                     .isInstanceOf(IndexContractMismatchException.class);
-            SourceRange invalid = new SourceRange(path, new SyntaxRange(new SyntaxPosition(9, 0), new SyntaxPosition(9, 1)));
-            assertThatThrownBy(() -> service.sourceSegment(context, new SourceSegmentQuery(new RepositoryId("orders"),
-                    new RepositoryRevision(REVISION), type, invalid))).isInstanceOf(IndexContractMismatchException.class);
-            String mapperPath = "src/main/resources/VideoMapper.xml";
-            String mapperXml = """
-                    <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
-                    <mapper namespace="example.mapper.VideoMapper"><select id="find">SELECT 1</select></mapper>
-                    """;
-            com.java.semantic.model.index.SourceArtifactDocument mapperArtifact = seedSource(template, mapperPath, mapperXml);
-            CodeFactIdentity mapper = seedMapper(template, mapperPath, mapperArtifact.id());
-            PublishedSourceSegment mapperEvidence = service.evidenceSource(context, mapper);
-            assertThat(mapperEvidence.content()).isEqualTo(mapperXml.substring(0, 8));
-            assertThat(mapperEvidence.location().sourceFile()).isEqualTo(mapperPath);
-            assertThat(mapperEvidence.location().range()).isEqualTo(new SyntaxRange(new SyntaxPosition(0, 0), new SyntaxPosition(0, 8)));
-            assertThat(mapperEvidence.generation().repositoryId()).isEqualTo(new RepositoryId("orders"));
-            assertThat(mapperEvidence.generation().revision()).isEqualTo(new RepositoryRevision(REVISION));
-            assertThat(mapperEvidence.evidenceIdentity()).contains(mapper);
         }
     }
 
     @Test
-    void rejects_denied_source_before_any_generation_or_artifact_reader_is_invoked() {
-        try (MongoDBContainer container = new MongoDBContainer(DockerImageName.parse("mongo:8.0.4"))) {
+    void whole_file_admission_rejects_forbidden_type_and_nonmapper_mapper_payload() {
+        try (MongoDBContainer container = container()) {
             container.start();
-            MongoTemplate template = new MongoTemplate(MongoClients.create(container.getConnectionString()), "published_source_denied");
+            MongoTemplate template = template(container, "source_type_payload_gate");
             seedCurrent(template, "orders");
-            CopyOnWriteArrayList<String> reads = new CopyOnWriteArrayList<>();
-            CommandListener listener = new CommandListener() {
-                @Override
-                public void commandStarted(CommandStartedEvent event) {
-                    if ("find".equals(event.getCommandName()) && event.getCommand().containsKey("find")) {
-                        reads.add(event.getCommand().getString("find").getValue());
-                    }
+            com.java.semantic.model.index.SourceArtifactDocument artifact = seedSource(template, PATH, "visible();\nmethod();\n");
+            CodeFactIdentity relation = relation(template, new SyntaxRange(new SyntaxPosition(0, 0), new SyntaxPosition(0, 10)));
+            com.java.semantic.model.codefact.SourceTypeIdentity hidden = new com.java.semantic.model.codefact.SourceTypeIdentity(
+                    new com.java.semantic.model.codefact.JavaTypeIdentity("example.payment", "HiddenType"), PATH);
+            seedType(template, hidden, artifact.id());
+            ConfiguredReadPolicy denied = new ConfiguredReadPolicy(new ReadPolicyProperties(List.of(), List.of(),
+                    List.of(new ReadPolicyProperties.ClassRule("orders", "example.payment", "HiddenType")), List.of()));
+            assertThatThrownBy(() -> reader(template, denied).readSource(admitted(template, denied), request(relation, 0, 200, Optional.empty())))
+                    .isInstanceOf(RepositoryNotFoundException.class);
+            template.getCollection("symbols").updateOne(new Document("kind", "TYPE"),
+                    new Document("$set", new Document("mapperStatementKind", "SELECT")));
+            assertThatThrownBy(() -> reader(template, policy()).readSource(admitted(template, policy()), request(relation, 0, 200, Optional.empty())))
+                    .isInstanceOf(IndexContractMismatchException.class);
+        }
+    }
+
+    @Test
+    void hidden_missing_unpublished_and_stale_repositories_are_denied_before_storage_reads() {
+        try (MongoDBContainer container = container()) {
+            container.start();
+            MongoTemplate template = template(container, "source_repository_gate");
+            seedCurrent(template, "orders");
+            java.util.List<String> reads = new java.util.concurrent.CopyOnWriteArrayList<>();
+            com.mongodb.event.CommandListener listener = new com.mongodb.event.CommandListener() {
+                @Override public void commandStarted(com.mongodb.event.CommandStartedEvent event) {
+                    if ("find".equals(event.getCommandName()) || "aggregate".equals(event.getCommandName())) reads.add(event.getCommandName());
                 }
             };
-            MongoClientSettings settings = MongoClientSettings.builder()
-                    .applyConnectionString(new ConnectionString(container.getConnectionString()))
-                    .addCommandListener(listener)
-                    .build();
-            try (MongoClient observedClient = MongoClients.create(settings)) {
-                MongoTemplate observedTemplate = new MongoTemplate(observedClient, "published_source_denied");
-                ConfiguredReadPolicy deniedPolicy = policy(new ReadPolicyProperties.PackageRule("orders", "example.video"));
-                SelectedGeneration context = new SelectedGeneration(new RepositoryId("orders"), new RepositoryRevision(REVISION),
-                        new GenerationId("g1"), new ManifestDigest(DIGEST));
-                SelectedGenerationGuard deniedGuard = guard(observedTemplate, deniedPolicy);
-                SourceSliceService service = new SourceSliceService(
-                        new CurrentSourceQueryService(observedTemplate, deniedGuard, Duration.ofSeconds(2)),
-                        new CodeFactReadService(observedTemplate, deniedGuard, Duration.ofSeconds(2)));
-                String path = "src/main/java/example/video/VideoListener.java";
-                SourceTypeIdentity type = new SourceTypeIdentity(
-                        new com.java.semantic.model.codefact.JavaTypeIdentity("example.video", "VideoListener"), path);
-                SourceRange range = new SourceRange(path, new SyntaxRange(new SyntaxPosition(0, 0), new SyntaxPosition(0, 1)));
-
-                assertThatThrownBy(() -> service.sourceSegment(context, new SourceSegmentQuery(
-                        new RepositoryId("orders"), new RepositoryRevision(REVISION), type, range)))
-                        .isInstanceOf(RepositoryNotFoundException.class);
+            com.mongodb.MongoClientSettings settings = com.mongodb.MongoClientSettings.builder()
+                    .applyConnectionString(new com.mongodb.ConnectionString(container.getConnectionString())).addCommandListener(listener).build();
+            try (com.mongodb.client.MongoClient client = MongoClients.create(settings)) {
+                MongoTemplate observed = new MongoTemplate(client, "source_repository_gate");
+                ConfiguredReadPolicy hidden = new ConfiguredReadPolicy(new ReadPolicyProperties(
+                        List.of("orders", "missing"), List.of(), List.of(), List.of()));
+                ReadContextSelector selector = new ReadContextSelector(selector(observed, hidden),
+                        new ReviewManifestReadService(observed, hidden, Duration.ofSeconds(2)), guard(observed, hidden), hidden);
+                for (ReadContext context : List.of(ReadContext.current("missing", REVISION), ReadContext.current("orders", REVISION),
+                        ReadContext.current("orders", "3".repeat(40)))) {
+                    assertThatThrownBy(() -> selector.select(context, SelectedGenerationGuard.SEARCH_WITH_SOURCES, ReadContextSelector.Access.SEMANTIC))
+                            .isInstanceOf(RepositoryNotFoundException.class);
+                }
+                template.getCollection("repositories").updateOne(new Document("repoId", "orders"), new Document("$unset", new Document("currentPointer", "")));
+                assertThatThrownBy(() -> selector.select(ReadContext.current("orders", REVISION),
+                        SelectedGenerationGuard.SEARCH_WITH_SOURCES, ReadContextSelector.Access.SEMANTIC)).isInstanceOf(RepositoryNotFoundException.class);
+                assertThat(reads).isEmpty();
             }
-
-            assertThat(reads).doesNotContain("repositories", "generation_manifests", "symbols", "generation_files", "source_artifacts");
         }
     }
 
-    private static void seedSearch(MongoTemplate template, CodeFactIdentity identity, String authority, List<String> tokens) {
-        CodeFactScope scope = CodeFactScope.from(identity);
-        template.getCollection("search").insertOne(new Document("repoId", "orders").append("generationId", "g1")
-                .append("factId", CodeFactId.from(identity).value()).append("kind", identity.kind().name())
-                .append("tokens", tokens).append("package", scope.packageName()).append("authority", authority)
-                .append("canonical", identity.canonicalForm())
-                .append("displayName", identity.canonicalIdentity() instanceof RelationIdentity relation
-                        ? ((RelationTarget.External) relation.target()).target().canonicalForm() : scope.methodName().orElse(scope.className()))
-                .append("signature", identity.canonicalIdentity() instanceof RelationIdentity ? ""
-                        : scope.methodName().map(name -> name + "(" + String.join(", ", scope.parameterTypes()) + ")").orElse(""))
-                .append("scopePackage", scope.packageName())
-                .append("scopeClass", scope.className()).append("scopeMethod", scope.methodName().orElse(""))
-                .append("scopeParameters", scope.parameterTypes()).append("scopePath", scope.sourcePath().orElse("")));
+    private static CodeFactIdentity relation(MongoTemplate template, SyntaxRange range) {
+        CodeFactIdentity from = methodIdentity("example.payment", "PaymentClient", "visible", PATH);
+        CodeFactIdentity identity = seedRelation(template, from, RelationKind.CALLS_OUTBOUND_API,
+                new RelationTarget.External(new ExternalTarget.Endpoint("POST", "https://payments.example/charge")),
+                new SourceRange(PATH, range)).fact().identity();
+        seedSearch(template, identity, "RELATIONS", List.of("visible"));
+        return identity;
     }
-
-    private static String relationSource() {
-        StringBuilder content = new StringBuilder();
-        for (int line = 1; line <= 45; line++) {
-            if (line == 42) {
-                content.append("    client.charge(request);\n");
-            } else {
-                content.append("line ").append(line).append('\n');
-            }
-        }
-        return content.toString();
+    private static SourceRequest request(CodeFactIdentity identity, int contextLines, int maxLines, Optional<String> cursor) {
+        return new SourceRequest(ReadContext.current("orders", REVISION), new SourceTarget(SourceTargetKind.FACT,
+                Optional.of(CodeFactId.from(identity).value()), Optional.empty(), Optional.empty(), Optional.of(contextLines)), maxLines, cursor);
+    }
+    private static AdmittedContext admitted(MongoTemplate template, ConfiguredReadPolicy policy) {
+        return new ReadContextSelector(selector(template, policy), new ReviewManifestReadService(template, policy, Duration.ofSeconds(2)),
+                guard(template, policy), policy).select(ReadContext.current("orders", REVISION), SelectedGenerationGuard.SEARCH_WITH_SOURCES,
+                        ReadContextSelector.Access.SEMANTIC);
+    }
+    private static GitEvidenceReadService reader(MongoTemplate template, ConfiguredReadPolicy policy) {
+        return new GitEvidenceReadService(template, policy, Duration.ofSeconds(2), new CodeFactReadService(template, guard(template, policy), Duration.ofSeconds(2)));
+    }
+    private static MongoDBContainer container() { return new MongoDBContainer(DockerImageName.parse("mongo:8.0.4")); }
+    private static MongoTemplate template(MongoDBContainer container, String database) {
+        return new MongoTemplate(MongoClients.create(container.getConnectionString()), database);
     }
 }

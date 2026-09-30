@@ -1,1169 +1,3414 @@
-openapi: 3.1.0
-info:
-  title: Semantic Query API
-  version: v1
-security:
-  - ApiToken: []
-paths:
-  /api/v1/repositories:
-    get:
-      summary: List visible repositories and their current revisions.
-      parameters: [{$ref: '#/components/parameters/Offset'}, {$ref: '#/components/parameters/Limit'}]
-      responses:
-        '200': {description: Repository page., content: {application/json: {schema: {$ref: '#/components/schemas/RepositoryCollection'}}}}
-        '400': {$ref: '#/components/responses/InvalidArgument'}
-        '401': {$ref: '#/components/responses/AuthenticationRequired'}
-        '403': {$ref: '#/components/responses/AccessForbidden'}
-        '503': {$ref: '#/components/responses/IndexUnavailable'}
-  /api/v1/repositories/{repositoryId}:
-    get:
-      summary: Read one visible repository and its current revision.
-      parameters: [{$ref: '#/components/parameters/RepositoryId'}]
-      responses:
-        '200': {description: Repository metadata., content: {application/json: {schema: {$ref: '#/components/schemas/RepositoryItem'}}}}
-        '400': {$ref: '#/components/responses/InvalidArgument'}
-        '401': {$ref: '#/components/responses/AuthenticationRequired'}
-        '403': {$ref: '#/components/responses/AccessForbidden'}
-        '404': {$ref: '#/components/responses/NotFound'}
-        '503': {$ref: '#/components/responses/IndexUnavailable'}
-  /api/v1/search-code:
-    $ref: '#/components/pathItems/SearchCode'
-  /api/v1/fact-source:
-    $ref: '#/components/pathItems/FactSource'
-  /api/v1/entry-points:
-    $ref: '#/components/pathItems/EntryPoints'
-  /api/v1/api-routes:
-    $ref: '#/components/pathItems/ApiRoutes'
-  /api/v1/event-listeners:
-    $ref: '#/components/pathItems/EventListeners'
-  /api/v1/type-members:
-    $ref: '#/components/pathItems/TypeMembers'
-  /api/v1/method-implementations:
-    $ref: '#/components/pathItems/MethodImplementations'
-  /api/v1/references:
-    $ref: '#/components/pathItems/References'
-  /api/v1/callers:
-    $ref: '#/components/pathItems/Callers'
-  /api/v1/callees:
-    $ref: '#/components/pathItems/Callees'
-  /api/v1/git/branches:
-    $ref: '#/components/pathItems/GitBranches'
-  /api/v1/git/commits:
-    $ref: '#/components/pathItems/GitCommits'
-  /api/v1/git/comparisons:
-    $ref: '#/components/pathItems/GitComparisons'
-  /api/v1/git/file-diff:
-    $ref: '#/components/pathItems/GitFileDiff'
-  /api/v1/git/files:
-    $ref: '#/components/pathItems/GitFiles'
-  /api/v1/git/file:
-    $ref: '#/components/pathItems/GitFile'
-  /api/v1/git/search:
-    $ref: '#/components/pathItems/GitTextSearch'
-  /api/v1/repositories/{repositoryId}/reviews/{reviewId}:
-    $ref: '#/components/pathItems/GetReview'
-  /api/v1/reviews/search-code:
-    $ref: '#/components/pathItems/ReviewSearchCode'
-  /api/v1/reviews/fact-source:
-    $ref: '#/components/pathItems/ReviewFactSource'
-  /api/v1/reviews/entry-points:
-    $ref: '#/components/pathItems/ReviewEntryPoints'
-  /api/v1/reviews/api-routes:
-    $ref: '#/components/pathItems/ReviewApiRoutes'
-  /api/v1/reviews/event-listeners:
-    $ref: '#/components/pathItems/ReviewEventListeners'
-  /api/v1/reviews/type-members:
-    $ref: '#/components/pathItems/ReviewTypeMembers'
-  /api/v1/reviews/method-implementations:
-    $ref: '#/components/pathItems/ReviewMethodImplementations'
-  /api/v1/reviews/references:
-    $ref: '#/components/pathItems/ReviewReferences'
-  /api/v1/reviews/callers:
-    $ref: '#/components/pathItems/ReviewCallers'
-  /api/v1/reviews/callees:
-    $ref: '#/components/pathItems/ReviewCallees'
-components:
-  parameters:
-    RepositoryId:
-      name: repositoryId
-      in: path
-      required: true
-      schema: {$ref: '#/components/schemas/RepositoryId'}
-    Offset:
-      name: offset
-      in: query
-      schema: {type: integer, minimum: 0, default: 0}
-    Limit:
-      name: limit
-      in: query
-      schema: {type: integer, minimum: 1, maximum: 100, default: 20}
-  pathItems:
-    GitBranches:
-      post:
-        summary: List immutable remote branch heads from one authorized Git catalog.
-        requestBody: {$ref: '#/components/requestBodies/GitBranchRequest'}
-        responses:
-          '200': {description: Catalog-pinned branch page., content: {application/json: {schema: {$ref: '#/components/schemas/GitBranchCollection'}}}}
-          '400': {$ref: '#/components/responses/InvalidArgument'}
-          '401': {$ref: '#/components/responses/AuthenticationRequired'}
-          '403': {$ref: '#/components/responses/AccessForbidden'}
-          '404': {$ref: '#/components/responses/NotFound'}
-          '409': {$ref: '#/components/responses/GitEvidenceNotReady'}
-          '503': {$ref: '#/components/responses/IndexUnavailable'}
-    GitCommits:
-      post:
-        summary: List immutable commits reachable from a catalog-pinned branch head.
-        requestBody: {$ref: '#/components/requestBodies/GitCommitRequest'}
-        responses:
-          '200': {description: History-pinned commit page., content: {application/json: {schema: {$ref: '#/components/schemas/GitCommitCollection'}}}}
-          '400': {$ref: '#/components/responses/InvalidArgument'}
-          '401': {$ref: '#/components/responses/AuthenticationRequired'}
-          '403': {$ref: '#/components/responses/AccessForbidden'}
-          '404': {$ref: '#/components/responses/NotFound'}
-          '409': {$ref: '#/components/responses/GitEvidenceNotReady'}
-          '503': {$ref: '#/components/responses/IndexUnavailable'}
-    GitComparisons:
-      post:
-        summary: List one immutable direct comparison of exact Git revisions.
-        requestBody: {$ref: '#/components/requestBodies/GitComparisonRequest'}
-        responses:
-          '200': {description: Exact comparison page., content: {application/json: {schema: {$ref: '#/components/schemas/GitComparisonCollection'}}}}
-          '400': {$ref: '#/components/responses/InvalidArgument'}
-          '401': {$ref: '#/components/responses/AuthenticationRequired'}
-          '403': {$ref: '#/components/responses/AccessForbidden'}
-          '404': {$ref: '#/components/responses/NotFound'}
-          '409': {$ref: '#/components/responses/GitEvidenceNotReady'}
-          '503': {$ref: '#/components/responses/IndexUnavailable'}
-    GitFileDiff:
-      post:
-        summary: Read one bounded patch from an immutable exact comparison.
-        requestBody: {$ref: '#/components/requestBodies/GitFileDiffRequest'}
-        responses:
-          '200': {description: Exact change patch., content: {application/json: {schema: {$ref: '#/components/schemas/GitFileDiffResult'}}}}
-          '400': {$ref: '#/components/responses/InvalidArgument'}
-          '401': {$ref: '#/components/responses/AuthenticationRequired'}
-          '403': {$ref: '#/components/responses/AccessForbidden'}
-          '404': {$ref: '#/components/responses/NotFound'}
-          '409': {$ref: '#/components/responses/GitEvidenceNotReady'}
-          '503': {$ref: '#/components/responses/IndexUnavailable'}
-    GitFiles:
-      post:
-        summary: List direct entries from one exact READY Git snapshot directory.
-        requestBody: {$ref: '#/components/requestBodies/GitFileListRequest'}
-        responses:
-          '200': {description: Snapshot directory page and immutable content coverage., content: {application/json: {schema: {$ref: '#/components/schemas/GitFileCollection'}}}}
-          '400': {$ref: '#/components/responses/InvalidArgument'}
-          '401': {$ref: '#/components/responses/AuthenticationRequired'}
-          '403': {$ref: '#/components/responses/AccessForbidden'}
-          '404': {$ref: '#/components/responses/NotFound'}
-          '409': {$ref: '#/components/responses/GitEvidenceNotReady'}
-          '503': {$ref: '#/components/responses/IndexUnavailable'}
-    GitFile:
-      post:
-        summary: Read a bounded UTF-8 page from one exact READY Git snapshot file.
-        requestBody: {$ref: '#/components/requestBodies/GitFileReadRequest'}
-        responses:
-          '200': {description: Exact source page with optional continuation cursor., content: {application/json: {schema: {$ref: '#/components/schemas/GitFileContent'}}}}
-          '400': {$ref: '#/components/responses/InvalidArgument'}
-          '401': {$ref: '#/components/responses/AuthenticationRequired'}
-          '403': {$ref: '#/components/responses/AccessForbidden'}
-          '404': {$ref: '#/components/responses/NotFound'}
-          '409': {$ref: '#/components/responses/GitEvidenceNotReady'}
-          '503': {$ref: '#/components/responses/IndexUnavailable'}
-    GitTextSearch:
-      post:
-        summary: Search literal UTF-8 text in one exact READY Git snapshot.
-        requestBody: {$ref: '#/components/requestBodies/GitTextSearchRequest'}
-        responses:
-          '200': {description: Bounded literal-search page with optional continuation cursor., content: {application/json: {schema: {$ref: '#/components/schemas/GitTextSearchResult'}}}}
-          '400': {$ref: '#/components/responses/InvalidArgument'}
-          '401': {$ref: '#/components/responses/AuthenticationRequired'}
-          '403': {$ref: '#/components/responses/AccessForbidden'}
-          '404': {$ref: '#/components/responses/NotFound'}
-          '409': {$ref: '#/components/responses/GitEvidenceNotReady'}
-          '503': {$ref: '#/components/responses/IndexUnavailable'}
-    SearchCode:
-      post:
-        summary: Search exact indexed code. Copy repository ID and revision from Semantic results.
-        requestBody: {$ref: '#/components/requestBodies/SearchCodeRequest'}
-        responses:
-          '200': {description: Revision-pinned collection page., content: {application/json: {schema: {$ref: '#/components/schemas/SearchCodeResult'}}}}
-          '400': {$ref: '#/components/responses/InvalidArgument'}
-          '401': {$ref: '#/components/responses/AuthenticationRequired'}
-          '403': {$ref: '#/components/responses/AccessForbidden'}
-          '404': {$ref: '#/components/responses/NotFound'}
-          '409': {$ref: '#/components/responses/RevisionOutdated'}
-          '503': {$ref: '#/components/responses/IndexUnavailable'}
-    FactSource:
-      post:
-        summary: Expand exact source for one returned fact ID.
-        requestBody: {$ref: '#/components/requestBodies/FactSourceRequest'}
-        responses:
-          '200': {description: Exact source and fact ranges., content: {application/json: {schema: {$ref: '#/components/schemas/FactSourceResult'}}}}
-          '400': {$ref: '#/components/responses/InvalidArgument'}
-          '401': {$ref: '#/components/responses/AuthenticationRequired'}
-          '403': {$ref: '#/components/responses/AccessForbidden'}
-          '404': {$ref: '#/components/responses/NotFound'}
-          '409': {$ref: '#/components/responses/RevisionOutdated'}
-          '503': {$ref: '#/components/responses/IndexUnavailable'}
-    EntryPoints:
-      post:
-        summary: List HTTP, messaging, and scheduled entry points.
-        requestBody: {$ref: '#/components/requestBodies/EntryPointRequest'}
-        responses:
-          '200': {description: Revision-pinned collection page., content: {application/json: {schema: {$ref: '#/components/schemas/EntryPointCollectionResult'}}}}
-          '400': {$ref: '#/components/responses/InvalidArgument'}
-          '401': {$ref: '#/components/responses/AuthenticationRequired'}
-          '403': {$ref: '#/components/responses/AccessForbidden'}
-          '404': {$ref: '#/components/responses/NotFound'}
-          '409': {$ref: '#/components/responses/RevisionOutdated'}
-          '503': {$ref: '#/components/responses/IndexUnavailable'}
-    ApiRoutes:
-      post:
-        summary: Find routes for one exact method and path.
-        requestBody: {$ref: '#/components/requestBodies/ApiRouteRequest'}
-        responses:
-          '200': {description: Revision-pinned collection page., content: {application/json: {schema: {$ref: '#/components/schemas/EntryPointCollectionResult'}}}}
-          '400': {$ref: '#/components/responses/InvalidArgument'}
-          '401': {$ref: '#/components/responses/AuthenticationRequired'}
-          '403': {$ref: '#/components/responses/AccessForbidden'}
-          '404': {$ref: '#/components/responses/NotFound'}
-          '409': {$ref: '#/components/responses/RevisionOutdated'}
-          '503': {$ref: '#/components/responses/IndexUnavailable'}
-    EventListeners:
-      post:
-        summary: Find listeners for one exact fully qualified event type.
-        requestBody: {$ref: '#/components/requestBodies/EventListenerRequest'}
-        responses:
-          '200': {description: Revision-pinned collection page., content: {application/json: {schema: {$ref: '#/components/schemas/EventListenerCollectionResult'}}}}
-          '400': {$ref: '#/components/responses/InvalidArgument'}
-          '401': {$ref: '#/components/responses/AuthenticationRequired'}
-          '403': {$ref: '#/components/responses/AccessForbidden'}
-          '404': {$ref: '#/components/responses/NotFound'}
-          '409': {$ref: '#/components/responses/RevisionOutdated'}
-          '503': {$ref: '#/components/responses/IndexUnavailable'}
-    TypeMembers:
-      post:
-        summary: List members of one returned type fact ID.
-        requestBody: {$ref: '#/components/requestBodies/TypeMemberRequest'}
-        responses:
-          '200': {description: Revision-pinned collection page., content: {application/json: {schema: {$ref: '#/components/schemas/TypeMemberCollectionResult'}}}}
-          '400': {$ref: '#/components/responses/InvalidArgument'}
-          '401': {$ref: '#/components/responses/AuthenticationRequired'}
-          '403': {$ref: '#/components/responses/AccessForbidden'}
-          '404': {$ref: '#/components/responses/NotFound'}
-          '409': {$ref: '#/components/responses/RevisionOutdated'}
-          '503': {$ref: '#/components/responses/IndexUnavailable'}
-    MethodImplementations:
-      post:
-        summary: Find direct implementations or overrides of one returned method fact ID.
-        requestBody: {$ref: '#/components/requestBodies/MethodRelationRequest'}
-        responses:
-          '200': {description: Revision-pinned collection page., content: {application/json: {schema: {$ref: '#/components/schemas/ImplementationCollectionResult'}}}}
-          '400': {$ref: '#/components/responses/InvalidArgument'}
-          '401': {$ref: '#/components/responses/AuthenticationRequired'}
-          '403': {$ref: '#/components/responses/AccessForbidden'}
-          '404': {$ref: '#/components/responses/NotFound'}
-          '409': {$ref: '#/components/responses/RevisionOutdated'}
-          '503': {$ref: '#/components/responses/IndexUnavailable'}
-    References:
-      post:
-        summary: Find exact references to one returned declaration fact ID.
-        requestBody: {$ref: '#/components/requestBodies/RelationRequest'}
-        responses:
-          '200': {description: Revision-pinned collection page., content: {application/json: {schema: {$ref: '#/components/schemas/ReferenceCollectionResult'}}}}
-          '400': {$ref: '#/components/responses/InvalidArgument'}
-          '401': {$ref: '#/components/responses/AuthenticationRequired'}
-          '403': {$ref: '#/components/responses/AccessForbidden'}
-          '404': {$ref: '#/components/responses/NotFound'}
-          '409': {$ref: '#/components/responses/RevisionOutdated'}
-          '503': {$ref: '#/components/responses/IndexUnavailable'}
-    Callers:
-      post:
-        summary: Find direct callers of one returned method fact ID.
-        requestBody: {$ref: '#/components/requestBodies/MethodRelationRequest'}
-        responses:
-          '200': {description: Revision-pinned collection page., content: {application/json: {schema: {$ref: '#/components/schemas/CallerCollectionResult'}}}}
-          '400': {$ref: '#/components/responses/InvalidArgument'}
-          '401': {$ref: '#/components/responses/AuthenticationRequired'}
-          '403': {$ref: '#/components/responses/AccessForbidden'}
-          '404': {$ref: '#/components/responses/NotFound'}
-          '409': {$ref: '#/components/responses/RevisionOutdated'}
-          '503': {$ref: '#/components/responses/IndexUnavailable'}
-    Callees:
-      post:
-        summary: Find direct callees of one returned method fact ID.
-        requestBody: {$ref: '#/components/requestBodies/MethodRelationRequest'}
-        responses:
-          '200': {description: Revision-pinned collection page., content: {application/json: {schema: {$ref: '#/components/schemas/CalleeCollectionResult'}}}}
-          '400': {$ref: '#/components/responses/InvalidArgument'}
-          '401': {$ref: '#/components/responses/AuthenticationRequired'}
-          '403': {$ref: '#/components/responses/AccessForbidden'}
-          '404': {$ref: '#/components/responses/NotFound'}
-          '409': {$ref: '#/components/responses/RevisionOutdated'}
-          '503': {$ref: '#/components/responses/IndexUnavailable'}
-    GetReview:
-      get:
-        summary: Discover safe metadata for one READY immutable review.
-        parameters: [{$ref: '#/components/parameters/RepositoryId'}, {name: reviewId, in: path, required: true, schema: {$ref: '#/components/schemas/ReviewId'}}]
-        responses:
-          '200': {description: Safe review metadata., content: {application/json: {schema: {$ref: '#/components/schemas/ReviewDetails'}}}}
-          '400': {$ref: '#/components/responses/InvalidArgument'}
-          '401': {$ref: '#/components/responses/AuthenticationRequired'}
-          '403': {$ref: '#/components/responses/AccessForbidden'}
-          '404': {$ref: '#/components/responses/NotFound'}
-          '409': {$ref: '#/components/responses/ReviewNotReady'}
-          '503': {$ref: '#/components/responses/IndexUnavailable'}
-    ReviewSearchCode:
-      post:
-        summary: Search exact indexed code on one immutable READY review side.
-        requestBody: {$ref: '#/components/requestBodies/ReviewSearchCodeRequest'}
-        responses: {'200': {description: Review-scoped search page., content: {application/json: {schema: {$ref: '#/components/schemas/ReviewSearchCodeResult'}}}}, '400': {$ref: '#/components/responses/InvalidArgument'}, '401': {$ref: '#/components/responses/AuthenticationRequired'}, '403': {$ref: '#/components/responses/AccessForbidden'}, '404': {$ref: '#/components/responses/NotFound'}, '409': {$ref: '#/components/responses/ReviewNotReady'}, '503': {$ref: '#/components/responses/IndexUnavailable'}}
-    ReviewFactSource:
-      post:
-        summary: Expand exact source on one immutable READY review side.
-        requestBody: {$ref: '#/components/requestBodies/ReviewFactSourceRequest'}
-        responses: {'200': {description: Review-scoped fact source., content: {application/json: {schema: {$ref: '#/components/schemas/ReviewFactSourceResult'}}}}, '400': {$ref: '#/components/responses/InvalidArgument'}, '401': {$ref: '#/components/responses/AuthenticationRequired'}, '403': {$ref: '#/components/responses/AccessForbidden'}, '404': {$ref: '#/components/responses/NotFound'}, '409': {$ref: '#/components/responses/ReviewNotReady'}, '503': {$ref: '#/components/responses/IndexUnavailable'}}
-    ReviewEntryPoints:
-      post:
-        summary: List entry points on one immutable READY review side.
-        requestBody: {$ref: '#/components/requestBodies/ReviewEntryPointRequest'}
-        responses: {'200': {description: Review-scoped entry point page., content: {application/json: {schema: {$ref: '#/components/schemas/ReviewEntryPointResult'}}}}, '400': {$ref: '#/components/responses/InvalidArgument'}, '401': {$ref: '#/components/responses/AuthenticationRequired'}, '403': {$ref: '#/components/responses/AccessForbidden'}, '404': {$ref: '#/components/responses/NotFound'}, '409': {$ref: '#/components/responses/ReviewNotReady'}, '503': {$ref: '#/components/responses/IndexUnavailable'}}
-    ReviewApiRoutes:
-      post:
-        summary: Find exact HTTP routes on one immutable READY review side.
-        requestBody: {$ref: '#/components/requestBodies/ReviewApiRouteRequest'}
-        responses: {'200': {description: Review-scoped route page., content: {application/json: {schema: {$ref: '#/components/schemas/ReviewEntryPointResult'}}}}, '400': {$ref: '#/components/responses/InvalidArgument'}, '401': {$ref: '#/components/responses/AuthenticationRequired'}, '403': {$ref: '#/components/responses/AccessForbidden'}, '404': {$ref: '#/components/responses/NotFound'}, '409': {$ref: '#/components/responses/ReviewNotReady'}, '503': {$ref: '#/components/responses/IndexUnavailable'}}
-    ReviewEventListeners:
-      post:
-        summary: Find exact event listeners on one immutable READY review side.
-        requestBody: {$ref: '#/components/requestBodies/ReviewEventListenerRequest'}
-        responses: {'200': {description: Review-scoped listener page., content: {application/json: {schema: {$ref: '#/components/schemas/ReviewEventListenerResult'}}}}, '400': {$ref: '#/components/responses/InvalidArgument'}, '401': {$ref: '#/components/responses/AuthenticationRequired'}, '403': {$ref: '#/components/responses/AccessForbidden'}, '404': {$ref: '#/components/responses/NotFound'}, '409': {$ref: '#/components/responses/ReviewNotReady'}, '503': {$ref: '#/components/responses/IndexUnavailable'}}
-    ReviewTypeMembers:
-      post:
-        summary: List type members on one immutable READY review side.
-        requestBody: {$ref: '#/components/requestBodies/ReviewTypeMemberRequest'}
-        responses: {'200': {description: Review-scoped member page., content: {application/json: {schema: {$ref: '#/components/schemas/ReviewTypeMemberResult'}}}}, '400': {$ref: '#/components/responses/InvalidArgument'}, '401': {$ref: '#/components/responses/AuthenticationRequired'}, '403': {$ref: '#/components/responses/AccessForbidden'}, '404': {$ref: '#/components/responses/NotFound'}, '409': {$ref: '#/components/responses/ReviewNotReady'}, '503': {$ref: '#/components/responses/IndexUnavailable'}}
-    ReviewMethodImplementations:
-      post:
-        summary: Find method implementations on one immutable READY review side.
-        requestBody: {$ref: '#/components/requestBodies/ReviewMethodRelationRequest'}
-        responses: {'200': {description: Review-scoped implementation page., content: {application/json: {schema: {$ref: '#/components/schemas/ReviewImplementationResult'}}}}, '400': {$ref: '#/components/responses/InvalidArgument'}, '401': {$ref: '#/components/responses/AuthenticationRequired'}, '403': {$ref: '#/components/responses/AccessForbidden'}, '404': {$ref: '#/components/responses/NotFound'}, '409': {$ref: '#/components/responses/ReviewNotReady'}, '503': {$ref: '#/components/responses/IndexUnavailable'}}
-    ReviewReferences:
-      post:
-        summary: Find exact references on one immutable READY review side.
-        requestBody: {$ref: '#/components/requestBodies/ReviewRelationRequest'}
-        responses: {'200': {description: Review-scoped reference page., content: {application/json: {schema: {$ref: '#/components/schemas/ReviewReferenceResult'}}}}, '400': {$ref: '#/components/responses/InvalidArgument'}, '401': {$ref: '#/components/responses/AuthenticationRequired'}, '403': {$ref: '#/components/responses/AccessForbidden'}, '404': {$ref: '#/components/responses/NotFound'}, '409': {$ref: '#/components/responses/ReviewNotReady'}, '503': {$ref: '#/components/responses/IndexUnavailable'}}
-    ReviewCallers:
-      post:
-        summary: Find direct callers on one immutable READY review side.
-        requestBody: {$ref: '#/components/requestBodies/ReviewMethodRelationRequest'}
-        responses: {'200': {description: Review-scoped caller page., content: {application/json: {schema: {$ref: '#/components/schemas/ReviewCallerResult'}}}}, '400': {$ref: '#/components/responses/InvalidArgument'}, '401': {$ref: '#/components/responses/AuthenticationRequired'}, '403': {$ref: '#/components/responses/AccessForbidden'}, '404': {$ref: '#/components/responses/NotFound'}, '409': {$ref: '#/components/responses/ReviewNotReady'}, '503': {$ref: '#/components/responses/IndexUnavailable'}}
-    ReviewCallees:
-      post:
-        summary: Find direct callees on one immutable READY review side.
-        requestBody: {$ref: '#/components/requestBodies/ReviewMethodRelationRequest'}
-        responses: {'200': {description: Review-scoped callee page., content: {application/json: {schema: {$ref: '#/components/schemas/ReviewCalleeResult'}}}}, '400': {$ref: '#/components/responses/InvalidArgument'}, '401': {$ref: '#/components/responses/AuthenticationRequired'}, '403': {$ref: '#/components/responses/AccessForbidden'}, '404': {$ref: '#/components/responses/NotFound'}, '409': {$ref: '#/components/responses/ReviewNotReady'}, '503': {$ref: '#/components/responses/IndexUnavailable'}}
-  requestBodies:
-    GitBranchRequest: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/GitBranchRequest'}}}}
-    GitCommitRequest: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/GitCommitRequest'}}}}
-    GitComparisonRequest: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/GitComparisonRequest'}}}}
-    GitFileDiffRequest: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/GitFileDiffRequest'}}}}
-    GitFileListRequest: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/GitFileListRequest'}}}}
-    GitFileReadRequest: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/GitFileReadRequest'}}}}
-    GitTextSearchRequest: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/GitTextSearchRequest'}}}}
-    SearchCodeRequest: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/SearchCodeRequest'}}}}
-    FactSourceRequest: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/FactSourceRequest'}}}}
-    EntryPointRequest: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/EntryPointRequest'}}}}
-    ApiRouteRequest: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ApiRouteRequest'}}}}
-    EventListenerRequest: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/EventListenerRequest'}}}}
-    TypeMemberRequest: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/TypeMemberRequest'}}}}
-    MethodRelationRequest: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/MethodRelationRequest'}}}}
-    RelationRequest: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/RelationRequest'}}}}
-    ReviewSearchCodeRequest: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ReviewSearchCodeRequest'}}}}
-    ReviewFactSourceRequest: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ReviewFactSourceRequest'}}}}
-    ReviewEntryPointRequest: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ReviewEntryPointRequest'}}}}
-    ReviewApiRouteRequest: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ReviewApiRouteRequest'}}}}
-    ReviewEventListenerRequest: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ReviewEventListenerRequest'}}}}
-    ReviewTypeMemberRequest: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ReviewTypeMemberRequest'}}}}
-    ReviewMethodRelationRequest: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ReviewMethodRelationRequest'}}}}
-    ReviewRelationRequest: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ReviewRelationRequest'}}}}
-  responses:
-    AuthenticationRequired:
-      description: X-Api-Token is required for HTTP query operations.
-    AccessForbidden:
-      description: Query access is disabled.
-    InvalidArgument:
-      description: Request does not satisfy the operation contract.
-      content: {application/json: {schema: {$ref: '#/components/schemas/SemanticQueryError'}}}
-    NotFound:
-      description: Repository or fact was not found.
-      content: {application/json: {schema: {$ref: '#/components/schemas/SemanticQueryError'}}}
-    GitEvidenceNotReady:
-      description: The requested immutable Git evidence has not reached READY; retry later with the same identity.
-      content: {application/json: {schema: {$ref: '#/components/schemas/SemanticQueryError'}}}
-    ReviewNotReady:
-      description: The requested review has not published immutable READY evidence; retry later with the same identity.
-      content: {application/json: {schema: {$ref: '#/components/schemas/SemanticQueryError'}}}
-    RevisionOutdated:
-      description: Retry only after replacing revision with the returned exact currentRevision.
-      content: {application/json: {schema: {$ref: '#/components/schemas/SemanticQueryError'}}}
-    IndexUnavailable:
-      description: The semantic index is temporarily unavailable.
-      content: {application/json: {schema: {$ref: '#/components/schemas/SemanticQueryError'}}}
-  schemas:
-    RepositoryId: {type: string, minLength: 1, maxLength: 64, pattern: '^[a-z0-9][a-z0-9._-]{0,63}$'}
-    Revision: {type: string, minLength: 40, maxLength: 40, pattern: '^[0-9a-f]{40}$'}
-    FactId: {type: string, pattern: '^[0-9a-f]{64}$'}
-    GitEvidenceId: {type: string, format: uuid}
-    ReviewId: {type: string, minLength: 1}
-    ReviewSide: {type: string, enum: [BEFORE, AFTER]}
-    GitBranchRequest:
-      type: object
-      additionalProperties: false
-      required: [repositoryId]
-      properties:
-        repositoryId: {$ref: '#/components/schemas/RepositoryId'}
-        catalogId: {$ref: '#/components/schemas/GitEvidenceId'}
-        offset: {type: integer, minimum: 0, default: 0}
-        limit: {type: integer, minimum: 1, maximum: 100, default: 20}
-    GitCommitRequest:
-      type: object
-      additionalProperties: false
-      required: [repositoryId, historyId, revision]
-      properties:
-        repositoryId: {$ref: '#/components/schemas/RepositoryId'}
-        historyId: {$ref: '#/components/schemas/GitEvidenceId'}
-        revision: {$ref: '#/components/schemas/Revision'}
-        offset: {type: integer, minimum: 0, default: 0}
-        limit: {type: integer, minimum: 1, maximum: 100, default: 20}
-    GitBranchItem:
-      type: object
-      additionalProperties: false
-      required: [branch, head]
-      properties:
-        branch: {type: string, minLength: 1}
-        head: {$ref: '#/components/schemas/Revision'}
-    GitBranchCollection:
-      type: object
-      additionalProperties: false
-      required: [repositoryId, catalogId, observedAt, items, page]
-      properties:
-        repositoryId: {$ref: '#/components/schemas/RepositoryId'}
-        catalogId: {$ref: '#/components/schemas/GitEvidenceId'}
-        observedAt: {type: string, format: date-time}
-        items: {type: array, items: {$ref: '#/components/schemas/GitBranchItem'}}
-        page: {$ref: '#/components/schemas/Page'}
-    GitCommitItem:
-      type: object
-      additionalProperties: false
-      required: [revision, parents, subject, committedAt]
-      properties:
-        revision: {$ref: '#/components/schemas/Revision'}
-        parents: {type: array, items: {$ref: '#/components/schemas/Revision'}}
-        subject: {type: string}
-        committedAt: {type: string, format: date-time}
-    GitCommitCollection:
-      type: object
-      additionalProperties: false
-      required: [repositoryId, historyId, revision, preparedAt, items, page]
-      properties:
-        repositoryId: {$ref: '#/components/schemas/RepositoryId'}
-        historyId: {$ref: '#/components/schemas/GitEvidenceId'}
-        revision: {$ref: '#/components/schemas/Revision'}
-        preparedAt: {type: string, format: date-time}
-        items: {type: array, items: {$ref: '#/components/schemas/GitCommitItem'}}
-        page: {$ref: '#/components/schemas/Page'}
-    GitComparisonRequest:
-      type: object
-      additionalProperties: false
-      required: [repositoryId, comparisonId, current]
-      properties:
-        repositoryId: {$ref: '#/components/schemas/RepositoryId'}
-        comparisonId: {type: string, format: uuid}
-        previous: {$ref: '#/components/schemas/Revision'}
-        current: {$ref: '#/components/schemas/Revision'}
-        offset: {type: integer, minimum: 0, default: 0}
-        limit: {type: integer, minimum: 1, maximum: 100, default: 20}
-    GitFileDiffRequest:
-      type: object
-      additionalProperties: false
-      required: [repositoryId, comparisonId, current, changeId]
-      properties:
-        repositoryId: {$ref: '#/components/schemas/RepositoryId'}
-        comparisonId: {type: string, format: uuid}
-        previous: {$ref: '#/components/schemas/Revision'}
-        current: {$ref: '#/components/schemas/Revision'}
-        changeId: {type: string, minLength: 1}
-        cursor: {type: string, minLength: 1}
-    GitFileListRequest:
-      type: object
-      additionalProperties: false
-      required: [repositoryId, snapshotId, revision, directory]
-      properties:
-        repositoryId: {$ref: '#/components/schemas/RepositoryId'}
-        snapshotId: {$ref: '#/components/schemas/GitEvidenceId'}
-        revision: {$ref: '#/components/schemas/Revision'}
-        directory: {type: string}
-        offset: {type: integer, minimum: 0, default: 0}
-        limit: {type: integer, minimum: 1, maximum: 100, default: 20}
-    GitFileReadRequest:
-      type: object
-      additionalProperties: false
-      required: [repositoryId, snapshotId, revision, path]
-      properties:
-        repositoryId: {$ref: '#/components/schemas/RepositoryId'}
-        snapshotId: {$ref: '#/components/schemas/GitEvidenceId'}
-        revision: {$ref: '#/components/schemas/Revision'}
-        path: {type: string, minLength: 1}
-        startLine: {type: integer, minimum: 1}
-        maxLines: {type: integer, minimum: 1, maximum: 500, default: 200}
-        cursor: {type: string, minLength: 1}
-    GitTextSearchRequest:
-      type: object
-      additionalProperties: false
-      required: [repositoryId, snapshotId, revision, query]
-      properties:
-        repositoryId: {$ref: '#/components/schemas/RepositoryId'}
-        snapshotId: {$ref: '#/components/schemas/GitEvidenceId'}
-        revision: {$ref: '#/components/schemas/Revision'}
-        query: {type: string, minLength: 1, maxLength: 256}
-        directory: {type: string}
-        cursor: {type: string, minLength: 1}
-        limit: {type: integer, minimum: 1, maximum: 100, default: 20}
-    GitChangeItem:
-      type: object
-      additionalProperties: false
-      required: [changeId, kind, diffStatus]
-      properties:
-        changeId: {type: string}
-        kind: {type: string, enum: [ADD, DELETE, MODIFY, RENAME, MODE]}
-        oldPath: {type: string}
-        newPath: {type: string}
-        oldMode: {type: string}
-        newMode: {type: string}
-        oldBlobId: {type: string}
-        newBlobId: {type: string}
-        diffStatus: {type: string}
-    GitComparisonCollection:
-      type: object
-      additionalProperties: false
-      required: [repositoryId, comparisonId, previous, current, previousSnapshotId, currentSnapshotId, ancestry, items, page]
-      properties:
-        repositoryId: {$ref: '#/components/schemas/RepositoryId'}
-        comparisonId: {type: string, format: uuid}
-        previous: {oneOf: [{$ref: '#/components/schemas/Revision'}, {type: 'null'}]}
-        current: {$ref: '#/components/schemas/Revision'}
-        previousSnapshotId: {type: string, format: uuid}
-        currentSnapshotId: {type: string, format: uuid}
-        ancestry: {type: string, enum: [SAME, PREVIOUS_ANCESTOR, CURRENT_ANCESTOR, DIVERGED, EMPTY_TREE]}
-        items: {type: array, items: {$ref: '#/components/schemas/GitChangeItem'}}
-        page: {$ref: '#/components/schemas/Page'}
-    GitFileDiffResult:
-      type: object
-      additionalProperties: false
-      required: [repositoryId, comparisonId, previous, current, change, patch]
-      properties:
-        repositoryId: {$ref: '#/components/schemas/RepositoryId'}
-        comparisonId: {type: string, format: uuid}
-        previous: {oneOf: [{$ref: '#/components/schemas/Revision'}, {type: 'null'}]}
-        current: {$ref: '#/components/schemas/Revision'}
-        change: {$ref: '#/components/schemas/GitChangeItem'}
-        patch: {type: string}
-        nextCursor: {type: string}
-    GitFileItem:
-      type: object
-      additionalProperties: false
-      required: [path, pathKey, entryType, byteLength, contentStatus]
-      properties:
-        path: {type: string}
-        pathKey: {type: string}
-        entryType: {type: string, enum: [FILE, DIRECTORY]}
-        byteLength: {type: integer, minimum: 0}
-        contentStatus: {type: string}
-    GitSnapshotCoverage:
-      type: object
-      additionalProperties: false
-      required: [inventoryCount, readableTextCount, binaryCount, unsupportedEncodingCount, tooLargeCount, symlinkCount, submoduleCount, lfsPointerCount, unsupportedPathCount]
-      properties:
-        inventoryCount: {type: integer, minimum: 0}
-        readableTextCount: {type: integer, minimum: 0}
-        binaryCount: {type: integer, minimum: 0}
-        unsupportedEncodingCount: {type: integer, minimum: 0}
-        tooLargeCount: {type: integer, minimum: 0}
-        symlinkCount: {type: integer, minimum: 0}
-        submoduleCount: {type: integer, minimum: 0}
-        lfsPointerCount: {type: integer, minimum: 0}
-        unsupportedPathCount: {type: integer, minimum: 0}
-    GitFileCollection:
-      type: object
-      additionalProperties: false
-      required: [repositoryId, snapshotId, revision, items, page, coverage]
-      properties:
-        repositoryId: {$ref: '#/components/schemas/RepositoryId'}
-        snapshotId: {$ref: '#/components/schemas/GitEvidenceId'}
-        revision: {$ref: '#/components/schemas/Revision'}
-        items: {type: array, items: {$ref: '#/components/schemas/GitFileItem'}}
-        page: {$ref: '#/components/schemas/Page'}
-        coverage: {$ref: '#/components/schemas/GitSnapshotCoverage'}
-    GitFileContent:
-      type: object
-      additionalProperties: false
-      required: [repositoryId, snapshotId, revision, path, pathKey, contentStatus, content, startLine, endLine, startLineComplete, endLineComplete]
-      properties:
-        repositoryId: {$ref: '#/components/schemas/RepositoryId'}
-        snapshotId: {$ref: '#/components/schemas/GitEvidenceId'}
-        revision: {$ref: '#/components/schemas/Revision'}
-        path: {type: string}
-        pathKey: {type: string}
-        contentStatus: {type: string}
-        content: {type: string}
-        startLine: {type: integer, minimum: 0}
-        endLine: {type: integer, minimum: 0}
-        startLineComplete: {type: boolean}
-        endLineComplete: {type: boolean}
-        nextCursor: {type: string}
-    GitTextMatch:
-      type: object
-      additionalProperties: false
-      required: [path, pathKey, line, column, snippet, snippetTruncated]
-      properties:
-        path: {type: string}
-        pathKey: {type: string}
-        line: {type: integer, minimum: 1}
-        column: {type: integer, minimum: 1}
-        snippet: {type: string}
-        snippetTruncated: {type: boolean}
-    GitTextSearchResult:
-      type: object
-      additionalProperties: false
-      required: [repositoryId, snapshotId, revision, items, scanComplete, coverage]
-      properties:
-        repositoryId: {$ref: '#/components/schemas/RepositoryId'}
-        snapshotId: {$ref: '#/components/schemas/GitEvidenceId'}
-        revision: {$ref: '#/components/schemas/Revision'}
-        items: {type: array, items: {$ref: '#/components/schemas/GitTextMatch'}}
-        scanComplete: {type: boolean}
-        nextCursor: {type: string}
-        coverage: {$ref: '#/components/schemas/GitSnapshotCoverage'}
-    Page:
-      type: object
-      additionalProperties: false
-      required: [offset, limit, returned, total, hasMore]
-      properties:
-        offset: {type: integer, minimum: 0}
-        limit: {type: integer, minimum: 1, maximum: 100}
-        returned: {type: integer, minimum: 0}
-        total: {type: integer, minimum: 0}
-        hasMore: {type: boolean}
-    RepositoryItem:
-      type: object
-      additionalProperties: false
-      required: [repositoryId, revision]
-      properties:
-        repositoryId: {$ref: '#/components/schemas/RepositoryId'}
-        revision: {$ref: '#/components/schemas/Revision'}
-    RepositoryCollection:
-      type: object
-      additionalProperties: false
-      required: [items, page]
-      properties:
-        items: {type: array, items: {$ref: '#/components/schemas/RepositoryItem'}}
-        page: {$ref: '#/components/schemas/Page'}
-    SourceSnippet:
-      type: object
-      additionalProperties: false
-      required: [path, startLine, endLine, code]
-      properties:
-        path: {type: string}
-        startLine: {type: integer, minimum: 1}
-        endLine: {type: integer, minimum: 1}
-        code: {type: string, minLength: 1}
-    FactRange:
-      type: object
-      additionalProperties: false
-      required: [startLine, endLine]
-      properties:
-        startLine: {type: integer, minimum: 1}
-        endLine: {type: integer, minimum: 1}
-    InternalProgramElement:
-      type: object
-      additionalProperties: false
-      required: [factId, kind, displayName, source]
-      properties:
-        factId: {$ref: '#/components/schemas/FactId'}
-        kind: {type: string, enum: [TYPE, METHOD, FIELD, ENUM_CONSTANT, RECORD_COMPONENT, MAPPER_STATEMENT, ANNOTATION_USAGE, TYPE_USAGE, SQL_IDENTIFIER, CONFIGURATION_KEY, OUTBOUND_API, MQ_PUBLISHER, ERROR_CONTRACT, API_ROUTE, MQ_DESTINATION, SCHEDULE]}
-        displayName: {type: string, minLength: 1}
-        source: {$ref: '#/components/schemas/SourceSnippet'}
-    ExternalCallee:
-      type: object
-      additionalProperties: false
-      required: [displayName]
-      properties:
-        displayName: {type: string, minLength: 1}
-    RelationSite:
-      type: object
-      additionalProperties: false
-      required: [factId, source]
-      properties:
-        factId: {$ref: '#/components/schemas/FactId'}
-        source: {$ref: '#/components/schemas/SourceSnippet'}
-    Trigger:
-      type: object
-      additionalProperties: false
-      required: [kind, method, value]
-      properties:
-        kind: {type: string, minLength: 1}
-        method: {type: string}
-        value: {type: string, minLength: 1}
-    EntryPointItem:
-      type: object
-      additionalProperties: false
-      required: [factId, handler, trigger]
-      properties:
-        factId: {$ref: '#/components/schemas/FactId'}
-        handler: {$ref: '#/components/schemas/InternalProgramElement'}
-        trigger: {$ref: '#/components/schemas/Trigger'}
-    EventListenerItem:
-      type: object
-      additionalProperties: false
-      required: [eventType, handler]
-      properties:
-        eventType: {type: string, minLength: 1}
-        handler: {$ref: '#/components/schemas/InternalProgramElement'}
-    ImplementationItem:
-      type: object
-      additionalProperties: false
-      required: [implementation, relationKind]
-      properties:
-        implementation: {$ref: '#/components/schemas/InternalProgramElement'}
-        relationKind: {type: string, enum: [IMPLEMENTS, OVERRIDES]}
-    CallerItem:
-      type: object
-      additionalProperties: false
-      required: [caller, callSite]
-      properties:
-        caller: {$ref: '#/components/schemas/InternalProgramElement'}
-        callSite: {$ref: '#/components/schemas/RelationSite'}
-    CalleeItem:
-      type: object
-      additionalProperties: false
-      required: [callee, callSite, resolutionStatus]
-      properties:
-        callee:
-          oneOf:
-            - {$ref: '#/components/schemas/InternalProgramElement'}
-            - {$ref: '#/components/schemas/ExternalCallee'}
-        callSite: {$ref: '#/components/schemas/RelationSite'}
-        resolutionStatus: {type: string, enum: [INDEXED, UNINDEXED_TARGET, UNRESOLVED]}
-    ReferenceItem:
-      type: object
-      additionalProperties: false
-      required: [container, referenceSite]
-      properties:
-        container: {$ref: '#/components/schemas/InternalProgramElement'}
-        referenceSite: {$ref: '#/components/schemas/RelationSite'}
-    SearchCodeResult:
-      type: object
-      additionalProperties: false
-      required: [repositoryId, revision, items, page, sourceCoverage]
-      properties:
-        repositoryId: {$ref: '#/components/schemas/RepositoryId'}
-        revision: {$ref: '#/components/schemas/Revision'}
-        items: {type: array, items: {$ref: '#/components/schemas/InternalProgramElement'}}
-        page: {$ref: '#/components/schemas/Page'}
-        sourceCoverage: {$ref: '#/components/schemas/SourceCoverage'}
-    SourceCoverage:
-      type: object
-      additionalProperties: false
-      required: [indexedSourceCount, issueCount, issueCodes]
-      properties:
-        indexedSourceCount: {type: integer, minimum: 0}
-        issueCount: {type: integer, minimum: 0}
-        issueCodes: {type: array, items: {type: string}}
-    EntryPointCollectionResult:
-      type: object
-      additionalProperties: false
-      required: [repositoryId, revision, items, page]
-      properties:
-        repositoryId: {$ref: '#/components/schemas/RepositoryId'}
-        revision: {$ref: '#/components/schemas/Revision'}
-        items: {type: array, items: {$ref: '#/components/schemas/EntryPointItem'}}
-        page: {$ref: '#/components/schemas/Page'}
-    EventListenerCollectionResult:
-      type: object
-      additionalProperties: false
-      required: [repositoryId, revision, items, page]
-      properties:
-        repositoryId: {$ref: '#/components/schemas/RepositoryId'}
-        revision: {$ref: '#/components/schemas/Revision'}
-        items: {type: array, items: {$ref: '#/components/schemas/EventListenerItem'}}
-        page: {$ref: '#/components/schemas/Page'}
-    TypeMemberCollectionResult:
-      type: object
-      additionalProperties: false
-      required: [repositoryId, revision, items, page]
-      properties:
-        repositoryId: {$ref: '#/components/schemas/RepositoryId'}
-        revision: {$ref: '#/components/schemas/Revision'}
-        items: {type: array, items: {$ref: '#/components/schemas/InternalProgramElement'}}
-        page: {$ref: '#/components/schemas/Page'}
-    ImplementationCollectionResult:
-      type: object
-      additionalProperties: false
-      required: [repositoryId, revision, items, page]
-      properties:
-        repositoryId: {$ref: '#/components/schemas/RepositoryId'}
-        revision: {$ref: '#/components/schemas/Revision'}
-        items: {type: array, items: {$ref: '#/components/schemas/ImplementationItem'}}
-        page: {$ref: '#/components/schemas/Page'}
-    ReferenceCollectionResult:
-      type: object
-      additionalProperties: false
-      required: [repositoryId, revision, items, page]
-      properties:
-        repositoryId: {$ref: '#/components/schemas/RepositoryId'}
-        revision: {$ref: '#/components/schemas/Revision'}
-        items: {type: array, items: {$ref: '#/components/schemas/ReferenceItem'}}
-        page: {$ref: '#/components/schemas/Page'}
-    CallerCollectionResult:
-      type: object
-      additionalProperties: false
-      required: [repositoryId, revision, items, page]
-      properties:
-        repositoryId: {$ref: '#/components/schemas/RepositoryId'}
-        revision: {$ref: '#/components/schemas/Revision'}
-        items: {type: array, items: {$ref: '#/components/schemas/CallerItem'}}
-        page: {$ref: '#/components/schemas/Page'}
-    CalleeCollectionResult:
-      type: object
-      additionalProperties: false
-      required: [repositoryId, revision, items, page]
-      properties:
-        repositoryId: {$ref: '#/components/schemas/RepositoryId'}
-        revision: {$ref: '#/components/schemas/Revision'}
-        items: {type: array, items: {$ref: '#/components/schemas/CalleeItem'}}
-        page: {$ref: '#/components/schemas/Page'}
-    FactSourceResult:
-      type: object
-      additionalProperties: false
-      required: [repositoryId, revision, factId, source, factRange]
-      properties:
-        repositoryId: {$ref: '#/components/schemas/RepositoryId'}
-        revision: {$ref: '#/components/schemas/Revision'}
-        factId: {$ref: '#/components/schemas/FactId'}
-        source: {$ref: '#/components/schemas/SourceSnippet'}
-        factRange: {$ref: '#/components/schemas/FactRange'}
-    SemanticQueryError:
-      type: object
-      additionalProperties: false
-      required: [code, message, retryable]
-      properties:
-        code: {type: string, enum: [INVALID_ARGUMENT, REPOSITORY_NOT_FOUND, REVIEW_NOT_FOUND, REVIEW_NOT_READY, REVIEW_FAILED, REVIEW_CONTEXT_MISMATCH, REVISION_OUTDATED, FACT_NOT_FOUND, FACT_KIND_MISMATCH, GIT_EVIDENCE_NOT_FOUND, GIT_EVIDENCE_NOT_READY, INDEX_UNAVAILABLE]}
-        message: {type: string}
-        retryable: {type: boolean}
-        currentRevision: {$ref: '#/components/schemas/Revision'}
-    SearchCodeRequest:
-      type: object
-      additionalProperties: false
-      required: [repositoryId, revision, query]
-      properties:
-        repositoryId: {$ref: '#/components/schemas/RepositoryId'}
-        revision: {$ref: '#/components/schemas/Revision'}
-        query: {type: string, minLength: 2, maxLength: 256}
-        kinds: {type: array, items: {type: string, enum: [TYPE, METHOD, FIELD, ENUM_CONSTANT, RECORD_COMPONENT, MAPPER_STATEMENT, ANNOTATION_USAGE, TYPE_USAGE, SQL_IDENTIFIER, CONFIGURATION_KEY, OUTBOUND_API, MQ_PUBLISHER, ERROR_CONTRACT, API_ROUTE, MQ_DESTINATION, SCHEDULE]}}
-        packagePrefix: {type: string, minLength: 1, pattern: '^[A-Za-z_$][A-Za-z0-9_$]*(?:\.[A-Za-z_$][A-Za-z0-9_$]*)*$'}
-        offset: {type: integer, minimum: 0, default: 0}
-        limit: {type: integer, minimum: 1, maximum: 100, default: 20}
-    FactSourceRequest:
-      type: object
-      additionalProperties: false
-      required: [repositoryId, revision, factId]
-      properties:
-        repositoryId: {$ref: '#/components/schemas/RepositoryId'}
-        revision: {$ref: '#/components/schemas/Revision'}
-        factId: {$ref: '#/components/schemas/FactId'}
-        contextLines: {type: integer, minimum: 0, maximum: 20, default: 0}
-    EntryPointRequest:
-      type: object
-      additionalProperties: false
-      required: [repositoryId, revision]
-      properties:
-        repositoryId: {$ref: '#/components/schemas/RepositoryId'}
-        revision: {$ref: '#/components/schemas/Revision'}
-        kinds: {type: array, items: {type: string, enum: [HTTP, MQ, SCHEDULE]}}
-        offset: {type: integer, minimum: 0, default: 0}
-        limit: {type: integer, minimum: 1, maximum: 100, default: 20}
-    ApiRouteRequest:
-      type: object
-      additionalProperties: false
-      required: [repositoryId, revision, httpMethod, path]
-      properties:
-        repositoryId: {$ref: '#/components/schemas/RepositoryId'}
-        revision: {$ref: '#/components/schemas/Revision'}
-        httpMethod: {type: string, enum: [GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS, TRACE, ALL]}
-        path: {type: string, minLength: 1}
-        offset: {type: integer, minimum: 0, default: 0}
-        limit: {type: integer, minimum: 1, maximum: 100, default: 20}
-    EventListenerRequest:
-      type: object
-      additionalProperties: false
-      required: [repositoryId, revision, eventType]
-      properties:
-        repositoryId: {$ref: '#/components/schemas/RepositoryId'}
-        revision: {$ref: '#/components/schemas/Revision'}
-        eventType: {type: string, minLength: 1}
-        offset: {type: integer, minimum: 0, default: 0}
-        limit: {type: integer, minimum: 1, maximum: 100, default: 20}
-    TypeMemberRequest:
-      type: object
-      additionalProperties: false
-      required: [repositoryId, revision, typeFactId]
-      properties:
-        repositoryId: {$ref: '#/components/schemas/RepositoryId'}
-        revision: {$ref: '#/components/schemas/Revision'}
-        typeFactId: {$ref: '#/components/schemas/FactId'}
-        kinds: {type: array, items: {type: string, enum: [METHOD, FIELD, ENUM_CONSTANT, RECORD_COMPONENT]}}
-        offset: {type: integer, minimum: 0, default: 0}
-        limit: {type: integer, minimum: 1, maximum: 100, default: 20}
-    MethodRelationRequest:
-      type: object
-      additionalProperties: false
-      required: [repositoryId, revision, methodFactId]
-      properties:
-        repositoryId: {$ref: '#/components/schemas/RepositoryId'}
-        revision: {$ref: '#/components/schemas/Revision'}
-        methodFactId: {$ref: '#/components/schemas/FactId'}
-        offset: {type: integer, minimum: 0, default: 0}
-        limit: {type: integer, minimum: 1, maximum: 100, default: 20}
-    RelationRequest:
-      type: object
-      additionalProperties: false
-      required: [repositoryId, revision, factId]
-      properties:
-        repositoryId: {$ref: '#/components/schemas/RepositoryId'}
-        revision: {$ref: '#/components/schemas/Revision'}
-        factId: {$ref: '#/components/schemas/FactId'}
-        offset: {type: integer, minimum: 0, default: 0}
-        limit: {type: integer, minimum: 1, maximum: 100, default: 20}
-    ReviewSearchCodeRequest:
-      type: object
-      additionalProperties: false
-      required: [repositoryId, reviewId, side, revision, query]
-      properties:
-        repositoryId: {$ref: '#/components/schemas/RepositoryId'}
-        reviewId: {$ref: '#/components/schemas/ReviewId'}
-        side: {$ref: '#/components/schemas/ReviewSide'}
-        revision: {$ref: '#/components/schemas/Revision'}
-        query: {type: string, minLength: 2, maxLength: 256}
-        kinds: {$ref: '#/components/schemas/SearchCodeRequest/properties/kinds'}
-        packagePrefix: {$ref: '#/components/schemas/SearchCodeRequest/properties/packagePrefix'}
-        offset: {type: integer, minimum: 0, default: 0}
-        limit: {type: integer, minimum: 1, maximum: 100, default: 20}
-    ReviewFactSourceRequest:
-      type: object
-      additionalProperties: false
-      required: [repositoryId, reviewId, side, revision, factId]
-      properties:
-        repositoryId: {$ref: '#/components/schemas/RepositoryId'}
-        reviewId: {$ref: '#/components/schemas/ReviewId'}
-        side: {$ref: '#/components/schemas/ReviewSide'}
-        revision: {$ref: '#/components/schemas/Revision'}
-        factId: {$ref: '#/components/schemas/FactId'}
-        contextLines: {type: integer, minimum: 0, maximum: 20, default: 0}
-    ReviewEntryPointRequest:
-      type: object
-      additionalProperties: false
-      required: [repositoryId, reviewId, side, revision]
-      properties:
-        repositoryId: {$ref: '#/components/schemas/RepositoryId'}
-        reviewId: {$ref: '#/components/schemas/ReviewId'}
-        side: {$ref: '#/components/schemas/ReviewSide'}
-        revision: {$ref: '#/components/schemas/Revision'}
-        kinds: {$ref: '#/components/schemas/EntryPointRequest/properties/kinds'}
-        offset: {type: integer, minimum: 0, default: 0}
-        limit: {type: integer, minimum: 1, maximum: 100, default: 20}
-    ReviewApiRouteRequest:
-      type: object
-      additionalProperties: false
-      required: [repositoryId, reviewId, side, revision, httpMethod, path]
-      properties:
-        repositoryId: {$ref: '#/components/schemas/RepositoryId'}
-        reviewId: {$ref: '#/components/schemas/ReviewId'}
-        side: {$ref: '#/components/schemas/ReviewSide'}
-        revision: {$ref: '#/components/schemas/Revision'}
-        httpMethod: {$ref: '#/components/schemas/ApiRouteRequest/properties/httpMethod'}
-        path: {type: string, minLength: 1}
-        offset: {type: integer, minimum: 0, default: 0}
-        limit: {type: integer, minimum: 1, maximum: 100, default: 20}
-    ReviewEventListenerRequest:
-      type: object
-      additionalProperties: false
-      required: [repositoryId, reviewId, side, revision, eventType]
-      properties:
-        repositoryId: {$ref: '#/components/schemas/RepositoryId'}
-        reviewId: {$ref: '#/components/schemas/ReviewId'}
-        side: {$ref: '#/components/schemas/ReviewSide'}
-        revision: {$ref: '#/components/schemas/Revision'}
-        eventType: {type: string, minLength: 1}
-        offset: {type: integer, minimum: 0, default: 0}
-        limit: {type: integer, minimum: 1, maximum: 100, default: 20}
-    ReviewTypeMemberRequest:
-      type: object
-      additionalProperties: false
-      required: [repositoryId, reviewId, side, revision, typeFactId]
-      properties:
-        repositoryId: {$ref: '#/components/schemas/RepositoryId'}
-        reviewId: {$ref: '#/components/schemas/ReviewId'}
-        side: {$ref: '#/components/schemas/ReviewSide'}
-        revision: {$ref: '#/components/schemas/Revision'}
-        typeFactId: {$ref: '#/components/schemas/FactId'}
-        kinds: {$ref: '#/components/schemas/TypeMemberRequest/properties/kinds'}
-        offset: {type: integer, minimum: 0, default: 0}
-        limit: {type: integer, minimum: 1, maximum: 100, default: 20}
-    ReviewMethodRelationRequest:
-      type: object
-      additionalProperties: false
-      required: [repositoryId, reviewId, side, revision, methodFactId]
-      properties:
-        repositoryId: {$ref: '#/components/schemas/RepositoryId'}
-        reviewId: {$ref: '#/components/schemas/ReviewId'}
-        side: {$ref: '#/components/schemas/ReviewSide'}
-        revision: {$ref: '#/components/schemas/Revision'}
-        methodFactId: {$ref: '#/components/schemas/FactId'}
-        offset: {type: integer, minimum: 0, default: 0}
-        limit: {type: integer, minimum: 1, maximum: 100, default: 20}
-    ReviewRelationRequest:
-      type: object
-      additionalProperties: false
-      required: [repositoryId, reviewId, side, revision, factId]
-      properties:
-        repositoryId: {$ref: '#/components/schemas/RepositoryId'}
-        reviewId: {$ref: '#/components/schemas/ReviewId'}
-        side: {$ref: '#/components/schemas/ReviewSide'}
-        revision: {$ref: '#/components/schemas/Revision'}
-        factId: {$ref: '#/components/schemas/FactId'}
-        offset: {type: integer, minimum: 0, default: 0}
-        limit: {type: integer, minimum: 1, maximum: 100, default: 20}
-    ReviewCoverage:
-      type: object
-      additionalProperties: false
-      required: [sourceCoverage, semanticLimitations]
-      properties:
-        sourceCoverage: {$ref: '#/components/schemas/SourceCoverage'}
-        semanticLimitations: {type: array, items: {type: string}}
-    ReviewContext:
-      type: object
-      additionalProperties: false
-      required: [repositoryId, reviewId, side, revision, generationId, coverage]
-      properties:
-        repositoryId: {$ref: '#/components/schemas/RepositoryId'}
-        reviewId: {$ref: '#/components/schemas/ReviewId'}
-        side: {$ref: '#/components/schemas/ReviewSide'}
-        revision: {$ref: '#/components/schemas/Revision'}
-        generationId: {type: string, minLength: 1}
-        coverage: {$ref: '#/components/schemas/ReviewCoverage'}
-    ReviewEndpointDetails:
-      type: object
-      additionalProperties: false
-      required: [revision, generationId, manifestDigest, analysisFingerprint, snapshotId, coverage]
-      properties:
-        revision: {$ref: '#/components/schemas/Revision'}
-        generationId: {type: string}
-        manifestDigest: {type: string}
-        analysisFingerprint: {type: string}
-        snapshotId: {type: string}
-        coverage: {$ref: '#/components/schemas/ReviewCoverage'}
-    ReviewSelection:
-      oneOf:
-        - type: object
-          additionalProperties: false
-          required: [kind, revision]
-          properties:
-            kind: {type: string, const: COMMIT}
-            revision: {$ref: '#/components/schemas/Revision'}
-        - type: object
-          additionalProperties: false
-          required: [kind, beforeRevision, afterRevision]
-          properties:
-            kind: {type: string, const: RANGE}
-            beforeRevision: {$ref: '#/components/schemas/Revision'}
-            afterRevision: {$ref: '#/components/schemas/Revision'}
-    ResolvedReviewEndpoints:
-      type: object
-      additionalProperties: false
-      required: [afterRevision, baselineRule]
-      properties:
-        beforeRevision: {$ref: '#/components/schemas/Revision'}
-        afterRevision: {$ref: '#/components/schemas/Revision'}
-        baselineRule: {type: string, enum: [FIRST_PARENT, EMPTY_TREE, DIRECT_RANGE]}
-    ReviewBeforeDetails:
-      type: object
-      additionalProperties: false
-      required: [kind]
-      properties:
-        kind: {type: string, enum: [FIRST_PARENT, EMPTY_TREE, DIRECT_RANGE]}
-        endpoint: {$ref: '#/components/schemas/ReviewEndpointDetails'}
-    ReviewDetails:
-      type: object
-      additionalProperties: false
-      required: [repositoryId, reviewId, selection, resolvedEndpoints, before, after, comparisonId, publishedAt]
-      properties:
-        repositoryId: {$ref: '#/components/schemas/RepositoryId'}
-        reviewId: {$ref: '#/components/schemas/ReviewId'}
-        selection: {$ref: '#/components/schemas/ReviewSelection'}
-        resolvedEndpoints: {$ref: '#/components/schemas/ResolvedReviewEndpoints'}
-        before: {$ref: '#/components/schemas/ReviewBeforeDetails'}
-        after: {$ref: '#/components/schemas/ReviewEndpointDetails'}
-        comparisonId: {type: string}
-        publishedAt: {type: string, format: date-time}
-    ReviewSearchCodeResult:
-      type: object
-      additionalProperties: false
-      required: [context, result]
-      properties: {context: {$ref: '#/components/schemas/ReviewContext'}, result: {$ref: '#/components/schemas/SearchCodeResult'}}
-    ReviewFactSourceResult:
-      type: object
-      additionalProperties: false
-      required: [context, result]
-      properties: {context: {$ref: '#/components/schemas/ReviewContext'}, result: {$ref: '#/components/schemas/FactSourceResult'}}
-    ReviewEntryPointResult:
-      type: object
-      additionalProperties: false
-      required: [context, result]
-      properties: {context: {$ref: '#/components/schemas/ReviewContext'}, result: {$ref: '#/components/schemas/EntryPointCollectionResult'}}
-    ReviewEventListenerResult:
-      type: object
-      additionalProperties: false
-      required: [context, result]
-      properties: {context: {$ref: '#/components/schemas/ReviewContext'}, result: {$ref: '#/components/schemas/EventListenerCollectionResult'}}
-    ReviewTypeMemberResult:
-      type: object
-      additionalProperties: false
-      required: [context, result]
-      properties: {context: {$ref: '#/components/schemas/ReviewContext'}, result: {$ref: '#/components/schemas/TypeMemberCollectionResult'}}
-    ReviewImplementationResult:
-      type: object
-      additionalProperties: false
-      required: [context, result]
-      properties: {context: {$ref: '#/components/schemas/ReviewContext'}, result: {$ref: '#/components/schemas/ImplementationCollectionResult'}}
-    ReviewReferenceResult:
-      type: object
-      additionalProperties: false
-      required: [context, result]
-      properties: {context: {$ref: '#/components/schemas/ReviewContext'}, result: {$ref: '#/components/schemas/ReferenceCollectionResult'}}
-    ReviewCallerResult:
-      type: object
-      additionalProperties: false
-      required: [context, result]
-      properties: {context: {$ref: '#/components/schemas/ReviewContext'}, result: {$ref: '#/components/schemas/CallerCollectionResult'}}
-    ReviewCalleeResult:
-      type: object
-      additionalProperties: false
-      required: [context, result]
-      properties: {context: {$ref: '#/components/schemas/ReviewContext'}, result: {$ref: '#/components/schemas/CalleeCollectionResult'}}
-  securitySchemes:
-    ApiToken:
-      type: apiKey
-      in: header
-      name: X-Api-Token
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Semantic Query read-only API",
+    "version": "1.0.0",
+    "description": "Thirteen operations shared with Query MCP. Strict shared binding rejects unknown fields and incompatible unions. Current exact SHA can expire; READY reviews stay immutable. Query reads Mongo only and never prepares evidence. Optional absent evidence fields are omitted, not fake values."
+  },
+  "security": [
+    {
+      "QueryToken": []
+    }
+  ],
+  "paths": {
+    "/api/v1/repositories": {
+      "get": {
+        "operationId": "list_repositories",
+        "summary": "Configured visible discovery includes unindexed repositories.",
+        "responses": {
+          "200": {
+            "description": "Application result, equal to MCP structuredContent and serialized TextContent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RepositoryCollection"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "INVALID_ARGUMENT or FACT_KIND_MISMATCH",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SemanticQueryError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown or denied repository/fact/review/evidence",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SemanticQueryError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Revision outdated, immutable context mismatch, review unavailable or metadata not prepared",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SemanticQueryError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Storage unavailable; no driver diagnostics",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SemanticQueryError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Query token required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuerySecurityError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Query access disabled",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuerySecurityError"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "nameFilter",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Literal case-sensitive substring of repositoryId or displayName."
+            },
+            "description": "Same field as MCP nameFilter"
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "description": "Same field as MCP cursor"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20
+            },
+            "description": "Same field as MCP limit"
+          }
+        ]
+      }
+    },
+    "/api/v1/context": {
+      "post": {
+        "operationId": "get_context",
+        "summary": "Discovery never prepares evidence. Copy READY contexts unchanged; pending/failed results have no readable half-context.",
+        "responses": {
+          "200": {
+            "description": "Application result, equal to MCP structuredContent and serialized TextContent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContextResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "INVALID_ARGUMENT or FACT_KIND_MISMATCH",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SemanticQueryError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown or denied repository/fact/review/evidence",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SemanticQueryError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Revision outdated, immutable context mismatch, review unavailable or metadata not prepared",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SemanticQueryError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Storage unavailable; no driver diagnostics",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SemanticQueryError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Query token required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuerySecurityError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Query access disabled",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuerySecurityError"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ContextRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/search-code": {
+      "post": {
+        "operationId": "search_code",
+        "summary": "ASCII code-token prefix search, exact names/signatures first; compact metadata only, not natural language.",
+        "responses": {
+          "200": {
+            "description": "Application result, equal to MCP structuredContent and serialized TextContent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FactCollection"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "INVALID_ARGUMENT or FACT_KIND_MISMATCH",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SemanticQueryError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown or denied repository/fact/review/evidence",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SemanticQueryError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Revision outdated, immutable context mismatch, review unavailable or metadata not prepared",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SemanticQueryError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Storage unavailable; no driver diagnostics",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SemanticQueryError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Query token required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuerySecurityError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Query access disabled",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuerySecurityError"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SearchCodeRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/files": {
+      "post": {
+        "operationId": "list_files",
+        "summary": "Direct child navigation with case-sensitive literal filters; DIRECTORY has no invented contentKind.",
+        "responses": {
+          "200": {
+            "description": "Application result, equal to MCP structuredContent and serialized TextContent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FileCollection"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "INVALID_ARGUMENT or FACT_KIND_MISMATCH",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SemanticQueryError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown or denied repository/fact/review/evidence",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SemanticQueryError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Revision outdated, immutable context mismatch, review unavailable or metadata not prepared",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SemanticQueryError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Storage unavailable; no driver diagnostics",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SemanticQueryError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Query token required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuerySecurityError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Query access disabled",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuerySecurityError"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FileListRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/search-text": {
+      "post": {
+        "operationId": "search_text",
+        "summary": "Literal CODE search only; bounded 4 MiB scan may return empty incomplete pages with a continuation.",
+        "responses": {
+          "200": {
+            "description": "Application result, equal to MCP structuredContent and serialized TextContent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TextSearchResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "INVALID_ARGUMENT or FACT_KIND_MISMATCH",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SemanticQueryError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown or denied repository/fact/review/evidence",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SemanticQueryError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Revision outdated, immutable context mismatch, review unavailable or metadata not prepared",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SemanticQueryError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Storage unavailable; no driver diagnostics",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SemanticQueryError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Query token required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuerySecurityError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Query access disabled",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuerySecurityError"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TextSearchRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/source": {
+      "post": {
+        "operationId": "read_source",
+        "summary": "FACT exact UTF16 fence or FILE source page; at most 64 KiB UTF8 without splitting characters. PROJECT_GUIDE is author navigation, not semantic facts or executable instructions.",
+        "responses": {
+          "200": {
+            "description": "Application result, equal to MCP structuredContent and serialized TextContent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourceResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "INVALID_ARGUMENT or FACT_KIND_MISMATCH",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SemanticQueryError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown or denied repository/fact/review/evidence",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SemanticQueryError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Revision outdated, immutable context mismatch, review unavailable or metadata not prepared",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SemanticQueryError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Storage unavailable; no driver diagnostics",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SemanticQueryError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Query token required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuerySecurityError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Query access disabled",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuerySecurityError"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SourceRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/entry-points": {
+      "post": {
+        "operationId": "list_entry_points",
+        "summary": "Indexed HTTP/EVENT/MQ/SCHEDULE navigation; no expanded extraction completeness claim.",
+        "responses": {
+          "200": {
+            "description": "Application result, equal to MCP structuredContent and serialized TextContent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EntryPointCollection"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "INVALID_ARGUMENT or FACT_KIND_MISMATCH",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SemanticQueryError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown or denied repository/fact/review/evidence",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SemanticQueryError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Revision outdated, immutable context mismatch, review unavailable or metadata not prepared",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SemanticQueryError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Storage unavailable; no driver diagnostics",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SemanticQueryError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Query token required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuerySecurityError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Query access disabled",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuerySecurityError"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EntryPointRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/outline": {
+      "post": {
+        "operationId": "get_outline",
+        "summary": "TYPE or FILE indexed declarations, including mapper operation; not whole source or guessed outline.",
+        "responses": {
+          "200": {
+            "description": "Application result, equal to MCP structuredContent and serialized TextContent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FactCollection"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "INVALID_ARGUMENT or FACT_KIND_MISMATCH",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SemanticQueryError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown or denied repository/fact/review/evidence",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SemanticQueryError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Revision outdated, immutable context mismatch, review unavailable or metadata not prepared",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SemanticQueryError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Storage unavailable; no driver diagnostics",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SemanticQueryError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Query token required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuerySecurityError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Query access disabled",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuerySecurityError"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OutlineRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/relations": {
+      "post": {
+        "operationId": "find_relations",
+        "summary": "One-hop relations; REFERENCES is the projected reference set, not IDE-complete; preserve external/unresolved evidence.",
+        "responses": {
+          "200": {
+            "description": "Application result, equal to MCP structuredContent and serialized TextContent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RelationCollection"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "INVALID_ARGUMENT or FACT_KIND_MISMATCH",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SemanticQueryError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown or denied repository/fact/review/evidence",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SemanticQueryError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Revision outdated, immutable context mismatch, review unavailable or metadata not prepared",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SemanticQueryError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Storage unavailable; no driver diagnostics",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SemanticQueryError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Query token required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuerySecurityError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Query access disabled",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuerySecurityError"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RelationRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/git/branches": {
+      "post": {
+        "operationId": "list_git_branches",
+        "summary": "Prepared COMPLETE metadata pair; missing metadata requires Indexer refresh_repository_metadata, never Query fetch.",
+        "responses": {
+          "200": {
+            "description": "Application result, equal to MCP structuredContent and serialized TextContent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GitBranchCollection"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "INVALID_ARGUMENT or FACT_KIND_MISMATCH",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SemanticQueryError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown or denied repository/fact/review/evidence",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SemanticQueryError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Revision outdated, immutable context mismatch, review unavailable or metadata not prepared",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SemanticQueryError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Storage unavailable; no driver diagnostics",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SemanticQueryError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Query token required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuerySecurityError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Query access disabled",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuerySecurityError"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GitBranchRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/git/commits": {
+      "post": {
+        "operationId": "list_git_commits",
+        "summary": "Prepared branch history, default ten; present full-SHA candidates for user choice, never implicitly choose newest.",
+        "responses": {
+          "200": {
+            "description": "Application result, equal to MCP structuredContent and serialized TextContent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GitCommitCollection"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "INVALID_ARGUMENT or FACT_KIND_MISMATCH",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SemanticQueryError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown or denied repository/fact/review/evidence",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SemanticQueryError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Revision outdated, immutable context mismatch, review unavailable or metadata not prepared",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SemanticQueryError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Storage unavailable; no driver diagnostics",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SemanticQueryError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Query token required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuerySecurityError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Query access disabled",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuerySecurityError"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GitCommitRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/git/comparisons": {
+      "post": {
+        "operationId": "compare_revisions",
+        "summary": "Direct before-to-after READY comparison; not merge-base; EMPTY_TREE explicit.",
+        "responses": {
+          "200": {
+            "description": "Application result, equal to MCP structuredContent and serialized TextContent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ComparisonResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "INVALID_ARGUMENT or FACT_KIND_MISMATCH",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SemanticQueryError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown or denied repository/fact/review/evidence",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SemanticQueryError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Revision outdated, immutable context mismatch, review unavailable or metadata not prepared",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SemanticQueryError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Storage unavailable; no driver diagnostics",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SemanticQueryError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Query token required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuerySecurityError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Query access disabled",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuerySecurityError"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ComparisonRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/git/file-diff": {
+      "post": {
+        "operationId": "get_file_diff",
+        "summary": "Bounded 64 KiB patch over copied comparisonContext and returned changeId; policy excludes unsafe changes.",
+        "responses": {
+          "200": {
+            "description": "Application result, equal to MCP structuredContent and serialized TextContent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FileDiffResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "INVALID_ARGUMENT or FACT_KIND_MISMATCH",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SemanticQueryError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown or denied repository/fact/review/evidence",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SemanticQueryError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Revision outdated, immutable context mismatch, review unavailable or metadata not prepared",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SemanticQueryError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Storage unavailable; no driver diagnostics",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SemanticQueryError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Query token required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuerySecurityError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Query access disabled",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuerySecurityError"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FileDiffRequest"
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "QueryToken": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-Api-Token"
+      }
+    },
+    "schemas": {
+      "Page": {
+        "type": "object",
+        "properties": {
+          "returned": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "hasMore": {
+            "type": "boolean"
+          },
+          "nextCursor": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "returned",
+          "hasMore"
+        ],
+        "additionalProperties": false
+      },
+      "CurrentContext": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "const": "CURRENT"
+          },
+          "repositoryId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "revision": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{40}$"
+          }
+        },
+        "required": [
+          "kind",
+          "repositoryId",
+          "revision"
+        ],
+        "additionalProperties": false
+      },
+      "ReviewContext": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "const": "REVIEW"
+          },
+          "repositoryId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "revision": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{40}$"
+          },
+          "reviewId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "side": {
+            "type": "string",
+            "enum": [
+              "BEFORE",
+              "AFTER"
+            ]
+          }
+        },
+        "required": [
+          "kind",
+          "repositoryId",
+          "revision",
+          "reviewId",
+          "side"
+        ],
+        "additionalProperties": false
+      },
+      "ReadContext": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/CurrentContext"
+          },
+          {
+            "$ref": "#/components/schemas/ReviewContext"
+          }
+        ]
+      },
+      "CurrentSelector": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "const": "CURRENT"
+          }
+        },
+        "required": [
+          "kind"
+        ],
+        "additionalProperties": false
+      },
+      "ReviewSelector": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "const": "REVIEW"
+          },
+          "reviewId": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "kind",
+          "reviewId"
+        ],
+        "additionalProperties": false
+      },
+      "CommitSelector": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "const": "COMMIT"
+          },
+          "revision": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{40}$"
+          }
+        },
+        "required": [
+          "kind",
+          "revision"
+        ],
+        "additionalProperties": false
+      },
+      "RangeSelector": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "const": "RANGE"
+          },
+          "beforeRevision": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{40}$"
+          },
+          "afterRevision": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{40}$"
+          }
+        },
+        "required": [
+          "kind",
+          "beforeRevision",
+          "afterRevision"
+        ],
+        "additionalProperties": false
+      },
+      "ContextSelector": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/CurrentSelector"
+          },
+          {
+            "$ref": "#/components/schemas/ReviewSelector"
+          },
+          {
+            "$ref": "#/components/schemas/CommitSelector"
+          },
+          {
+            "$ref": "#/components/schemas/RangeSelector"
+          }
+        ]
+      },
+      "ReviewDiscoverySelector": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/ReviewSelector"
+          },
+          {
+            "$ref": "#/components/schemas/CommitSelector"
+          },
+          {
+            "$ref": "#/components/schemas/RangeSelector"
+          }
+        ]
+      },
+      "EmptyTreeEndpoint": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "const": "EMPTY_TREE"
+          }
+        },
+        "required": [
+          "kind"
+        ],
+        "additionalProperties": false
+      },
+      "RevisionEndpoint": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "const": "REVISION"
+          },
+          "revision": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{40}$"
+          }
+        },
+        "required": [
+          "kind",
+          "revision"
+        ],
+        "additionalProperties": false
+      },
+      "ComparisonContext": {
+        "type": "object",
+        "properties": {
+          "repositoryId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "reviewId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "before": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/EmptyTreeEndpoint"
+              },
+              {
+                "$ref": "#/components/schemas/RevisionEndpoint"
+              }
+            ]
+          },
+          "after": {
+            "$ref": "#/components/schemas/RevisionEndpoint"
+          }
+        },
+        "required": [
+          "repositoryId",
+          "reviewId",
+          "before",
+          "after"
+        ],
+        "additionalProperties": false
+      },
+      "FactSourceTarget": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "const": "FACT"
+          },
+          "factId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "contextLines": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 20,
+            "default": 0
+          }
+        },
+        "required": [
+          "kind",
+          "factId"
+        ],
+        "additionalProperties": false
+      },
+      "FileSourceTarget": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "const": "FILE"
+          },
+          "path": {
+            "type": "string",
+            "minLength": 1
+          },
+          "startLine": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2147483647,
+            "default": 1
+          }
+        },
+        "required": [
+          "kind",
+          "path"
+        ],
+        "additionalProperties": false
+      },
+      "SourceTarget": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/FactSourceTarget"
+          },
+          {
+            "$ref": "#/components/schemas/FileSourceTarget"
+          }
+        ]
+      },
+      "OutlineTarget": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "const": "TYPE"
+              },
+              "factId": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "required": [
+              "kind",
+              "factId"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "const": "FILE"
+              },
+              "path": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "required": [
+              "kind",
+              "path"
+            ],
+            "additionalProperties": false
+          }
+        ]
+      },
+      "Destination": {
+        "type": "object",
+        "properties": {
+          "broker": {
+            "type": "string",
+            "minLength": 1
+          },
+          "destination": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "broker",
+          "destination"
+        ],
+        "additionalProperties": false
+      },
+      "RepositoryRequest": {
+        "type": "object",
+        "properties": {
+          "nameFilter": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Literal case-sensitive substring of repositoryId or displayName."
+          },
+          "cursor": {
+            "type": "string",
+            "minLength": 1
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 20
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "ContextRequest": {
+        "type": "object",
+        "properties": {
+          "repositoryId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "selector": {
+            "$ref": "#/components/schemas/ContextSelector"
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 20
+          }
+        },
+        "required": [
+          "repositoryId",
+          "selector"
+        ],
+        "additionalProperties": false
+      },
+      "SearchCodeRequest": {
+        "type": "object",
+        "properties": {
+          "context": {
+            "$ref": "#/components/schemas/ReadContext"
+          },
+          "query": {
+            "type": "string",
+            "minLength": 2,
+            "maxLength": 256
+          },
+          "kinds": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "TYPE",
+                "METHOD",
+                "FIELD",
+                "ENUM_CONSTANT",
+                "RECORD_COMPONENT",
+                "MAPPER_STATEMENT",
+                "ANNOTATION_USAGE",
+                "TYPE_USAGE",
+                "SQL_IDENTIFIER",
+                "CONFIGURATION_KEY",
+                "OUTBOUND_API",
+                "MQ_PUBLISHER",
+                "ERROR_CONTRACT",
+                "API_ROUTE",
+                "MQ_DESTINATION",
+                "SCHEDULE"
+              ]
+            },
+            "uniqueItems": true
+          },
+          "packagePrefix": {
+            "type": "string",
+            "pattern": "^[A-Za-z_$][A-Za-z0-9_$]*(?:\\.[A-Za-z_$][A-Za-z0-9_$]*)*$"
+          },
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Exact source file path."
+          },
+          "cursor": {
+            "type": "string",
+            "minLength": 1
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 20
+          }
+        },
+        "required": [
+          "context",
+          "query"
+        ],
+        "additionalProperties": false
+      },
+      "FileListRequest": {
+        "type": "object",
+        "properties": {
+          "context": {
+            "$ref": "#/components/schemas/ReadContext"
+          },
+          "directory": {
+            "type": "string"
+          },
+          "nameFilter": {
+            "type": "string",
+            "minLength": 1
+          },
+          "pathFilter": {
+            "type": "string",
+            "minLength": 1
+          },
+          "cursor": {
+            "type": "string",
+            "minLength": 1
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 20
+          }
+        },
+        "required": [
+          "context"
+        ],
+        "additionalProperties": false
+      },
+      "TextSearchRequest": {
+        "type": "object",
+        "properties": {
+          "context": {
+            "$ref": "#/components/schemas/ReadContext"
+          },
+          "query": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256,
+            "pattern": "^[^\\r\\n]+$",
+            "description": "One literal line, at most 256 Unicode code points; CODE only, never guide text."
+          },
+          "directory": {
+            "type": "string"
+          },
+          "cursor": {
+            "type": "string",
+            "minLength": 1
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 20
+          }
+        },
+        "required": [
+          "context",
+          "query"
+        ],
+        "additionalProperties": false
+      },
+      "SourceRequest": {
+        "type": "object",
+        "properties": {
+          "context": {
+            "$ref": "#/components/schemas/ReadContext"
+          },
+          "target": {
+            "$ref": "#/components/schemas/SourceTarget"
+          },
+          "maxLines": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 500,
+            "default": 200
+          },
+          "cursor": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "context",
+          "target"
+        ],
+        "additionalProperties": false
+      },
+      "EntryPointRequest": {
+        "type": "object",
+        "properties": {
+          "context": {
+            "$ref": "#/components/schemas/ReadContext"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "HTTP",
+              "EVENT",
+              "MQ",
+              "SCHEDULE"
+            ]
+          },
+          "handlerName": {
+            "type": "string",
+            "minLength": 1
+          },
+          "packagePrefix": {
+            "type": "string",
+            "pattern": "^[A-Za-z_$][A-Za-z0-9_$]*(?:\\.[A-Za-z_$][A-Za-z0-9_$]*)*$"
+          },
+          "httpMethod": {
+            "type": "string",
+            "enum": [
+              "GET",
+              "HEAD",
+              "POST",
+              "PUT",
+              "PATCH",
+              "DELETE",
+              "OPTIONS",
+              "TRACE",
+              "ALL"
+            ]
+          },
+          "path": {
+            "type": "string",
+            "minLength": 1
+          },
+          "eventType": {
+            "type": "string",
+            "minLength": 1
+          },
+          "destination": {
+            "$ref": "#/components/schemas/Destination"
+          },
+          "trigger": {
+            "type": "string",
+            "minLength": 1
+          },
+          "cursor": {
+            "type": "string",
+            "minLength": 1
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 20
+          }
+        },
+        "required": [
+          "context"
+        ],
+        "additionalProperties": false,
+        "allOf": [
+          {"if": {"required": ["httpMethod"]}, "then": {"required": ["kind"], "properties": {"kind": {"const": "HTTP"}}}},
+          {"if": {"required": ["path"]}, "then": {"required": ["kind"], "properties": {"kind": {"const": "HTTP"}}}},
+          {"if": {"required": ["eventType"]}, "then": {"required": ["kind"], "properties": {"kind": {"const": "EVENT"}}}},
+          {"if": {"required": ["destination"]}, "then": {"required": ["kind"], "properties": {"kind": {"const": "MQ"}}}},
+          {"if": {"required": ["trigger"]}, "then": {"required": ["kind"], "properties": {"kind": {"const": "SCHEDULE"}}}}
+        ],
+        "description": "Kind-specific fields require the corresponding explicit kind: HTTP method/path, EVENT eventType, MQ destination, SCHEDULE trigger."
+      },
+      "OutlineRequest": {
+        "type": "object",
+        "properties": {
+          "context": {
+            "$ref": "#/components/schemas/ReadContext"
+          },
+          "target": {
+            "$ref": "#/components/schemas/OutlineTarget"
+          },
+          "kinds": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "TYPE",
+                "METHOD",
+                "FIELD",
+                "ENUM_CONSTANT",
+                "RECORD_COMPONENT",
+                "MAPPER_STATEMENT"
+              ]
+            },
+            "uniqueItems": true
+          },
+          "cursor": {
+            "type": "string",
+            "minLength": 1
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 20
+          }
+        },
+        "required": [
+          "context",
+          "target"
+        ],
+        "additionalProperties": false
+      },
+      "RelationRequest": {
+        "type": "object",
+        "properties": {
+          "context": {
+            "$ref": "#/components/schemas/ReadContext"
+          },
+          "relation": {
+            "type": "string",
+            "enum": [
+              "CALLERS",
+              "CALLEES",
+              "IMPLEMENTATIONS",
+              "REFERENCES"
+            ]
+          },
+          "factId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "cursor": {
+            "type": "string",
+            "minLength": 1
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 20
+          }
+        },
+        "required": [
+          "context",
+          "relation",
+          "factId"
+        ],
+        "additionalProperties": false
+      },
+      "GitBranchRequest": {
+        "type": "object",
+        "properties": {
+          "repositoryId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "cursor": {
+            "type": "string",
+            "minLength": 1
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 20
+          }
+        },
+        "required": [
+          "repositoryId"
+        ],
+        "additionalProperties": false
+      },
+      "GitCommitRequest": {
+        "type": "object",
+        "properties": {
+          "repositoryId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "branch": {
+            "type": "string",
+            "minLength": 1
+          },
+          "cursor": {
+            "type": "string",
+            "minLength": 1
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 10
+          }
+        },
+        "required": [
+          "repositoryId",
+          "branch"
+        ],
+        "additionalProperties": false
+      },
+      "ComparisonRequest": {
+        "type": "object",
+        "properties": {
+          "comparisonContext": {
+            "$ref": "#/components/schemas/ComparisonContext"
+          },
+          "cursor": {
+            "type": "string",
+            "minLength": 1
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 20
+          }
+        },
+        "required": [
+          "comparisonContext"
+        ],
+        "additionalProperties": false
+      },
+      "FileDiffRequest": {
+        "type": "object",
+        "properties": {
+          "comparisonContext": {
+            "$ref": "#/components/schemas/ComparisonContext"
+          },
+          "changeId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "cursor": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "comparisonContext",
+          "changeId"
+        ],
+        "additionalProperties": false
+      },
+      "SyntaxPosition": {
+        "type": "object",
+        "properties": {
+          "line": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "character": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "line",
+          "character"
+        ],
+        "additionalProperties": false,
+        "description": "Zero-based UTF-16 code-unit position."
+      },
+      "SyntaxRange": {
+        "type": "object",
+        "properties": {
+          "start": {
+            "$ref": "#/components/schemas/SyntaxPosition"
+          },
+          "end": {
+            "$ref": "#/components/schemas/SyntaxPosition"
+          }
+        },
+        "required": [
+          "start",
+          "end"
+        ],
+        "additionalProperties": false,
+        "description": "Start-inclusive, end-exclusive."
+      },
+      "CompactFact": {
+        "type": "object",
+        "properties": {
+          "factId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "TYPE",
+              "METHOD",
+              "FIELD",
+              "ENUM_CONSTANT",
+              "RECORD_COMPONENT",
+              "MAPPER_STATEMENT",
+              "ANNOTATION_USAGE",
+              "TYPE_USAGE",
+              "SQL_IDENTIFIER",
+              "CONFIGURATION_KEY",
+              "OUTBOUND_API",
+              "MQ_PUBLISHER",
+              "ERROR_CONTRACT",
+              "API_ROUTE",
+              "MQ_DESTINATION",
+              "SCHEDULE"
+            ]
+          },
+          "displayName": {
+            "type": "string"
+          },
+          "signature": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string",
+            "minLength": 1
+          },
+          "range": {
+            "$ref": "#/components/schemas/SyntaxRange"
+          },
+          "canonical": {
+            "type": "string",
+            "minLength": 1
+          },
+          "mapperStatementKind": {
+            "type": "string",
+            "enum": [
+              "SELECT",
+              "INSERT",
+              "UPDATE",
+              "DELETE",
+              "ANNOTATION"
+            ]
+          }
+        },
+        "required": [
+          "factId",
+          "kind",
+          "displayName",
+          "path",
+          "range"
+        ],
+        "additionalProperties": false
+      },
+      "RepositoryItem": {
+        "type": "object",
+        "properties": {
+          "repositoryId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "displayName": {
+            "type": "string"
+          },
+          "defaultBranch": {
+            "type": "string",
+            "minLength": 1
+          },
+          "configured": {
+            "type": "boolean"
+          },
+          "publishedRevision": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{40}$"
+          }
+        },
+        "required": [
+          "repositoryId",
+          "displayName",
+          "defaultBranch",
+          "configured"
+        ],
+        "additionalProperties": false
+      },
+      "Coverage": {
+        "type": "object",
+        "properties": {
+          "scope": {
+            "type": "string",
+            "enum": [
+              "GENERATION",
+              "AUTHORIZED_SOURCE_FILES"
+            ]
+          },
+          "readableCode": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "excludedOrUnsupported": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "extractionIssues": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "unresolvedSemanticEvidence": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "omittedMetrics": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        "required": [
+          "scope",
+          "readableCode",
+          "extractionIssues",
+          "omittedMetrics"
+        ],
+        "additionalProperties": false
+      },
+      "ModuleSummary": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "sourceRoots": {
+            "type": "object",
+            "properties": {
+              "items": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "omitted": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "items",
+              "omitted"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "path",
+          "sourceRoots"
+        ],
+        "additionalProperties": false
+      },
+      "PackageSummary": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "sourceCount": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "name",
+          "sourceCount"
+        ],
+        "additionalProperties": false
+      },
+      "EntryKindCount": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "HTTP",
+              "EVENT",
+              "MQ",
+              "SCHEDULE"
+            ]
+          },
+          "count": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "kind",
+          "count"
+        ],
+        "additionalProperties": false
+      },
+      "ContextOverview": {
+        "type": "object",
+        "properties": {
+          "modules": {
+            "type": "object",
+            "properties": {
+              "items": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/ModuleSummary"
+                }
+              },
+              "omitted": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "items",
+              "omitted"
+            ],
+            "additionalProperties": false
+          },
+          "sourceRoots": {
+            "type": "object",
+            "properties": {
+              "items": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "omitted": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "items",
+              "omitted"
+            ],
+            "additionalProperties": false
+          },
+          "packages": {
+            "type": "object",
+            "properties": {
+              "items": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/PackageSummary"
+                }
+              },
+              "omitted": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "items",
+              "omitted"
+            ],
+            "additionalProperties": false
+          },
+          "entryPoints": {
+            "type": "object",
+            "properties": {
+              "items": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/EntryKindCount"
+                }
+              },
+              "omitted": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "items",
+              "omitted"
+            ],
+            "additionalProperties": false
+          },
+          "uncountedEntryKinds": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "HTTP",
+                "EVENT",
+                "MQ",
+                "SCHEDULE"
+              ]
+            }
+          },
+          "coverage": {
+            "$ref": "#/components/schemas/Coverage"
+          }
+        },
+        "required": [
+          "modules",
+          "sourceRoots",
+          "packages",
+          "entryPoints",
+          "uncountedEntryKinds",
+          "coverage"
+        ],
+        "additionalProperties": false
+      },
+      "GuideSourceScope": {
+        "type": "object",
+        "properties": {
+          "includedPaths": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "excludedPaths": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "limitations": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "includedPaths",
+          "excludedPaths",
+          "limitations"
+        ],
+        "additionalProperties": false
+      },
+      "GuideProvenance": {
+        "type": "object",
+        "properties": {
+          "formatVersion": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "promptVersion": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "repositoryId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "analyzedRevision": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{40}$"
+          },
+          "generatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "sourceScope": {
+            "$ref": "#/components/schemas/GuideSourceScope"
+          }
+        },
+        "required": [
+          "formatVersion",
+          "promptVersion",
+          "repositoryId",
+          "analyzedRevision",
+          "generatedAt",
+          "sourceScope"
+        ],
+        "additionalProperties": false
+      },
+      "GuideInfo": {
+        "type": "object",
+        "properties": {
+          "state": {
+            "type": "string",
+            "enum": [
+              "DISABLED",
+              "ABSENT",
+              "INVALID",
+              "AVAILABLE"
+            ]
+          },
+          "reason": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string",
+            "minLength": 1
+          },
+          "digest": {
+            "type": "string",
+            "minLength": 1
+          },
+          "importedRevision": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{40}$"
+          },
+          "provenance": {
+            "$ref": "#/components/schemas/GuideProvenance"
+          },
+          "freshness": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "state",
+          "freshness"
+        ],
+        "additionalProperties": false
+      },
+      "JobIdentity": {
+        "type": "object",
+        "properties": {
+          "jobId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "operation": {
+            "type": "string",
+            "minLength": 1
+          },
+          "phase": {
+            "type": "string",
+            "minLength": 1
+          },
+          "requestId": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "jobId",
+          "operation",
+          "phase"
+        ],
+        "additionalProperties": false
+      },
+      "CurrentContextResult": {
+        "type": "object",
+        "properties": {
+          "repositoryId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "selector": {
+            "$ref": "#/components/schemas/CurrentSelector"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "UNINDEXED",
+              "NOT_PREPARED",
+              "PREPARING",
+              "FAILED",
+              "READY"
+            ]
+          },
+          "configuredBranch": {
+            "type": "string",
+            "minLength": 1
+          },
+          "activeJob": {
+            "$ref": "#/components/schemas/JobIdentity"
+          },
+          "revision": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{40}$"
+          },
+          "indexedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "preparationBranch": {
+            "type": "string",
+            "minLength": 1
+          },
+          "context": {
+            "$ref": "#/components/schemas/ReadContext"
+          },
+          "overview": {
+            "$ref": "#/components/schemas/ContextOverview"
+          },
+          "projectGuide": {
+            "$ref": "#/components/schemas/GuideInfo"
+          }
+        },
+        "required": [
+          "repositoryId",
+          "selector",
+          "state"
+        ],
+        "additionalProperties": false
+      },
+      "ReviewSideContext": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "EMPTY_TREE",
+              "REVISION"
+            ]
+          },
+          "revision": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{40}$"
+          },
+          "context": {
+            "$ref": "#/components/schemas/ReadContext"
+          },
+          "overview": {
+            "$ref": "#/components/schemas/ContextOverview"
+          },
+          "projectGuide": {
+            "$ref": "#/components/schemas/GuideInfo"
+          }
+        },
+        "required": [
+          "kind"
+        ],
+        "additionalProperties": false
+      },
+      "ReviewContextResult": {
+        "type": "object",
+        "properties": {
+          "repositoryId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "selector": {
+            "$ref": "#/components/schemas/ReviewDiscoverySelector"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "UNINDEXED",
+              "NOT_PREPARED",
+              "PREPARING",
+              "FAILED",
+              "READY"
+            ]
+          },
+          "reviewId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "jobId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "failureCategory": {
+            "type": "string",
+            "minLength": 1
+          },
+          "before": {
+            "$ref": "#/components/schemas/ReviewSideContext"
+          },
+          "after": {
+            "$ref": "#/components/schemas/ReviewSideContext"
+          },
+          "comparisonContext": {
+            "$ref": "#/components/schemas/ComparisonContext"
+          }
+        },
+        "required": [
+          "repositoryId",
+          "selector",
+          "state"
+        ],
+        "additionalProperties": false
+      },
+      "ContextResult": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/CurrentContextResult"
+          },
+          {
+            "$ref": "#/components/schemas/ReviewContextResult"
+          }
+        ]
+      },
+      "RepositoryCollection": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RepositoryItem"
+            }
+          },
+          "page": {
+            "$ref": "#/components/schemas/Page"
+          }
+        },
+        "required": [
+          "items",
+          "page"
+        ],
+        "additionalProperties": false
+      },
+      "FactCollection": {
+        "type": "object",
+        "properties": {
+          "context": {
+            "$ref": "#/components/schemas/ReadContext"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CompactFact"
+            }
+          },
+          "page": {
+            "$ref": "#/components/schemas/Page"
+          }
+        },
+        "required": [
+          "context",
+          "items",
+          "page"
+        ],
+        "additionalProperties": false
+      },
+      "EntryTrigger": {
+        "type": "object",
+        "properties": {
+          "httpMethod": {
+            "type": "string",
+            "enum": [
+              "GET",
+              "HEAD",
+              "POST",
+              "PUT",
+              "PATCH",
+              "DELETE",
+              "OPTIONS",
+              "TRACE",
+              "ALL"
+            ]
+          },
+          "path": {
+            "type": "string",
+            "minLength": 1
+          },
+          "eventType": {
+            "type": "string",
+            "minLength": 1
+          },
+          "destination": {
+            "$ref": "#/components/schemas/Destination"
+          },
+          "trigger": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "EntryPointItem": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "HTTP",
+              "EVENT",
+              "MQ",
+              "SCHEDULE"
+            ]
+          },
+          "factId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "handler": {
+            "$ref": "#/components/schemas/CompactFact"
+          },
+          "trigger": {
+            "$ref": "#/components/schemas/EntryTrigger"
+          }
+        },
+        "required": [
+          "kind",
+          "handler",
+          "trigger"
+        ],
+        "additionalProperties": false
+      },
+      "EntryPointCollection": {
+        "type": "object",
+        "properties": {
+          "context": {
+            "$ref": "#/components/schemas/ReadContext"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/EntryPointItem"
+            }
+          },
+          "page": {
+            "$ref": "#/components/schemas/Page"
+          }
+        },
+        "required": [
+          "context",
+          "items",
+          "page"
+        ],
+        "additionalProperties": false
+      },
+      "ExternalTargetInfo": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "minLength": 1
+          },
+          "displayName": {
+            "type": "string"
+          },
+          "canonical": {
+            "type": "string",
+            "minLength": 1
+          },
+          "arity": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "kind",
+          "displayName"
+        ],
+        "additionalProperties": false
+      },
+      "RelationTarget": {
+        "type": "object",
+        "properties": {
+          "resolution": {
+            "type": "string",
+            "enum": [
+              "INTERNAL",
+              "EXTERNAL",
+              "UNRESOLVED"
+            ]
+          },
+          "fact": {
+            "$ref": "#/components/schemas/CompactFact"
+          },
+          "external": {
+            "$ref": "#/components/schemas/ExternalTargetInfo"
+          }
+        },
+        "required": [
+          "resolution"
+        ],
+        "additionalProperties": false
+      },
+      "Occurrence": {
+        "type": "object",
+        "properties": {
+          "factId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "path": {
+            "type": "string",
+            "minLength": 1
+          },
+          "range": {
+            "$ref": "#/components/schemas/SyntaxRange"
+          }
+        },
+        "required": [
+          "factId",
+          "path",
+          "range"
+        ],
+        "additionalProperties": false
+      },
+      "RelationItem": {
+        "type": "object",
+        "properties": {
+          "relationKind": {
+            "type": "string",
+            "minLength": 1
+          },
+          "origin": {
+            "$ref": "#/components/schemas/CompactFact"
+          },
+          "target": {
+            "$ref": "#/components/schemas/RelationTarget"
+          },
+          "occurrence": {
+            "$ref": "#/components/schemas/Occurrence"
+          }
+        },
+        "required": [
+          "relationKind",
+          "origin",
+          "target",
+          "occurrence"
+        ],
+        "additionalProperties": false
+      },
+      "RelationCollection": {
+        "type": "object",
+        "properties": {
+          "context": {
+            "$ref": "#/components/schemas/ReadContext"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RelationItem"
+            }
+          },
+          "page": {
+            "$ref": "#/components/schemas/Page"
+          },
+          "relation": {
+            "type": "string",
+            "enum": [
+              "CALLERS",
+              "CALLEES",
+              "IMPLEMENTATIONS",
+              "REFERENCES"
+            ]
+          },
+          "evidenceScope": {
+            "type": "string",
+            "enum": [
+              "PROJECTED_CALLS",
+              "PROJECTED_IMPLEMENTATIONS",
+              "PROJECTED_REFERENCES"
+            ]
+          }
+        },
+        "required": [
+          "context",
+          "items",
+          "page",
+          "relation",
+          "evidenceScope"
+        ],
+        "additionalProperties": false
+      },
+      "FileItem": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1
+          },
+          "entryType": {
+            "type": "string",
+            "enum": [
+              "FILE",
+              "DIRECTORY"
+            ]
+          },
+          "contentKind": {
+            "type": "string",
+            "enum": [
+              "CODE",
+              "PROJECT_GUIDE"
+            ]
+          },
+          "contentStatus": {
+            "type": "string",
+            "minLength": 1
+          },
+          "byteLength": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "projectGuide": {
+            "$ref": "#/components/schemas/GuideInfo"
+          }
+        },
+        "required": [
+          "path",
+          "entryType"
+        ],
+        "additionalProperties": false
+      },
+      "FileCollection": {
+        "type": "object",
+        "properties": {
+          "context": {
+            "$ref": "#/components/schemas/ReadContext"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FileItem"
+            }
+          },
+          "page": {
+            "$ref": "#/components/schemas/Page"
+          }
+        },
+        "required": [
+          "context",
+          "items",
+          "page"
+        ],
+        "additionalProperties": false
+      },
+      "TextMatch": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1
+          },
+          "range": {
+            "$ref": "#/components/schemas/SyntaxRange"
+          },
+          "snippet": {
+            "type": "string"
+          },
+          "snippetTruncated": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "path",
+          "range",
+          "snippet",
+          "snippetTruncated"
+        ],
+        "additionalProperties": false
+      },
+      "TextSearchResult": {
+        "type": "object",
+        "properties": {
+          "context": {
+            "$ref": "#/components/schemas/ReadContext"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TextMatch"
+            }
+          },
+          "page": {
+            "$ref": "#/components/schemas/Page"
+          },
+          "scanComplete": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "context",
+          "items",
+          "page",
+          "scanComplete"
+        ],
+        "additionalProperties": false
+      },
+      "SourceWindow": {
+        "type": "object",
+        "properties": {
+          "start": {
+            "$ref": "#/components/schemas/SyntaxPosition"
+          },
+          "end": {
+            "$ref": "#/components/schemas/SyntaxPosition"
+          }
+        },
+        "required": [
+          "start"
+        ],
+        "additionalProperties": false,
+        "description": "FILE end omitted means through EOF; FACT end is fixed."
+      },
+      "SourceResult": {
+        "type": "object",
+        "properties": {
+          "context": {
+            "$ref": "#/components/schemas/ReadContext"
+          },
+          "target": {
+            "$ref": "#/components/schemas/SourceTarget"
+          },
+          "path": {
+            "type": "string",
+            "minLength": 1
+          },
+          "contentKind": {
+            "type": "string",
+            "enum": [
+              "CODE",
+              "PROJECT_GUIDE"
+            ]
+          },
+          "contentStatus": {
+            "type": "string",
+            "minLength": 1
+          },
+          "content": {
+            "type": "string"
+          },
+          "factRange": {
+            "$ref": "#/components/schemas/SyntaxRange"
+          },
+          "window": {
+            "$ref": "#/components/schemas/SourceWindow"
+          },
+          "pageRange": {
+            "$ref": "#/components/schemas/SyntaxRange"
+          },
+          "rangeComplete": {
+            "type": "boolean"
+          },
+          "startLineComplete": {
+            "type": "boolean"
+          },
+          "endLineComplete": {
+            "type": "boolean"
+          },
+          "nextCursor": {
+            "type": "string",
+            "minLength": 1
+          },
+          "projectGuide": {
+            "$ref": "#/components/schemas/GuideInfo"
+          }
+        },
+        "required": [
+          "context",
+          "target",
+          "path",
+          "contentKind",
+          "contentStatus",
+          "rangeComplete",
+          "startLineComplete",
+          "endLineComplete"
+        ],
+        "additionalProperties": false
+      },
+      "MetadataIdentity": {
+        "type": "object",
+        "properties": {
+          "jobId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "catalogId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "historyId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "branch": {
+            "type": "string",
+            "minLength": 1
+          },
+          "headRevision": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{40}$"
+          },
+          "observedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "jobId",
+          "catalogId",
+          "historyId",
+          "branch",
+          "headRevision",
+          "observedAt"
+        ],
+        "additionalProperties": false
+      },
+      "GitBranchItem": {
+        "type": "object",
+        "properties": {
+          "branch": {
+            "type": "string",
+            "minLength": 1
+          },
+          "headRevision": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{40}$"
+          }
+        },
+        "required": [
+          "branch",
+          "headRevision"
+        ],
+        "additionalProperties": false
+      },
+      "GitCommitItem": {
+        "type": "object",
+        "properties": {
+          "revision": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{40}$"
+          },
+          "shortRevision": {
+            "type": "string",
+            "minLength": 1
+          },
+          "parents": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{40}$"
+            }
+          },
+          "subject": {
+            "type": "string"
+          },
+          "committedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "revision",
+          "shortRevision",
+          "parents",
+          "subject",
+          "committedAt"
+        ],
+        "additionalProperties": false
+      },
+      "GitBranchCollection": {
+        "type": "object",
+        "properties": {
+          "repositoryId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "metadata": {
+            "$ref": "#/components/schemas/MetadataIdentity"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/GitBranchItem"
+            }
+          },
+          "page": {
+            "$ref": "#/components/schemas/Page"
+          }
+        },
+        "required": [
+          "repositoryId",
+          "metadata",
+          "items",
+          "page"
+        ],
+        "additionalProperties": false
+      },
+      "GitCommitCollection": {
+        "type": "object",
+        "properties": {
+          "repositoryId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "metadata": {
+            "$ref": "#/components/schemas/MetadataIdentity"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/GitCommitItem"
+            }
+          },
+          "page": {
+            "$ref": "#/components/schemas/Page"
+          }
+        },
+        "required": [
+          "repositoryId",
+          "metadata",
+          "items",
+          "page"
+        ],
+        "additionalProperties": false
+      },
+      "ChangeEndpoint": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1
+          },
+          "mode": {
+            "type": "string",
+            "minLength": 1
+          },
+          "blobId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "contentKind": {
+            "type": "string",
+            "enum": [
+              "CODE",
+              "PROJECT_GUIDE"
+            ]
+          },
+          "projectGuide": {
+            "$ref": "#/components/schemas/GuideInfo"
+          }
+        },
+        "required": [
+          "path",
+          "mode",
+          "blobId",
+          "contentKind"
+        ],
+        "additionalProperties": false
+      },
+      "GitChangeItem": {
+        "type": "object",
+        "properties": {
+          "changeId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "kind": {
+            "type": "string",
+            "minLength": 1
+          },
+          "before": {
+            "$ref": "#/components/schemas/ChangeEndpoint"
+          },
+          "after": {
+            "$ref": "#/components/schemas/ChangeEndpoint"
+          },
+          "diffStatus": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "changeId",
+          "kind",
+          "diffStatus"
+        ],
+        "additionalProperties": false
+      },
+      "ComparisonResult": {
+        "type": "object",
+        "properties": {
+          "comparisonContext": {
+            "$ref": "#/components/schemas/ComparisonContext"
+          },
+          "ancestry": {
+            "type": "string",
+            "minLength": 1
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/GitChangeItem"
+            }
+          },
+          "page": {
+            "$ref": "#/components/schemas/Page"
+          }
+        },
+        "required": [
+          "comparisonContext",
+          "ancestry",
+          "items",
+          "page"
+        ],
+        "additionalProperties": false
+      },
+      "FileDiffResult": {
+        "type": "object",
+        "properties": {
+          "comparisonContext": {
+            "$ref": "#/components/schemas/ComparisonContext"
+          },
+          "change": {
+            "$ref": "#/components/schemas/GitChangeItem"
+          },
+          "patch": {
+            "type": "string"
+          },
+          "complete": {
+            "type": "boolean"
+          },
+          "nextCursor": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "comparisonContext",
+          "change",
+          "complete"
+        ],
+        "additionalProperties": false
+      },
+      "SemanticQueryError": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "minLength": 1
+          },
+          "message": {
+            "type": "string"
+          },
+          "retryable": {
+            "type": "boolean"
+          },
+          "currentRevision": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{40}$"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "retryable"
+        ],
+        "additionalProperties": false
+      },
+      "QuerySecurityError": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "enum": [
+              "QUERY_TOKEN_REQUIRED",
+              "QUERY_ACCESS_DISABLED"
+            ]
+          },
+          "retryable": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "code",
+          "retryable"
+        ],
+        "additionalProperties": false
+      }
+    }
+  }
+}

@@ -1,333 +1,176 @@
 package com.java.semantic.query.application;
 
 import com.java.semantic.model.codefact.CodeFactIdentity;
-import com.java.semantic.model.codefact.CodeFact;
-import com.java.semantic.model.codefact.CodeFactDetails;
 import com.java.semantic.model.codefact.CodeFactId;
 import com.java.semantic.model.codefact.CodeFactKind;
-import com.java.semantic.model.codefact.CodeFactScope;
-import com.java.semantic.model.codefact.CodeFactSearchQuery;
-import com.java.semantic.model.codefact.CodeFactSearchResult;
-import com.java.semantic.model.codefact.CodeFactReadQuery;
-import com.java.semantic.model.codefact.ExternalTarget;
-import com.java.semantic.model.codefact.MethodTarget;
-import com.java.semantic.model.codefact.RelationIdentity;
-import com.java.semantic.model.codefact.RelationKind;
-import com.java.semantic.model.codefact.RelationTarget;
-import com.java.semantic.model.codefact.SourceRange;
-import com.java.semantic.model.codefact.SyntaxPosition;
-import com.java.semantic.model.codefact.SyntaxRange;
-import com.java.semantic.model.index.GenerationId;
+import com.java.semantic.model.codefact.CodeFactTokenizer;
+import com.java.semantic.model.codefact.MapperStatementKind;
 import com.java.semantic.model.index.IndexSchemaContract;
-import com.java.semantic.model.index.RelationDocument;
+import com.java.semantic.model.index.ProjectionName;
+import com.java.semantic.model.index.ProjectionRequirements;
 import com.java.semantic.model.index.SourceArtifactId;
-import com.java.semantic.model.index.SourceIndexScope;
-import com.java.semantic.model.repository.RepositoryId;
-import com.java.semantic.model.query.SelectedGeneration;
-import com.java.semantic.model.repository.RepositoryRevision;
-import com.java.semantic.query.config.ReadPolicyProperties;
-import com.java.semantic.query.config.ConfiguredReadPolicy;
-import com.mongodb.ConnectionString;
-import com.mongodb.MongoClientSettings;
-import com.mongodb.client.MongoClient;
-import com.mongodb.client.MongoClients;
-import com.mongodb.event.CommandListener;
-import com.mongodb.event.CommandStartedEvent;
-import java.util.concurrent.CopyOnWriteArrayList;
-import org.bson.Document;
-import org.junit.jupiter.api.AfterAll;
-import org.junit.jupiter.api.BeforeAll;
-import org.junit.jupiter.api.Tag;
-import org.junit.jupiter.api.Test;
-import org.springframework.data.mongodb.core.MongoTemplate;
-
 import java.time.Duration;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
-
-import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import org.bson.Document;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Tag;
+import org.springframework.data.mongodb.core.MongoTemplate;
+import static com.java.semantic.query.application.SemanticQueryContract.*;
+import static org.assertj.core.api.Assertions.*;
 
 @Tag("mongo-it")
 class PublishedCodeFactContractIT extends PublishedMongoITSupport {
+    private static final String PATH = "src/main/java/example/Payment.java";
 
-    private static PublishedMongoLifecycle lifecycle;
-
-    @BeforeAll
-    static void startMongo() {
-        lifecycle = PublishedMongoLifecycle.start();
-    }
-
-    @AfterAll
-    static void stopMongo() {
-        lifecycle.close();
+    @Test
+    void exact_then_name_prefix_then_all_token_prefix_pages_do_not_duplicate_or_skip() {
+        try (PublishedMongoLifecycle lifecycle = PublishedMongoLifecycle.start(); PublishedMongoLifecycle.Invocation invocation = lifecycle.openInvocation()) {
+            MongoTemplate template = invocation.template();
+            seedCurrent(template, "orders");
+            seedSource(template, PATH, "class Payment {}\n");
+            for (String name : List.of("findPayment", "findPaymentHistory", "lookupPayment")) {
+                CodeFactIdentity identity = methodIdentity("example", "Payment", name, PATH);
+                seedMethod(template, identity, List.of());
+                seedSearch(template, identity, "SYMBOLS", name.equals("lookupPayment") ? List.of("find", "payment") : CodeFactTokenizer.tokenize(name));
+            }
+            SelectedSemanticQueryService service = semantic(template, policy());
+            SearchCodeRequest request = search("findPayment", Optional.empty(), 1);
+            ReadContextSelector.AdmittedContext context = admitted(template, policy(), service.searchRequirements(request));
+            FactCollection exact = service.searchCode(context, request);
+            assertThat(exact.items()).extracting(CompactFact::displayName).containsExactly("findPayment");
+            FactCollection prefix = service.searchCode(context, search("findPayment", exact.page().nextCursor(), 1));
+            assertThat(prefix.items()).extracting(CompactFact::displayName).containsExactly("findPaymentHistory");
+            FactCollection token = service.searchCode(context, search("findPayment", prefix.page().nextCursor(), 1));
+            assertThat(token.items()).extracting(CompactFact::displayName).containsExactly("lookupPayment");
+            assertThat(token.page().hasMore()).isFalse();
+            assertThatThrownBy(() -> service.searchCode(context, search("find", exact.page().nextCursor(), 1))).isInstanceOf(IllegalArgumentException.class);
+            SearchCodeRequest wrongPath = new SearchCodeRequest(request.context(), request.query(), request.kinds(), Optional.empty(), Optional.of(PATH + ".other"), new PageRequest(Optional.empty(), 1));
+            assertThat(service.searchCode(context, wrongPath).items()).isEmpty();
+            SearchCodeRequest signature = search("findPayment(example.events.VideoReady)", Optional.empty(), 20);
+            assertThat(service.searchCode(context, signature).items()).extracting(CompactFact::displayName).containsExactly("findPayment");
+        }
     }
 
     @Test
-    void method_search_and_get_ignore_unrelated_incompatible_projections_but_require_symbols() {
-        try (PublishedMongoLifecycle.Invocation invocation = lifecycle.openInvocation()) {
+    void metadata_only_batch_resolution_rejects_search_scope_artifact_and_snapshot_corruption() {
+        try (PublishedMongoLifecycle lifecycle = PublishedMongoLifecycle.start(); PublishedMongoLifecycle.Invocation invocation = lifecycle.openInvocation()) {
             MongoTemplate template = invocation.template();
             seedCurrent(template, "orders");
-            CodeFactIdentity identity = methodIdentity("example.payment", "PaymentService", "findPayment",
-                    "src/main/java/example/payment/PaymentService.java");
+            seedSource(template, PATH, "class Payment {}\n");
+            CodeFactIdentity identity = methodIdentity("example", "Payment", "charge", PATH);
             seedMethod(template, identity, List.of());
-            seedSearch(template, identity, "SYMBOLS", List.of("find", "payment"));
-            Map<String, Integer> currentVersions = IndexSchemaContract.requiredProjectionVersions();
-            template.getCollection("generation_manifests").updateOne(new Document("repoId", "orders"),
-                    new Document("$set", new Document("projectionVersions", List.of(
-                            new Document("name", "SOURCES").append("version", 1),
-                            new Document("name", "SYMBOLS").append("version", currentVersions.get("SYMBOLS")),
-                            new Document("name", "RELATIONS").append("version", 1),
-                            new Document("name", "ENTRY_POINTS").append("version", 1),
-                            new Document("name", "SEARCH").append("version", currentVersions.get("SEARCH"))))));
-            CurrentGenerationSelector selector = selector(template, policy());
-            SelectedGeneration context = selector.select("orders", REVISION,
-                    CodeFactReadService.requirementsForSearchKinds(Set.of(CodeFactKind.METHOD)));
-            SelectedGenerationGuard guard = guard(template, policy());
-            CodeFactSearchService search = new CodeFactSearchService(template, guard, Duration.ofSeconds(2));
-            CodeFactReadService reader = new CodeFactReadService(template, guard, Duration.ofSeconds(2));
-            CodeFactSearchQuery query = new CodeFactSearchQuery(new RepositoryId("orders"),
-                    new RepositoryRevision(REVISION), "findPayment", Set.of(CodeFactKind.METHOD), Optional.empty(), 0, 20);
-            CodeFactSearchResult results = search.search(context, query);
-
-            assertThat(results.facts()).extracting(summary -> summary.fact().identity()).containsExactly(identity);
-            assertThat(reader.get(context, new CodeFactReadQuery(new RepositoryId("orders"), new RepositoryRevision(REVISION),
-                    CodeFactId.from(identity))).fact().identity()).isEqualTo(identity);
-
-            template.getCollection("generation_manifests").updateOne(new Document("repoId", "orders"),
-                    new Document("$set", new Document("projectionVersions", List.of(
-                            new Document("name", "SOURCES").append("version", 1),
-                            new Document("name", "SYMBOLS").append("version", 1),
-                            new Document("name", "RELATIONS").append("version", 1),
-                            new Document("name", "ENTRY_POINTS").append("version", 1),
-                            new Document("name", "SEARCH").append("version", currentVersions.get("SEARCH"))))));
-
-            assertThatThrownBy(() -> search.search(context, query))
-                    .isInstanceOf(IndexContractMismatchException.class);
-        }
-    }
-    @Test
-    void searches_authorized_derived_rows_and_rejects_denied_package_scope() {
-        try (PublishedMongoLifecycle.Invocation invocation = lifecycle.openInvocation()) {
-            MongoTemplate template = invocation.template();
-            seedCurrent(template, "orders");
-            CodeFactIdentity identity = methodIdentity("example.payment", "PaymentService", "findPayment", "src/main/java/example/payment/PaymentService.java");
-            seedMethod(template, identity, java.util.List.of());
-            CodeFactScope scope = CodeFactScope.from(identity);
-            template.getCollection("search").insertOne(new Document("repoId", "orders").append("generationId", "g1")
-                    .append("factId", com.java.semantic.model.codefact.CodeFactId.from(identity).value()).append("kind", "METHOD")
-                    .append("tokens", java.util.List.of("find", "payment", "findpayment")).append("package", "example.payment")
-                    .append("authority", "SYMBOLS").append("canonical", identity.canonicalForm())
-                    .append("displayName", "findPayment").append("signature", "findPayment(example.events.VideoReady)")
-                    .append("scopePackage", scope.packageName())
-                    .append("scopeClass", scope.className()).append("scopeMethod", scope.methodName().orElse(""))
-                    .append("scopeParameters", scope.parameterTypes()).append("scopePath", scope.sourcePath().orElse("")));
-            CodeFactSearchQuery query = new CodeFactSearchQuery(new RepositoryId("orders"), new RepositoryRevision(REVISION), "findPayment");
-            CurrentGenerationSelector selector = selector(template, policy());
-            SelectedGeneration context = selector.select("orders", REVISION,
-                    CodeFactReadService.requirementsForSearchKinds(query.kinds()));
-            CodeFactSearchService visible = new CodeFactSearchService(template, guard(template, policy()), Duration.ofSeconds(2));
-
-            CodeFactSearchResult result = visible.search(context, query);
-            assertThat(result.facts()).hasSize(1);
+            seedSearch(template, identity, "SYMBOLS", List.of("charge"));
             CodeFactReadService reader = new CodeFactReadService(template, guard(template, policy()), Duration.ofSeconds(2));
-            CodeFactReadQuery readQuery = new CodeFactReadQuery(new RepositoryId("orders"), new RepositoryRevision(REVISION),
-                    result.facts().getFirst().fact().id());
-            assertThat(reader.get(context, readQuery).fact().identity()).isEqualTo(identity);
-            assertThatThrownBy(() -> reader.get(context, new CodeFactReadQuery(new RepositoryId("orders"), new RepositoryRevision(REVISION),
-                    new CodeFactId("0".repeat(64))))).isInstanceOf(CodeFactNotFoundException.class);
-            CodeFactSearchService denied = new CodeFactSearchService(template, guard(template,
-                    policy(new ReadPolicyProperties.PackageRule("orders", "example.payment"))), Duration.ofSeconds(2));
-            assertThat(denied.search(context, query).facts()).isEmpty();
-            CodeFactSearchQuery deniedQuery = new CodeFactSearchQuery(new RepositoryId("orders"), new RepositoryRevision(REVISION),
-                    "findPayment", Set.of(), Optional.of("example.payment"), 0, 20);
-            assertThatThrownBy(() -> denied.search(context, deniedQuery))
-                    .isInstanceOf(RepositoryNotFoundException.class);
-            assertThatThrownBy(() -> new CodeFactSearchQuery(new RepositoryId("orders"), new RepositoryRevision(REVISION),
-                    "findPayment", java.util.Set.of(), Optional.of("example..payment"), 0, 20))
-                    .isInstanceOf(IllegalArgumentException.class);
+            SelectedGenerationGuard.SourceContext source = admitted(template, policy(), SelectedGenerationGuard.SEARCH_WITH_SOURCES).source();
+            template.getCollection("source_artifacts").deleteMany(new Document());
+            assertThat(reader.getAllByIdentity(source, Set.of(identity)).get(identity).fact().identity()).isEqualTo(identity);
+            assertThat(reader.get(source, CodeFactId.from(identity)).fact().identity()).isEqualTo(identity);
+            template.getCollection("search").updateOne(new Document("factId", CodeFactId.from(identity).value()), new Document("$set", new Document("displayName", "forged")));
+            assertThatThrownBy(() -> reader.get(source, CodeFactId.from(identity))).isInstanceOf(IndexContractMismatchException.class);
+            template.getCollection("search").updateOne(new Document("factId", CodeFactId.from(identity).value()), new Document("$set", new Document("displayName", "charge")));
+            template.getCollection("git_snapshot_files").updateOne(new Document("path", PATH), new Document("$set", new Document("checksum", "f".repeat(64))));
+            assertThatThrownBy(() -> reader.getAllByIdentity(source, Set.of(identity))).isInstanceOf(IndexContractMismatchException.class);
         }
     }
 
     @Test
-    void resolves_relation_search_rows_through_their_relation_authority() {
-        try (PublishedMongoLifecycle.Invocation invocation = lifecycle.openInvocation()) {
-            MongoTemplate template = invocation.template();
-            seedCurrent(template, "orders");
-            CodeFactIdentity from = methodIdentity("example.payment", "PaymentService", "charge", "src/main/java/example/payment/PaymentService.java");
-            SourceRange range = new SourceRange("src/main/java/example/payment/PaymentService.java",
-                    new SyntaxRange(new SyntaxPosition(2, 0), new SyntaxPosition(2, 10)));
-            RelationTarget target = new RelationTarget.External(new ExternalTarget.Endpoint("POST", "https://payments.example/charge"));
-            RelationIdentity relationIdentity = new RelationIdentity(from, RelationKind.CALLS_OUTBOUND_API, target, range);
-            CodeFactIdentity identity = new CodeFactIdentity(new RepositoryId("orders"), new RepositoryRevision(REVISION),
-                    CodeFactKind.OUTBOUND_API, relationIdentity);
-            RelationDocument relation = new RelationDocument(new RepositoryId("orders"), new GenerationId("g1"),
-                    new CodeFact(CodeFactId.from(identity), identity), RelationKind.CALLS_OUTBOUND_API, from, target,
-                    new SourceArtifactId("a".repeat(64)), range);
-            Document stored = new Document();
-            template.getConverter().write(relation, stored);
-            stored.put("repoId", "orders"); stored.put("generationId", "g1"); stored.put("relationId", relation.fact().id().value());
-            stored.put("canonical", identity.canonicalForm()); stored.put("from", from.canonicalForm());
-            stored.put("target", target.canonicalForm()); stored.put("kind", RelationKind.CALLS_OUTBOUND_API.name());
-            stored.put("sourcePath", range.sourceFile());
-            template.getCollection("relations").insertOne(stored);
-            seedSearch(template, identity, "RELATIONS", List.of("charge", "payment"));
-            CurrentGenerationSelector selector = selector(template, policy());
-            CodeFactSearchQuery query = new CodeFactSearchQuery(new RepositoryId("orders"), new RepositoryRevision(REVISION), "charge");
-            SelectedGeneration context = selector.select("orders", REVISION,
-                    CodeFactReadService.requirementsForSearchKinds(Set.of(CodeFactKind.OUTBOUND_API)));
-            CodeFactSearchService service = new CodeFactSearchService(template, guard(template, policy()), Duration.ofSeconds(2));
-
-            CodeFactSearchResult result = service.search(context, query);
-            assertThat(result.facts()).extracting(summary -> summary.fact().identity()).containsExactly(identity);
+    void method_reads_require_only_actual_authority_and_source_projections() {
+        try (PublishedMongoLifecycle lifecycle = PublishedMongoLifecycle.start(); PublishedMongoLifecycle.Invocation invocation = lifecycle.openInvocation()) {
+            MongoTemplate template = invocation.template(); seedCurrent(template, "orders"); seedSource(template, PATH, "class Payment {}\n");
+            CodeFactIdentity identity = methodIdentity("example", "Payment", "charge", PATH); seedMethod(template, identity, List.of()); seedSearch(template, identity, "SYMBOLS", List.of("charge"));
+            template.getCollection("generation_manifests").updateOne(new Document("generationId", "g1"), new Document("$set", new Document("projectionVersions",
+                    IndexSchemaContract.requiredProjectionVersions().entrySet().stream().map(entry -> new Document("name", entry.getKey()).append("version",
+                            Set.of("RELATIONS", "ENTRY_POINTS").contains(entry.getKey()) ? 1 : entry.getValue())).toList())));
+            SelectedSemanticQueryService service = semantic(template, policy()); SearchCodeRequest request = search("charge", Optional.empty(), 20);
+            assertThat(service.searchCode(admitted(template, policy(), service.searchRequirements(request)), request).items()).extracting(CompactFact::displayName).containsExactly("charge");
+            SelectedGenerationGuard.SourceContext source = admitted(template, policy(), new ProjectionRequirements(Set.of(ProjectionName.SOURCES))).source();
             CodeFactReadService reader = new CodeFactReadService(template, guard(template, policy()), Duration.ofSeconds(2));
-            assertThat(reader.get(context, new CodeFactReadQuery(new RepositoryId("orders"), new RepositoryRevision(REVISION),
-                    result.facts().getFirst().fact().id())).fact().identity()).isEqualTo(identity);
+            assertThat(reader.getAllByIdentity(source, Set.of(identity))).containsKey(identity);
+            template.getCollection("symbols").deleteOne(new Document("symbolId", CodeFactId.from(identity).value()));
+            assertThatThrownBy(() -> reader.getAllByIdentity(source, Set.of(identity))).isInstanceOf(CodeFactNotFoundException.class);
         }
     }
 
     @Test
-    void returns_only_code_proven_fee_declaration_evidence() {
-        try (PublishedMongoLifecycle.Invocation invocation = lifecycle.openInvocation()) {
-            MongoTemplate template = invocation.template();
-            seedCurrent(template, "orders");
-            CodeFactIdentity identity = methodIdentity("example.payment", "PaymentFeeCalculator", "feeFormula",
-                    "src/main/java/example/payment/PaymentFeeCalculator.java");
-            seedMethod(template, identity, List.of());
-            seedSearch(template, identity, "SYMBOLS", List.of("fee", "formula"));
-            CurrentGenerationSelector selector = selector(template, policy());
-            CodeFactSearchQuery query = new CodeFactSearchQuery(new RepositoryId("orders"), new RepositoryRevision(REVISION), "feeFormula");
-            SelectedGeneration context = selector.select("orders", REVISION,
-                    CodeFactReadService.requirementsForSearchKinds(Set.of(CodeFactKind.METHOD)));
-            CodeFactSearchService search = new CodeFactSearchService(template, guard(template, policy()), Duration.ofSeconds(2));
-            CodeFactId factId = search.search(context, query).facts().getFirst().fact().id();
-            CodeFactReadService reader = new CodeFactReadService(template, guard(template, policy()), Duration.ofSeconds(2));
-            CodeFactDetails details = reader.get(context, new CodeFactReadQuery(
-                    new RepositoryId("orders"), new RepositoryRevision(REVISION), factId));
-
-            assertThat(details.fact().identity()).isEqualTo(identity);
-            assertThat(details.location().sourceFile()).isEqualTo("src/main/java/example/payment/PaymentFeeCalculator.java");
-            assertThat(details.annotations()).isEmpty();
-        }
-    }
-
-    @Test
-    void unfiltered_search_requires_all_possible_authorities_while_exact_read_requires_only_its_authority() {
-        try (PublishedMongoLifecycle.Invocation invocation = lifecycle.openInvocation()) {
-            MongoTemplate template = invocation.template();
-            seedCurrent(template, "orders");
-            CodeFactIdentity identity = methodIdentity("example.payment", "PaymentService", "findPayment",
-                    "src/main/java/example/payment/PaymentService.java");
-            seedMethod(template, identity, List.of());
-            seedSearch(template, identity, "SYMBOLS", List.of("find", "payment"));
-            Map<String, Integer> currentVersions = IndexSchemaContract.requiredProjectionVersions();
-            template.getCollection("generation_manifests").updateOne(new Document("repoId", "orders"),
-                    new Document("$set", new Document("projectionVersions", List.of(
-                            new Document("name", "SOURCES").append("version", currentVersions.get("SOURCES")),
-                            new Document("name", "SYMBOLS").append("version", currentVersions.get("SYMBOLS")),
-                            new Document("name", "RELATIONS").append("version", 1),
-                            new Document("name", "SEARCH").append("version", currentVersions.get("SEARCH"))))));
-            CurrentGenerationSelector selector = selector(template, policy());
-            SelectedGeneration selectedContext = selector.selectCodeFact("orders", REVISION, identity,
-                    CodeFactReadService.requirementsForSearchKinds(Set.of(identity.kind())));
-            CodeFactSearchService search = new CodeFactSearchService(template, guard(template, policy()), Duration.ofSeconds(2));
-            CodeFactReadService reader = new CodeFactReadService(template, guard(template, policy()), Duration.ofSeconds(2));
-            CodeFactSearchQuery query = new CodeFactSearchQuery(new RepositoryId("orders"),
-                    new RepositoryRevision(REVISION), "findPayment");
-
-            assertThatThrownBy(() -> search.search(selector.select("orders", REVISION,
-                    CodeFactReadService.requirementsForSearchKinds(query.kinds())), query))
-                    .isInstanceOf(IndexContractMismatchException.class);
-            assertThat(reader.get(selectedContext, new CodeFactReadQuery(new RepositoryId("orders"), new RepositoryRevision(REVISION),
-                    CodeFactId.from(identity))).fact().identity()).isEqualTo(identity);
-        }
-    }
-
-    @Test
-    void reports_only_pre_authorized_current_source_coverage_and_syntax_issues() {
-        try (PublishedMongoLifecycle.Invocation invocation = lifecycle.openInvocation()) {
-            MongoTemplate template = invocation.template();
-            seedCurrent(template, "orders");
-            CodeFactIdentity identity = methodIdentity("example.payment", "PaymentService", "findPayment",
-                    "src/main/java/example/payment/PaymentService.java");
-            seedMethod(template, identity, List.of());
-            seedSearch(template, identity, "SYMBOLS", List.of("find", "payment", "findpayment"));
-            seedCoverageSource(template, "src/main/java/example/payment/PaymentService.java", "JDT_SYNTAX_PROBLEM",
-                    new SourceIndexScope(true, List.of("example.payment"),
-                            List.of(SourceIndexScope.classKey("example.payment", "PaymentService")),
-                            List.of(SourceIndexScope.methodKey("example.payment", "PaymentService", "findPayment",
-                                    List.of("example.events.VideoReady")))));
-            seedCoverageSource(template, "src/main/java/example/payment/InternalPaymentService.java", "SECRET_SYNTAX",
-                    new SourceIndexScope(true, List.of("example.payment"),
-                            List.of(SourceIndexScope.classKey("example.payment", "InternalPaymentService")), List.of()));
-            seedCoverageSource(template, "src/main/java/example/video/VideoService.java", "",
-                    new SourceIndexScope(true, List.of("example.video"),
-                            List.of(SourceIndexScope.classKey("example.video", "VideoService")), List.of()));
-            seedCoverageSource(template, "src/main/java/example/unknown/Unknown.java", "UNKNOWN_SCOPE",
-                    new SourceIndexScope(false, List.of(), List.of(), List.of()));
-            ConfiguredReadPolicy policy = new ConfiguredReadPolicy(new ReadPolicyProperties(List.of(), List.of(),
-                    List.of(new ReadPolicyProperties.ClassRule("orders", "example.payment", "InternalPaymentService")), List.of()));
-            CopyOnWriteArrayList<org.bson.BsonDocument> generationFileFilters = new CopyOnWriteArrayList<>();
-            CommandListener listener = new CommandListener() {
-                @Override
-                public void commandStarted(CommandStartedEvent event) {
-                    if (("find".equals(event.getCommandName()) || "count".equals(event.getCommandName()))
-                            && "generation_files".equals(event.getCommand().getString(event.getCommandName()).getValue())) {
-                        org.bson.BsonDocument filter = "find".equals(event.getCommandName())
-                                ? event.getCommand().getDocument("filter") : event.getCommand().getDocument("query");
-                        generationFileFilters.add(filter.clone());
+    void mapper_authority_retains_select_update_annotation_and_rejects_invalid_payloads() {
+        try (PublishedMongoLifecycle lifecycle = PublishedMongoLifecycle.start(); PublishedMongoLifecycle.Invocation invocation = lifecycle.openInvocation()) {
+            MongoTemplate template = invocation.template(); seedCurrent(template, "orders");
+            for (MapperStatementKind kind : List.of(MapperStatementKind.SELECT, MapperStatementKind.UPDATE, MapperStatementKind.ANNOTATION)) {
+                String path = kind == MapperStatementKind.ANNOTATION ? "src/main/java/example/Mapper.java" : "src/main/resources/mapper/" + kind + ".xml";
+                SourceArtifactId artifact = seedSource(template, path, kind == MapperStatementKind.ANNOTATION ? "interface Mapper {}" : "<mapper/>").id();
+                CodeFactIdentity identity = seedMapper(template, path, artifact, kind); seedSearch(template, identity, "SYMBOLS", List.of("find"));
+                CodeFactReadService reader = new CodeFactReadService(template, guard(template, policy()), Duration.ofSeconds(2));
+                SelectedGenerationGuard.SourceContext source = admitted(template, policy(), SelectedGenerationGuard.SEARCH_WITH_SOURCES).source();
+                assertThat(reader.get(source, CodeFactId.from(identity)).mapperStatementKind()).contains(kind);
+                if (kind == MapperStatementKind.SELECT) {
+                    for (Object malformed : List.of("", "UPSERT", new Document("value", "SELECT"))) {
+                        template.getCollection("symbols").updateOne(new Document("symbolId", CodeFactId.from(identity).value()),
+                                new Document("$set", new Document("mapperStatementKind", malformed)));
+                        assertThatThrownBy(() -> reader.get(source, CodeFactId.from(identity))).isInstanceOf(IndexContractMismatchException.class);
                     }
                 }
-            };
-            MongoClientSettings settings = MongoClientSettings.builder().applyConnectionString(new ConnectionString(lifecycle.connectionString()))
-                    .addCommandListener(listener).build();
-            try (MongoClient observedClient = MongoClients.create(settings)) {
-                MongoTemplate observedTemplate = new MongoTemplate(observedClient, invocation.databaseName());
-                CurrentGenerationSelector selector = selector(observedTemplate, policy);
-                SelectedGeneration context = selector.select("orders", REVISION,
-                        CodeFactReadService.requirementsForSearchKinds(Set.of()));
-                CodeFactSearchService service = new CodeFactSearchService(observedTemplate, guard(observedTemplate, policy), Duration.ofSeconds(2));
-
-                CodeFactSearchQuery broadQuery = new CodeFactSearchQuery(new RepositoryId("orders"),
-                        new RepositoryRevision(REVISION), "findPayment");
-                CodeFactSearchQuery scopedQuery = new CodeFactSearchQuery(new RepositoryId("orders"),
-                        new RepositoryRevision(REVISION), "findPayment", Set.of(), Optional.of("example.payment"), 0, 20);
-                CodeFactSearchResult broad = service.search(context, broadQuery);
-                CodeFactSearchResult result = service.search(context, scopedQuery);
-
-                assertThat(broad.coverage().indexedSourceCount()).isEqualTo(2);
-                assertThat(result.coverage().indexedSourceCount()).isEqualTo(1);
-                assertThat(result.coverage().issues()).containsExactly(new com.java.semantic.model.index.SourceIndexIssue(
-                    "src/main/java/example/payment/PaymentService.java", "JDT_SYNTAX_PROBLEM"));
-                SemanticQueryContract.SearchCodeResult publicResult = SemanticResultMapper.toSearchCodeResult(result,
-                        List.of(new SemanticQueryContract.ProgramElement(CodeFactId.from(identity).value(), CodeFactKind.METHOD,
-                                identity.canonicalIdentity().canonicalForm(), new SemanticQueryContract.SourceSnippet(
-                                "src/main/java/example/payment/PaymentService.java", 1, 1, "findPayment"))));
-                assertThat(publicResult.sourceCoverage()).isEqualTo(new SemanticQueryContract.SourceCoverage(1, 1,
-                        List.of("JDT_SYNTAX_PROBLEM")));
+                template.getCollection("symbols").updateOne(new Document("symbolId", CodeFactId.from(identity).value()), new Document("$unset", new Document("mapperStatementKind", "")));
+                assertThatThrownBy(() -> reader.get(source, CodeFactId.from(identity))).isInstanceOf(IndexContractMismatchException.class);
             }
-            assertThat(generationFileFilters).hasSize(2).allSatisfy(filter -> {
-                assertThat(filter.toJson()).contains("scopeUsable", "scopeClassKeys", "InternalPaymentService");
-            });
         }
     }
 
-    private static void seedSearch(MongoTemplate template, CodeFactIdentity identity, String authority, List<String> tokens) {
-        CodeFactScope scope = CodeFactScope.from(identity);
-        String displayName = identity.canonicalIdentity() instanceof RelationIdentity relation
-                ? ((RelationTarget.External) relation.target()).target().canonicalForm()
-                : scope.methodName().orElse(scope.className());
-        String signature = identity.canonicalIdentity() instanceof MethodTarget method
-                ? method.methodName() + "(" + String.join(", ", method.parameterTypes()) + ")" : "";
-        template.getCollection("search").insertOne(new Document("repoId", "orders").append("generationId", "g1")
-                .append("factId", CodeFactId.from(identity).value()).append("kind", identity.kind().name())
-                .append("tokens", tokens).append("package", scope.packageName()).append("authority", authority)
-                .append("canonical", identity.canonicalForm()).append("displayName", displayName)
-                .append("signature", signature)
-                .append("scopePackage", scope.packageName())
-                .append("scopeClass", scope.className()).append("scopeMethod", scope.methodName().orElse(""))
-                .append("scopeParameters", scope.parameterTypes()).append("scopePath", scope.sourcePath().orElse("")));
+    @Test
+    void nonmapper_declaration_rejects_mapper_operation_payload() {
+        try (PublishedMongoLifecycle lifecycle = PublishedMongoLifecycle.start(); PublishedMongoLifecycle.Invocation invocation = lifecycle.openInvocation()) {
+            MongoTemplate template = invocation.template(); seedCurrent(template, "orders"); seedSource(template, PATH, "class Payment {}\n");
+            CodeFactIdentity identity = methodIdentity("example", "Payment", "charge", PATH); seedMethod(template, identity, List.of());
+            CodeFactReadService reader = new CodeFactReadService(template, guard(template, policy()), Duration.ofSeconds(2));
+            SelectedGenerationGuard.SourceContext source = admitted(template, policy(), SelectedGenerationGuard.SOURCES).source();
+            template.getCollection("symbols").updateOne(new Document("symbolId", CodeFactId.from(identity).value()),
+                    new Document("$set", new Document("mapperStatementKind", "UPDATE")));
+            assertThatThrownBy(() -> reader.getAllByIdentity(source, Set.of(identity))).isInstanceOf(IndexContractMismatchException.class);
+        }
+    }
+
+    @Test
+    void small_semantic_page_batches_authority_and_membership_without_body_or_manifest_reads() {
+        try (PublishedMongoLifecycle lifecycle = PublishedMongoLifecycle.start(); PublishedMongoLifecycle.Invocation invocation = lifecycle.openInvocation()) {
+            MongoTemplate template = invocation.template(); seedCurrent(template, "orders"); seedSource(template, PATH, "class Payment {}\n");
+            for (int index = 0; index < 25; index++) {
+                String name = "findPayment" + String.format(java.util.Locale.ROOT, "%02d", index);
+                CodeFactIdentity identity = methodIdentity("example", "Payment", name, PATH);
+                seedMethod(template, identity, List.of()); seedSearch(template, identity, "SYMBOLS", List.of("find", "payment"));
+            }
+            java.util.concurrent.CopyOnWriteArrayList<org.bson.BsonDocument> commands = new java.util.concurrent.CopyOnWriteArrayList<>();
+            com.mongodb.event.CommandListener listener = new com.mongodb.event.CommandListener() {
+                @Override public void commandStarted(com.mongodb.event.CommandStartedEvent event) {
+                    if (event.getCommandName().equals("find")) commands.add(event.getCommand().clone());
+                }
+            };
+            com.mongodb.MongoClientSettings settings = com.mongodb.MongoClientSettings.builder()
+                    .applyConnectionString(new com.mongodb.ConnectionString(lifecycle.connectionString())).addCommandListener(listener).build();
+            try (com.mongodb.client.MongoClient client = com.mongodb.client.MongoClients.create(settings)) {
+                MongoTemplate observed = new MongoTemplate(client, invocation.databaseName());
+                SelectedSemanticQueryService service = semantic(observed, policy());
+                SearchCodeRequest request = search("findPayment", Optional.empty(), 20);
+                ReadContextSelector.AdmittedContext context = admitted(observed, policy(), service.searchRequirements(request));
+                commands.clear();
+                FactCollection result = service.searchCode(context, request);
+                assertThat(result.items()).extracting(CompactFact::displayName).containsExactly(
+                        "findPayment00", "findPayment01", "findPayment02", "findPayment03", "findPayment04",
+                        "findPayment05", "findPayment06", "findPayment07", "findPayment08", "findPayment09",
+                        "findPayment10", "findPayment11", "findPayment12", "findPayment13", "findPayment14",
+                        "findPayment15", "findPayment16", "findPayment17", "findPayment18", "findPayment19");
+                assertThat(result.page().hasMore()).isTrue();
+                assertThat(commands).noneSatisfy(command -> assertThat(command.getString("find").getValue())
+                        .isIn("generation_manifests", "git_evidence_manifests", "source_artifacts", "git_snapshot_chunks"));
+                assertThat(commands.stream().filter(command -> command.getString("find").getValue().equals("symbols")).toList()).hasSize(1);
+                assertThat(commands.stream().filter(command -> command.getString("find").getValue().equals("generation_files")).toList()).hasSize(1);
+                assertThat(commands.stream().filter(command -> command.getString("find").getValue().equals("git_snapshot_files")).toList()).hasSize(1);
+                for (org.bson.BsonDocument command : commands) assertThat(command.getNumber("limit").longValue()).isBetween(1L, 100L);
+            }
+        }
+    }
+
+    private static SearchCodeRequest search(String query, Optional<String> cursor, int limit) {
+        return new SearchCodeRequest(ReadContext.current("orders", REVISION), query, Set.of(CodeFactKind.METHOD), Optional.empty(), Optional.of(PATH), new PageRequest(cursor, limit));
     }
 }

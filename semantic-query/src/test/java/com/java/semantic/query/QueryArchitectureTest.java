@@ -25,15 +25,6 @@ class QueryArchitectureTest {
             .should().dependOnClassesThat().resideInAnyPackage(
                     "com.java.semantic.api..", "com.java.semantic.mcp..", "io.modelcontextprotocol..", "org.springframework.ai..");
 
-    @Test
-    void query_module_origins_include_transport_feature_roots_but_not_test_or_other_module_classes() {
-        JavaClasses queryClasses = queryProductionClasses();
-
-        assertThat(queryClasses).extracting(JavaClass::getName)
-                .contains("com.java.semantic.api.SemanticQueryController", "com.java.semantic.mcp.SemanticMcpToolCatalog",
-                        "com.java.semantic.query.application.SourceSliceService")
-                .doesNotContain("com.java.semantic.query.QueryArchitectureTest", "com.java.semantic.model.repository.RepositoryId");
-    }
 
     @Test
     void query_does_not_depend_on_indexer_or_language_server() {

@@ -16,6 +16,9 @@ import com.java.semantic.model.index.GenerationWriteState;
 import com.java.semantic.model.index.IndexCollections;
 import com.java.semantic.model.index.IndexSchemaContract;
 import com.java.semantic.model.index.SourceArtifactDocument;
+import com.java.semantic.model.codefact.CodeFactId;
+import com.java.semantic.model.codefact.MapperStatementKind;
+import com.java.semantic.model.index.SymbolDocument;
 import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.model.repository.RepositoryRevision;
 import com.java.semantic.indexer.job.IndexJob;
@@ -55,6 +58,67 @@ class IncrementalGenerationBuilderIT {
 
     @TempDir
     Path temporaryDirectory;
+
+    @Test
+    void copied_mapper_symbols_retain_operations_and_revision_authority_and_reject_missing_payload() throws Exception {
+        Path mapperSource = temporaryDirectory.resolve("src/main/resources/mapper/OrderMapper.xml");
+        Files.createDirectories(mapperSource.getParent());
+        Files.createDirectories(temporaryDirectory.resolve("src/main/java"));
+        Files.writeString(mapperSource, """
+                <mapper namespace="orders.OrderMapper">
+                  <select id="find">select 1</select>
+                  <update id="change">update orders set status = 1</update>
+                </mapper>
+                """);
+        FullIndexPlan plan = new FullIndexPlanner().plan(temporaryDirectory);
+        List<SourceIndexBatch> batches = new TestSyntaxRepositoryIndexExporter().export(RepositoryId.of("orders"),
+                GenerationValidatorIT.revision(), GenerationValidatorIT.lease().generationId(), plan);
+        SourceIndexBatch parentBatch = batches.getFirst();
+        try (MongoDBContainer container = new MongoDBContainer("mongo:8.0.4")) {
+            container.start();
+            MongoTemplate template = new MongoTemplate(MongoClients.create(container.getConnectionString()), "semantic");
+            new IndexSchemaBootstrap(template).bootstrap();
+            GenerationValidatorIT.seedWritingGeneration(template, parentBatch);
+            MongoGenerationWriter writer = new MongoGenerationWriter(template);
+            SourceIndexBatchDocumentMapper mapper = new SourceIndexBatchDocumentMapper(template.getConverter());
+            GenerationValidator validator = new GenerationValidator(template);
+            GenerationValidator.ValidationResult validated = validator.validate(GenerationValidatorIT.lease(),
+                    GenerationValidatorIT.revision(), GenerationValidatorIT.revision(), plan);
+            assertThat(validated.valid()).as("valid mapper parent: %s", validated.issues()).isTrue();
+            validator.recordValid(GenerationValidatorIT.lease(), validated);
+            writer.seal(GenerationValidatorIT.lease(), validated.identityDigest().value());
+            publishParent(template, validated.identityDigest().value());
+            GenerationWriteContext child = childLease(template);
+            insertChildManifest(template, child);
+            ParentGenerationCopier copier = new ParentGenerationCopier(template, writer);
+            Document parentFilter = new Document("generationId", "g1").append("sourcePath", parentBatch.sourcePath());
+            template.getCollection(IndexCollections.SYMBOLS).updateMany(parentFilter,
+                    new Document("$unset", new Document("mapperStatementKind", "")));
+            org.assertj.core.api.Assertions.assertThatThrownBy(() -> copier.copy(child, new GenerationId("g1"),
+                    GenerationValidatorIT.revision(), new RepositoryRevision("b".repeat(40)), List.of(parentBatch.sourcePath())))
+                    .isInstanceOf(RuntimeException.class);
+            assertThat(template.getCollection(IndexCollections.SYMBOLS).countDocuments(new Document("generationId", "g2"))).isZero();
+            for (SymbolDocument symbol : parentBatch.symbols()) {
+                template.getCollection(IndexCollections.SYMBOLS).updateOne(new Document("symbolId", symbol.fact().id().value()),
+                        new Document("$set", new Document("mapperStatementKind", symbol.mapperStatementKind().orElseThrow().name())));
+            }
+            RepositoryRevision targetRevision = new RepositoryRevision("b".repeat(40));
+            copier.copy(child, new GenerationId("g1"), GenerationValidatorIT.revision(), targetRevision, List.of(parentBatch.sourcePath()));
+            List<SymbolDocument> copied = template.getCollection(IndexCollections.SYMBOLS)
+                    .find(new Document("generationId", "g2")).map(mapper::reconstructSymbol).into(new java.util.ArrayList<>());
+            assertThat(copied).extracting(symbol -> symbol.mapperStatementKind().orElseThrow())
+                    .containsExactlyInAnyOrder(MapperStatementKind.SELECT, MapperStatementKind.UPDATE);
+            for (SymbolDocument symbol : copied) {
+                SymbolDocument parent = parentBatch.symbols().stream().filter(candidate -> candidate.name().equals(symbol.name()))
+                        .findFirst().orElseThrow();
+                assertThat(symbol.fact().identity().repositoryRevision()).isEqualTo(targetRevision);
+                assertThat(symbol.fact().identity().canonicalIdentity()).isEqualTo(parent.fact().identity().canonicalIdentity());
+                assertThat(symbol.fact().id()).isEqualTo(CodeFactId.from(symbol.fact().identity())).isNotEqualTo(parent.fact().id());
+                assertThat(symbol.sourceArtifactId()).isEqualTo(parent.sourceArtifactId());
+                assertThat(symbol.range()).isEqualTo(parent.range());
+            }
+        }
+    }
 
     @Test
     void rebuilds_selected_sources_when_parent_analysis_fingerprint_differs() throws Exception {

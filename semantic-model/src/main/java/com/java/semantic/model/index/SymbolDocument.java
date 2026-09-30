@@ -4,12 +4,14 @@ import com.java.semantic.model.codefact.AnnotationFact;
 import com.java.semantic.model.codefact.CodeFact;
 import com.java.semantic.model.codefact.CodeFactKind;
 import com.java.semantic.model.codefact.DeclaredType;
+import com.java.semantic.model.codefact.MapperStatementKind;
 import com.java.semantic.model.codefact.SourceRange;
 import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.model.support.ModelValidation;
 
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 
 public record SymbolDocument(
@@ -24,7 +26,8 @@ public record SymbolDocument(
         Set<String> modifiers,
         List<AnnotationFact> annotations,
         SourceArtifactId sourceArtifactId,
-        SourceRange range) {
+        SourceRange range,
+        Optional<MapperStatementKind> mapperStatementKind) {
 
     public SymbolDocument {
         repositoryId = Objects.requireNonNull(repositoryId, "repository id is required");
@@ -48,5 +51,8 @@ public record SymbolDocument(
         annotations = List.copyOf(Objects.requireNonNull(annotations, "annotations are required"));
         sourceArtifactId = Objects.requireNonNull(sourceArtifactId, "source artifact id is required");
         range = Objects.requireNonNull(range, "source range is required");
+        mapperStatementKind = Objects.requireNonNull(mapperStatementKind, "mapper statement kind is required");
+        ModelValidation.require((kind == CodeFactKind.MAPPER_STATEMENT) == mapperStatementKind.isPresent(),
+                "mapper statement metadata must match symbol kind");
     }
 }

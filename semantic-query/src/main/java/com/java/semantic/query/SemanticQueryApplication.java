@@ -11,22 +11,13 @@ import org.springframework.data.mongodb.core.convert.MongoCustomConversions;
 
 import com.java.semantic.query.application.CurrentGenerationSelector;
 import com.java.semantic.query.application.SelectedGenerationGuard;
-import com.java.semantic.query.application.ReviewGenerationSelector;
+import com.java.semantic.query.application.ReadContextSelector;
+import com.java.semantic.query.application.CodeFactReadService;
+import com.java.semantic.query.application.ContextDiscoveryService;
 import com.java.semantic.query.application.ReviewManifestReadService;
 import com.java.semantic.query.application.GitEvidenceReadService;
-import com.java.semantic.query.application.CurrentRepositoryQueryService;
-import com.java.semantic.query.application.CurrentSourceQueryService;
-import com.java.semantic.query.application.CurrentSymbolQueryService;
-import com.java.semantic.query.application.CodeFactReadService;
-import com.java.semantic.query.application.CodeFactSearchService;
-import com.java.semantic.query.application.PublishedDiscoveryQueryService;
-import com.java.semantic.query.application.PublishedEntryPointQueryService;
-import com.java.semantic.query.application.PublishedRelationQueryService;
-import com.java.semantic.query.application.SourceSliceService;
 import com.java.semantic.query.application.SemanticQueryFacade;
 import com.java.semantic.query.application.SelectedSemanticQueryService;
-import com.java.semantic.query.application.ReviewQueryFacade;
-import com.java.semantic.query.application.SourceIndexCoverageReader;
 import com.java.semantic.query.config.ConfiguredReadPolicy;
 import com.java.semantic.query.config.GitEvidenceProperties;
 import com.java.semantic.query.config.ReadPolicyProperties;
@@ -71,25 +62,16 @@ public class SemanticQueryApplication {
     }
 
     @Bean
-    ReviewGenerationSelector reviewGenerationSelector(ReviewManifestReadService reviews, SelectedGenerationGuard guard) {
-        return new ReviewGenerationSelector(reviews, guard);
+    ReadContextSelector readContextSelector(CurrentGenerationSelector current, ReviewManifestReadService reviews,
+            SelectedGenerationGuard guard, ConfiguredReadPolicy policy) {
+        return new ReadContextSelector(current, reviews, guard, policy);
     }
 
     @Bean
-    CurrentRepositoryQueryService currentRepositoryQueryService(CurrentGenerationSelector selector) {
-        return new CurrentRepositoryQueryService(selector);
-    }
-
-    @Bean
-    CurrentSourceQueryService currentSourceQueryService(MongoTemplate template, SelectedGenerationGuard guard,
-                                                         SemanticQueryProperties properties) {
-        return new CurrentSourceQueryService(template, guard, properties.storageTimeout());
-    }
-
-    @Bean
-    CurrentSymbolQueryService currentSymbolQueryService(MongoTemplate template, SelectedGenerationGuard guard,
-                                                         SemanticQueryProperties properties) {
-        return new CurrentSymbolQueryService(template, guard, properties.storageTimeout());
+    ContextDiscoveryService contextDiscoveryService(MongoTemplate template, ConfiguredReadPolicy policy,
+            SemanticQueryProperties properties, CurrentGenerationSelector current, ReadContextSelector contexts,
+            ReviewManifestReadService reviews) {
+        return new ContextDiscoveryService(template, policy, properties.storageTimeout(), current, contexts, reviews);
     }
 
     @Bean
@@ -98,69 +80,21 @@ public class SemanticQueryApplication {
     }
 
     @Bean
-    CodeFactSearchService codeFactSearchService(MongoTemplate template, SelectedGenerationGuard guard, SemanticQueryProperties properties) {
-        return new CodeFactSearchService(template, guard, properties.storageTimeout());
-    }
-
-    @Bean
-    PublishedDiscoveryQueryService publishedDiscoveryQueryService(MongoTemplate template, SelectedGenerationGuard guard,
-                                                                   SemanticQueryProperties properties) {
-        return new PublishedDiscoveryQueryService(template, guard, properties.storageTimeout());
-    }
-
-    @Bean
-    PublishedEntryPointQueryService publishedEntryPointQueryService(MongoTemplate template, SelectedGenerationGuard guard,
-                                                                     SemanticQueryProperties properties) {
-        return new PublishedEntryPointQueryService(template, guard, properties.storageTimeout());
-    }
-
-    @Bean
-    PublishedRelationQueryService publishedRelationQueryService(MongoTemplate template, SelectedGenerationGuard guard,
-                                                                SemanticQueryProperties properties) {
-        return new PublishedRelationQueryService(template, guard, properties.storageTimeout());
-    }
-
-    @Bean
-    SourceSliceService sourceSliceService(CurrentSourceQueryService sourceQueryService,
-                                          CodeFactReadService codeFactReadService) {
-        return new SourceSliceService(sourceQueryService, codeFactReadService);
-    }
-
-    @Bean
-    SelectedSemanticQueryService selectedSemanticQueryService(CodeFactSearchService codeFactSearchService,
-                                                              SourceSliceService sourceSliceService,
-                                                              CodeFactReadService codeFactReadService,
-                                                              PublishedDiscoveryQueryService discoveryQueryService,
-                                                              PublishedEntryPointQueryService entryPointQueryService,
-                                                              PublishedRelationQueryService relationQueryService) {
-        return new SelectedSemanticQueryService(codeFactSearchService, sourceSliceService, codeFactReadService,
-                discoveryQueryService, entryPointQueryService, relationQueryService);
-    }
-
-    @Bean
-    SourceIndexCoverageReader sourceIndexCoverageReader(MongoTemplate template, SemanticQueryProperties properties) {
-        return new SourceIndexCoverageReader(template, properties.storageTimeout());
-    }
-
-    @Bean
-    ReviewQueryFacade reviewQueryFacade(ReviewGenerationSelector selector, ReviewManifestReadService manifests,
-                                        SelectedSemanticQueryService selectedQueries, SelectedGenerationGuard guard,
-                                        SourceIndexCoverageReader coverageReader) {
-        return new ReviewQueryFacade(selector, manifests, selectedQueries, guard, coverageReader);
-    }
-
-    @Bean
-    SemanticQueryFacade semanticQueryFacade(CurrentGenerationSelector selector,
-                                            SelectedSemanticQueryService selectedQueries,
-                                            CurrentRepositoryQueryService repositoryQueryService,
-                                            GitEvidenceReadService gitEvidenceReadService) {
-        return new SemanticQueryFacade(selector, selectedQueries, repositoryQueryService, gitEvidenceReadService);
+    SelectedSemanticQueryService selectedSemanticQueryService(MongoTemplate template, SelectedGenerationGuard guard,
+            SemanticQueryProperties properties, CodeFactReadService facts) {
+        return new SelectedSemanticQueryService(template, guard, properties.storageTimeout(), facts);
     }
 
     @Bean
     GitEvidenceReadService gitEvidenceReadService(MongoTemplate template, ConfiguredReadPolicy policy,
-                                                  SemanticQueryProperties properties, ReviewManifestReadService reviews) {
-        return new GitEvidenceReadService(template, policy, properties.storageTimeout(), reviews);
+            SemanticQueryProperties properties, CodeFactReadService facts) {
+        return new GitEvidenceReadService(template, policy, properties.storageTimeout(), facts);
+    }
+
+    @Bean
+    SemanticQueryFacade semanticQueryFacade(ContextDiscoveryService discovery, ReadContextSelector contexts,
+            SelectedSemanticQueryService semantic, GitEvidenceReadService evidence) {
+        return new SemanticQueryFacade(discovery, contexts, semantic, evidence);
     }
     @Bean
     ApplicationRunner semanticIndexSchemaGate(MongoTemplate template, SemanticQueryProperties properties) {

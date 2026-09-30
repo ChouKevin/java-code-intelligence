@@ -115,7 +115,7 @@ public final class ReviewPublicationStore {
         return new Document("repoId", manifest.repositoryId().value()).append("reviewId", manifest.reviewId().value())
                 .append("ownerJobId", manifest.ownerJobId()).append("reviewContractVersion", manifest.reviewContractVersion())
                 .append("state", manifest.state().name()).append("selection", selectionDocument(manifest.selection()))
-                .append("selectionKey", selectionKey(manifest.selection()))
+                .append("selectionKey", manifest.selection().selectionKey())
                 .append("createdAt", Date.from(manifest.createdAt()));
     }
 
@@ -162,11 +162,6 @@ public final class ReviewPublicationStore {
                     .append("afterRevision", selection.afterRevision().value());
         }
         return document;
-    }
-
-    private static String selectionKey(ReviewSelection selection) {
-        return selection.kind().name() + ":" + selection.beforeRevision().map(RepositoryRevision::value).orElse("")
-                + ":" + selection.afterRevision().value();
     }
 
     private static ReviewSelection selectionFrom(Document document) {

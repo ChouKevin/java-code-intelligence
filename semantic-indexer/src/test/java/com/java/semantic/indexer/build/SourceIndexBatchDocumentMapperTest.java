@@ -240,7 +240,7 @@ class SourceIndexBatchDocumentMapperTest {
         MethodTarget target = (MethodTarget) identity.canonicalIdentity();
         return new SymbolDocument(repositoryId(), generationId(), new CodeFact(CodeFactId.from(identity), identity), CodeFactKind.METHOD,
                 target.sourceType().fullyQualifiedName(), target.methodName(), target.canonicalForm(), new DeclaredType("void"),
-                java.util.Set.of(), List.of(), artifact.id(), sourceRange());
+                java.util.Set.of(), List.of(), artifact.id(), sourceRange(), Optional.empty());
     }
 
     private static EntryPointDocument mqEntryPoint() {

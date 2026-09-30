@@ -30,16 +30,22 @@ class SemanticQueryErrorMapperTest {
     void maps_missing_fact_to_safe_not_found_error() {
         SemanticQueryError error = mapper.map(new CodeFactNotFoundException());
 
-        assertEquals(new SemanticQueryError("FACT_NOT_FOUND", "The requested fact was not found.", false, Optional.empty()), error);
+        assertEquals("FACT_NOT_FOUND", error.code());
+        assertFalse(error.retryable());
+        assertTrue(error.currentRevision().isEmpty());
     }
 
     @Test
     void collapses_index_contract_and_storage_failures_without_internal_details() {
         SemanticQueryError contract = mapper.map(new IndexContractMismatchException());
         SemanticQueryError storage = mapper.map(new SemanticIndexUnavailableException(new IllegalStateException("mongo secret host")));
+        SemanticQueryError nativeStorage = mapper.map(new com.mongodb.MongoException("mongo secret host"));
+        SemanticQueryError springStorage = mapper.map(new org.springframework.dao.DataAccessResourceFailureException("password"));
 
         assertEquals("INDEX_UNAVAILABLE", contract.code());
         assertEquals(contract, storage);
+        assertEquals(storage, nativeStorage);
+        assertEquals(storage, springStorage);
         assertTrue(contract.retryable());
         assertFalse(contract.message().contains("mongo"));
         assertEquals(Optional.empty(), contract.currentRevision());
@@ -56,5 +62,8 @@ class SemanticQueryErrorMapperTest {
         assertEquals(List.of("REVIEW_NOT_FOUND", "REVIEW_NOT_READY", "REVIEW_FAILED", "REVIEW_CONTEXT_MISMATCH"),
                 errors.stream().map(SemanticQueryError::code).toList());
         assertEquals(List.of(false, true, false, false), errors.stream().map(SemanticQueryError::retryable).toList());
+        SemanticQueryError metadata = mapper.map(new MetadataNotPreparedException());
+        assertEquals("METADATA_NOT_PREPARED", metadata.code());
+        assertFalse(metadata.retryable());
     }
 }

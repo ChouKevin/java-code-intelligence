@@ -18,7 +18,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
-/** Explicit syntax-only test fixture. It must never be used to seal a generation. */
+/** Syntax-only projection fixture; storage tests supply synthetic analysis evidence, not a real JDT LS proof. */
 final class TestSyntaxRepositoryIndexExporter {
     private final JdtSyntaxExtractionService extraction = new JdtSyntaxExtractionService();
     private final SyntaxSymbolProjector symbols = new SyntaxSymbolProjector();

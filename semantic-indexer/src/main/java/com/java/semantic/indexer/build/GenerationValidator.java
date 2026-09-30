@@ -609,7 +609,7 @@ public final class GenerationValidator {
         List<StoredSymbol> symbols = new ArrayList<>();
         for (Document document : symbolDocuments) {
             try {
-                SymbolDocument symbol = template.getConverter().read(SymbolDocument.class, document);
+                SymbolDocument symbol = projectionMapper.reconstructSymbol(document);
                 validateScope(context, requestedRevision, symbol.repositoryId().value(), symbol.generationId().value(),
                         symbol.fact().identity().repositoryRevision(), issues);
                 if (!symbol.fact().id().value().equals(document.getString("symbolId"))

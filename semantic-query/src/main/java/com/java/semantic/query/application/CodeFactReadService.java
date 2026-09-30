@@ -6,7 +6,6 @@ import com.java.semantic.model.codefact.CodeFactDetails;
 import com.java.semantic.model.codefact.CodeFactId;
 import com.java.semantic.model.codefact.CodeFactIdentity;
 import com.java.semantic.model.codefact.CodeFactKind;
-import com.java.semantic.model.codefact.CodeFactReadQuery;
 import com.java.semantic.model.codefact.CodeFactScope;
 import com.java.semantic.model.codefact.RelationIdentity;
 import com.java.semantic.model.codefact.SourceRange;
@@ -19,9 +18,9 @@ import com.java.semantic.model.index.RelationDocument;
 import com.java.semantic.model.index.SourceArtifactId;
 import com.java.semantic.model.index.SymbolDocument;
 import com.java.semantic.model.index.persistence.EntryPointPersistence;
+import com.java.semantic.model.index.persistence.SymbolPersistence;
 import com.java.semantic.model.query.SelectedGeneration;
 import com.java.semantic.model.repository.RepositoryId;
-import com.java.semantic.query.config.SearchAccessPlan;
 import com.mongodb.MongoException;
 import com.mongodb.client.model.Filters;
 import org.bson.Document;
@@ -37,6 +36,13 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.Map;
+import java.util.HashMap;
+import java.util.HashSet;
+import com.java.semantic.model.index.GenerationFileDocument;
+import com.java.semantic.query.application.SelectedGenerationGuard.SourceContext;
+import com.mongodb.client.model.Projections;
+import com.mongodb.client.model.Sorts;
 import java.util.concurrent.TimeUnit;
 
 /** Resolves derived search rows to their one authoritative selected-generation fact. */
@@ -51,117 +57,224 @@ public final class CodeFactReadService {
         this.storageTimeout = Objects.requireNonNull(storageTimeout, "storage timeout is required");
     }
 
+    public CodeFactDetails get(SourceContext source, CodeFactId id) {
+        return getAll(source, Set.of(id)).get(id);
+    }
 
-    public CodeFactDetails get(SelectedGeneration context, CodeFactReadQuery query) {
-        SelectedGeneration selected = Objects.requireNonNull(context, "selected generation is required");
-        CodeFactReadQuery request = Objects.requireNonNull(query, "code fact read query is required");
-        if (!selected.repositoryId().equals(request.repositoryId()) || !selected.revision().equals(request.revision())) {
-            throw new IllegalArgumentException("query repository and revision must match the selected generation");
-        }
-        SearchAccessPlan accessPlan = guard.searchAccessPlan(request.repositoryId().value());
-        guard.require(selected, new ProjectionRequirements(EnumSet.of(ProjectionName.SEARCH)));
+    public Map<CodeFactId, CodeFactDetails> getAll(SourceContext source, Set<CodeFactId> ids) {
+        source.requireProjections(new ProjectionRequirements(Set.of(ProjectionName.SEARCH)));
+        if (ids.isEmpty()) return Map.of();
         try {
-            Bson filter = accessPlan.authorized(Filters.and(Filters.eq("repoId", selected.repositoryId().value()),
-                    Filters.eq("generationId", selected.generationId().value()), Filters.eq("factId", request.factId().value())));
-            Document row = template.getCollection(IndexCollections.SEARCH).find(filter)
-                    .maxTime(storageTimeout.toMillis(), TimeUnit.MILLISECONDS).first();
-            if (Objects.isNull(row)) { throw new CodeFactNotFoundException(); }
-            SearchRow search = searchRow(row, selected);
-            guard.require(selected, requirementsForSearchKinds(Set.of(search.kind())));
-            CodeFactDetails details = authoritative(selected, search.kind(), search.factId());
-            verifySearchRow(search, details, selected);
-            guard.requireVisible(selected, details.fact().identity());
-            return details;
+            List<Document> rows = template.getCollection(IndexCollections.SEARCH).find(
+                    guard.searchAccessPlan(source.selected().repositoryId().value()).authorized(Filters.and(
+                            base(source), Filters.in("factId", ids.stream().map(CodeFactId::value).toList()))))
+                    .limit(ids.size()).maxTime(storageTimeout.toMillis(), TimeUnit.MILLISECONDS).into(new ArrayList<>());
+            if (rows.size() != ids.size()) throw new CodeFactNotFoundException();
+            return authoritativeAll(source, rows);
         } catch (MongoException | DataAccessException exception) {
             throw new SemanticIndexUnavailableException(exception);
-        } catch (RepositoryNotFoundException | CodeFactNotFoundException | IndexContractMismatchException exception) {
-            throw exception;
-        } catch (RuntimeException exception) {
-            throw new IndexContractMismatchException();
         }
     }
 
-    /** Internal exact-identity helper for source slices that have not yet been handed a search hit. */
-    CodeFactDetails get(SelectedGeneration context, CodeFactIdentity identity) {
-        SelectedGeneration selected = Objects.requireNonNull(context, "selected generation is required");
-        CodeFactIdentity expectedIdentity = Objects.requireNonNull(identity, "code fact identity is required");
-        guard.requireVisible(selected, expectedIdentity);
-        guard.require(selected, requirementsForSearchKinds(Set.of(expectedIdentity.kind())));
+    Map<CodeFactId, CodeFactDetails> authoritativeAll(SourceContext source, List<Document> rows) {
+        Map<CodeFactId, CodeFactKind> requested = new HashMap<>();
+        List<SearchRow> searches = new ArrayList<>(rows.size());
+        for (Document row : rows) {
+            SearchRow search = searchRow(row, source.selected());
+            if (Objects.nonNull(requested.put(search.factId(), search.kind()))) throw new IndexContractMismatchException();
+            searches.add(search);
+        }
+        Map<CodeFactId, CodeFactDetails> result = resolve(source, requested);
+        for (SearchRow search : searches) verifySearchRow(search, result.get(search.factId()), source.selected());
+        return result;
+    }
+
+    public Map<CodeFactIdentity, CodeFactDetails> getAllByIdentity(SourceContext source, Set<CodeFactIdentity> identities) {
+        Map<CodeFactId, CodeFactKind> requested = new HashMap<>();
+        for (CodeFactIdentity identity : identities) {
+            if (!source.selected().repositoryId().equals(identity.repositoryId())
+                    || !source.selected().revision().equals(identity.repositoryRevision())) throw new IndexContractMismatchException();
+            guard.requireVisible(source.selected(), identity);
+            requested.put(CodeFactId.from(identity), identity.kind());
+        }
+        Map<CodeFactId, CodeFactDetails> resolved = resolve(source, requested);
+        Map<CodeFactIdentity, CodeFactDetails> result = new HashMap<>();
+        for (CodeFactIdentity identity : identities) {
+            CodeFactDetails details = resolved.get(CodeFactId.from(identity));
+            if (!identity.equals(details.fact().identity())) throw new IndexContractMismatchException();
+            result.put(identity, details);
+        }
+        return Map.copyOf(result);
+    }
+
+    private Map<CodeFactId, CodeFactDetails> resolve(SourceContext source, Map<CodeFactId, CodeFactKind> requested) {
+        Map<CodeFactId, CodeFactDetails> result = new HashMap<>();
+        List<StoredFact> stored = new ArrayList<>();
         try {
-            CodeFactDetails details = authoritative(selected, expectedIdentity.kind(), CodeFactId.from(expectedIdentity));
-            if (!expectedIdentity.equals(details.fact().identity())) { throw new IndexContractMismatchException(); }
-            return details;
+            for (ProjectionName authority : List.of(ProjectionName.SYMBOLS, ProjectionName.RELATIONS, ProjectionName.ENTRY_POINTS)) {
+                List<String> ids = requested.entrySet().stream().filter(entry -> authorityFor(entry.getValue()) == authority)
+                        .map(entry -> entry.getKey().value()).toList();
+                if (ids.isEmpty()) continue;
+                source.requireProjections(new ProjectionRequirements(Set.of(authority)));
+                String collection = collection(authority);
+                String key = authorityKey(authority);
+                for (Document row : template.getCollection(collection).find(Filters.and(base(source), Filters.in(key, ids)))
+                        .limit(ids.size()).maxTime(storageTimeout.toMillis(), TimeUnit.MILLISECONDS)) {
+                    StoredFact fact = storedFact(source, authority, row);
+                    if (!requested.containsKey(fact.details().fact().id())
+                            || requested.get(fact.details().fact().id()) != fact.details().fact().identity().kind()
+                            || Objects.nonNull(result.put(fact.details().fact().id(), fact.details()))) throw new IndexContractMismatchException();
+                    guard.requireVisible(source.selected(), fact.details().fact().identity());
+                    stored.add(fact);
+                }
+            }
+            if (result.size() != requested.size()) throw new CodeFactNotFoundException();
+            validateSources(source, stored);
+            return Map.copyOf(result);
         } catch (MongoException | DataAccessException exception) {
             throw new SemanticIndexUnavailableException(exception);
-        } catch (CodeFactNotFoundException | IndexContractMismatchException exception) {
-            throw exception;
-        } catch (RuntimeException exception) {
-            throw new IndexContractMismatchException();
         }
     }
 
-    CodeFactDetails authoritative(Document row, SelectedGeneration current) {
-        SelectedGeneration selected = Objects.requireNonNull(current, "selected generation is required");
-        try {
-            SearchRow search = searchRow(row, selected);
-            CodeFactDetails details = authoritative(selected, search.kind(), search.factId());
-            verifySearchRow(search, details, selected);
-            return details;
-        } catch (CodeFactNotFoundException | IndexContractMismatchException exception) {
-            throw exception;
-        } catch (RuntimeException exception) {
-            throw new IndexContractMismatchException();
-        }
-    }
-
-    static ProjectionRequirements requirementsForSearchKinds(Set<CodeFactKind> requestedKinds) {
-        Set<CodeFactKind> kinds = Objects.requireNonNull(requestedKinds, "requested kinds are required");
-        EnumSet<ProjectionName> projections = EnumSet.of(ProjectionName.SEARCH);
-        Set<CodeFactKind> effectiveKinds = kinds.isEmpty() ? EnumSet.allOf(CodeFactKind.class) : kinds;
-        for (CodeFactKind kind : effectiveKinds) {
-            projections.add(authorityFor(kind));
-        }
-        return new ProjectionRequirements(projections);
-    }
-
-    private CodeFactDetails authoritative(SelectedGeneration current, CodeFactKind kind, CodeFactId id) {
-        return switch (authorityFor(kind)) {
-            case SYMBOLS -> symbol(current, id);
-            case RELATIONS -> relation(current, id);
-            case ENTRY_POINTS -> entryPoint(current, id);
+    StoredFact storedFact(SourceContext source, ProjectionName authority, Document row) {
+        SelectedGeneration selected = source.selected();
+        return switch (authority) {
+            case SYMBOLS -> {
+                SymbolDocument symbol = decode(row, selected, template);
+                verifyScope(row, symbol.fact().identity());
+                yield new StoredFact(new CodeFactDetails(selected, symbol.fact(), symbol.range(), symbol.annotations(),
+                        symbol.mapperStatementKind()), Optional.of(symbol.sourceArtifactId()));
+            }
+            case RELATIONS -> {
+                RelationDocument relation = decodeRelation(row, selected, template);
+                yield new StoredFact(new CodeFactDetails(selected, relation.fact(), relation.range(), List.of(), Optional.empty()),
+                        Optional.of(relation.sourceArtifactId()));
+            }
+            case ENTRY_POINTS -> storedEntryPoint(source, row, decodeEntryPoint(row, selected, template));
             default -> throw new IndexContractMismatchException();
         };
     }
 
-    private CodeFactDetails symbol(SelectedGeneration current, CodeFactId id) {
-        Document document = template.getCollection(IndexCollections.SYMBOLS).find(Filters.and(
-                Filters.eq("repoId", current.repositoryId().value()), Filters.eq("generationId", current.generationId().value()),
-                Filters.eq("symbolId", id.value()))).maxTime(storageTimeout.toMillis(), TimeUnit.MILLISECONDS).first();
-        if (Objects.isNull(document)) { throw new CodeFactNotFoundException(); }
-        SymbolDocument symbol = decode(document, current, template);
-        if (!id.equals(symbol.fact().id())) { throw new IndexContractMismatchException(); }
-        return new CodeFactDetails(current, symbol.fact(), symbol.range(), symbol.annotations());
+    StoredFact storedEntryPoint(SourceContext source, Document row, EntryPointDocument entry) {
+        verifyScope(row, entry.fact().identity());
+        if (!entry.method().canonicalForm().equals(requiredText(row, "method"))
+                || !entry.trigger().httpMethod().orElse("").equals(requiredString(row, "httpMethod"))
+                || !entry.trigger().httpPath().orElse("").equals(requiredString(row, "path"))) throw new IndexContractMismatchException();
+        return new StoredFact(new CodeFactDetails(source.selected(), entry.fact(), entry.range(), List.of(), Optional.empty()), Optional.empty());
     }
 
-    private CodeFactDetails relation(SelectedGeneration current, CodeFactId id) {
-        Document document = template.getCollection(IndexCollections.RELATIONS).find(Filters.and(
-                Filters.eq("repoId", current.repositoryId().value()), Filters.eq("generationId", current.generationId().value()),
-                Filters.eq("relationId", id.value()))).maxTime(storageTimeout.toMillis(), TimeUnit.MILLISECONDS).first();
-        if (Objects.isNull(document)) { throw new CodeFactNotFoundException(); }
-        RelationDocument relation = decodeRelation(document, current, template);
-        if (!id.equals(relation.fact().id())) { throw new IndexContractMismatchException(); }
-        return new CodeFactDetails(current, relation.fact(), relation.range(), List.of());
+    void validateSources(SourceContext source, List<StoredFact> facts) {
+        Set<String> paths = new HashSet<>();
+        for (StoredFact fact : facts) paths.add(fact.details().location().sourceFile());
+        Map<String, GenerationFileDocument> files = sourceFiles(source, paths);
+        for (StoredFact fact : facts) {
+            GenerationFileDocument file = files.get(fact.details().location().sourceFile());
+            if (fact.artifact().filter(artifact -> !file.sourceArtifactId().equals(artifact)).isPresent()) throw new IndexContractMismatchException();
+        }
     }
 
-    private CodeFactDetails entryPoint(SelectedGeneration current, CodeFactId id) {
-        Document document = template.getCollection(IndexCollections.ENTRY_POINTS).find(Filters.and(
-                Filters.eq("repoId", current.repositoryId().value()), Filters.eq("generationId", current.generationId().value()),
-                Filters.eq("entryPointId", id.value()))).maxTime(storageTimeout.toMillis(), TimeUnit.MILLISECONDS).first();
-        if (Objects.isNull(document)) { throw new CodeFactNotFoundException(); }
-        EntryPointDocument entryPoint = decodeEntryPoint(document, current, template);
-        if (!id.equals(entryPoint.fact().id())) { throw new IndexContractMismatchException(); }
-        return new CodeFactDetails(current, entryPoint.fact(), entryPoint.range(), List.of());
+    Map<String, GenerationFileDocument> sourceFiles(SourceContext source, Set<String> paths) {
+        source.requireProjections(new ProjectionRequirements(Set.of(ProjectionName.SOURCES)));
+        if (paths.isEmpty()) return Map.of();
+        Map<String, GenerationFileDocument> files = new HashMap<>();
+        try {
+            for (Document row : template.getCollection(IndexCollections.GENERATION_FILES)
+                    .find(Filters.and(base(source), Filters.in("sourcePath", paths))).limit(paths.size())
+                    .maxTime(storageTimeout.toMillis(), TimeUnit.MILLISECONDS)) {
+                Document converted = new Document(row);
+                converted.put("generationId", new Document("value", source.selected().generationId().value()));
+                GenerationFileDocument file;
+                try { file = template.getConverter().read(GenerationFileDocument.class, converted); }
+                catch (RuntimeException exception) { throw new IndexContractMismatchException(); }
+                if (!source.selected().repositoryId().equals(file.repositoryId())
+                        || !source.selected().generationId().equals(file.generationId())
+                        || !file.sourcePath().equals(requiredText(row, "sourcePath"))
+                        || !paths.contains(file.sourcePath()) || !source.policy().allowsCode(file.sourcePath())
+                        || !file.sourceArtifactId().value().equals(file.contentHash())
+                        || Objects.nonNull(files.put(file.sourcePath(), file))) throw new IndexContractMismatchException();
+            }
+            if (files.size() != paths.size()) throw new CodeFactNotFoundException();
+            Set<String> found = new HashSet<>();
+            for (Document row : template.getCollection(IndexCollections.GIT_SNAPSHOT_FILES).find(Filters.and(
+                    Filters.eq("repoId", source.selected().repositoryId().value()),
+                    Filters.eq("snapshotId", source.snapshot().snapshotId().value()), Filters.in("path", paths)))
+                    .projection(Projections.include("repoId", "snapshotId", "path", "mode", "contentKind", "contentStatus",
+                            "policyFingerprint", "checksum")).limit(paths.size())
+                    .maxTime(storageTimeout.toMillis(), TimeUnit.MILLISECONDS)) {
+                String path = requiredText(row, "path");
+                GenerationFileDocument file = files.get(path);
+                if (Objects.isNull(file) || !found.add(path) || !"CODE".equals(row.getString("contentKind"))
+                        || !"TEXT".equals(row.getString("contentStatus"))
+                        || !List.of("100644", "100755").contains(row.getString("mode"))
+                        || !source.fingerprint().equals(row.getString("policyFingerprint"))
+                        || !file.contentHash().equals(row.getString("checksum"))) throw new IndexContractMismatchException();
+            }
+            if (found.size() != paths.size()) throw new IndexContractMismatchException();
+            return Map.copyOf(files);
+        } catch (MongoException | DataAccessException exception) {
+            throw new SemanticIndexUnavailableException(exception);
+        }
     }
+
+    public void requireWholeSourceVisible(SourceContext source, String path) {
+        source.requireProjections(new ProjectionRequirements(Set.of(ProjectionName.SYMBOLS, ProjectionName.SOURCES)));
+        SourceArtifactId artifact = sourceFiles(source, Set.of(path)).get(path).sourceArtifactId();
+        String after = "";
+        try {
+            Bson wholeSource = guard.searchAccessPlan(source.selected().repositoryId().value()).authorizedSource(
+                    Filters.and(base(source), Filters.eq("sourcePath", path)));
+            if (Objects.isNull(template.getCollection(IndexCollections.GENERATION_FILES).find(wholeSource)
+                    .projection(Projections.include("sourcePath")).limit(1)
+                    .maxTime(storageTimeout.toMillis(), TimeUnit.MILLISECONDS).first())) throw new RepositoryNotFoundException();
+            while (true) {
+                List<Document> rows = template.getCollection(IndexCollections.SYMBOLS).find(Filters.and(base(source),
+                        Filters.eq("sourcePath", path), Filters.gt("symbolId", after))).sort(Sorts.ascending("symbolId"))
+                        .limit(100).maxTime(storageTimeout.toMillis(), TimeUnit.MILLISECONDS).into(new ArrayList<>());
+                if (rows.isEmpty()) return;
+                for (Document row : rows) {
+                    StoredFact fact = storedFact(source, ProjectionName.SYMBOLS, row);
+                    guard.requireVisible(source.selected(), fact.details().fact().identity());
+                    if (!artifact.equals(fact.artifact().orElseThrow(IndexContractMismatchException::new))) throw new IndexContractMismatchException();
+                    after = requiredText(row, "symbolId");
+                }
+            }
+        } catch (MongoException | DataAccessException exception) {
+            throw new SemanticIndexUnavailableException(exception);
+        }
+    }
+
+    static ProjectionRequirements requirementsForSearchKinds(Set<CodeFactKind> kinds) {
+        EnumSet<ProjectionName> projections = EnumSet.of(ProjectionName.SEARCH, ProjectionName.SOURCES);
+        for (CodeFactKind kind : kinds.isEmpty() ? EnumSet.allOf(CodeFactKind.class) : kinds) projections.add(authorityFor(kind));
+        return new ProjectionRequirements(projections);
+    }
+
+    private static Bson base(SourceContext source) {
+        return Filters.and(Filters.eq("repoId", source.selected().repositoryId().value()),
+                Filters.eq("generationId", source.selected().generationId().value()));
+    }
+    private static String collection(ProjectionName authority) {
+        return switch (authority) {
+            case SYMBOLS -> IndexCollections.SYMBOLS;
+            case RELATIONS -> IndexCollections.RELATIONS;
+            case ENTRY_POINTS -> IndexCollections.ENTRY_POINTS;
+            default -> throw new IndexContractMismatchException();
+        };
+    }
+    private static String authorityKey(ProjectionName authority) {
+        return switch (authority) {
+            case SYMBOLS -> "symbolId";
+            case RELATIONS -> "relationId";
+            case ENTRY_POINTS -> "entryPointId";
+            default -> throw new IndexContractMismatchException();
+        };
+    }
+    static void verifyScope(Document row, CodeFactIdentity identity) {
+        CodeFactScope scope = new CodeFactScope(requiredString(row, "scopePackage"), requiredText(row, "scopeClass"),
+                optionalText(row, "scopeMethod"), requiredTextList(row, "scopeParameters"), optionalText(row, "scopePath"));
+        if (!scope.equals(CodeFactScope.from(identity))) throw new IndexContractMismatchException();
+    }
+    record StoredFact(CodeFactDetails details, Optional<SourceArtifactId> artifact) { }
 
     private static SearchRow searchRow(Document row, SelectedGeneration current) {
         Document stored = Objects.requireNonNull(row, "search row is required");
@@ -175,7 +288,7 @@ public final class CodeFactReadService {
                     optionalText(stored, "scopeMethod"), requiredTextList(stored, "scopeParameters"), optionalText(stored, "scopePath"));
             if (!authorityFor(kind).equals(authority)) { throw new IndexContractMismatchException(); }
             return new SearchRow(factId, kind, authority, requiredText(stored, "canonical"),
-                    requiredText(stored, "displayName"), requiredString(stored, "signature"), scope);
+                    requiredText(stored, "displayName"), requiredString(stored, "signature"), scope, requiredText(stored, "sourcePath"));
         } catch (IllegalArgumentException exception) {
             throw new IndexContractMismatchException();
         }
@@ -188,6 +301,7 @@ public final class CodeFactReadService {
                 || !row.canonical().equals(fact.identity().canonicalForm()) || !row.scope().equals(CodeFactScope.from(fact.identity()))
                 || !row.displayName().equals(CodeFactDisplay.displayName(fact.identity().canonicalIdentity()))
                 || !row.signature().equals(CodeFactDisplay.signature(fact.identity().canonicalIdentity()))
+                || !row.sourcePath().equals(details.location().sourceFile())
                 || row.authority() != authorityFor(fact.identity().kind())) { throw new IndexContractMismatchException(); }
     }
 
@@ -195,12 +309,15 @@ public final class CodeFactReadService {
         try {
             Document converted = new Document(stored);
             converted.put("generationId", new Document("value", current.generationId().value()));
-            SymbolDocument symbol = template.getConverter().read(SymbolDocument.class, converted);
+            SymbolDocument symbol = template.getConverter().read(SymbolPersistence.class, converted).toModel();
             CodeFact fact = symbol.fact();
             if (!current.repositoryId().equals(symbol.repositoryId()) || !current.generationId().equals(symbol.generationId())
                     || !current.repositoryId().equals(fact.identity().repositoryId()) || !current.revision().equals(fact.identity().repositoryRevision())
                     || !fact.id().equals(CodeFactId.from(fact.identity())) || !fact.id().value().equals(requiredText(stored, "symbolId"))
                     || !fact.identity().canonicalForm().equals(requiredText(stored, "canonical"))
+                    || !symbol.name().equals(CodeFactDisplay.displayName(fact.identity().canonicalIdentity()))
+                    || !symbol.owner().equals(symbolOwner(fact.identity()))
+                    || !CodeFactScope.from(fact.identity()).sourcePath().equals(Optional.of(symbol.range().sourceFile()))
                     || !symbol.range().sourceFile().equals(requiredText(stored, "sourcePath"))) { throw new IndexContractMismatchException(); }
             return symbol;
         } catch (IndexContractMismatchException exception) {
@@ -245,6 +362,7 @@ public final class CodeFactReadService {
                     || !current.repositoryId().equals(fact.identity().repositoryId()) || !current.revision().equals(fact.identity().repositoryRevision())
                     || !fact.id().equals(CodeFactId.from(fact.identity())) || !fact.id().value().equals(requiredText(stored, "entryPointId"))
                     || !fact.identity().canonicalForm().equals(requiredText(stored, "canonical"))
+                    || !entryPoint.method().sourceFile().equals(entryPoint.range().sourceFile())
                     || !entryPoint.range().sourceFile().equals(requiredText(stored, "sourcePath"))) { throw new IndexContractMismatchException(); }
             return entryPoint;
         } catch (IndexContractMismatchException exception) {
@@ -252,6 +370,16 @@ public final class CodeFactReadService {
         } catch (RuntimeException exception) {
             throw new IndexContractMismatchException();
         }
+    }
+
+    private static String symbolOwner(CodeFactIdentity identity) {
+        return switch (identity.canonicalIdentity()) {
+            case com.java.semantic.model.codefact.SourceTypeIdentity type -> type.fullyQualifiedName();
+            case com.java.semantic.model.codefact.MethodTarget method -> method.fullyQualifiedClassName();
+            case com.java.semantic.model.codefact.MemberIdentity member -> member.owner().fullyQualifiedName();
+            case com.java.semantic.model.codefact.MapperStatementIdentity mapper -> mapper.namespace();
+            default -> throw new IndexContractMismatchException();
+        };
     }
 
     private static ProjectionName authorityFor(CodeFactKind kind) {
@@ -291,6 +419,6 @@ public final class CodeFactReadService {
     }
 
     private record SearchRow(CodeFactId factId, CodeFactKind kind, ProjectionName authority, String canonical,
-            String displayName, String signature, CodeFactScope scope) { }
+            String displayName, String signature, CodeFactScope scope, String sourcePath) { }
 
 }

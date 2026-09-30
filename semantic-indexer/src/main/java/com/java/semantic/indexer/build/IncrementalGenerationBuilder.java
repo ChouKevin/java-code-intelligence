@@ -149,7 +149,7 @@ public final class IncrementalGenerationBuilder {
         List<String> sources = template.getCollection(IndexCollections.GENERATION_FILES).find(scope).map(document -> document.getString("sourcePath"))
                 .into(new ArrayList<>());
         List<SymbolDocument> symbols = template.getCollection(IndexCollections.SYMBOLS).find(scope).map(document ->
-                template.getConverter().read(SymbolDocument.class, document)).into(new ArrayList<>());
+                mapper.reconstructSymbol(document)).into(new ArrayList<>());
         List<com.java.semantic.model.index.RelationDocument> relations = template.getCollection(IndexCollections.RELATIONS).find(scope)
                 .map(mapper::reconstructRelation).into(new ArrayList<>());
         List<com.java.semantic.model.index.EntryPointDocument> entryPoints = template.getCollection(IndexCollections.ENTRY_POINTS).find(scope)

@@ -1,45 +1,57 @@
 package com.java.semantic.query.application;
 
-import com.java.semantic.model.source.SourceEvidenceDocumentCodec;
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+
+import com.java.semantic.model.codefact.CodeFact;
 import com.java.semantic.model.codefact.CodeFactId;
 import com.java.semantic.model.codefact.CodeFactIdentity;
 import com.java.semantic.model.codefact.CodeFactKind;
-import com.java.semantic.model.codefact.DeclaredType;
+import com.java.semantic.model.codefact.EntryPointIdentity;
+import com.java.semantic.model.codefact.EntryPointKind;
+import com.java.semantic.model.codefact.EntryPointTrigger;
+import com.java.semantic.model.codefact.ExternalTarget;
 import com.java.semantic.model.codefact.JavaTypeIdentity;
 import com.java.semantic.model.codefact.MethodTarget;
-import com.java.semantic.model.codefact.MapperStatementIdentity;
 import com.java.semantic.model.codefact.SourceRange;
 import com.java.semantic.model.codefact.SourceTypeIdentity;
 import com.java.semantic.model.codefact.SyntaxPosition;
 import com.java.semantic.model.codefact.SyntaxRange;
-import com.java.semantic.model.index.GenerationFileDocument;
-import com.java.semantic.model.index.IndexSchemaContract;
-import com.java.semantic.model.index.SourceIndexScope;
+import com.java.semantic.model.index.AnalysisFingerprint;
+import com.java.semantic.model.index.AnalysisInputs;
+import com.java.semantic.model.index.EntryPointDocument;
 import com.java.semantic.model.index.GenerationId;
-import com.java.semantic.model.index.SourceArtifactDocument;
+import com.java.semantic.model.index.IndexSchemaContract;
 import com.java.semantic.model.index.ManifestDigest;
+import com.java.semantic.model.index.SealedGeneration;
+import com.java.semantic.model.index.SemanticAnalysisEvidence;
+import com.java.semantic.model.index.SourceIndexScope;
+import com.java.semantic.model.index.persistence.EntryPointPersistence;
 import com.java.semantic.model.query.SelectedGeneration;
-import com.java.semantic.model.index.SourceArtifactId;
-import com.java.semantic.model.index.SymbolDocument;
 import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.model.repository.RepositoryRevision;
-import com.java.semantic.model.git.GitSnapshotId;
-import com.java.semantic.model.source.ProjectGuideMembership;
-import com.java.semantic.model.source.ProjectGuideState;
-import com.java.semantic.model.source.SourceCoverage;
-import com.java.semantic.model.source.SourceEvidencePolicy;
-import com.java.semantic.model.source.SourceSnapshotMembership;
-import com.java.semantic.model.source.SourceStructure;
+import com.java.semantic.model.review.ReviewSelection;
+import com.java.semantic.query.application.SemanticQueryContract.ContextRequest;
+import com.java.semantic.query.application.SemanticQueryContract.ContextSelector;
+import com.java.semantic.query.application.SemanticQueryContract.ContextState;
+import com.java.semantic.query.application.SemanticQueryContract.CurrentContextResult;
+import com.java.semantic.query.application.SemanticQueryContract.EntryKind;
+import com.java.semantic.query.application.SemanticQueryContract.PageRequest;
+import com.java.semantic.query.application.SemanticQueryContract.RepositoryCollection;
+import com.java.semantic.query.application.SemanticQueryContract.RepositoryRequest;
+import com.java.semantic.query.application.SemanticQueryContract.ReviewContextResult;
+import com.java.semantic.query.application.SemanticQueryContract.SelectorKind;
 import com.java.semantic.query.config.ConfiguredReadPolicy;
+import com.java.semantic.query.config.GitEvidenceProperties;
 import com.java.semantic.query.config.ReadPolicyProperties;
-import com.mongodb.ConnectionString;
-import com.mongodb.MongoClientSettings;
 import com.mongodb.client.MongoClient;
 import com.mongodb.client.MongoClients;
-import com.mongodb.client.model.ReplaceOptions;
-import com.mongodb.event.CommandListener;
-import com.mongodb.event.CommandStartedEvent;
-import org.bson.BsonDocument;
+import java.time.Duration;
+import java.time.Instant;
+import java.util.Date;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
 import org.bson.Document;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
@@ -48,463 +60,287 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.testcontainers.mongodb.MongoDBContainer;
-import org.testcontainers.utility.DockerImageName;
 
-import java.time.Duration;
-import java.util.List;
-import java.util.Map;
-import java.util.Optional;
-import java.util.Set;
-import java.util.concurrent.CopyOnWriteArrayList;
-
-import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
-
+/** Native discovery/aggregate contracts; legacy source scenarios moved to source/authority suites. */
 @Tag("mongo-it")
-class CurrentQueryContractIT {
-    private static final String REVISION = "1".repeat(40);
-    private static final String REVISION_2 = "3".repeat(40);
-    private static final String DIGEST = "2".repeat(64);
-    private static final String DIGEST_2 = "4".repeat(64);
+class CurrentQueryContractIT extends PublishedMongoITSupport {
+    private static final Instant PUBLISHED = Instant.parse("2026-09-28T01:00:00Z");
+    private static final Duration TIMEOUT = Duration.ofSeconds(3);
     private static MongoDBContainer container;
+    private static MongoClient client;
     private static MongoTemplate template;
 
     @BeforeAll
     static void startMongo() {
-        container = new MongoDBContainer(DockerImageName.parse("mongo:8.0.4"));
+        container = new MongoDBContainer("mongo:8.0.4");
         container.start();
-        template = new MongoTemplate(MongoClients.create(container.getConnectionString()), "semantic_query_contract_test");
+        client = MongoClients.create(container.getConnectionString());
+        template = new MongoTemplate(client, "current_context_contract");
     }
-
     @AfterAll
-    static void stopMongo() { container.stop(); }
-
+    static void stopMongo() { client.close(); container.stop(); }
     @BeforeEach
     void clearDatabase() { template.getDb().drop(); }
 
     @Test
-    void reads_production_shaped_sources_and_fails_closed_for_forbidden_typed_identities() {
-        SourceTypeIdentity type = sourceType();
-        seedCurrent("orders");
-        seedManifest("orders", true);
-        String content = "package example.api; class OrderService {}";
-        SourceArtifactDocument artifact = seedSource("orders", "g1", type.sourceFile(), content);
-        seedTypeSymbol("orders", REVISION, "g1", type, artifact.id());
-
-        assertThat(sourceService(policy()).getSource(sourceContext(policy(), "orders", REVISION, type), type).utf8Content()).isEqualTo(content);
-        assertThatThrownBy(() -> sourceService(policy(new ReadPolicyProperties.PackageRule("orders", "example")))
-                .getSource(sourceContext(policy(new ReadPolicyProperties.PackageRule("orders", "example")), "orders", REVISION, type), type))
-                .isInstanceOf(RepositoryNotFoundException.class);
-
-        seedManifest("orders", REVISION_2, "g2", DIGEST_2, true);
-        String currentContent = "package example.api; class OrderService { String revision = \"R2\"; }";
-        SourceArtifactDocument currentArtifact = seedSource("orders", "g2", type.sourceFile(), currentContent);
-        seedTypeSymbol("orders", REVISION_2, "g2", type, currentArtifact.id());
-        seedCurrent("orders", REVISION_2, "g2", DIGEST_2);
-
-        assertThatThrownBy(() -> sourceService(policy()).getSource(sourceContext(policy(), "orders", REVISION, type), type))
-                .isInstanceOfSatisfying(RevisionOutdatedException.class,
-                        exception -> assertThat(exception.currentRevision().value()).isEqualTo(REVISION_2));
-        assertThat(sourceService(policy()).getSource(sourceContext(policy(), "orders", REVISION_2, type), type).utf8Content()).isEqualTo(currentContent);
-
-        seedCurrent("orders", REVISION, "g1", DIGEST);
-        assertThat(sourceService(policy()).getSource(sourceContext(policy(), "orders", REVISION, type), type).utf8Content()).isEqualTo(content);
-        assertThatThrownBy(() -> sourceService(policy()).getSource(sourceContext(policy(), "orders", REVISION_2, type), type))
-                .isInstanceOfSatisfying(RevisionOutdatedException.class,
-                        exception -> assertThat(exception.currentRevision().value()).isEqualTo(REVISION));
+    void configured_name_filter_is_literal_and_visible_paging_is_bound_to_filter_and_limit() {
+        registry("alpha", "Order.Alpha", true);
+        registry("ab-hidden", "Order.Hidden", true);
+        registry("beta", "Order.Beta", true);
+        registry("removed", "Order.Removed", false);
+        registry("unrelated", "OrderXOther", true);
+        ConfiguredReadPolicy policy = new ConfiguredReadPolicy(new ReadPolicyProperties(List.of("ab-hidden"), List.of(), List.of(), List.of()));
+        ContextDiscoveryService discovery = discovery(template, policy);
+        RepositoryRequest request = new RepositoryRequest(Optional.of("Order."), new PageRequest(Optional.empty(), 1));
+        RepositoryCollection first = discovery.listRepositories(request);
+        assertThat(first.items()).extracting(SemanticQueryContract.RepositoryItem::repositoryId).containsExactly("alpha");
+        assertThat(first.items().getFirst().publishedRevision()).isEmpty();
+        assertThat(first.page().hasMore()).isTrue();
+        RepositoryCollection second = discovery.listRepositories(new RepositoryRequest(request.nameFilter(),
+                new PageRequest(first.page().nextCursor(), 1)));
+        assertThat(second.items()).extracting(SemanticQueryContract.RepositoryItem::repositoryId).containsExactly("beta");
+        assertThat(second.page().hasMore()).isFalse();
+        assertThatThrownBy(() -> discovery.listRepositories(new RepositoryRequest(Optional.of("Order"),
+                new PageRequest(first.page().nextCursor(), 1)))).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> discovery.listRepositories(new RepositoryRequest(request.nameFilter(),
+                new PageRequest(first.page().nextCursor(), 2)))).isInstanceOf(IllegalArgumentException.class);
     }
 
     @Test
-    void distinguishes_absent_unpublished_denied_and_incompatible_catalog_entries() {
-        template.getCollection("repositories").insertOne(new Document("repoId", "unpublished"));
-        seedCurrent("published");
-        seedManifest("published", true);
-        seedCurrent("incompatible");
-        seedManifest("incompatible", false);
-        seedCurrent("malformed");
-        seedManifest("malformed", true);
-        template.getCollection("generation_manifests").updateOne(new Document("repoId", "malformed"),
-                new Document("$set", new Document("schemaVersion", "1")));
-        CurrentRepositoryQueryService visible = new CurrentRepositoryQueryService(selector(policy()));
-
-        assertThat(visible.listRepositories()).extracting(current -> current.repositoryId().value())
-                .containsExactly("incompatible", "malformed", "published");
-        assertThatThrownBy(() -> visible.getRepository("absent")).isInstanceOf(RepositoryNotFoundException.class);
-        assertThatThrownBy(() -> visible.getRepository("unpublished")).isInstanceOf(IndexNotReadyException.class);
-        assertThat(visible.getRepository("incompatible").repositoryId().value()).isEqualTo("incompatible");
-        assertThat(visible.getRepository("malformed").repositoryId().value()).isEqualTo("malformed");
-        assertThatThrownBy(() -> new CurrentRepositoryQueryService(selector(policy("published"))).getRepository("published"))
-                .isInstanceOf(RepositoryNotFoundException.class);
+    void published_revision_and_recorded_branch_remain_separate_from_active_preparation() {
+        registry("orders", "Orders", true);
+        job("first-build", "BUILD", "RUNNING", true, PUBLISHED);
+        CurrentContextResult before = current(discovery(template, openPolicy()), 20);
+        assertThat(before.state()).isEqualTo(ContextState.UNINDEXED);
+        assertThat(before.configuredBranch()).contains("main");
+        assertThat(before.context()).isEmpty();
+        assertThat(before.revision()).isEmpty();
+        assertThat(before.activeJob()).get().extracting(SemanticQueryContract.JobIdentity::jobId).isEqualTo("first-build");
+        template.getCollection("index_jobs").updateOne(new Document("jobId", "first-build"),
+                new Document("$set", new Document("phase", "FAILED").append("active", false)));
+        assertThat(current(discovery(template, openPolicy()), 20).state()).isEqualTo(ContextState.UNINDEXED);
+        seedPublished();
+        job("new-build", "BUILD", "RUNNING", true, PUBLISHED.plusSeconds(10));
+        CurrentContextResult ready = current(discovery(template, openPolicy()), 20);
+        assertThat(ready.state()).isEqualTo(ContextState.READY);
+        assertThat(ready.revision()).contains(REVISION);
+        assertThat(ready.indexedAt()).contains(PUBLISHED);
+        assertThat(ready.preparationBranch()).contains("release/prepared");
+        assertThat(ready.configuredBranch()).contains("main");
+        assertThat(ready.activeJob()).get().extracting(SemanticQueryContract.JobIdentity::jobId).isEqualTo("new-build");
     }
 
     @Test
-    void derives_symbol_ids_from_typed_code_fact_identities_before_querying() {
-        MethodTarget method = new MethodTarget(sourceType(), "find", List.of("java.lang.String"));
-        CodeFactIdentity identity = new CodeFactIdentity(new RepositoryId("orders"), new RepositoryRevision(REVISION), CodeFactKind.METHOD, method);
-        seedCurrent("orders");
-        seedManifest("orders", true);
-        seedMethodSymbol("orders", REVISION, "g1", method);
-        CurrentGenerationSelector selector = selector(policy());
-        SelectedGeneration context = selector.selectCodeFact("orders", REVISION, identity, SelectedGenerationGuard.SYMBOLS);
-        CurrentSymbolQueryService service = new CurrentSymbolQueryService(template, guard(policy()), Duration.ofSeconds(2));
-
-        assertThat(service.getSymbol(context, identity).symbolId()).isEqualTo(CodeFactId.from(identity).value());
-        ConfiguredReadPolicy deniedPolicy = policy(new ReadPolicyProperties.MethodRule(
-                "orders", "example.api", "OrderService", "find", List.of("java.lang.String")));
-        assertThatThrownBy(() -> new CurrentSymbolQueryService(template, guard(deniedPolicy), Duration.ofSeconds(2))
-                .getSymbol(selector(deniedPolicy).selectCodeFact("orders", REVISION, identity, SelectedGenerationGuard.SYMBOLS), identity))
-                .isInstanceOf(RepositoryNotFoundException.class);
+    void overview_bounds_real_modules_roots_and_packages_without_inventing_event_counts() {
+        seedPublished();
+        SemanticQueryContract.ContextOverview overview = current(discovery(template, openPolicy()), 1).overview().orElseThrow();
+        assertThat(overview.modules().items()).extracting(SemanticQueryContract.ModuleSummary::path).containsExactly("app");
+        assertThat(overview.modules().omitted()).isTrue();
+        assertThat(overview.sourceRoots().items()).containsExactly("src/main/java");
+        assertThat(overview.sourceRoots().omitted()).isTrue();
+        assertThat(overview.packages().items()).extracting(SemanticQueryContract.PackageSummary::name).containsExactly("");
+        assertThat(overview.packages().omitted()).isTrue();
+        assertThat(overview.coverage().readableCode()).isEqualTo(4);
+        assertThat(overview.coverage().excludedOrUnsupported()).contains(3L);
+        assertThat(overview.coverage().unresolvedSemanticEvidence()).contains(7L);
+        assertThat(overview.uncountedEntryKinds()).containsExactly(EntryKind.EVENT);
+        assertThat(overview.entryPoints().items()).noneMatch(item -> item.kind() == EntryKind.EVENT);
     }
 
     @Test
-    void hides_forbidden_repositories_before_validating_typed_identities() {
-        SelectedGeneration hiddenContext = new SelectedGeneration(new RepositoryId("orders"), new RepositoryRevision(REVISION),
-                new GenerationId("g1"), new ManifestDigest(DIGEST));
-        assertThatThrownBy(() -> sourceService(policy("orders")).getSource(hiddenContext, (SourceTypeIdentity) null))
-                .isInstanceOf(RepositoryNotFoundException.class);
-        assertThatThrownBy(() -> new CurrentSymbolQueryService(template, guard(policy("orders")), Duration.ofSeconds(2))
-                .getSymbol(hiddenContext, null)).isInstanceOf(RepositoryNotFoundException.class);
+    void restricted_overview_aggregates_authorized_files_and_canonical_entry_handlers() {
+        seedPublished();
+        seedCoverageSource(template, "src/main/java/example/public/A.java", "", scope("example.public", "A"));
+        seedCoverageSource(template, "src/main/java/example/public/B.java", "JDT_SYNTAX_PROBLEM", scope("example.public", "B"));
+        seedCoverageSource(template, "src/main/java/example/hidden/Secret.java", "JDT_SYNTAX_PROBLEM", scope("example.hidden", "Secret"));
+        seedCoverageSource(template, "src/main/resources/RootMapper.xml", "", scope("", "RootMapper"));
+        entry("example.public", "A", EntryPointKind.HTTP);
+        entry("example.hidden", "Secret", EntryPointKind.HTTP);
+        entry("example.public", "B", EntryPointKind.MQ);
+        ConfiguredReadPolicy restricted = new ConfiguredReadPolicy(new ReadPolicyProperties(List.of(),
+                List.of(new ReadPolicyProperties.PackageRule("orders", "example.hidden")), List.of(), List.of()),
+                new GitEvidenceProperties(List.of("orders")));
+        CurrentContextResult result = current(discovery(template, restricted), 20);
+        SemanticQueryContract.ContextOverview overview = result.overview().orElseThrow();
+        assertThat(overview.coverage().scope()).isEqualTo(SemanticQueryContract.CoverageScope.AUTHORIZED_SOURCE_FILES);
+        assertThat(overview.coverage().readableCode()).isEqualTo(3);
+        assertThat(overview.coverage().extractionIssues()).isEqualTo(1);
+        assertThat(overview.coverage().excludedOrUnsupported()).isEmpty();
+        assertThat(overview.coverage().unresolvedSemanticEvidence()).isEmpty();
+        assertThat(overview.coverage().omittedMetrics()).containsExactlyInAnyOrder("excludedOrUnsupported", "unresolvedSemanticEvidence");
+        assertThat(overview.packages().items()).extracting(SemanticQueryContract.PackageSummary::name).containsExactly("", "example.public");
+        assertThat(overview.modules().items()).extracting(SemanticQueryContract.ModuleSummary::path).containsExactly("app", "mapper-module");
+        assertThat(overview.sourceRoots().items()).containsExactly("src/main/java", "src/main/resources");
+        assertThat(overview.entryPoints().items()).containsExactly(new SemanticQueryContract.EntryKindCount(EntryKind.HTTP, 1),
+                new SemanticQueryContract.EntryKindCount(EntryKind.MQ, 1));
+        assertThat(result.projectGuide()).isEmpty();
     }
 
     @Test
-    void denies_source_reads_when_a_requested_type_is_spoofed_or_a_colocated_declaration_is_denied() {
-        SourceTypeIdentity allowed = new SourceTypeIdentity(new JavaTypeIdentity("example.api", "PublicFacade"),
-                "src/main/java/example/api/Shared.java");
-        SourceTypeIdentity denied = new SourceTypeIdentity(new JavaTypeIdentity("example.api", "SecretAdmin"),
-                allowed.sourceFile());
-        seedCurrent("orders");
-        seedManifest("orders", true);
-        SourceArtifactDocument artifact = seedSource("orders", "g1", allowed.sourceFile(), "class PublicFacade {} class SecretAdmin {}");
-        seedTypeSymbol("orders", REVISION, "g1", allowed, artifact.id());
-        seedTypeSymbol("orders", REVISION, "g1", denied, artifact.id());
-        ConfiguredReadPolicy deniedPolicy = policy(new ReadPolicyProperties.ClassRule(
-                "orders", "example.api", "SecretAdmin"));
-        assertThatThrownBy(() -> sourceService(deniedPolicy).getSource(
-                sourceContext(deniedPolicy, "orders", REVISION, allowed), allowed))
-                .isInstanceOf(RepositoryNotFoundException.class);
+    void configured_discovery_does_not_claim_malformed_published_evidence_is_readable_or_missing_counts_are_zero() {
+        seedPublished();
+        ContextDiscoveryService discovery = discovery(template, openPolicy());
+        template.getCollection("generation_manifests").updateOne(new Document("repoId", "orders"),
+                new Document("$unset", new Document("coverage.unresolvedSemanticEvidence", "")));
+        assertThat(discovery.listRepositories(new RepositoryRequest(Optional.empty(), new PageRequest(Optional.empty(), 20))).items())
+                .extracting(SemanticQueryContract.RepositoryItem::repositoryId).containsExactly("orders");
+        assertThatThrownBy(() -> current(discovery, 20)).isInstanceOf(IndexContractMismatchException.class);
+        ConfiguredReadPolicy forbidden = new ConfiguredReadPolicy(new ReadPolicyProperties(List.of("orders"), List.of(), List.of(), List.of()));
+        assertThatThrownBy(() -> current(discovery(template, forbidden), 20)).isInstanceOf(RepositoryNotFoundException.class);
     }
 
     @Test
-    void denies_a_persisted_mapper_symbol_when_its_namespace_method_is_forbidden() {
-        MapperStatementIdentity statement = new MapperStatementIdentity("example.api.OrderMapper", "find",
-                "src/main/resources/OrderMapper.xml");
-        CodeFactIdentity identity = new CodeFactIdentity(new RepositoryId("orders"), new RepositoryRevision(REVISION),
-                CodeFactKind.MAPPER_STATEMENT, statement);
-        seedCurrent("orders");
-        seedManifest("orders", true);
-        ConfiguredReadPolicy deniedPolicy = policy(new ReadPolicyProperties.MethodRule(
-                "orders", "example.api", "OrderMapper", "find", List.of("java.lang.String")));
-        assertThatThrownBy(() -> new CurrentSymbolQueryService(template, guard(deniedPolicy), Duration.ofSeconds(2))
-                .getSymbol(symbolContext(deniedPolicy, "orders", REVISION, identity), identity))
-                .isInstanceOf(RepositoryNotFoundException.class);
+    void newer_attempt_shadows_ready_selection_with_review_id_tie_break_and_explicit_old_review_remains_readable() {
+        SealedGeneration generation = seedPublished();
+        String oldId = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa1";
+        String newId = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa2";
+        reviewJob("zz-old", oldId, "COMPLETE", false);
+        readyRootReview(oldId, "zz-old", generation);
+        ContextDiscoveryService discovery = discovery(template, openPolicy());
+        ContextSelector selected = new ContextSelector(SelectorKind.COMMIT, Optional.empty(), Optional.of(REVISION), Optional.empty(), Optional.empty());
+        ReviewContextResult ready = (ReviewContextResult) discovery.getContext(new ContextRequest("orders", selected, 20));
+        assertThat(ready.state()).isEqualTo(ContextState.READY);
+        assertThat(ready.before()).get().satisfies(before -> {
+            assertThat(before.kind()).isEqualTo(SemanticQueryContract.EndpointKind.EMPTY_TREE);
+            assertThat(before.context()).isEmpty();
+        });
+        assertThat(ready.after()).get().satisfies(after -> assertThat(after.context()).get()
+                .extracting(SemanticQueryContract.ReadContext::revision).isEqualTo(REVISION));
+        reviewJob("aa-new", newId, "RUNNING", true);
+        ReviewContextResult preparing = (ReviewContextResult) discovery.getContext(new ContextRequest("orders", selected, 20));
+        assertThat(preparing.state()).isEqualTo(ContextState.PREPARING);
+        assertThat(preparing.reviewId()).contains(newId);
+        assertThat(preparing.after()).isEmpty();
+        assertThat(preparing.comparisonContext()).isEmpty();
+        template.getCollection("index_jobs").updateOne(new Document("jobId", "aa-new"), new Document("$set",
+                new Document("phase", "FAILED").append("active", false).append("failureCategory", "WORKER_INTERRUPTED")));
+        ReviewContextResult failed = (ReviewContextResult) discovery.getContext(new ContextRequest("orders", selected, 20));
+        assertThat(failed.state()).isEqualTo(ContextState.FAILED);
+        assertThat(failed.jobId()).contains("aa-new");
+        assertThat(failed.before()).isEmpty();
+        ContextSelector explicit = new ContextSelector(SelectorKind.REVIEW, Optional.of(oldId), Optional.empty(), Optional.empty(), Optional.empty());
+        ReviewContextResult retained = (ReviewContextResult) discovery.getContext(new ContextRequest("orders", explicit, 20));
+        assertThat(retained.state()).isEqualTo(ContextState.READY);
+        assertThat(retained.comparisonContext()).isEqualTo(ready.comparisonContext());
+        ContextSelector absent = new ContextSelector(SelectorKind.COMMIT, Optional.empty(), Optional.of("3".repeat(40)), Optional.empty(), Optional.empty());
+        ReviewContextResult missing = (ReviewContextResult) discovery.getContext(new ContextRequest("orders", absent, 20));
+        assertThat(missing.state()).isEqualTo(ContextState.NOT_PREPARED);
+        assertThat(missing.reviewId()).isEmpty();
     }
 
     @Test
-    void reads_a_valid_empty_source_artifact() {
-        SourceTypeIdentity type = sourceType();
-        seedCurrent("orders");
-        seedManifest("orders", true);
-        SourceArtifactDocument artifact = seedSource("orders", "g1", type.sourceFile(), "");
-        seedTypeSymbol("orders", REVISION, "g1", type, artifact.id());
-
-        assertThat(sourceService(policy()).getSource(sourceContext(policy(), "orders", REVISION, type), type).utf8Content()).isEmpty();
+    void unavailable_discovery_storage_is_not_reported_as_an_empty_repository_or_context() {
+        try (MongoClient unavailable = MongoClients.create("mongodb://127.0.0.1:1/semantic?serverSelectionTimeoutMS=100&connectTimeoutMS=100")) {
+            ContextDiscoveryService discovery = discovery(new MongoTemplate(unavailable, "semantic"), openPolicy());
+            assertThatThrownBy(() -> current(discovery, 20)).isInstanceOf(SemanticIndexUnavailableException.class);
+            assertThatThrownBy(() -> discovery.listRepositories(new RepositoryRequest(Optional.empty(), new PageRequest(Optional.empty(), 20))))
+                    .isInstanceOf(SemanticIndexUnavailableException.class);
+        }
     }
 
     @Test
     void normalizes_nested_classes_and_parameter_forms_without_overmatching_package_boundaries() {
-        RepositoryId repositoryId = new RepositoryId("orders");
-        SourceTypeIdentity nestedType = new SourceTypeIdentity(new JavaTypeIdentity("example.api", "Outer.Inner"),
-                "src/main/java/example/api/Outer.java");
-        MethodTarget method = new MethodTarget(nestedType, "save", List.of("java.util.List<java.lang.String>..."));
-        ConfiguredReadPolicy classPolicy = policy(new ReadPolicyProperties.ClassRule("orders", "example.api", "Outer$Inner"));
-        ConfiguredReadPolicy methodPolicy = policy(new ReadPolicyProperties.MethodRule(
-                "orders", "example.api", "Outer.Inner", "save", List.of("List[]")));
-        ConfiguredReadPolicy packagePolicy = policy(new ReadPolicyProperties.PackageRule("orders", "example.api"));
-
-        assertThat(classPolicy.isSourceVisible(repositoryId, nestedType)).isFalse();
-        assertThat(methodPolicy.isCodeFactVisible(repositoryId, new CodeFactIdentity(repositoryId, new RepositoryRevision(REVISION),
-                CodeFactKind.METHOD, method))).isFalse();
-        assertThat(packagePolicy.isSourceVisible(repositoryId, new SourceTypeIdentity(new JavaTypeIdentity("example.apix", "Visible"),
-                "src/main/java/example/apix/Visible.java"))).isTrue();
+        RepositoryId repository = new RepositoryId("orders");
+        SourceTypeIdentity nested = new SourceTypeIdentity(new JavaTypeIdentity("example.api", "Outer.Inner"), "src/main/java/example/api/Outer.java");
+        MethodTarget method = new MethodTarget(nested, "save", List.of("java.util.List<java.lang.String>..."));
+        ConfiguredReadPolicy classPolicy = new ConfiguredReadPolicy(new ReadPolicyProperties(List.of(), List.of(),
+                List.of(new ReadPolicyProperties.ClassRule("orders", "example.api", "Outer$Inner")), List.of()));
+        ConfiguredReadPolicy methodPolicy = new ConfiguredReadPolicy(new ReadPolicyProperties(List.of(), List.of(), List.of(),
+                List.of(new ReadPolicyProperties.MethodRule("orders", "example.api", "Outer.Inner", "save", List.of("List[]")))));
+        assertThat(classPolicy.isSourceVisible(repository, nested)).isFalse();
+        assertThat(methodPolicy.isCodeFactVisible(repository, new CodeFactIdentity(repository, new RepositoryRevision(REVISION), CodeFactKind.METHOD, method))).isFalse();
+        assertThat(policy(new ReadPolicyProperties.PackageRule("orders", "example.api")).isSourceVisible(repository,
+                new SourceTypeIdentity(new JavaTypeIdentity("example.apix", "Visible"), "src/main/java/example/apix/Visible.java"))).isTrue();
     }
 
-    @Test
-    void keeps_shared_artifacts_scoped_by_current_repository_generation_membership() {
-        SourceTypeIdentity ordersType = sourceType();
-        SourceTypeIdentity billingType = new SourceTypeIdentity(new JavaTypeIdentity("example.billing", "BillingService"),
-                ordersType.sourceFile());
-        seedCurrent("orders");
-        seedManifest("orders", true);
-        seedCurrent("billing");
-        seedManifest("billing", true);
-        String content = "package example.api; class OrderService {}";
-        SourceArtifactDocument shared = seedSource("orders", "g1", ordersType.sourceFile(), content);
-        seedTypeSymbol("orders", REVISION, "g1", ordersType, shared.id());
-        seedTypeSymbol("billing", REVISION, "g1", billingType, shared.id());
-
-        assertThatThrownBy(() -> sourceService(policy()).getSource(sourceContext(policy(), "billing", REVISION, billingType), billingType))
-                .isInstanceOf(IndexNotReadyException.class);
-
-        seedGenerationFile("billing", "g1", billingType.sourceFile(), shared);
-        assertThat(sourceService(policy()).getSource(sourceContext(policy(), "billing", REVISION, billingType), billingType).utf8Content()).isEqualTo(content);
-        assertThatThrownBy(() -> sourceService(policy("billing")).getSource(
-                new SelectedGeneration(new RepositoryId("billing"), new RepositoryRevision(REVISION),
-                        new GenerationId("g1"), new ManifestDigest(DIGEST)), billingType))
-                .isInstanceOf(RepositoryNotFoundException.class);
+    private static ContextDiscoveryService discovery(MongoTemplate mongo, ConfiguredReadPolicy policy) {
+        CurrentGenerationSelector currents = new CurrentGenerationSelector(mongo, policy, TIMEOUT);
+        ReviewManifestReadService reviews = new ReviewManifestReadService(mongo, policy, TIMEOUT);
+        ReadContextSelector contexts = new ReadContextSelector(currents, reviews, new SelectedGenerationGuard(mongo, policy, TIMEOUT), policy);
+        return new ContextDiscoveryService(mongo, policy, TIMEOUT, currents, contexts, reviews);
     }
-
-    @Test
-    void hides_missing_unpublished_current_and_stale_repositories_with_one_result() {
-        template.getCollection("repositories").insertOne(new Document("repoId", "hidden-unpublished"));
-        seedCurrent("hidden-current");
-        seedManifest("hidden-current", true);
-        seedCurrent("hidden-stale", REVISION_2, "g2", DIGEST_2);
-        seedManifest("hidden-stale", REVISION_2, "g2", DIGEST_2, true);
-        for (String repositoryId : List.of("hidden-missing", "hidden-unpublished", "hidden-current", "hidden-stale")) {
-            SelectedGeneration hiddenContext = new SelectedGeneration(new RepositoryId(repositoryId), new RepositoryRevision(REVISION),
-                    new GenerationId("g1"), new ManifestDigest(DIGEST));
-            assertThatThrownBy(() -> sourceService(policy(repositoryId)).getSource(hiddenContext, (SourceTypeIdentity) null))
-                    .isInstanceOf(RepositoryNotFoundException.class)
-                    .hasMessage("REPOSITORY_NOT_FOUND")
-                    .hasNoCause();
-        }
+    private static CurrentContextResult current(ContextDiscoveryService discovery, int limit) {
+        return (CurrentContextResult) discovery.getContext(new ContextRequest("orders",
+                new ContextSelector(SelectorKind.CURRENT, Optional.empty(), Optional.empty(), Optional.empty(), Optional.empty()), limit));
     }
-
-    @Test
-    void maps_unavailable_storage_and_bounds_every_source_read_without_rereading_the_pointer() {
-        try (MongoClient unavailableClient = MongoClients.create(
-                "mongodb://127.0.0.1:1/semantic?serverSelectionTimeoutMS=100&connectTimeoutMS=100")) {
-            MongoTemplate unavailableTemplate = new MongoTemplate(unavailableClient, "semantic");
-            SelectedGeneration unavailableContext = new SelectedGeneration(new RepositoryId("orders"),
-                    new RepositoryRevision(REVISION), new GenerationId("g1"), new ManifestDigest(DIGEST));
-            CurrentSourceQueryService unavailable = new CurrentSourceQueryService(unavailableTemplate,
-                    new SelectedGenerationGuard(unavailableTemplate, policy(), Duration.ofMillis(250)), Duration.ofMillis(250));
-            assertThatThrownBy(() -> unavailable.getSource(unavailableContext, sourceType()))
-                    .isInstanceOf(SemanticIndexUnavailableException.class)
-                    .hasMessage("SEMANTIC_INDEX_UNAVAILABLE");
-        }
-
-        SourceTypeIdentity type = sourceType();
-        seedCurrent("orders");
-        seedManifest("orders", true);
-        SourceArtifactDocument artifact = seedSource("orders", "g1", type.sourceFile(), "class OrderService {}");
-        seedTypeSymbol("orders", REVISION, "g1", type, artifact.id());
-        Duration timeout = Duration.ofMillis(750);
-        List<BsonDocument> commands = new CopyOnWriteArrayList<>();
-        CommandListener listener = new CommandListener() {
-            @Override
-            public void commandStarted(CommandStartedEvent event) {
-                if ("find".equals(event.getCommandName())) {
-                    commands.add(event.getCommand().clone());
-                }
-            }
-        };
-        MongoClientSettings settings = MongoClientSettings.builder()
-                .applyConnectionString(new ConnectionString(container.getConnectionString()))
-                .addCommandListener(listener)
-                .build();
-        try (MongoClient client = MongoClients.create(settings)) {
-            MongoTemplate observedTemplate = new MongoTemplate(client, "semantic_query_contract_test");
-            CurrentGenerationSelector observedSelector = new CurrentGenerationSelector(observedTemplate, policy(), timeout);
-            SelectedGeneration observedContext = observedSelector.selectSource("orders", REVISION, type);
-            CurrentSourceQueryService observedService = new CurrentSourceQueryService(observedTemplate,
-                    new SelectedGenerationGuard(observedTemplate, policy(), timeout), timeout);
-
-            assertThat(observedService.getSource(observedContext, type).utf8Content()).isEqualTo("class OrderService {}");
-        }
-
-        List<String> expectedCollections = List.of(
-                "repositories", "generation_manifests", "symbols", "generation_files", "source_artifacts");
-        assertThat(commands).extracting(command -> command.getString("find").getValue()).containsAll(expectedCollections);
-        assertThat(commands).filteredOn(command -> expectedCollections.contains(command.getString("find").getValue()))
-                .allSatisfy(command -> assertThat(command.getNumber("maxTimeMS").longValue()).isEqualTo(timeout.toMillis()));
-        assertThat(commands).filteredOn(command -> "repositories".equals(command.getString("find").getValue())).hasSize(1);
+    private static ConfiguredReadPolicy openPolicy() {
+        return new ConfiguredReadPolicy(new ReadPolicyProperties(List.of(), List.of(), List.of(), List.of()), new GitEvidenceProperties(List.of("orders")));
     }
-
-    private CurrentSourceQueryService sourceService(ConfiguredReadPolicy policy) {
-        return new CurrentSourceQueryService(template, guard(policy), Duration.ofSeconds(2));
+    private static void registry(String id, String name, boolean configured) {
+        template.getCollection("repositories").insertOne(new Document("repoId", id).append("displayName", name)
+                .append("configured", configured).append("defaultBranch", "main"));
     }
-
-    private SelectedGeneration sourceContext(ConfiguredReadPolicy policy, String repositoryId, String revision,
-                                             SourceTypeIdentity sourceType) {
-        return selector(policy).selectSource(repositoryId, revision, sourceType);
+    private static void job(String id, String operation, String phase, boolean active, Instant at) {
+        template.getCollection("index_jobs").insertOne(new Document("repoId", "orders").append("jobId", id).append("operation", operation)
+                .append("phase", phase).append("active", active).append("jobVersion", IndexSchemaContract.PERSISTED_JOB_VERSION)
+                .append("createdAt", Date.from(at)));
     }
-
-    private SelectedGeneration symbolContext(ConfiguredReadPolicy policy, String repositoryId, String revision,
-                                             CodeFactIdentity identity) {
-        return selector(policy).selectCodeFact(repositoryId, revision, identity, SelectedGenerationGuard.SYMBOLS);
+    private static SealedGeneration seedPublished() {
+        seedCurrent(template, "orders");
+        template.getCollection("repositories").updateOne(new Document("repoId", "orders"), new Document("$set", new Document("configured", true)
+                .append("displayName", "Orders").append("defaultBranch", "main").append("currentPointer.publishedAt", Date.from(PUBLISHED))));
+        job("job-g1", "BUILD", "COMPLETE", false, PUBLISHED);
+        template.getCollection("index_jobs").updateOne(new Document("jobId", "job-g1"),
+                new Document("$set", new Document("preparationBranch", "release/prepared")));
+        AnalysisInputs inputs = new AnalysisInputs(IndexSchemaContract.ANALYSIS_EVIDENCE_VERSION, "e".repeat(64), "e".repeat(64),
+                "e".repeat(64), "e".repeat(64), List.of(project("app", "src/main/java"), project("mapper-module", "src/main/resources")));
+        AnalysisFingerprint fingerprint = AnalysisFingerprint.from(inputs);
+        SemanticAnalysisEvidence evidence = new SemanticAnalysisEvidence(IndexSchemaContract.ANALYSIS_EVIDENCE_VERSION, fingerprint.digest(),
+                "SUCCESS", List.of(), new SemanticAnalysisEvidence.ResolutionCoverage(0, 0, 0, 0, 0), List.of());
+        Document structure = new Document("importedSourceRoots", List.of("src/main/java", "src/main/resources"))
+                .append("packageCounts", new Document("example.public", 2L).append("example.hidden", 1L).append("", 1L))
+                .append("entryPointKindCounts", new Document("HTTP", 2L).append("MQ", 1L));
+        template.getCollection("generation_manifests").updateOne(new Document("repoId", "orders"), new Document("$set",
+                new Document("analysisInputs", template.getConverter().convertToMongoType(inputs)).append("analysisFingerprint", fingerprint.digest())
+                        .append("analysisEvidence", template.getConverter().convertToMongoType(evidence)).append("structure", structure)
+                        .append("coverage", new Document("readableCode", 4L).append("excludedOrUnsupported", 3L)
+                                .append("extractionIssues", 2L).append("unresolvedSemanticEvidence", 7L))));
+        return new SealedGeneration(new SelectedGeneration(new RepositoryId("orders"), new RepositoryRevision(REVISION),
+                new GenerationId("g1"), new ManifestDigest(DIGEST)), fingerprint, evidence);
     }
-
-    private SelectedGenerationGuard guard(ConfiguredReadPolicy policy) {
-        return new SelectedGenerationGuard(template, policy, Duration.ofSeconds(2));
+    private static AnalysisInputs.Project project(String path, String root) {
+        return new AnalysisInputs.Project(path, "e".repeat(64), Map.of(), List.of(),
+                List.of(new AnalysisInputs.Root(root, "SOURCE", true, List.of())), List.of(), List.of());
     }
-
-    private CurrentGenerationSelector selector(ConfiguredReadPolicy policy) {
-        return new CurrentGenerationSelector(template, policy, Duration.ofSeconds(2));
+    private static SourceIndexScope scope(String name, String type) {
+        return new SourceIndexScope(true, List.of(name), List.of(SourceIndexScope.classKey(name, type)), List.of());
     }
-
-    private ConfiguredReadPolicy policy() { return policy(List.of(), List.of(), List.of()); }
-    private ConfiguredReadPolicy policy(String forbiddenRepository) { return policy(List.of(forbiddenRepository), List.of(), List.of()); }
-    private ConfiguredReadPolicy policy(ReadPolicyProperties.PackageRule packageRule) { return policy(List.of(), List.of(packageRule), List.of()); }
-    private ConfiguredReadPolicy policy(ReadPolicyProperties.ClassRule classRule) {
-        return new ConfiguredReadPolicy(new ReadPolicyProperties(List.of(), List.of(), List.of(classRule), List.of()));
-    }
-    private ConfiguredReadPolicy policy(ReadPolicyProperties.MethodRule methodRule) { return policy(List.of(), List.of(), List.of(methodRule)); }
-    private ConfiguredReadPolicy policy(List<String> repositories, List<ReadPolicyProperties.PackageRule> packages,
-                                       List<ReadPolicyProperties.MethodRule> methods) {
-        return new ConfiguredReadPolicy(new ReadPolicyProperties(repositories, packages, List.of(), methods));
-    }
-
-    private void seedCurrent(String repositoryId) {
-        seedCurrent(repositoryId, REVISION, "g1", DIGEST);
-    }
-
-    private void seedCurrent(String repositoryId, String revision, String generationId, String digest) {
-        Document currentPointer = new Document("revision", revision)
-                .append("generationId", generationId).append("manifestDigest", digest).append("committedJobId", "job-" + generationId)
-                .append("publishedAt", new java.util.Date());
-        Document repository = new Document("repoId", repositoryId).append("currentPointer", currentPointer);
-        template.getCollection("repositories").replaceOne(new Document("repoId", repositoryId), repository,
-                new ReplaceOptions().upsert(true));
-    }
-
-    private void seedManifest(String repositoryId, boolean compatible) {
-        seedManifest(repositoryId, REVISION, "g1", DIGEST, compatible);
-    }
-
-    private void seedManifest(String repositoryId, String revision, String generationId, String digest, boolean compatible) {
-        List<Document> projections = compatible ? IndexSchemaContract.requiredProjectionVersions().entrySet().stream()
-                .sorted(Map.Entry.comparingByKey())
-                .map(entry -> new Document("name", entry.getKey()).append("version", entry.getValue()))
-                .toList()
-                : List.of(new Document("name", "SOURCES").append("version", 0));
-        String snapshotId = snapshotId(generationId);
-        SourceEvidencePolicy policy = new SourceEvidencePolicy(SourceEvidencePolicy.VERSION,
-                List.of("src/main/java", "src/main/resources"), Set.of(), Optional.empty());
-        ProjectGuideMembership guide = ProjectGuideMembership.unavailable(ProjectGuideState.DISABLED);
-        template.getCollection("git_evidence_manifests").insertOne(new Document("repoId", repositoryId)
-                .append("evidenceId", snapshotId).append("kind", "SNAPSHOT").append("state", "READY")
-                .append("gitEvidenceVersion", IndexSchemaContract.GIT_EVIDENCE_VERSION)
-                .append("sourceGenerationId", generationId)
-                .append("scope", "STANDALONE").append("revision", revision)
-                .append("policyFingerprint", policy.fingerprint()).append("contentDigest", "a".repeat(64))
-                .append("projectGuide", new Document(SourceEvidenceDocumentCodec.encodeGuide(guide))));
-        template.getCollection("generation_manifests").insertOne(new Document("repoId", repositoryId).append("sourceRevision", revision)
-                .append("generationId", generationId).append("identityDigest", digest).append("writeState", "SEALED_VALID")
-                .append("schemaVersion", IndexSchemaContract.SCHEMA_VERSION).append("projectionVersions", projections)
-                .append("sourceSnapshot", bson(new SourceSnapshotMembership(new GitSnapshotId(snapshotId),
-                        new RepositoryRevision(revision), policy.fingerprint(), "a".repeat(64))))
-                .append("sourcePolicy", new Document(SourceEvidenceDocumentCodec.encodePolicy(policy))).append("projectGuide", new Document(SourceEvidenceDocumentCodec.encodeGuide(guide)))
-                .append("coverage", bson(new SourceCoverage(0, 0, 0, 0)))
-                .append("structure", bson(new SourceStructure(policy.includedRoots(), Map.of(), Map.of()))));
-    }
-
-    private static String snapshotId(String generationId) {
-        return "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa" + generationId.substring(1);
-    }
-
-    private Document bson(Object value) {
-        return (Document) template.getConverter().convertToMongoType(value);
-    }
-
-    private static SourceTypeIdentity sourceType() {
-        return new SourceTypeIdentity(new JavaTypeIdentity("example.api", "OrderService"), "src/main/java/example/api/OrderService.java");
-    }
-
-    private SourceArtifactDocument seedSource(String repositoryId, String generationId, String sourcePath, String content) {
-        SourceArtifactDocument artifact = SourceArtifactDocument.create(content);
-        template.getCollection("source_artifacts").replaceOne(new Document("sourceArtifactId", artifact.id().value()),
-                new Document("sourceArtifactId", artifact.id().value()).append("contentHash", artifact.contentHash())
-                        .append("utf8Content", content), new ReplaceOptions().upsert(true));
-        seedGenerationFile(repositoryId, generationId, sourcePath, artifact);
-        return artifact;
-    }
-
-    private void seedGenerationFile(String repositoryId, String generationId, String sourcePath, SourceArtifactDocument artifact) {
-        GenerationFileDocument mapping = new GenerationFileDocument(new RepositoryId(repositoryId), new GenerationId(generationId),
-                sourcePath, artifact.id(), artifact.contentHash(), "",
-                new SourceIndexScope(false, java.util.List.of(), java.util.List.of(), java.util.List.of()));
+    private static void entry(String packageName, String className, EntryPointKind kind) {
+        SourceTypeIdentity type = new SourceTypeIdentity(new JavaTypeIdentity(packageName, className),
+                "src/main/java/" + packageName.replace('.', '/') + "/" + className + ".java");
+        MethodTarget method = new MethodTarget(type, "handle", List.of());
+        EntryPointTrigger trigger = kind == EntryPointKind.HTTP
+                ? new EntryPointTrigger(Optional.of("GET"), Optional.of("/" + className), Optional.empty(), Optional.empty())
+                : new EntryPointTrigger(Optional.empty(), Optional.empty(), Optional.of(new ExternalTarget.Destination("kafka", "orders")), Optional.empty());
+        CodeFactIdentity identity = new CodeFactIdentity(new RepositoryId("orders"), new RepositoryRevision(REVISION),
+                kind == EntryPointKind.HTTP ? CodeFactKind.API_ROUTE : CodeFactKind.MQ_DESTINATION, new EntryPointIdentity(kind, method, trigger));
+        EntryPointDocument entry = new EntryPointDocument(new RepositoryId("orders"), new GenerationId("g1"),
+                new CodeFact(CodeFactId.from(identity), identity), kind, method, trigger,
+                new SourceRange(type.sourceFile(), new SyntaxRange(new SyntaxPosition(0, 0), new SyntaxPosition(0, 1))));
         Document stored = new Document();
-        template.getConverter().write(mapping, stored);
-        stored.put("repoId", repositoryId);
-        stored.put("generationId", generationId);
-        template.getCollection("generation_files").insertOne(stored);
-        Document generation = template.getCollection("generation_manifests").find(new Document("repoId", repositoryId)
-                .append("generationId", generationId)).first();
-        SourceEvidencePolicy oldPolicy = SourceEvidenceDocumentCodec.decodePolicy(
-                generation.get("sourcePolicy", Document.class));
-        Set<String> paths = new java.util.HashSet<>(oldPolicy.selectedCodePaths());
-        paths.add(sourcePath);
-        SourceEvidencePolicy policy = new SourceEvidencePolicy(SourceEvidencePolicy.VERSION,
-                oldPolicy.includedRoots(), paths, Optional.empty());
-        String revision = generation.getString("sourceRevision");
-        String snapshotId = snapshotId(generationId);
-        template.getCollection("generation_manifests").updateOne(new Document("repoId", repositoryId).append("generationId", generationId),
-                new Document("$set", new Document("sourcePolicy", new Document(SourceEvidenceDocumentCodec.encodePolicy(policy)))
-                        .append("sourceSnapshot", bson(new SourceSnapshotMembership(new GitSnapshotId(snapshotId),
-                                new RepositoryRevision(revision), policy.fingerprint(), "a".repeat(64))))));
-        template.getCollection("git_evidence_manifests").updateOne(new Document("repoId", repositoryId).append("evidenceId", snapshotId),
-                new Document("$set", new Document("policyFingerprint", policy.fingerprint())));
-        template.getCollection("git_snapshot_files").updateMany(new Document("repoId", repositoryId).append("snapshotId", snapshotId),
-                new Document("$set", new Document("policyFingerprint", policy.fingerprint())));
-        template.getCollection("git_snapshot_files").insertOne(new Document("repoId", repositoryId)
-                .append("snapshotId", snapshotId).append("path", sourcePath).append("contentKind", "CODE")
-                .append("mode", "100644").append("contentStatus", "TEXT").append("checksum", artifact.contentHash())
-                .append("policyFingerprint", policy.fingerprint()));
+        template.getConverter().write(EntryPointPersistence.from(entry), stored);
+        stored.put("repoId", "orders"); stored.put("generationId", "g1"); stored.put("entryPointId", entry.fact().id().value());
+        stored.put("scopePackage", "example.public");
+        template.getCollection("entry_points").insertOne(stored);
     }
-
-    private void seedTypeSymbol(String repositoryId, String revision, String generationId, SourceTypeIdentity sourceType,
-                                SourceArtifactId artifactId) {
-        CodeFactIdentity identity = new CodeFactIdentity(new RepositoryId(repositoryId), new RepositoryRevision(revision),
-                CodeFactKind.TYPE, sourceType);
-        com.java.semantic.model.codefact.CodeFact fact = new com.java.semantic.model.codefact.CodeFact(CodeFactId.from(identity), identity);
-        SymbolDocument symbol = new SymbolDocument(new RepositoryId(repositoryId), new GenerationId(generationId), fact,
-                CodeFactKind.TYPE, sourceType.fullyQualifiedName(), sourceType.javaType().className(), sourceType.canonicalForm(),
-                new DeclaredType(sourceType.fullyQualifiedName()), java.util.Set.of(), List.of(), artifactId,
-                new SourceRange(sourceType.sourceFile(), new SyntaxRange(new SyntaxPosition(0, 0), new SyntaxPosition(0, 1))));
-        Document stored = new Document();
-        template.getConverter().write(symbol, stored);
-        stored.put("repoId", repositoryId);
-        stored.put("generationId", generationId);
-        stored.put("symbolId", fact.id().value());
-        stored.put("canonical", identity.canonicalForm());
-        stored.put("sourcePath", sourceType.sourceFile());
-        template.getCollection("symbols").insertOne(stored);
+    private static void reviewJob(String jobId, String reviewId, String phase, boolean active) {
+        job(jobId, "REVIEW", phase, active, PUBLISHED);
+        template.getCollection("index_jobs").updateOne(new Document("jobId", jobId), new Document("$set", new Document("review",
+                new Document("reviewId", reviewId).append("selectionKey", ReviewSelection.commit(new RepositoryRevision(REVISION)).selectionKey())
+                        .append("selection", new Document("kind", "COMMIT").append("revision", REVISION)))));
     }
-
-    private void seedMethodSymbol(String repositoryId, String revision, String generationId, MethodTarget method) {
-        CodeFactIdentity identity = new CodeFactIdentity(new RepositoryId(repositoryId), new RepositoryRevision(revision),
-                CodeFactKind.METHOD, method);
-        com.java.semantic.model.codefact.CodeFact fact = new com.java.semantic.model.codefact.CodeFact(CodeFactId.from(identity), identity);
-        SymbolDocument symbol = new SymbolDocument(new RepositoryId(repositoryId), new GenerationId(generationId), fact,
-                CodeFactKind.METHOD, method.fullyQualifiedClassName(), method.methodName(), method.canonicalForm(),
-                new DeclaredType("void"), java.util.Set.of(), List.of(), new SourceArtifactId("a".repeat(64)),
-                new SourceRange(method.sourceFile(), new SyntaxRange(new SyntaxPosition(0, 0), new SyntaxPosition(0, 1))));
-        Document stored = new Document();
-        template.getConverter().write(symbol, stored);
-        stored.put("repoId", repositoryId);
-        stored.put("generationId", generationId);
-        stored.put("symbolId", fact.id().value());
-        stored.put("canonical", identity.canonicalForm());
-        stored.put("sourcePath", method.sourceFile());
-        template.getCollection("symbols").insertOne(stored);
-    }
-
-    private void seedMapperSymbol(String repositoryId, String revision, String generationId, MapperStatementIdentity statement) {
-        CodeFactIdentity identity = new CodeFactIdentity(new RepositoryId(repositoryId), new RepositoryRevision(revision),
-                CodeFactKind.MAPPER_STATEMENT, statement);
-        com.java.semantic.model.codefact.CodeFact fact = new com.java.semantic.model.codefact.CodeFact(CodeFactId.from(identity), identity);
-        SymbolDocument symbol = new SymbolDocument(new RepositoryId(repositoryId), new GenerationId(generationId), fact,
-                CodeFactKind.MAPPER_STATEMENT, statement.namespace(), statement.statementId(), statement.canonicalForm(),
-                new DeclaredType("mapper-statement"), java.util.Set.of(), List.of(), new SourceArtifactId("a".repeat(64)),
-                new SourceRange(statement.resourcePath(), new SyntaxRange(new SyntaxPosition(0, 0), new SyntaxPosition(0, 1))));
-        Document stored = new Document();
-        template.getConverter().write(symbol, stored);
-        stored.put("repoId", repositoryId);
-        stored.put("generationId", generationId);
-        stored.put("symbolId", fact.id().value());
-        stored.put("canonical", identity.canonicalForm());
-        stored.put("sourcePath", statement.resourcePath());
-        template.getCollection("symbols").insertOne(stored);
+    private static void readyRootReview(String reviewId, String jobId, SealedGeneration generation) {
+        String snapshotId = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb";
+        Document snapshot = new Document(template.getCollection("git_evidence_manifests").find(new Document("evidenceId", SOURCE_SNAPSHOT)).first());
+        snapshot.remove("_id"); snapshot.put("evidenceId", snapshotId); snapshot.put("scope", "REVIEW");
+        snapshot.put("reviewId", reviewId); snapshot.put("ownerJobId", jobId);
+        template.getCollection("git_evidence_manifests").insertOne(snapshot);
+        template.getCollection("review_manifests").insertOne(new Document("repoId", "orders").append("reviewId", reviewId)
+                .append("ownerJobId", jobId).append("reviewContractVersion", IndexSchemaContract.REVIEW_MANIFEST_VERSION).append("state", "READY")
+                .append("selection", new Document("kind", "COMMIT").append("revision", REVISION))
+                .append("resolvedEndpoints", new Document("afterRevision", REVISION).append("baselineRule", "EMPTY_TREE"))
+                .append("after", new Document("generation", template.getConverter().convertToMongoType(generation)).append("snapshotId", snapshotId))
+                .append("comparisonId", "cccccccc-cccc-cccc-cccc-cccccccccccc")
+                .append("createdAt", Date.from(PUBLISHED)).append("publishedAt", Date.from(PUBLISHED)));
     }
 }

@@ -1,70 +1,27 @@
 package com.java.semantic.query.application;
 
-import com.java.semantic.model.codefact.CodeFactSummary;
+import com.java.semantic.model.codefact.CanonicalIdentity;
 import com.java.semantic.model.codefact.CodeFactDetails;
-import com.java.semantic.model.codefact.CodeFactSearchResult;
-import com.java.semantic.model.index.SourceIndexCoverage;
-import com.java.semantic.model.query.SelectedGeneration;
+import com.java.semantic.model.codefact.CodeFactDisplay;
+import com.java.semantic.model.codefact.ExternalTarget;
+import com.java.semantic.model.codefact.RelationIdentity;
+import com.java.semantic.model.codefact.RelationTarget;
+import java.util.Optional;
 
-import java.util.List;
-import java.util.Objects;
+/** Compact semantic navigation never hydrates source content. */
+final class SemanticResultMapper {
+    private SemanticResultMapper() { }
 
-/** Maps already-authorized query results to the transport-neutral application contract. */
-public final class SemanticResultMapper {
-
-    private SemanticResultMapper() {
-    }
-
-    public static SemanticQueryContract.RepositoryItem toRepositoryItem(SelectedGeneration generation) {
-        SelectedGeneration requiredGeneration = Objects.requireNonNull(generation, "generation is required");
-        return new SemanticQueryContract.RepositoryItem(requiredGeneration.repositoryId().value(), requiredGeneration.revision().value());
-    }
-
-    public static SemanticQueryContract.ProgramElement toProgramElement(CodeFactSummary summary, FactSourceSlice slice) {
-        CodeFactSummary requiredSummary = Objects.requireNonNull(summary, "code fact summary is required");
-        FactSourceSlice requiredSlice = Objects.requireNonNull(slice, "fact source slice is required");
-        return new SemanticQueryContract.ProgramElement(requiredSummary.fact().id().value(), requiredSummary.fact().identity().kind(),
-                requiredSummary.fact().identity().canonicalIdentity().canonicalForm(),
-                SourceSnippetMapper.toSnippet(requiredSlice.sourceRange(), requiredSlice.fileContent()));
-    }
-
-    public static SemanticQueryContract.ProgramElement toProgramElement(CodeFactDetails details, FactSourceSlice slice) {
-        CodeFactDetails requiredDetails = Objects.requireNonNull(details, "code fact details are required");
-        return toProgramElement(new CodeFactSummary(requiredDetails.fact(), requiredDetails.location()), slice);
-    }
-
-    public static SemanticQueryContract.SearchCodeResult toSearchCodeResult(CodeFactSearchResult result,
-                                                                              List<SemanticQueryContract.ProgramElement> elements) {
-        CodeFactSearchResult requiredResult = Objects.requireNonNull(result, "code fact search result is required");
-        List<SemanticQueryContract.ProgramElement> requiredElements = List.copyOf(Objects.requireNonNull(elements, "program elements are required"));
-        SelectedGeneration generation = requiredResult.generation();
-        SemanticQueryContract.Page page = new SemanticQueryContract.Page(requiredResult.query().offset(), requiredResult.query().limit(),
-                requiredElements.size(), requiredResult.totalCount(), requiredResult.hasMore());
-        return new SemanticQueryContract.SearchCodeResult(generation.repositoryId().value(), generation.revision().value(), requiredElements, page,
-                toSourceCoverage(requiredResult.coverage()));
-    }
-
-    public static SemanticQueryContract.CollectionResult toCollectionResult(SelectedGeneration generation, int offset, int limit,
-                                                                              List<?> items, long totalCount, boolean hasMore) {
-        SelectedGeneration requiredGeneration = Objects.requireNonNull(generation, "generation is required");
-        List<?> requiredItems = List.copyOf(Objects.requireNonNull(items, "collection items are required"));
-        SemanticQueryContract.Page page = new SemanticQueryContract.Page(offset, limit, requiredItems.size(), totalCount, hasMore);
-        return new SemanticQueryContract.CollectionResult(requiredGeneration.repositoryId().value(), requiredGeneration.revision().value(),
-                requiredItems, page);
-    }
-
-    public static SemanticQueryContract.FactSourceResult toFactSourceResult(String factId, FactSourceSlice slice) {
-        String requiredFactId = Objects.requireNonNull(factId, "fact id is required");
-        FactSourceSlice requiredSlice = Objects.requireNonNull(slice, "fact source slice is required");
-        SelectedGeneration generation = requiredSlice.generation();
-        return new SemanticQueryContract.FactSourceResult(generation.repositoryId().value(), generation.revision().value(), requiredFactId,
-                SourceSnippetMapper.toSnippet(requiredSlice.sourceRange(), requiredSlice.fileContent()),
-                SourceSnippetMapper.toFactRange(requiredSlice.factRange()));
-    }
-
-    private static SemanticQueryContract.SourceCoverage toSourceCoverage(SourceIndexCoverage coverage) {
-        SourceIndexCoverage requiredCoverage = Objects.requireNonNull(coverage, "source index coverage is required");
-        List<String> issueCodes = requiredCoverage.issues().stream().map(issue -> issue.code()).distinct().sorted().toList();
-        return new SemanticQueryContract.SourceCoverage(requiredCoverage.indexedSourceCount(), requiredCoverage.issues().size(), issueCodes);
+    static SemanticQueryContract.CompactFact compact(CodeFactDetails details) {
+        CanonicalIdentity identity = details.fact().identity().canonicalIdentity();
+        String signature = CodeFactDisplay.signature(identity);
+        boolean unresolved = identity instanceof RelationIdentity relation
+                && relation.target() instanceof RelationTarget.External external
+                && external.target() instanceof ExternalTarget.UnresolvedCall;
+        return new SemanticQueryContract.CompactFact(details.fact().id().value(), details.fact().identity().kind(),
+                CodeFactDisplay.displayName(identity),
+                signature.isEmpty() ? Optional.empty() : Optional.of(signature), details.location().sourceFile(),
+                details.location().range(), unresolved ? Optional.empty() : Optional.of(details.fact().identity().canonicalForm()),
+                details.mapperStatementKind());
     }
 }

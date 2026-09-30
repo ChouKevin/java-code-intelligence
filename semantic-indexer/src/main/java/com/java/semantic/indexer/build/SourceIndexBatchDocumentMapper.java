@@ -15,6 +15,8 @@ import com.java.semantic.model.index.IndexSchemaContract;
 import com.java.semantic.model.index.ProjectionName;
 import com.java.semantic.model.index.RelationDocument;
 import com.java.semantic.model.index.persistence.EntryPointPersistence;
+import com.java.semantic.model.index.persistence.SymbolPersistence;
+import com.java.semantic.model.index.SymbolDocument;
 import com.java.semantic.model.index.SourceArtifactId;
 import com.java.semantic.model.repository.RepositoryId;
 import java.util.ArrayList;
@@ -97,7 +99,8 @@ public final class SourceIndexBatchDocumentMapper {
     }
 
     private List<StoredDocument> symbolDocuments(SourceIndexBatch batch) {
-        return batch.symbols().stream().map(symbol -> stored(IndexSchemaContract.projectionCollection(ProjectionName.SYMBOLS), symbol, document -> {
+        return batch.symbols().stream().map(symbol -> stored(IndexSchemaContract.projectionCollection(ProjectionName.SYMBOLS),
+                SymbolPersistence.from(symbol), document -> {
             CodeFactScope scope = CodeFactScope.from(symbol.fact().identity());
             document.put("symbolId", symbol.fact().id().value());
             document.put("canonical", symbol.fact().identity().canonicalForm());
@@ -164,6 +167,14 @@ public final class SourceIndexBatchDocumentMapper {
         converter.write(value, document);
         enrich.accept(document);
         return new StoredDocument(collection, document);
+    }
+
+    SymbolDocument reconstructSymbol(Document document) {
+        Document converted = new Document(document);
+        if (document.get("generationId") instanceof String generationId) {
+            converted.put("generationId", new Document("value", generationId));
+        }
+        return converter.read(SymbolPersistence.class, converted).toModel();
     }
 
     com.java.semantic.model.index.EntryPointDocument reconstructEntryPoint(Document document) {

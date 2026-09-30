@@ -63,6 +63,6 @@ class SourceIndexBatchPartitioningTest {
         CodeFact fact = new CodeFact(CodeFactId.from(identity), identity);
         SourceRange range = new SourceRange(SOURCE_PATH, new SyntaxRange(new SyntaxPosition(0, index), new SyntaxPosition(0, index + 1)));
         return new SymbolDocument(REPOSITORY_ID, GENERATION_ID, fact, CodeFactKind.TYPE, "sample", "Type" + index,
-                "sample.Type" + index, new DeclaredType("sample.Type" + index), Set.of(), List.of(), ARTIFACT.id(), range);
+                "sample.Type" + index, new DeclaredType("sample.Type" + index), Set.of(), List.of(), ARTIFACT.id(), range, java.util.Optional.empty());
     }
 }

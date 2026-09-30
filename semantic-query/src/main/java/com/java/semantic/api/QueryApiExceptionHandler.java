@@ -17,6 +17,7 @@ import com.java.semantic.query.application.ReviewNotFoundException;
 import com.java.semantic.query.application.ReviewNotReadyException;
 import com.java.semantic.query.application.SemanticQueryError;
 import com.java.semantic.query.application.SemanticQueryErrorMapper;
+import com.java.semantic.query.application.MetadataNotPreparedException;
 import jakarta.validation.ConstraintViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -46,7 +47,8 @@ public final class QueryApiExceptionHandler {
             ReviewNotReadyException.class, ReviewFailedException.class, ReviewContextMismatchException.class,
             GitEvidenceNotFoundException.class, GitEvidenceNotReadyException.class, CodeFactNotFoundException.class,
             CodeFactKindMismatchException.class, IndexNotReadyException.class, IndexContractMismatchException.class,
-            SemanticIndexUnavailableException.class, InvalidCodeFactQueryException.class,
+            SemanticIndexUnavailableException.class, InvalidCodeFactQueryException.class, MetadataNotPreparedException.class,
+            com.mongodb.MongoException.class, org.springframework.dao.DataAccessException.class,
             CodeFactKindUnsupportedException.class, IllegalArgumentException.class})
     public ResponseEntity<SemanticQueryError> failure(RuntimeException exception) {
         SemanticQueryError error = errorMapper.map(exception);
@@ -63,9 +65,10 @@ public final class QueryApiExceptionHandler {
     private static HttpStatus status(SemanticQueryError error) {
         return switch (error.code()) {
             case "REPOSITORY_NOT_FOUND", "REVIEW_NOT_FOUND", "FACT_NOT_FOUND", "GIT_EVIDENCE_NOT_FOUND" -> HttpStatus.NOT_FOUND;
-            case "REVISION_OUTDATED", "REVIEW_NOT_READY", "REVIEW_FAILED", "GIT_EVIDENCE_NOT_READY" -> HttpStatus.CONFLICT;
+            case "REVISION_OUTDATED", "REVIEW_NOT_READY", "REVIEW_FAILED", "GIT_EVIDENCE_NOT_READY",
+                    "REVIEW_CONTEXT_MISMATCH", "METADATA_NOT_PREPARED" -> HttpStatus.CONFLICT;
             case "INDEX_UNAVAILABLE" -> HttpStatus.SERVICE_UNAVAILABLE;
-            case "INVALID_ARGUMENT", "FACT_KIND_MISMATCH", "REVIEW_CONTEXT_MISMATCH" -> HttpStatus.BAD_REQUEST;
+            case "INVALID_ARGUMENT", "FACT_KIND_MISMATCH" -> HttpStatus.BAD_REQUEST;
             default -> throw new IllegalArgumentException("unknown Semantic Query error code");
         };
     }

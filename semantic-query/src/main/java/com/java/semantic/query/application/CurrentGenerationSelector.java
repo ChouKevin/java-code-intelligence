@@ -1,19 +1,14 @@
 package com.java.semantic.query.application;
 
-import com.java.semantic.model.codefact.CodeFactIdentity;
-import com.java.semantic.model.codefact.SourceTypeIdentity;
 import com.java.semantic.model.index.GenerationId;
 import com.java.semantic.model.index.IndexCollections;
-import com.java.semantic.model.index.IndexSchemaContract;
 import com.java.semantic.model.index.ManifestDigest;
-import com.java.semantic.model.index.ProjectionName;
 import com.java.semantic.model.index.ProjectionRequirements;
 import com.java.semantic.model.query.SelectedGeneration;
 import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.model.repository.RepositoryRevision;
 import com.java.semantic.query.config.ConfiguredReadPolicy;
 import com.mongodb.MongoException;
-import com.mongodb.client.FindIterable;
 import com.mongodb.client.model.Filters;
 import org.bson.Document;
 import org.springframework.dao.DataAccessException;
@@ -21,12 +16,7 @@ import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.util.StringUtils;
 
 import java.time.Duration;
-import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.Date;
-import java.util.EnumSet;
-import java.util.List;
-import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.TimeUnit;
 
@@ -42,90 +32,15 @@ public final class CurrentGenerationSelector {
         this.guard = new SelectedGenerationGuard(template, readPolicy, storageTimeout);
     }
 
-    public SelectedGeneration selectSource(String requestedRepositoryId, String requestedRevision, SourceTypeIdentity sourceType) {
-        return selectSource(requestedRepositoryId, requestedRevision, sourceType, SelectedGenerationGuard.SOURCES);
+    public SelectedGenerationGuard.SourceContext selectSourceContext(String requestedRepositoryId, String requestedRevision,
+            ProjectionRequirements requirements) {
+        return guard.requireSourceContext(selectedPointer(request(requestedRepositoryId, requestedRevision)), requirements);
     }
 
-    /** Selects an authorized source scope while requiring only the caller's actual persisted projections. */
-    public SelectedGeneration selectSource(String requestedRepositoryId, String requestedRevision, SourceTypeIdentity sourceType,
-                                          ProjectionRequirements requirements) {
-        Request request = request(requestedRepositoryId, requestedRevision);
-        SourceTypeIdentity identity = Objects.requireNonNull(sourceType, "source type identity is required");
-        ProjectionRequirements requiredRequirements = Objects.requireNonNull(requirements, "projection requirements are required");
-        SelectedGeneration current = selectedPointer(request);
-        guard.requireSourceVisible(current, identity);
-        return guard.require(current, requiredRequirements);
-    }
-
-
-    public SelectedGeneration selectCodeFact(String requestedRepositoryId, String requestedRevision, CodeFactIdentity codeFact) {
-        Request request = request(requestedRepositoryId, requestedRevision);
-        CodeFactIdentity identity = Objects.requireNonNull(codeFact, "code fact identity is required");
-        return selectCodeFact(request, identity, requirementsFor(identity));
-    }
-
-    /** Selects one authorized generation for a fact query requiring additional projections. */
-    public SelectedGeneration selectCodeFact(String requestedRepositoryId, String requestedRevision, CodeFactIdentity codeFact,
-                                            ProjectionRequirements requirements) {
-        Request request = request(requestedRepositoryId, requestedRevision);
-        CodeFactIdentity identity = Objects.requireNonNull(codeFact, "code fact identity is required");
-        ProjectionRequirements requiredRequirements = Objects.requireNonNull(requirements, "projection requirements are required");
-        return selectCodeFact(request, identity, requiredRequirements);
-    }
-
-    private SelectedGeneration selectCodeFact(Request request, CodeFactIdentity identity, ProjectionRequirements requiredRequirements) {
-        if (!request.repositoryId().equals(identity.repositoryId()) || !request.revision().equals(identity.repositoryRevision())) {
-            throw new IllegalArgumentException("code fact identity repository and revision must match the request");
-        }
-        SelectedGeneration current = selectedPointer(request);
-        guard.requireVisible(current, identity);
-        return guard.require(current, requiredRequirements);
-    }
-
-    /** Selects an authorized current generation before a bounded projection query. */
-    public SelectedGeneration select(String requestedRepositoryId, String requestedRevision,
-                                     ProjectionRequirements requirements) {
-        Request request = request(requestedRepositoryId, requestedRevision);
-        ProjectionRequirements requiredRequirements = Objects.requireNonNull(requirements, "projection requirements are required");
-        return guard.require(selectedPointer(request), requiredRequirements);
-    }
-
-
-    private static ProjectionRequirements requirementsFor(CodeFactIdentity identity) {
-        return switch (identity.kind()) {
-            case ANNOTATION_USAGE, TYPE_USAGE, SQL_IDENTIFIER, CONFIGURATION_KEY, OUTBOUND_API, MQ_PUBLISHER, ERROR_CONTRACT ->
-                    new ProjectionRequirements(EnumSet.of(ProjectionName.RELATIONS, ProjectionName.SYMBOLS));
-            case API_ROUTE, MQ_DESTINATION, SCHEDULE -> SelectedGenerationGuard.ENTRY_POINTS;
-            default -> SelectedGenerationGuard.SYMBOLS;
-        };
-    }
-
-    public SelectedGeneration currentRepository(String requestedRepositoryId) {
-        return currentPointer(parseAndAuthorize(requestedRepositoryId));
-    }
-
-    public List<SelectedGeneration> listCurrentRepositories() {
-        try {
-            List<SelectedGeneration> result = new ArrayList<>();
-            FindIterable<Document> repositories = template.getCollection(IndexCollections.REPOSITORIES).find()
-                    .maxTime(storageTimeout.toMillis(), TimeUnit.MILLISECONDS);
-            for (Document candidate : repositories) {
-                Object repositoryValue = candidate.get("repoId");
-                if (!(repositoryValue instanceof String value) || !StringUtils.hasText(value)) { continue; }
-                try {
-                    RepositoryId repositoryId = new RepositoryId(value);
-                if (guard.isRepositoryVisible(repositoryId)) {
-                    result.add(pointer(repositoryId, candidate));
-                }
-                } catch (IndexNotReadyException | IndexContractMismatchException | IllegalArgumentException exception) {
-                    // Catalogs omit unpublished or incompatible rows.
-                }
-            }
-            result.sort(Comparator.comparing(current -> current.repositoryId().value()));
-            return List.copyOf(result);
-        } catch (MongoException | DataAccessException exception) {
-            throw unavailable(exception);
-        }
+    SelectedGenerationGuard.SourceContext publishedContext(RepositoryId repositoryId, Document repository,
+            ProjectionRequirements requirements) {
+        if (!guard.isRepositoryVisible(repositoryId)) throw new RepositoryNotFoundException();
+        return guard.requireSourceContext(pointer(repositoryId, repository), requirements);
     }
 
     private Request request(String requestedRepositoryId, String requestedRevision) {

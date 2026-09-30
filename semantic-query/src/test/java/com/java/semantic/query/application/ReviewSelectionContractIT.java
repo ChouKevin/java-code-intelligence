@@ -1,5 +1,7 @@
 package com.java.semantic.query.application;
 
+import com.java.semantic.model.index.persistence.SymbolPersistence;
+
 import com.java.semantic.model.source.SourceEvidenceDocumentCodec;
 import com.java.semantic.model.codefact.CodeFact;
 import com.java.semantic.model.codefact.CodeFactId;
@@ -73,29 +75,31 @@ class ReviewSelectionContractIT extends PublishedMongoITSupport {
             template.getCollection("repositories").insertOne(new Document("repoId", "orders").append("currentPointer",
                     pointer(REVISION_A, "g-a-rebuilt", "3".repeat(64))));
             seedReadyReview(template, a, b);
+            seedSemanticIndexes(template);
 
             ConfiguredReadPolicy policy = policy();
-            ReviewGenerationSelector selector = new ReviewGenerationSelector(
-                    new ReviewManifestReadService(template, policy, Duration.ofSeconds(2)), guard(template, policy));
-
-            ReviewSelection selected = selector.select(new RepositoryId("orders"), new ReviewId(REVIEW_ID), ReviewSide.BEFORE,
-                    new RepositoryRevision(REVISION_A));
-
-            assertThat(selected.selected().generationId().value()).isEqualTo("g-a");
-            SelectedSemanticQueryService selectedQueries = SelectedSemanticQueryService.create(template, guard(template, policy), Duration.ofSeconds(2));
-            SemanticQueryContract.SearchCodeResult result = selectedQueries.searchCode(selected.selected(),
-                    new SemanticQueryContract.SearchCodeRequest("orders", REVISION_A, "Order", Set.of(CodeFactKind.TYPE),
-                            Optional.empty(), 0, 20));
-            assertThat(result.items()).singleElement().satisfies(item -> assertThat(item.source().code()).contains("A-g-a"));
-            assertThatThrownBy(() -> selectedQueries.getFactSource(selected.selected(), new SemanticQueryContract.FactSourceRequest(
-                    "orders", REVISION_B, factId(REVISION_B), 0))).isInstanceOf(IllegalArgumentException.class);
-            assertThatThrownBy(() -> selector.select(new RepositoryId("orders"), new ReviewId(REVIEW_ID), ReviewSide.BEFORE,
-                    new RepositoryRevision(REVISION_B))).isInstanceOf(ReviewContextMismatchException.class);
-            String beforeSnapshotId = selected.manifest().before().orElseThrow().snapshotId().value();
+            ReadContextSelector selector = new ReadContextSelector(selector(template, policy),
+                    new ReviewManifestReadService(template, policy, Duration.ofSeconds(2)), guard(template, policy), policy);
+            SemanticQueryContract.ReadContext before = SemanticQueryContract.ReadContext.review("orders", REVIEW_ID, ReviewSide.BEFORE, REVISION_A);
+            ReadContextSelector.AdmittedContext selected = selector.select(before, SelectedGenerationGuard.SEARCH_WITH_SOURCES, ReadContextSelector.Access.SEMANTIC);
+            assertThat(selected.source().selected().generationId().value()).isEqualTo("g-a");
+            SelectedSemanticQueryService selectedQueries = semantic(template, policy);
+            SemanticQueryContract.FactCollection result = selectedQueries.searchCode(selected,
+                    new SemanticQueryContract.SearchCodeRequest(before, "Order", Set.of(CodeFactKind.TYPE),
+                            Optional.empty(), Optional.empty(), new SemanticQueryContract.PageRequest(Optional.empty(), 20)));
+            assertThat(result.items()).singleElement().satisfies(item -> {
+                assertThat(item.factId()).isEqualTo(factId(REVISION_A));
+                assertThat(item.displayName()).isEqualTo("Order");
+                assertThat(item.range().end().character()).isGreaterThan(0);
+            });
+            SemanticQueryContract.ReadContext wrong = SemanticQueryContract.ReadContext.review("orders", REVIEW_ID, ReviewSide.BEFORE, REVISION_B);
+            assertThatThrownBy(() -> selector.select(wrong, SelectedGenerationGuard.SOURCES, ReadContextSelector.Access.SEMANTIC)).isInstanceOf(ReviewContextMismatchException.class);
+            CodeFactReadService facts = new CodeFactReadService(template, guard(template, policy), Duration.ofSeconds(2));
+            assertThatThrownBy(() -> facts.get(selected.source(), new CodeFactId(factId(REVISION_B)))).isInstanceOf(CodeFactNotFoundException.class);
+            String beforeSnapshotId = selected.source().snapshot().snapshotId().value();
             template.getCollection("git_evidence_manifests").updateOne(new Document("evidenceId", beforeSnapshotId),
                     new Document("$set", new Document("sourceGenerationId", "g-a-rebuilt")));
-            assertThatThrownBy(() -> selector.select(new RepositoryId("orders"), new ReviewId(REVIEW_ID), ReviewSide.BEFORE,
-                    new RepositoryRevision(REVISION_A))).isInstanceOf(IndexContractMismatchException.class);
+            assertThatThrownBy(() -> selector.select(before, SelectedGenerationGuard.SOURCES, ReadContextSelector.Access.SEMANTIC)).isInstanceOf(IndexContractMismatchException.class);
         }
     }
 
@@ -142,6 +146,9 @@ class ReviewSelectionContractIT extends PublishedMongoITSupport {
                 .append("evidenceId", snapshotId).append("kind", "SNAPSHOT").append("state", "READY")
                 .append("gitEvidenceVersion", IndexSchemaContract.GIT_EVIDENCE_VERSION).append("scope", "STANDALONE")
                 .append("sourceGenerationId", generationId)
+                .append("ownerJobId", "job-" + generationId).append("total", 1L)
+                .append("fileTextBytesLimit", 1048576L).append("snapshotTextBytesLimit", 1048576L)
+                .append("contentCoverage", new Document("entryCount", 1L).append("textEntries", 1L).append("textBytes", 0L))
                 .append("revision", revision).append("policyFingerprint", policy.fingerprint())
                 .append("contentDigest", "c".repeat(64)).append("projectGuide", new Document(SourceEvidenceDocumentCodec.encodeGuide(guide))));
         template.getCollection("generation_manifests").insertOne(new Document("repoId", "orders").append("sourceRevision", revision)
@@ -165,6 +172,9 @@ class ReviewSelectionContractIT extends PublishedMongoITSupport {
         SourceArtifactDocument artifact = SourceArtifactDocument.create(content);
         String snapshotId = UUID.nameUUIDFromBytes(generationId.getBytes(StandardCharsets.UTF_8)).toString();
         Document snapshot = template.getCollection("git_evidence_manifests").find(new Document("evidenceId", snapshotId)).first();
+        template.getCollection("git_evidence_manifests").updateOne(new Document("evidenceId", snapshotId),
+                new Document("$set", new Document("contentCoverage", new Document("entryCount", 1L).append("textEntries", 1L)
+                        .append("textBytes", (long) content.getBytes(StandardCharsets.UTF_8).length))));
         template.getCollection("git_snapshot_files").insertOne(new Document("repoId", "orders")
                 .append("snapshotId", snapshotId).append("path", path).append("contentKind", "CODE")
                 .append("mode", "100644").append("contentStatus", "TEXT").append("checksum", artifact.contentHash())
@@ -184,9 +194,9 @@ class ReviewSelectionContractIT extends PublishedMongoITSupport {
         CodeFact fact = new CodeFact(CodeFactId.from(identity), identity);
         SymbolDocument symbol = new SymbolDocument(new RepositoryId("orders"), new GenerationId(generationId), fact, CodeFactKind.TYPE,
                 type.fullyQualifiedName(), "Order", type.canonicalForm(), new DeclaredType(type.fullyQualifiedName()), Set.of(), List.of(),
-                artifact.id(), new SourceRange(path, new SyntaxRange(new SyntaxPosition(0, 0), new SyntaxPosition(0, content.length()))));
+                artifact.id(), new SourceRange(path, new SyntaxRange(new SyntaxPosition(0, 0), new SyntaxPosition(0, content.length()))), Optional.empty());
         Document storedSymbol = new Document();
-        template.getConverter().write(symbol, storedSymbol);
+        template.getConverter().write(SymbolPersistence.from(symbol), storedSymbol);
         CodeFactScope scope = CodeFactScope.from(identity);
         storedSymbol.put("repoId", "orders"); storedSymbol.put("generationId", generationId); storedSymbol.put("symbolId", fact.id().value());
         storedSymbol.put("canonical", identity.canonicalForm()); storedSymbol.put("sourcePath", path); storedSymbol.put("scopePackage", scope.packageName());
@@ -197,7 +207,7 @@ class ReviewSelectionContractIT extends PublishedMongoITSupport {
                 .append("factId", fact.id().value()).append("kind", "TYPE").append("tokens", List.of("order")).append("package", "")
                 .append("authority", "SYMBOLS").append("canonical", identity.canonicalForm())
                 .append("displayName", "Order").append("signature", "").append("scopePackage", "")
-                .append("scopeClass", "Order").append("scopeMethod", "").append("scopeParameters", List.of()).append("scopePath", path));
+                .append("scopeClass", "Order").append("scopeMethod", "").append("scopeParameters", List.of()).append("scopePath", path).append("sourcePath", path));
     }
 
     private static String factId(String revision) {
@@ -226,15 +236,25 @@ class ReviewSelectionContractIT extends PublishedMongoITSupport {
         SelectedGeneration selected = generation.selected();
         Document source = template.getCollection("generation_manifests").find(new Document("repoId", "orders")
                 .append("generationId", selected.generationId().value())).first();
-        Document membership = source.get("sourceSnapshot", Document.class);
+        SourceSnapshotMembership membership = template.getConverter().read(SourceSnapshotMembership.class,
+                source.get("sourceSnapshot", Document.class));
+        Document canonicalSnapshot = template.getCollection("git_evidence_manifests")
+                .find(new Document("evidenceId", membership.snapshotId().value())).first();
         template.getCollection("git_evidence_manifests").insertOne(new Document("repoId", "orders")
                 .append("evidenceId", snapshotId).append("kind", "SNAPSHOT").append("state", "READY")
                 .append("gitEvidenceVersion", IndexSchemaContract.GIT_EVIDENCE_VERSION)
                 .append("sourceGenerationId", selected.generationId().value())
+                .append("total", 1L).append("fileTextBytesLimit", 1048576L).append("snapshotTextBytesLimit", 1048576L)
+                .append("contentCoverage", canonicalSnapshot.get("contentCoverage"))
                 .append("scope", "REVIEW").append("reviewId", REVIEW_ID).append("ownerJobId", "review-job")
                 .append("revision", selected.revision().value()).append("projectGuide", source.get("projectGuide"))
-                .append("contentDigest", membership.getString("contentDigest"))
-                .append("policyFingerprint", membership.getString("policyFingerprint")));
+                .append("contentDigest", membership.contentDigest())
+                .append("policyFingerprint", membership.policyFingerprint()));
+        Document file = new Document(template.getCollection("git_snapshot_files")
+                .find(new Document("snapshotId", membership.snapshotId().value())).first());
+        file.remove("_id");
+        file.put("snapshotId", snapshotId);
+        template.getCollection("git_snapshot_files").insertOne(file);
     }
 
     private static Document pointer(String revision, String generationId, String digest) {

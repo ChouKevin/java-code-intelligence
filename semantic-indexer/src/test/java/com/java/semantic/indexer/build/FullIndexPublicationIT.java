@@ -284,7 +284,7 @@ class FullIndexPublicationIT {
                     SymbolDocument symbol = batch.symbols().getFirst();
                     SymbolDocument mismatched = new SymbolDocument(symbol.repositoryId(), symbol.generationId(), symbol.fact(), symbol.kind(),
                             symbol.owner(), symbol.name(), symbol.signature(), symbol.declaredType(), symbol.modifiers(), symbol.annotations(),
-                            new SourceArtifactId("f".repeat(64)), symbol.range());
+                            new SourceArtifactId("f".repeat(64)), symbol.range(), symbol.mapperStatementKind());
                     return copyBatch(batch, List.of(mismatched), batch.search());
                 }),
                 Arguments.of("character crosses source line", (java.util.function.UnaryOperator<SourceIndexBatch>) batch -> {
@@ -293,7 +293,7 @@ class FullIndexPublicationIT {
                             new SyntaxRange(new SyntaxPosition(0, 200), new SyntaxPosition(0, 201)));
                     SymbolDocument outOfLine = new SymbolDocument(symbol.repositoryId(), symbol.generationId(), symbol.fact(), symbol.kind(),
                             symbol.owner(), symbol.name(), symbol.signature(), symbol.declaredType(), symbol.modifiers(), symbol.annotations(),
-                            symbol.sourceArtifactId(), invalid);
+                            symbol.sourceArtifactId(), invalid, symbol.mapperStatementKind());
                     return copyBatch(batch, List.of(outOfLine), batch.search());
                 }));
     }
@@ -399,7 +399,7 @@ class FullIndexPublicationIT {
         CodeFact methodFact = new CodeFact(CodeFactId.from(methodIdentity), methodIdentity);
         SourceRange range = new SourceRange(sourcePath, new SyntaxRange(new SyntaxPosition(0, 0), new SyntaxPosition(0, 1)));
         SymbolDocument symbol = new SymbolDocument(repositoryId, generationId, methodFact, CodeFactKind.METHOD, "orders.Secret", "place",
-                "orders.Secret#place()", new DeclaredType("void"), Set.of(), List.of(), artifact.id(), range);
+                "orders.Secret#place()", new DeclaredType("void"), Set.of(), List.of(), artifact.id(), range, Optional.empty());
         RelationTarget target = new RelationTarget.Internal(methodIdentity);
         RelationIdentity relationIdentity = new RelationIdentity(methodIdentity, RelationKind.CALLS, target, range);
         CodeFactIdentity relationIdentityFact = new CodeFactIdentity(repositoryId, requestedRevision, CodeFactKind.TYPE_USAGE, relationIdentity);

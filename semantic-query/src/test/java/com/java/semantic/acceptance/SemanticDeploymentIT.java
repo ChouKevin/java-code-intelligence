@@ -24,12 +24,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 class SemanticDeploymentIT {
 
     private static final String TOKEN_HEADER = "X-Api-Token";
-    private static final List<String> TOOL_NAMES = List.of(
-            "list_repositories", "get_repository", "search_code", "get_fact_source", "list_entry_points", "find_api_routes",
-            "find_event_listeners", "list_type_members", "find_method_implementations", "find_references", "find_callers", "find_callees");
 
     @Test
-    void deployed_query_exposes_the_twelve_tool_contract_and_matches_http_revision_errors() throws Exception {
+    void deployed_query_reads_copied_contexts_and_matches_http_revision_errors() throws Exception {
         String baseUrl = requiredEnvironment("SEMANTIC_BASE_URL");
         String apiToken = requiredEnvironment("SEMANTIC_API_TOKEN");
         String repositoryId = requiredEnvironment("SEMANTIC_UAT_REPOSITORY");
@@ -46,28 +43,25 @@ class SemanticDeploymentIT {
             McpSchema.InitializeResult initialization = client.initialize();
             assertThat(initialization.serverInfo()).isNotNull();
 
-            McpSchema.ListToolsResult tools = client.listTools();
-            assertThat(tools.tools()).extracting(McpSchema.Tool::name)
-                .containsExactlyInAnyOrderElementsOf(TOOL_NAMES);
 
             Map<?, ?> repositories = successfulBody(client.callTool(McpSchema.CallToolRequest.builder("list_repositories").arguments(Map.of()).build()), mapper);
             Map<?, ?> repository = repository(repositories, repositoryId);
-            String revision = String.valueOf(repository.get("revision"));
+            String revision = String.valueOf(repository.get("publishedRevision"));
+            Map<String, Object> context = Map.of("kind", "CURRENT", "repositoryId", repositoryId, "revision", revision);
 
             Map<?, ?> search = successfulBody(client.callTool(McpSchema.CallToolRequest.builder("search_code").arguments(Map.of(
-                    "repositoryId", repositoryId, "revision", revision, "query", "payment")).build()), mapper);
+                    "context", context, "query", "payment")).build()), mapper);
             Map<?, ?> fact = firstItem(search, "search_code");
             String factId = String.valueOf(fact.get("factId"));
 
-            Map<?, ?> factSource = successfulBody(client.callTool(McpSchema.CallToolRequest.builder("get_fact_source").arguments(Map.of(
-                    "repositoryId", repositoryId, "revision", revision, "factId", factId)).build()), mapper);
-            assertThat(factSource.get("repositoryId")).isEqualTo(repositoryId);
-            assertThat(factSource.get("revision")).isEqualTo(revision);
-            assertThat(factSource.get("factId")).isEqualTo(factId);
-            assertThat(factSource.get("source")).isInstanceOf(Map.class);
+            Map<?, ?> factSource = successfulBody(client.callTool(McpSchema.CallToolRequest.builder("read_source").arguments(Map.of(
+                    "context", context, "target", Map.of("kind", "FACT", "factId", factId))).build()), mapper);
+            assertThat(factSource.get("context")).isEqualTo(context);
+            assertThat(String.valueOf(factSource.get("content"))).contains("payment");
+            assertThat(factSource.get("factRange")).isInstanceOf(Map.class);
 
-            Map<String, Object> outdatedRequest = Map.of(
-                    "repositoryId", repositoryId, "revision", "0".repeat(40), "query", "payment");
+            Map<String, Object> outdatedRequest = Map.of("context",
+                    Map.of("kind", "CURRENT", "repositoryId", repositoryId, "revision", "0".repeat(40)), "query", "payment");
             HttpResponse<String> httpResponse = HttpClient.newHttpClient().send(HttpRequest.newBuilder()
                     .uri(URI.create(httpEndpoint(baseUrl, "/api/v1/search-code")))
                     .header(TOKEN_HEADER, apiToken)

@@ -36,14 +36,13 @@ import com.java.semantic.model.repository.RepositoryRevision;
 import com.java.semantic.query.application.CurrentGenerationSelector;
 import com.java.semantic.query.application.GitEvidenceReadService;
 import com.java.semantic.query.application.CodeFactReadService;
-import com.java.semantic.query.application.CodeFactSearchService;
-import com.java.semantic.query.application.CurrentRepositoryQueryService;
-import com.java.semantic.query.application.PublishedDiscoveryQueryService;
-import com.java.semantic.query.application.PublishedEntryPointQueryService;
-import com.java.semantic.query.application.PublishedRelationQueryService;
+import com.java.semantic.query.application.ContextDiscoveryService;
+import com.java.semantic.query.application.ReadContextSelector;
+import com.java.semantic.query.application.ReviewManifestReadService;
+import com.java.semantic.query.application.SelectedGenerationGuard;
+import com.java.semantic.model.review.ReviewSide;
 import com.java.semantic.query.application.SemanticQueryContract;
 import com.java.semantic.query.application.SemanticQueryFacade;
-import com.java.semantic.query.application.SourceSliceService;
 import com.java.semantic.query.application.SelectedSemanticQueryService;
 import com.java.semantic.api.QueryApiExceptionHandler;
 import com.java.semantic.api.SemanticQueryController;
@@ -138,25 +137,27 @@ class DispatchedGitEvidenceIT {
             assertThat(catalogComplete.phase()).isEqualTo(IndexJobPhase.COMPLETE);
             String catalogId = catalogComplete.gitEvidence().orElseThrow().catalogId().orElseThrow().value();
             GitEvidenceReadService reader = reader(template);
-            SemanticQueryContract.GitBranchCollection catalog = reader.branches(
-                    new SemanticQueryContract.GitBranchRequest("orders", Optional.of(catalogId), 0, 20));
-            assertThat(catalog.items()).extracting(SemanticQueryContract.GitBranchItem::head).containsExactly(head.value());
-            httpReader(reader).perform(post("/api/v1/git/branches").contentType(MediaType.APPLICATION_JSON)
-                            .content("{\"repositoryId\":\"orders\",\"catalogId\":\"" + catalogId + "\",\"offset\":0,\"limit\":20}"))
-                    .andExpect(status().isOk()).andExpect(jsonPath("$.catalogId").value(catalogId))
-                    .andExpect(jsonPath("$.items[0].head").value(head.value()));
+            SemanticQueryContract.GitBranchCollection catalog = reader.listGitBranches(
+                    new SemanticQueryContract.GitBranchRequest("orders", page()));
+            assertThat(catalog.items()).extracting(SemanticQueryContract.GitBranchItem::headRevision).containsExactly(head.value());
+            httpReader(template, reader).perform(post("/api/v1/git/branches").contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"repositoryId\":\"orders\",\"limit\":20}"))
+                    .andExpect(status().isOk()).andExpect(jsonPath("$.metadata.catalogId").value(catalogId))
+                    .andExpect(jsonPath("$.items[0].headRevision").value(head.value()));
 
             IndexJob historyComplete = catalogComplete;
-            String historyId = historyComplete.gitEvidence().orElseThrow().evidenceId().orElseThrow().value();
             assertThat(historyComplete.gitEvidence().orElseThrow().metadataResult().orElseThrow().total()).isEqualTo(2L);
             assertThat(new GitEvidencePublicationStore(template).metadataReady(catalogJob)).isTrue();
-            SemanticQueryContract.GitCommitCollection history = reader.commits(
-                    new SemanticQueryContract.GitCommitRequest("orders", historyId, head.value(), 0, 20));
+            SemanticQueryContract.GitCommitCollection history = reader.listGitCommits(
+                    new SemanticQueryContract.GitCommitRequest("orders", "main", page()));
             assertThat(history.items()).extracting(SemanticQueryContract.GitCommitItem::revision).containsExactly(head.value(), first.value());
             assertThat(history.items().getFirst().parents()).containsExactly(first.value());
             assertThat(history.items().get(1).subject()).isEmpty();
 
-            RepositoryRevision added = commitAdditional(seed, seedPath, "add", ADDED_SOURCE, "class Added { }");
+            String unicodeComment = "//" + "😀".repeat(17_000) + "\r\n";
+            String declarationPrefix = "class Added { String marker = \"";
+            String addedSource = unicodeComment + declarationPrefix + "😀needle\"; }";
+            RepositoryRevision added = commitAdditional(seed, seedPath, "add", ADDED_SOURCE, addedSource);
             push(seed, "main");
             seedPreparedSource(template, jobs, seedPath, head, List.of(EVIDENCE_SOURCE));
             seedPreparedSource(template, jobs, seedPath, added, List.of(ADDED_SOURCE, EVIDENCE_SOURCE));
@@ -172,10 +173,30 @@ class DispatchedGitEvidenceIT {
             assertThat(template.getCollection(IndexCollections.GIT_SNAPSHOT_FILES)
                     .find(new Document("snapshotId", snapshotId)).into(new java.util.ArrayList<>()))
                     .extracting(file -> file.getString("path")).contains(ADDED_SOURCE, EVIDENCE_SOURCE);
-            assertThat(template.getCollection(IndexCollections.GIT_SNAPSHOT_CHUNKS)
-                    .find(new Document("snapshotId", snapshotId)).into(new java.util.ArrayList<>()))
-                    .anySatisfy(chunk -> assertThat(new String(chunk.get("bytes", org.bson.types.Binary.class).getData(),
-                            java.nio.charset.StandardCharsets.UTF_8)).contains("class Added"));
+            SemanticQueryContract.ReadContext context = SemanticQueryContract.ReadContext.review("orders",
+                    addComparisonComplete.review().orElseThrow().reviewId().value(), ReviewSide.AFTER, added.value());
+            ReadContextSelector.AdmittedContext admitted = contexts(template).select(context,
+                    ReadContextSelector.SOURCE_ONLY, ReadContextSelector.Access.WHOLE_SOURCE);
+            SemanticQueryContract.SourceTarget target = new SemanticQueryContract.SourceTarget(SemanticQueryContract.SourceTargetKind.FILE,
+                    Optional.empty(), Optional.of(ADDED_SOURCE), Optional.of(1), Optional.empty());
+            SemanticQueryContract.SourceResult unicodeFirst = reader.readSource(admitted,
+                    new SemanticQueryContract.SourceRequest(context, target, 1, Optional.empty()));
+            SemanticQueryContract.SourceResult unicodeSecond = reader.readSource(admitted,
+                    new SemanticQueryContract.SourceRequest(context, target, 1, unicodeFirst.nextCursor()));
+            assertThat(unicodeFirst.endLineComplete()).isFalse();
+            assertThat(unicodeSecond.startLineComplete()).isFalse();
+            assertThat(unicodeFirst.content().orElseThrow() + unicodeSecond.content().orElseThrow()).isEqualTo(unicodeComment);
+            SemanticQueryContract.SourceResult declaration = reader.readSource(admitted,
+                    new SemanticQueryContract.SourceRequest(context, target, 1, unicodeSecond.nextCursor()));
+            assertThat(declaration.content()).contains(declarationPrefix + "😀needle\"; }");
+            assertThat(declaration.nextCursor()).isEmpty();
+            assertThat(reader.searchText(admitted, new SemanticQueryContract.TextSearchRequest(
+                    context, "needle", "", new SemanticQueryContract.PageRequest(Optional.empty(), 1))).items())
+                    .singleElement().satisfies(match -> {
+                        assertThat(match.path()).isEqualTo(ADDED_SOURCE);
+                        assertThat(match.range().start().line()).isEqualTo(1);
+                        assertThat(match.range().start().character()).isEqualTo(declarationPrefix.length() + 2);
+                    });
 
             RepositoryRevision deleted = deleteAdditional(seed, seedPath, "delete", ADDED_SOURCE);
             push(seed, "main");
@@ -199,9 +220,9 @@ class DispatchedGitEvidenceIT {
 
             commit(seed, seedPath, "third", "class Evidence { int version; int later; }");
             push(seed, "main");
-            assertThat(reader.branches(new SemanticQueryContract.GitBranchRequest("orders", Optional.of(catalogId), 0, 20)).items())
-                    .extracting(SemanticQueryContract.GitBranchItem::head).containsExactly(head.value());
-            assertThat(reader.commits(new SemanticQueryContract.GitCommitRequest("orders", historyId, head.value(), 0, 20)).items())
+            assertThat(reader.listGitBranches(new SemanticQueryContract.GitBranchRequest("orders", page())).items())
+                    .extracting(SemanticQueryContract.GitBranchItem::headRevision).containsExactly(head.value());
+            assertThat(reader.listGitCommits(new SemanticQueryContract.GitCommitRequest("orders", "main", page())).items())
                     .extracting(SemanticQueryContract.GitCommitItem::revision).containsExactly(head.value(), first.value());
         }
     }
@@ -224,20 +245,35 @@ class DispatchedGitEvidenceIT {
         return properties;
     }
 
-    private static GitEvidenceReadService reader(MongoTemplate template) {
-        ReadPolicyProperties policy = new ReadPolicyProperties(List.of(), List.of(), List.of(), List.of());
-        GitEvidenceProperties gitEvidence = new GitEvidenceProperties(List.of("orders"));
-        return new GitEvidenceReadService(template, new ConfiguredReadPolicy(policy, gitEvidence), Duration.ofSeconds(2));
+    private static SemanticQueryContract.PageRequest page() {
+        return new SemanticQueryContract.PageRequest(Optional.empty(), 20);
     }
 
-    private static MockMvc httpReader(GitEvidenceReadService reader) {
-        CurrentGenerationSelector selector = mock(CurrentGenerationSelector.class);
-        SelectedSemanticQueryService selected = new SelectedSemanticQueryService(
-                mock(CodeFactSearchService.class), mock(SourceSliceService.class), mock(CodeFactReadService.class),
-                mock(PublishedDiscoveryQueryService.class), mock(PublishedEntryPointQueryService.class),
-                mock(PublishedRelationQueryService.class));
-        SemanticQueryFacade facade = new SemanticQueryFacade(selector, selected,
-                mock(CurrentRepositoryQueryService.class), reader);
+    private static ConfiguredReadPolicy policy() {
+        return new ConfiguredReadPolicy(new ReadPolicyProperties(List.of(), List.of(), List.of(), List.of()),
+                new GitEvidenceProperties(List.of("orders")));
+    }
+
+    private static GitEvidenceReadService reader(MongoTemplate template) {
+        SelectedGenerationGuard guard = new SelectedGenerationGuard(template, policy(), Duration.ofSeconds(2));
+        return new GitEvidenceReadService(template, policy(), Duration.ofSeconds(2),
+                new CodeFactReadService(template, guard, Duration.ofSeconds(2)));
+    }
+
+    private static ReadContextSelector contexts(MongoTemplate template) {
+        SelectedGenerationGuard guard = new SelectedGenerationGuard(template, policy(), Duration.ofSeconds(2));
+        return new ReadContextSelector(new CurrentGenerationSelector(template, policy(), Duration.ofSeconds(2)),
+                new ReviewManifestReadService(template, policy(), Duration.ofSeconds(2)), guard, policy());
+    }
+
+    private static MockMvc httpReader(MongoTemplate template, GitEvidenceReadService reader) {
+        SelectedGenerationGuard guard = new SelectedGenerationGuard(template, policy(), Duration.ofSeconds(2));
+        ReadContextSelector contexts = contexts(template);
+        SemanticQueryFacade facade = new SemanticQueryFacade(new ContextDiscoveryService(template, policy(), Duration.ofSeconds(2),
+                new CurrentGenerationSelector(template, policy(), Duration.ofSeconds(2)), contexts,
+                new ReviewManifestReadService(template, policy(), Duration.ofSeconds(2))), contexts,
+                new SelectedSemanticQueryService(template, guard, Duration.ofSeconds(2),
+                        new CodeFactReadService(template, guard, Duration.ofSeconds(2))), reader);
         return standaloneSetup(new SemanticQueryController(facade)).setControllerAdvice(new QueryApiExceptionHandler()).build();
     }
 

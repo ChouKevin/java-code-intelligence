@@ -41,6 +41,14 @@ Release and rebuild in this exact order:
    uniqueness, and Git ordinal/ID indexes. Also verify
    `preparation_request_unique`, `metadata_job_latest_branch`, and
    `review_job_latest_selection` for durable admission and discovery.
+   Unified Query also requires `metadata_job_latest_complete`,
+   `search_generation_order`, `search_exact_name_order`,
+   `search_exact_signature_order`, `symbol_kind_canonical_order`,
+   `symbol_file_range_order`, `symbol_owner_range_order`,
+   `entry_point_kind_order`, `entry_point_route_order`, and
+   `relation_from_kind_source`. The redundant
+   `search_generation_fact_lookup` is no longer part of the catalogue;
+   exact fact lookup remains covered by `search_unique`.
    Preserve the existing global semantic source-artifact unique indexes on
    `sourceArtifactId` and `contentHash`. There is no TTL index or new unique
    commit-SHA constraint on generations, reviews, or Git snapshots;
@@ -153,6 +161,33 @@ including dots, `_class`, and the empty default-package name; do not escape or
 rewrite them. Decode structure counts with the explicit source codec: generic
 Mongo map decoding treats `_class` as type metadata and silently loses that
 legal package. Counts are BSON int64 values and must be nonnegative.
+
+## Unified Query projection and source payloads
+
+Every symbol stores an optional-free scalar `mapperStatementKind`. A
+`MAPPER_STATEMENT` requires `SELECT`, `INSERT`, `UPDATE`, `DELETE`, or
+`ANNOTATION`; every other symbol stores the empty string. Missing fields,
+unknown values, or mapper values attached to non-mapper symbols are invalid.
+Writers, incremental copies, publication validation, and Query authority
+decoding use the same symbol persistence contract. Query does not reparse XML
+to recover missing operation evidence.
+
+Search rows retain exact source paths and authoritative fact identities.
+Display names for unresolved calls use the written method name, not the
+canonical relation encoding or inline argument bodies. Compact Query results
+omit source-bearing unresolved canonical text; arity, resolution state,
+fact identity, and occurrence ranges remain available. Read the occurrence
+through `read_source` when its full written expression is needed.
+
+Git source chunk checkpoints retain UTF-8 byte offsets and one-based line and
+UTF-16 column positions. Public `SyntaxRange` values are zero-based UTF-16;
+FILE `startLine` remains one-based. Non-BMP characters consume two UTF-16
+columns, and continuation cannot split a UTF-8 character or CRLF pair.
+Intermediate feature-branch data using earlier payloads or code-point
+checkpoints must be rebuilt, not decoded through a fallback. These changes
+finalize the single schema-4/projection-4/Git-3 pre-release cutover above;
+they are not independently deployable intermediate formats.
+
 
 
 ## Operational release controls

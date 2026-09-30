@@ -63,7 +63,7 @@ public final class ParentGenerationCopier {
         }
         SourceArtifactDocument artifact = SourceArtifactDocument.create(content);
         List<SymbolDocument> symbols = template.getCollection(IndexCollections.SYMBOLS).find(scope).map(document ->
-                copy(template.getConverter().read(SymbolDocument.class, document), lease, targetRevision)).into(new ArrayList<>());
+                copy(mapper.reconstructSymbol(document), lease, targetRevision)).into(new ArrayList<>());
         List<RelationDocument> relations = template.getCollection(IndexCollections.RELATIONS).find(scope).map(document ->
                 copy(mapper.reconstructRelation(document), lease, targetRevision)).into(new ArrayList<>());
         List<EntryPointDocument> entryPoints = template.getCollection(IndexCollections.ENTRY_POINTS).find(scope).map(document ->
@@ -82,7 +82,7 @@ public final class ParentGenerationCopier {
     private static SymbolDocument copy(SymbolDocument parent, GenerationWriteContext lease, RepositoryRevision targetRevision) {
         return new SymbolDocument(lease.repositoryId(), lease.generationId(), copy(parent.fact(), lease, targetRevision), parent.kind(),
                 parent.owner(), parent.name(), parent.signature(), parent.declaredType(), parent.modifiers(), parent.annotations(),
-                parent.sourceArtifactId(), parent.range());
+                parent.sourceArtifactId(), parent.range(), parent.mapperStatementKind());
     }
 
     private static RelationDocument copy(RelationDocument parent, GenerationWriteContext lease, RepositoryRevision targetRevision) {
