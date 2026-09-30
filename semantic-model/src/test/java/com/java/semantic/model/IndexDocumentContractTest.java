@@ -166,7 +166,7 @@ class IndexDocumentContractTest {
         Map<String, Object> structure = new LinkedHashMap<>(Map.of(
                 "importedSourceRoots", List.of("src/main/java"),
                 "packageCounts", packages, "entryPointKindCounts", Map.of("HTTP", 4L)));
-        var decoded = SourceEvidenceDocumentCodec.decodeStructure(structure);
+        SourceStructure decoded = SourceEvidenceDocumentCodec.decodeStructure(structure);
         assertEquals(packages, decoded.packageCounts());
         assertEquals(Map.of("HTTP", 4L), decoded.entryPointKindCounts());
         structure.put("packageCounts", Map.of("_class", -1L));
