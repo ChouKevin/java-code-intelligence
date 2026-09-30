@@ -41,7 +41,7 @@ public final class CurrentSourceQueryService {
         guard.requireRepositoryVisible(selected);
         SourceTypeIdentity identity = Objects.requireNonNull(sourceType, "source type identity is required");
         guard.requireSourceVisible(selected, identity);
-        guard.require(selected, SelectedGenerationGuard.SOURCES);
+        SelectedGenerationGuard.SourceContext source = guard.requireSourceContext(selected, SelectedGenerationGuard.SOURCES);
         try {
             requireAuthorizedCurrentSource(selected, identity);
             Document mapping = template.getCollection(IndexCollections.GENERATION_FILES).find(Filters.and(
@@ -49,7 +49,7 @@ public final class CurrentSourceQueryService {
                             Filters.eq("sourcePath", identity.sourceFile()))).maxTime(storageTimeout.toMillis(), TimeUnit.MILLISECONDS).first();
             if (Objects.isNull(mapping)) { throw new IndexNotReadyException(); }
             GenerationFileDocument generationFile = decodeGenerationFile(mapping, selected, identity.sourceFile());
-            guard.requireCodeSource(selected, identity.sourceFile(), generationFile.contentHash());
+            guard.requireCodeSource(selected, source, identity.sourceFile(), generationFile.contentHash());
             String artifactId = generationFile.sourceArtifactId().value();
             Document artifact = template.getCollection(IndexCollections.SOURCE_ARTIFACTS).find(Filters.eq("sourceArtifactId", artifactId))
                     .maxTime(storageTimeout.toMillis(), TimeUnit.MILLISECONDS).first();
@@ -67,7 +67,7 @@ public final class CurrentSourceQueryService {
     PublishedSource getSource(SelectedGeneration context, String sourcePath) {
         SelectedGeneration selected = Objects.requireNonNull(context, "selected generation is required");
         guard.requireRepositoryVisible(selected);
-        guard.require(selected, SelectedGenerationGuard.SOURCES);
+        SelectedGenerationGuard.SourceContext source = guard.requireSourceContext(selected, SelectedGenerationGuard.SOURCES);
         String path = com.java.semantic.model.support.ModelValidation.repositoryRelativePath(sourcePath);
         try {
             Document mapping = template.getCollection(IndexCollections.GENERATION_FILES).find(Filters.and(
@@ -75,7 +75,7 @@ public final class CurrentSourceQueryService {
                     Filters.eq("sourcePath", path))).maxTime(storageTimeout.toMillis(), TimeUnit.MILLISECONDS).first();
             if (Objects.isNull(mapping)) { throw new IndexNotReadyException(); }
             GenerationFileDocument generationFile = decodeGenerationFile(mapping, selected, path);
-            guard.requireCodeSource(selected, path, generationFile.contentHash());
+            guard.requireCodeSource(selected, source, path, generationFile.contentHash());
             Document artifact = template.getCollection(IndexCollections.SOURCE_ARTIFACTS).find(Filters.eq("sourceArtifactId", generationFile.sourceArtifactId().value()))
                     .maxTime(storageTimeout.toMillis(), TimeUnit.MILLISECONDS).first();
             if (Objects.isNull(artifact)) { throw new IndexNotReadyException(); }

@@ -356,6 +356,15 @@ public class JGitRepositoryAdapter implements GitRepositoryPort {
         List<GitSnapshotEntry> entries = new java.util.ArrayList<>();
         long storedTextBytes = 0L;
         long excluded = 0L;
+        if (policy.projectGuidePath().isPresent()) {
+            String guidePath = policy.projectGuidePath().orElseThrow();
+            try (TreeWalk guide = TreeWalk.forPath(repository, guidePath, commit.getTree())) {
+                if (Objects.nonNull(guide) && FileMode.TREE.equals(guide.getFileMode(0))) {
+                    entries.add(new GitSnapshotEntry(guidePath, FileMode.TREE.toString(), guide.getObjectId(0).name(),
+                            GitFileContentStatus.UNSUPPORTED_PATH, 0L, new byte[0]));
+                }
+            }
+        }
         try (TreeWalk walk = new TreeWalk(repository)) {
             walk.addTree(commit.getTree());
             walk.setRecursive(true);
@@ -393,11 +402,14 @@ public class JGitRepositoryAdapter implements GitRepositoryPort {
                 }
                 byte[] bytes = loader.getBytes();
                 GitFileContentStatus contentStatus = status(mode, bytes);
-                if (contentStatus == GitFileContentStatus.TEXT && exceedsSnapshotLimit(storedTextBytes, size)) {
+                boolean codeText = contentStatus == GitFileContentStatus.TEXT && policy.allowsCode(snapshotPath.value());
+                if (codeText && exceedsSnapshotLimit(storedTextBytes, size)) {
                     throw new RepositoryMutationException("exact snapshot text budget exceeded");
                 }
                 if (contentStatus == GitFileContentStatus.TEXT) {
-                    storedTextBytes += size;
+                    if (codeText) {
+                        storedTextBytes += size;
+                    }
                     entries.add(new GitSnapshotEntry(snapshotPath.value(), mode.toString(), walk.getObjectId(0).name(), contentStatus, size, bytes));
                     continue;
                 }

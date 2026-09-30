@@ -175,7 +175,7 @@ public final class GenerationValidator {
             SourceEvidencePolicy policy = SourceEvidenceDocumentCodec.decodePolicy(policyDocument);
             ProjectGuideMembership guide = SourceEvidenceDocumentCodec.decodeGuide(guideDocument);
             SourceCoverage coverage = template.getConverter().read(SourceCoverage.class, coverageDocument);
-            SourceStructure structure = template.getConverter().read(SourceStructure.class, structureDocument);
+            SourceStructure structure = SourceEvidenceDocumentCodec.decodeStructure(structureDocument);
             if (!revision.equals(snapshot.revision()) || !snapshot.policyFingerprint().equals(policy.fingerprint())
                     || coverage.readableCode() != files.size()
                     || !structure.importedSourceRoots().equals(policy.includedRoots())

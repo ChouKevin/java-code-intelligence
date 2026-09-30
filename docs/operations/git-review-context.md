@@ -119,9 +119,11 @@ digest and guide membership; equivalent same-SHA generations are not substitutes
 Standalone comparisons require already sealed source membership for both revisions.
 
 The configurable preparation defaults are 2 MiB text per file and 256 MiB total
-text per snapshot. A snapshot exceeding its total limit fails preparation and
-never publishes READY. Each READY manifest records its effective limits and
-coverage, so later configuration changes do not reinterpret sealed evidence. Read
+admitted text per snapshot. Candidate guide reads obey the per-file limit, but
+invalid guides do not consume the final snapshot budget. Admitted guide plus code
+must still fit that total; otherwise preparation fails and never publishes READY.
+Each READY manifest records its effective limits and coverage, so later
+configuration changes do not reinterpret sealed evidence. Read
 and patch payloads are capped at 64 KiB; search scans at most 4 MiB per call and
 returns an incomplete cursor when that budget is exhausted. Query never uses Git, a
 checkout, Indexer, JDT, or JDT LS to fill an incomplete result.

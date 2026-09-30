@@ -507,25 +507,46 @@ public final class GitEvidencePublicationStore {
             if (Objects.isNull(storedOrdinal) || storedOrdinal.longValue() != ordinal || Objects.isNull(length) || rawPath.isEmpty()) {
                 throw new PublicationConflictException();
             }
-            byte[] bytes = storedSnapshotBytes(repositoryId, snapshotId, rawPath.get());
+            long byteLength = integralLong(length).orElseThrow(PublicationConflictException::new);
+            if (byteLength < 0L) {
+                throw new PublicationConflictException();
+            }
+            GitFileContentStatus contentStatus = GitFileContentStatus.valueOf(file.getString("contentStatus"));
+            byte[] bytes = storedSnapshotBytes(repositoryId, snapshotId, rawPath.get(),
+                    contentStatus == GitFileContentStatus.TEXT ? byteLength : 0L);
             entries.add(new GitSnapshotEntry(file.getString("path"), file.getString("mode"), file.getString("blobId"),
-                    GitFileContentStatus.valueOf(file.getString("contentStatus")), length.longValue(), bytes, rawPath.get()));
+                    contentStatus, byteLength, bytes, rawPath.get()));
             ordinal++;
         }
         return List.copyOf(entries);
     }
 
-    private byte[] storedSnapshotBytes(RepositoryId repositoryId, GitSnapshotId snapshotId, byte[] rawPath) {
+    private byte[] storedSnapshotBytes(RepositoryId repositoryId, GitSnapshotId snapshotId, byte[] rawPath, long expectedByteLength) {
         List<Document> chunks = new ArrayList<>();
         template.getCollection(IndexCollections.GIT_SNAPSHOT_CHUNKS).find(Filters.and(Filters.eq("repoId", repositoryId.value()),
                 Filters.eq("snapshotId", snapshotId.value()), Filters.eq("pathKey", pathKey(rawPath))))
                 .sort(Sorts.ascending("ordinal")).into(chunks);
-        byte[] bytes = new byte[0];
+        if (expectedByteLength < 0L || expectedByteLength > Integer.MAX_VALUE) {
+            throw new PublicationConflictException();
+        }
+        List<byte[]> parts = new ArrayList<>(chunks.size());
+        long total = 0L;
         for (Document chunk : chunks) {
             byte[] part = binaryBytes(chunk.get("bytes")).orElseThrow(PublicationConflictException::new);
-            byte[] next = Arrays.copyOf(bytes, bytes.length + part.length);
-            System.arraycopy(part, 0, next, bytes.length, part.length);
-            bytes = next;
+            if (part.length == 0 || part.length > CHUNK_BYTES || part.length > expectedByteLength - total) {
+                throw new PublicationConflictException();
+            }
+            total += part.length;
+            parts.add(part);
+        }
+        if (total != expectedByteLength) {
+            throw new PublicationConflictException();
+        }
+        byte[] bytes = new byte[(int) total];
+        int offset = 0;
+        for (byte[] part : parts) {
+            System.arraycopy(part, 0, bytes, offset, part.length);
+            offset += part.length;
         }
         return bytes;
     }

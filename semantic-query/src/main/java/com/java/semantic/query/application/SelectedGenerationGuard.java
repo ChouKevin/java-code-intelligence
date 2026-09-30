@@ -15,7 +15,6 @@ import com.java.semantic.model.source.SourceSnapshotMembership;
 import com.java.semantic.model.source.ProjectGuideState;
 import com.java.semantic.model.source.ProjectGuideMembership;
 import com.java.semantic.model.source.SourceCoverage;
-import com.java.semantic.model.source.SourceStructure;
 import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.query.config.ConfiguredReadPolicy;
 import com.java.semantic.query.config.SearchAccessPlan;
@@ -62,6 +61,11 @@ public final class SelectedGenerationGuard {
     }
 
     public SelectedGeneration require(SelectedGeneration context, ProjectionRequirements requirements) {
+        requireSourceContext(context, requirements);
+        return context;
+    }
+
+    SourceContext requireSourceContext(SelectedGeneration context, ProjectionRequirements requirements) {
         SelectedGeneration selected = Objects.requireNonNull(context, "selected generation is required");
         ProjectionRequirements requiredRequirements = Objects.requireNonNull(requirements, "projection requirements are required");
         if (!readPolicy.isRepositoryVisible(selected.repositoryId())) {
@@ -72,10 +76,7 @@ public final class SelectedGenerationGuard {
                             Filters.eq("repoId", selected.repositoryId().value()), Filters.eq("generationId", selected.generationId().value()),
                             Filters.eq("sourceRevision", selected.revision().value()), Filters.eq("identityDigest", selected.manifestDigest().value()),
                             Filters.eq("writeState", "SEALED_VALID"))).maxTime(storageTimeout.toMillis(), TimeUnit.MILLISECONDS).first();
-            if (!isCompatible(manifest, requiredRequirements)) {
-                throw new IndexContractMismatchException();
-            }
-            return selected;
+            return validatedSource(selected, manifest, requiredRequirements);
         } catch (MongoException | DataAccessException exception) {
             throw new SemanticIndexUnavailableException(exception);
         } catch (IndexContractMismatchException exception) {
@@ -97,25 +98,10 @@ public final class SelectedGenerationGuard {
         }
     }
 
-    void requireCodeSource(SelectedGeneration selected, String path, String contentHash) {
+    void requireCodeSource(SelectedGeneration selected, SourceContext source, String path, String contentHash) {
         try {
-            Document manifest = template.getCollection(IndexCollections.GENERATION_MANIFESTS).find(Filters.and(
-                    Filters.eq("repoId", selected.repositoryId().value()),
-                    Filters.eq("generationId", selected.generationId().value()),
-                    Filters.eq("identityDigest", selected.manifestDigest().value()),
-                    Filters.eq("sourceRevision", selected.revision().value()),
-                    Filters.eq("schemaVersion", IndexSchemaContract.SCHEMA_VERSION),
-                    Filters.eq("writeState", "SEALED_VALID")))
-                    .maxTime(storageTimeout.toMillis(), TimeUnit.MILLISECONDS).first();
-            if (Objects.isNull(manifest)) {
-                throw new IndexContractMismatchException();
-            }
-            SourceEvidencePolicy policy = SourceEvidenceDocumentCodec.decodePolicy(
-                    manifest.get("sourcePolicy", Document.class));
-            SourceSnapshotMembership snapshot = template.getConverter().read(SourceSnapshotMembership.class,
-                    manifest.get("sourceSnapshot", Document.class));
-            if (!policy.allowsCode(path) || !policy.fingerprint().equals(snapshot.policyFingerprint())
-                    || !selected.revision().equals(snapshot.revision())) {
+            SourceSnapshotMembership snapshot = source.snapshot();
+            if (!selected.equals(source.selected()) || !source.policy().allowsCode(path)) {
                 throw new IndexContractMismatchException();
             }
             Document row = template.getCollection(IndexCollections.GIT_SNAPSHOT_FILES).find(Filters.and(
@@ -187,29 +173,29 @@ public final class SelectedGenerationGuard {
         return readPolicy.isRepositoryVisible(repositoryId);
     }
 
-    private boolean isCompatible(Document manifest, ProjectionRequirements requirements) {
+    private SourceContext validatedSource(SelectedGeneration selected, Document manifest, ProjectionRequirements requirements) {
         if (Objects.isNull(manifest) || !Integer.valueOf(IndexSchemaContract.SCHEMA_VERSION).equals(manifest.get("schemaVersion"))) {
-            return false;
+            throw new IndexContractMismatchException();
         }
         Object storedVersions = manifest.get("projectionVersions");
         if (!(storedVersions instanceof List<?> versions)) {
-            return false;
+            throw new IndexContractMismatchException();
         }
         Map<String, Integer> actual = new HashMap<>();
         for (Object value : versions) {
             if (!(value instanceof Document version)) {
-                return false;
+                throw new IndexContractMismatchException();
             }
             Object name = version.get("name");
             Object number = version.get("version");
             if (!(name instanceof String projectionName) || !StringUtils.hasText(projectionName) || !(number instanceof Integer projectionVersion)) {
-                return false;
+                throw new IndexContractMismatchException();
             }
             actual.put(projectionName, projectionVersion);
         }
         for (ProjectionName required : requirements.names()) {
             if (!Objects.equals(IndexSchemaContract.requiredProjectionVersions().get(required.name()), actual.get(required.name()))) {
-                return false;
+                throw new IndexContractMismatchException();
             }
         }
         try {
@@ -220,13 +206,14 @@ public final class SelectedGenerationGuard {
             Document structureValue = manifest.get("structure", Document.class);
             if (Objects.isNull(snapshotValue) || Objects.isNull(policyValue) || Objects.isNull(guideValue)
                     || Objects.isNull(coverageValue) || Objects.isNull(structureValue)) {
-                return false;
+                throw new IndexContractMismatchException();
             }
             SourceSnapshotMembership snapshot = template.getConverter().read(SourceSnapshotMembership.class, snapshotValue);
             SourceEvidencePolicy policy = SourceEvidenceDocumentCodec.decodePolicy(policyValue);
             ProjectGuideMembership guide = SourceEvidenceDocumentCodec.decodeGuide(guideValue);
+            String fingerprint = policy.fingerprint();
             template.getConverter().read(SourceCoverage.class, coverageValue);
-            template.getConverter().read(SourceStructure.class, structureValue);
+            SourceEvidenceDocumentCodec.decodeStructure(structureValue);
             Document evidence = template.getCollection(IndexCollections.GIT_EVIDENCE_MANIFESTS).find(Filters.and(
                     Filters.eq("repoId", manifest.getString("repoId")),
                     Filters.eq("evidenceId", snapshot.snapshotId().value()), Filters.eq("kind", "SNAPSHOT"),
@@ -236,20 +223,23 @@ public final class SelectedGenerationGuard {
                     Filters.eq("policyFingerprint", snapshot.policyFingerprint()),
                     Filters.eq("contentDigest", snapshot.contentDigest())))
                     .maxTime(storageTimeout.toMillis(), TimeUnit.MILLISECONDS).first();
-            if (Objects.isNull(evidence) || !policy.fingerprint().equals(snapshot.policyFingerprint())
+            if (Objects.isNull(evidence) || !fingerprint.equals(snapshot.policyFingerprint())
                     || !snapshot.revision().value().equals(manifest.getString("sourceRevision"))
                     || guide.path().isPresent() && !guide.path().equals(policy.projectGuidePath())
                     || (guide.state() == ProjectGuideState.DISABLED) != policy.projectGuidePath().isEmpty()
                     || guide.importedRevision().filter(revision -> !revision.equals(snapshot.revision())).isPresent()
                     || guide.provenance().filter(provenance -> !provenance.repositoryId().value().equals(manifest.getString("repoId"))).isPresent()
                     || !Objects.equals(guideValue, evidence.get("projectGuide"))) {
-                return false;
+                throw new IndexContractMismatchException();
             }
+            return new SourceContext(selected, snapshot, policy, guide, fingerprint);
         } catch (MongoException | DataAccessException storageFailure) {
             throw storageFailure;
         } catch (RuntimeException exception) {
-            return false;
+            throw new IndexContractMismatchException();
         }
-        return true;
     }
+
+    record SourceContext(SelectedGeneration selected, SourceSnapshotMembership snapshot, SourceEvidencePolicy policy,
+            ProjectGuideMembership guide, String fingerprint) { }
 }

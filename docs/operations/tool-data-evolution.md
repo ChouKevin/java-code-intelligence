@@ -93,6 +93,11 @@ is not treated as an invalid optional document. Guide provenance `analyzedRevisi
 remains distinct from guide membership `importedRevision` (the generation's source
 revision), and freshness is always `NOT_VERIFIED`. A guide is source evidence,
 never a semantic fact.
+A missing configured Git tree entry is ABSENT; a directory, symlink, or submodule
+at that exact path is INVALID without reading its target bytes. Candidate guide
+reads remain per-file bounded. Only an admitted AVAILABLE guide consumes the
+final snapshot text budget alongside code; invalid guide bytes cannot exhaust
+the code snapshot budget.
 
 The framework-neutral source codec writes optional fields by omission, not as
 Java `Optional` objects. Policy paths and guide identities are scalar strings;
@@ -101,7 +106,10 @@ not lost. Decoders require the current field types and state invariants.
 Coverage and structure are sealed objective summaries, not model conclusions.
 `structure.packageCounts` counts distinct admitted source files per namespace,
 including mapper XML, not classes or methods. Package names remain literal keys,
-including dots and the empty default-package name; do not escape or rewrite them.
+including dots, `_class`, and the empty default-package name; do not escape or
+rewrite them. Decode structure counts with the explicit source codec: generic
+Mongo map decoding treats `_class` as type metadata and silently loses that
+legal package. Counts are BSON int64 values and must be nonnegative.
 
 
 ## Operational release controls

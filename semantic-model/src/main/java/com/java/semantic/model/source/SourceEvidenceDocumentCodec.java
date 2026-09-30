@@ -80,6 +80,24 @@ public final class SourceEvidenceDocumentCodec {
                                 strings(scope, "excludedPaths"), strings(scope, "limitations")))), freshness);
     }
 
+    public static SourceStructure decodeStructure(Map<String, ?> fields) {
+        Objects.requireNonNull(fields, "source structure is required");
+        return new SourceStructure(strings(fields, "importedSourceRoots"),
+                counts(fields, "packageCounts"), counts(fields, "entryPointKindCounts"));
+    }
+
+    private static Map<String, Long> counts(Map<String, ?> fields, String key) {
+        Map<?, ?> values = map(fields, key);
+        Map<String, Long> counts = new LinkedHashMap<>();
+        for (Map.Entry<?, ?> entry : values.entrySet()) {
+            if (!(entry.getValue() instanceof Long count)) {
+                throw new IllegalArgumentException("source metadata requires long counts in " + key);
+            }
+            counts.put((String) entry.getKey(), count);
+        }
+        return counts;
+    }
+
     private static Map<String, Object> encodeProvenance(ProjectGuideProvenance provenance) {
         Map<String, Object> scope = new LinkedHashMap<>();
         scope.put("includedPaths", provenance.sourceScope().includedPaths());

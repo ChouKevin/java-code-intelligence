@@ -1,6 +1,6 @@
 package com.java.semantic.query.application;
 
-import com.java.semantic.model.source.SourceEvidenceDocumentCodec;
+import com.java.semantic.query.application.SelectedGenerationGuard.SourceContext;
 import com.java.semantic.model.git.GitEvidenceId;
 import com.java.semantic.model.git.GitChangeKind;
 import com.java.semantic.model.git.GitEvidenceOwnership;
@@ -327,7 +327,7 @@ public final class GitEvidenceReadService {
         if (Objects.isNull(generation)) {
             throw new IndexContractMismatchException();
         }
-        snapshot.put("_selectedPolicy", requireBoundSource(repositoryId, revision, snapshot, generation, Optional.of(snapshotId)));
+        snapshot.put("_selectedSource", requireBoundSource(repositoryId, revision, snapshot, generation, Optional.of(snapshotId)));
         return true;
     }
 
@@ -342,39 +342,26 @@ public final class GitEvidenceReadService {
                 .maxTime(storageTimeout.toMillis(), TimeUnit.MILLISECONDS).first();
     }
 
-    private SourceEvidencePolicy requireBoundSource(RepositoryId repositoryId, String revision, Document snapshot,
+    private SourceContext requireBoundSource(RepositoryId repositoryId, String revision, Document snapshot,
             Document generation, Optional<String> sourceSnapshotId) {
         if (Objects.isNull(generation)) {
             throw new IndexContractMismatchException();
         }
-        generations.require(
+        SourceContext source = generations.requireSourceContext(
                 new SelectedGeneration(repositoryId, new RepositoryRevision(revision),
                         new GenerationId(requiredText(generation, "generationId")),
                         new ManifestDigest(requiredText(generation, "identityDigest"))),
                 SelectedGenerationGuard.ALL_PROJECTIONS);
-        try {
-            SourceSnapshotMembership membership = template.getConverter().read(SourceSnapshotMembership.class,
-                    requiredDocument(generation, "sourceSnapshot"));
-            SourceEvidencePolicy policy = SourceEvidenceDocumentCodec.decodePolicy(
-                    requiredDocument(generation, "sourcePolicy"));
-            ProjectGuideMembership guide = SourceEvidenceDocumentCodec.decodeGuide(
-                    requiredDocument(generation, "projectGuide"));
-            if (!revision.equals(membership.revision().value())
-                    || !requiredText(generation, "generationId").equals(requiredText(snapshot, "sourceGenerationId"))
-                    || !membership.policyFingerprint().equals(policy.fingerprint())
-                    || !membership.policyFingerprint().equals(requiredText(snapshot, "policyFingerprint"))
-                    || !membership.contentDigest().equals(requiredText(snapshot, "contentDigest"))
-                    || !Objects.equals(snapshot.get("projectGuide"), generation.get("projectGuide"))
-                    || guide.path().isPresent() && !guide.path().equals(policy.projectGuidePath())
-                    || (guide.state() == com.java.semantic.model.source.ProjectGuideState.DISABLED) != policy.projectGuidePath().isEmpty()
-                    || guide.importedRevision().filter(value -> !revision.equals(value.value())).isPresent()
-                    || sourceSnapshotId.filter(id -> !id.equals(membership.snapshotId().value())).isPresent()) {
-                throw new IndexContractMismatchException();
-            }
-            return policy;
-        } catch (IllegalArgumentException exception) {
+        SourceSnapshotMembership membership = source.snapshot();
+        if (!revision.equals(membership.revision().value())
+                || !source.selected().generationId().value().equals(requiredText(snapshot, "sourceGenerationId"))
+                || !source.fingerprint().equals(requiredText(snapshot, "policyFingerprint"))
+                || !membership.contentDigest().equals(requiredText(snapshot, "contentDigest"))
+                || !Objects.equals(snapshot.get("projectGuide"), generation.get("projectGuide"))
+                || sourceSnapshotId.filter(id -> !id.equals(membership.snapshotId().value())).isPresent()) {
             throw new IndexContractMismatchException();
         }
+        return source;
     }
 
     private void requireReadyComparisonOwner(RepositoryId repositoryId, String snapshotId, String revision, Document snapshot) {
@@ -420,7 +407,8 @@ public final class GitEvidenceReadService {
             authorizeReviewMembership(repositoryId, ownership, ownerJobId, new GitComparisonId(requiredText(parent, "evidenceId")), previousSnapshotId,
                     currentSnapshotId, previous, current);
             bindComparisonSources(repositoryId, parent, previousSnapshotId, currentSnapshotId, previous, current, ownership);
-            snapshot.put("_selectedPolicy", requiredPolicy(parent, requestedPrevious ? "beforePolicy" : "afterPolicy"));
+            snapshot.put("_selectedSource", requiredSource(requiredDocument(parent,
+                    requestedPrevious ? "beforeSnapshot" : "afterSnapshot")));
         } catch (IllegalArgumentException exception) {
             throw new IndexContractMismatchException();
         }
@@ -458,13 +446,15 @@ public final class GitEvidenceReadService {
         }
         if (before.isPresent()) {
             Document beforeSnapshot = readySnapshot(repositoryId, beforeId, before, requiredText(comparison, "ownerJobId"), ownership);
-            comparison.put("beforePolicy", requireBoundSource(repositoryId, before.orElseThrow().value(), beforeSnapshot,
+            beforeSnapshot.put("_selectedSource", requireBoundSource(repositoryId, before.orElseThrow().value(), beforeSnapshot,
                     beforeGeneration, Optional.empty()));
+            comparison.put("beforeSnapshot", beforeSnapshot);
         } else if (beforeId.equals(afterId)) {
             throw new IndexContractMismatchException();
         }
-        comparison.put("afterPolicy", requireBoundSource(repositoryId, after.value(), afterSnapshot,
+        afterSnapshot.put("_selectedSource", requireBoundSource(repositoryId, after.value(), afterSnapshot,
                 afterGeneration, Optional.empty()));
+        comparison.put("afterSnapshot", afterSnapshot);
     }
 
     private Document sealedEndpoint(RepositoryId repositoryId, String revision,
@@ -485,12 +475,12 @@ public final class GitEvidenceReadService {
         return generation;
     }
 
-    private static SourceEvidencePolicy requiredPolicy(Document document, String field) {
-        Object value = document.get(field);
-        if (!(value instanceof SourceEvidencePolicy policy)) {
+    private static SourceContext requiredSource(Document snapshot) {
+        Object value = snapshot.get("_selectedSource");
+        if (!(value instanceof SourceContext source)) {
             throw new IndexContractMismatchException();
         }
-        return policy;
+        return source;
     }
 
     private static GitEvidenceId canonicalGitEvidenceId(String value) {
@@ -503,9 +493,9 @@ public final class GitEvidenceReadService {
 
     private FileEntries directEntries(RepositoryId repositoryId, String snapshotId, String directory, int offset, int limit, Document manifest) {
         validateDirectory(directory);
-        SourceEvidencePolicy policy = requiredPolicy(manifest, "_selectedPolicy");
-        List<String> allowed = new ArrayList<>(policy.selectedCodePaths());
-        ProjectGuideMembership guide = SourceEvidenceDocumentCodec.decodeGuide(requiredDocument(manifest, "projectGuide"));
+        SourceContext source = requiredSource(manifest);
+        List<String> allowed = new ArrayList<>(source.policy().selectedCodePaths());
+        ProjectGuideMembership guide = source.guide();
         if (guide.state() == com.java.semantic.model.source.ProjectGuideState.AVAILABLE) {
             allowed.add(guide.path().orElseThrow());
         }
@@ -594,9 +584,10 @@ public final class GitEvidenceReadService {
 
     private SnapshotFile validatedFile(Document row, Document manifest) {
         SnapshotFile file = snapshotFile(row);
-        SourceEvidencePolicy policy = requiredPolicy(manifest, "_selectedPolicy");
+        SourceContext source = requiredSource(manifest);
+        SourceEvidencePolicy policy = source.policy();
         String kind = requiredText(row, "contentKind");
-        if (!policy.fingerprint().equals(requiredText(row, "policyFingerprint"))
+        if (!source.fingerprint().equals(requiredText(row, "policyFingerprint"))
                 || !List.of("100644", "100755").contains(requiredText(row, "mode"))) {
             throw new IndexContractMismatchException();
         }
@@ -604,8 +595,7 @@ public final class GitEvidenceReadService {
             return file;
         }
         if ("PROJECT_GUIDE".equals(kind) && policy.allowsGuide(file.path())) {
-            ProjectGuideMembership guide = SourceEvidenceDocumentCodec.decodeGuide(
-                    requiredDocument(manifest, "projectGuide"));
+            ProjectGuideMembership guide = source.guide();
             if (guide.state() == com.java.semantic.model.source.ProjectGuideState.AVAILABLE
                     && guide.path().filter(file.path()::equals).isPresent()
                     && guide.digest().filter(requiredText(row, "checksum")::equals).isPresent()
@@ -1361,19 +1351,18 @@ public final class GitEvidenceReadService {
     private void requireAllowedChange(RepositoryId repositoryId, Document manifest, SemanticQueryContract.GitChangeItem change) {
         if (!change.oldPath().isEmpty()) {
             requireAllowedEndpoint(repositoryId, manifest, change.oldPath(), change.oldMode(), change.oldBlobId(),
-                    "previousSnapshotId", "beforePolicy");
+                    "previousSnapshotId", "beforeSnapshot");
         }
         if (!change.newPath().isEmpty()) {
             requireAllowedEndpoint(repositoryId, manifest, change.newPath(), change.newMode(), change.newBlobId(),
-                    "currentSnapshotId", "afterPolicy");
+                    "currentSnapshotId", "afterSnapshot");
         }
     }
 
     private void requireAllowedEndpoint(RepositoryId repositoryId, Document comparison, String path, String mode,
-            String blobId, String snapshotField, String policyField) {
+            String blobId, String snapshotField, String boundSnapshotField) {
         String snapshotId = requiredText(comparison, snapshotField);
-        Document snapshot = ready(findManifest(repositoryId, new GitEvidenceId(snapshotId)), "SNAPSHOT");
-        snapshot.put("_selectedPolicy", requiredPolicy(comparison, policyField));
+        Document snapshot = requiredDocument(comparison, boundSnapshotField);
         List<Document> matches = new ArrayList<>();
         for (Document row : template.getCollection(IndexCollections.GIT_SNAPSHOT_FILES).find(Filters.and(
                 Filters.eq("repoId", repositoryId.value()), Filters.eq("snapshotId", snapshotId), Filters.eq("path", path)))

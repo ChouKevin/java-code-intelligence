@@ -20,6 +20,9 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import com.java.semantic.repository.application.RepositoryMutationException;
+import java.nio.charset.StandardCharsets;
 
 class JGitRepositoryAdapterComparisonTest {
     @TempDir
@@ -113,6 +116,53 @@ class JGitRepositoryAdapterComparisonTest {
                     .contains(firstRevision);
             assertThat(adapter.resolveReviewEndpoints(repositoryDirectory,
                     ReviewSelection.range(mergeRevision, firstRevision)).beforeRevision()).contains(mergeRevision);
+        }
+    }
+
+    @Test
+    void selected_java_total_budget_is_enforced_even_when_each_file_fits() throws Exception {
+        try (Git git = Git.init().setDirectory(repositoryDirectory.toFile()).call()) {
+            Files.writeString(repositoryDirectory.resolve("First.java"), "//" + "a".repeat(78));
+            Files.writeString(repositoryDirectory.resolve("Second.java"), "//" + "b".repeat(78));
+            git.add().addFilepattern(".").call();
+            RepositoryRevision revision = RepositoryRevision.ofSha(git.commit().setMessage("bounded source")
+                    .setAuthor("Test", "test@example.test").call().name());
+            RepositoryProperties properties = new RepositoryProperties();
+            properties.setGitEvidenceFileTextBytes(128L);
+            properties.setGitEvidenceSnapshotTextBytes(128L);
+            JGitRepositoryAdapter adapter = new JGitRepositoryAdapter(properties, JdtLsTestProperties.linuxUid());
+
+            assertThatThrownBy(() -> adapter.prepareSnapshot(repositoryDirectory, revision,
+                    policy(Set.of("First.java", "Second.java")))).isInstanceOf(RepositoryMutationException.class);
+            assertThat(adapter.prepareSnapshot(repositoryDirectory, revision, policy(Set.of("First.java"))).candidates())
+                    .singleElement().satisfies(entry -> assertThat(new String(entry.bytes(), StandardCharsets.UTF_8))
+                            .isEqualTo("//" + "a".repeat(78)));
+        }
+    }
+
+    @Test
+    void large_selected_java_patch_retains_every_utf8_line_in_bounded_chunks() throws Exception {
+        try (Git git = Git.init().setDirectory(repositoryDirectory.toFile()).call()) {
+            Files.writeString(repositoryDirectory.resolve("Source.java"), "class Source {}\n");
+            git.add().addFilepattern(".").call();
+            RepositoryRevision before = RepositoryRevision.ofSha(git.commit().setMessage("before")
+                    .setAuthor("Test", "test@example.test").call().name());
+            Files.writeString(repositoryDirectory.resolve("Source.java"), "class Source {}\n" + "// é😀\n".repeat(20000));
+            git.add().addFilepattern(".").call();
+            RepositoryRevision after = RepositoryRevision.ofSha(git.commit().setMessage("after")
+                    .setAuthor("Test", "test@example.test").call().name());
+            SourceEvidencePolicy policy = policy(Set.of("Source.java"));
+            GitPreparedComparison comparison = adapter().prepareComparison(repositoryDirectory, Optional.of(before), after,
+                    policy, policy, Set.of(), Set.of());
+
+            assertThat(comparison.changes()).singleElement().satisfies(change -> {
+                assertThat(change.diffStatus()).isEqualTo("AVAILABLE");
+                String patch = String.join("", change.patchChunks());
+                assertThat(patch.lines().filter(line -> line.equals("+// é😀")).count()).isEqualTo(20000L);
+                assertThat(patch).doesNotContain("\uFFFD");
+                assertThat(change.patchChunks()).allSatisfy(chunk ->
+                        assertThat(chunk.getBytes(StandardCharsets.UTF_8).length).isLessThanOrEqualTo(64 * 1024));
+            });
         }
     }
 

@@ -160,6 +160,21 @@ class IndexDocumentContractTest {
         assertThrows(IllegalArgumentException.class, () -> SourceEvidenceDocumentCodec.decodePolicy(policy));
     }
 
+    @Test
+    void structure_preserves_literal_package_names_and_rejects_invalid_counts() {
+        Map<String, Long> packages = Map.of("com.example", 1L, "_class", 2L, "", 3L);
+        Map<String, Object> structure = new LinkedHashMap<>(Map.of(
+                "importedSourceRoots", List.of("src/main/java"),
+                "packageCounts", packages, "entryPointKindCounts", Map.of("HTTP", 4L)));
+        var decoded = SourceEvidenceDocumentCodec.decodeStructure(structure);
+        assertEquals(packages, decoded.packageCounts());
+        assertEquals(Map.of("HTTP", 4L), decoded.entryPointKindCounts());
+        structure.put("packageCounts", Map.of("_class", -1L));
+        assertThrows(IllegalArgumentException.class, () -> SourceEvidenceDocumentCodec.decodeStructure(structure));
+        structure.put("packageCounts", Map.of("com.example", 1.5));
+        assertThrows(IllegalArgumentException.class, () -> SourceEvidenceDocumentCodec.decodeStructure(structure));
+    }
+
 
     @Test
     void source_artifact_hash_and_offsets_are_content_derived_and_utf16_preserving() {
