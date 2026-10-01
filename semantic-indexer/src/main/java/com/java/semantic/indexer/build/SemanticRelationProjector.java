@@ -412,43 +412,10 @@ public final class SemanticRelationProjector {
     }
 
     static ExternalTarget.UnresolvedCall unresolvedCall(SyntaxInvocation invocation) {
-        String expression = invocation.expression();
-        int openingParenthesis = expression.indexOf('(');
-        String invocationHead = openingParenthesis < 0 ? expression : expression.substring(0, openingParenthesis);
-        int methodSeparator = Math.max(invocationHead.lastIndexOf('.'), invocationHead.lastIndexOf(':'));
-        String methodName = methodSeparator < 0 ? invocationHead.trim() : invocationHead.substring(methodSeparator + 1).trim();
-        if (methodName.isBlank()) {
-            methodName = "unknownMethod";
-        }
-        int arity = argumentCount(expression, openingParenthesis);
-        return new ExternalTarget.UnresolvedCall(expression, invocation.receiver(), methodName, arity);
+        return new ExternalTarget.UnresolvedCall(invocation.expression(), invocation.receiver(),
+                invocation.writtenName(), invocation.arguments().size());
     }
 
-    private static int argumentCount(String expression, int openingParenthesis) {
-        if (openingParenthesis < 0) {
-            return 0;
-        }
-        int depth = 0;
-        int arguments = 0;
-        boolean hasArgument = false;
-        for (int index = openingParenthesis + 1; index < expression.length(); index++) {
-            char current = expression.charAt(index);
-            if (current == '(') {
-                depth++;
-                hasArgument = true;
-            } else if (current == ')') {
-                if (depth == 0) {
-                    return hasArgument ? arguments + 1 : 0;
-                }
-                depth--;
-            } else if (current == ',' && depth == 0) {
-                arguments++;
-            } else if (!Character.isWhitespace(current)) {
-                hasArgument = true;
-            }
-        }
-        return hasArgument ? arguments + 1 : 0;
-    }
 
     private static void addCall(CodeFactIdentity from, InvocationTarget target, SourceRange occurrence, RepositoryId repositoryId,
                                 RepositoryRevision revision, GenerationId generationId, Map<String, SourceTypeMetadata> typesByName,

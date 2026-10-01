@@ -89,16 +89,18 @@ DISABLED／ABSENT／INVALID 不阻擋 code publication；AVAILABLE 文件須有 
 
 前兩列的每個 JSON TextContent 均與 structured result 相等。公開來源 fixture 的 current 為本機 guide-only commit `d56a65b7a1a9244bfe81d19072f23807acda3842`，其分析基準為 upstream `43d68528f106f83a774616e38bf0fbcaa0d74021`；不宣稱本機 commit 已發布到 upstream。正式 Indexer image 以原始 Java1.5 POM 完成 publication；沒有因此宣稱該舊專案 Maven build/runtime 或業務完整性通過。
 
-另外兩次隔離的實際模型 review 已完成，使用同一 saved request
-`2f087673-fbd3-4bc3-ac8c-574e3fb6f1da` 找回 COMPLETE job，再讀 READY review
-`48a03135-0d75-41f2-a982-ce1efc53ce9c`：
+以 analyzer policy 2 重新建立 current 並準備新 review 後，兩次實際模型 review
+使用 saved request `40fe7010-4b56-4ecf-9b36-6211678f954e` 找回 COMPLETE job，
+再讀 READY review `1af7d510-7feb-4418-b7c7-a668ba7d7228`：
 
 | Client | 已觀察範圍 | Calls / JSON bytes / wall | 結論邊界 |
 | --- | --- | --- | --- |
-| OMP18.4.4，gpt-6-astra | exact FIRST_PARENT diff、兩側完整來源／outline、實際 fact 的 relations、session-use 來源 | 14 / 36341 / 119.15s | 已檢查範圍內無支持的 defect；serialization/framework rebinding 未執行 |
-| Codex，`--ignore-user-config`、ephemeral、read-only | 同一 review 的兩側完整來源／outline、各側 CALLERS/CALLEES/IMPLEMENTATIONS，再核對 current 未變 | 16 / 52067 / 77.02s | 已檢查範圍內無支持的 defect；CLI 事件未提供 model ID，不推測 |
+| OMP18.4.4，gpt-6-astra | exact FIRST_PARENT diff、兩側完整來源／outline、實際 fact 的 relations、兩側 outgoing call 核對 | 14 / 37885 / 145.40s | 已檢查範圍內無支持的 defect；serialization/framework rebinding 未執行 |
+| Codex，`--ignore-user-config`、ephemeral、read-only | 同一 review 的兩側完整來源／outline、各側 CALLERS/CALLEES/IMPLEMENTATIONS、current 身分 | 15 / 49530 / 67.49s | 已檢查範圍內無支持的 defect；CLI 事件未提供 model ID，不推測 |
 
 兩次全部 tool responses 的 JSON TextContent 與 structured result 相等，沒有 tool error。
+Codex 另有既存 arg0 暫存目錄清理的 permission-denied 警告；這不是 Semantic tool error，
+也未因此另行清理或修改使用者的 client 狀態。
 比較是 `9dc193483d5e75263befcbe82157e581ac6a4f64` →
 `eb750eb00e75f932f358d86517f408bdc8908bd3`，只修改
 `src/main/java/org/mybatis/jpetstore/web/actions/AbstractActionBean.java:15`
@@ -107,9 +109,15 @@ DISABLED／ABSENT／INVALID 不阻擋 code publication；AVAILABLE 文件須有 
 模型保留 unresolved／empty relation 的限制，未把 null-context 的條件風險冒充已證實 regression，
 也未宣稱執行目標專案 build/tests/runtime。
 
+前一輪真實資料揭露 chained-call metadata 錯誤，並非模型推論錯誤。修正後兩個模型
+均將 `setMessage` 的 source 與 outgoing evidence 核對為 `getMessages`/0、
+`add`/1、`SimpleMessage`/1，range 不變，resolution 仍為 `UNRESOLVED`。
+這些新接受紀錄不把舊 immutable review 當成已修正資料；升級與重建要求見
+[analyzer policy cutover](tool-data-evolution.md#analyzer-policy-changes-within-schema-4)。
+
 其後停止 Indexer 並重新啟動無任何 mount 的 Query image，以 read-only Mongo identity
-重讀上述 review/current/guide 的 25 組不同參數。每組 cold MCP JSON／structured result、
-cold HTTP body 與停止前結果相等。這證明本機已準備證據的 Mongo-only cold read；
+重讀這兩次新模型實際請求與 current guide 共 23 組不同參數。每組 cold MCP JSON／structured
+result、cold HTTP body 與停止前結果相等。這證明本機已準備證據的 Mongo-only cold read；
 不證明模型認證、私有 repo、TLS 部署或容量。Claude 的模型旅程仍未驗證。
 
 操作／release／retention 見 [Semantic review deployment and operation](semantic-review.md)。

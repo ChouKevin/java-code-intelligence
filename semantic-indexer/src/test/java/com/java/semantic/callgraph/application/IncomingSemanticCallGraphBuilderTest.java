@@ -599,7 +599,7 @@ class IncomingSemanticCallGraphBuilderTest {
 
     private static SyntaxInvocation invocation(int line) {
         SyntaxRange range = new SyntaxRange(new SyntaxPosition(line, 0), new SyntaxPosition(line, 4));
-        return new SyntaxInvocation(SyntaxInvocation.InvocationKind.METHOD, range, "work()",
+        return new SyntaxInvocation(SyntaxInvocation.InvocationKind.METHOD, range, "work()", "work",
                 "worker", "", "", Optional.empty(), range.start(), List.of());
     }
 

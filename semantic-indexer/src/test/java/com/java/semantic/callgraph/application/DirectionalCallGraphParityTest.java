@@ -30,6 +30,7 @@ import com.java.semantic.syntax.domain.MethodTargetResolution;
 import com.java.semantic.syntax.domain.RepositorySyntax;
 import com.java.semantic.model.codefact.SourceRange;
 import com.java.semantic.syntax.domain.SyntaxInvocation;
+import com.java.semantic.syntax.domain.SyntaxInvocationArgument;
 import com.java.semantic.model.codefact.SyntaxPosition;
 import com.java.semantic.model.codefact.SyntaxRange;
 import com.java.semantic.syntax.domain.TypeReference;
@@ -123,8 +124,9 @@ class DirectionalCallGraphParityTest {
         SyntaxRange syntaxRange = new SyntaxRange(
                 new SyntaxPosition(range.start().line(), range.start().character()),
                 new SyntaxPosition(range.end().line(), range.end().character()));
-        return new SyntaxInvocation(SyntaxInvocation.InvocationKind.METHOD, syntaxRange, "work(value)",
-                "target", "", "", Optional.empty(), syntaxRange.start(), List.of());
+        return new SyntaxInvocation(SyntaxInvocation.InvocationKind.METHOD, syntaxRange, "work(value)", "work",
+                "target", "", "", Optional.empty(), syntaxRange.start(),
+                List.of(new SyntaxInvocationArgument(syntaxRange, "value", Optional.empty())));
     }
 
     private static final class FakeSemanticService implements JavaSemanticService {

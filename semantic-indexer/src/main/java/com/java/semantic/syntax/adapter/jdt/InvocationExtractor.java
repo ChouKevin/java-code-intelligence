@@ -117,6 +117,7 @@ final class InvocationExtractor {
                 InvocationKind.METHOD_REFERENCE,
                 AstSourceRanges.range(unit, node),
                 AstSourceRanges.text(source, node),
+                node.getName().getIdentifier(),
                 receiver,
                 declaration,
                 "",
@@ -134,12 +135,25 @@ final class InvocationExtractor {
                 kind,
                 AstSourceRanges.range(unit, node),
                 AstSourceRanges.text(source, node),
+                writtenName(node, source),
                 receiverText,
                 receiverDeclaration,
                 qualifier,
                 invocationTarget(node),
                 resolutionAnchor(node, unit),
                 argumentsOf(node, unit, source));
+    }
+
+    private static String writtenName(ASTNode node, String source) {
+        return switch (node) {
+            case MethodInvocation invocation -> invocation.getName().getIdentifier();
+            case ClassInstanceCreation creation -> AstSourceRanges.text(source, creation.getType());
+            case ExpressionMethodReference reference -> reference.getName().getIdentifier();
+            case TypeMethodReference reference -> reference.getName().getIdentifier();
+            case SuperMethodReference reference -> reference.getName().getIdentifier();
+            case CreationReference reference -> "new";
+            default -> throw new IllegalArgumentException("unsupported invocation node: " + node.getClass().getSimpleName());
+        };
     }
 
     private static List<SyntaxInvocationArgument> argumentsOf(ASTNode node, CompilationUnit unit, String source) {

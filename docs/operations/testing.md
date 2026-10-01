@@ -113,11 +113,24 @@ source-workspace fallback; the host Git fixture is not a least-privilege DB-role
 certification. Its intentionally >4-MiB search-budget source uses an explicit
 8-MiB per-file export ceiling; the production default remains 2 MiB.
 
+The semantic journey enables the existing `uat` publication gate only in its
+controlled container. BUILD C remains held while old-current and READY-review
+reads are asserted; a `finally` release precedes completion polling. An active
+job alone is not used as proof that publication cannot occur between reads.
+Production profiles and defaults remain unchanged.
+
 The Git restart scenario first publishes real evidence, stops Indexer, then
 constructs the original job's publication-before-terminal durable state. A new
 JVM must validate the existing READY graph/digest and reconcile the same job
 without replacing the comparison. This is a recovery-state regression, not
 an observed real crash.
+
+A focused real-JDT diagnostic on 2026-10-01 traced the video/order fixture
+`SOURCE_SCAN_FAILED` / `NoSuchFileException` warnings to the imported but absent
+`src/main/resources` root. Their existing production Java roots covered all
+10/10 and 7/7 expected Java files respectively. This explains those fixture
+warnings only; investigate other failed roots instead of treating the warning
+as a blanket acceptable condition. The diagnostic did not suppress logging.
 
 ## Actual clients and deployment acceptance
 

@@ -1,6 +1,11 @@
 package com.java.semantic.callgraph.application;
 
 import com.java.semantic.syntax.domain.SourceTypeKind;
+import com.java.semantic.syntax.adapter.jdt.JdtSyntaxExtractionService;
+import com.java.semantic.syntax.domain.RepositorySyntax;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 
 import java.util.List;
 import java.util.Optional;
@@ -9,6 +14,7 @@ import java.util.stream.Stream;
 import com.java.semantic.callgraph.domain.ResolutionStrategy;
 import com.java.semantic.syntax.domain.SourceTypeMetadata;
 import com.java.semantic.syntax.domain.SourceFieldMetadata;
+import com.java.semantic.syntax.domain.SyntaxInvocationArgument;
 import com.java.semantic.syntax.domain.SourceMethodMetadata;
 import com.java.semantic.syntax.domain.MethodTargetResolution;
 import com.java.semantic.model.codefact.SourceRange;
@@ -20,6 +26,7 @@ import com.java.semantic.syntax.domain.NamedTypeReference;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 
@@ -29,11 +36,41 @@ class GeneratedMemberEvidenceTest {
 
     private final GeneratedMemberEvidence evidence = new GeneratedMemberEvidence();
 
+
+    @Test
+    void should_match_a_generated_setter_with_a_comma_inside_its_single_string_argument(@TempDir Path repository)
+            throws IOException {
+        Path sourceRoot = repository.resolve("src/main/java/com/example");
+        Files.createDirectories(sourceRoot);
+        Files.writeString(sourceRoot.resolve("Caller.java"), """
+                package com.example;
+                class Order { }
+                class Caller {
+                    void call(Order order) {
+                        order.setTotal("first,second");
+                    }
+                }
+                """);
+        RepositorySyntax syntax = new JdtSyntaxExtractionService().extract(repository);
+        SyntaxInvocation call = syntax.sourceTypes().stream()
+                .flatMap(type -> type.members().methods().stream())
+                .filter(method -> method.name().equals("call"))
+                .flatMap(method -> method.invocations().stream())
+                .findFirst().orElseThrow();
+        SourceTypeMetadata order = metadata("com.example.Order", List.of("Setter"),
+                List.of(field("total", "String")), List.of(), false);
+
+        Optional<EvidenceMatch> match = evidence.evaluate(order, call);
+
+        assertThat(match).isPresent();
+        assertThat(match.orElseThrow().opaqueSymbol()).isEqualTo("com.example.Order#setTotal(..)");
+        assertThat(match.orElseThrow().strategy()).isEqualTo(ResolutionStrategy.LOMBOK_GENERATED);
+    }
     @Test
     void should_match_data_getter_without_source_declaration() {
         SourceTypeMetadata order = metadata("com.example.Order", List.of("Data"),
                 List.of(field("total", "BigDecimal")), List.of(), false);
-        SyntaxInvocation call = invocation(InvocationKind.METHOD, "order.getTotal()", "com.example.Order");
+        SyntaxInvocation call = invocation(InvocationKind.METHOD, "order.getTotal()", "getTotal", "com.example.Order");
 
         Optional<EvidenceMatch> match = evidence.evaluate(order, call);
 
@@ -47,7 +84,7 @@ class GeneratedMemberEvidenceTest {
         SourceMethodMetadata handWritten = method("getTotal", List.of());
         SourceTypeMetadata order = metadata("com.example.Order", List.of("Data"),
                 List.of(field("total", "BigDecimal")), List.of(handWritten), false);
-        SyntaxInvocation call = invocation(InvocationKind.METHOD, "order.getTotal()", "com.example.Order");
+        SyntaxInvocation call = invocation(InvocationKind.METHOD, "order.getTotal()", "getTotal", "com.example.Order");
 
         assertThat(evidence.evaluate(order, call)).isEmpty();
     }
@@ -56,7 +93,7 @@ class GeneratedMemberEvidenceTest {
     void should_not_match_required_args_constructor() {
         SourceTypeMetadata invoice = metadata("com.example.Invoice", List.of("RequiredArgsConstructor"),
                 List.of(field("id", "String")), List.of(), false);
-        SyntaxInvocation call = invocation(InvocationKind.CONSTRUCTOR, "new Invoice(id)", "com.example.Invoice");
+        SyntaxInvocation call = invocation(InvocationKind.CONSTRUCTOR, "new Invoice(id)", "Invoice", "com.example.Invoice", "id");
 
         assertThat(evidence.evaluate(invoice, call)).isEmpty();
     }
@@ -94,50 +131,50 @@ class GeneratedMemberEvidenceTest {
 
         return Stream.of(
                 Arguments.of("setter matches @Setter field", setterOwner,
-                        invocation(InvocationKind.METHOD, "order.setTotal(five)", "com.example.Order"),
+                        invocation(InvocationKind.METHOD, "order.setTotal(five)", "setTotal", "com.example.Order", "five"),
                         Optional.of("com.example.Order#setTotal(..)")),
                 Arguments.of("object method matches @Value toString", valueOwner,
-                        invocation(InvocationKind.METHOD, "order.toString()", "com.example.Order"),
+                        invocation(InvocationKind.METHOD, "order.toString()", "toString", "com.example.Order"),
                         Optional.of("com.example.Order#toString()")),
                 Arguments.of("fluent accessor matches bare field getter", fluentGetterOwner,
-                        invocation(InvocationKind.METHOD, "order.total()", "com.example.Order"),
+                        invocation(InvocationKind.METHOD, "order.total()", "total", "com.example.Order"),
                         Optional.of("com.example.Order#getTotal()")),
                 Arguments.of("fluent accessor matches bare field setter with one argument", fluentSetterOwner,
-                        invocation(InvocationKind.METHOD, "order.total(five)", "com.example.Order"),
+                        invocation(InvocationKind.METHOD, "order.total(five)", "total", "com.example.Order", "five"),
                         Optional.of("com.example.Order#setTotal(..)")),
                 Arguments.of("builder entry matches @Builder builder()", builderOwner,
-                        invocation(InvocationKind.METHOD, "Order.builder()", "com.example.Order"),
+                        invocation(InvocationKind.METHOD, "Order.builder()", "builder", "com.example.Order"),
                         Optional.of("com.example.Order#builder()")),
                 Arguments.of("builder chain matches build() on the nested builder", builderOwner,
-                        invocation(InvocationKind.METHOD, "orderBuilder.build()", "com.example.Order.OrderBuilder"),
+                        invocation(InvocationKind.METHOD, "orderBuilder.build()", "build", "com.example.Order.OrderBuilder"),
                         Optional.of("com.example.Order.OrderBuilder#build()")),
                 Arguments.of("builder chain matches a one-argument field setter", builderOwner,
-                        invocation(InvocationKind.METHOD, "orderBuilder.carrier(x)", "com.example.Order.OrderBuilder"),
+                        invocation(InvocationKind.METHOD, "orderBuilder.carrier(x)", "carrier", "com.example.Order.OrderBuilder", "x"),
                         Optional.of("com.example.Order.OrderBuilder#carrier(..)")),
                 Arguments.of("builder chain does not match a zero-argument call sharing a field name", builderOwner,
-                        invocation(InvocationKind.METHOD, "orderBuilder.carrier()", "com.example.Order.OrderBuilder"),
+                        invocation(InvocationKind.METHOD, "orderBuilder.carrier()", "carrier", "com.example.Order.OrderBuilder"),
                         Optional.<String>empty()),
                 Arguments.of("no-args constructor matches @NoArgsConstructor", noArgsOwner,
-                        invocation(InvocationKind.CONSTRUCTOR, "new Order()", "com.example.Order"),
+                        invocation(InvocationKind.CONSTRUCTOR, "new Order()", "Order", "com.example.Order"),
                         Optional.of("com.example.Order#<init>(0)")),
                 Arguments.of("all-args constructor matches arg count equal to field count", allArgsOwner,
-                        invocation(InvocationKind.CONSTRUCTOR, "new Order(id, total)", "com.example.Order"),
+                        invocation(InvocationKind.CONSTRUCTOR, "new Order(id, total)", "Order", "com.example.Order", "id", "total"),
                         Optional.of("com.example.Order#<init>(2)")),
                 Arguments.of("all-args constructor does not match on arity mismatch", allArgsOwner,
-                        invocation(InvocationKind.CONSTRUCTOR, "new Order(id)", "com.example.Order"),
+                        invocation(InvocationKind.CONSTRUCTOR, "new Order(id)", "Order", "com.example.Order", "id"),
                         Optional.<String>empty()),
                 Arguments.of("getter matches through a chained receiver expression", valueOwner,
-                        invocation(InvocationKind.METHOD, "service.findOrder(id).getTotal()", "com.example.Order"),
+                        invocation(InvocationKind.METHOD, "service.findOrder(id).getTotal()", "getTotal", "com.example.Order"),
                         Optional.of("com.example.Order#getTotal()")),
                 Arguments.of("setter does not match a two-argument call through a chained receiver expression",
                         setterOwner,
-                        invocation(InvocationKind.METHOD, "service.findOrder(id).setTotal(a, b)", "com.example.Order"),
+                        invocation(InvocationKind.METHOD, "service.findOrder(id).setTotal(a, b)", "setTotal", "com.example.Order", "a", "b"),
                         Optional.<String>empty()),
                 Arguments.of("object method matches @Value equals with one argument", valueOwner,
-                        invocation(InvocationKind.METHOD, "order.equals(a)", "com.example.Order"),
+                        invocation(InvocationKind.METHOD, "order.equals(a)", "equals", "com.example.Order", "a"),
                         Optional.of("com.example.Order#equals(..)")),
                 Arguments.of("object method does not match equals with two arguments", valueOwner,
-                        invocation(InvocationKind.METHOD, "order.equals(a, b)", "com.example.Order"),
+                        invocation(InvocationKind.METHOD, "order.equals(a, b)", "equals", "com.example.Order", "a", "b"),
                         Optional.<String>empty()));
     }
 
@@ -173,10 +210,13 @@ class GeneratedMemberEvidenceTest {
                 List.of(), range.start(), MethodTargetResolution.unresolved("test-fixture"), true, false, true, List.of());
     }
 
-    private static SyntaxInvocation invocation(InvocationKind kind, String expression, String receiverDeclaration) {
+    private static SyntaxInvocation invocation(InvocationKind kind, String expression, String writtenName,
+            String receiverDeclaration, String... argumentExpressions) {
         SyntaxRange range = range(0, 0, 0, expression.length());
+        List<SyntaxInvocationArgument> arguments = Stream.of(argumentExpressions)
+                .map(argument -> new SyntaxInvocationArgument(range, argument, Optional.empty())).toList();
         return new SyntaxInvocation(
-                kind, range, expression, "receiver", receiverDeclaration, "", Optional.empty(), range.start(), List.of());
+                kind, range, expression, writtenName, "receiver", receiverDeclaration, "", Optional.empty(), range.start(), arguments);
     }
 
     private static SyntaxRange range(int startLine, int startCharacter, int endLine, int endCharacter) {

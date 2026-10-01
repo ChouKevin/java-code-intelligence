@@ -95,7 +95,7 @@ class SpringImplementationSelectorTest {
     private static SyntaxInvocation invocation(String qualifier) {
         SyntaxRange range = new SyntaxRange(new SyntaxPosition(0, 0), new SyntaxPosition(0, 4));
         return new SyntaxInvocation(
-                SyntaxInvocation.InvocationKind.METHOD, range, "work()", "worker", "", qualifier,
+                SyntaxInvocation.InvocationKind.METHOD, range, "work()", "work", "worker", "", qualifier,
                 Optional.empty(), range.start(), List.of());
     }
 }

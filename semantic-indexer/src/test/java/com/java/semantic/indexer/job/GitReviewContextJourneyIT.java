@@ -50,6 +50,8 @@ class GitReviewContextJourneyIT {
     // Two full review endpoints, including multi-MiB paging fixtures, need the real analysis deadline.
     private static final Duration JOB_TIMEOUT = Duration.ofMinutes(10);
 
+    private HttpClient http;
+
     @TempDir
     Path temporaryDirectory;
 
@@ -68,9 +70,11 @@ class GitReviewContextJourneyIT {
         Path jdtWorkspace = temporaryDirectory.resolve("jdt-workspace");
         int indexerPort = availablePort();
         int queryPort = availablePort();
-        try (MongoDBContainer mongo = new MongoDBContainer("mongo:8.0.4");
+        try (HttpClient journeyHttp = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
+             MongoDBContainer mongo = new MongoDBContainer("mongo:8.0.4");
              Git remote = Git.init().setBare(true).setDirectory(remotePath.toFile()).call();
              Git seed = Git.init().setInitialBranch("main").setDirectory(seedPath.toFile()).call()) {
+            http = journeyHttp;
             mongo.start();
             String mongoUri = mongo.getConnectionString() + "/git_review_journey";
             bootstrapSchema(indexerJar, mongoUri, jdtHome);
@@ -253,7 +257,7 @@ class GitReviewContextJourneyIT {
         assertThat(client.callTool(McpSchema.CallToolRequest.builder(operation).arguments(arguments).build()).isError()).isFalse();
     }
 
-    private static void assertRecoveredIdentity(McpSyncClient client, String base, String requestId,
+    private void assertRecoveredIdentity(McpSyncClient client, String base, String requestId,
             Map<?, ?> original, JsonMapper mapper) throws Exception {
         Map<?, ?> recovered = mcpBody(client, "get_job", Map.of("repositoryId", REPOSITORY_ID, "requestId", requestId), mapper);
         assertThat(recovered).isEqualTo(original);
@@ -320,7 +324,7 @@ class GitReviewContextJourneyIT {
         }
     }
 
-    private static void preparationError(McpSyncClient client, String base, String tool, String suffix,
+    private void preparationError(McpSyncClient client, String base, String tool, String suffix,
             Map<String, Object> arguments, int status, String code, JsonMapper mapper) throws Exception {
         String repository = (String) arguments.get("repositoryId");
         String path = "/index/repositories/" + repository + suffix;
@@ -773,7 +777,7 @@ class GitReviewContextJourneyIT {
         }
     }
 
-    private static void assertSourceParity(McpSyncClient client, String base, Map<?, ?> context,
+    private void assertSourceParity(McpSyncClient client, String base, Map<?, ?> context,
             String expected, JsonMapper mapper) throws Exception {
         Map<?, ?> source = queryParity(client, base, "read_source", "/api/v1/source",
                 Map.of("context", context, "target", Map.of("kind", "FILE", "path", "src/Service.java",
@@ -782,7 +786,7 @@ class GitReviewContextJourneyIT {
         assertThat(text(source, "content")).isEqualTo("  // stable-token " + expected + " 0\n");
     }
 
-    private static void assertMetadataParity(McpSyncClient client, String base, String tool, String path,
+    private void assertMetadataParity(McpSyncClient client, String base, String tool, String path,
             Map<String, Object> identity, String pin, JsonMapper mapper) throws Exception {
         Map<?, ?> defaults = queryParity(client, base, tool, path, identity, mapper);
         Map<String, Object> request = new java.util.HashMap<>(identity);
@@ -802,7 +806,7 @@ class GitReviewContextJourneyIT {
         queryError(client, base, tool, path, invalidCursor, 400, "INVALID_ARGUMENT", mapper);
     }
 
-    private static void assertComparisonPages(McpSyncClient client, String base, Map<?, ?> context,
+    private void assertComparisonPages(McpSyncClient client, String base, Map<?, ?> context,
             List<Map<?, ?>> expected, JsonMapper mapper) throws Exception {
         Map<String, Object> request = new java.util.HashMap<>(Map.of("comparisonContext", context, "limit", 1));
         List<Map<?, ?>> changes = new ArrayList<>();
@@ -816,7 +820,7 @@ class GitReviewContextJourneyIT {
         assertThat(changes).isEqualTo(expected);
     }
 
-    private static String exhaustParityDiff(McpSyncClient client, String base, Map<?, ?> context, String changeId,
+    private String exhaustParityDiff(McpSyncClient client, String base, Map<?, ?> context, String changeId,
             JsonMapper mapper) throws Exception {
         Map<String, Object> request = new java.util.HashMap<>(Map.of("comparisonContext", context, "changeId", changeId));
         StringBuilder patch = new StringBuilder();
@@ -836,7 +840,7 @@ class GitReviewContextJourneyIT {
         }
     }
 
-    private static String exhaustParitySource(McpSyncClient client, String base, Map<?, ?> context,
+    private String exhaustParitySource(McpSyncClient client, String base, Map<?, ?> context,
             JsonMapper mapper) throws Exception {
         Map<String, Object> request = new java.util.HashMap<>(Map.of("context", context, "target",
                 Map.of("kind", "FILE", "path", "src/Service.java"), "maxLines", 1));
@@ -856,7 +860,7 @@ class GitReviewContextJourneyIT {
         }
     }
 
-    private static Map<?, ?> queryParity(McpSyncClient client, String base, String tool, String path,
+    private Map<?, ?> queryParity(McpSyncClient client, String base, String tool, String path,
             Map<String, Object> request, JsonMapper mapper) throws Exception {
         Map<?, ?> http = successful(post(base, path, QUERY_TOKEN, request), mapper);
         Map<?, ?> nativeBody = mcpBody(client, tool, request, mapper);
@@ -866,7 +870,7 @@ class GitReviewContextJourneyIT {
         return http;
     }
 
-    private static void queryError(McpSyncClient client, String base, String tool, String path,
+    private void queryError(McpSyncClient client, String base, String tool, String path,
             Map<String, Object> request, int status, String code, JsonMapper mapper) throws Exception {
         HttpResponse<String> http = post(base, path, QUERY_TOKEN, request);
         assertThat(http.statusCode()).as(http.body()).isEqualTo(status);
@@ -1055,20 +1059,22 @@ class GitReviewContextJourneyIT {
         throw new AssertionError("application did not open its local HTTP endpoint: " + Files.readString(process.log()));
     }
 
-    private static HttpResponse<String> post(String base, String path, String token, Map<String, Object> body) throws Exception {
+    private HttpResponse<String> post(String base, String path, String token, Map<String, Object> body) throws Exception {
         JsonMapper mapper = JsonMapper.builder().build();
         return postUri(base + path, token, mapper.writeValueAsString(body));
     }
 
-    private static HttpResponse<String> postUri(String uri, String token, String body) throws IOException, InterruptedException {
-        HttpRequest request = HttpRequest.newBuilder(URI.create(uri)).header(TOKEN_HEADER, token).header("Content-Type", "application/json")
+    private HttpResponse<String> postUri(String uri, String token, String body) throws IOException, InterruptedException {
+        HttpRequest request = HttpRequest.newBuilder(URI.create(uri)).timeout(Duration.ofSeconds(30))
+                .header(TOKEN_HEADER, token).header("Content-Type", "application/json")
                 .POST(HttpRequest.BodyPublishers.ofString(body)).build();
-        return HttpClient.newHttpClient().send(request, HttpResponse.BodyHandlers.ofString());
+        return http.send(request, HttpResponse.BodyHandlers.ofString());
     }
 
-    private static HttpResponse<String> get(String base, String path, String token) throws IOException, InterruptedException {
-        HttpRequest request = HttpRequest.newBuilder(URI.create(base + path)).header(TOKEN_HEADER, token).GET().build();
-        return HttpClient.newHttpClient().send(request, HttpResponse.BodyHandlers.ofString());
+    private HttpResponse<String> get(String base, String path, String token) throws IOException, InterruptedException {
+        HttpRequest request = HttpRequest.newBuilder(URI.create(base + path)).timeout(Duration.ofSeconds(30))
+                .header(TOKEN_HEADER, token).GET().build();
+        return http.send(request, HttpResponse.BodyHandlers.ofString());
     }
 
     private static int availablePort() throws IOException {

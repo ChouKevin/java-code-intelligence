@@ -272,7 +272,7 @@ class SemanticCallGraphBuilderTest {
     void should_rethrow_root_point_resolution_failures() {
         MethodTarget rootTarget = target("Root", "run");
         SemanticMethod root = outgoingMethod(rootTarget, 0);
-        SyntaxInvocation invocation = invocation("worker.failed()", 2);
+        SyntaxInvocation invocation = invocation("worker.failed()", "failed", 2);
         SemanticCallSite callSite = new SemanticCallSite(
                 semanticRange(invocation.range()), new SemanticPosition(2, 0));
         IllegalStateException expected = new IllegalStateException("planned point resolution failure");
@@ -329,8 +329,8 @@ class SemanticCallGraphBuilderTest {
         SemanticMethod root = outgoingMethod(rootTarget, 0);
         SemanticMethod child = outgoingMethod(childTarget, 10);
         SemanticMethod grandchild = outgoingMethod(grandchildTarget, 20);
-        SyntaxInvocation failedInvocation = invocation("worker.failed()", 12);
-        SyntaxInvocation successfulInvocation = invocation("worker.save()", 14);
+        SyntaxInvocation failedInvocation = invocation("worker.failed()", "failed", 12);
+        SyntaxInvocation successfulInvocation = invocation("worker.save()", "save", 14);
         SemanticCallSite failedCallSite = new SemanticCallSite(
                 semanticRange(failedInvocation.range()), new SemanticPosition(12, 0));
         FakeSemanticService semantic = new FakeSemanticService()
@@ -531,7 +531,7 @@ class SemanticCallGraphBuilderTest {
         MethodTarget zetaTarget = target("Zeta", "work");
         MethodTarget alphaTarget = target("Alpha", "work");
         SemanticMethod root = outgoingMethod(rootTarget, 0);
-        SyntaxInvocation invocation = invocation("worker.work()", 2);
+        SyntaxInvocation invocation = invocation("worker.work()", "work", 2);
         FakeSemanticService semantic = new FakeSemanticService().resolution(root,
                 SemanticCallResolution.ambiguous(List.of(outgoingMethod(zetaTarget, 20), outgoingMethod(alphaTarget, 10))));
 
@@ -682,7 +682,7 @@ class SemanticCallGraphBuilderTest {
 
     private static SyntaxInvocation receiverInvocation(String expression, int line, String receiverDeclaration) {
         SyntaxRange invocationRange = range(line, 0, line, expression.length());
-        return new SyntaxInvocation(SyntaxInvocation.InvocationKind.METHOD, invocationRange, expression,
+        return new SyntaxInvocation(SyntaxInvocation.InvocationKind.METHOD, invocationRange, expression, "getTotal",
                 "receiver", receiverDeclaration, "", Optional.empty(), invocationRange.start(), List.of());
     }
 
@@ -829,9 +829,9 @@ class SemanticCallGraphBuilderTest {
                 SemanticResolutionOrigin.CALL_HIERARCHY, SemanticCallStatus.IDENTITY_UNPROVEN);
     }
 
-    private static SyntaxInvocation invocation(String expression, int line) {
+    private static SyntaxInvocation invocation(String expression, String writtenName, int line) {
         SyntaxRange range = range(line, 0, line, 4);
-        return new SyntaxInvocation(SyntaxInvocation.InvocationKind.METHOD, range, expression,
+        return new SyntaxInvocation(SyntaxInvocation.InvocationKind.METHOD, range, expression, writtenName,
                 "worker", "", "", Optional.empty(), range.start(), List.of());
     }
 

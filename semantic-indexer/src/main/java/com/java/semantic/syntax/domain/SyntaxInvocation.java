@@ -6,11 +6,15 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.List;
 
-/** 一個呼叫位置的原始語法證據 */
+/**
+ * 一個呼叫位置的原始語法證據。
+ * writtenName 來自 AST 的呼叫名稱；僅缺少語法證據的 call hierarchy fallback 使用空字串。
+ */
 public record SyntaxInvocation(
         InvocationKind kind,
         SyntaxRange range,
         String expression,
+        String writtenName,
         String receiver,
         String receiverDeclaration,
         String qualifier,
@@ -22,6 +26,7 @@ public record SyntaxInvocation(
         Objects.requireNonNull(kind, "kind is required");
         Objects.requireNonNull(range, "range is required");
         require(hasText(expression), "expression is required");
+        writtenName = Objects.requireNonNull(writtenName, "written name is required");
         receiver = Objects.requireNonNullElse(receiver, "");
         receiverDeclaration = Objects.requireNonNullElse(receiverDeclaration, "");
         qualifier = Objects.requireNonNullElse(qualifier, "");

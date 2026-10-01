@@ -27,6 +27,7 @@ import com.java.semantic.syntax.domain.MethodTargetResolution;
 import com.java.semantic.syntax.domain.RepositorySyntax;
 import com.java.semantic.model.codefact.SourceRange;
 import com.java.semantic.syntax.domain.SyntaxInvocation;
+import com.java.semantic.syntax.domain.SyntaxInvocationArgument;
 import com.java.semantic.model.codefact.SyntaxPosition;
 import com.java.semantic.model.codefact.SyntaxRange;
 import com.java.semantic.syntax.domain.TypeReference;
@@ -116,7 +117,7 @@ class DirectCallRelationshipResolverTest {
     void should_carry_invocation_without_declaration_target_when_definition_fallback_stays_unresolved() {
         MethodTarget callerTarget = target("Root", "run");
         SemanticMethod caller = outgoingMethod(callerTarget, 0);
-        SyntaxInvocation invocation = invocation("worker.work()", 2, 3);
+        SyntaxInvocation invocation = invocation("worker.work()", "work", 2, 3);
         FakeSemanticService semantic = new FakeSemanticService();
 
         List<DirectCallRelationship> relationships = resolver(semantic).resolveAll(
@@ -135,7 +136,7 @@ class DirectCallRelationshipResolverTest {
         MethodTarget target = target("Local", "work");
         SemanticMethod caller = outgoingMethod(callerTarget, 0);
         SemanticMethod local = outgoingMethod(target, 10);
-        SyntaxInvocation invocation = invocation("worker.work()", 2, 3);
+        SyntaxInvocation invocation = invocation("worker.work()", "work", 2, 3);
         FakeSemanticService semantic = new FakeSemanticService().resolution(caller,
                 SemanticCallResolution.resolved(resolvedCall(local, 2)));
 
@@ -156,8 +157,8 @@ class DirectCallRelationshipResolverTest {
         MethodTarget localTarget = target("Local", "work");
         SemanticMethod caller = outgoingMethod(callerTarget, 0);
         SemanticMethod local = outgoingMethod(localTarget, 10);
-        SyntaxInvocation failedInvocation = invocation("worker.failed()", 2, 3);
-        SyntaxInvocation successfulInvocation = invocation("worker.work()", 4, 5);
+        SyntaxInvocation failedInvocation = invocation("worker.failed()", "failed", 2, 3);
+        SyntaxInvocation successfulInvocation = invocation("worker.work()", "work", 4, 5);
         SemanticCallSite failedCallSite = new SemanticCallSite(
                 semanticRange(failedInvocation.range()), new SemanticPosition(2, 3));
         FakeSemanticService semantic = new FakeSemanticService()
@@ -187,7 +188,7 @@ class DirectCallRelationshipResolverTest {
     void should_rethrow_raw_point_resolution_failure_from_direct_resolution() {
         MethodTarget callerTarget = target("Root", "run");
         SemanticMethod caller = outgoingMethod(callerTarget, 0);
-        SyntaxInvocation invocation = invocation("worker.failed()", 2, 3);
+        SyntaxInvocation invocation = invocation("worker.failed()", "failed", 2, 3);
         SemanticCallSite callSite = new SemanticCallSite(
                 semanticRange(invocation.range()), new SemanticPosition(2, 3));
         IllegalStateException expected = new IllegalStateException("planned point resolution failure");
@@ -250,8 +251,8 @@ class DirectCallRelationshipResolverTest {
         MethodTarget target = target("Local", "work");
         SemanticMethod caller = outgoingMethod(callerTarget, 0);
         SemanticMethod local = outgoingMethod(target, 10);
-        SyntaxInvocation nearby = invocation("worker.work()", 2, 1);
-        SyntaxInvocation exact = invocation("worker.work()", 3, 7);
+        SyntaxInvocation nearby = invocation("worker.work()", "work", 2, 1);
+        SyntaxInvocation exact = invocation("worker.work()", "work", 3, 7);
         FakeSemanticService semantic = new FakeSemanticService().resolution(caller,
                 SemanticCallResolution.resolved(resolvedCall(local, 3)));
         DirectCallRelationshipResolver resolver = resolver(semantic);
@@ -281,12 +282,13 @@ class DirectCallRelationshipResolverTest {
                 SyntaxInvocation.InvocationKind.METHOD,
                 invocationRange,
                 "orderService.placeFromMessage(orderId)",
+                "placeFromMessage",
                 "orderService",
                 "com.example.OrderService",
                 "",
                 Optional.empty(),
                 new SyntaxPosition(3, 28),
-                List.of());
+                List.of(new SyntaxInvocationArgument(range(3, 45, 3, 52), "orderId", Optional.empty())));
         FakeSemanticService semantic = new FakeSemanticService().resolution(caller,
                 SemanticCallResolution.resolved(resolvedCall(local, 3)));
 
@@ -316,6 +318,7 @@ class DirectCallRelationshipResolverTest {
                 SyntaxInvocation.InvocationKind.METHOD,
                 range(2, 0, 2, 20),
                 "port.handle()",
+                "handle",
                 "port",
                 "com.example.Port",
                 "fast",
@@ -355,10 +358,10 @@ class DirectCallRelationshipResolverTest {
         SemanticMethod declaration = outgoingMethod(interfaceTarget, 10);
         SemanticCall call = resolvedCall(declaration, 2);
         SyntaxInvocation first = new SyntaxInvocation(
-                SyntaxInvocation.InvocationKind.METHOD, range(2, 0, 2, 20), "port.handle()",
+                SyntaxInvocation.InvocationKind.METHOD, range(2, 0, 2, 20), "port.handle()", "handle",
                 "port", "com.example.Port", "fast", Optional.empty(), new SyntaxPosition(2, 0), List.of());
         SyntaxInvocation second = new SyntaxInvocation(
-                SyntaxInvocation.InvocationKind.METHOD, range(2, 0, 2, 15), "port.handle()",
+                SyntaxInvocation.InvocationKind.METHOD, range(2, 0, 2, 15), "port.handle()", "handle",
                 "port", "com.example.Port", "fast", Optional.empty(), new SyntaxPosition(2, 0), List.of());
         FakeSemanticService semantic = new FakeSemanticService()
                 .outgoing(caller, call)
@@ -386,7 +389,7 @@ class DirectCallRelationshipResolverTest {
     void should_not_guess_a_nearby_or_same_name_invocation_when_exact_call_site_is_missing() {
         MethodTarget callerTarget = target("Root", "run");
         SemanticMethod caller = outgoingMethod(callerTarget, 0);
-        SyntaxInvocation nearby = invocation("worker.work()", 2, 1);
+        SyntaxInvocation nearby = invocation("worker.work()", "work", 2, 1);
         FakeSemanticService semantic = new FakeSemanticService();
 
         DirectCallRelationship relationship = resolver(semantic).resolveAt(
@@ -410,7 +413,7 @@ class DirectCallRelationshipResolverTest {
         SemanticMethod alpha = outgoingMethod(alphaTarget, 10);
         SemanticMethod beta = outgoingMethod(betaTarget, 20);
         SemanticMethod unmapped = outgoingMethod(unmappedTarget, 30);
-        SyntaxInvocation invocation = invocation("worker.handle()", 2, 3);
+        SyntaxInvocation invocation = invocation("worker.handle()", "handle", 2, 3);
         FakeSemanticService semantic = new FakeSemanticService().resolution(
                 caller, SemanticCallResolution.ambiguous(List.of(alpha, beta, unmapped)));
 
@@ -436,7 +439,7 @@ class DirectCallRelationshipResolverTest {
         SemanticMethod alpha = outgoingMethod(alphaTarget, 10);
         SemanticMethod unmappedBeta = outgoingMethod(unmappedBetaTarget, 20);
         SemanticMethod unmappedGamma = outgoingMethod(unmappedGammaTarget, 30);
-        SyntaxInvocation invocation = invocation("worker.handle()", 2, 3);
+        SyntaxInvocation invocation = invocation("worker.handle()", "handle", 2, 3);
         FakeSemanticService semantic = new FakeSemanticService().resolution(
                 caller, SemanticCallResolution.ambiguous(List.of(alpha, unmappedBeta, unmappedGamma)));
 
@@ -509,9 +512,9 @@ class DirectCallRelationshipResolverTest {
                 SemanticResolutionOrigin.CALL_HIERARCHY, SemanticCallStatus.IDENTITY_UNPROVEN);
     }
 
-    private static SyntaxInvocation invocation(String expression, int line, int anchorCharacter) {
+    private static SyntaxInvocation invocation(String expression, String writtenName, int line, int anchorCharacter) {
         SyntaxRange range = range(line, 0, line, 4);
-        return new SyntaxInvocation(SyntaxInvocation.InvocationKind.METHOD, range, expression,
+        return new SyntaxInvocation(SyntaxInvocation.InvocationKind.METHOD, range, expression, writtenName,
                 "worker", "", "", Optional.empty(), new SyntaxPosition(line, anchorCharacter), List.of());
     }
 

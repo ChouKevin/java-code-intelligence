@@ -44,16 +44,14 @@ public final class GeneratedMemberEvidence {
         Objects.requireNonNull(receiverType, "receiverType is required");
         Objects.requireNonNull(invocation, "invocation is required");
 
-        Optional<Integer> arity = arityOf(invocation.expression());
-        if (arity.isEmpty()) {
+        if (invocation.kind() != InvocationKind.METHOD && invocation.kind() != InvocationKind.CONSTRUCTOR) {
             return Optional.empty();
         }
-        String invokedName = invokedNameOf(invocation);
-        if (!StringUtils.hasText(invokedName) || hasSourceDeclaration(receiverType, invokedName, arity.orElseThrow())) {
+        String invokedName = invocation.writtenName();
+        int argumentCount = invocation.arguments().size();
+        if (!StringUtils.hasText(invokedName) || hasSourceDeclaration(receiverType, invokedName, argumentCount)) {
             return Optional.empty();
         }
-
-        int argumentCount = arity.orElseThrow();
         return matchGetter(receiverType, invocation, invokedName, argumentCount)
                 .or(() -> matchSetter(receiverType, invocation, invokedName, argumentCount))
                 .or(() -> matchObjectMethod(receiverType, invocation, invokedName, argumentCount))
@@ -224,90 +222,6 @@ public final class GeneratedMemberEvidence {
                 generatedEvidence);
     }
 
-    /**
-     * 取得呼叫語法「自身」的成員名稱；receiver chain（如
-     * {@code service.findOrder(id).getTotal()}）必須取尾端呼叫的名稱，而非第一個括號前的名稱
-     */
-    private static String invokedNameOf(SyntaxInvocation invocation) {
-        String expression = invocation.expression().trim();
-        if (invocation.kind() == InvocationKind.CONSTRUCTOR) {
-            expression = stripPrefix(expression, "new ");
-        }
-        if (!expression.endsWith(")")) {
-            return "";
-        }
-        int openIndex = matchingOpenParenIndex(expression);
-        if (openIndex < 0) {
-            return "";
-        }
-        String beforeParen = expression.substring(0, openIndex);
-        int lastDot = beforeParen.lastIndexOf('.');
-        return (lastDot >= 0 ? beforeParen.substring(lastDot + 1) : beforeParen).trim();
-    }
-
-    private static String stripPrefix(String value, String prefix) {
-        return value.startsWith(prefix) ? value.substring(prefix.length()) : value;
-    }
-
-    /**
-     * 計算呼叫語法「自身」尾端引數列表的引數個數；語法無法解析時回傳空值（fail-closed）
-     * <p>
-     * JDT 呼叫語法的 expression 保留完整 receiver chain（如
-     * {@code service.findOrder(id).getTotal()}），因此必須從字串結尾往回找到與最後一個
-     * {@code )} 配對的開括號，而非直接取第一個 {@code (}，否則會誤讀 chain 中前段呼叫的引數列表
-     * <p>
-     * 僅計算該引數列表最外層深度的逗號，巢狀括號（如 {@code set(a, f(b, c))}）內的逗號不計入
-     */
-    private static Optional<Integer> arityOf(String expression) {
-        String trimmedExpression = expression.trim();
-        if (!trimmedExpression.endsWith(")")) {
-            return Optional.empty();
-        }
-        int openIndex = matchingOpenParenIndex(trimmedExpression);
-        if (openIndex < 0) {
-            return Optional.empty();
-        }
-        String innerArguments = trimmedExpression.substring(openIndex + 1, trimmedExpression.length() - 1).trim();
-        if (innerArguments.isEmpty()) {
-            return Optional.of(0);
-        }
-        return Optional.of(topLevelCommaCount(innerArguments) + 1);
-    }
-
-    private static int matchingOpenParenIndex(String trimmedExpression) {
-        int depth = 0;
-        for (int index = trimmedExpression.length() - 1; index >= 0; index--) {
-            char character = trimmedExpression.charAt(index);
-            if (character == ')') {
-                depth++;
-            } else if (character == '(') {
-                depth--;
-                if (depth == 0) {
-                    return index;
-                }
-                if (depth < 0) {
-                    return -1;
-                }
-            }
-        }
-        return -1;
-    }
-
-    private static int topLevelCommaCount(String innerArguments) {
-        int depth = 0;
-        int commaCount = 0;
-        for (int index = 0; index < innerArguments.length(); index++) {
-            char character = innerArguments.charAt(index);
-            if (character == '(') {
-                depth++;
-            } else if (character == ')') {
-                depth--;
-            } else if (character == ',' && depth == 0) {
-                commaCount++;
-            }
-        }
-        return commaCount;
-    }
 
     private static String decapitalize(String value) {
         if (value.isEmpty()) {

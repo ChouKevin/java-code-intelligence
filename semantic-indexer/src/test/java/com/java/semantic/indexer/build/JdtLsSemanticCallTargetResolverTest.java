@@ -46,6 +46,7 @@ class JdtLsSemanticCallTargetResolverTest {
                 SyntaxInvocation.InvocationKind.METHOD,
                 new SyntaxRange(position, position),
                 "call()",
+                "call",
                 "",
                 "",
                 "",

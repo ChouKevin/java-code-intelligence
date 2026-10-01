@@ -61,7 +61,8 @@ class SemanticReviewJourneyIT {
     private static final int MONGO_CONTAINER_PORT = 27017;
     private static final Duration STARTUP_TIMEOUT = Duration.ofSeconds(45);
     private static final Duration JOB_TIMEOUT = Duration.ofMinutes(3);
-    private static final HttpClient HTTP = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
+
+    private HttpClient http;
 
     @TempDir
     Path temporaryDirectory;
@@ -81,10 +82,12 @@ class SemanticReviewJourneyIT {
         String baselineGeneration;
         String indexerLogs;
 
-        try (Network network = Network.newNetwork();
+        try (HttpClient journeyHttp = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
+             Network network = Network.newNetwork();
              MongoDBContainer mongo = authenticatedMongo(network);
              Git remote = Git.init().setBare(true).setDirectory(remotePath.toFile()).call();
              Git seed = Git.init().setInitialBranch("main").setDirectory(seedPath.toFile()).call()) {
+            http = journeyHttp;
             mongo.start();
             String maintenanceUri = mongoUri(mongo, "root", "root-password", DATABASE, "admin");
             bootstrapSchema(indexerJar, maintenanceUri);
@@ -120,8 +123,7 @@ class SemanticReviewJourneyIT {
                             assertThat(item.get("configured")).isEqualTo(true);
                             assertThat(item.containsKey("publishedRevision")).isFalse();
                         });
-                        String requestId = UUID.randomUUID().toString();
-                        Files.writeString(temporaryDirectory.resolve("build-request-id"), requestId);
+                        String requestId = savedRequestId("build");
                         // Deliberately retain no accepted job identity: recover solely with the saved requestId.
                         mcpBody(preparation, "prepare_codebase", Map.of("repositoryId", REPOSITORY_ID, "requestId", requestId), mapper);
                         Map<?, ?> recovered = mcpBody(preparation, "get_job",
@@ -147,11 +149,13 @@ class SemanticReviewJourneyIT {
                                 Map.of("repositoryId", REPOSITORY_ID,
                                         "selector", Map.of("kind", "COMMIT", "revision", revisionB)), mapper);
                         assertThat(text(notPrepared, "state")).isEqualTo("NOT_PREPARED");
+                    String unauthorizedRequestId = savedRequestId("unauthorized-review");
                     assertThat(post(indexerBase, "/index/repositories/" + REPOSITORY_ID + "/reviews", QUERY_TOKEN,
-                            Map.of("requestId", java.util.UUID.randomUUID().toString(), "selection", Map.of("kind", "COMMIT", "revision", revisionB))).statusCode()).isEqualTo(401);
+                            Map.of("requestId", unauthorizedRequestId, "selection", Map.of("kind", "COMMIT", "revision", revisionB))).statusCode()).isEqualTo(401);
+                    String reviewRequestId = savedRequestId("review");
                     Map<?, ?> acceptedReviewBody = acceptedReview(post(indexerBase,
                             "/index/repositories/" + REPOSITORY_ID + "/reviews", ADMIN_TOKEN,
-                            Map.of("requestId", java.util.UUID.randomUUID().toString(), "selection", Map.of("kind", "COMMIT", "revision", revisionB))), mapper);
+                            Map.of("requestId", reviewRequestId, "selection", Map.of("kind", "COMMIT", "revision", revisionB))), mapper);
                     String reviewJob = text(acceptedReviewBody, "jobId");
                     Map<?, ?> admittedReview = successful(get(indexerBase,
                             "/index/repositories/" + REPOSITORY_ID + "/jobs?jobId=" + reviewJob, ADMIN_TOKEN), mapper);
@@ -173,9 +177,10 @@ class SemanticReviewJourneyIT {
 
                     assertThat(indexer.execInContainer("sh", "-c",
                             "printf 'changed installation\\n' > /opt/jdtls/reuse-fingerprint-marker").getExitCode()).isZero();
+                    String changedInstallationRequestId = savedRequestId("changed-installation-review");
                     Map<?, ?> changedInstallationAdmission = acceptedReview(post(indexerBase,
                             "/index/repositories/" + REPOSITORY_ID + "/reviews", ADMIN_TOKEN,
-                            Map.of("requestId", java.util.UUID.randomUUID().toString(), "selection", Map.of("kind", "COMMIT", "revision", revisionB))), mapper);
+                            Map.of("requestId", changedInstallationRequestId, "selection", Map.of("kind", "COMMIT", "revision", revisionB))), mapper);
                     Map<?, ?> changedInstallationComplete = completed(indexerBase,
                             text(changedInstallationAdmission, "jobId"), mapper, indexer);
                     changedInstallationReviewId = text(map(changedInstallationComplete, "review"), "reviewId");
@@ -217,19 +222,31 @@ class SemanticReviewJourneyIT {
                     assertThat(original).isEqualTo(mapper.readValue(Files.readString(temporaryDirectory.resolve("baseline-result")), Map.class));
                     String guideText = validGuide(revisionB);
                     String revisionC = commitGuide(seed, seedPath, guideText, "valid guide");
-                    Map<?, ?> admitted = mcpBody(preparation, "prepare_codebase",
-                            Map.of("repositoryId", REPOSITORY_ID, "requestId", UUID.randomUUID().toString()), mapper);
-                    // Capture actual active BUILD state, not a timing-only sleep or a production test gate.
-                    Map<?, ?> during = successful(post(liveBase, "/api/v1/context", QUERY_TOKEN, currentDiscovery()), mapper);
-                    assertThat(text(during, "revision")).isEqualTo(revisionA);
-                    assertThat(text(map(during, "activeJob"), "operation")).isEqualTo("BUILD");
-                    Map<?, ?> oldSource = successful(post(liveBase, "/api/v1/source", QUERY_TOKEN,
-                            Map.of("context", currentContext(revisionA), "target",
-                                    Map.of("kind", "FILE", "path", "src/main/java/example/LegacyGateway.java"))), mapper);
-                    assertThat(text(oldSource, "content")).contains("class LegacyGateway");
-                    assertThat(map(oldSource, "context")).isEqualTo(currentContext(revisionA));
-                    assertSemanticMatrix(liveBase, reader, context(reviewId, "BEFORE", revisionA), "LegacyGateway", mapper);
-                    assertSemanticMatrix(liveBase, reader, context(reviewId, "AFTER", revisionB), "ModernGateway", mapper);
+                    String validGuideRequestId = savedRequestId("valid-guide-build");
+                    Map<?, ?> admitted;
+                    try {
+                        Map<?, ?> armed = successful(post(base, "/index/uat/publication/arm", ADMIN_TOKEN, Map.of()), mapper);
+                        admitted = mcpBody(preparation, "prepare_codebase",
+                                Map.of("repositoryId", REPOSITORY_ID, "requestId", validGuideRequestId), mapper);
+                        Map<?, ?> reached = successful(http.send(HttpRequest.newBuilder(
+                                URI.create(base + "/index/uat/publication/await")).timeout(JOB_TIMEOUT.plusSeconds(10))
+                                .header("X-Api-Token", ADMIN_TOKEN).GET().build(), HttpResponse.BodyHandlers.ofString()), mapper);
+                        assertThat(reached.get("cycleId")).isEqualTo(armed.get("cycleId"));
+                        // Publication is held while CURRENT A, its source and immutable READY review are read.
+                        Map<?, ?> during = successful(post(liveBase, "/api/v1/context", QUERY_TOKEN, currentDiscovery()), mapper);
+                        assertThat(text(during, "revision")).isEqualTo(revisionA);
+                        assertThat(text(map(during, "activeJob"), "operation")).isEqualTo("BUILD");
+                        Map<?, ?> oldSource = successful(post(liveBase, "/api/v1/source", QUERY_TOKEN,
+                                Map.of("context", currentContext(revisionA), "target",
+                                        Map.of("kind", "FILE", "path", "src/main/java/example/LegacyGateway.java"))), mapper);
+                        assertThat(text(oldSource, "content")).contains("class LegacyGateway");
+                        assertThat(map(oldSource, "context")).isEqualTo(currentContext(revisionA));
+                        assertSemanticMatrix(liveBase, reader, context(reviewId, "BEFORE", revisionA), "LegacyGateway", mapper);
+                        assertSemanticMatrix(liveBase, reader, context(reviewId, "AFTER", revisionB), "ModernGateway", mapper);
+                    } finally {
+                        HttpResponse<String> released = post(base, "/index/uat/publication/release", ADMIN_TOKEN, Map.of());
+                        assertThat(released.statusCode()).as(released.body()).isEqualTo(200);
+                    }
                     completed(base, text(admitted, "jobId"), mapper, restarted);
                     assertSemanticMatrix(liveBase, reader, context(reviewId, "BEFORE", revisionA), "LegacyGateway", mapper);
                     assertSemanticMatrix(liveBase, reader, context(reviewId, "AFTER", revisionB), "ModernGateway", mapper);
@@ -244,8 +261,9 @@ class SemanticReviewJourneyIT {
                             Map.of("context", currentContext(revisionA), "query", "LegacyGateway"),
                             409, "REVISION_OUTDATED", QUERY_TOKEN, mapper);
                     String revisionD = commitGuide(seed, seedPath, "# Invalid guide\nGuideOnlySentinel\n", "invalid guide");
+                    String invalidGuideRequestId = savedRequestId("invalid-guide-build");
                     Map<?, ?> invalidAdmission = mcpBody(preparation, "prepare_codebase",
-                            Map.of("repositoryId", REPOSITORY_ID, "requestId", UUID.randomUUID().toString()), mapper);
+                            Map.of("repositoryId", REPOSITORY_ID, "requestId", invalidGuideRequestId), mapper);
                     completed(base, text(invalidAdmission, "jobId"), mapper, restarted);
                     Map<?, ?> invalid = parity(liveBase, reader, "get_context", "/api/v1/context", currentDiscovery(), mapper);
                     assertThat(text(invalid, "revision")).isEqualTo(revisionD);
@@ -343,6 +361,12 @@ class SemanticReviewJourneyIT {
                 throw withIndexerLogs(failure, indexerLogs);
             }
         }
+    }
+
+    private String savedRequestId(String label) throws IOException {
+        String requestId = UUID.randomUUID().toString();
+        Files.writeString(temporaryDirectory.resolve(label + "-request-id"), requestId);
+        return requestId;
     }
 
     private static MongoDBContainer authenticatedMongo(Network network) {
@@ -460,7 +484,12 @@ class SemanticReviewJourneyIT {
                 "--semantic.repositories." + REPOSITORY_ID + ".url=file://" + REMOTE_CONTAINER_PATH,
                 "--semantic.repositories." + REPOSITORY_ID + ".default-branch=main",
                 "--semantic.index-jobs.poll-delay=20ms", "--spring.main.banner-mode=off"));
-        if (guide) arguments.add("--semantic.repositories." + REPOSITORY_ID + ".project-guide-path=PROJECT_GUIDE.md");
+        if (guide) {
+            arguments.add("--semantic.repositories." + REPOSITORY_ID + ".project-guide-path=PROJECT_GUIDE.md");
+            // Only this controlled opt-in container exposes the existing UAT publication barrier.
+            arguments.add("--spring.profiles.active=uat");
+            arguments.add("--semantic.uat.publication-timeout=" + JOB_TIMEOUT.toSeconds() + "s");
+        }
         return arguments.toArray(String[]::new);
     }
 
@@ -821,21 +850,21 @@ class SemanticReviewJourneyIT {
                 + "Journey assertion: " + failure.getMessage(), failure);
     }
 
-    private static HttpResponse<String> post(String base, String path, String token, Map<String, Object> body) throws Exception {
+    private HttpResponse<String> post(String base, String path, String token, Map<String, Object> body) throws Exception {
         return postUri(base + path, token, JsonMapper.builder().build().writeValueAsString(body));
     }
 
-    private static HttpResponse<String> postUri(String uri, String token, String body) throws IOException, InterruptedException {
-        return HTTP.send(HttpRequest.newBuilder(URI.create(uri)).timeout(Duration.ofSeconds(30)).header("X-Api-Token", token)
+    private HttpResponse<String> postUri(String uri, String token, String body) throws IOException, InterruptedException {
+        return http.send(HttpRequest.newBuilder(URI.create(uri)).timeout(Duration.ofSeconds(30)).header("X-Api-Token", token)
                 .header("Content-Type", "application/json").POST(HttpRequest.BodyPublishers.ofString(body)).build(), HttpResponse.BodyHandlers.ofString());
     }
 
-    private static HttpResponse<String> get(String base, String path, String token) throws IOException, InterruptedException {
+    private HttpResponse<String> get(String base, String path, String token) throws IOException, InterruptedException {
         return getUri(base + path, token);
     }
 
-    private static HttpResponse<String> getUri(String uri, String token) throws IOException, InterruptedException {
-        return HTTP.send(HttpRequest.newBuilder(URI.create(uri)).timeout(Duration.ofSeconds(30)).header("X-Api-Token", token).GET().build(),
+    private HttpResponse<String> getUri(String uri, String token) throws IOException, InterruptedException {
+        return http.send(HttpRequest.newBuilder(URI.create(uri)).timeout(Duration.ofSeconds(30)).header("X-Api-Token", token).GET().build(),
                 HttpResponse.BodyHandlers.ofString());
     }
 

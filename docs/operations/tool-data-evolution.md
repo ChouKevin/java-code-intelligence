@@ -254,16 +254,25 @@ separately designed storage contract changes it.
 
 ## Analyzer policy changes within schema 4
 
-The Indexer hashes the explicit analyzer policy `semantic-indexer-analysis:1`
+The Indexer hashes the explicit analyzer policy `semantic-indexer-analysis:2`
 into `analyzerDigest`. Advance this policy version when source planning,
 extraction, or semantic interpretation changes, even if persisted document
 shapes do not. A Java implementation class name is not an analyzer version.
 
+Policy 2 derives invocation names and argument counts from the AST, rather than
+parsing expression text. This corrects chained receiver calls and comma-bearing
+literal arguments, including generated-member evidence. Constructor labels use
+the written type. Corrected external target metadata can change affected
+relation identities; a written identifier does not turn unresolved evidence into
+a resolved target.
+
 Generation reuse and incremental-parent selection require the resulting exact
-analysis fingerprint. Generations produced with the earlier unversioned
-class-name identity are therefore not reused by the corrected analyzer.
+analysis fingerprint. Generations produced with the earlier class-name identity
+or policy 1 are not reused by policy 2. Schema/projection/analysis-evidence
+versions remain 4/4/1.
 Rebuild affected current generations through ordinary indexing and prepare new
-reviews; never rewrite the fingerprints or payloads of immutable old reviews.
+reviews. Immutable older reviews retain their original metadata; never rewrite
+their fingerprints or payloads to make them appear corrected.
 An analyzer-policy change alone does not require schema bootstrap or a volume
 reset. Persisted shape changes still follow the coordinated cutover above.
 

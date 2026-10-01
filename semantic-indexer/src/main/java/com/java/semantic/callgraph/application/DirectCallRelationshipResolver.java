@@ -343,6 +343,7 @@ public final class DirectCallRelationshipResolver {
                         "",
                         "",
                         "",
+                        "",
                         Optional.empty(),
                         syntaxRange(callSite).start(),
                         List.of()));
