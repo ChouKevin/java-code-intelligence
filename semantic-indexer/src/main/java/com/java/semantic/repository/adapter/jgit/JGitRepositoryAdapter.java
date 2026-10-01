@@ -12,6 +12,7 @@ import com.java.semantic.model.git.GitComparisonChange;
 import com.java.semantic.model.git.GitChangeKind;
 import com.java.semantic.model.git.GitFileContentStatus;
 import com.java.semantic.model.git.GitPreparedComparison;
+import com.java.semantic.model.git.GitComparisonPolicyCoverage;
 import com.java.semantic.model.git.GitSnapshotEntry;
 import com.java.semantic.repository.port.GitRepositoryPort;
 import com.java.semantic.model.review.ReviewBaselineRule;
@@ -62,6 +63,7 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.util.Comparator;
+import java.util.EnumMap;
 
 import java.util.Collection;
 import java.util.Objects;
@@ -341,11 +343,11 @@ public class JGitRepositoryAdapter implements GitRepositoryPort {
                             .filter(entry -> previousPolicy.allowsCode(entry.path()) || availableGuidesBefore.contains(entry.path())).toList();
             List<GitSnapshotEntry> currentEntries = snapshot(git.getRepository(), currentCommit, currentPolicy).candidates().stream()
                     .filter(entry -> currentPolicy.allowsCode(entry.path()) || availableGuidesAfter.contains(entry.path())).toList();
-            List<GitComparisonChange> changes = changes(git.getRepository(), previousCommit, currentCommit,
+            PreparedChanges changes = changes(git.getRepository(), previousCommit, currentCommit,
                     previousPolicy, currentPolicy, availableGuidesBefore, availableGuidesAfter);
             GitComparisonAncestry relationship = Objects.isNull(previousCommit) ? GitComparisonAncestry.EMPTY_TREE
                     : ancestry(walk, previousCommit, currentCommit);
-            return new GitPreparedComparison(previous, current, relationship, previousEntries, currentEntries, changes);
+            return new GitPreparedComparison(previous, current, relationship, previousEntries, currentEntries, changes.items(), changes.coverage());
         } catch (IOException | RuntimeException exception) {
             throw new RepositoryMutationException("cannot prepare exact Git comparison", exception);
         }
@@ -419,10 +421,13 @@ public class JGitRepositoryAdapter implements GitRepositoryPort {
         return new TrackedSourceInventory(entries, excluded);
     }
 
-    private List<GitComparisonChange> changes(org.eclipse.jgit.lib.Repository repository, RevCommit previous, RevCommit current,
+    private record PreparedChanges(List<GitComparisonChange> items, GitComparisonPolicyCoverage coverage) { }
+
+    private PreparedChanges changes(org.eclipse.jgit.lib.Repository repository, RevCommit previous, RevCommit current,
             SourceEvidencePolicy previousPolicy, SourceEvidencePolicy currentPolicy,
             Set<String> availableGuidesBefore, Set<String> availableGuidesAfter) throws IOException {
         List<GitComparisonChange> changes = new java.util.ArrayList<>();
+        EnumMap<GitComparisonPolicyCoverage.Reason, Long> excluded = new EnumMap<>(GitComparisonPolicyCoverage.Reason.class);
         try (ChunkingOutputStream output = new ChunkingOutputStream(); DiffFormatter formatter = new DiffFormatter(output)) {
             formatter.setRepository(repository);
             long ordinal = 0L;
@@ -430,17 +435,20 @@ public class JGitRepositoryAdapter implements GitRepositoryPort {
                 output.reset();
                 SnapshotPath oldPath = comparisonPath(entry.getOldPath());
                 SnapshotPath newPath = comparisonPath(entry.getNewPath());
-                if (!oldPath.supported() || !newPath.supported()
-                        || entry.getOldMode().equals(FileMode.SYMLINK) || entry.getNewMode().equals(FileMode.SYMLINK)
-                        || entry.getOldMode().equals(FileMode.GITLINK) || entry.getNewMode().equals(FileMode.GITLINK)
-                        || !SourceEvidencePolicy.allowsChange(
-                                entry.getOldMode().equals(FileMode.MISSING) ? Optional.empty() : Optional.of(oldPath.value()),
-                                previousPolicy, availableGuidesBefore,
-                                entry.getNewMode().equals(FileMode.MISSING) ? Optional.empty() : Optional.of(newPath.value()),
-                                currentPolicy, availableGuidesAfter)) {
+                GitComparisonPolicyCoverage.Reason reason = null;
+                if (!oldPath.supported() || !newPath.supported()) reason = GitComparisonPolicyCoverage.Reason.UNSUPPORTED_PATH;
+                else if (entry.getOldMode().equals(FileMode.SYMLINK) || entry.getNewMode().equals(FileMode.SYMLINK)) reason = GitComparisonPolicyCoverage.Reason.SYMLINK;
+                else if (entry.getOldMode().equals(FileMode.GITLINK) || entry.getNewMode().equals(FileMode.GITLINK)) reason = GitComparisonPolicyCoverage.Reason.SUBMODULE;
+                else if (!SourceEvidencePolicy.allowsChange(
+                        entry.getOldMode().equals(FileMode.MISSING) ? Optional.empty() : Optional.of(oldPath.value()),
+                        previousPolicy, availableGuidesBefore,
+                        entry.getNewMode().equals(FileMode.MISSING) ? Optional.empty() : Optional.of(newPath.value()),
+                        currentPolicy, availableGuidesAfter)) reason = GitComparisonPolicyCoverage.Reason.OUTSIDE_SOURCE_POLICY;
+                if (Objects.nonNull(reason)) {
+                    excluded.merge(reason, 1L, Math::addExact);
                     continue;
                 }
-                String diffStatus = !oldPath.supported() || !newPath.supported() ? GitFileContentStatus.UNSUPPORTED_PATH.name() : diffStatus(repository, entry);
+                String diffStatus = diffStatus(repository, entry);
                 List<String> patchChunks = List.of();
                 if ("AVAILABLE".equals(diffStatus)) {
                     formatter.format(entry);
@@ -455,7 +463,11 @@ public class JGitRepositoryAdapter implements GitRepositoryPort {
                 ordinal++;
             }
         }
-        return List.copyOf(changes);
+        List<GitComparisonPolicyCoverage.Exclusion> reasons = excluded.entrySet().stream()
+                .map(entry -> new GitComparisonPolicyCoverage.Exclusion(entry.getKey(), entry.getValue())).toList();
+        long total = 0;
+        for (GitComparisonPolicyCoverage.Exclusion reason : reasons) total = Math.addExact(total, reason.count());
+        return new PreparedChanges(List.copyOf(changes), new GitComparisonPolicyCoverage(total, reasons));
     }
 
     /** Uses JGit's raw TreeWalk only to retain path identity before DiffEntry renders it. */

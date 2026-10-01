@@ -21,6 +21,7 @@ import com.java.semantic.query.application.ReadContextSelector.AdmittedContext;
 import com.java.semantic.query.application.SelectedGenerationGuard.SourceContext;
 import com.java.semantic.query.config.SearchAccessPlan;
 import com.mongodb.MongoException;
+import com.mongodb.client.FindIterable;
 import com.mongodb.client.model.Filters;
 import com.mongodb.client.model.Sorts;
 import org.bson.Document;
@@ -76,9 +77,13 @@ public final class SelectedSemanticQueryService {
         List<Bson> tokenFilters = tokens.stream().map(token -> Filters.regex("tokens", "^" + Pattern.quote(token))).toList();
         Bson token = tokenFilters.isEmpty() ? Filters.eq("factId", "") : Filters.and(tokenFilters);
         List<Phase> phases = new ArrayList<>();
-        for (Bson rank : List.of(exact, Filters.and(prefix, Filters.nor(exact)), Filters.and(token, Filters.nor(exact, prefix)))) {
+        // Keep name and signature in one rank; Mongo can merge their equality-index branches.
+        phases.add(new Phase(IndexCollections.SEARCH, access.authorized(Filters.and(Filters.and(common), exact)),
+                List.of("kind", "canonical", "factId"), false, Optional.empty()));
+        // Prefix/token ranges cannot supply the rank's kind/canonical/factId order directly.
+        for (Bson rank : List.of(Filters.and(prefix, Filters.nor(exact)), Filters.and(token, Filters.nor(exact, prefix)))) {
             phases.add(new Phase(IndexCollections.SEARCH, access.authorized(Filters.and(Filters.and(common), rank)),
-                    List.of("kind", "canonical", "factId"), false));
+                    List.of("kind", "canonical", "factId"), false, Optional.of("search_generation_order")));
         }
         String binding = QueryCursorCodec.binding("search_code", admitted, List.of(request.query(), String.join(",", names(request.kinds())),
                 request.packagePrefix().orElse(""), request.path().orElse(""), Integer.toString(request.page().limit())));
@@ -115,7 +120,7 @@ public final class SelectedSemanticQueryService {
                     Filters.and(Filters.eq("kind", "TYPE"), Filters.regex("owner", "^" + Pattern.quote(fqn) + "[.$][^.$]+$"))));
         });
         Phase phase = new Phase(IndexCollections.SYMBOLS, access(source).authorized(Filters.and(filters)),
-                List.of("range.range.start.line", "range.range.start.character", "symbolId"), true);
+                List.of("range.range.start.line", "range.range.start.character", "symbolId"), true, Optional.of("symbol_file_range_order"));
         String binding = QueryCursorCodec.binding("get_outline", admitted, List.of(request.target().kind().name(),
                 request.target().factId().orElse(""), path, String.join(",", names(kinds)), Integer.toString(request.page().limit())));
         Scanned<CompactFact> result = scan(List.of(phase), request.page(), binding, rows -> {
@@ -147,7 +152,7 @@ public final class SelectedSemanticQueryService {
                 request.eventType().ifPresent(value -> predicates.add(Filters.eq("fact.identity.canonicalIdentity.parameterTypes", value)));
                 request.handlerName().ifPresent(value -> predicates.add(Filters.regex("name", "^" + Pattern.quote(value))));
                 phases.add(new Phase(IndexCollections.SYMBOLS, access(source).authorizedMethod(Filters.and(predicates)),
-                        List.of("canonical", "symbolId"), false));
+                        List.of("canonical", "symbolId"), false, Optional.of("symbol_kind_canonical_order")));
             } else {
                 predicates.add(Filters.eq("entryPoint.kind", kind.name()));
                 request.handlerName().ifPresent(value -> predicates.add(Filters.regex("scopeMethod", "^" + Pattern.quote(value))));
@@ -160,7 +165,7 @@ public final class SelectedSemanticQueryService {
                 });
                 request.trigger().ifPresent(value -> predicates.add(Filters.eq("entryPoint.trigger.schedule", value)));
                 phases.add(new Phase(IndexCollections.ENTRY_POINTS, access(source).authorizedEntryPoint(access(source).authorized(Filters.and(predicates))),
-                        List.of("method", "entryPointId"), false));
+                        List.of("method", "entryPointId"), false, Optional.of("entry_point_kind_order")));
             }
         }
         String binding = QueryCursorCodec.binding("list_entry_points", admitted, List.of(request.kind().map(Enum::name).orElse(""),
@@ -243,7 +248,8 @@ public final class SelectedSemanticQueryService {
         String endpoint = outbound ? target.fact().identity().canonicalForm() : new RelationTarget.Internal(target.fact().identity()).canonicalForm();
         List<Phase> phases = kinds.stream().map(kind -> new Phase(IndexCollections.RELATIONS,
                 Filters.and(base(source), Filters.eq(outbound ? "from" : "target", endpoint), Filters.eq("kind", kind.name())),
-                outbound ? List.of("sourcePath", "relationId") : List.of("from", "sourcePath", "relationId"), false)).toList();
+                outbound ? List.of("sourcePath", "relationId") : List.of("from", "sourcePath", "relationId"), false,
+                Optional.of(outbound ? "relation_from_kind_source" : "relation_target_kind_source"))).toList();
         String binding = QueryCursorCodec.binding("find_relations", admitted, List.of(request.relation().name(), request.factId(), Integer.toString(request.page().limit())));
         Scanned<RelationItem> result = scan(phases, request.page(), binding, rows -> relationBatch(source, rows));
         RelationEvidenceScope scope = switch (request.relation()) {
@@ -324,8 +330,10 @@ public final class SelectedSemanticQueryService {
             while (phaseIndex < phases.size()) {
                 Phase phase = phases.get(phaseIndex);
                 Bson filter = position.isEmpty() ? phase.filter() : Filters.and(phase.filter(), after(phase, position));
-                List<Document> rows = template.getCollection(phase.collection()).find(filter).sort(Sorts.ascending(phase.keys()))
-                        .hintString(orderedIndex(phase)).limit(BATCH).batchSize(BATCH).maxTime(timeout.toMillis(), TimeUnit.MILLISECONDS).into(new ArrayList<>());
+                FindIterable<Document> find = template.getCollection(phase.collection()).find(filter).sort(Sorts.ascending(phase.keys()));
+                phase.indexHint().ifPresent(find::hintString);
+                List<Document> rows = find.limit(BATCH).batchSize(BATCH)
+                        .maxTime(timeout.toMillis(), TimeUnit.MILLISECONDS).into(new ArrayList<>());
                 if (rows.isEmpty()) { phaseIndex++; position = List.of(); continue; }
                 List<Optional<T>> candidates = materialize.apply(rows);
                 for (int index = 0; index < rows.size(); index++) {
@@ -410,12 +418,6 @@ public final class SelectedSemanticQueryService {
         }
         return Integer.compare(left.length() - leftIndex, right.length() - rightIndex);
     }
-    private static String orderedIndex(Phase phase) {
-        if (phase.collection().equals(IndexCollections.SEARCH)) return "search_generation_order";
-        if (phase.collection().equals(IndexCollections.ENTRY_POINTS)) return "entry_point_kind_order";
-        if (phase.collection().equals(IndexCollections.SYMBOLS)) return phase.numericRange() ? "symbol_file_range_order" : "symbol_kind_canonical_order";
-        return phase.keys().getFirst().equals("from") ? "relation_target_kind_source" : "relation_from_kind_source";
-    }
-    private record Phase(String collection, Bson filter, List<String> keys, boolean numericRange) { }
+    private record Phase(String collection, Bson filter, List<String> keys, boolean numericRange, Optional<String> indexHint) { }
     private record Scanned<T>(List<T> items, Page page) { }
 }

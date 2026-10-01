@@ -12,6 +12,7 @@ import com.java.semantic.model.git.GitPublicationScope;
 import com.java.semantic.model.git.GitEvidenceState;
 import com.java.semantic.model.git.GitHistoryManifest;
 import com.java.semantic.model.git.GitPreparedComparison;
+import com.java.semantic.model.git.GitComparisonPolicyCoverage;
 import com.java.semantic.model.git.GitSnapshotEntry;
 import com.java.semantic.model.git.GitSnapshotId;
 import com.java.semantic.model.git.GitComparisonId;
@@ -329,7 +330,7 @@ public final class GitEvidencePublicationStore {
         GitSnapshotId previousSnapshot = GitSnapshotId.create();
         GitSnapshotId currentSnapshot = GitSnapshotId.create();
         bindComparison(requiredJob, comparisonId, previousSnapshot, currentSnapshot, requiredOwnership);
-        String comparisonDigest = emptyDigest();
+        String comparisonDigest = digest(emptyDigest(), comparison.policyCoverage().toString());
         for (int ordinal = 0; ordinal < comparison.changes().size(); ordinal++) {
             comparisonDigest = digest(comparisonDigest, comparisonRow(ordinal, comparison.changes().get(ordinal)));
         }
@@ -341,7 +342,7 @@ public final class GitEvidencePublicationStore {
                 .append("previousSnapshotId", previousSnapshot.value()).append("currentSnapshotId", currentSnapshot.value())
                 .append("ancestry", comparison.ancestry().name()).append("preparedAt", Date.from(preparedAt))
                 .append("ownerJobId", requiredJob.id().value()).append("total", (long) comparison.changes().size())
-                .append("contentDigest", comparisonDigest), requiredOwnership);
+                .append("contentDigest", comparisonDigest).append("policyCoverage", new Document(comparison.policyCoverage().toFields())), requiredOwnership);
         comparison.previous().ifPresent(revision -> comparisonManifest.append("previous", revision.value()));
         template.getCollection(IndexCollections.GIT_EVIDENCE_MANIFESTS).insertOne(comparisonManifest);
         publishSnapshot(requiredJob, previousSnapshot, comparison.previous().map(RepositoryRevision::value),
@@ -481,6 +482,14 @@ public final class GitEvidencePublicationStore {
                 || !currentSnapshot.value().equals(manifest.getString("currentSnapshotId")) || !expected.ancestry().name().equals(manifest.getString("ancestry"))) {
             throw new PublicationConflictException();
         }
+        if (!expected.policyCoverage().equals(comparisonCoverage(manifest))) throw new PublicationConflictException();
+        String expectedDigest = digest(emptyDigest(), expected.policyCoverage().toString());
+        for (int ordinal = 0; ordinal < expected.changes().size(); ordinal++) {
+            expectedDigest = digest(expectedDigest, comparisonRow(ordinal, expected.changes().get(ordinal)));
+        }
+        if (!numberEquals(manifest, "total", expected.changes().size()) || !expectedDigest.equals(manifest.getString("contentDigest"))) {
+            throw new PublicationConflictException();
+        }
         validateReadySnapshot(repositoryId, previousSnapshot, expected.previous().map(RepositoryRevision::value), expected.previousEntries());
         validateReadySnapshot(repositoryId, currentSnapshot, Optional.of(expected.current().value()), expected.currentEntries());
         validateChanges(repositoryId, comparisonId, expected.changes());
@@ -546,11 +555,19 @@ public final class GitEvidencePublicationStore {
         validateReadySnapshot(repositoryId, currentSnapshot, Optional.of(manifest.getString("current")), currentEntries);
         List<GitComparisonChange> changes = storedChanges(repositoryId, comparisonId);
         validateChanges(repositoryId, comparisonId, changes);
-        String digest = emptyDigest();
+        String digest = digest(emptyDigest(), comparisonCoverage(manifest).toString());
         for (int ordinal = 0; ordinal < changes.size(); ordinal++) {
             digest = digest(digest, comparisonRow(ordinal, changes.get(ordinal)));
         }
         if (!numberEquals(manifest, "total", changes.size()) || !digest.equals(manifest.getString("contentDigest"))) {
+            throw new PublicationConflictException();
+        }
+    }
+
+    private static GitComparisonPolicyCoverage comparisonCoverage(Document manifest) {
+        try {
+            return GitComparisonPolicyCoverage.fromFields(manifest.get("policyCoverage", Document.class));
+        } catch (IllegalArgumentException | ArithmeticException | ClassCastException exception) {
             throw new PublicationConflictException();
         }
     }

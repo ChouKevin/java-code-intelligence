@@ -18,8 +18,6 @@ import org.bson.Document;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.data.mongodb.core.MongoTemplate;
-import org.testcontainers.mongodb.MongoDBContainer;
-import org.testcontainers.utility.DockerImageName;
 import java.time.Duration;
 import java.util.List;
 import java.util.Optional;
@@ -32,9 +30,9 @@ class SourceSliceContractIT extends PublishedMongoITSupport {
 
     @Test
     void exact_relation_fence_and_neighboring_context_keep_original_utf16_range() {
-        try (MongoDBContainer container = container()) {
-            container.start();
-            MongoTemplate template = template(container, "source_exact_context");
+        try (PublishedMongoLifecycle lifecycle = PublishedMongoLifecycle.start();
+                PublishedMongoLifecycle.Invocation invocation = lifecycle.openInvocation()) {
+            MongoTemplate template = invocation.template();
             seedCurrent(template, "orders");
             seedSource(template, PATH, "before\r\n  😀charge(); tail\r\nafter\r\nlast\n");
             SyntaxRange range = new SyntaxRange(new SyntaxPosition(1, 2), new SyntaxPosition(1, 13));
@@ -58,9 +56,9 @@ class SourceSliceContractIT extends PublishedMongoITSupport {
 
     @Test
     void long_fact_pages_reconstruct_utf8_without_losing_exclusive_fence_or_partial_line_flags() {
-        try (MongoDBContainer container = container()) {
-            container.start();
-            MongoTemplate template = template(container, "source_long_fact");
+        try (PublishedMongoLifecycle lifecycle = PublishedMongoLifecycle.start();
+                PublishedMongoLifecycle.Invocation invocation = lifecycle.openInvocation()) {
+            MongoTemplate template = invocation.template();
             seedCurrent(template, "orders");
             String wanted = "😀".repeat(20_000);
             seedSource(template, PATH, "prefix" + wanted + "SECRET_AFTER_FENCE");
@@ -88,9 +86,9 @@ class SourceSliceContractIT extends PublishedMongoITSupport {
 
     @Test
     void line_limited_fact_pages_do_not_leak_following_source() {
-        try (MongoDBContainer container = container()) {
-            container.start();
-            MongoTemplate template = template(container, "source_line_fence");
+        try (PublishedMongoLifecycle lifecycle = PublishedMongoLifecycle.start();
+                PublishedMongoLifecycle.Invocation invocation = lifecycle.openInvocation()) {
+            MongoTemplate template = invocation.template();
             seedCurrent(template, "orders");
             String wanted = "line\r\n".repeat(600);
             seedSource(template, PATH, wanted + "outside\n");
@@ -109,9 +107,9 @@ class SourceSliceContractIT extends PublishedMongoITSupport {
 
     @Test
     void malformed_surrogate_and_crlf_coordinates_fail_instead_of_widening_source() {
-        try (MongoDBContainer container = container()) {
-            container.start();
-            MongoTemplate template = template(container, "source_invalid_fence");
+        try (PublishedMongoLifecycle lifecycle = PublishedMongoLifecycle.start();
+                PublishedMongoLifecycle.Invocation invocation = lifecycle.openInvocation()) {
+            MongoTemplate template = invocation.template();
             seedCurrent(template, "orders");
             seedSource(template, PATH, "😀a\r\nnext\n");
             CodeFactIdentity relation = relation(template, new SyntaxRange(new SyntaxPosition(0, 1), new SyntaxPosition(0, 3)));
@@ -127,9 +125,9 @@ class SourceSliceContractIT extends PublishedMongoITSupport {
 
     @Test
     void fact_read_does_not_require_git_allowlist_but_rejects_other_forbidden_symbols_in_file() {
-        try (MongoDBContainer container = container()) {
-            container.start();
-            MongoTemplate template = template(container, "source_symbol_gate");
+        try (PublishedMongoLifecycle lifecycle = PublishedMongoLifecycle.start();
+                PublishedMongoLifecycle.Invocation invocation = lifecycle.openInvocation()) {
+            MongoTemplate template = invocation.template();
             seedCurrent(template, "orders");
             seedSource(template, PATH, "visible();\nforbidden();\n");
             CodeFactIdentity visible = methodIdentity("example.payment", "PaymentClient", "visible", PATH);
@@ -149,9 +147,9 @@ class SourceSliceContractIT extends PublishedMongoITSupport {
 
     @Test
     void mapper_fact_reads_authoritative_range_and_sources_projection_is_required() {
-        try (MongoDBContainer container = container()) {
-            container.start();
-            MongoTemplate template = template(container, "source_mapper_projection");
+        try (PublishedMongoLifecycle lifecycle = PublishedMongoLifecycle.start();
+                PublishedMongoLifecycle.Invocation invocation = lifecycle.openInvocation()) {
+            MongoTemplate template = invocation.template();
             seedCurrent(template, "orders");
             String path = "src/main/resources/VideoMapper.xml";
             com.java.semantic.model.index.SourceArtifactDocument artifact = seedSource(template, path, "<mapper><select id=\"find\">SELECT 1</select></mapper>");
@@ -168,9 +166,9 @@ class SourceSliceContractIT extends PublishedMongoITSupport {
 
     @Test
     void zero_width_authoritative_fact_returns_an_empty_complete_range_without_widening() {
-        try (MongoDBContainer container = container()) {
-            container.start();
-            MongoTemplate template = template(container, "source_zero_width");
+        try (PublishedMongoLifecycle lifecycle = PublishedMongoLifecycle.start();
+                PublishedMongoLifecycle.Invocation invocation = lifecycle.openInvocation()) {
+            MongoTemplate template = invocation.template();
             seedCurrent(template, "orders");
             seedSource(template, PATH, "😀tail\n");
             SyntaxPosition point = new SyntaxPosition(0, 2);
@@ -186,10 +184,32 @@ class SourceSliceContractIT extends PublishedMongoITSupport {
     }
 
     @Test
+    void zero_width_fact_at_eof_preserves_exact_range_with_and_without_terminal_newline() {
+        try (PublishedMongoLifecycle lifecycle = PublishedMongoLifecycle.start()) {
+            for (String content : List.of("class C {}\n", "class C {}")) {
+                try (PublishedMongoLifecycle.Invocation invocation = lifecycle.openInvocation()) {
+                    MongoTemplate template = invocation.template();
+                    seedCurrent(template, "orders");
+                    seedSource(template, PATH, content);
+                    SyntaxPosition point = content.endsWith("\n") ? new SyntaxPosition(1, 0) : new SyntaxPosition(0, content.length());
+                    SyntaxRange range = new SyntaxRange(point, point);
+                    CodeFactIdentity identity = relation(template, range);
+                    SourceResult result = reader(template, policy()).readSource(admitted(template, policy()), request(identity, 0, 200, Optional.empty()));
+                    assertThat(result.content()).contains("");
+                    assertThat(result.factRange()).contains(range);
+                    assertThat(result.pageRange()).contains(range);
+                    assertThat(result.rangeComplete()).isTrue();
+                    assertThat(result.nextCursor()).isEmpty();
+                }
+            }
+        }
+    }
+
+    @Test
     void shared_artifact_body_does_not_authorize_rebound_snapshot_membership() {
-        try (MongoDBContainer container = container()) {
-            container.start();
-            MongoTemplate template = template(container, "source_shared_artifact_membership");
+        try (PublishedMongoLifecycle lifecycle = PublishedMongoLifecycle.start();
+                PublishedMongoLifecycle.Invocation invocation = lifecycle.openInvocation()) {
+            MongoTemplate template = invocation.template();
             seedCurrent(template, "orders");
             seedSource(template, PATH, "visible();\n");
             CodeFactIdentity relation = relation(template, new SyntaxRange(new SyntaxPosition(0, 0), new SyntaxPosition(0, 10)));
@@ -208,9 +228,9 @@ class SourceSliceContractIT extends PublishedMongoITSupport {
 
     @Test
     void whole_file_admission_rejects_forbidden_type_and_nonmapper_mapper_payload() {
-        try (MongoDBContainer container = container()) {
-            container.start();
-            MongoTemplate template = template(container, "source_type_payload_gate");
+        try (PublishedMongoLifecycle lifecycle = PublishedMongoLifecycle.start();
+                PublishedMongoLifecycle.Invocation invocation = lifecycle.openInvocation()) {
+            MongoTemplate template = invocation.template();
             seedCurrent(template, "orders");
             com.java.semantic.model.index.SourceArtifactDocument artifact = seedSource(template, PATH, "visible();\nmethod();\n");
             CodeFactIdentity relation = relation(template, new SyntaxRange(new SyntaxPosition(0, 0), new SyntaxPosition(0, 10)));
@@ -230,9 +250,9 @@ class SourceSliceContractIT extends PublishedMongoITSupport {
 
     @Test
     void hidden_missing_unpublished_and_stale_repositories_are_denied_before_storage_reads() {
-        try (MongoDBContainer container = container()) {
-            container.start();
-            MongoTemplate template = template(container, "source_repository_gate");
+        try (PublishedMongoLifecycle lifecycle = PublishedMongoLifecycle.start();
+                PublishedMongoLifecycle.Invocation invocation = lifecycle.openInvocation()) {
+            MongoTemplate template = invocation.template();
             seedCurrent(template, "orders");
             java.util.List<String> reads = new java.util.concurrent.CopyOnWriteArrayList<>();
             com.mongodb.event.CommandListener listener = new com.mongodb.event.CommandListener() {
@@ -241,9 +261,9 @@ class SourceSliceContractIT extends PublishedMongoITSupport {
                 }
             };
             com.mongodb.MongoClientSettings settings = com.mongodb.MongoClientSettings.builder()
-                    .applyConnectionString(new com.mongodb.ConnectionString(container.getConnectionString())).addCommandListener(listener).build();
+                    .applyConnectionString(new com.mongodb.ConnectionString(lifecycle.connectionString())).addCommandListener(listener).build();
             try (com.mongodb.client.MongoClient client = MongoClients.create(settings)) {
-                MongoTemplate observed = new MongoTemplate(client, "source_repository_gate");
+                MongoTemplate observed = new MongoTemplate(client, invocation.databaseName());
                 ConfiguredReadPolicy hidden = new ConfiguredReadPolicy(new ReadPolicyProperties(
                         List.of("orders", "missing"), List.of(), List.of(), List.of()));
                 ReadContextSelector selector = new ReadContextSelector(selector(observed, hidden),
@@ -280,9 +300,5 @@ class SourceSliceContractIT extends PublishedMongoITSupport {
     }
     private static GitEvidenceReadService reader(MongoTemplate template, ConfiguredReadPolicy policy) {
         return new GitEvidenceReadService(template, policy, Duration.ofSeconds(2), new CodeFactReadService(template, guard(template, policy), Duration.ofSeconds(2)));
-    }
-    private static MongoDBContainer container() { return new MongoDBContainer(DockerImageName.parse("mongo:8.0.4")); }
-    private static MongoTemplate template(MongoDBContainer container, String database) {
-        return new MongoTemplate(MongoClients.create(container.getConnectionString()), database);
     }
 }

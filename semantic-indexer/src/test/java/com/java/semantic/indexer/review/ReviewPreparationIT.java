@@ -18,6 +18,7 @@ import com.java.semantic.model.git.GitEvidenceOwnership;
 import com.java.semantic.model.git.GitPublicationScope;
 import com.java.semantic.model.git.GitFileContentStatus;
 import com.java.semantic.model.git.GitPreparedComparison;
+import com.java.semantic.model.git.GitComparisonPolicyCoverage;
 import com.java.semantic.model.git.GitSnapshotEntry;
 import com.java.semantic.model.index.GenerationFileDocument;
 import com.java.semantic.model.index.AnalysisFingerprint;
@@ -219,29 +220,21 @@ class ReviewPreparationIT {
                 try (McpSyncClient client = McpClient.sync(transport).requestTimeout(Duration.ofSeconds(30))
                         .initializationTimeout(Duration.ofSeconds(30)).build()) {
                     client.initialize();
-                    McpSchema.Tool comparisonTool = client.listTools().tools().stream()
-                            .filter(tool -> tool.name().equals("compare_revisions")).findFirst().orElseThrow();
-                    McpSchema.Tool diffTool = client.listTools().tools().stream()
-                            .filter(tool -> tool.name().equals("get_file_diff")).findFirst().orElseThrow();
-                    Map<String, Object> arguments = Map.of("repositoryId", fixture.repositoryId.value(),
-                            "comparisonId", prepared.comparisonId(), "current", fixture.requestedRevision.value());
-                    Map<?, ?> comparison = callMcp(client, mapper, "compare_revisions", arguments);
-                    assertThat(comparison.get("previous")).isNull();
+                    Map<String, Object> comparisonContext = Map.of("repositoryId", fixture.repositoryId.value(),
+                            "reviewId", prepared.reviewId().value(), "before", Map.of("kind", "EMPTY_TREE"),
+                            "after", Map.of("kind", "REVISION", "revision", fixture.requestedRevision.value()));
+                    Map<?, ?> comparison = callMcp(client, mapper, "compare_revisions",
+                            Map.of("comparisonContext", comparisonContext));
+                    assertThat(((Map<?, ?>) comparison.get("comparisonContext")).get("before"))
+                            .isEqualTo(Map.of("kind", "EMPTY_TREE"));
                     assertThat(comparison.get("ancestry")).isEqualTo("EMPTY_TREE");
-                    Map<?, ?> addition = ((List<Map<?, ?>>) comparison.get("items")).getFirst();
+                    Map<?, ?> addition = (Map<?, ?>) ((List<?>) comparison.get("items")).getFirst();
                     assertThat(addition.get("kind")).isEqualTo("ADD");
-                    Map<?, ?> patch = callMcp(client, mapper, "get_file_diff", Map.of("repositoryId", fixture.repositoryId.value(),
-                            "comparisonId", prepared.comparisonId(), "current", fixture.requestedRevision.value(),
-                            "changeId", addition.get("changeId")));
-                    assertThat(patch.get("previous")).isNull();
+                    Map<?, ?> patch = callMcp(client, mapper, "get_file_diff",
+                            Map.of("comparisonContext", comparisonContext, "changeId", addition.get("changeId")));
+                    assertThat(((Map<?, ?>) patch.get("comparisonContext")).get("before"))
+                            .isEqualTo(Map.of("kind", "EMPTY_TREE"));
                     assertThat(patch.get("patch")).asString().contains("+class ReviewSource");
-                    for (McpSchema.Tool tool : List.of(comparisonTool, diffTool)) {
-                        assertThat(((List<?>) tool.inputSchema().get("required")).contains("previous")).isFalse();
-                        Map<?, ?> properties = (Map<?, ?>) tool.outputSchema().get("properties");
-                        Map<?, ?> previous = (Map<?, ?>) properties.get("previous");
-                        assertThat((List<?>) previous.get("oneOf")).anySatisfy(option ->
-                                assertThat(((Map<?, ?>) option).get("type")).isEqualTo("null"));
-                    }
                 }
             }
         }
@@ -427,13 +420,13 @@ class ReviewPreparationIT {
                         "", REVIEW_SOURCE_PATH, "0", "100644", "0".repeat(40), "1".repeat(40),
                         "@@ -0,0 +1 @@\n+" + REVIEW_SOURCE, "AVAILABLE");
                 return new GitPreparedComparison(Optional.empty(), REQUESTED_REVISION, GitComparisonAncestry.EMPTY_TREE,
-                        List.of(), List.of(entry), List.of(addition));
+                        List.of(), List.of(entry), List.of(addition), new GitComparisonPolicyCoverage(0, List.of()));
             }
             GitComparisonChange change = new GitComparisonChange("change-0", GitChangeKind.MODIFY,
                     REVIEW_SOURCE_PATH, REVIEW_SOURCE_PATH, "100644", "100644", "1".repeat(40), "2".repeat(40),
                     "@@ -1 +1 @@\n-review source\n+review source\n", "AVAILABLE");
             return new GitPreparedComparison(Optional.of(CAPTURED_REVISION), REQUESTED_REVISION, GitComparisonAncestry.PREVIOUS_ANCESTOR,
-                    List.of(entry), List.of(entry), List.of(change));
+                    List.of(entry), List.of(entry), List.of(change), new GitComparisonPolicyCoverage(0, List.of()));
         }
 
         private SealedGeneration seedGeneration(RepositoryRevision revision, GenerationId generationId, ManifestDigest digest, String ownerJobId) {

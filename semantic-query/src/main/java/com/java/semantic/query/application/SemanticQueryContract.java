@@ -8,6 +8,7 @@ import com.java.semantic.model.codefact.MapperStatementKind;
 import com.java.semantic.model.codefact.RelationKind;
 import com.java.semantic.model.codefact.SyntaxPosition;
 import com.java.semantic.model.codefact.SyntaxRange;
+import com.java.semantic.model.git.GitComparisonPolicyCoverage;
 import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.model.repository.RepositoryRevision;
 import com.java.semantic.model.review.ReviewId;
@@ -400,8 +401,9 @@ public final class SemanticQueryContract {
     @JsonInclude(JsonInclude.Include.NON_ABSENT)
     public record GitChangeItem(String changeId, String kind, Optional<ChangeEndpoint> before, Optional<ChangeEndpoint> after,
             String diffStatus) { }
-    public record ComparisonResult(ComparisonContext comparisonContext, String ancestry, List<GitChangeItem> items, Page page) {
-        public ComparisonResult { items = List.copyOf(items); }
+    public record ComparisonResult(ComparisonContext comparisonContext, String ancestry, GitComparisonPolicyCoverage policyCoverage,
+            List<GitChangeItem> items, Page page) {
+        public ComparisonResult { policyCoverage = Objects.requireNonNull(policyCoverage); items = List.copyOf(items); }
     }
     @JsonInclude(JsonInclude.Include.NON_ABSENT)
     public record FileDiffResult(ComparisonContext comparisonContext, GitChangeItem change, Optional<String> patch,

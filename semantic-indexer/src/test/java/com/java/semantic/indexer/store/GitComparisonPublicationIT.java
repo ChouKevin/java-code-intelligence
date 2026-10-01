@@ -20,6 +20,9 @@ import com.java.semantic.indexer.build.SourceSnapshotPublication;
 import com.java.semantic.model.git.GitComparisonAncestry;
 import com.java.semantic.model.git.GitEvidenceOwnership;
 import com.java.semantic.model.git.GitPreparedComparison;
+import com.java.semantic.model.git.GitComparisonPolicyCoverage;
+import com.java.semantic.model.git.GitComparisonId;
+import com.java.semantic.model.git.GitSnapshotId;
 import com.java.semantic.model.git.GitSnapshotEntry;
 import com.java.semantic.model.index.GenerationId;
 import com.java.semantic.model.index.IndexCollections;
@@ -118,6 +121,13 @@ class GitComparisonPublicationIT {
             assertThat(patches).noneSatisfy(patch -> assertThat(patch).contains("SECRET_MARKER_A"));
             assertThat(patches).noneSatisfy(patch -> assertThat(patch).contains("SECRET_MARKER_B"));
             assertThat(template.getCollection(IndexCollections.GIT_COMPARISON_CHANGES).countDocuments()).isZero();
+            Document manifest = template.getCollection(IndexCollections.GIT_EVIDENCE_MANIFESTS)
+                    .find(new Document("kind", "COMPARISON").append("state", "READY")).first();
+            Document coverage = manifest.get("policyCoverage", Document.class);
+            assertThat(coverage).as("an entirely policy-excluded comparison must disclose its immutable exclusion coverage").isNotNull();
+            assertThat(coverage.getLong("excludedChanges")).isEqualTo(1L);
+            assertThat(coverage.getList("reasons", Document.class)).containsExactly(
+                    new Document("reason", "OUTSIDE_SOURCE_POLICY").append("count", 1L));
             assertThat(template.getCollection(IndexCollections.GIT_SNAPSHOT_FILES)
                     .countDocuments(new Document("path", "src/main/resources/application.properties"))).isZero();
             assertThat(template.getCollection(IndexCollections.GIT_SNAPSHOT_FILES)
@@ -135,6 +145,58 @@ class GitComparisonPublicationIT {
     }
 
     @Test
+    void mixed_comparison_publishes_policy_exclusion_coverage_without_excluded_paths() throws Exception {
+        JdtLsTestProperties.prepareSafeCheckoutRoot(repositoryDirectory);
+        try (MongoDBContainer container = MongoSchemaTestSupport.container();
+                Git git = Git.init().setDirectory(repositoryDirectory.toFile()).call()) {
+            MongoTemplate template = MongoSchemaTestSupport.template(container);
+            new IndexSchemaBootstrap(template).bootstrap();
+            Files.createDirectories(repositoryDirectory.resolve(JAVA).getParent());
+            Files.writeString(repositoryDirectory.resolve(JAVA), "class Order {}\n");
+            Files.writeString(repositoryDirectory.resolve("secret.properties"), "SECRET_BEFORE\n");
+            git.add().addFilepattern(".").call();
+            RepositoryRevision before = RepositoryRevision.ofSha(git.commit().setMessage("before")
+                    .setAuthor("tester", "tester@example.test").call().name());
+            Files.writeString(repositoryDirectory.resolve(JAVA), "class Order { int value; }\n");
+            Files.writeString(repositoryDirectory.resolve("secret.properties"), "SECRET_AFTER\n");
+            git.add().addFilepattern(".").call();
+            RepositoryRevision after = RepositoryRevision.ofSha(git.commit().setMessage("after")
+                    .setAuthor("tester", "tester@example.test").call().name());
+            SourceEvidencePolicy selected = policy(Set.of(JAVA));
+            ProjectGuideMembership disabled = ProjectGuideMembership.unavailable(ProjectGuideState.DISABLED);
+            GitPreparedComparison comparison = new JGitRepositoryAdapter(new RepositoryProperties(), JdtLsTestProperties.linuxUid())
+                    .prepareComparison(repositoryDirectory, Optional.of(before), after, selected, selected, Set.of(), Set.of());
+            GitEvidencePublicationStore store = new GitEvidencePublicationStore(template);
+            publishComparison(store, template, comparison,
+                    Optional.of(source(template, store, before, selected, disabled, comparison.previousEntries())),
+                    source(template, store, after, selected, disabled, comparison.currentEntries()));
+            Document manifest = template.getCollection(IndexCollections.GIT_EVIDENCE_MANIFESTS)
+                    .find(new Document("kind", "COMPARISON").append("state", "READY")).first();
+            assertThat(template.getCollection(IndexCollections.GIT_COMPARISON_CHANGES).countDocuments()).isEqualTo(1);
+            Document coverage = manifest.get("policyCoverage", Document.class);
+            assertThat(coverage).as("mixed comparisons must disclose policy exclusions").isNotNull();
+            assertThat(coverage.getLong("excludedChanges")).isEqualTo(1L);
+            assertThat(coverage.getList("reasons", Document.class)).containsExactly(
+                    new Document("reason", "OUTSIDE_SOURCE_POLICY").append("count", 1L));
+            assertThat(coverage.toJson()).doesNotContain("secret.properties", "SECRET_BEFORE", "SECRET_AFTER");
+            GitComparisonId id = new GitComparisonId(manifest.getString("evidenceId"));
+            GitSnapshotId previousId = new GitSnapshotId(manifest.getString("previousSnapshotId"));
+            GitSnapshotId currentId = new GitSnapshotId(manifest.getString("currentSnapshotId"));
+            store.validateReadyReviewComparison(REPOSITORY, id, previousId, currentId);
+            template.getCollection(IndexCollections.GIT_EVIDENCE_MANIFESTS).updateOne(new Document("evidenceId", id.value()),
+                    new Document("$unset", new Document("policyCoverage", "")));
+            assertThatThrownBy(() -> store.validateReadyReviewComparison(REPOSITORY, id, previousId, currentId))
+                    .isInstanceOf(PublicationConflictException.class);
+            template.getCollection(IndexCollections.GIT_EVIDENCE_MANIFESTS).updateOne(new Document("evidenceId", id.value()),
+                    new Document("$set", new Document("policyCoverage", new Document("excludedChanges", 2L).append("reasons",
+                            List.of(new Document("reason", "OUTSIDE_SOURCE_POLICY").append("count", 2L))))));
+            assertThatThrownBy(() -> store.validateReadyReviewComparison(REPOSITORY, id, previousId, currentId))
+                    .as("even a structurally valid altered summary must fail the immutable publication digest")
+                    .isInstanceOf(PublicationConflictException.class);
+        }
+    }
+
+    @Test
     void refuses_unbound_comparison_without_persisting_a_ready_manifest() {
         try (MongoDBContainer container = MongoSchemaTestSupport.container()) {
             MongoTemplate template = MongoSchemaTestSupport.template(container);
@@ -142,7 +204,7 @@ class GitComparisonPublicationIT {
             RepositoryRevision before = RepositoryRevision.ofSha("1".repeat(40));
             RepositoryRevision after = RepositoryRevision.ofSha("2".repeat(40));
             GitPreparedComparison comparison = new GitPreparedComparison(Optional.of(before), after,
-                    GitComparisonAncestry.PREVIOUS_ANCESTOR, List.of(), List.of(), List.of());
+                    GitComparisonAncestry.PREVIOUS_ANCESTOR, List.of(), List.of(), List.of(), new GitComparisonPolicyCoverage(0, List.of()));
             SourceEvidencePolicy policy = policy(Set.of());
             ProjectGuideMembership guide = ProjectGuideMembership.unavailable(ProjectGuideState.DISABLED);
             GitEvidencePublicationStore store = new GitEvidencePublicationStore(template);

@@ -1,6 +1,7 @@
 package com.java.semantic.mcp;
 
 import com.java.semantic.model.codefact.CodeFactKind;
+import com.java.semantic.model.git.GitComparisonPolicyCoverage;
 import com.java.semantic.query.application.SemanticQueryContract;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
@@ -101,8 +102,8 @@ public final class SemanticMcpSchemaCatalog {
                     "eventType", text(), "destination", destination(), "trigger", text()), List.of())), List.of("kind", "handler", "trigger")));
             case "find_relations" -> relations();
             case "list_git_branches", "list_git_commits" -> metadataCollection(operation);
-            case "compare_revisions" -> object(Map.of("comparisonContext", comparison(), "ancestry", text(), "items", array(change()), "page", page()),
-                    List.of("comparisonContext", "ancestry", "items", "page"));
+            case "compare_revisions" -> object(Map.of("comparisonContext", comparison(), "ancestry", text(), "items", array(change()), "page", page(),
+                    "policyCoverage", policyCoverage()), List.of("comparisonContext", "ancestry", "items", "page", "policyCoverage"));
             case "get_file_diff" -> object(Map.of("comparisonContext", comparison(), "change", change(), "patch", string(), "complete", bool(), "nextCursor", text()),
                     List.of("comparisonContext", "change", "complete"));
             default -> throw new IllegalArgumentException("unknown Semantic operation");
@@ -172,6 +173,12 @@ public final class SemanticMcpSchemaCatalog {
                 : object(Map.of("revision", revision(), "shortRevision", text(), "parents", array(revision()), "subject", string(), "committedAt", timestamp()),
                         List.of("revision", "shortRevision", "parents", "subject", "committedAt"));
         return object(Map.of("repositoryId", text(), "metadata", metadata, "items", array(item), "page", page()), List.of("repositoryId", "metadata", "items", "page"));
+    }
+    private static Map<String, Object> policyCoverage() {
+        return object(Map.of("excludedChanges", count(), "reasons", array(object(Map.of(
+                "reason", enums(GitComparisonPolicyCoverage.Reason.values()),
+                "count", Map.of("type", "integer", "minimum", 1)), List.of("reason", "count")))),
+                List.of("excludedChanges", "reasons"));
     }
     private static Map<String, Object> change() {
         Map<String, Object> side = object(Map.of("path", text(), "mode", text(), "blobId", text(), "contentKind", enumeration("CODE", "PROJECT_GUIDE"),

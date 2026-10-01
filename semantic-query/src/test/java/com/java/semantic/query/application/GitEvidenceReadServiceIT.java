@@ -23,19 +23,17 @@ import com.java.semantic.model.source.SourceStructure;
 import com.java.semantic.model.source.ProjectGuideProvenance;
 import com.java.semantic.model.source.SourceContentKind;
 import com.java.semantic.model.git.GitSnapshotId;
+import com.java.semantic.model.git.GitComparisonPolicyCoverage;
 import com.java.semantic.model.review.ReviewSide;
 import com.java.semantic.model.codefact.SyntaxPosition;
 import com.java.semantic.model.codefact.SyntaxRange;
 import com.java.semantic.query.application.ReadContextSelector.AdmittedContext;
 import com.java.semantic.query.application.ReadContextSelector.AdmittedComparison;
 import com.java.semantic.query.application.SemanticQueryContract.*;
-import com.mongodb.client.MongoClients;
 import org.bson.Document;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.data.mongodb.core.MongoTemplate;
-import org.testcontainers.mongodb.MongoDBContainer;
-import org.testcontainers.utility.DockerImageName;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
@@ -56,9 +54,9 @@ class GitEvidenceReadServiceIT {
 
     @Test
     void file_pages_preserve_crlf_utf16_ranges_and_literal_overlap_search() {
-        try (MongoDBContainer container = container()) {
-            container.start();
-            MongoTemplate template = template(container, "git_source_utf16");
+        try (PublishedMongoLifecycle lifecycle = PublishedMongoLifecycle.start();
+                PublishedMongoLifecycle.Invocation invocation = lifecycle.openInvocation()) {
+            MongoTemplate template = invocation.template();
             seedSnapshot(template, "orders"); publishCurrent(template);
             GitEvidenceReadService reader = service(template);
             AdmittedContext admitted = current(template);
@@ -80,9 +78,9 @@ class GitEvidenceReadServiceIT {
     }
     @Test
     void unicode_long_line_continuation_is_byte_safe_and_empty_file_is_complete() {
-        try (MongoDBContainer container = container()) {
-            container.start();
-            MongoTemplate template = template(container, "git_long_source");
+        try (PublishedMongoLifecycle lifecycle = PublishedMongoLifecycle.start();
+                PublishedMongoLifecycle.Invocation invocation = lifecycle.openInvocation()) {
+            MongoTemplate template = invocation.template();
             seedSnapshot(template, "orders"); seedLongLineSnapshot(template, "orders"); publishCurrent(template);
             GitEvidenceReadService reader = service(template);
             AdmittedContext admitted = current(template);
@@ -102,11 +100,87 @@ class GitEvidenceReadServiceIT {
             assertThat(empty.nextCursor()).isEmpty();
         }
     }
+
+    @Test
+    void file_terminal_empty_line_is_an_exact_complete_eof_window() {
+        try (PublishedMongoLifecycle lifecycle = PublishedMongoLifecycle.start();
+                PublishedMongoLifecycle.Invocation invocation = lifecycle.openInvocation()) {
+            MongoTemplate template = invocation.template();
+            seedSnapshot(template, "orders");
+            publishCurrent(template);
+            byte[] content = "class C {}\n".getBytes(StandardCharsets.UTF_8);
+            insertTextSnapshotFile(template, "orders", 1L, "src/terminal.java", content);
+            growSnapshot(template, 2, 27 + content.length);
+            sealAfterFixtureMutation(template, "orders");
+            AdmittedContext admitted = current(template);
+            SourceRequest request = new SourceRequest(admitted.context(), new SourceTarget(SourceTargetKind.FILE,
+                    Optional.empty(), Optional.of("src/terminal.java"), Optional.of(2), Optional.empty()), 200, Optional.empty());
+            SourceResult result = service(template).readSource(admitted, request);
+            SyntaxRange range = new SyntaxRange(new SyntaxPosition(1, 0), new SyntaxPosition(1, 0));
+            assertThat(result.content()).contains("");
+            assertThat(result.pageRange()).contains(range);
+            assertThat(result.rangeComplete()).isTrue();
+            assertThat(result.nextCursor()).isEmpty();
+        }
+    }
+
+    @Test
+    void comparison_missing_or_corrupt_policy_coverage_fails_closed() {
+        try (PublishedMongoLifecycle lifecycle = PublishedMongoLifecycle.start();
+                PublishedMongoLifecycle.Invocation invocation = lifecycle.openInvocation()) {
+            MongoTemplate template = invocation.template();
+            seedSnapshot(template, "orders");
+            completeReviewComparison(template, "orders");
+            markSnapshotComparisonReviewOwned(template, "orders", REVIEW_ID, "READY");
+            AdmittedComparison admitted = review(template);
+            ComparisonRequest request = new ComparisonRequest(admitted.comparisonContext(), page(20, Optional.empty()));
+            template.getCollection("git_evidence_manifests").updateOne(new Document("kind", "COMPARISON"),
+                    new Document("$unset", new Document("policyCoverage", "")));
+            assertThatThrownBy(() -> service(template).compareRevisions(admitted, request))
+                    .isInstanceOf(IndexContractMismatchException.class);
+            for (Document invalid : List.of(
+                    new Document("excludedChanges", -1L).append("reasons", List.of()),
+                    new Document("excludedChanges", 0L),
+                    new Document("excludedChanges", 0L).append("reasons", List.of(new Document("reason", "OUTSIDE_SOURCE_POLICY").append("count", 0L))),
+                    new Document("excludedChanges", 1L).append("reasons", List.of(new Document("reason", "UNKNOWN").append("count", 1L))),
+                    new Document("excludedChanges", 2L).append("reasons", List.of(new Document("reason", "OUTSIDE_SOURCE_POLICY").append("count", 1L))),
+                    new Document("excludedChanges", 2L).append("reasons", List.of(
+                            new Document("reason", "OUTSIDE_SOURCE_POLICY").append("count", 1L),
+                            new Document("reason", "OUTSIDE_SOURCE_POLICY").append("count", 1L))))) {
+                template.getCollection("git_evidence_manifests").updateOne(new Document("kind", "COMPARISON"),
+                        new Document("$set", new Document("policyCoverage", invalid)));
+                assertThatThrownBy(() -> service(template).compareRevisions(admitted, request))
+                        .isInstanceOf(IndexContractMismatchException.class);
+            }
+        }
+    }
+
+    @Test
+    void entirely_policy_excluded_comparison_returns_empty_items_with_explicit_immutable_coverage() {
+        try (PublishedMongoLifecycle lifecycle = PublishedMongoLifecycle.start();
+                PublishedMongoLifecycle.Invocation invocation = lifecycle.openInvocation()) {
+            MongoTemplate template = invocation.template();
+            seedSnapshot(template, "orders");
+            markSnapshotComparisonReviewOwned(template, "orders", REVIEW_ID, "READY");
+            template.getCollection("git_evidence_manifests").updateOne(new Document("kind", "COMPARISON"),
+                    new Document("$set", new Document("policyCoverage", new Document("excludedChanges", 1L).append("reasons",
+                            List.of(new Document("reason", "OUTSIDE_SOURCE_POLICY").append("count", 1L))))));
+            AdmittedComparison admitted = review(template);
+            ComparisonResult result = service(template).compareRevisions(admitted,
+                    new ComparisonRequest(admitted.comparisonContext(), page(20, Optional.empty())));
+            assertThat(result.items()).isEmpty();
+            assertThat(result.policyCoverage().excludedChanges()).isEqualTo(1L);
+            assertThat(result.policyCoverage().reasons()).containsExactly(new GitComparisonPolicyCoverage.Exclusion(
+                    GitComparisonPolicyCoverage.Reason.OUTSIDE_SOURCE_POLICY, 1L));
+            assertThat(result.page().hasMore()).isFalse();
+            assertThat(result.page().nextCursor()).isEmpty();
+        }
+    }
     @Test
     void literal_prefix_across_four_mib_request_boundary_survives_empty_page_and_overlaps() {
-        try (MongoDBContainer container = container()) {
-            container.start();
-            MongoTemplate template = template(container, "git_budget_prefix");
+        try (PublishedMongoLifecycle lifecycle = PublishedMongoLifecycle.start();
+                PublishedMongoLifecycle.Invocation invocation = lifecycle.openInvocation()) {
+            MongoTemplate template = invocation.template();
             seedBudgetSnapshot(template, "orders", false); publishCurrent(template);
             byte[] start = ("x".repeat(65_535) + "a").getBytes(StandardCharsets.UTF_8);
             byte[] end = ("baba" + "x".repeat(65_532)).getBytes(StandardCharsets.UTF_8);
@@ -127,9 +201,9 @@ class GitEvidenceReadServiceIT {
     }
     @Test
     void changed_line_limit_cursor_and_corrupt_checkpoint_are_rejected() {
-        try (MongoDBContainer container = container()) {
-            container.start();
-            MongoTemplate template = template(container, "git_cursor_integrity");
+        try (PublishedMongoLifecycle lifecycle = PublishedMongoLifecycle.start();
+                PublishedMongoLifecycle.Invocation invocation = lifecycle.openInvocation()) {
+            MongoTemplate template = invocation.template();
             seedSnapshot(template, "orders"); publishCurrent(template);
             AdmittedContext admitted = current(template);
             GitEvidenceReadService reader = service(template);
@@ -144,9 +218,9 @@ class GitEvidenceReadServiceIT {
     }
     @Test
     void directory_navigation_literal_filters_and_cursors_do_not_repeat_descendants() {
-        try (MongoDBContainer container = container()) {
-            container.start();
-            MongoTemplate template = template(container, "git_direct_children");
+        try (PublishedMongoLifecycle lifecycle = PublishedMongoLifecycle.start();
+                PublishedMongoLifecycle.Invocation invocation = lifecycle.openInvocation()) {
+            MongoTemplate template = invocation.template();
             seedSnapshot(template, "orders");
             insertTextSnapshotFile(template, "orders", 1L, "src/a/A.java", "A".getBytes(StandardCharsets.UTF_8));
             insertTextSnapshotFile(template, "orders", 2L, "src/a/B.java", "B".getBytes(StandardCharsets.UTF_8));
@@ -168,9 +242,9 @@ class GitEvidenceReadServiceIT {
     }
     @Test
     void immutable_review_pages_survive_pointer_movement_and_reject_other_side_replay() {
-        try (MongoDBContainer container = container()) {
-            container.start();
-            MongoTemplate template = template(container, "git_review_pinned");
+        try (PublishedMongoLifecycle lifecycle = PublishedMongoLifecycle.start();
+                PublishedMongoLifecycle.Invocation invocation = lifecycle.openInvocation()) {
+            MongoTemplate template = invocation.template();
             seedSnapshot(template, "orders"); markSnapshotComparisonReviewOwned(template, "orders", REVIEW_ID, "READY"); publishCurrent(template);
             GitEvidenceReadService reader = service(template);
             AdmittedComparison comparison = review(template);
@@ -186,9 +260,9 @@ class GitEvidenceReadServiceIT {
     }
     @Test
     void diff_patch_continuation_rechecks_both_rename_endpoints() {
-        try (MongoDBContainer container = container()) {
-            container.start();
-            MongoTemplate template = template(container, "git_diff_policy");
+        try (PublishedMongoLifecycle lifecycle = PublishedMongoLifecycle.start();
+                PublishedMongoLifecycle.Invocation invocation = lifecycle.openInvocation()) {
+            MongoTemplate template = invocation.template();
             seedSnapshot(template, "orders"); completeReviewComparison(template, "orders");
             markSnapshotComparisonReviewOwned(template, "orders", REVIEW_ID, "READY");
             GitEvidenceReadService reader = service(template);
@@ -208,9 +282,9 @@ class GitEvidenceReadServiceIT {
     }
     @Test
     void complete_metadata_pair_is_required_and_branch_history_is_exact_and_cursor_pinned() {
-        try (MongoDBContainer container = container()) {
-            container.start();
-            MongoTemplate template = template(container, "git_metadata_complete");
+        try (PublishedMongoLifecycle lifecycle = PublishedMongoLifecycle.start();
+                PublishedMongoLifecycle.Invocation invocation = lifecycle.openInvocation()) {
+            MongoTemplate template = invocation.template();
             template.getCollection("repositories").insertOne(new Document("repoId", "orders"));
             GitEvidenceReadService reader = service(template);
             assertThatThrownBy(() -> reader.listGitBranches(new GitBranchRequest("orders", page(1, Optional.empty()))))
@@ -234,9 +308,9 @@ class GitEvidenceReadServiceIT {
     }
     @Test
     void metadata_missing_ordinal_and_rebound_complete_owner_are_corruption_not_partial_success() {
-        try (MongoDBContainer container = container()) {
-            container.start();
-            MongoTemplate template = template(container, "git_metadata_corruption");
+        try (PublishedMongoLifecycle lifecycle = PublishedMongoLifecycle.start();
+                PublishedMongoLifecycle.Invocation invocation = lifecycle.openInvocation()) {
+            MongoTemplate template = invocation.template();
             template.getCollection("repositories").insertOne(new Document("repoId", "orders"));
             metadataFixture(template, "owner", "release", REVISION, "COMPLETE", Instant.parse("2026-09-28T00:00:00Z"));
             GitEvidenceReadService reader = service(template);
@@ -252,9 +326,9 @@ class GitEvidenceReadServiceIT {
 
     @Test
     void current_movement_and_rollback_reject_stale_identity_and_select_actual_snapshot_content() {
-        try (MongoDBContainer container = container()) {
-            container.start();
-            MongoTemplate template = template(container, "git_current_rollback");
+        try (PublishedMongoLifecycle lifecycle = PublishedMongoLifecycle.start();
+                PublishedMongoLifecycle.Invocation invocation = lifecycle.openInvocation()) {
+            MongoTemplate template = invocation.template();
             seedSnapshot(template, "orders"); publishCurrent(template);
             GitEvidenceReadService reader = service(template);
             ReadContext old = current(template).context();
@@ -290,9 +364,9 @@ class GitEvidenceReadServiceIT {
 
     @Test
     void guide_provenance_is_side_owned_and_search_excluded_while_unavailable_code_is_honest() {
-        try (MongoDBContainer container = container()) {
-            container.start();
-            MongoTemplate template = template(container, "git_guide_metadata");
+        try (PublishedMongoLifecycle lifecycle = PublishedMongoLifecycle.start();
+                PublishedMongoLifecycle.Invocation invocation = lifecycle.openInvocation()) {
+            MongoTemplate template = invocation.template();
             seedSnapshot(template, "orders");
             String path = "docs/codebase/overview.md";
             String body = "guide-only-marker\nsecond\n";
@@ -333,9 +407,9 @@ class GitEvidenceReadServiceIT {
 
     @Test
     void equal_sha_review_side_cursor_cannot_be_replayed_on_other_membership() {
-        try (MongoDBContainer container = container()) {
-            container.start();
-            MongoTemplate template = template(container, "git_equal_side_cursor");
+        try (PublishedMongoLifecycle lifecycle = PublishedMongoLifecycle.start();
+                PublishedMongoLifecycle.Invocation invocation = lifecycle.openInvocation()) {
+            MongoTemplate template = invocation.template();
             seedSnapshot(template, "orders"); markSnapshotComparisonReviewOwned(template, "orders", REVIEW_ID, "READY");
             String beforeSnapshot = siblingSnapshotId("orders", "job-snapshot");
             String beforeGeneration = "source-" + beforeSnapshot;
@@ -357,9 +431,9 @@ class GitEvidenceReadServiceIT {
 
     @Test
     void root_review_has_empty_before_and_reads_only_real_after_patch_endpoint() {
-        try (MongoDBContainer container = container()) {
-            container.start();
-            MongoTemplate template = template(container, "git_root_review");
+        try (PublishedMongoLifecycle lifecycle = PublishedMongoLifecycle.start();
+                PublishedMongoLifecycle.Invocation invocation = lifecycle.openInvocation()) {
+            MongoTemplate template = invocation.template();
             seedSnapshot(template, "orders"); completeReviewComparison(template, "orders");
             markSnapshotComparisonReviewOwned(template, "orders", REVIEW_ID, "READY");
             String beforeId = siblingSnapshotId("orders", "job-snapshot");
@@ -473,10 +547,6 @@ class GitEvidenceReadServiceIT {
                         .append("parents", List.of()).append("subject", "parent").append("committedAt", time)));
         template.getCollection("repositories").updateOne(new Document("repoId", "orders"), new Document("$set", new Document("metadataPointer",
                 new Document("catalogId", catalog).append("historyId", history).append("branch", branch).append("headRevision", revision).append("observedAt", time))));
-    }
-    private static MongoDBContainer container() { return new MongoDBContainer(DockerImageName.parse("mongo:8.0.4")); }
-    private static MongoTemplate template(MongoDBContainer container, String database) {
-        return new MongoTemplate(MongoClients.create(container.getConnectionString()), database);
     }
     private static void seedBudgetSnapshot(MongoTemplate template, String repositoryId, boolean malformedFinalChunk) {
         String path = "src/budget.java";
@@ -627,7 +697,8 @@ class GitEvidenceReadServiceIT {
                 .append("state", "READY").append("gitEvidenceVersion", IndexSchemaContract.GIT_EVIDENCE_VERSION)
                 .append("scope", "STANDALONE").append("ownerJobId", ownerJobId).append("previous", "2".repeat(40))
                 .append("current", revision).append("previousSnapshotId", siblingSnapshotId)
-                .append("currentSnapshotId", snapshotId).append("contentDigest", "c".repeat(64)).append("ancestry", "PREVIOUS_ANCESTOR").append("total", 0L));
+                .append("currentSnapshotId", snapshotId).append("contentDigest", "c".repeat(64)).append("ancestry", "PREVIOUS_ANCESTOR").append("total", 0L)
+                .append("policyCoverage", new Document("excludedChanges", 0L).append("reasons", List.of())));
         sealFixtureSource(template, repositoryId, snapshotId, revision, "source-" + snapshotId);
         sealFixtureSource(template, repositoryId, siblingSnapshotId, "2".repeat(40), "source-" + siblingSnapshotId);
     }

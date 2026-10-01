@@ -120,6 +120,32 @@ change; current, rollback, and metadata pointers are preserved. Removed
 configurations become `configured=false` without deleting evidence. Registry
 publication does not write remote URLs, checkout paths, or credentials.
 
+## Immutable comparison policy coverage
+
+Git-3 comparison manifests require `policyCoverage` with int64
+`excludedChanges` and a `reasons` array of `{reason, count}`. Counts are positive
+int64 values per unique reason and sum to the nonnegative exclusion total.
+Reasons are `UNSUPPORTED_PATH`, `SYMLINK`, `SUBMODULE`, or
+`OUTSIDE_SOURCE_POLICY`, in that deterministic first-applicable precedence.
+Indexer counts each excluded change once after rename detection, before dropping
+it. Neither excluded paths nor excluded content belong in this summary.
+
+The canonical summary participates in the immutable comparison digest and READY
+validation, including comparisons with no admitted changes. Missing or malformed
+coverage has no zero/default decoder; rebuild/reprepare earlier evidence.
+`compare_revisions` exposes the same required summary through HTTP and MCP, so an
+entirely policy-excluded comparison is distinguishable from an unchanged tree.
+These are whole-comparison policy counts, not per-page counts or a full deployment
+diff. Existing package/class/method restrictions deny repository-wide Git
+comparison access; they do not receive global counts disguised as scoped coverage.
+
+## Query search access
+
+Exact name/signature search allows Mongo to choose the dedicated equality indexes
+while retaining one exact-match rank and stable seek order. Name/token prefix
+phases retain generation-order scans. Page/batch limits bound returned rows, not
+documents examined for sparse matches; the storage deadline still applies.
+
 ## Sealed source membership
 
 Schema-4 generation manifests require `sourceSnapshot`, `sourcePolicy`,

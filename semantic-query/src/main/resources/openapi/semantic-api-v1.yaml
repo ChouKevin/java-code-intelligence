@@ -3309,6 +3309,27 @@
         ],
         "additionalProperties": false
       },
+      "GitComparisonPolicyCoverage": {
+        "type": "object",
+        "description": "Immutable policy exclusions across the complete direct comparison, not authorization-filtered coverage. Granular source-restricted readers cannot access this operation. No excluded paths or contents are returned.",
+        "properties": {
+          "excludedChanges": { "type": "integer", "format": "int64", "minimum": 0 },
+          "reasons": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "reason": { "type": "string", "enum": ["UNSUPPORTED_PATH", "SYMLINK", "SUBMODULE", "OUTSIDE_SOURCE_POLICY"] },
+                "count": { "type": "integer", "format": "int64", "minimum": 1 }
+              },
+              "required": ["reason", "count"],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": ["excludedChanges", "reasons"],
+        "additionalProperties": false
+      },
       "ComparisonResult": {
         "type": "object",
         "properties": {
@@ -3318,6 +3339,9 @@
           "ancestry": {
             "type": "string",
             "minLength": 1
+          },
+          "policyCoverage": {
+            "$ref": "#/components/schemas/GitComparisonPolicyCoverage"
           },
           "items": {
             "type": "array",
@@ -3332,6 +3356,7 @@
         "required": [
           "comparisonContext",
           "ancestry",
+          "policyCoverage",
           "items",
           "page"
         ],

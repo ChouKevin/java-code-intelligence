@@ -13,6 +13,7 @@ import com.java.semantic.model.git.GitChangeKind;
 import com.java.semantic.model.git.GitEvidenceOwnership;
 import com.java.semantic.model.git.GitPublicationScope;
 import com.java.semantic.model.git.GitFileContentStatus;
+import com.java.semantic.model.git.GitComparisonPolicyCoverage;
 import com.java.semantic.model.index.IndexCollections;
 import com.java.semantic.model.index.IndexSchemaContract;
 import com.java.semantic.model.repository.RepositoryId;
@@ -504,9 +505,10 @@ public final class GitEvidenceReadService {
 
     public ComparisonResult compareRevisions(AdmittedComparison admitted, ComparisonRequest request) {
         return storage(() -> {
-            Document manifest = comparison(admitted);
+            ComparisonEvidence evidence = comparison(admitted);
+            Document manifest = evidence.manifest();
             String id = requiredText(manifest, "evidenceId");
-            String binding = comparisonBinding("compare_revisions", admitted, manifest, List.of(Integer.toString(request.page().limit())));
+            String binding = comparisonBinding("compare_revisions", admitted, evidence, List.of(Integer.toString(request.page().limit())));
             long ordinal = request.page().cursor().map(value -> number(QueryCursorCodec.decode(value, binding, 1).getFirst())).orElse(0L);
             long total = requiredLong(manifest, "total");
             if (request.page().cursor().isPresent() && (ordinal == 0 || ordinal >= total)) throw new IllegalArgumentException("comparison cursor is invalid");
@@ -521,14 +523,15 @@ public final class GitEvidenceReadService {
             }
             if (items.size() != count) throw new IndexContractMismatchException();
             long next = ordinal + items.size();
-            return new ComparisonResult(admitted.comparisonContext(), requiredText(manifest, "ancestry"), items,
+            return new ComparisonResult(admitted.comparisonContext(), requiredText(manifest, "ancestry"), evidence.coverage(), items,
                     new Page(items.size(), next < total, next < total
                             ? Optional.of(QueryCursorCodec.encode(binding, List.of(Long.toString(next)))) : Optional.empty()));
         });
     }
     public FileDiffResult getFileDiff(AdmittedComparison admitted, FileDiffRequest request) {
         return storage(() -> {
-            Document manifest = comparison(admitted);
+            ComparisonEvidence evidence = comparison(admitted);
+            Document manifest = evidence.manifest();
             String id = requiredText(manifest, "evidenceId");
             RepositoryId repo = new RepositoryId(admitted.comparisonContext().repositoryId());
             Document row = template.getCollection(IndexCollections.GIT_COMPARISON_CHANGES).find(Filters.and(Filters.eq("repoId", repo.value()),
@@ -537,7 +540,7 @@ public final class GitEvidenceReadService {
             if (Objects.isNull(row)) throw new GitEvidenceNotFoundException();
             if (requiredLong(row, "ordinal") >= requiredLong(manifest, "total")) throw new IndexContractMismatchException();
             GitChangeItem change = change(admitted, row, id);
-            String binding = comparisonBinding("get_file_diff", admitted, manifest, List.of(request.changeId(), change.toString(),
+            String binding = comparisonBinding("get_file_diff", admitted, evidence, List.of(request.changeId(), change.toString(),
                     Long.toString(requiredLong(row, "patchChunkCount"))));
             long ordinal = request.cursor().map(value -> number(QueryCursorCodec.decode(value, binding, 1).getFirst())).orElse(0L);
             if (request.cursor().isPresent() && ordinal == 0) throw new IllegalArgumentException("diff cursor is invalid");
@@ -547,7 +550,8 @@ public final class GitEvidenceReadService {
                     page.hasNext() ? Optional.of(QueryCursorCodec.encode(binding, List.of(Long.toString(ordinal + 1)))) : Optional.empty());
         });
     }
-    private Document comparison(AdmittedComparison admitted) {
+    private record ComparisonEvidence(Document manifest, GitComparisonPolicyCoverage coverage) { }
+    private ComparisonEvidence comparison(AdmittedComparison admitted) {
         RepositoryId repo = new RepositoryId(admitted.comparisonContext().repositoryId());
         readPolicy.requireGitEvidenceVisible(repo);
         String id = admitted.manifest().comparisonId().orElseThrow(IndexContractMismatchException::new).value();
@@ -567,13 +571,22 @@ public final class GitEvidenceReadService {
                     || !admitted.manifest().ownerJobId().equals(requiredText(empty, "ownerJobId")) || empty.containsKey("revision")
                     || empty.containsKey("sourceGenerationId") || requiredLong(empty, "total") != 0) throw new IndexContractMismatchException();
         }
-        return manifest;
+        return new ComparisonEvidence(manifest, coverage(manifest));
     }
-    private static String comparisonBinding(String operation, AdmittedComparison admitted, Document manifest, List<String> filters) {
+    private static GitComparisonPolicyCoverage coverage(Document manifest) {
+        try {
+            return GitComparisonPolicyCoverage.fromFields(manifest.get("policyCoverage", Document.class));
+        } catch (IllegalArgumentException | ArithmeticException | ClassCastException exception) {
+            throw new IndexContractMismatchException();
+        }
+    }
+    private static String comparisonBinding(String operation, AdmittedComparison admitted, ComparisonEvidence evidence, List<String> filters) {
+        Document manifest = evidence.manifest();
         List<String> fields = new ArrayList<>(List.of(admitted.comparisonContext().toString(), admitted.manifest().ownerJobId(),
                 requiredText(manifest, "evidenceId"), requiredText(manifest, "contentDigest"), Long.toString(requiredLong(manifest, "total")),
                 QueryCursorCodec.binding(operation, admitted.after(), List.of()),
                 admitted.before().map(value -> QueryCursorCodec.binding(operation, value, List.of())).orElse("EMPTY_TREE")));
+        fields.add(evidence.coverage().toString());
         fields.addAll(filters);
         return QueryCursorCodec.binding(operation, fields);
     }
@@ -625,6 +638,7 @@ public final class GitEvidenceReadService {
         int responseBytes = 0;
         int returnedLines = 0;
         int endOffset = fence.map(ReadPosition::byteOffset).orElse(Math.toIntExact(file.byteLength()));
+        if (position.byteOffset() == endOffset) return page(content, start, position, false);
         while (position.chunkOrdinal() < file.chunkCount()) {
             ChunkData chunk = chunkData(repositoryId, snapshotId, file, position.chunkOrdinal(), position.byteOffset(), position.line(), position.column());
             int character = charIndexAtByteOffset(chunk.text(), Math.toIntExact(position.byteOffset() - chunk.byteOffset()));
@@ -632,7 +646,9 @@ public final class GitEvidenceReadService {
                 if (position.byteOffset() == endOffset) return page(content, start, position, false);
                 int codePoint = chunk.text().codePointAt(character);
                 int bytes = utf8Bytes(codePoint);
-                if (responseBytes + bytes > MAX_RESPONSE_BYTES) {
+                int reservedBytes = bytes;
+                if (codePoint == '\r' && character + 1 < chunk.text().length() && chunk.text().charAt(character + 1) == '\n') reservedBytes++;
+                if (responseBytes + reservedBytes > MAX_RESPONSE_BYTES) {
                     return page(content, start, position, true);
                 }
                 content.appendCodePoint(codePoint);
