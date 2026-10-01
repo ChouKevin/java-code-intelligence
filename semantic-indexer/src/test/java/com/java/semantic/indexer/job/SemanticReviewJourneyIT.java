@@ -24,6 +24,10 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
+import java.util.UUID;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.util.HexFormat;
 import org.bson.Document;
 import org.eclipse.jgit.api.Git;
 import org.eclipse.jgit.lib.Constants;
@@ -57,6 +61,7 @@ class SemanticReviewJourneyIT {
     private static final int MONGO_CONTAINER_PORT = 27017;
     private static final Duration STARTUP_TIMEOUT = Duration.ofSeconds(45);
     private static final Duration JOB_TIMEOUT = Duration.ofMinutes(3);
+    private static final HttpClient HTTP = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
 
     @TempDir
     Path temporaryDirectory;
@@ -81,27 +86,67 @@ class SemanticReviewJourneyIT {
              Git remote = Git.init().setBare(true).setDirectory(remotePath.toFile()).call();
              Git seed = Git.init().setInitialBranch("main").setDirectory(seedPath.toFile()).call()) {
             mongo.start();
-            String writerUri = mongoUri(mongo, "root", "root-password", DATABASE, "admin");
-            createReadOnlyUser(writerUri);
+            String maintenanceUri = mongoUri(mongo, "root", "root-password", DATABASE, "admin");
+            bootstrapSchema(indexerJar, maintenanceUri);
+            createRuntimeUsers(maintenanceUri);
+            String writerUri = mongoUri(mongo, "review-writer", "write-password", DATABASE, DATABASE);
+            assertNoMaintenance(writerUri);
             String readerUri = mongoUri(mongo, "review-reader", "read-password", DATABASE, DATABASE);
             assertReadOnly(readerUri);
             String revisionA = commitA(seed, seedPath, remotePath);
             assertCleanMavenSeed(seedPath);
-            String revisionB = commitB(seed, seedPath);
-            bootstrapSchema(indexerJar, writerUri);
             remote.getRepository().updateRef(Constants.HEAD, true).link(Constants.R_HEADS + "main");
-            String indexerMongoUri = mongoUri(MONGO_NETWORK_ALIAS, MONGO_CONTAINER_PORT, "root", "root-password", DATABASE, "admin");
+            String indexerMongoUri = mongoUri(MONGO_NETWORK_ALIAS, MONGO_CONTAINER_PORT,
+                    "review-writer", "write-password", DATABASE, DATABASE);
             JsonMapper mapper = JsonMapper.builder().build();
-            try (GenericContainer<?> indexer = startIndexer(indexerImage, indexerMongoUri, remotePath, network)) {
+            try (RunningProcess liveQuery = startQuery(queryJar, readerUri, queryPort);
+                 GenericContainer<?> indexer = startIndexer(indexerImage, indexerMongoUri, remotePath, network, false)) {
                 try {
                     String indexerBase = "http://" + indexer.getHost() + ":" + indexer.getMappedPort(INDEXER_CONTAINER_PORT);
                     awaitHttp(indexerBase + "/index/repositories/" + REPOSITORY_ID + "/publication", ADMIN_TOKEN, indexer);
-                    String checkoutJob = accepted(post(indexerBase, "/index/repositories/" + REPOSITORY_ID + "/checkout", ADMIN_TOKEN,
-                            Map.of("revision", revisionA)), mapper);
-                    Map<?, ?> currentA = completed(indexerBase, checkoutJob, mapper, indexer);
+                    String liveBase = "http://127.0.0.1:" + queryPort;
+                    awaitHttp(liveBase + "/api/v1/repositories", QUERY_TOKEN, liveQuery);
+                    try (McpSyncClient preparation = nativeClient(indexerBase, ADMIN_TOKEN, mapper);
+                         McpSyncClient reader = nativeClient(liveBase, QUERY_TOKEN, mapper)) {
+                        preparation.initialize();
+                        reader.initialize();
+                        assertThat(preparation.listTools().tools()).extracting(McpSchema.Tool::name)
+                                .containsExactlyInAnyOrder("refresh_repository_metadata", "prepare_codebase", "prepare_review", "get_job");
+                        Map<?, ?> unindexed = parity(liveBase, reader, "get_context", "/api/v1/context", currentDiscovery(), mapper);
+                        assertThat(text(unindexed, "state")).isEqualTo("UNINDEXED");
+                        Map<?, ?> repositories = repositoryParity(liveBase, reader, mapper);
+                        assertThat(mapList(repositories, "items")).singleElement().satisfies(item -> {
+                            assertThat(text(item, "repositoryId")).isEqualTo(REPOSITORY_ID);
+                            assertThat(item.get("configured")).isEqualTo(true);
+                            assertThat(item.containsKey("publishedRevision")).isFalse();
+                        });
+                        String requestId = UUID.randomUUID().toString();
+                        Files.writeString(temporaryDirectory.resolve("build-request-id"), requestId);
+                        // Deliberately retain no accepted job identity: recover solely with the saved requestId.
+                        mcpBody(preparation, "prepare_codebase", Map.of("repositoryId", REPOSITORY_ID, "requestId", requestId), mapper);
+                        Map<?, ?> recovered = mcpBody(preparation, "get_job",
+                                Map.of("repositoryId", REPOSITORY_ID, "requestId", requestId), mapper);
+                        String checkoutJob = text(recovered, "jobId");
+                        assertThat(text(recovered, "preparationBranch")).isEqualTo("main");
+                        assertThat(text(map(recovered, "target"), "revision")).isEqualTo(revisionA);
+                        assertThat(text(recovered, "requestId")).isEqualTo(requestId);
+                    Map<?, ?> currentA = completedLookup(indexerBase, "requestId=" + requestId, mapper, indexer);
+                    assertThat(text(currentA, "jobId")).isEqualTo(checkoutJob);
+                    assertThat(text(currentA, "requestId")).isEqualTo(requestId);
+                    assertThat(text(currentA, "operation")).isEqualTo("BUILD");
+                    assertThat(mcpBody(preparation, "get_job",
+                            Map.of("repositoryId", REPOSITORY_ID, "requestId", requestId), mapper)).isEqualTo(currentA);
                     Map<?, ?> currentPointerA = map(currentA, "currentPointer");
                     assertThat(text(currentPointerA, "revision")).isEqualTo(revisionA);
                     baselineGeneration = text(currentPointerA, "generationId");
+                        assertThat(text(map(parity(liveBase, reader, "get_context", "/api/v1/context",
+                                currentDiscovery(), mapper), "projectGuide"), "state")).isEqualTo("DISABLED");
+                        assertSemanticMatrix(liveBase, reader, currentContext(revisionA), "LegacyGateway", mapper);
+                        String revisionB = commitB(seed, seedPath);
+                        Map<?, ?> notPrepared = parity(liveBase, reader, "get_context", "/api/v1/context",
+                                Map.of("repositoryId", REPOSITORY_ID,
+                                        "selector", Map.of("kind", "COMMIT", "revision", revisionB)), mapper);
+                        assertThat(text(notPrepared, "state")).isEqualTo("NOT_PREPARED");
                     assertThat(post(indexerBase, "/index/repositories/" + REPOSITORY_ID + "/reviews", QUERY_TOKEN,
                             Map.of("requestId", java.util.UUID.randomUUID().toString(), "selection", Map.of("kind", "COMMIT", "revision", revisionB))).statusCode()).isEqualTo(401);
                     Map<?, ?> acceptedReviewBody = acceptedReview(post(indexerBase,
@@ -115,7 +160,6 @@ class SemanticReviewJourneyIT {
                     assertReviewComparisonType(admittedReview);
                     Map<?, ?> admittedReviewDetails = map(admittedReview, "review");
                     assertThat(text(map(admittedReviewDetails, "selection"), "revision")).isEqualTo(revisionB);
-                    assertThat(admittedReviewDetails.get("resolvedEndpoints")).isNull();
                     assertThat(map(admittedReview, "currentPointer")).isEqualTo(currentPointerA);
 
                     Map<?, ?> completeReview = completed(indexerBase, reviewJob, mapper, indexer);
@@ -136,6 +180,19 @@ class SemanticReviewJourneyIT {
                             text(changedInstallationAdmission, "jobId"), mapper, indexer);
                     changedInstallationReviewId = text(map(changedInstallationComplete, "review"), "reviewId");
                     assertThat(map(changedInstallationComplete, "currentPointer")).isEqualTo(currentPointerA);
+                        assertThat(mcpBody(preparation, "get_job", Map.of("repositoryId", REPOSITORY_ID,
+                                "requestId", requestId), mapper)).isEqualTo(currentA);
+                        Map<?, ?> duplicate = mcpError(preparation, "prepare_codebase",
+                                Map.of("repositoryId", REPOSITORY_ID, "requestId", requestId), mapper);
+                        assertThat(text(duplicate, "code")).isEqualTo("REQUEST_ID_REUSED");
+                        assertThat(text(duplicate, "jobId")).isEqualTo(checkoutJob);
+                        errorParity(indexerBase, preparation, "prepare_codebase",
+                                "/index/repositories/" + REPOSITORY_ID + "/codebase",
+                                Map.of("repositoryId", REPOSITORY_ID, "requestId", requestId),
+                                Map.of("requestId", requestId), 409, "REQUEST_ID_REUSED", ADMIN_TOKEN, mapper);
+                        Files.writeString(temporaryDirectory.resolve("review-revision"), revisionB);
+                        Files.writeString(temporaryDirectory.resolve("baseline-result"), mapper.writeValueAsString(currentA));
+                    }
                 } catch (AssertionError failure) {
                     throw withIndexerLogs(failure, indexer.getLogs());
                 } finally {
@@ -143,6 +200,68 @@ class SemanticReviewJourneyIT {
                 }
             }
 
+            String revisionB = Files.readString(temporaryDirectory.resolve("review-revision"));
+            String buildRequest = Files.readString(temporaryDirectory.resolve("build-request-id"));
+            try (RunningProcess liveQuery = startQuery(queryJar, readerUri, queryPort);
+                 GenericContainer<?> restarted = startIndexer(indexerImage, indexerMongoUri, remotePath, network, true)) {
+                String base = "http://" + restarted.getHost() + ":" + restarted.getMappedPort(INDEXER_CONTAINER_PORT);
+                String liveBase = "http://127.0.0.1:" + queryPort;
+                awaitHttp(base + "/index/repositories/" + REPOSITORY_ID + "/publication", ADMIN_TOKEN, restarted);
+                awaitHttp(liveBase + "/api/v1/repositories", QUERY_TOKEN, liveQuery);
+                try (McpSyncClient preparation = nativeClient(base, ADMIN_TOKEN, mapper);
+                     McpSyncClient reader = nativeClient(liveBase, QUERY_TOKEN, mapper)) {
+                    preparation.initialize();
+                    reader.initialize();
+                    Map<?, ?> original = mcpBody(preparation, "get_job",
+                            Map.of("repositoryId", REPOSITORY_ID, "requestId", buildRequest), mapper);
+                    assertThat(original).isEqualTo(mapper.readValue(Files.readString(temporaryDirectory.resolve("baseline-result")), Map.class));
+                    String guideText = validGuide(revisionB);
+                    String revisionC = commitGuide(seed, seedPath, guideText, "valid guide");
+                    Map<?, ?> admitted = mcpBody(preparation, "prepare_codebase",
+                            Map.of("repositoryId", REPOSITORY_ID, "requestId", UUID.randomUUID().toString()), mapper);
+                    // Capture actual active BUILD state, not a timing-only sleep or a production test gate.
+                    Map<?, ?> during = successful(post(liveBase, "/api/v1/context", QUERY_TOKEN, currentDiscovery()), mapper);
+                    assertThat(text(during, "revision")).isEqualTo(revisionA);
+                    assertThat(text(map(during, "activeJob"), "operation")).isEqualTo("BUILD");
+                    Map<?, ?> oldSource = successful(post(liveBase, "/api/v1/source", QUERY_TOKEN,
+                            Map.of("context", currentContext(revisionA), "target",
+                                    Map.of("kind", "FILE", "path", "src/main/java/example/LegacyGateway.java"))), mapper);
+                    assertThat(text(oldSource, "content")).contains("class LegacyGateway");
+                    assertThat(map(oldSource, "context")).isEqualTo(currentContext(revisionA));
+                    assertSemanticMatrix(liveBase, reader, context(reviewId, "BEFORE", revisionA), "LegacyGateway", mapper);
+                    assertSemanticMatrix(liveBase, reader, context(reviewId, "AFTER", revisionB), "ModernGateway", mapper);
+                    completed(base, text(admitted, "jobId"), mapper, restarted);
+                    assertSemanticMatrix(liveBase, reader, context(reviewId, "BEFORE", revisionA), "LegacyGateway", mapper);
+                    assertSemanticMatrix(liveBase, reader, context(reviewId, "AFTER", revisionB), "ModernGateway", mapper);
+                    Map<?, ?> valid = parity(liveBase, reader, "get_context", "/api/v1/context", currentDiscovery(), mapper);
+                    assertThat(text(valid, "revision")).isEqualTo(revisionC);
+                    assertThat(map(valid, "context")).isEqualTo(currentContext(revisionC));
+                    assertThat(mapList(repositoryParity(liveBase, reader, mapper), "items")).singleElement()
+                            .satisfies(item -> assertThat(text(item, "publishedRevision")).isEqualTo(revisionC));
+                    assertGuide(liveBase, reader, valid, revisionB, revisionC, guideText, mapper);
+                    errorParity(liveBase, reader, "search_code", "/api/v1/search-code",
+                            Map.of("context", currentContext(revisionA), "query", "LegacyGateway"),
+                            Map.of("context", currentContext(revisionA), "query", "LegacyGateway"),
+                            409, "REVISION_OUTDATED", QUERY_TOKEN, mapper);
+                    String revisionD = commitGuide(seed, seedPath, "# Invalid guide\nGuideOnlySentinel\n", "invalid guide");
+                    Map<?, ?> invalidAdmission = mcpBody(preparation, "prepare_codebase",
+                            Map.of("repositoryId", REPOSITORY_ID, "requestId", UUID.randomUUID().toString()), mapper);
+                    completed(base, text(invalidAdmission, "jobId"), mapper, restarted);
+                    Map<?, ?> invalid = parity(liveBase, reader, "get_context", "/api/v1/context", currentDiscovery(), mapper);
+                    assertThat(text(invalid, "revision")).isEqualTo(revisionD);
+                    assertThat(text(map(invalid, "projectGuide"), "state")).isEqualTo("INVALID");
+                    assertSemanticMatrix(liveBase, reader, currentContext(revisionD), "ModernGateway", mapper);
+                    assertUnavailableDocument(liveBase, reader, currentContext(revisionD), "PROJECT_GUIDE.md", mapper);
+                    assertGuideExcludedFromSearch(liveBase, reader, currentContext(revisionD), mapper);
+                    Map<?, ?> recoveredAfterMovement = mcpBody(preparation, "get_job",
+                            Map.of("repositoryId", REPOSITORY_ID, "requestId", buildRequest), mapper);
+                    assertSameJob(recoveredAfterMovement, original);
+                    Map<?, ?> httpRecovered = successful(get(base, "/index/repositories/" + REPOSITORY_ID
+                            + "/jobs?requestId=" + buildRequest, ADMIN_TOKEN), mapper);
+                    assertThat(httpRecovered).isEqualTo(recoveredAfterMovement);
+                    Files.writeString(temporaryDirectory.resolve("current-revision"), revisionD);
+                }
+            }
             try {
                 Files.move(remotePath, temporaryDirectory.resolve("remote-unavailable"));
                 Files.move(seedPath, temporaryDirectory.resolve("seed-unavailable"));
@@ -156,14 +275,29 @@ class SemanticReviewJourneyIT {
                     Map<?, ?> after = map(reviewDetails, "after");
                     assertThat(text(before, "revision")).isEqualTo(revisionA);
                     assertThat(text(after, "revision")).isEqualTo(revisionB);
+                    assertThat(map(before, "context")).isEqualTo(context(reviewId, "BEFORE", revisionA));
+                    assertThat(map(after, "context")).isEqualTo(context(reviewId, "AFTER", revisionB));
+                    try (McpSyncClient reader = nativeClient(queryBase, QUERY_TOKEN, mapper)) {
+                        reader.initialize();
+                        Map<?, ?> coldCurrent = parity(queryBase, reader, "get_context", "/api/v1/context", currentDiscovery(), mapper);
+                        assertThat(text(coldCurrent, "revision")).isEqualTo(Files.readString(temporaryDirectory.resolve("current-revision")));
+                        assertThat(text(map(coldCurrent, "projectGuide"), "state")).isEqualTo("INVALID");
+                        assertUnavailableDocument(queryBase, reader, currentContext(text(coldCurrent, "revision")), "PROJECT_GUIDE.md", mapper);
+                        assertSemanticMatrix(queryBase, reader, context(reviewId, "BEFORE", revisionA), "LegacyGateway", mapper);
+                        assertSemanticMatrix(queryBase, reader, context(reviewId, "AFTER", revisionB), "ModernGateway", mapper);
+                        assertSemanticMatrix(queryBase, reader, currentContext(Files.readString(
+                                temporaryDirectory.resolve("current-revision"))), "ModernGateway", mapper);
+                    }
                     try (MongoClient evidenceClient = MongoClients.create(writerUri)) {
                         MongoCollection<Document> manifests = evidenceClient.getDatabase(DATABASE).getCollection("review_manifests");
                         Document original = manifests.find(new Document("reviewId", reviewId)).first();
                         Document changed = manifests.find(new Document("reviewId", changedInstallationReviewId)).first();
                         Document originalGeneration = original.get("before", Document.class).get("generation", Document.class);
                         Document changedGeneration = changed.get("before", Document.class).get("generation", Document.class);
-                        assertThat(originalGeneration.get("selected", Document.class).getString("generationId")).isEqualTo(baselineGeneration);
-                        assertThat(changedGeneration.get("selected", Document.class).getString("generationId")).isNotEqualTo(baselineGeneration);
+                        assertThat(originalGeneration.get("selected", Document.class)
+                                .get("generationId", Document.class).getString("value")).isEqualTo(baselineGeneration);
+                        assertThat(changedGeneration.get("selected", Document.class)
+                                .get("generationId", Document.class).getString("value")).isNotEqualTo(baselineGeneration);
                         assertThat(changedGeneration.get("fingerprint", Document.class))
                                 .isNotEqualTo(originalGeneration.get("fingerprint", Document.class));
                     }
@@ -194,6 +328,8 @@ class SemanticReviewJourneyIT {
                     Map<?, ?> comparisonContext = map(reviewDetails, "comparisonContext");
                     Map<?, ?> comparison = successful(post(queryBase, "/api/v1/git/comparisons", QUERY_TOKEN,
                             Map.of("comparisonContext", comparisonContext)), mapper);
+                    assertThat(((Number) map(comparison, "policyCoverage").get("excludedChanges")).longValue()).isZero();
+                    assertThat(mapList(map(comparison, "policyCoverage"), "reasons")).isEmpty();
                     Map<?, ?> checkoutChange = mapList(comparison, "items").stream()
                             .filter(item -> "src/main/java/example/Checkout.java".equals(map(item, "after").get("path"))).findFirst().orElseThrow();
                     Map<?, ?> patch = successful(post(queryBase, "/api/v1/git/file-diff", QUERY_TOKEN,
@@ -241,11 +377,23 @@ class SemanticReviewJourneyIT {
         assertThat(Files.exists(root.resolve("target"))).as("Maven seed A has no precreated target").isFalse();
     }
 
-    private static void createReadOnlyUser(String writerUri) {
-        try (MongoClient client = MongoClients.create(writerUri)) {
+    private static void createRuntimeUsers(String maintenanceUri) {
+        try (MongoClient client = MongoClients.create(maintenanceUri)) {
             MongoDatabase database = client.getDatabase(DATABASE);
+            List<Document> privileges = List.of(new Document("resource", new Document("db", DATABASE).append("collection", ""))
+                    .append("actions", List.of("find", "insert", "update", "remove", "listCollections", "listIndexes")));
+            database.runCommand(new Document("createRole", "runtime-writer").append("privileges", privileges).append("roles", List.of()));
+            database.runCommand(new Document("createUser", "review-writer").append("pwd", "write-password")
+                    .append("roles", List.of(new Document("role", "runtime-writer").append("db", DATABASE))));
             database.runCommand(new Document("createUser", "review-reader").append("pwd", "read-password")
                     .append("roles", List.of(new Document("role", "read").append("db", DATABASE))));
+        }
+    }
+
+    private static void assertNoMaintenance(String writerUri) {
+        try (MongoClient client = MongoClients.create(writerUri)) {
+            assertThatThrownBy(() -> client.getDatabase(DATABASE).runCommand(new Document("collMod", "repositories")
+                    .append("validationLevel", "strict"))).isInstanceOf(MongoCommandException.class);
         }
     }
 
@@ -295,19 +443,196 @@ class SemanticReviewJourneyIT {
         return revision;
     }
 
-    private GenericContainer<?> startIndexer(String image, String mongoUri, Path remote, Network network) {
+    private GenericContainer<?> startIndexer(String image, String mongoUri, Path remote, Network network, boolean guide) {
         GenericContainer<?> indexer = new GenericContainer<>(DockerImageName.parse(image))
                 .withNetwork(network)
                 .withExposedPorts(INDEXER_CONTAINER_PORT)
                 .withTmpFs(Map.of("/data/repos", "rw,noexec,nosuid,nodev,size=1g", "/data/jdtls", "rw,noexec,nosuid,nodev,size=1g"))
                 .withFileSystemBind(remote.toAbsolutePath().toString(), REMOTE_CONTAINER_PATH, BindMode.READ_ONLY)
-                .withCommand("--spring.mongodb.uri=" + mongoUri, "--server.address=0.0.0.0",
-                        "--server.port=" + INDEXER_CONTAINER_PORT, "--semantic.indexer.admin-token=" + ADMIN_TOKEN,
-                        "--semantic.repositories." + REPOSITORY_ID + ".url=file://" + REMOTE_CONTAINER_PATH,
-                        "--semantic.repositories." + REPOSITORY_ID + ".default-branch=main",
-                        "--semantic.index-jobs.poll-delay=20ms", "--spring.main.banner-mode=off");
+                .withCommand(indexerArguments(mongoUri, guide));
         indexer.start();
         return indexer;
+    }
+
+    private static String[] indexerArguments(String mongoUri, boolean guide) {
+        List<String> arguments = new ArrayList<>(List.of("--spring.mongodb.uri=" + mongoUri, "--server.address=0.0.0.0",
+                "--server.port=" + INDEXER_CONTAINER_PORT, "--semantic.indexer.admin-token=" + ADMIN_TOKEN,
+                "--semantic.repositories." + REPOSITORY_ID + ".url=file://" + REMOTE_CONTAINER_PATH,
+                "--semantic.repositories." + REPOSITORY_ID + ".default-branch=main",
+                "--semantic.index-jobs.poll-delay=20ms", "--spring.main.banner-mode=off"));
+        if (guide) arguments.add("--semantic.repositories." + REPOSITORY_ID + ".project-guide-path=PROJECT_GUIDE.md");
+        return arguments.toArray(String[]::new);
+    }
+
+    private static McpSyncClient nativeClient(String base, String token, JsonMapper mapper) {
+        return McpClient.sync(HttpClientStreamableHttpTransport.builder(base + "/mcp")
+                .jsonMapper(new JacksonMcpJsonMapper(mapper))
+                .httpRequestCustomizer((request, method, uri, body, context) -> request.header("X-Api-Token", token)).build())
+                .requestTimeout(Duration.ofSeconds(30)).initializationTimeout(Duration.ofSeconds(30)).build();
+    }
+
+    private static Map<String, Object> currentDiscovery() {
+        return Map.of("repositoryId", REPOSITORY_ID, "selector", Map.of("kind", "CURRENT"));
+    }
+
+    private static Map<String, Object> currentContext(String revision) {
+        return Map.of("kind", "CURRENT", "repositoryId", REPOSITORY_ID, "revision", revision);
+    }
+
+    private Map<?, ?> repositoryParity(String base, McpSyncClient client, JsonMapper mapper) throws Exception {
+        Map<?, ?> http = successful(get(base, "/api/v1/repositories", QUERY_TOKEN), mapper);
+        assertThat(mcpBody(client, "list_repositories", Map.of(), mapper)).isEqualTo(http);
+        return http;
+    }
+
+    private Map<?, ?> parity(String base, McpSyncClient client, String tool, String route,
+            Map<String, Object> request, JsonMapper mapper) throws Exception {
+        Map<?, ?> http = successful(post(base, route, QUERY_TOKEN, request), mapper);
+        assertThat(mcpBody(client, tool, request, mapper)).isEqualTo(http);
+        return http;
+    }
+
+    private static Map<?, ?> mcpError(McpSyncClient client, String tool, Map<String, Object> arguments, JsonMapper mapper) {
+        McpSchema.CallToolResult result = client.callTool(McpSchema.CallToolRequest.builder(tool).arguments(arguments).build());
+        assertThat(result.isError()).isTrue();
+        assertThat(mapper.readTree(((McpSchema.TextContent) result.content().getFirst()).text()))
+                .isEqualTo(mapper.readTree(mapper.writeValueAsString(result.structuredContent())));
+        return mapper.convertValue(result.structuredContent(), Map.class);
+    }
+
+    private void errorParity(String base, McpSyncClient client, String tool, String route,
+            Map<String, Object> arguments, Map<String, Object> httpArguments, int status, String code,
+            String token, JsonMapper mapper) throws Exception {
+        Map<?, ?> error = mcpError(client, tool, arguments, mapper);
+        assertThat(text(error, "code")).isEqualTo(code);
+        HttpResponse<String> http = post(base, route, token, httpArguments);
+        assertThat(http.statusCode()).as(http.body()).isEqualTo(status);
+        Map<?, ?> httpError = mapper.readValue(http.body(), Map.class);
+        assertThat(httpError).isEqualTo(error);
+    }
+
+    private void assertSemanticMatrix(String base, McpSyncClient client, Map<String, Object> readContext,
+            String gateway, JsonMapper mapper) throws Exception {
+        Map<?, ?> search = parity(base, client, "search_code", "/api/v1/search-code",
+                Map.of("context", readContext, "query", gateway), mapper);
+        assertThat(map(search, "context")).isEqualTo(readContext);
+        Map<?, ?> fact = mapList(search, "items").stream()
+                .filter(item -> "TYPE".equals(item.get("kind")) && gateway.equals(item.get("displayName"))).findFirst().orElseThrow();
+        String factId = text(fact, "factId");
+        Map<?, ?> source = parity(base, client, "read_source", "/api/v1/source", factSource(readContext, factId), mapper);
+        assertThat(text(source, "path")).isEqualTo("src/main/java/example/" + gateway + ".java");
+        assertThat(text(source, "content")).contains("class " + gateway);
+        assertThat(map(source, "factRange")).isEqualTo(map(fact, "range"));
+        assertThat(map(source, "context")).isEqualTo(readContext);
+        Map<?, ?> files = parity(base, client, "list_files", "/api/v1/files",
+                Map.of("context", readContext, "directory", "src/main/java/example"), mapper);
+        assertThat(mapList(files, "items")).anySatisfy(item ->
+                assertThat(text(item, "path")).isEqualTo("src/main/java/example/" + gateway + ".java"));
+        Map<?, ?> textResult = parity(base, client, "search_text", "/api/v1/search-text",
+                Map.of("context", readContext, "query", "new " + gateway, "directory", "src/main/java"), mapper);
+        assertThat(mapList(textResult, "items")).singleElement().satisfies(item -> {
+            assertThat(text(item, "path")).isEqualTo("src/main/java/example/Checkout.java");
+            assertThat(text(item, "snippet")).contains("new " + gateway + "().pay()");
+            assertThat(map(map(item, "range"), "start").get("line")).isEqualTo(0);
+        });
+        Map<?, ?> entries = parity(base, client, "list_entry_points", "/api/v1/entry-points",
+                Map.of("context", readContext), mapper);
+        assertThat(mapList(entries, "items")).isEmpty();
+        Map<?, ?> outline = parity(base, client, "get_outline", "/api/v1/outline",
+                Map.of("context", readContext, "target", Map.of("kind", "TYPE", "factId", factId)), mapper);
+        Map<?, ?> pay = mapList(outline, "items").stream().filter(item -> "METHOD".equals(item.get("kind"))
+                && "pay".equals(item.get("displayName"))).findFirst().orElseThrow();
+        Map<?, ?> relations = parity(base, client, "find_relations", "/api/v1/relations",
+                callers(readContext, text(pay, "factId")), mapper);
+        assertThat(mapList(relations, "items")).anySatisfy(item -> {
+            assertThat(text(map(item, "origin"), "canonical")).contains("Checkout");
+            assertThat(text(map(item, "occurrence"), "path")).isEqualTo("src/main/java/example/Checkout.java");
+        });
+        Map<String, Object> wrongKind = Map.of("context", readContext, "target", Map.of("kind", "TYPE", "factId", text(pay, "factId")));
+        errorParity(base, client, "get_outline", "/api/v1/outline", wrongKind, wrongKind,
+                400, "FACT_KIND_MISMATCH", QUERY_TOKEN, mapper);
+        Map<String, Object> invalidSearch = Map.of("context", readContext, "query", "x");
+        errorParity(base, client, "search_code", "/api/v1/search-code", invalidSearch, invalidSearch,
+                400, "INVALID_ARGUMENT", QUERY_TOKEN, mapper);
+        if ("REVIEW".equals(readContext.get("kind"))) {
+            Map<String, Object> mismatch = new java.util.HashMap<>(readContext);
+            mismatch.put("revision", "0".repeat(40));
+            Map<String, Object> request = Map.of("context", mismatch, "query", gateway);
+            errorParity(base, client, "search_code", "/api/v1/search-code", request, request,
+                    409, "REVIEW_CONTEXT_MISMATCH", QUERY_TOKEN, mapper);
+            Map<?, ?> discovery = parity(base, client, "get_context", "/api/v1/context",
+                    discoveryRequest((String) readContext.get("reviewId")), mapper);
+            assertThat(text(discovery, "state")).isEqualTo("READY");
+            assertThat(map(map(discovery, "BEFORE".equals(readContext.get("side")) ? "before" : "after"), "context"))
+                    .isEqualTo(readContext);
+        }
+    }
+
+    private String commitGuide(Git seed, Path root, String content, String message) throws Exception {
+        write(root, "PROJECT_GUIDE.md", content);
+        write(root, "OTHER.md", "# Not opted in\nOtherDocumentSentinel\n");
+        seed.add().addFilepattern(".").call();
+        String revision = seed.commit().setMessage(message).setAuthor("Fixture", "fixture@example.test")
+                .setCommitter("Fixture", "fixture@example.test").call().getId().name();
+        push(seed);
+        return revision;
+    }
+
+    private static String validGuide(String analyzedRevision) {
+        return """
+                # Project guide
+                ```json
+                {"formatVersion":1,"promptVersion":1,"repositoryId":"%s","analyzedRevision":"%s",
+                 "generatedAt":"2026-09-28T00:00:00Z","sourceScope":{"includedPaths":["src/main/java"],
+                 "excludedPaths":[],"limitations":["No runtime verification"]}}
+                ```
+                GuideOnlySentinel
+                """.formatted(REPOSITORY_ID, analyzedRevision);
+    }
+
+    private void assertGuide(String base, McpSyncClient reader, Map<?, ?> discovery, String analyzedRevision,
+            String importedRevision, String guideText, JsonMapper mapper) throws Exception {
+        Map<?, ?> guide = map(discovery, "projectGuide");
+        assertThat(text(guide, "state")).isEqualTo("AVAILABLE");
+        assertThat(text(guide, "importedRevision")).isEqualTo(importedRevision);
+        assertThat(text(map(guide, "provenance"), "analyzedRevision")).isEqualTo(analyzedRevision);
+        assertThat(text(guide, "freshness")).isEqualTo("NOT_VERIFIED");
+        assertThat(text(guide, "digest")).isEqualTo(HexFormat.of().formatHex(
+                MessageDigest.getInstance("SHA-256").digest(guideText.getBytes(StandardCharsets.UTF_8))));
+        Map<String, Object> readContext = currentContext(importedRevision);
+        Map<?, ?> source = parity(base, reader, "read_source", "/api/v1/source",
+                Map.of("context", readContext, "target", Map.of("kind", "FILE", "path", "PROJECT_GUIDE.md")), mapper);
+        assertThat(text(source, "content")).isEqualTo(guideText);
+        assertThat(map(source, "projectGuide")).isEqualTo(guide);
+        Map<?, ?> files = parity(base, reader, "list_files", "/api/v1/files", Map.of("context", readContext), mapper);
+        assertThat(mapList(files, "items")).anySatisfy(item -> {
+            assertThat(text(item, "path")).isEqualTo("PROJECT_GUIDE.md");
+            assertThat(text(item, "contentKind")).isEqualTo("PROJECT_GUIDE");
+        }).noneSatisfy(item -> assertThat(text(item, "path")).isEqualTo("OTHER.md"));
+        assertGuideExcludedFromSearch(base, reader, readContext, mapper);
+        assertUnavailableDocument(base, reader, readContext, "OTHER.md", mapper);
+    }
+
+    private void assertGuideExcludedFromSearch(String base, McpSyncClient reader, Map<String, Object> readContext,
+            JsonMapper mapper) throws Exception {
+        for (String tool : List.of("search_code", "search_text")) {
+            Map<?, ?> result = parity(base, reader, tool, tool.equals("search_code") ? "/api/v1/search-code" : "/api/v1/search-text",
+                    Map.of("context", readContext, "query", "GuideOnlySentinel"), mapper);
+            assertThat(mapList(result, "items")).isEmpty();
+        }
+    }
+
+    private void assertUnavailableDocument(String base, McpSyncClient reader, Map<String, Object> readContext,
+            String path, JsonMapper mapper) throws Exception {
+        Map<String, Object> request = Map.of("context", readContext, "target", Map.of("kind", "FILE", "path", path));
+        errorParity(base, reader, "read_source", "/api/v1/source", request, request,
+                404, "GIT_EVIDENCE_NOT_FOUND", QUERY_TOKEN, mapper);
+    }
+
+    private static void assertSameJob(Map<?, ?> actual, Map<?, ?> expected) {
+        for (String field : List.of("jobId", "requestId", "repositoryId", "operation", "phase", "requested", "target", "preparationBranch")) {
+            assertThat(actual.get(field)).as("original job %s", field).isEqualTo(expected.get(field));
+        }
     }
 
     private RunningProcess startQuery(Path jar, String mongoUri, int port) throws IOException {
@@ -390,9 +715,13 @@ class SemanticReviewJourneyIT {
             Map<?, ?> callers = mcpBody(client, "find_relations", callers(context(reviewId, "AFTER", revisionB), modernPay), mapper);
             assertThat(mapList(callers, "items")).anySatisfy(item -> assertThat(text(map(item, "origin"), "canonical")).contains("Checkout"));
             Map<?, ?> comparison = mcpBody(client, "compare_revisions", Map.of("comparisonContext", comparisonContext), mapper);
+            assertThat(comparison).isEqualTo(successful(post(base, "/api/v1/git/comparisons", QUERY_TOKEN,
+                    Map.of("comparisonContext", comparisonContext)), mapper));
             Map<?, ?> checkoutChange = mapList(comparison, "items").stream()
                     .filter(item -> "src/main/java/example/Checkout.java".equals(map(item, "after").get("path"))).findFirst().orElseThrow();
             Map<?, ?> patch = mcpBody(client, "get_file_diff", Map.of("comparisonContext", comparisonContext, "changeId", text(checkoutChange, "changeId")), mapper);
+            assertThat(patch).isEqualTo(successful(post(base, "/api/v1/git/file-diff", QUERY_TOKEN,
+                    Map.of("comparisonContext", comparisonContext, "changeId", text(checkoutChange, "changeId"))), mapper));
             assertThat(text(patch, "patch")).contains("LegacyGateway", "ModernGateway");
             assertMapperVisibleThroughHttpAndMcp(base, client, reviewId, revisionA, revisionB, mapper);
         }
@@ -400,7 +729,7 @@ class SemanticReviewJourneyIT {
 
     private void assertMapperVisibleThroughHttpAndMcp(String base, McpSyncClient client, String reviewId,
             String revisionA, String revisionB, JsonMapper mapper) throws Exception {
-        Map<String, Object> currentContext = Map.of("kind", "CURRENT", "repositoryId", REPOSITORY_ID, "revision", revisionA);
+        Map<String, Object> currentContext = context(reviewId, "BEFORE", revisionA);
         Map<String, Object> currentSearchRequest = Map.of("context", currentContext, "query", "findActive", "kinds", List.of("MAPPER_STATEMENT"));
         Map<?, ?> currentSearch = successful(post(base, "/api/v1/search-code", QUERY_TOKEN, currentSearchRequest), mapper);
         assertThat(mapList(currentSearch, "items")).singleElement()
@@ -432,9 +761,13 @@ class SemanticReviewJourneyIT {
     }
 
     private Map<?, ?> completed(String base, String jobId, JsonMapper mapper, GenericContainer<?> indexer) throws Exception {
+        return completedLookup(base, "jobId=" + jobId, mapper, indexer);
+    }
+
+    private Map<?, ?> completedLookup(String base, String lookup, JsonMapper mapper, GenericContainer<?> indexer) throws Exception {
         Instant deadline = Instant.now().plus(JOB_TIMEOUT);
         while (Instant.now().isBefore(deadline)) {
-            HttpResponse<String> response = get(base, "/index/repositories/" + REPOSITORY_ID + "/jobs?jobId=" + jobId, ADMIN_TOKEN);
+            HttpResponse<String> response = get(base, "/index/repositories/" + REPOSITORY_ID + "/jobs?" + lookup, ADMIN_TOKEN);
             if (response.statusCode() == 200) {
                 Map<?, ?> status = mapper.readValue(response.body(), Map.class);
                 if ("COMPLETE".equals(status.get("phase"))) {
@@ -444,7 +777,7 @@ class SemanticReviewJourneyIT {
             }
             Thread.sleep(100L);
         }
-        throw new AssertionError("job did not complete: " + jobId + System.lineSeparator() + indexer.getLogs());
+        throw new AssertionError("job did not complete: " + lookup + System.lineSeparator() + indexer.getLogs());
     }
 
     private void awaitHttp(String url, String token, GenericContainer<?> indexer) throws Exception {
@@ -493,7 +826,7 @@ class SemanticReviewJourneyIT {
     }
 
     private static HttpResponse<String> postUri(String uri, String token, String body) throws IOException, InterruptedException {
-        return HttpClient.newHttpClient().send(HttpRequest.newBuilder(URI.create(uri)).header("X-Api-Token", token)
+        return HTTP.send(HttpRequest.newBuilder(URI.create(uri)).timeout(Duration.ofSeconds(30)).header("X-Api-Token", token)
                 .header("Content-Type", "application/json").POST(HttpRequest.BodyPublishers.ofString(body)).build(), HttpResponse.BodyHandlers.ofString());
     }
 
@@ -502,14 +835,10 @@ class SemanticReviewJourneyIT {
     }
 
     private static HttpResponse<String> getUri(String uri, String token) throws IOException, InterruptedException {
-        return HttpClient.newHttpClient().send(HttpRequest.newBuilder(URI.create(uri)).header("X-Api-Token", token).GET().build(),
+        return HTTP.send(HttpRequest.newBuilder(URI.create(uri)).timeout(Duration.ofSeconds(30)).header("X-Api-Token", token).GET().build(),
                 HttpResponse.BodyHandlers.ofString());
     }
 
-    private static String accepted(HttpResponse<String> response, JsonMapper mapper) throws Exception {
-        assertThat(response.statusCode()).as(response.body()).isEqualTo(202);
-        return text(mapper.readValue(response.body(), Map.class), "jobId");
-    }
 
     private static Map<?, ?> acceptedReview(HttpResponse<String> response, JsonMapper mapper) throws Exception {
         assertThat(response.statusCode()).as(response.body()).isEqualTo(202);
@@ -521,7 +850,6 @@ class SemanticReviewJourneyIT {
     private static void assertReviewComparisonType(Map<?, ?> response) {
         Map<?, ?> review = map(response, "review");
         assertThat(text(map(review, "selection"), "kind")).isEqualTo("COMMIT");
-        assertThat(response.containsKey("comparisonType")).isFalse();
     }
 
     private static Map<?, ?> successful(HttpResponse<String> response, JsonMapper mapper) throws Exception {
@@ -581,6 +909,7 @@ class SemanticReviewJourneyIT {
                 try {
                     if (!process.waitFor(10, TimeUnit.SECONDS)) {
                         process.destroyForcibly();
+                        assertThat(process.waitFor(10, TimeUnit.SECONDS)).as("forced Query/bootstrap shutdown").isTrue();
                     }
                 } catch (InterruptedException exception) {
                     Thread.currentThread().interrupt();

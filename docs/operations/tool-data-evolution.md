@@ -230,6 +230,16 @@ a separate reader identity and must not receive schema-maintenance, writer, Git,
 checkout, source, or JDT permissions. Close admissions before step 2 and reopen
 them only after Query is deployed against verified compatible data.
 
+Client cutover is part of the same release: replace old Query callers with the
+thirteen shared operations and exact CURRENT/REVIEW contexts, plus four private
+Indexer preparation/status tools. Update both independent MCP entries and their
+tokens; do not retain removed route/tool aliases or raw snapshot/comparison-ID
+request forms. Use the shipped OpenAPI documents and live MCP schemas together.
+After rebuilding, smoke saved-requestId recovery, cold UNINDEXED→READY discovery,
+fixed branch publication, guide provenance, pinned review and HTTP/native MCP
+parity before reopening service. Actual model-client, TLS and capacity evidence
+must be recorded separately from SDK/schema checks.
+
 The backup in step 3 is coherent only when it includes repository pointers, index
 jobs, generation manifests and every referenced projection/source payload, Git
 evidence, review manifests, and their referenced generations/comparison/snapshots.

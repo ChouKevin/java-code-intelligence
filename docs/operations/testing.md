@@ -11,7 +11,8 @@ the two test sets because later profile values overwrite the same properties.
 | Mongo integration | `mvn --batch-mode --no-transfer-progress -Pmongo-it verify` | Java 21, Maven, and Docker | Mongo storage and generation contracts, including `SourceSliceContractIT`; this profile is separate from the ordinary suite |
 | Full JDT LS profile | `JDTLS_HOME=/opt/jdtls mvn --batch-mode --no-transfer-progress -Pjdtls-it test` | Java 21, Maven, and a real JDT LS installation; some scenarios also need Docker | All scenarios tagged `jdtls-it`; a valid directory satisfies the basic prerequisite, while the existing startup checks report an incomplete installation |
 | Local fixture contract | `JDTLS_HOME=/opt/jdtls scripts/test-indexer-query-contract.sh` | Java 21, Maven, Docker, and a real JDT LS installation | Payment, order, and video fixture indexing through the exporter and temporary Mongo to a temporary Query HTTP/MCP server, followed by projection evolution; it does not use an existing deployment |
-| Semantic review journey | `scripts/test-semantic-review-journey.sh` | Java 21, Maven, Docker, an existing production Indexer image selected by `SEMANTIC_REVIEW_INDEXER_IMAGE`, and fresh locally packaged Indexer and Query jars | Real-image A→B review, compatible generation reuse and changed-installation rebuild under UID isolation, then cold Query HTTP/MCP over read-only Mongo including mapper XML facts |
+| Semantic/codebase journey | `SEMANTIC_REVIEW_INDEXER_IMAGE=semantic-indexer:review-local scripts/test-semantic-review-journey.sh` | Java21, Maven, Docker, freshly built production Indexer image and executable jars | Maintenance/writer/reader separation, cold fixed-branch MCP preparation, requestId recovery, guide states, published/current/review transitions, installation-fingerprint reuse and cold Mongo-only Query |
+| Git/recovery journey | `JDTLS_HOME=/opt/jdtls scripts/test-git-review-context-journey.sh` | Java21, Maven, Docker, real JDT LS and fresh executable jars | Independent host JVMs, COMMIT root/ordinary/merge and direct RANGE equal/reverse/divergent, metadata/review requestId recovery, HTTP/native MCP parity, source/patch paging and cross-JVM READY validation |
 | Deployed Query profile | `mvn --batch-mode --no-transfer-progress -Pdeployed-it test` | Java 21, Maven, an available Query deployment, and the three deployment variables below | The actual deployed Query HTTP/MCP contract |
 | Fixture Maven tests | See commands below | Java 21 and Maven | Focused deterministic payment, order, and video fixture project tests |
 | Image checks | See commands below | Docker | Indexer JDT LS image smoke and Query image isolation |
@@ -101,23 +102,35 @@ evaluate an LLM Agent. The deployed profile is the entry point for an existing
 Query deployment; neither profile turns an empty indexed result into a business
 conclusion.
 
-The semantic review journey is opt-in and fails if `JDTLS_HOME` or either fresh
-executable jar is absent. It deliberately does not run in the ordinary Docker-
-and JDT-free suite. Its Query process has a temporary working directory and
-receives only the Mongo read credential; it is never given an Indexer URL,
-repository checkout, source tree, or JDT LS path.
+Both packaged-service journeys are explicitly opt-in; their ordinary/profile
+skips are not acceptance. Dedicated scripts fail missing prerequisites rather
+than turning an unavailable image/jar/JDT installation into success. Build the
+production Indexer image before the semantic journey. That journey exercises
+LINUX_UID; the Git host journey deliberately uses LOCAL_TRUSTED only for its
+controlled fixture. The image journey gives cold Query a separate Mongo read
+credential. Both cold readers have no configured Indexer URL, Git/JDT path or
+source-workspace fallback; the host Git fixture is not a least-privilege DB-role
+certification. Its intentionally >4-MiB search-budget source uses an explicit
+8-MiB per-file export ceiling; the production default remains 2 MiB.
 
-## Actual OMP and deployment acceptance
+The Git restart scenario first publishes real evidence, stops Indexer, then
+constructs the original job's publication-before-terminal durable state. A new
+JVM must validate the existing READY graph/digest and reconcile the same job
+without replacing the comparison. This is a recovery-state regression, not
+an observed real crash.
 
-The semantic-review journey is Task 9 scripted local evidence. It proves a
-disposable real-JDT A/B flow and a cold Mongo-only Query process; it does not run
-OMP, validate an actual VM hostname/certificate, or exercise private deployment
-credentials. An actual OMP acceptance requires a separately prepared local
-Indexer/Mongo/Query environment using an actual committed approved repository,
-one captured-A/single-B review submission **through the review endpoint rather
-than ordinary BUILD admission**, immediate typed admission/status and unchanged-
-current checks, a persistent cold Query reader, and sanitized external-client
-evidence. See the [canonical review admission and stop procedure](semantic-review.md#current-generations-and-review-preparation).
+## Actual clients and deployment acceptance
+
+Scripted real-JDT/native SDK journeys prove their stated local boundaries, not
+OMP/Codex/Claude model behavior, a VM certificate or private credentials. Actual
+client acceptance uses isolated prepared services and a committed approved
+repository. Check tools discovery on both endpoints, model-readable results,
+saved-requestId preparation/recovery and at least one exact-context review
+diff→relations/outline→source journey. Preserve current, stop Indexer and retain
+the cold Query evidence. Record client/version, calls/bytes/time and bounded
+source citations; authentication failure remains unverified, not SDK success.
+See [MCP Agent Acceptance](mcp-agent-acceptance.md) and the
+[review procedure](semantic-review.md#current-generations-and-review-preparation).
 A remote deployment additionally requires the approved VM, private Mongo/admin
 path, safe credential distribution, Query TLS certificate and hostname
 validation, and its real OMP client configuration.

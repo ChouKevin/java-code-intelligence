@@ -12,8 +12,10 @@ contains two independently deployable applications and one shared model module:
 - **Model** defines framework-neutral identities, facts, relations, repository
   values, and persisted index contracts.
 
-There is no LLM, chat, prompt, embedding, vector model, review service, or
-findings store in this repository. OMP is an external evidence client.
+Neither application runs an LLM, chat, embedding/vector model, or findings store.
+OMP, Codex and Claude Code are external evidence clients. An optional
+[external guide-authoring prompt](docs/operations/repository-context-prompt.md)
+is an operator handoff document, not a service-side model runtime.
 
 ## Where changes belong
 
@@ -109,32 +111,41 @@ credential, checkouts, and JDT workspaces. See
 for the single-VM topology, secret-file references, TLS, release, retention,
 and OMP workflow.
 
-MCP exposes thirty raw tool names:
+Query exposes thirteen tools, with the same inputs/results through HTTP:
 
-- Current discovery/evidence: `list_repositories`, `get_repository`,
-  `search_code`, `get_fact_source`, `list_entry_points`, `find_api_routes`,
-  `find_event_listeners`, `list_type_members`, `find_method_implementations`,
-  `find_references`, `find_callers`, `find_callees`
-- Historical Git evidence: `list_git_branches`, `list_git_commits`,
-  `compare_revisions`, `get_file_diff`, `list_files`, `read_file`,
-  `search_text`
-- READY-review discovery/side evidence: `get_review`, `review_search_code`,
-  `review_get_fact_source`, `review_list_entry_points`,
-  `review_find_api_routes`, `review_find_event_listeners`,
-  `review_list_type_members`, `review_find_method_implementations`,
-  `review_find_references`, `review_find_callers`, `review_find_callees`
+- Discovery: `list_repositories`, `get_context`
+- Code/source: `search_code`, `list_files`, `search_text`, `read_source`,
+  `list_entry_points`, `get_outline`, `find_relations`
+- Git: `list_git_branches`, `list_git_commits`, `compare_revisions`,
+  `get_file_diff`
 
-The matching HTTP routes are documented in
+The matching routes and request examples are in
 [Semantic Query Operations](docs/operations/semantic-index-operations.md).
-Current discovery returns the exact `repositoryId`/`revision` for the ten
-current semantic tools. A stale request returns `REVISION_OUTDATED` with
-`currentRevision`; rediscover fact IDs before a fact-bound retry.
+`get_context` accepts `CURRENT`, `REVIEW`, `COMMIT`, or `RANGE` discovery
+selectors; discovery never prepares evidence. Copy returned READY `context`
+or review `before.context`/`after.context` into the same navigation tools.
+CURRENT requires the exact published revision. `REVISION_OUTDATED` requires
+rediscovery and new fact IDs, not silent revision replacement.
 
-Use `get_review` to discover READY BEFORE/AFTER revisions, side generation/snapshot IDs,
-and comparison ID. Send `repositoryId`, `reviewId`, `side`, and exact side
-`revision` to every `review_` semantic tool. Review-owned Git IDs pass the same
-READY owner gate. Query never replaces side identity with current, exposes an
-arbitrary generation ID, or starts Indexer to recover missing evidence.
+Review contexts require exact `repositoryId`, `reviewId`, `side`, and side
+`revision`. Copy `comparisonContext` into comparison/patch calls. A root
+commit has an `EMPTY_TREE` before endpoint and no BEFORE semantic context.
+Generation, snapshot and comparison IDs are not public context overrides.
+There are no separate `review_` navigation tools or old-route aliases.
+
+Only selected Java, mapper-root XML, and at most one configured valid Markdown
+project guide are readable. Generic configuration documents are excluded before
+publication. Guides are marked `PROJECT_GUIDE`, retain separate author
+`analyzedRevision` and actual `importedRevision`, and always report
+`freshness: NOT_VERIFIED`; they do not become semantic facts or text-search
+evidence. Missing/invalid guides do not block code indexing. See the
+[guide prompt and review procedure](docs/operations/repository-context-prompt.md).
+
+No configured repository is indexed automatically. A fresh database can expose
+`UNINDEXED`; an active BUILD is reported separately from a published current.
+While preparing a newer revision, reads keep the old published identity until
+publication. Failed preparation preserves the old pointer; inspect the original
+job rather than infer success from metadata refresh or admission.
 
 Git evidence is Mongo-only and source-visible only for explicit
 `semantic.query.git-evidence.allowed-repositories`; the allowlist is empty by
@@ -170,6 +181,7 @@ mvn --batch-mode --no-transfer-progress test
 mvn --batch-mode --no-transfer-progress -Pmongo-it verify
 JDTLS_HOME=/opt/jdtls scripts/test-indexer-query-contract.sh
 JDTLS_HOME=/opt/jdtls scripts/test-semantic-review-journey.sh
+JDTLS_HOME=/opt/jdtls scripts/test-git-review-context-journey.sh
 ```
 
 See [Testing and verification](docs/operations/testing.md) for entry-point

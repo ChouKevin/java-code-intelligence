@@ -104,7 +104,8 @@ Use three Mongo identities in the `semantic` database:
 
 - `semantic-schema-maintenance` creates/verifies the schema/index catalogue and
   is used only for bootstrap;
-- `semantic-index-writer` owns Indexer runtime writes;
+- `semantic-index-writer` has data find/insert/update/remove and
+  listCollections/listIndexes, not schema DDL;
 - `semantic-query-reader` has only the reads Query needs.
 
 Create these identities through the VM's approved secret/DB provisioning path;
@@ -147,6 +148,10 @@ SEMANTIC_DATA_ROOT=/srv/semantic/indexer/checkouts
 JDTLS_WORKSPACE_DATA_ROOT=/srv/semantic/indexer/jdtls
 ```
 
+LINUX_UID also requires actual cross-UID filesystem ownership and child-process
+privileges. An unprivileged host JVM with a JDT directory is insufficient.
+LOCAL_TRUSTED is an explicit trusted-fixture mode, not production UID isolation.
+
 Register each approved repository in Indexer configuration. `url` is the
 read-only Git URL and `default-branch` supplies ordinary admission; a local
 operator clone is never the configured checkout:
@@ -157,6 +162,8 @@ semantic:
     orders:
       url: https://git.example.invalid/team/orders.git
       default-branch: main
+      # Optional exact, reviewed Markdown exception:
+      project-guide-path: docs/codebase/overview.md
 ```
 
 Keep Query's source-evidence gate empty until an administrator approves a whole
@@ -192,6 +199,22 @@ worker. The default ports are Spring Boot's `8080`; set an explicit private
 `server.address`/`server.port` in deployment configuration rather than relying
 on public defaults.
 
+Startup publishes configured registry metadata only; it does not index repositories.
+Connect the external client to two independently credentialed MCP entries: private
+Indexer for preparation/status, Query for evidence. Discover `UNINDEXED`, save a
+canonical requestId, call `prepare_codebase` for the configured branch, recover/poll
+that identity, then rediscover READY and exercise outline/source/relations.
+Metadata readiness is not codebase readiness. A later active BUILD is separate
+from the old published pointer; failure preserves the old publication.
+
+The optional [external guide prompt](repository-context-prompt.md) runs on an
+independent approved clone, not inside either application. Review and commit its
+output to the fixed branch before preparing a new current. Missing/invalid guides
+do not block code. Query marks readable guides PROJECT_GUIDE, retains author
+analyzedRevision separately from importedRevision/digest, and reports NOT_VERIFIED
+freshness. Guide text is not semantic/text-search evidence, and historical sides
+never borrow a current document.
+
 Size Indexer/JDT, Query, and Mongo separately. The JDT LS spike observed about
 1 GiB RSS per trivial workspace (1,030,328 KiB at `-Xmx768m` and 1,045,700 KiB
 at `-Xmx2g`); its Equinox/OSGi/JDK baseline means heap flags are not a container
@@ -203,11 +226,12 @@ or capacity claim.
 
 ## Current generations and review preparation
 
-Current-generation tools are current-only. Discover a repository with
-`list_repositories` or `get_repository`, copy its returned `repositoryId` and
-exact current `revision`, and use them with the ten semantic tools. A stale
-request receives `REVISION_OUTDATED` and `currentRevision`; rediscover
-revision-scoped fact IDs before a fact-bound retry.
+Discover visible repositories with `list_repositories`, then call `get_context`
+with `selector: {"kind":"CURRENT"}`. Copy its READY `context` into the unified
+navigation tools. Exact current SHA is mandatory; `REVISION_OUTDATED` requires
+rediscovery and revision-scoped fact IDs before a fact-bound retry. Structural
+overview and omitted/coverage fields describe indexed evidence, not business
+completeness.
 
 A review is separate immutable READY membership. Before submitting, the client
 creates and durably saves a canonical lowercase UUID `requestId`. Choose one
@@ -255,10 +279,11 @@ available semantic sides and Git evidence. An accepted job can still be
 records `comparisonId`, `previousSnapshotId`, and `currentSnapshotId`; the
 root's previous snapshot is empty but real, without a fabricated revision.
 
-For a root comparison, omit `previous` when calling the ordinary
-`compare_revisions` and `get_file_diff` MCP tools (or the equivalent Query HTTP
-endpoints). Their responses carry `previous: null`; use the returned
-`comparisonId`, current SHA, and change ID to read the root `ADD` patch.
+For a root comparison, copy the returned `comparisonContext` unchanged into
+`compare_revisions` and `get_file_diff`; its before endpoint explicitly has
+`kind: EMPTY_TREE`. Read an ADD patch using the returned changeId. There is no
+BEFORE semantic context, omitted-previous compatibility form or public raw-ID
+override.
 
 If the job is `operation: BUILD` or selection/review identity differs, stop
 and investigate rather than interpreting it as review progress. An unrelated
@@ -276,24 +301,20 @@ identity, without Git resolution or new work. A retry after an inspected failure
 requires explicit new intent and a new UUID. Terminal request identities have
 no automatic TTL.
 
-Give OMP the Query base/MCP endpoint, a secure reference to the Query-token
-file, `repositoryId`, and `reviewId`. It first calls `get_review`: the response
-supplies `selection`, fixed `resolvedEndpoints`, `before.kind`, optional
-`before.endpoint`, required `after`, snapshots, and comparison identity.
-Inspect the direct before → after Git comparison/diff. Use the ten semantic
-operations only on present `BEFORE` and `AFTER` generations with exact side
-revision; on `EMPTY_TREE` no BEFORE semantic lookup is possible:
+Give the external client the Query MCP endpoint, secure Query credential,
+repositoryId and reviewId. Call `get_context` with
+`selector: {"kind":"REVIEW","reviewId":"…"}`. COMMIT/RANGE selectors can also
+discover the latest preparation state for that exact requested selection.
+Discovery does not prepare anything; NOT_PREPARED/PREPARING/FAILED returns no
+readable half-context.
 
-1. `review_search_code`
-2. `review_get_fact_source`
-3. `review_list_entry_points`
-4. `review_find_api_routes`
-5. `review_find_event_listeners`
-6. `review_list_type_members`
-7. `review_find_method_implementations`
-8. `review_find_references`
-9. `review_find_callers`
-10. `review_find_callees`
+Copy READY `comparisonContext` for direct comparison/patch calls and each present
+`before.context`/`after.context` for the same seven navigation tools:
+`search_code`, `list_files`, `search_text`, `read_source`, `list_entry_points`,
+`get_outline`, `find_relations`. Source targets distinguish FACT from FILE;
+outline targets distinguish TYPE from FILE; relation selects CALLERS, CALLEES,
+IMPLEMENTATIONS or REFERENCES. Each REVIEW context contains exact repositoryId,
+reviewId, side and revision. There are no separate review-prefixed tools.
 
 Query selects no arbitrary historical generation. Each side call is pinned to
 READY membership; a wrong side/revision is `REVIEW_CONTEXT_MISMATCH`. Unknown
@@ -307,12 +328,12 @@ fill missing data.
 
 OMP is an ordinary external MCP/HTTP client. For a fuzzy question such as
 "which APIs belong to this class or module?", it must discover the repository
-and current revision, search ASCII code-token candidates, list HTTP entry
-points, verify the handler, and read source. If the candidate is a service,
-follow callers/references as needed and inspect the relevant source. Do not use
-`find_api_routes` as a fuzzy lookup: it requires the exact HTTP method and path.
-Read continuations until completion where the response supplies a cursor or
-page; an empty code-token search is not proof that a feature does not exist.
+and current context, search code-symbol candidates, list HTTP entry points,
+verify the handler, and read source. If the candidate is a service, follow
+CALLERS/REFERENCES through `find_relations`. `list_entry_points` combines typed
+filters; do not confuse an exact route filter with fuzzy symbol search.
+Read continuations until completion. An empty search or an empty budget-limited
+text page is not proof that a feature does not exist.
 
 For a review, inspect the direct diff first and retain explicit BEFORE/AFTER contexts.
 Every finding needs the issue, severity, triggering condition, impact, and
@@ -327,9 +348,10 @@ Record only sanitized evidence: repository/revision/review and evidence IDs,
 operation count, serialized response bytes, elapsed time, checked scope, source
 path/line ranges, and finding/no-finding limits. Never record a token, URI,
 private hostname, full source body, local path, or model transcript. Keep three
-evidence classes separate: Task 9 scripted local journey; an actual local OMP
-journey; and remote VM/TLS/private-credential acceptance. The latter remains an
-external prerequisite until independently exercised.
+evidence classes separate: scripted native SDK journeys, actual OMP/Codex/Claude
+model-client journeys, and remote VM/TLS/private-credential acceptance. Record
+unavailable authentication explicitly rather than treating tool discovery or an
+SDK call as model-side review proof.
 
 The general `mongo-it` and `jdtls-it` profiles skip their explicitly enabled
 packaged-service journeys. Run `scripts/test-git-review-context-journey.sh` and
@@ -354,13 +376,14 @@ Perform this order:
 3. Take one coherent backup of repository pointers, manifests and their
    projection/source payloads, jobs, Git evidence, and the complete review
    reference graph.
-4. With the maintenance identity run schema-4 bootstrap and verify its named
-   indexes (including review ownership, active-job, sealed-generation reuse,
-   generation identity, and Git ordinal/ID indexes).
+4. Explicitly replace or clear the approved old dataset, run schema-4 bootstrap
+   with maintenance identity and verify named indexes, including durable
+   requestId uniqueness, review ownership, active-job, sealed-generation reuse
+   and ordered Query/Git indexes. Do not leave mixed-version payloads reachable.
 5. Run the schema-4 Indexer with the writer identity. Rebuild every approved
    repository's current generation so its projections and semantic analysis
    evidence are compatible.
-6. Reprepare standalone Git evidence as necessary. Create new reviews from
+6. Refresh approved branch metadata and create needed COMMIT/RANGE reviews from
    fetched reachable commits; no published current generation is required.
 7. Verify manifests/evidence/indexes, deploy Query, then reopen admissions.
 
