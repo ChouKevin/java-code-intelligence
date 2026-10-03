@@ -5,6 +5,84 @@ uses the existing Indexer, Query, and MongoDB processes; it does not add a
 review service, model, prompt runtime, chat history, or findings store. An
 external client such as OMP interprets evidence returned by Query.
 
+## Startup and repository onboarding
+
+Use this order for the first deployment or the first approved repository.
+Repository registration, semantic indexing, and optional guide authoring are
+different operations. There is no automatic indexing or summarization at startup.
+
+1. **Provision the runtime.** Use Java 21, MongoDB, and the production Indexer
+   image with its restricted JDT LS analysis child. Follow
+   [topology and storage](#single-vm-topology-and-trust-boundaries) and
+   [credentials and configuration](#credentials-mongo-roles-and-configuration).
+   Prepare distinct maintenance, Indexer writer, and Query reader Mongo identities,
+   separate API tokens, read-only Git credentials, private networking and approved
+   Query ingress. Do not give Query checkout/JDT mounts or an Indexer endpoint.
+2. **Register the repository.** Configure Indexer's `semantic.repositories` entry
+   with a stable repository ID, Git URL and fixed `default-branch`; optionally set
+   `project-guide-path`. Explicitly approve the same ID in Query's
+   `semantic.query.git-evidence.allowed-repositories` before source/patch reading.
+   Apply configuration through the deployment's normal restart/release procedure;
+   `prepare_codebase` does not register a URL or change the configured branch.
+3. **Optionally author a project guide.** On an independent approved clone, use the
+   [shared external-agent prompt](repository-context-prompt.md). Limit reading to
+   the authorized source scope, review references and sensitive content, and commit
+   the reviewed guide through the target repository's normal PR process to the
+   fixed branch. Match its path to `project-guide-path`. Do not use an
+   Indexer-managed checkout. Skip this step when no guide is needed: basic code
+   indexing does not depend on a summary, model or guide.
+4. **Bootstrap, then start.** Build from the reactor root if using local artifacts:
+
+   ```bash
+   mvn --batch-mode --no-transfer-progress -DskipTests package
+   docker build -f Dockerfile.indexer -t java-semantic-indexer:uat .
+   docker build -f Dockerfile.query -t java-semantic-query:uat .
+   ```
+
+   Run the documented schema-bootstrap command with the **maintenance** Mongo URI,
+   then start Indexer with its **writer** URI and Query with its **reader** URI.
+   Runtime configuration and schema bootstrap are described
+   [below](#credentials-mongo-roles-and-configuration); the Indexer image launch and
+   ownership prerequisites are in [topology](#single-vm-topology-and-trust-boundaries).
+   Choose explicit private bind addresses/ports. Schema 4 is a clean cutover;
+   upgrading older persisted data requires the
+   [release/rebuild sequence](tool-data-evolution.md), not merely restarting.
+5. **Connect the MCP client.** A preparation-capable client needs two server
+   entries: private Indexer `/mcp` with `X-Api-Token` from
+   `SEMANTIC_INDEXER_ADMIN_TOKEN`, and Query `/mcp` with the separate
+   `SEMANTIC_QUERY_API_TOKEN`. Use URLs reachable from that client, not a container's
+   loopback address. Tool discovery should show preparation/status tools on Indexer
+   and evidence tools on Query. Evidence-only clients need Query alone. Never put
+   populated credentials into committed client configuration.
+6. **Prepare the first codebase.** Discover `list_repositories` and
+   `get_context` with `{"repositoryId":"orders","selector":{"kind":"CURRENT"}}`.
+   A newly registered repository is UNINDEXED. Generate and durably save a canonical
+   lowercase UUID, then call Indexer:
+
+   ```json
+   {
+     "repositoryId": "orders",
+     "requestId": "<saved-canonical-lowercase-uuid>"
+   }
+   ```
+
+   Pass that object to `prepare_codebase`; do not add branch/revision overrides.
+   Use `get_job` with the same `repositoryId` and saved `requestId` until terminal.
+   ACCEPTED is not READY. An unknown submission outcome requires original-intent
+   lookup; a failed job requires inspection before an explicit new intent.
+7. **Read only published evidence.** After COMPLETE, rediscover CURRENT READY and
+   copy the returned exact context into `get_outline`, `read_source` and
+   `find_relations`. Inspect coverage/omission fields; unresolved or empty relations
+   do not prove dead code. If a guide is AVAILABLE, read it as PROJECT_GUIDE and
+   retain its `NOT_VERIFIED` freshness. To review a historical change, use
+   [separate review preparation](#current-generations-and-review-preparation);
+   do not replace current with the review commit.
+
+For later source or guide commits, submit a new saved codebase preparation intent
+against the configured branch. Guide generation is not repeated by the service;
+guide freshness is not automatically certified. Client-specific acceptance and
+observed verification limits are in [MCP Agent Acceptance](mcp-agent-acceptance.md).
+
 ## Single-VM topology and trust boundaries
 
 Run three processes on the VM:

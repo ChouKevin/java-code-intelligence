@@ -54,6 +54,31 @@ or business conclusions.
 - `docs/operations/`: schema evolution, indexing, deployment, and recovery rules.
 - `scripts/`: image smoke tests and deployed Indexer/Query contract checks.
 
+## Using Semantic with a repository
+
+Start with the [startup and repository onboarding checklist](docs/operations/semantic-review.md#startup-and-repository-onboarding).
+It links the deployment, credentials, repository configuration, and MCP contracts;
+do not invent a second startup procedure here.
+
+- An administrator bootstraps the schema, then starts one Indexer with Mongo writer
+  credentials and Query with Mongo reader credentials. Startup registers configured
+  repositories; it does not automatically index them.
+- Register the approved Git URL and fixed `default-branch` in Indexer, and explicitly
+  approve the same repository ID for Query source evidence. Git credentials are
+  read-only and belong only to Indexer.
+- Before first code reading, durably save a canonical UUID `requestId`, submit
+  `prepare_codebase`, recover/poll with `get_job`, then discover READY with
+  `get_context` CURRENT. Copy its exact context into navigation tools. An unknown
+  acceptance outcome requires lookup of the original intent, not a new submission.
+- Connect preparation clients to private Indexer MCP and Query MCP with separate
+  tokens. Evidence-only clients need Query alone; never give every agent admin
+  authority or make Query control Indexer.
+- A [project guide](docs/operations/repository-context-prompt.md) is optional.
+  Generate it on an independent approved clone, review it, commit it through the
+  repository's normal process to the configured branch, then prepare a new
+  codebase. Do not analyze or edit Indexer-managed checkouts. Missing guides do
+  not block indexing; guide content is navigation, not verified semantic facts.
+
 ## Change guide
 
 - New or changed code fact: update `semantic-model`, the Indexer projection, its

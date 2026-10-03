@@ -17,6 +17,18 @@ OMP, Codex and Claude Code are external evidence clients. An optional
 [external guide-authoring prompt](docs/operations/repository-context-prompt.md)
 is an operator handoff document, not a service-side model runtime.
 
+## First use
+
+Follow the [startup and repository onboarding checklist](docs/operations/semantic-review.md#startup-and-repository-onboarding):
+provision/bootstrap the services, configure an approved Git URL and fixed branch,
+approve Query source access, connect the MCP endpoints, then save a request ID and
+prepare the first codebase. Startup registration alone does not create an index.
+
+An [externally authored project guide](docs/operations/repository-context-prompt.md)
+is optional, not a prerequisite summary. Review and commit it to the configured
+branch before preparing a generation that should include it. Query-only readers
+do not need Indexer administration credentials.
+
 ## Where changes belong
 
 | Change | Location |
