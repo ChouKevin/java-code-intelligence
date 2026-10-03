@@ -163,6 +163,11 @@ are not source or patch evidence. Both sides of a rename must be eligible.
 Snapshots are prepared before semantic sealing and the expected-parent current
 pointer update. Failure does not replace the previous current generation.
 
+Publication checks each selected source's content hash against its exact
+authorized Git tree entry. Missing entries or changed bytes fail before
+publication. One local path lookup avoids repeated inventory scans without
+widening source admission.
+
 Guide states are `DISABLED`, `ABSENT`, `INVALID`, and `AVAILABLE`. Only AVAILABLE
 has a readable path, digest, imported revision, and author provenance. Invalid
 guide content does not prevent code publication; storage or membership corruption
@@ -254,21 +259,29 @@ separately designed storage contract changes it.
 
 ## Analyzer policy changes within schema 4
 
-The Indexer hashes the explicit analyzer policy `semantic-indexer-analysis:2`
+The Indexer hashes the explicit analyzer policy `semantic-indexer-analysis:3`
 into `analyzerDigest`. Advance this policy version when source planning,
-extraction, or semantic interpretation changes, even if persisted document
-shapes do not. A Java implementation class name is not an analyzer version.
+extraction, semantic interpretation, or generation evidence semantics change,
+even if persisted document shapes do not. A Java implementation class name is
+not an analyzer version.
 
-Policy 2 derives invocation names and argument counts from the AST, rather than
+Policy 2 introduced AST-derived invocation names and argument counts instead of
 parsing expression text. This corrects chained receiver calls and comma-bearing
 literal arguments, including generated-member evidence. Constructor labels use
 the written type. Corrected external target metadata can change affected
 relation identities; a written identifier does not turn unresolved evidence into
 a resolved target.
 
+Policy 3 also computes `coverage.unresolvedSemanticEvidence` from persisted
+`UnresolvedCall` occurrences across the exact repository/generation, including
+copied sources and excluding removed sources and other generations. It does not
+use the current export's resolution counter. Per-export analysis accounting may
+legitimately be zero on an unchanged rebuild while generation coverage remains
+nonzero. Policy-2 incremental generations can undercount this coverage.
+
 Generation reuse and incremental-parent selection require the resulting exact
 analysis fingerprint. Generations produced with the earlier class-name identity
-or policy 1 are not reused by policy 2. Schema/projection/analysis-evidence
+or policies 1/2 are not reused by policy 3. Schema/projection/analysis-evidence
 versions remain 4/4/1.
 Rebuild affected current generations through ordinary indexing and prepare new
 reviews. Immutable older reviews retain their original metadata; never rewrite

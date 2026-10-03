@@ -393,7 +393,7 @@ class UnifiedQueryDiscoveryTransportIT {
                 new JGitRepositoryAdapter(properties, JdtLsTestProperties.linuxUid()), new GitEvidencePublicationStore(template),
                 properties.getGitEvidenceFileTextBytes()).publish(job, root, revision, plan, Optional.empty());
         MongoGenerationWriter.SourceOverview overview = generations.sourceOverview(context, source.policy().includedRoots(),
-                source.excludedOrUnsupported(), 0);
+                source.excludedOrUnsupported());
         generations.recordSourceMembership(context, source.snapshot(), source.guide(), source.policy(), overview.coverage(), overview.structure());
         GenerationValidator validator = new GenerationValidator(template);
         GenerationValidator.ValidationResult validation = validator.validate(context, revision, revision, plan);

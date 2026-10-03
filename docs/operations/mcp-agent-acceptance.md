@@ -120,4 +120,31 @@ Codex 另有既存 arg0 暫存目錄清理的 permission-denied 警告；這不�
 result、cold HTTP body 與停止前結果相等。這證明本機已準備證據的 Mongo-only cold read；
 不證明模型認證、私有 repo、TLS 部署或容量。Claude 的模型旅程仍未驗證。
 
+### Policy 3 的增量 coverage 與模型紀錄
+
+同 SHA 增量重建 smoke 揭露 generation coverage 誤用本輪 export 計數。
+Policy 3 修正後，公開 fixture 的 full build 與 copied-only rebuild 都有
+109 個 persisted unresolved call occurrences，overview 都回傳 109；
+後者本輪 analysis accounting 為 attempted 0／unresolved 0。CURRENT 結果除
+預期的 indexedAt 更新外相等，HTTP 與 MCP 結果也相等。
+
+新 READY review `a0ecf19c-a9fb-43fe-86b0-9c6a465ee4aa` 使用 saved request
+`718b3969-3d4c-40e6-8648-cbb4df11b533`；比較仍為上述 exact FIRST_PARENT。
+
+| Client | Calls / JSON bytes / wall | 已觀察結果 |
+| --- | --- | --- |
+| OMP18.4.4，gpt-6-astra | 13 / 37589 / 161.92s | exact source、diff、outline、relations；三個 call 名稱／arity／range 正確，仍為 UNRESOLVED |
+| Codex，isolated ephemeral read-only | 15 / 49530 / 83.92s | 同一 review 兩側來源與三種 relations；CURRENT 未變，historical guide 未借用 current |
+
+全部成功 Semantic tool calls 的 JSON TextContent 與 structured result 相等，
+沒有 Semantic tool error；兩個模型都未在檢查範圍內提出支持的 defect。
+這不證明 framework、serialization 或目標專案 runtime 正確。
+Codex 首次臨時 launcher 關閉必需的 code-mode host，未能發出 Semantic calls；
+修正 launcher 後才取得表中紀錄。既有 stale-arg0 permission warning 保留。
+上面的 23 組 cold request 紀錄屬 policy 2，不將它重標為 policy 3。
+另以既有 `SemanticReviewJourneyIT` 在 policy 3 production image 與新 executable
+jars 上完成獨立程序 cold Mongo journey（1 test，0 failures／errors／skips）。
+Indexer 停止後，新的 read-only Query 仍提供 historical／current 導覽及 HTTP／native
+MCP parity。這是 native cold-process 證據，不是重建遺失的實際模型 request transcript。
+
 操作／release／retention 見 [Semantic review deployment and operation](semantic-review.md)。

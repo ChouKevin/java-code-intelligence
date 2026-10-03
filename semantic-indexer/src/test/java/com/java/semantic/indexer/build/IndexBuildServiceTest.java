@@ -200,7 +200,7 @@ class IndexBuildServiceTest {
         SourceStructure structure = new SourceStructure(policy.includedRoots(), Map.of(), Map.of());
         when(publication.publish(eq(job), eq(plan.repositoryRoot()), eq(snapshot.revision()), eq(plan), eq(Optional.empty())))
                 .thenReturn(new SourceSnapshotPublication.PublishedSource(snapshot, guide, policy, 0));
-        when(writer.sourceOverview(any(), eq(policy.includedRoots()), eq(0L), eq(0L)))
+        when(writer.sourceOverview(any(), eq(policy.includedRoots()), eq(0L)))
                 .thenReturn(new MongoGenerationWriter.SourceOverview(coverage, structure));
         return publication;
     }

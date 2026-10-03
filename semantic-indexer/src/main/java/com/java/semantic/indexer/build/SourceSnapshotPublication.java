@@ -12,7 +12,9 @@ import com.java.semantic.model.source.TrackedSourceInventory;
 import com.java.semantic.repository.port.GitRepositoryPort;
 import java.nio.file.Path;
 import java.time.Instant;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 
@@ -42,9 +44,15 @@ public final class SourceSnapshotPublication {
                 .filter(entry -> entry.contentStatus() == GitFileContentStatus.TEXT)
                 .filter(entry -> policy.allowsCode(entry.path()) || guide.path().filter(entry.path()::equals).isPresent())
                 .toList();
+        Map<String, GitSnapshotEntry> authorizedByPath = HashMap.newHashMap(authorized.size());
+        for (GitSnapshotEntry entry : authorized) {
+            authorizedByPath.putIfAbsent(entry.path(), entry);
+        }
         for (FullIndexPlan.SourceInput source : plan.sources()) {
-            GitSnapshotEntry entry = authorized.stream().filter(value -> value.path().equals(source.sourcePath()))
-                    .findFirst().orElseThrow(() -> new IllegalStateException("selected source is missing from the exact Git tree"));
+            GitSnapshotEntry entry = authorizedByPath.get(source.sourcePath());
+            if (Objects.isNull(entry)) {
+                throw new IllegalStateException("selected source is missing from the exact Git tree");
+            }
             String exactHash = com.java.semantic.model.index.SourceArtifactDocument.create(
                     new String(entry.bytes(), java.nio.charset.StandardCharsets.UTF_8)).contentHash();
             if (!source.contentArtifact().contentHash().equals(exactHash)) {

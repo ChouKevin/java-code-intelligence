@@ -324,7 +324,7 @@ class DispatchedGitEvidenceIT {
                 new GitEvidencePublicationStore(template), properties.getGitEvidenceFileTextBytes())
                 .publish(job, fixture, revision, plan, Optional.empty());
         MongoGenerationWriter.SourceOverview overview = writer.sourceOverview(context, source.policy().includedRoots(),
-                source.excludedOrUnsupported(), 0);
+                source.excludedOrUnsupported());
         writer.recordSourceMembership(context, source.snapshot(), source.guide(), source.policy(),
                 overview.coverage(), overview.structure());
         GenerationValidator validator = new GenerationValidator(template);

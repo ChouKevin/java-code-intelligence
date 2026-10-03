@@ -117,8 +117,7 @@ public final class IndexBuildService {
             SourceSnapshotPublication.PublishedSource source = sourcePublication
                     .publish(requiredJob, checkout.root(), target.revision(), plan, guidePath.apply(requiredJob.repositoryId()));
             MongoGenerationWriter.SourceOverview overview = generationWriter.sourceOverview(context,
-                    source.policy().includedRoots(), source.excludedOrUnsupported(),
-                    export.analysisEvidence().resolution().unresolved());
+                    source.policy().includedRoots(), source.excludedOrUnsupported());
             generationWriter.recordSourceMembership(context, source.snapshot(), source.guide(), source.policy(),
                     overview.coverage(), overview.structure());
             GenerationValidator.ValidationResult result = validator.validate(context, target.revision(), checkout.revision(), plan);

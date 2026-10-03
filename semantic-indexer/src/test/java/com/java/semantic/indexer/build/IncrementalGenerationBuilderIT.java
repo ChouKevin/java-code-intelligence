@@ -35,9 +35,11 @@ import com.java.semantic.model.source.SourceEvidencePolicy;
 import com.java.semantic.model.source.SourceSnapshotMembership;
 import com.java.semantic.model.source.SourceStructure;
 import com.java.semantic.repository.domain.RepositorySnapshot;
+import com.mongodb.client.MongoClient;
 import com.mongodb.client.MongoClients;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
 import java.nio.charset.StandardCharsets;
@@ -49,6 +51,8 @@ import org.bson.Document;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.testcontainers.mongodb.MongoDBContainer;
 
@@ -58,6 +62,67 @@ class IncrementalGenerationBuilderIT {
 
     @TempDir
     Path temporaryDirectory;
+
+    @ParameterizedTest
+    @CsvSource({"true, false, 1", "true, true, 3", "false, false, 0"})
+    void coverage_counts_unresolved_calls_in_the_assembled_generation(boolean retainParentSource, boolean addSource,
+            long expectedUnresolved) throws Exception {
+        String parentContent = "class Order { String note; void place() { missing(); } }";
+        Path parentSource = temporaryDirectory.resolve("src/main/java/Order.java");
+        Files.createDirectories(parentSource.getParent());
+        Files.writeString(parentSource, parentContent);
+        FullIndexPlan parentPlan = new FullIndexPlan(temporaryDirectory, List.of(new FullIndexPlan.SourceInput(
+                "src/main/java/Order.java", parentSource, SourceArtifactDocument.create(parentContent))));
+        TestSyntaxRepositoryIndexExporter exporter = new TestSyntaxRepositoryIndexExporter();
+        SourceIndexBatch parentBatch = exporter.export(RepositoryId.of("orders"), GenerationValidatorIT.revision(),
+                GenerationValidatorIT.lease().generationId(), parentPlan).getFirst();
+        try (MongoDBContainer container = new MongoDBContainer("mongo:8.0.4")) {
+            container.start();
+            try (MongoClient client = MongoClients.create(container.getConnectionString())) {
+                MongoTemplate template = new MongoTemplate(client, "semantic");
+                new IndexSchemaBootstrap(template).bootstrap();
+                GenerationValidatorIT.seedWritingGeneration(template, parentBatch);
+                template.getCollection(IndexCollections.GENERATION_MANIFESTS).updateOne(
+                        new Document("repoId", "orders").append("generationId", "g1"),
+                        new Document("$set", new Document("coverage.unresolvedSemanticEvidence", 1L)));
+                MongoGenerationWriter writer = new MongoGenerationWriter(template);
+                GenerationValidator validator = new GenerationValidator(template);
+                GenerationValidator.ValidationResult validated = validator.validate(GenerationValidatorIT.lease(),
+                        GenerationValidatorIT.revision(), GenerationValidatorIT.revision(), parentPlan);
+                assertThat(validated.valid()).as("valid unresolved-call parent: %s", validated.issues()).isTrue();
+                validator.recordValid(GenerationValidatorIT.lease(), validated);
+                writer.seal(GenerationValidatorIT.lease(), validated.identityDigest().value());
+                publishParent(template, validated.identityDigest().value());
+                GenerationWriteContext child = childLease(template);
+                insertChildManifest(template, child);
+                List<FullIndexPlan.SourceInput> selectedSources = new ArrayList<>();
+                if (retainParentSource) {
+                    selectedSources.addAll(parentPlan.sources());
+                } else {
+                    Files.delete(parentSource);
+                }
+                if (addSource) {
+                    String addedContent = "class Added { void place() { another(); third(); } }";
+                    Path addedSource = Files.writeString(temporaryDirectory.resolve("src/main/java/Added.java"), addedContent);
+                    selectedSources.add(new FullIndexPlan.SourceInput("src/main/java/Added.java", addedSource,
+                            SourceArtifactDocument.create(addedContent)));
+                }
+                FullIndexPlan selected = new FullIndexPlan(temporaryDirectory, selectedSources);
+                IncrementalGenerationBuilder.BuildSelection selection = new IncrementalGenerationBuilder(template,
+                        emptyDiffPlanner(), new ParentGenerationCopier(template, writer))
+                        .assemble(childJob(), child, selected, preparedAnalysis().fingerprint());
+                MongoIndexBatchWriter batches = new MongoIndexBatchWriter(writer, child,
+                        new SourceIndexBatchDocumentMapper(template.getConverter()));
+                for (SourceIndexBatch batch : exporter.export(RepositoryId.of("orders"),
+                        new RepositoryRevision("b".repeat(40)), child.generationId(), selection.exportPlan())) {
+                    batches.write(batch);
+                }
+
+                assertThat(writer.sourceOverview(child, List.of("src"), 0)
+                        .coverage().unresolvedSemanticEvidence()).isEqualTo(expectedUnresolved);
+            }
+        }
+    }
 
     @Test
     void copied_mapper_symbols_retain_operations_and_revision_authority_and_reject_missing_payload() throws Exception {

@@ -425,7 +425,7 @@ class FixtureFullIndexJdtLsIT {
                 new RepositoryRevision(revision), plan, Optional.empty());
         MongoGenerationWriter generationWriter = new MongoGenerationWriter(template);
         MongoGenerationWriter.SourceOverview overview = generationWriter.sourceOverview(lease,
-                published.policy().includedRoots(), published.excludedOrUnsupported(), 0);
+                published.policy().includedRoots(), published.excludedOrUnsupported());
         generationWriter.recordSourceMembership(lease, published.snapshot(), published.guide(),
                 published.policy(), overview.coverage(), overview.structure());
         GenerationValidator.ValidationResult result = new GenerationValidator(template).validate(lease,

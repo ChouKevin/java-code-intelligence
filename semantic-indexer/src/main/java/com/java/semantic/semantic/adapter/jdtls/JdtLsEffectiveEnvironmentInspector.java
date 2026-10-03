@@ -30,8 +30,8 @@ import org.springframework.util.Assert;
 
 /** Reads JDT LS's post-import project model and converts it into persistable, path-free inputs. */
 public final class JdtLsEffectiveEnvironmentInspector {
-    // Advance the analyzer policy version when planning or extraction semantics change.
-    private static final String ANALYZER_DIGEST = digestText("semantic-indexer-analysis:2");
+    // Advance when planning, extraction, or generation evidence semantics change.
+    private static final String ANALYZER_DIGEST = digestText("semantic-indexer-analysis:3");
     private static final String GET_ALL = "java.project.getAll";
     private static final String GET_SETTINGS = "java.project.getSettings";
     private static final String GET_CLASSPATHS = "java.project.getClasspaths";

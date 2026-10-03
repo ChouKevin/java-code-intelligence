@@ -4,6 +4,7 @@ import com.java.semantic.model.index.GenerationWriteState;
 import com.java.semantic.model.index.AnalysisFingerprint;
 import com.java.semantic.model.index.SemanticAnalysisEvidence;
 import com.java.semantic.model.codefact.EntryPointKind;
+import com.java.semantic.model.codefact.ExternalTarget;
 import com.java.semantic.model.source.SourceSnapshotMembership;
 import com.java.semantic.model.source.ProjectGuideMembership;
 import com.java.semantic.model.source.SourceEvidencePolicy;
@@ -107,7 +108,7 @@ public final class MongoGenerationWriter {
     }
 
     public SourceOverview sourceOverview(GenerationWriteContext context, List<String> includedRoots,
-            long excludedOrUnsupported, long unresolved) {
+            long excludedOrUnsupported) {
         verifyRunningBuild(context);
         Document filter = new Document("repoId", context.repositoryId().value())
                 .append("generationId", context.generationId().value());
@@ -132,6 +133,9 @@ public final class MongoGenerationWriter {
             String kind = EntryPointKind.valueOf(storedEntryPoint.getString("kind")).name();
             entryKinds.merge(kind, 1L, Long::sum);
         }
+        // Coverage describes the assembled generation, including copied relations.
+        filter.append("fact.identity.canonicalIdentity.target.target._class", ExternalTarget.UnresolvedCall.class.getName());
+        long unresolved = template.getCollection(IndexCollections.RELATIONS).countDocuments(filter);
         return new SourceOverview(new SourceCoverage(files.size(), excludedOrUnsupported, extractionIssues, unresolved),
                 new SourceStructure(includedRoots, packageCounts, entryKinds));
     }
