@@ -7,12 +7,13 @@ import com.java.semantic.query.source.LocalSourceRevisionCatalog;
 import com.java.semantic.query.source.RepositorySourcePort;
 import com.java.semantic.query.source.SourceRevisionCatalog;
 import java.util.List;
+import org.springframework.beans.factory.config.BeanFactoryPostProcessor;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
-import org.springframework.context.annotation.Bean;
 import org.springframework.boot.context.properties.bind.Bindable;
 import org.springframework.boot.context.properties.bind.Binder;
+import org.springframework.context.annotation.Bean;
 import org.springframework.core.env.Environment;
 import tools.jackson.databind.ObjectMapper;
 
@@ -40,10 +41,11 @@ public class SemanticQueryApplication {
     }
 
     @Bean
-    static org.springframework.boot.ApplicationRunner rejectLegacyRestrictions(Environment environment) {
-        return arguments -> {
+    static BeanFactoryPostProcessor rejectLegacyRestrictions(Environment environment) {
+        return beanFactory -> {
             Binder binder = Binder.get(environment);
-            for (String name : List.of("forbidden-packages", "forbidden-classes", "forbidden-methods")) {
+            for (String name : List.of("forbidden-repositories", "forbidden-packages", "forbidden-classes",
+                    "forbidden-methods")) {
                 String key = "semantic.query.read-policy." + name;
                 List<String> restrictions = binder.bind(key, Bindable.listOf(String.class)).orElse(List.of());
                 if (!restrictions.isEmpty()) {

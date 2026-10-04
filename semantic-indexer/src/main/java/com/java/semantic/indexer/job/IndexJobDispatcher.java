@@ -42,12 +42,18 @@ public final class IndexJobDispatcher implements ApplicationListener<Application
     }
 
     public void dispatchOnce() {
+        jobs.pendingStatus().ifPresent(publications::updatePreparation);
         jobs.claimNext().ifPresent(job -> {
             try {
                 publications.updatePreparation(job);
             } catch (RuntimeException exception) {
-                jobs.fail(new com.java.semantic.model.repository.RepositoryId(job.repositoryId()),
+                SourcePreparationJob failed = jobs.fail(new com.java.semantic.model.repository.RepositoryId(job.repositoryId()),
                         new IndexJobId(job.jobId()), "PREPARATION_FAILED");
+                try {
+                    publications.updatePreparation(failed);
+                } catch (RuntimeException publicationFailure) {
+                    exception.addSuppressed(publicationFailure);
+                }
                 throw exception;
             }
             executor.execute(job);

@@ -61,6 +61,20 @@ class RipgrepTextSearchTest {
     }
 
     @Test
+    void untracked_match_before_authorized_prefix_does_not_consume_global_limit() throws Exception {
+        SourceFilesystemFixture fixture = new SourceFilesystemFixture(temp);
+        fixture.file("b.java", "needle\n");
+        fixture.file("c.java", "needle\n");
+        AdmittedSourceRevision admitted = fixture.publish(Optional.empty());
+        Files.writeString(fixture.tree.resolve("a.java"), "needle\n");
+        TextSearchResult result = fixture.service().searchText(admitted, new TextSearchRequest(fixture.context,
+                "needle", "", Optional.empty(), 1));
+        assertThat(result.matches()).extracting(TextMatch::path).containsExactly("b.java");
+        assertThat(result.truncated()).isTrue();
+        assertThat(result.scanComplete()).isFalse();
+    }
+
+    @Test
     void utf8_bom_search_columns_include_the_preserved_source_prefix() throws Exception {
         SourceFilesystemFixture fixture = new SourceFilesystemFixture(temp);
         fixture.file("bom.java", "\uFEFF🙂 needle\r\n");

@@ -74,6 +74,7 @@ public final class SourcePublicationStore {
                     .filter(stored -> stored.jobId().equals(job.jobId()))
                     .orElseThrow(() -> new IllegalStateException("source job identity mismatch"));
             if (persisted.phase() != job.phase()) {
+                jobs.statusPublished(job);
                 return;
             }
             synchronized (this) {
@@ -83,15 +84,18 @@ public final class SourcePublicationStore {
                 if (old.preparation().jobId().isPresent()) {
                     if (!old.preparation().jobId().orElseThrow().equals(job.jobId())) {
                         if (job.phase() != SourcePreparationJob.Phase.ACCEPTED) {
+                            jobs.statusPublished(job);
                             return;
                         }
                     } else if (phase.ordinal() <= old.preparation().phase().ordinal()) {
+                        jobs.statusPublished(job);
                         return;
                     }
                 }
                 replace(new SourceRepositoryState(old.formatVersion(), id.value(), old.current(), old.published(),
                         new PreparationStatus(phase, Optional.of(job.jobId()), job.failureCode())));
             }
+            jobs.statusPublished(job);
         }
     }
 

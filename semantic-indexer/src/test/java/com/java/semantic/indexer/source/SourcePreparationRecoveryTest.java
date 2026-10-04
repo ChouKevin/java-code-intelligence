@@ -1,6 +1,8 @@
 package com.java.semantic.indexer.source;
 
 import com.java.semantic.indexer.job.FileSourceJobStore;
+import com.java.semantic.indexer.job.IndexJobDispatcher;
+import com.java.semantic.indexer.job.IndexJobExecutor;
 import com.java.semantic.indexer.job.IndexJobId;
 import com.java.semantic.indexer.job.PreparationRequestId;
 import com.java.semantic.indexer.job.SourcePreparationJob;
@@ -20,8 +22,109 @@ import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class SourcePreparationRecoveryTest {
+
+    @Test
+    void failed_running_status_write_converges_after_reopen_without_reexecuting_job() throws Exception {
+        try (LocalSourceFixture fixture = new LocalSourceFixture(root)) {
+            fixture.commit("A.java", "class A {}\n".getBytes(StandardCharsets.UTF_8), "A");
+            RepositoryProperties properties = SourcePreparationPublicationTest.properties(fixture);
+            PreparationRequestId request = new PreparationRequestId(UUID.randomUUID().toString());
+            Path stateFile = fixture.published.resolve("orders/state.json");
+            byte[] acceptedState;
+            String jobId;
+            try (DurableSourceFiles writer = new DurableSourceFiles(fixture.admin)) {
+                RepositoryRegistry registry = new RepositoryRegistry(properties);
+                FileSourceJobStore jobs = new FileSourceJobStore(properties, mapper, writer);
+                SourcePublicationStore published = new SourcePublicationStore(properties, mapper, writer, jobs);
+                SourcePreparationService service = new SourcePreparationService(jobs, published, registry);
+                SourcePreparationJob accepted = service.prepareSource(fixture.repository, request, Optional.empty());
+                jobId = accepted.jobId();
+                acceptedState = Files.readAllBytes(stateFile);
+                Files.delete(stateFile);
+                Files.createDirectory(stateFile);
+                Files.writeString(stateFile.resolve("blocker"), "not an atomic state replacement");
+                RepositoryRevisionResolver resolver = new RepositoryRevisionResolver(registry, properties);
+                RepositorySourceManager manager = new RepositorySourceManager(jobs, resolver,
+                        new JGitRevisionExporter(resolver, registry, mapper), published, registry, properties);
+                IndexJobDispatcher dispatcher = new IndexJobDispatcher(jobs, new IndexJobExecutor(manager), published);
+                try {
+                    assertThatThrownBy(dispatcher::dispatchOnce).isInstanceOf(IllegalStateException.class);
+                    assertThat(jobs.find(fixture.repository, request).orElseThrow().phase())
+                            .isEqualTo(SourcePreparationJob.Phase.FAILED);
+                    assertThat(Files.exists(fixture.admin.resolve("staging").resolve(jobId))).isFalse();
+                } finally {
+                    Files.delete(stateFile.resolve("blocker"));
+                    Files.delete(stateFile);
+                    Files.write(stateFile, acceptedState);
+                    dispatcher.stop();
+                }
+            }
+            try (DurableSourceFiles writer = new DurableSourceFiles(fixture.admin)) {
+                FileSourceJobStore jobs = new FileSourceJobStore(properties, mapper, writer);
+                SourcePublicationStore published = new SourcePublicationStore(properties, mapper, writer, jobs);
+                jobs.recover(published);
+                assertThat(jobs.find(fixture.repository, request).orElseThrow().phase())
+                        .isEqualTo(SourcePreparationJob.Phase.FAILED);
+                assertThat(published.state(fixture.repository).preparation().phase())
+                        .isEqualTo(SourceRepositoryState.PreparationPhase.FAILED);
+                assertThat(published.state(fixture.repository).preparation().jobId()).contains(jobId);
+                assertThat(published.state(fixture.repository).published()).isEmpty();
+                assertThat(jobs.claimNext()).isEmpty();
+                assertThat(Files.exists(fixture.admin.resolve("staging").resolve(jobId))).isFalse();
+            }
+        }
+    }
+
+    @Test
+    void old_failed_status_does_not_replace_newer_accepted_preparation_on_recovery() throws Exception {
+        try (LocalSourceFixture fixture = new LocalSourceFixture(root)) {
+            fixture.commit("A.java", "class A {}\n".getBytes(StandardCharsets.UTF_8), "A");
+            RepositoryProperties properties = SourcePreparationPublicationTest.properties(fixture);
+            PreparationRequestId older = new PreparationRequestId(UUID.randomUUID().toString());
+            PreparationRequestId newer = new PreparationRequestId(UUID.randomUUID().toString());
+            String newerJobId;
+            Path stateFile = fixture.published.resolve("orders/state.json");
+            try (DurableSourceFiles writer = new DurableSourceFiles(fixture.admin)) {
+                RepositoryRegistry registry = new RepositoryRegistry(properties);
+                FileSourceJobStore jobs = new FileSourceJobStore(properties, mapper, writer);
+                SourcePublicationStore published = new SourcePublicationStore(properties, mapper, writer, jobs);
+                SourcePreparationService service = new SourcePreparationService(jobs, published, registry);
+                service.prepareSource(fixture.repository, older, Optional.empty());
+                byte[] acceptedState = Files.readAllBytes(stateFile);
+                Files.delete(stateFile);
+                Files.createDirectory(stateFile);
+                Files.writeString(stateFile.resolve("blocker"), "block replacement");
+                RepositoryRevisionResolver resolver = new RepositoryRevisionResolver(registry, properties);
+                RepositorySourceManager manager = new RepositorySourceManager(jobs, resolver,
+                        new JGitRevisionExporter(resolver, registry, mapper), published, registry, properties);
+                IndexJobDispatcher dispatcher = new IndexJobDispatcher(jobs, new IndexJobExecutor(manager), published);
+                try {
+                    assertThatThrownBy(dispatcher::dispatchOnce).isInstanceOf(IllegalStateException.class);
+                } finally {
+                    Files.delete(stateFile.resolve("blocker"));
+                    Files.delete(stateFile);
+                    Files.write(stateFile, acceptedState);
+                    dispatcher.stop();
+                }
+                newerJobId = service.prepareSource(fixture.repository, newer, Optional.empty()).jobId();
+            }
+            try (DurableSourceFiles writer = new DurableSourceFiles(fixture.admin)) {
+                FileSourceJobStore jobs = new FileSourceJobStore(properties, mapper, writer);
+                SourcePublicationStore published = new SourcePublicationStore(properties, mapper, writer, jobs);
+                jobs.recover(published);
+                assertThat(published.state(fixture.repository).preparation().jobId()).contains(newerJobId);
+                assertThat(published.state(fixture.repository).preparation().phase())
+                        .isEqualTo(SourceRepositoryState.PreparationPhase.ACCEPTED);
+                assertThat(jobs.find(fixture.repository, older).orElseThrow().phase())
+                        .isEqualTo(SourcePreparationJob.Phase.FAILED);
+                assertThat(jobs.find(fixture.repository, newer).orElseThrow().phase())
+                        .isEqualTo(SourcePreparationJob.Phase.ACCEPTED);
+            }
+        }
+    }
     @TempDir Path root;
     private final ObjectMapper mapper = JsonMapper.builder().build();
 

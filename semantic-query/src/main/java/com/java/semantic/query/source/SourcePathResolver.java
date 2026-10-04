@@ -15,8 +15,11 @@ import java.nio.file.Path;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.util.HashMap;
 import java.util.HexFormat;
+import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.function.Consumer;
 import tools.jackson.databind.ObjectMapper;
 
@@ -83,6 +86,15 @@ public final class SourcePathResolver {
         });
         if (Objects.isNull(result[0])) throw new SourceQueryException(Code.SOURCE_NOT_FOUND);
         return result[0];
+    }
+
+    /** Resolve only this bounded search window while verifying the complete inventory digest/order. */
+    public Map<String, SourceInventoryEntry> entries(AdmittedSourceRevision admitted, Set<String> paths, long deadline) {
+        Map<String, SourceInventoryEntry> found = new HashMap<>();
+        scan(admitted, deadline, entry -> {
+            if (paths.contains(entry.path())) found.put(entry.path(), entry);
+        });
+        return found;
     }
 
     public Path readable(AdmittedSourceRevision admitted, SourceInventoryEntry entry) {

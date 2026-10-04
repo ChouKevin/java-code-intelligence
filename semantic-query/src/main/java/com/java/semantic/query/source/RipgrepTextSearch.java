@@ -15,10 +15,11 @@ import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
-import java.util.List;
 import java.util.HashSet;
-import java.util.Set;
+import java.util.List;
+import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -234,9 +235,11 @@ public final class RipgrepTextSearch {
             AdmittedSourceRevision admitted, TextSearchRequest request, String directory, String glob,
             long deadline, List<TextMatch> matches, AtomicBoolean enough) throws IOException {
         ByteArrayOutputStream frame = new ByteArrayOutputStream();
+        List<JsonNode> candidates = new ArrayList<>();
         Set<String> verified = new HashSet<>();
         byte[] buffer = new byte[8192];
         int total = 0;
+        int window = request.limit() + 1;
         while (!enough.get()) {
             int ready = available(stream, process, stopping, deadline);
             if (ready < 0) break;
@@ -249,37 +252,63 @@ public final class RipgrepTextSearch {
                     if (frame.size() >= FRAME_CAP) throw new SourceQueryException(Code.SOURCE_UNAVAILABLE);
                     frame.write(value);
                 } else {
-                    parseMatch(frame.toByteArray(), admitted, request, directory, glob, deadline, matches, enough, verified);
+                    JsonNode event = candidate(frame.toByteArray(), directory, glob);
+                    if (Objects.nonNull(event)) candidates.add(event);
                     frame.reset();
+                    if (candidates.size() >= window) {
+                        validateWindow(candidates, admitted, request, deadline, matches, enough, verified);
+                        candidates.clear();
+                    }
                 }
             }
         }
-        if (!stopping.get() && !enough.get() && frame.size() != 0) {
-            throw new SourceQueryException(Code.SOURCE_UNAVAILABLE);
+        if (!stopping.get() && !enough.get()) {
+            if (frame.size() != 0) throw new SourceQueryException(Code.SOURCE_UNAVAILABLE);
+            if (!candidates.isEmpty()) validateWindow(candidates, admitted, request, deadline, matches, enough, verified);
         }
     }
 
-    private void parseMatch(byte[] frame, AdmittedSourceRevision admitted, TextSearchRequest request,
-            String directory, String glob, long deadline, List<TextMatch> matches, AtomicBoolean enough,
-            Set<String> verified) {
+    private JsonNode candidate(byte[] frame, String directory, String glob) {
         try {
             JsonNode event = mapper.readTree(frame);
-            if (!"match".equals(event.path("type").asString())) return;
-            JsonNode data = event.path("data");
-            String path = data.path("path").path("text").asString();
-            if (path.startsWith("./")) path = path.substring(2);
+            if (!"match".equals(event.path("type").asString())) return null;
+            String path = matchPath(event);
             SourcePathResolver.safeFile(path);
-            if (!directory.isEmpty() && !path.startsWith(directory + "/")) throw new SourceQueryException(Code.SOURCE_UNAVAILABLE);
-            if (!glob.isEmpty() && !SourcePathResolver.matches(path, glob)) return;
-            SourceInventoryEntry entry;
-            try { entry = resolver.entry(admitted, path, deadline); }
-            catch (SourceQueryException exception) {
-                if (exception.code() == Code.SOURCE_NOT_FOUND) return;
-                throw exception;
+            if (!directory.isEmpty() && !path.startsWith(directory + "/")) {
+                throw new SourceQueryException(Code.SOURCE_UNAVAILABLE);
             }
+            if (!glob.isEmpty() && !SourcePathResolver.matches(path, glob)) return null;
+            return event;
+        } catch (SourceQueryException exception) { throw exception; }
+        catch (RuntimeException exception) { throw new SourceQueryException(Code.SOURCE_UNAVAILABLE, exception); }
+    }
+
+    private static String matchPath(JsonNode event) {
+        String path = event.path("data").path("path").path("text").asString();
+        return path.startsWith("./") ? path.substring(2) : path;
+    }
+
+    private void validateWindow(List<JsonNode> candidates, AdmittedSourceRevision admitted,
+            TextSearchRequest request, long deadline, List<TextMatch> matches, AtomicBoolean enough,
+            Set<String> verified) {
+        Set<String> paths = new HashSet<>();
+        for (JsonNode candidate : candidates) paths.add(matchPath(candidate));
+        Map<String, SourceInventoryEntry> entries = resolver.entries(admitted, paths, deadline);
+        for (JsonNode event : candidates) {
+            String path = matchPath(event);
+            SourceInventoryEntry entry = entries.get(path);
+            if (Objects.isNull(entry)) continue;
             Path physical = resolver.readable(admitted, entry);
             if (verified.add(path)) verifyContent(physical, entry, deadline);
-            String matchedPath = path;
+            addMatches(event, admitted, request, path, matches, enough);
+            if (enough.get()) return;
+        }
+    }
+
+    private void addMatches(JsonNode event, AdmittedSourceRevision admitted, TextSearchRequest request,
+            String path, List<TextMatch> matches, AtomicBoolean enough) {
+        try {
+            JsonNode data = event.path("data");
             String line = data.path("lines").path("text").asString();
             int number = data.path("line_number").asInt();
             byte[] lineBytes = line.getBytes(StandardCharsets.UTF_8);
@@ -292,9 +321,9 @@ public final class RipgrepTextSearch {
                 String before = strict(lineBytes, 0, start);
                 String found = strict(lineBytes, start, end - start);
                 if (!found.equals(request.query())) throw new SourceQueryException(Code.SOURCE_UNAVAILABLE);
-                TextMatch match = new TextMatch(matchedPath, number, before.length() + 1, found,
+                TextMatch match = new TextMatch(path, number, before.length() + 1, found,
                         admitted.manifest().projectGuide().state() == GuideState.AVAILABLE
-                                && admitted.manifest().projectGuide().path().filter(matchedPath::equals).isPresent());
+                                && admitted.manifest().projectGuide().path().filter(path::equals).isPresent());
                 synchronized (matches) {
                     matches.add(match);
                     if (matches.size() > request.limit()) { enough.set(true); return; }

@@ -12,6 +12,10 @@ import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
+import java.util.HashMap;
+import java.util.Iterator;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.Optional;
 import org.springframework.stereotype.Component;
 import tools.jackson.databind.ObjectMapper;
@@ -22,6 +26,8 @@ public final class FileSourceJobStore {
     private static final long MAX_JOB_BYTES = 64 * 1024;
     private final Path jobsRoot;
     private final ObjectMapper mapper;
+    private final Map<String, SourcePreparationJob> acceptedJobs = new LinkedHashMap<>();
+    private final Map<String, SourcePreparationJob> pendingStatus = new HashMap<>();
 
     public FileSourceJobStore(com.java.semantic.repository.config.RepositoryProperties properties, ObjectMapper mapper,
             DurableSourceFiles ownership) {
@@ -52,6 +58,7 @@ public final class FileSourceJobStore {
                     defaultBranch, SourcePreparationJob.Phase.ACCEPTED, Instant.now(), Optional.empty(), current,
                     Optional.empty(), Optional.empty());
             save(job);
+            acceptedJobs.put(repository.value(), job);
             return job;
         } catch (IOException exception) {
             throw unavailable(exception);
@@ -93,29 +100,15 @@ public final class FileSourceJobStore {
     }
 
     public synchronized Optional<SourcePreparationJob> claimNext() {
-        if (!Files.isDirectory(jobsRoot)) {
+        Iterator<SourcePreparationJob> queued = acceptedJobs.values().iterator();
+        if (!queued.hasNext()) {
             return Optional.empty();
         }
-        try (DirectoryStream<Path> repositories = Files.newDirectoryStream(jobsRoot)) {
-            for (Path repository : repositories) {
-                if (!Files.isDirectory(repository)) {
-                    continue;
-                }
-                try (DirectoryStream<Path> entries = Files.newDirectoryStream(repository, "*.json")) {
-                    for (Path path : entries) {
-                        SourcePreparationJob job = read(path);
-                        if (job.phase() == SourcePreparationJob.Phase.ACCEPTED) {
-                            SourcePreparationJob claimed = job.withPhase(SourcePreparationJob.Phase.RUNNING);
-                            save(claimed);
-                            return Optional.of(claimed);
-                        }
-                    }
-                }
-            }
-            return Optional.empty();
-        } catch (IOException exception) {
-            throw unavailable(exception);
-        }
+        SourcePreparationJob accepted = queued.next();
+        SourcePreparationJob claimed = accepted.withPhase(SourcePreparationJob.Phase.RUNNING);
+        save(claimed);
+        queued.remove();
+        return Optional.of(claimed);
     }
 
     public synchronized SourcePreparationJob recordResolved(RepositoryId repository, IndexJobId id,
@@ -134,16 +127,30 @@ public final class FileSourceJobStore {
         }
         SourcePreparationJob complete = job.completed(receipt);
         save(complete);
+        pendingStatus.remove(repository.value());
         return complete;
     }
 
     public synchronized SourcePreparationJob fail(RepositoryId repository, IndexJobId id, String code) {
         SourcePreparationJob failed = running(repository, id).failed(code);
         save(failed);
+        pendingStatus.put(repository.value(), failed);
         return failed;
     }
 
+    public synchronized Optional<SourcePreparationJob> pendingStatus() {
+        for (SourcePreparationJob pending : pendingStatus.values()) {
+            return Optional.of(pending);
+        }
+        return Optional.empty();
+    }
+
+    public synchronized void statusPublished(SourcePreparationJob job) {
+        pendingStatus.remove(job.repositoryId(), job);
+    }
+
     public synchronized void recover(SourcePublicationStore publications) {
+        acceptedJobs.clear();
         if (!Files.isDirectory(jobsRoot)) {
             return;
         }
@@ -152,16 +159,29 @@ public final class FileSourceJobStore {
                 if (!Files.isDirectory(repository)) {
                     continue;
                 }
+                SourcePreparationJob latest = null;
                 try (DirectoryStream<Path> entries = Files.newDirectoryStream(repository, "*.json")) {
                     for (Path path : entries) {
                         SourcePreparationJob job = read(path);
                         if (job.phase() == SourcePreparationJob.Phase.RUNNING) {
-                            SourcePreparationJob recovered = publications.lookupPublishedJob(job)
-                                    .map(job::completed).orElseGet(() -> job.failed("WORKER_INTERRUPTED"));
+                            Optional<PreparedRevision> publication = publications.lookupPublishedJob(job);
+                            SourcePreparationJob recovered = publication.isPresent()
+                                    ? job.completed(publication.orElseThrow()) : job.failed("WORKER_INTERRUPTED");
                             save(recovered);
-                            publications.updatePreparation(recovered);
+                            job = recovered;
+                        }
+                        if (java.util.Objects.isNull(latest) || job.acceptedAt().isAfter(latest.acceptedAt())) {
+                            latest = job;
                         }
                     }
+                }
+                if (java.util.Objects.nonNull(latest) && latest.phase() == SourcePreparationJob.Phase.ACCEPTED) {
+                    acceptedJobs.put(latest.repositoryId(), latest);
+                }
+                if (java.util.Objects.nonNull(latest) && (latest.phase() == SourcePreparationJob.Phase.FAILED
+                        || latest.phase() == SourcePreparationJob.Phase.COMPLETE)) {
+                    pendingStatus.put(latest.repositoryId(), latest);
+                    publications.updatePreparation(latest);
                 }
             }
         } catch (IOException exception) {
