@@ -58,16 +58,17 @@ public final class SessionOwnedMcpTransport implements McpStreamableServerTransp
                 running.forEach(ActiveCall::cancel);
             }
             // The SDK provider may discard sessions after invoking closeGracefully; keep
-            // the live-call completion fence independently of its session map.
-            return delegate.closeGracefully().then(Mono.defer(() -> awaitCleanup(running)));
+            // the live-call fence independently of its session map. One timeout covers
+            // the provider close and this final fence together, not six seconds each.
+            return delegate.closeGracefully().then(Mono.defer(() -> awaitCleanup(running)))
+                    .timeout(CLEANUP_WAIT);
         });
     }
 
     private static Mono<Void> awaitCleanup(Iterable<ActiveCall> calls) {
         ArrayList<CompletableFuture<Void>> completed = new ArrayList<>();
         calls.forEach(call -> completed.add(call.completed));
-        return Mono.fromFuture(CompletableFuture.allOf(completed.toArray(CompletableFuture[]::new)))
-                .timeout(CLEANUP_WAIT);
+        return Mono.fromFuture(CompletableFuture.allOf(completed.toArray(CompletableFuture[]::new)));
     }
 
     private final class OwnedSession extends McpStreamableServerSession {
@@ -149,12 +150,14 @@ public final class SessionOwnedMcpTransport implements McpStreamableServerTransp
 
         @Override
         public Mono<Void> delete() {
-            return Mono.defer(() -> awaitCleanup(cancelAll()).then(Mono.defer(delegate::delete)));
+            return Mono.defer(() -> awaitCleanup(cancelAll()).then(Mono.defer(delegate::delete)))
+                    .timeout(CLEANUP_WAIT);
         }
 
         @Override
         public Mono<Void> closeGracefully() {
-            return Mono.defer(() -> awaitCleanup(cancelAll()).then(Mono.defer(delegate::closeGracefully)));
+            return Mono.defer(() -> awaitCleanup(cancelAll()).then(Mono.defer(delegate::closeGracefully)))
+                    .timeout(CLEANUP_WAIT);
         }
 
         @Override

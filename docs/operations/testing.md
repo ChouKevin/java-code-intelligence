@@ -27,8 +27,8 @@ Do not reuse old Mongo/JDT, semantic-review or Git-review acceptance reports as 
 ## PR #2 repair verification (2026-10-04)
 
 After the client-isolation, search-admission, registry-snapshot and MCP lifecycle
-repairs, the controller ran the complete Java 21 reactor: **90 tests passed**
-(Model 6, Indexer 29, Query 55; zero failures/errors/skips). The run supplied a real
+repairs, the controller ran the complete Java 21 reactor: **91 tests passed**
+(Model 6, Indexer 29, Query 56; zero failures/errors/skips). The run supplied a real
 ripgrep executable through `-Dsource.test.rg`; no workstation fallback was added.
 The clean `scripts/test-source-mcp.sh` also passed with real Git/ripgrep,
 independent Indexer and warm/cold Query processes, native MCP/HTTP parity, and
@@ -48,6 +48,9 @@ admission, a registry replacement cannot bind an old page to the new digest,
 DELETE/graceful close wait while terminal cleanup holds the search permit, and
 cancelled tool responses survive interrupt-sensitive servlet I/O. The defect
 regressions had observed behavioral failures before their production fixes.
+
+Deadline-exhaustion coverage holds cleanup past the lifecycle budget and verifies
+that graceful close fails without starting a second cleanup waiting period.
 
 Query now requires the [MCP session lifecycle](source-mcp.md#mcp-session-lifecycle).
 The pinned provider retains abandoned sessions until shutdown; this verification

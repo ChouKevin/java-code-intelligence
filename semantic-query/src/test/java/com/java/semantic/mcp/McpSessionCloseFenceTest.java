@@ -1,6 +1,7 @@
 package com.java.semantic.query.source;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.java.semantic.mcp.QueryMcpToolCatalogConfiguration;
 import com.java.semantic.mcp.SessionOwnedMcpTransport;
@@ -22,9 +23,11 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.springframework.ai.mcp.server.common.autoconfigure.properties.McpServerProperties;
@@ -36,15 +39,20 @@ class McpSessionCloseFenceTest {
 
     @Test
     void delete_waits_until_owned_search_cleanup_finishes_before_releasing_session() throws Exception {
-        verifyCloseWaitsForCleanup(false);
+        verifyCloseWaitsForCleanup(false, false);
     }
 
     @Test
     void graceful_server_close_waits_until_owned_search_cleanup_finishes() throws Exception {
-        verifyCloseWaitsForCleanup(true);
+        verifyCloseWaitsForCleanup(true, false);
     }
 
-    private void verifyCloseWaitsForCleanup(boolean serverShutdown) throws Exception {
+    @Test
+    void graceful_server_close_fails_within_one_budget_when_cleanup_cannot_finish() throws Exception {
+        verifyCloseWaitsForCleanup(true, true);
+    }
+
+    private void verifyCloseWaitsForCleanup(boolean serverShutdown, boolean holdPastDeadline) throws Exception {
         SourceFilesystemFixture fixture = new SourceFilesystemFixture(temp);
         fixture.file("Order.java", "class Order {}\n");
         fixture.publish(Optional.empty());
@@ -114,6 +122,14 @@ class McpSessionCloseFenceTest {
                 assertThat(child.isAlive()).isFalse();
                 assertThat(closing).isNotDone();
                 assertThat(pending).isNotDone();
+                if (holdPastDeadline) {
+                    CompletableFuture<Void> closingAttempt = closing;
+                    assertThatThrownBy(() -> closingAttempt.get(9, TimeUnit.SECONDS))
+                            .isInstanceOf(ExecutionException.class)
+                            .hasRootCauseInstanceOf(TimeoutException.class);
+                    assertThat(pending).isNotDone();
+                    return;
+                }
                 releaseCleanup.complete(null);
                 closing.get(3, TimeUnit.SECONDS);
                 assertThat(child.isAlive()).isFalse();
