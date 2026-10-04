@@ -26,12 +26,15 @@ clients 同時使用相同 JSON-RPC request ID 都能成功；取消只影響所
 
 ## PR #2 修復驗證（2026-10-04）
 
-修復後完整 reactor **87 PASS**（Model 6、Indexer 29、Query 52，零
+修復後完整 reactor **90 PASS**（Model 6、Indexer 29、Query 55，零
 failures/errors/skips），clean 真實 MCP journey 亦通過。額外獨立 JVM／socket
-probe 證明相同 request ID 不跨 client 衝突、foreign cancellation 不影響另一
-session、owner cancellation 回收子程序後可再次搜尋，以及跨 session 的第三個
-搜尋收到 `SOURCE_BUSY`。回歸測試涵蓋 admission 前的 permit 與 registry/cursor
-單一快照；完整驗證範圍見 [修復驗證](testing.md#pr-2-repair-verification-2026-10-04)。
+probe 證明相同 request ID 不跨 client 衝突、同 session 並行重複 ID 被拒絕且不
+中斷原呼叫、foreign cancellation 不影響另一 session。Owner cancellation 保留
+結構化 `SOURCE_TIMEOUT`、回收子程序後可再次搜尋；跨 session 的第三個搜尋收到
+`SOURCE_BUSY`。DELETE 回應前與 Query JVM 結束前，所屬子程序均已回收。
+回歸測試涵蓋 admission 前的 permit、registry/cursor 單一快照、清理完成前不可
+完成 DELETE／graceful close，以及取消後仍可寫出 MCP 回應；完整範圍見
+[修復驗證](testing.md#pr-2-repair-verification-2026-10-04)。
 這些結果不代表已完成實際模型客戶端、正式 TLS 或容量驗收。
 
 ## PR #2 review 前的 Phase 1 紀錄（2026-10-04）

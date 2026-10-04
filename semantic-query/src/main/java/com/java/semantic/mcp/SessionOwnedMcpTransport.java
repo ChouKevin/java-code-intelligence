@@ -6,16 +6,25 @@ import io.modelcontextprotocol.spec.McpStreamableServerSession;
 import io.modelcontextprotocol.spec.McpStreamableServerTransport;
 import io.modelcontextprotocol.spec.McpStreamableServerTransportProvider;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 /** Keeps request IDs and cancellation within the SDK's initialized MCP session. */
 public final class SessionOwnedMcpTransport implements McpStreamableServerTransportProvider {
+    // Source searches and process cleanup share a five-second deadline; allow a second
+    // for the transport to finish its terminal signal, then fail instead of returning 200.
+    private static final Duration CLEANUP_WAIT = Duration.ofSeconds(6);
+
     private final McpStreamableServerTransportProvider delegate;
+    private final Set<ActiveCall> running = ConcurrentHashMap.newKeySet();
+    private boolean closing;
 
     public SessionOwnedMcpTransport(McpStreamableServerTransportProvider delegate) {
         this.delegate = Objects.requireNonNull(delegate);
@@ -42,9 +51,26 @@ public final class SessionOwnedMcpTransport implements McpStreamableServerTransp
     }
 
     @Override
-    public Mono<Void> closeGracefully() { return delegate.closeGracefully(); }
+    public Mono<Void> closeGracefully() {
+        return Mono.defer(() -> {
+            synchronized (this) {
+                closing = true;
+                running.forEach(ActiveCall::cancel);
+            }
+            // The SDK provider may discard sessions after invoking closeGracefully; keep
+            // the live-call completion fence independently of its session map.
+            return delegate.closeGracefully().then(Mono.defer(() -> awaitCleanup(running)));
+        });
+    }
 
-    private static final class OwnedSession extends McpStreamableServerSession {
+    private static Mono<Void> awaitCleanup(Iterable<ActiveCall> calls) {
+        ArrayList<CompletableFuture<Void>> completed = new ArrayList<>();
+        calls.forEach(call -> completed.add(call.completed));
+        return Mono.fromFuture(CompletableFuture.allOf(completed.toArray(CompletableFuture[]::new)))
+                .timeout(CLEANUP_WAIT);
+    }
+
+    private final class OwnedSession extends McpStreamableServerSession {
         private final McpStreamableServerSession delegate;
         private final Map<Object, ActiveCall> active = new ConcurrentHashMap<>();
         private boolean closed;
@@ -59,25 +85,32 @@ public final class SessionOwnedMcpTransport implements McpStreamableServerTransp
             if (!McpSchema.METHOD_TOOLS_CALL.equals(request.method())) return delegate.responseStream(request, transport);
             return Mono.defer(() -> {
                 ActiveCall call = new ActiveCall(Thread.currentThread());
-                synchronized (this) {
-                    if (closed) return Mono.empty();
-                    if (Objects.nonNull(active.putIfAbsent(request.id(), call))) {
-                        return transport.sendMessage(McpSchema.JSONRPCResponse.error(request.id(),
-                                new McpSchema.JSONRPCResponse.JSONRPCError(McpSchema.ErrorCodes.INVALID_REQUEST,
-                                        "Concurrent duplicate request ID"))).then(transport.closeGracefully());
+                synchronized (SessionOwnedMcpTransport.this) {
+                    synchronized (this) {
+                        if (closing || closed) return Mono.empty();
+                        if (Objects.nonNull(active.putIfAbsent(request.id(), call))) {
+                            return transport.sendMessage(McpSchema.JSONRPCResponse.error(request.id(),
+                                    new McpSchema.JSONRPCResponse.JSONRPCError(McpSchema.ErrorCodes.INVALID_REQUEST,
+                                            "Concurrent duplicate request ID"))).then(transport.closeGracefully());
+                        }
+                        running.add(call);
                     }
                 }
                 try {
-                    return delegate.responseStream(request, transport).doFinally(signal -> {
-                        call.finish();
-                        active.remove(request.id(), call);
-                    });
+                    return delegate.responseStream(request, new ResponseTransport(transport, call))
+                            .doFinally(signal -> finish(request.id(), call));
                 } catch (RuntimeException exception) {
-                    call.finish();
-                    active.remove(request.id(), call);
+                    finish(request.id(), call);
                     throw exception;
                 }
             });
+        }
+
+        private void finish(Object requestId, ActiveCall call) {
+            call.finish();
+            active.remove(requestId, call);
+            running.remove(call);
+            call.completed.complete(null);
         }
 
         @Override
@@ -115,22 +148,60 @@ public final class SessionOwnedMcpTransport implements McpStreamableServerTransp
         public Flux<McpSchema.JSONRPCMessage> replay(Object eventId) { return delegate.replay(eventId); }
 
         @Override
-        public Mono<Void> delete() { return Mono.defer(() -> { cancelAll(); return delegate.delete(); }); }
+        public Mono<Void> delete() {
+            return Mono.defer(() -> awaitCleanup(cancelAll()).then(Mono.defer(delegate::delete)));
+        }
 
         @Override
-        public Mono<Void> closeGracefully() { return Mono.defer(() -> { cancelAll(); return delegate.closeGracefully(); }); }
+        public Mono<Void> closeGracefully() {
+            return Mono.defer(() -> awaitCleanup(cancelAll()).then(Mono.defer(delegate::closeGracefully)));
+        }
 
         @Override
         public void close() { cancelAll(); delegate.close(); }
 
-        private synchronized void cancelAll() {
+        private synchronized Iterable<ActiveCall> cancelAll() {
             closed = true;
-            active.values().forEach(ActiveCall::cancel);
+            List<ActiveCall> current = List.copyOf(active.values());
+            current.forEach(ActiveCall::cancel);
+            return current;
         }
+    }
+
+    /**
+     * The SDK calls sendMessage after its tool handler has produced a result. Release
+     * only this call's cancellation interrupt before entering servlet response I/O.
+     */
+    private record ResponseTransport(McpStreamableServerTransport delegate, ActiveCall call)
+            implements McpStreamableServerTransport {
+        @Override
+        public Mono<Void> sendMessage(McpSchema.JSONRPCMessage message) {
+            return Mono.defer(() -> {
+                call.beginResponse();
+                return delegate.sendMessage(message);
+            });
+        }
+
+        @Override
+        public Mono<Void> sendMessage(McpSchema.JSONRPCMessage message, String messageId) {
+            return delegate.sendMessage(message, messageId);
+        }
+
+        @Override
+        public <T> T unmarshalFrom(Object data, TypeRef<T> type) {
+            return delegate.unmarshalFrom(data, type);
+        }
+
+        @Override
+        public Mono<Void> closeGracefully() { return delegate.closeGracefully(); }
+
+        @Override
+        public void close() { delegate.close(); }
     }
 
     private static final class ActiveCall {
         private final Thread owner;
+        private final CompletableFuture<Void> completed = new CompletableFuture<>();
         private boolean open = true;
         private boolean cancelled;
 
@@ -140,6 +211,14 @@ public final class SessionOwnedMcpTransport implements McpStreamableServerTransp
             if (!open) return;
             cancelled = true;
             owner.interrupt();
+        }
+
+        synchronized void beginResponse() {
+            open = false;
+            if (cancelled && Thread.currentThread() == owner) {
+                Thread.interrupted();
+                cancelled = false;
+            }
         }
 
         synchronized void finish() {

@@ -25,10 +25,15 @@ uninitialized `tools/call` POSTs.
 JSON-RPC request IDs are scoped to a session: independent clients may reuse the
 same ID without rejecting or cancelling each other's calls. Send
 `notifications/cancelled` with the owning session and request ID to stop its work.
-Close an unused session with `DELETE /mcp` carrying the same headers. After Query
-restarts, initialize a new session; an already-published exact source context
-remains valid and does not require new preparation. Indexer retains its separate
-stateless preparation endpoint and admin token.
+Close an unused session with `DELETE /mcp` carrying the same headers. DELETE and
+graceful shutdown interrupt owned work and await terminal cleanup, with a
+six-second lifecycle deadline. DELETE does not report success if cleanup exceeds
+that deadline. Cancellation preserves the structured tool-error response rather
+than leaving its interrupt flag set during HTTP response writes.
+
+After Query restarts, initialize a new session; an already-published exact source
+context remains valid and does not require new preparation. Indexer retains its
+separate stateless preparation endpoint and admin token.
 
 The pinned MCP provider retains a session until client `DELETE` or server
 shutdown; it has no supported idle-eviction setting. Clients must close unused

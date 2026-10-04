@@ -40,7 +40,7 @@ public class QueryMcpToolCatalogConfiguration {
         return new SessionOwnedMcpTransport(delegate);
     }
 
-    @Bean(destroyMethod = "close")
+    @Bean(destroyMethod = "closeGracefully")
     public McpSyncServer queryMcpServer(McpStreamableServerTransportProvider transport, McpServerProperties properties,
             @Qualifier("mcpQueryToolSpecifications") List<McpServerFeatures.SyncToolSpecification> tools) {
         // SDK schema rejection bypasses the shared structured application error contract.

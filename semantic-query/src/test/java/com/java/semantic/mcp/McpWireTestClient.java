@@ -2,9 +2,11 @@ package com.java.semantic.query.source;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import jakarta.servlet.http.HttpServletResponse;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Objects;
+import java.util.function.Function;
 import org.springframework.ai.mcp.server.webmvc.transport.WebMvcStreamableServerTransportProvider;
 import org.springframework.http.MediaType;
 import org.springframework.http.converter.HttpMessageConverter;
@@ -40,6 +42,10 @@ final class McpWireTestClient {
     String session() { return session; }
 
     Response request(String body) throws Exception { return request(transport, "POST", body, session); }
+    Response request(String body, Function<MockHttpServletResponse, HttpServletResponse> responseSurface)
+            throws Exception {
+        return request(transport, "POST", body, session, responseSurface);
+    }
 
     JsonNode call(String body) throws Exception {
         Response response = request(body);
@@ -51,6 +57,11 @@ final class McpWireTestClient {
 
     static Response request(WebMvcStreamableServerTransportProvider transport, String method, String body,
             String session) throws Exception {
+        return request(transport, method, body, session, output -> output);
+    }
+
+    private static Response request(WebMvcStreamableServerTransportProvider transport, String method, String body,
+            String session, Function<MockHttpServletResponse, HttpServletResponse> responseSurface) throws Exception {
         MockHttpServletRequest servlet = new MockHttpServletRequest(method, "/mcp");
         servlet.setAsyncSupported(true);
         servlet.setContentType(MediaType.APPLICATION_JSON_VALUE);
@@ -65,7 +76,7 @@ final class McpWireTestClient {
         ServerRequest input = ServerRequest.create(servlet, converters);
         ServerResponse response = transport.getRouterFunction().route(input).orElseThrow().handle(input);
         MockHttpServletResponse output = new MockHttpServletResponse();
-        response.writeTo(servlet, output, () -> converters);
+        response.writeTo(servlet, responseSurface.apply(output), () -> converters);
         return new Response(output.getStatus(), output.getHeader("Mcp-Session-Id"),
                 new String(output.getContentAsByteArray(), StandardCharsets.UTF_8));
     }

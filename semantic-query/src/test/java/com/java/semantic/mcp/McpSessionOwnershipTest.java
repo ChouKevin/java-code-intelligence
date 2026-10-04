@@ -67,6 +67,12 @@ class McpSessionOwnershipTest {
                 assertThat(Files.exists(pidFile)).isTrue();
                 ProcessHandle child = ProcessHandle.of(Long.parseLong(Files.readString(pidFile).trim())).orElseThrow();
                 assertThat(child.isAlive()).isTrue();
+                McpWireTestClient.Response duplicate = a.request(call);
+                assertThat(duplicate.status()).isEqualTo(200);
+                assertThat(mapper.readTree(McpWireTestClient.jsonBody(duplicate.body()))
+                        .get("error").get("code").asInt()).isEqualTo(-32600);
+                assertThat(child.isAlive()).isTrue();
+                assertThat(pending.isDone()).isFalse();
                 Files.writeString(released, "ready");
                 McpWireTestClient.Response bResponse = b.request(call);
                 JsonNode bResult = result(mapper, bResponse);
