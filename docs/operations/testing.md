@@ -27,12 +27,20 @@ Do not reuse old Mongo/JDT, semantic-review or Git-review acceptance reports as 
 ## PR #2 repair verification (2026-10-04)
 
 After the client-isolation, search-admission, registry-snapshot, MCP lifecycle and
-durable-origin repairs, the controller ran the complete Java 21 reactor:
+durable-origin repairs, the controller ran the complete Java 21 reactor at `c11caab`:
 **97 tests passed** (Model 6, Indexer 35, Query 56; zero failures/errors/skips). The run supplied a real
 ripgrep executable through `-Dsource.test.rg`; no workstation fallback was added.
 The clean `scripts/test-source-mcp.sh` also passed with real Git/ripgrep,
 independent Indexer and warm/cold Query processes, native MCP/HTTP parity, and
 exact A/B source citations.
+
+The subsequent credential-only correction ran the **10 origin regressions** and
+rebuilt only Indexer/Model. Four actual Indexer startup probes rejected malformed
+password URLs, HTTP and HTTPS token user-info, and malformed HTTP authorities;
+the full startup diagnostics contained no sentinel secret and no registry was
+published. Parser disclosure and HTTP credential acceptance were observed before
+the fix. Unchanged Query/session scenarios retain the checkpoint evidence below;
+the final commit still goes through the complete CI gate.
 
 A separate actual-socket probe initialized two Query sessions and verified that
 both clients could use the same in-flight JSON-RPC ID; a concurrent duplicate

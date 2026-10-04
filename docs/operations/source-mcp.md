@@ -20,8 +20,11 @@ Indexer stores an opaque SHA-256 fingerprint in
 `source-published/<id>/origin.sha256`; raw URLs and Git credentials are not
 published. Keep the configured URL spelling stable: scheme, host, port, SSH user,
 path and spelling differences distinguish origins. Embedded URL passwords,
-queries and fragments are unsupported; provide authentication through the separate
-Git credential settings and never embed tokens in URLs.
+HTTP(S) user-info, queries and fragments are unsupported; HTTP authorities are
+validated strictly, and rejected parser input is never retained in exception
+causes. SSH/scp usernames remain part of the origin identity. Provide
+authentication through the separate Git credential settings and never embed
+tokens in URLs.
 
 Startup validates both namespaces before rewriting the registry or dispatching
 work. Admission, cached-object/already-published reuse, worker execution and

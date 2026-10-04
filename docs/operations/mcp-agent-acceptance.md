@@ -26,7 +26,7 @@ clients 同時使用相同 JSON-RPC request ID 都能成功；取消只影響所
 
 ## PR #2 修復驗證（2026-10-04）
 
-修復後完整 reactor **97 PASS**（Model 6、Indexer 35、Query 56，零
+Origin 修復 checkpoint `c11caab` 的完整 reactor **97 PASS**（Model 6、Indexer 35、Query 56，零
 failures/errors/skips），clean 真實 MCP journey 亦通過。額外獨立 JVM／socket
 probe 證明相同 request ID 不跨 client 衝突、同 session 並行重複 ID 被拒絕且不
 中斷原呼叫、foreign cancellation 不影響另一 session。Owner cancellation 保留
@@ -42,6 +42,10 @@ probe 證明相同 request ID 不跨 client 衝突、同 session 並行重複 ID
 尚未發布的 A cache、跨重啟 ACCEPTED intent 與未綁定既有資料拒絕由回歸測試
 涵蓋；private job format 2／重建規則見
 [origin identity](source-mcp.md#repository-origin-and-storage-identity)。
+
+後續 URL credential 修正通過 10 個 origin regression 與 4 個真實 Indexer
+啟動拒絕情境；完整 startup diagnostics 沒有 sentinel secret，且沒有發布 registry。
+這次局部修正沒有重跑無變更的 Query socket 情境；最終 commit 仍須通過完整 CI。
 
 這些結果不代表已完成實際模型客戶端、正式 TLS 或容量驗收。
 

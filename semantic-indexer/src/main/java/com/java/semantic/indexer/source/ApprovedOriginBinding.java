@@ -3,6 +3,7 @@ package com.java.semantic.indexer.source;
 import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.repository.config.RepositoryProperties;
 import java.io.IOException;
+import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
@@ -25,6 +26,14 @@ public final class ApprovedOriginBinding {
 
     public static String fingerprint(String endpoint) {
         try {
+            if (endpoint.regionMatches(true, 0, "http://", 0, 7)
+                    || endpoint.regionMatches(true, 0, "https://", 0, 8)) {
+                // URIish can accept malformed HTTP authorities as credential-free hosts.
+                URI http = new URI(endpoint).parseServerAuthority();
+                if (Objects.nonNull(http.getRawUserInfo())) {
+                    throw new IllegalArgumentException("unsupported credential-bearing Git endpoint");
+                }
+            }
             URIish uri = new URIish(endpoint);
             // A password or URL query can carry a token. Never persist even its digest as public identity.
             if (Objects.nonNull(uri.getPass()) || endpoint.indexOf('?') >= 0 || endpoint.indexOf('#') >= 0) {
@@ -32,7 +41,8 @@ public final class ApprovedOriginBinding {
             }
             return DurableSourceFiles.sha256(("source-origin-v1\u0000" + endpoint).getBytes(StandardCharsets.UTF_8));
         } catch (java.net.URISyntaxException exception) {
-            throw new IllegalArgumentException("invalid approved Git endpoint", exception);
+            // Parser exceptions retain the endpoint, including any credentials.
+            throw new IllegalArgumentException("invalid approved Git endpoint");
         }
     }
 

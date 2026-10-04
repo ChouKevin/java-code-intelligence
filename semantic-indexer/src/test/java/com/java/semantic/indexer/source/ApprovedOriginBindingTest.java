@@ -2,6 +2,7 @@ package com.java.semantic.indexer.source;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.catchThrowable;
 
 import com.java.semantic.indexer.config.ConfiguredRepositoryPublisher;
 import com.java.semantic.indexer.job.FileSourceJobStore;
@@ -9,9 +10,12 @@ import com.java.semantic.indexer.job.PreparationRequestId;
 import com.java.semantic.indexer.job.SourcePreparationJob;
 import com.java.semantic.model.repository.RepositoryRevision;
 import com.java.semantic.repository.config.RepositoryProperties;
+import java.io.PrintWriter;
+import java.io.StringWriter;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import org.eclipse.jgit.api.Git;
@@ -198,6 +202,41 @@ class ApprovedOriginBindingTest {
                 assertThat(publications.state(fixture.repository).current().orElseThrow().revision()).isEqualTo(revision);
             }
         }
+    }
+
+    @Test
+    void malformed_endpoint_errors_never_include_credentials() {
+        String secret = "origin-credential-sentinel";
+        Throwable failure = catchThrowable(() ->
+                ApprovedOriginBinding.fingerprint("https://user:" + secret + "%zz@example.invalid/repo.git"));
+        assertThat(failure).isInstanceOf(IllegalArgumentException.class);
+        StringWriter diagnostics = new StringWriter();
+        failure.printStackTrace(new PrintWriter(diagnostics));
+        assertThat(diagnostics.toString()).doesNotContain(secret);
+    }
+
+    @Test
+    void malformed_http_authority_cannot_hide_credentials() {
+        assertThatThrownBy(() -> ApprovedOriginBinding.fingerprint(
+                "https://user:origin-credential-sentinel@example.invalid:bad/repo.git"))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void http_user_info_is_not_an_origin_identity() {
+        for (String scheme : List.of("http", "https")) {
+            assertThatThrownBy(() -> ApprovedOriginBinding.fingerprint(
+                    scheme + "://origin-credential-sentinel@example.invalid/repo.git"))
+                    .isInstanceOf(IllegalArgumentException.class);
+        }
+    }
+
+    @Test
+    void ssh_usernames_remain_distinct_origin_identities() {
+        assertThat(ApprovedOriginBinding.fingerprint("ssh://alice@example.invalid/repo.git"))
+                .isNotEqualTo(ApprovedOriginBinding.fingerprint("ssh://bob@example.invalid/repo.git"));
+        assertThat(ApprovedOriginBinding.fingerprint("alice@example.invalid:repo.git"))
+                .isNotEqualTo(ApprovedOriginBinding.fingerprint("bob@example.invalid:repo.git"));
     }
 
     private Path unrelatedRemote() throws Exception {
