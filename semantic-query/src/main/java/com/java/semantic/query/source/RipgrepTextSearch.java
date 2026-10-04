@@ -64,11 +64,22 @@ public final class RipgrepTextSearch {
         if (!Files.isDirectory(admitted.tree(), java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
             throw new SourceQueryException(Code.SOURCE_UNAVAILABLE);
         }
-        if (!directory.isEmpty()) {
-            SourceInventoryEntry entry = resolver.entry(admitted, directory, deadline);
-            if (entry.kind() != EntryKind.DIRECTORY) throw new SourceQueryException(Code.SOURCE_NOT_FOUND);
-            resolver.physical(admitted, directory);
+        try (SourcePathResolver.InventoryLookup inventory = resolver.openVerified(admitted, deadline)) {
+            if (!directory.isEmpty()) {
+                SourceInventoryEntry entry = inventory.find(directory + "/")
+                        .orElseThrow(() -> new SourceQueryException(Code.SOURCE_NOT_FOUND));
+                if (entry.kind() != EntryKind.DIRECTORY) throw new SourceQueryException(Code.SOURCE_NOT_FOUND);
+                resolver.physical(admitted, directory);
+            }
+            return runVerified(admitted, request, directory, glob, deadline, operationDeadline, inventory);
+        } catch (IOException exception) {
+            throw new SourceQueryException(Code.SOURCE_UNAVAILABLE, exception);
         }
+    }
+
+    private TextSearchResult runVerified(AdmittedSourceRevision admitted, TextSearchRequest request,
+            String directory, String glob, long deadline, long operationDeadline,
+            SourcePathResolver.InventoryLookup inventory) {
         List<String> command = new ArrayList<>(List.of(properties.rgExecutable().toString(), "--no-config", "--json",
                 "--fixed-strings", "--case-sensitive", "--line-number", "--hidden", "--no-ignore", "--no-messages",
                 "--sort", "path", "--encoding", "none"));
@@ -96,7 +107,7 @@ public final class RipgrepTextSearch {
         AtomicBoolean enough = new AtomicBoolean();
         Thread stdout = Thread.ofVirtual().name("source-rg-stdout").start(() -> {
             try { readMatches(process.getInputStream(), process, stopping, admitted, request, directory, glob,
-                    deadline, matches, enough); }
+                    deadline, matches, enough, inventory); }
             catch (Throwable exception) { failure.compareAndSet(null, exception); }
         });
         Thread stderr = Thread.ofVirtual().name("source-rg-stderr").start(() -> {
@@ -233,7 +244,8 @@ public final class RipgrepTextSearch {
 
     private void readMatches(InputStream stream, Process process, AtomicBoolean stopping,
             AdmittedSourceRevision admitted, TextSearchRequest request, String directory, String glob,
-            long deadline, List<TextMatch> matches, AtomicBoolean enough) throws IOException {
+            long deadline, List<TextMatch> matches, AtomicBoolean enough,
+            SourcePathResolver.InventoryLookup inventory) throws IOException {
         ByteArrayOutputStream frame = new ByteArrayOutputStream();
         List<JsonNode> candidates = new ArrayList<>();
         Set<String> verified = new HashSet<>();
@@ -256,7 +268,7 @@ public final class RipgrepTextSearch {
                     if (Objects.nonNull(event)) candidates.add(event);
                     frame.reset();
                     if (candidates.size() >= window) {
-                        validateWindow(candidates, admitted, request, deadline, matches, enough, verified);
+                        validateWindow(candidates, admitted, request, deadline, matches, enough, verified, inventory);
                         candidates.clear();
                     }
                 }
@@ -264,7 +276,8 @@ public final class RipgrepTextSearch {
         }
         if (!stopping.get() && !enough.get()) {
             if (frame.size() != 0) throw new SourceQueryException(Code.SOURCE_UNAVAILABLE);
-            if (!candidates.isEmpty()) validateWindow(candidates, admitted, request, deadline, matches, enough, verified);
+            if (!candidates.isEmpty()) validateWindow(candidates, admitted, request, deadline, matches, enough, verified,
+                    inventory);
         }
     }
 
@@ -290,10 +303,10 @@ public final class RipgrepTextSearch {
 
     private void validateWindow(List<JsonNode> candidates, AdmittedSourceRevision admitted,
             TextSearchRequest request, long deadline, List<TextMatch> matches, AtomicBoolean enough,
-            Set<String> verified) {
+            Set<String> verified, SourcePathResolver.InventoryLookup inventory) {
         Set<String> paths = new HashSet<>();
         for (JsonNode candidate : candidates) paths.add(matchPath(candidate));
-        Map<String, SourceInventoryEntry> entries = resolver.entries(admitted, paths, deadline);
+        Map<String, SourceInventoryEntry> entries = inventory.entries(paths);
         for (JsonNode event : candidates) {
             String path = matchPath(event);
             SourceInventoryEntry entry = entries.get(path);

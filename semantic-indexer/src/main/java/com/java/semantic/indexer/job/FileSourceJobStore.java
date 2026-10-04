@@ -16,6 +16,7 @@ import java.util.HashMap;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import org.springframework.stereotype.Component;
 import tools.jackson.databind.ObjectMapper;
@@ -24,6 +25,15 @@ import tools.jackson.databind.ObjectMapper;
 @Component
 public final class FileSourceJobStore {
     private static final long MAX_JOB_BYTES = 64 * 1024;
+    private static final long MAX_ORDER_BYTES = 64;
+    private record StoredJob(long sequence, SourcePreparationJob job) {
+        private StoredJob {
+            if (sequence < 1 || Objects.isNull(job)) {
+                throw new IllegalArgumentException("invalid private admission order");
+            }
+        }
+    }
+
     private final Path jobsRoot;
     private final ObjectMapper mapper;
     private final Map<String, SourcePreparationJob> acceptedJobs = new LinkedHashMap<>();
@@ -44,8 +54,10 @@ public final class FileSourceJobStore {
         try {
             DurableSourceFiles.ensureDirectories(jobsRoot.getParent(), jobsRoot.resolve(repository.value()),
                     DurableSourceFiles.Visibility.PRIVATE);
+            boolean hasJobs = false;
             try (DirectoryStream<Path> entries = Files.newDirectoryStream(jobsRoot.resolve(repository.value()), "*.json")) {
                 for (Path path : entries) {
+                    hasJobs = true;
                     SourcePreparationJob existing = read(path);
                     if (existing.phase() == SourcePreparationJob.Phase.ACCEPTED
                             || existing.phase() == SourcePreparationJob.Phase.RUNNING) {
@@ -57,7 +69,7 @@ public final class FileSourceJobStore {
                     IndexJobId.create().value(), repository.value(), request.value(), revision.map(RepositoryRevision::value),
                     defaultBranch, SourcePreparationJob.Phase.ACCEPTED, Instant.now(), Optional.empty(), current,
                     Optional.empty(), Optional.empty());
-            save(job);
+            save(job, reserve(repository.value(), request.value(), hasJobs));
             acceptedJobs.put(repository.value(), job);
             return job;
         } catch (IOException exception) {
@@ -159,10 +171,18 @@ public final class FileSourceJobStore {
                 if (!Files.isDirectory(repository)) {
                     continue;
                 }
-                SourcePreparationJob latest = null;
+                long reserved = readOrder(repository, false);
+                StoredJob latest = null;
+                SourcePreparationJob accepted = null;
                 try (DirectoryStream<Path> entries = Files.newDirectoryStream(repository, "*.json")) {
                     for (Path path : entries) {
-                        SourcePreparationJob job = read(path);
+                        StoredJob stored = readRecord(path);
+                        if (stored.sequence() > reserved
+                                || !stored.job().repositoryId().equals(repository.getFileName().toString())
+                                || !path.getFileName().toString().equals(stored.job().requestId() + ".json")) {
+                            throw new IOException("invalid private admission record");
+                        }
+                        SourcePreparationJob job = stored.job();
                         if (job.phase() == SourcePreparationJob.Phase.RUNNING) {
                             Optional<PreparedRevision> publication = publications.lookupPublishedJob(job);
                             SourcePreparationJob recovered = publication.isPresent()
@@ -170,18 +190,23 @@ public final class FileSourceJobStore {
                             save(recovered);
                             job = recovered;
                         }
-                        if (java.util.Objects.isNull(latest) || job.acceptedAt().isAfter(latest.acceptedAt())) {
-                            latest = job;
+                        if (job.phase() == SourcePreparationJob.Phase.ACCEPTED) {
+                            if (Objects.nonNull(accepted)) throw new IOException("multiple accepted jobs");
+                            accepted = job;
+                        }
+                        if (Objects.isNull(latest) || stored.sequence() > latest.sequence()) {
+                            latest = new StoredJob(stored.sequence(), job);
+                        } else if (stored.sequence() == latest.sequence()) {
+                            throw new IOException("duplicate admission order");
                         }
                     }
                 }
-                if (java.util.Objects.nonNull(latest) && latest.phase() == SourcePreparationJob.Phase.ACCEPTED) {
-                    acceptedJobs.put(latest.repositoryId(), latest);
-                }
-                if (java.util.Objects.nonNull(latest) && (latest.phase() == SourcePreparationJob.Phase.FAILED
-                        || latest.phase() == SourcePreparationJob.Phase.COMPLETE)) {
-                    pendingStatus.put(latest.repositoryId(), latest);
-                    publications.updatePreparation(latest);
+                if (Objects.nonNull(accepted)) acceptedJobs.put(accepted.repositoryId(), accepted);
+                if (Objects.nonNull(latest) && (latest.job().phase() == SourcePreparationJob.Phase.FAILED
+                        || latest.job().phase() == SourcePreparationJob.Phase.COMPLETE)
+                        && Objects.isNull(accepted)) {
+                    pendingStatus.put(latest.job().repositoryId(), latest.job());
+                    publications.updatePreparation(latest.job());
                 }
             }
         } catch (IOException exception) {
@@ -202,17 +227,74 @@ public final class FileSourceJobStore {
     }
 
     private SourcePreparationJob read(Path path) throws IOException {
+        return readRecord(path).job();
+    }
+
+    private StoredJob readRecord(Path path) throws IOException {
         try {
-            return mapper.readValue(DurableSourceFiles.boundedRead(path, MAX_JOB_BYTES), SourcePreparationJob.class);
+            StoredJob stored = mapper.readValue(DurableSourceFiles.boundedRead(path, MAX_JOB_BYTES), StoredJob.class);
+            Path link = admissionFile(stored.job().repositoryId(), stored.sequence());
+            String linkedRequest = mapper.readValue(DurableSourceFiles.boundedRead(link, MAX_ORDER_BYTES), String.class);
+            if (!stored.job().requestId().equals(linkedRequest)) {
+                throw new IOException("private admission identity mismatch");
+            }
+            return stored;
         } catch (RuntimeException exception) {
             throw new IOException("invalid durable job", exception);
         }
     }
 
+    private Path admissionFile(String repository, long sequence) {
+        return jobsRoot.resolve(repository).resolve("admissions").resolve(Long.toString(sequence));
+    }
+
+    private Path orderFile(String repository) {
+        return jobsRoot.resolve(repository).resolve("admission-sequence");
+    }
+
+    private long readOrder(Path repository, boolean required) throws IOException {
+        Path path = repository.resolve("admission-sequence");
+        if (!Files.exists(path)) {
+            if (required) throw new IOException("missing private admission order");
+            return 0;
+        }
+        try {
+            Long value = mapper.readValue(DurableSourceFiles.boundedRead(path, MAX_ORDER_BYTES), Long.class);
+            if (Objects.isNull(value) || value < 1) throw new IOException("invalid private admission order");
+            return value;
+        } catch (RuntimeException exception) {
+            throw new IOException("invalid private admission order", exception);
+        }
+    }
+
+    private long reserve(String repository, String request, boolean hasJobs) throws IOException {
+        long prior = readOrder(jobsRoot.resolve(repository), hasJobs);
+        if (prior == Long.MAX_VALUE) throw new IOException("private admission order exhausted");
+        long next = prior + 1;
+        DurableSourceFiles.atomicBytes(orderFile(repository), mapper.writeValueAsBytes(next),
+                MAX_ORDER_BYTES, DurableSourceFiles.Visibility.PRIVATE);
+        Path link = admissionFile(repository, next);
+        DurableSourceFiles.ensureDirectories(jobsRoot.resolve(repository), link.getParent(),
+                DurableSourceFiles.Visibility.PRIVATE);
+        DurableSourceFiles.atomicBytes(link, mapper.writeValueAsBytes(request),
+                MAX_ORDER_BYTES, DurableSourceFiles.Visibility.PRIVATE);
+        return next;
+    }
+
     private void save(SourcePreparationJob job) {
+        Path path = file(job.repositoryId(), job.requestId());
+        try {
+            save(job, readRecord(path).sequence());
+        } catch (IOException exception) {
+            throw unavailable(exception);
+        }
+    }
+
+    private void save(SourcePreparationJob job, long sequence) {
         try {
             DurableSourceFiles.atomicBytes(file(job.repositoryId(), job.requestId()),
-                    mapper.writeValueAsBytes(job), MAX_JOB_BYTES, DurableSourceFiles.Visibility.PRIVATE);
+                    mapper.writeValueAsBytes(new StoredJob(sequence, job)), MAX_JOB_BYTES,
+                    DurableSourceFiles.Visibility.PRIVATE);
         } catch (IOException exception) {
             throw unavailable(exception);
         }

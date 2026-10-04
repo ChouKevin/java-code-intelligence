@@ -14,6 +14,7 @@ import com.java.semantic.repository.config.RepositoryProperties;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Instant;
 import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
@@ -125,6 +126,174 @@ class SourcePreparationRecoveryTest {
             }
         }
     }
+
+    @Test
+    void newer_durable_acceptance_remains_claimable_after_reopen_with_reversed_audit_clocks() throws Exception {
+        try (LocalSourceFixture fixture = new LocalSourceFixture(root)) {
+            fixture.commit("A.java", "class A {}\n".getBytes(StandardCharsets.UTF_8), "A");
+            RepositoryProperties properties = SourcePreparationPublicationTest.properties(fixture);
+            PreparationRequestId older = new PreparationRequestId(UUID.randomUUID().toString());
+            PreparationRequestId newer = new PreparationRequestId(UUID.randomUUID().toString());
+            String newerJobId;
+            try (DurableSourceFiles writer = new DurableSourceFiles(fixture.admin)) {
+                FileSourceJobStore jobs = new FileSourceJobStore(properties, mapper, writer);
+                SourcePublicationStore published = new SourcePublicationStore(properties, mapper, writer, jobs);
+                SourcePreparationService service = new SourcePreparationService(jobs, published,
+                        new RepositoryRegistry(properties));
+                service.prepareSource(fixture.repository, older, Optional.empty());
+                SourcePreparationJob claimed = jobs.claimNext().orElseThrow();
+                SourcePreparationJob failed = jobs.fail(fixture.repository, new IndexJobId(claimed.jobId()),
+                        "PREPARATION_FAILED");
+                published.updatePreparation(failed);
+                newerJobId = service.prepareSource(fixture.repository, newer, Optional.empty()).jobId();
+            }
+            rewriteAuditTime(fixture, older, Instant.parse("2040-01-01T00:00:00Z"));
+            rewriteAuditTime(fixture, newer, Instant.parse("2000-01-01T00:00:00Z"));
+            try (DurableSourceFiles writer = new DurableSourceFiles(fixture.admin)) {
+                FileSourceJobStore reopened = new FileSourceJobStore(properties, mapper, writer);
+                SourcePublicationStore published = new SourcePublicationStore(properties, mapper, writer, reopened);
+                reopened.recover(published);
+                assertThat(reopened.claimNext().orElseThrow().jobId()).isEqualTo(newerJobId);
+                assertThat(published.state(fixture.repository).preparation().jobId()).contains(newerJobId);
+            }
+        }
+    }
+
+    @Test
+    void latest_terminal_status_wins_recovery_with_reversed_audit_clocks() throws Exception {
+        try (LocalSourceFixture fixture = new LocalSourceFixture(root)) {
+            fixture.commit("A.java", "class A {}\n".getBytes(StandardCharsets.UTF_8), "A");
+            RepositoryProperties properties = SourcePreparationPublicationTest.properties(fixture);
+            PreparationRequestId older = new PreparationRequestId(UUID.randomUUID().toString());
+            PreparationRequestId newer = new PreparationRequestId(UUID.randomUUID().toString());
+            String newerJobId;
+            try (DurableSourceFiles writer = new DurableSourceFiles(fixture.admin)) {
+                FileSourceJobStore jobs = new FileSourceJobStore(properties, mapper, writer);
+                SourcePublicationStore published = new SourcePublicationStore(properties, mapper, writer, jobs);
+                SourcePreparationService service = new SourcePreparationService(jobs, published,
+                        new RepositoryRegistry(properties));
+                service.prepareSource(fixture.repository, older, Optional.empty());
+                SourcePreparationJob first = jobs.claimNext().orElseThrow();
+                published.updatePreparation(jobs.fail(fixture.repository, new IndexJobId(first.jobId()),
+                        "PREPARATION_FAILED"));
+                newerJobId = service.prepareSource(fixture.repository, newer, Optional.empty()).jobId();
+                SourcePreparationJob second = jobs.claimNext().orElseThrow();
+                jobs.fail(fixture.repository, new IndexJobId(second.jobId()), "PREPARATION_FAILED");
+                assertThat(published.state(fixture.repository).preparation().phase())
+                        .isEqualTo(SourceRepositoryState.PreparationPhase.ACCEPTED);
+            }
+            rewriteAuditTime(fixture, older, Instant.parse("2040-01-01T00:00:00Z"));
+            rewriteAuditTime(fixture, newer, Instant.parse("2000-01-01T00:00:00Z"));
+            try (DurableSourceFiles writer = new DurableSourceFiles(fixture.admin)) {
+                FileSourceJobStore reopened = new FileSourceJobStore(properties, mapper, writer);
+                SourcePublicationStore published = new SourcePublicationStore(properties, mapper, writer, reopened);
+                reopened.recover(published);
+                assertThat(published.state(fixture.repository).preparation().jobId()).contains(newerJobId);
+                assertThat(published.state(fixture.repository).preparation().phase())
+                        .isEqualTo(SourceRepositoryState.PreparationPhase.FAILED);
+                assertThat(reopened.claimNext()).isEmpty();
+            }
+        }
+    }
+
+    @Test
+    void interrupted_private_order_reservation_does_not_hide_durable_acceptance() throws Exception {
+        try (LocalSourceFixture fixture = new LocalSourceFixture(root)) {
+            fixture.commit("A.java", "class A {}\n".getBytes(StandardCharsets.UTF_8), "A");
+            RepositoryProperties properties = SourcePreparationPublicationTest.properties(fixture);
+            PreparationRequestId request = new PreparationRequestId(UUID.randomUUID().toString());
+            String acceptedId;
+            try (DurableSourceFiles writer = new DurableSourceFiles(fixture.admin)) {
+                FileSourceJobStore jobs = new FileSourceJobStore(properties, mapper, writer);
+                SourcePublicationStore published = new SourcePublicationStore(properties, mapper, writer, jobs);
+                acceptedId = new SourcePreparationService(jobs, published, new RepositoryRegistry(properties))
+                        .prepareSource(fixture.repository, request, Optional.empty()).jobId();
+            }
+            // Reservation 2 was durable, but its corresponding acceptance never committed.
+            Files.writeString(fixture.admin.resolve("jobs/orders/admission-sequence"), "2");
+            try (DurableSourceFiles writer = new DurableSourceFiles(fixture.admin)) {
+                FileSourceJobStore jobs = new FileSourceJobStore(properties, mapper, writer);
+                SourcePublicationStore published = new SourcePublicationStore(properties, mapper, writer, jobs);
+                jobs.recover(published);
+                assertThat(jobs.claimNext().orElseThrow().jobId()).isEqualTo(acceptedId);
+                SourcePreparationJob failed = jobs.fail(fixture.repository, new IndexJobId(acceptedId),
+                        "PREPARATION_FAILED");
+                published.updatePreparation(failed);
+                PreparationRequestId next = new PreparationRequestId(UUID.randomUUID().toString());
+                String nextId = new SourcePreparationService(jobs, published, new RepositoryRegistry(properties))
+                        .prepareSource(fixture.repository, next, Optional.empty()).jobId();
+                assertThat(jobs.claimNext().orElseThrow().jobId()).isEqualTo(nextId);
+            }
+        }
+    }
+
+    @Test
+    void missing_private_order_refuses_recovery_instead_of_guessing_from_audit_time() throws Exception {
+        try (LocalSourceFixture fixture = new LocalSourceFixture(root)) {
+            fixture.commit("A.java", "class A {}\n".getBytes(StandardCharsets.UTF_8), "A");
+            RepositoryProperties properties = SourcePreparationPublicationTest.properties(fixture);
+            try (DurableSourceFiles writer = new DurableSourceFiles(fixture.admin)) {
+                FileSourceJobStore jobs = new FileSourceJobStore(properties, mapper, writer);
+                SourcePublicationStore published = new SourcePublicationStore(properties, mapper, writer, jobs);
+                new SourcePreparationService(jobs, published, new RepositoryRegistry(properties))
+                        .prepareSource(fixture.repository, new PreparationRequestId(UUID.randomUUID().toString()),
+                                Optional.empty());
+            }
+            Files.delete(fixture.admin.resolve("jobs/orders/admission-sequence"));
+            try (DurableSourceFiles writer = new DurableSourceFiles(fixture.admin)) {
+                FileSourceJobStore reopened = new FileSourceJobStore(properties, mapper, writer);
+                SourcePublicationStore published = new SourcePublicationStore(properties, mapper, writer, reopened);
+                assertThatThrownBy(() -> reopened.recover(published)).isInstanceOf(IllegalStateException.class);
+                assertThat(published.state(fixture.repository).preparation().phase())
+                        .isEqualTo(SourceRepositoryState.PreparationPhase.ACCEPTED);
+            }
+        }
+    }
+
+    @Test
+    void duplicate_private_admission_order_refuses_recovery() throws Exception {
+        try (LocalSourceFixture fixture = new LocalSourceFixture(root)) {
+            fixture.commit("A.java", "class A {}\n".getBytes(StandardCharsets.UTF_8), "A");
+            RepositoryProperties properties = SourcePreparationPublicationTest.properties(fixture);
+            PreparationRequestId older = new PreparationRequestId(UUID.randomUUID().toString());
+            PreparationRequestId newer = new PreparationRequestId(UUID.randomUUID().toString());
+            try (DurableSourceFiles writer = new DurableSourceFiles(fixture.admin)) {
+                FileSourceJobStore jobs = new FileSourceJobStore(properties, mapper, writer);
+                SourcePublicationStore published = new SourcePublicationStore(properties, mapper, writer, jobs);
+                SourcePreparationService service = new SourcePreparationService(jobs, published,
+                        new RepositoryRegistry(properties));
+                service.prepareSource(fixture.repository, older, Optional.empty());
+                SourcePreparationJob claimed = jobs.claimNext().orElseThrow();
+                published.updatePreparation(jobs.fail(fixture.repository, new IndexJobId(claimed.jobId()),
+                        "PREPARATION_FAILED"));
+                service.prepareSource(fixture.repository, newer, Optional.empty());
+            }
+            Path olderFile = fixture.admin.resolve("jobs/orders").resolve(older.value() + ".json");
+            Path newerFile = fixture.admin.resolve("jobs/orders").resolve(newer.value() + ".json");
+            DurableJob first = mapper.readValue(Files.readAllBytes(olderFile), DurableJob.class);
+            DurableJob second = mapper.readValue(Files.readAllBytes(newerFile), DurableJob.class);
+            Files.write(newerFile, mapper.writeValueAsBytes(new DurableJob(first.sequence(), second.job())));
+            try (DurableSourceFiles writer = new DurableSourceFiles(fixture.admin)) {
+                FileSourceJobStore reopened = new FileSourceJobStore(properties, mapper, writer);
+                SourcePublicationStore published = new SourcePublicationStore(properties, mapper, writer, reopened);
+                assertThatThrownBy(() -> reopened.recover(published)).isInstanceOf(IllegalStateException.class);
+            }
+        }
+    }
+
+    private record DurableJob(long sequence, SourcePreparationJob job) { }
+
+    private void rewriteAuditTime(LocalSourceFixture fixture, PreparationRequestId request, Instant timestamp)
+            throws Exception {
+        Path record = fixture.admin.resolve("jobs/orders").resolve(request.value() + ".json");
+        DurableJob stored = mapper.readValue(Files.readAllBytes(record), DurableJob.class);
+        SourcePreparationJob job = stored.job();
+        SourcePreparationJob shifted = new SourcePreparationJob(job.formatVersion(), job.jobId(), job.repositoryId(),
+                job.requestId(), job.requestedRevision(), job.defaultBranch(), job.phase(), timestamp,
+                job.resolvedRevision(), job.expectedCurrent(), job.publication(), job.failureCode());
+        Files.write(record, mapper.writeValueAsBytes(new DurableJob(stored.sequence(), shifted)));
+    }
+
     @TempDir Path root;
     private final ObjectMapper mapper = JsonMapper.builder().build();
 

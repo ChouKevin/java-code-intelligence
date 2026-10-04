@@ -5,20 +5,25 @@ import com.java.semantic.model.source.SourcePathPolicy;
 import com.java.semantic.model.source.SourceReadContract.EntryKind;
 import com.java.semantic.model.source.SourceReadContract.EntryStatus;
 import com.java.semantic.query.source.SourceQueryException.Code;
-import java.io.ByteArrayOutputStream;
 import java.io.BufferedInputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.ByteBuffer;
+import java.nio.channels.Channels;
+import java.nio.channels.FileChannel;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
-import java.nio.charset.StandardCharsets;
+import java.nio.file.StandardOpenOption;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.HashMap;
 import java.util.HexFormat;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.function.Consumer;
 import tools.jackson.databind.ObjectMapper;
@@ -48,6 +53,32 @@ public final class SourcePathResolver {
     public void scan(AdmittedSourceRevision admitted, long deadline, Consumer<SourceInventoryEntry> consumer) {
         LocalSourceRevisionCatalog.noLinks(admitted.inventory());
         try (InputStream input = new BufferedInputStream(Files.newInputStream(admitted.inventory(), LinkOption.NOFOLLOW_LINKS))) {
+            verify(input, admitted, deadline, consumer);
+        } catch (IOException exception) {
+            throw new SourceQueryException(Code.SOURCE_UNAVAILABLE, exception);
+        }
+    }
+
+    public InventoryLookup openVerified(AdmittedSourceRevision admitted, long deadline) {
+        LocalSourceRevisionCatalog.noLinks(admitted.inventory());
+        try {
+            FileChannel channel = FileChannel.open(admitted.inventory(),
+                    Set.of(StandardOpenOption.READ, LinkOption.NOFOLLOW_LINKS));
+            try {
+                verify(new BufferedInputStream(Channels.newInputStream(channel)), admitted, deadline, entry -> { });
+                return new InventoryLookup(channel, channel.size(), deadline);
+            } catch (RuntimeException | IOException exception) {
+                channel.close();
+                throw exception;
+            }
+        } catch (IOException exception) {
+            throw new SourceQueryException(Code.SOURCE_UNAVAILABLE, exception);
+        }
+    }
+
+    private void verify(InputStream input, AdmittedSourceRevision admitted, long deadline,
+            Consumer<SourceInventoryEntry> consumer) {
+        try {
             ByteArrayOutputStream frame = new ByteArrayOutputStream(1024);
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
             String previous = "";
@@ -88,14 +119,118 @@ public final class SourcePathResolver {
         return result[0];
     }
 
-    /** Resolve only this bounded search window while verifying the complete inventory digest/order. */
-    public Map<String, SourceInventoryEntry> entries(AdmittedSourceRevision admitted, Set<String> paths, long deadline) {
-        Map<String, SourceInventoryEntry> found = new HashMap<>();
-        scan(admitted, deadline, entry -> {
-            if (paths.contains(entry.path())) found.put(entry.path(), entry);
-        });
-        return found;
+    public final class InventoryLookup implements AutoCloseable {
+        private final FileChannel channel;
+        private final long size;
+        private final long deadline;
+        private final ByteBuffer block = ByteBuffer.allocate(1024);
+        private final ByteBuffer single = ByteBuffer.allocate(1);
+        private final ByteArrayOutputStream frame = new ByteArrayOutputStream(1024);
+        private String previousPath;
+        private Optional<SourceInventoryEntry> previousResult = Optional.empty();
+
+        private InventoryLookup(FileChannel channel, long size, long deadline) {
+            this.channel = channel;
+            this.size = size;
+            this.deadline = deadline;
+        }
+
+        public Optional<SourceInventoryEntry> find(String path) {
+            LocalSourceRevisionCatalog.check(deadline);
+            if (path.equals(previousPath)) return previousResult;
+            Optional<SourceInventoryEntry> result = seek(path);
+            previousPath = path;
+            previousResult = result;
+            return result;
+        }
+
+        private Optional<SourceInventoryEntry> seek(String path) {
+            try {
+                long low = 0;
+                long high = size;
+                while (low < high) {
+                    LocalSourceRevisionCatalog.check(deadline);
+                    long midpoint = low + (high - low) / 2;
+                    long start = lineStart(midpoint);
+                    if (start >= high) {
+                        high = midpoint;
+                        continue;
+                    }
+                    InventoryLine line = readLine(start);
+                    int order = compare(key(line.entry()), path);
+                    if (order == 0) return Optional.of(line.entry());
+                    if (order < 0) low = line.end();
+                    else high = start;
+                }
+                return Optional.empty();
+            } catch (IOException exception) {
+                throw new SourceQueryException(Code.SOURCE_UNAVAILABLE, exception);
+            }
+        }
+
+        public Map<String, SourceInventoryEntry> entries(Set<String> paths) {
+            Map<String, SourceInventoryEntry> found = new HashMap<>();
+            for (String path : paths) find(path).ifPresent(entry -> found.put(path, entry));
+            return found;
+        }
+
+        private long lineStart(long offset) throws IOException {
+            if (offset == 0 || byteAt(offset - 1) == '\n') return offset;
+            long position = offset;
+            while (position < size) {
+                LocalSourceRevisionCatalog.check(deadline);
+                block.clear();
+                int count = channel.read(block, position);
+                if (count <= 0) throw new IOException("incomplete inventory line");
+                block.flip();
+                for (int index = 0; index < count; index++) {
+                    if (block.get() == '\n') return position + index + 1;
+                }
+                position += count;
+            }
+            throw new IOException("unterminated inventory line");
+        }
+
+        private byte byteAt(long offset) throws IOException {
+            single.clear();
+            if (channel.read(single, offset) != 1) throw new IOException("incomplete inventory line");
+            return single.get(0);
+        }
+
+        private InventoryLine readLine(long start) throws IOException {
+            frame.reset();
+            long position = start;
+            while (position < size) {
+                LocalSourceRevisionCatalog.check(deadline);
+                block.clear();
+                int count = channel.read(block, position);
+                if (count <= 0) throw new IOException("incomplete inventory line");
+                block.flip();
+                for (int index = 0; index < count; index++) {
+                    byte next = block.get();
+                    if (next == '\n') {
+                        try {
+                            return new InventoryLine(mapper.readValue(frame.toByteArray(), SourceInventoryEntry.class),
+                                    position + index + 1);
+                        } catch (RuntimeException exception) {
+                            throw new IOException("invalid inventory entry", exception);
+                        }
+                    }
+                    if (frame.size() >= 65_536) throw new IOException("inventory frame too large");
+                    frame.write(next);
+                }
+                position += count;
+            }
+            throw new IOException("unterminated inventory line");
+        }
+
+        @Override
+        public void close() throws IOException {
+            channel.close();
+        }
     }
+
+    private record InventoryLine(SourceInventoryEntry entry, long end) { }
 
     public Path readable(AdmittedSourceRevision admitted, SourceInventoryEntry entry) {
         if (entry.kind() != EntryKind.FILE || entry.status().orElseThrow() != EntryStatus.TEXT) {

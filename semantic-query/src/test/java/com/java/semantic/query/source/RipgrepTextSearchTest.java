@@ -75,6 +75,59 @@ class RipgrepTextSearchTest {
     }
 
     @Test
+    void multiwindow_unknown_prefix_preserves_real_directory_traversal_order() throws Exception {
+        SourceFilesystemFixture fixture = new SourceFilesystemFixture(temp);
+        fixture.directory("a");
+        fixture.file("a/z.java", "needle\n");
+        fixture.file("a.java", "needle\n");
+        fixture.directory("z");
+        for (int index = 0; index < 512; index++) {
+            fixture.file("z/" + String.format("%04d", index) + ".java", "no match\n");
+        }
+        AdmittedSourceRevision admitted = fixture.publish(Optional.empty());
+        for (int index = 0; index < 12; index++) {
+            Files.writeString(fixture.tree.resolve("a/" + String.format("%04d", index) + ".java"), "needle\n");
+        }
+        TextSearchResult limited = fixture.service().searchText(admitted, new TextSearchRequest(fixture.context,
+                "needle", "", Optional.empty(), 1));
+        assertThat(limited.matches()).extracting(TextMatch::path).containsExactly("a/z.java");
+        assertThat(limited.truncated()).isTrue();
+        assertThat(limited.scanComplete()).isFalse();
+        TextSearchResult complete = fixture.service().searchText(admitted, new TextSearchRequest(fixture.context,
+                "needle", "", Optional.empty(), 20));
+        assertThat(complete.matches()).extracting(TextMatch::path).containsExactly("a/z.java", "a.java");
+        assertThat(complete.truncated()).isFalse();
+        assertThat(complete.scanComplete()).isTrue();
+    }
+
+    @Test
+    void verified_inventory_seeks_cover_first_last_unicode_and_missing_paths() throws Exception {
+        SourceFilesystemFixture fixture = new SourceFilesystemFixture(temp);
+        fixture.file("0-first.java", "first-only\n");
+        fixture.directory("a");
+        fixture.file("a/nested.java", "nested-only\n");
+        fixture.file("\u00e9-last.java", "last-only\n");
+        AdmittedSourceRevision admitted = fixture.publish(Optional.empty());
+        Files.writeString(fixture.tree.resolve("missing.java"), "unknown-only\n");
+        TextSearchResult first = fixture.service().searchText(admitted, new TextSearchRequest(fixture.context,
+                "first-only", "", Optional.empty(), 1));
+        assertThat(first.matches()).extracting(TextMatch::path).containsExactly("0-first.java");
+        assertThat(first.scanComplete()).isTrue();
+        TextSearchResult last = fixture.service().searchText(admitted, new TextSearchRequest(fixture.context,
+                "last-only", "", Optional.empty(), 1));
+        assertThat(last.matches()).extracting(TextMatch::path).containsExactly("\u00e9-last.java");
+        assertThat(last.scanComplete()).isTrue();
+        TextSearchResult nested = fixture.service().searchText(admitted, new TextSearchRequest(fixture.context,
+                "nested-only", "a", Optional.empty(), 1));
+        assertThat(nested.matches()).extracting(TextMatch::path).containsExactly("a/nested.java");
+        assertThat(nested.scanComplete()).isTrue();
+        TextSearchResult missing = fixture.service().searchText(admitted, new TextSearchRequest(fixture.context,
+                "unknown-only", "", Optional.empty(), 1));
+        assertThat(missing.matches()).isEmpty();
+        assertThat(missing.scanComplete()).isTrue();
+    }
+
+    @Test
     void utf8_bom_search_columns_include_the_preserved_source_prefix() throws Exception {
         SourceFilesystemFixture fixture = new SourceFilesystemFixture(temp);
         fixture.file("bom.java", "\uFEFF🙂 needle\r\n");
