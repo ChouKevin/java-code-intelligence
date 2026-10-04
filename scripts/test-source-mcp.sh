@@ -33,12 +33,8 @@ fi
 
 run_root="$(mktemp -d "${TMPDIR:-/tmp}/source-mcp-journey.XXXXXXXX")"
 cleanup() {
-  # Retain diagnostic process logs, then remove only this run's disposable service storage and Git.
-  if [[ -d "$run_root/work" ]]; then
-    for process_log in "$run_root/work"/*.log; do
-      if [[ -f "$process_log" ]]; then cp -- "$process_log" "$run_root/artifacts/"; fi
-    done
-  fi
+  # Only remove this run's disposable service storage, Git fixture and process logs.
+  # Git source bodies and potentially sensitive process diagnostics never become retained artifacts.
   rm -rf -- "$run_root/work"
   echo "Source journey artifacts: $run_root/artifacts"
 }

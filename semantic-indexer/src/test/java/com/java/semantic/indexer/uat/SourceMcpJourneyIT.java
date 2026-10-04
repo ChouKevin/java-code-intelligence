@@ -122,10 +122,12 @@ class SourceMcpJourneyIT {
                         "path", VIDEO_PATH), "a-old-bytes");
                 JsonNode bSource = pair(sourceMcp, read, "read_source", Map.of("context", contextB.get("context"),
                         "path", VIDEO_PATH), "b-new-bytes");
-                assertThat(aSource.get("content").asString()).isEqualTo(git(checkout, "show", a + ":" + VIDEO_PATH));
-                assertThat(bSource.get("content").asString()).isEqualTo(git(checkout, "show", b + ":" + VIDEO_PATH));
-                assertThat(aSource.get("content").asString()).doesNotContain("release B source marker");
-                assertThat(bSource.get("content").asString()).contains("release B source marker");
+                assertExactBytes(aSource.get("content").asString(), git(checkout, "show", a + ":" + VIDEO_PATH),
+                        "A controller source");
+                assertExactBytes(bSource.get("content").asString(), git(checkout, "show", b + ":" + VIDEO_PATH),
+                        "B controller source");
+                assertThat(aSource.get("content").asString().contains("release B source marker")).isFalse();
+                assertThat(bSource.get("content").asString().contains("release B source marker")).isTrue();
                 assertFlow(sourceMcp, read, contextB.get("context"), b, "video-b");
                 for (String repository : List.of("orders", "payments")) {
                     String guideRequest = requestId(repository, "guide");
@@ -139,10 +141,13 @@ class SourceMcpJourneyIT {
                     String path = repository.equals("orders") ? "order-service/GUIDE.md" : "payment-service/GUIDE.md";
                     JsonNode guide = pair(sourceMcp, read, "read_source",
                             Map.of("context", guideContext.get("context"), "path", path), "guide-" + repository);
-                    assertThat(guide.get("content").asString()).isEqualTo(git(checkout, "show", b + ":" + path));
+                    assertExactBytes(guide.get("content").asString(), git(checkout, "show", b + ":" + path),
+                            "guide source");
                     assertThat(guideContext.get("projectGuide").get("path").asString()).isEqualTo(path);
                     assertThat(guideContext.get("projectGuide").get("digest").asString()).hasSize(64);
                 }
+                Map<String, String> immutableA = revisionHashes(a);
+                assertThat(immutableA).containsKeys("manifest.json", "tree/" + VIDEO_PATH);
                 String repeatRequest = requestId(VIDEO, "republish-a");
                 JsonNode repeated = call(privateMcp, "prepare_source", Map.of("repositoryId", VIDEO,
                         "requestId", repeatRequest, "revision", a));
@@ -151,6 +156,15 @@ class SourceMcpJourneyIT {
                         .isEqualTo(repeated.get("jobId").asString());
                 JsonNode afterRepeat = context(sourceMcp, read, VIDEO, Map.of(), "context-republished-a");
                 assertIdentity(afterRepeat, VIDEO, a);
+                assertThat(revisionHashes(a)).as("republishing known SHA must preserve A manifest and tree bytes")
+                        .isEqualTo(immutableA);
+                JsonNode republishedSource = pair(sourceMcp, read, "read_source",
+                        Map.of("context", afterRepeat.get("context"), "path", VIDEO_PATH), "a-after-republication");
+                assertExactBytes(republishedSource.get("content").asString(), aSource.get("content").asString(),
+                        "republished A response");
+                assertExactBytes(republishedSource.get("content").asString(),
+                        git(checkout, "show", a + ":" + republishedSource.get("path").asString()),
+                        "republished A Git blob");
                 assertIdentity(context(sourceMcp, read, VIDEO, Map.of("revision", b), "context-known-b"), VIDEO, b);
                 assertError(sourceMcp, read, "get_context", Map.of("repositoryId", VIDEO,
                         "revision", "0000000000000000000000000000000000000000"), "REVISION_NOT_PREPARED", 404);
@@ -294,13 +308,14 @@ class SourceMcpJourneyIT {
             String[] lines = source.split("\n", -1);
             int line = match.get("line").asInt();
             assertThat(line).isBetween(1, lines.length);
-            assertThat(lines[line - 1]).contains("upload(");
+            assertThat(lines[line - 1].contains("upload(")).isTrue();
         }
         JsonNode read = pair(client, base, "read_source", Map.of("context", ctx,
                 "path", VIDEO_PATH), phase + "-read");
         assertThat(read.get("context")).isEqualTo(identity);
         assertThat(read.get("path").asString()).isEqualTo(VIDEO_PATH);
-        assertThat(read.get("content").asString()).isEqualTo(git(fixtureCheckout(), "show", sha + ":" + VIDEO_PATH));
+        assertExactBytes(read.get("content").asString(), git(fixtureCheckout(), "show", sha + ":" + VIDEO_PATH),
+                "controller source");
     }
 
     private void assertFlow(McpSyncClient client, String base, JsonNode identity, String sha, String label) throws Exception {
@@ -327,9 +342,18 @@ class SourceMcpJourneyIT {
             JsonNode read = pair(client, base, "read_source", Map.of("context", ctx,
                     "path", matched.get("path").asString(), "startLine", matched.get("line").asInt(),
                     "maxLines", 1), label + "-source-" + citations.size());
-            assertThat(read.get("content").asString()).contains(step[1]);
-            assertThat(read.get("startLine").asInt()).isEqualTo(matched.get("line").asInt());
+            assertThat(read.get("content").asString().contains(step[1])).as("flow source phrase").isTrue();
+            int line = matched.get("line").asInt();
+            assertThat(read.get("startLine").asInt()).isEqualTo(line);
+            assertThat(read.get("context").get("repositoryId").asString()).isEqualTo(identity.get("repositoryId").asString());
             assertThat(read.get("context").get("revision").asString()).isEqualTo(sha);
+            String returnedPath = read.get("path").asString();
+            assertThat(returnedPath).isEqualTo(matched.get("path").asString());
+            String[] gitLines = git(fixtureCheckout(), "show", sha + ":" + returnedPath).split("(?<=\\n)", -1);
+            assertThat(line).isBetween(1, gitLines.length);
+            assertThat(gitLines[line - 1].contains(matched.get("matchedText").asString()))
+                    .as("search match must occur in the actual Git line").isTrue();
+            assertExactBytes(read.get("content").asString(), gitLines[line - 1], "cited Git line");
             citations.add(Map.of("repositoryId", read.get("context").get("repositoryId").asString(),
                     "revision", read.get("context").get("revision").asString(),
                     "path", read.get("path").asString(), "line", read.get("startLine").asInt(),
@@ -366,9 +390,9 @@ class SourceMcpJourneyIT {
                 route, mapper.writeValueAsString(input), readToken);
         assertThat(response.statusCode()).as(label).isEqualTo(200);
         JsonNode httpResult = mapper.readTree(response.body());
-        assertThat(httpResult).as("HTTP/MCP parity: " + label).isEqualTo(mcpResult);
         save(label + "-http", httpResult);
         save(label + "-mcp", mcpResult);
+        assertThat(httpResult.equals(mcpResult)).as("HTTP/MCP parity: " + label).isTrue();
         return httpResult;
     }
 
@@ -395,6 +419,8 @@ class SourceMcpJourneyIT {
     private JsonNode jobByOriginal(McpSyncClient client, String index, String repository, String requestId)
             throws Exception {
         JsonNode mcpJob = call(client, "get_job", Map.of("repositoryId", repository, "requestId", requestId));
+        String phase = mcpJob.get("phase").asString();
+        if (!phase.equals("COMPLETE") && !phase.equals("FAILED")) return mcpJob;
         HttpResponse<String> response = request(index, "GET", "/index/repositories/" + repository
                 + "/jobs?requestId=" + requestId, "", adminToken);
         assertThat(response.statusCode()).isEqualTo(200);
@@ -485,14 +511,26 @@ class SourceMcpJourneyIT {
     }
 
     private Map<String, String> publishedHashes() throws Exception {
+        return fileHashes(published);
+    }
+
+    private Map<String, String> revisionHashes(String revision) throws Exception {
+        return fileHashes(published.resolve(VIDEO).resolve("revisions").resolve(revision));
+    }
+
+    private Map<String, String> fileHashes(Path directory) throws Exception {
         java.util.TreeMap<String, String> hashes = new java.util.TreeMap<>();
-        try (java.util.stream.Stream<Path> paths = Files.walk(published)) {
+        try (java.util.stream.Stream<Path> paths = Files.walk(directory)) {
             for (Path path : paths.filter(Files::isRegularFile).toList()) {
                 byte[] digest = java.security.MessageDigest.getInstance("SHA-256").digest(Files.readAllBytes(path));
-                hashes.put(published.relativize(path).toString(), java.util.HexFormat.of().formatHex(digest));
+                hashes.put(directory.relativize(path).toString(), java.util.HexFormat.of().formatHex(digest));
             }
         }
         return hashes;
+    }
+
+    private static void assertExactBytes(String actual, String expected, String evidence) {
+        assertThat(actual.equals(expected)).as(evidence + " must match exact tracked UTF-8 bytes").isTrue();
     }
 
     private String requestId(String repository, String intent) throws Exception {
@@ -502,6 +540,10 @@ class SourceMcpJourneyIT {
         try (java.nio.channels.FileChannel channel = java.nio.channels.FileChannel.open(record,
                 java.nio.file.StandardOpenOption.WRITE)) {
             channel.force(true);
+        }
+        try (java.nio.channels.FileChannel directory = java.nio.channels.FileChannel.open(artifacts,
+                java.nio.file.StandardOpenOption.READ)) {
+            directory.force(true);
         }
         return id;
     }
@@ -513,17 +555,27 @@ class SourceMcpJourneyIT {
     private String git(Path cwd, String... args) throws Exception {
         List<String> command = new ArrayList<>(List.of("git", "-C", cwd.toString()));
         command.addAll(List.of(args));
-        Path outputFile = work.resolve("git-command.log");
-        Process process = new ProcessBuilder(command).redirectErrorStream(true)
-                .redirectOutput(outputFile.toFile()).start();
-        if (!process.waitFor(15, TimeUnit.SECONDS)) {
-            process.destroyForcibly();
-            assertThat(process.waitFor(10, TimeUnit.SECONDS)).isTrue();
-            throw new AssertionError("Timed out waiting for local Git command: " + command);
+        Process process = new ProcessBuilder(command).redirectErrorStream(true).start();
+        java.util.concurrent.CompletableFuture<String> output = java.util.concurrent.CompletableFuture.supplyAsync(() -> {
+            try (java.io.InputStream stream = process.getInputStream()) {
+                return new String(stream.readAllBytes(), StandardCharsets.UTF_8);
+            } catch (IOException exception) {
+                throw new java.io.UncheckedIOException(exception);
+            }
+        });
+        try {
+            if (!process.waitFor(15, TimeUnit.SECONDS)) {
+                throw new AssertionError("Timed out waiting for local Git fixture command");
+            }
+            String result = output.get(5, TimeUnit.SECONDS);
+            assertThat(process.exitValue()).as("Local Git fixture command failed").isZero();
+            return result;
+        } finally {
+            if (process.isAlive()) {
+                process.destroyForcibly();
+                process.waitFor(10, TimeUnit.SECONDS);
+            }
         }
-        String output = Files.readString(outputFile);
-        assertThat(process.exitValue()).as(command + ": " + output).isZero();
-        return output;
     }
 
     private void save(String label, JsonNode value) throws Exception {
