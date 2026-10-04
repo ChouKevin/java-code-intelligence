@@ -35,6 +35,20 @@ class SourceContextContractTest {
     }
 
     @Test
+    void complete_orphan_tree_does_not_become_a_published_context() throws Exception {
+        SourceFilesystemFixture fixture = new SourceFilesystemFixture(temp);
+        fixture.file("safe.java", "complete-but-unpublished");
+        fixture.publish(Optional.empty());
+        Files.delete(fixture.root.resolve("sample/state.json"));
+        assertThat(fixture.catalog().getContext(new ContextRequest("sample", Optional.empty())).sourceStatus())
+                .isEqualTo(SourceStatus.NOT_PREPARED);
+        assertThat(fixture.catalog().getContext(new ContextRequest("sample", Optional.empty())).context()).isEmpty();
+        assertThatThrownBy(() -> fixture.catalog().admit(fixture.context))
+                .isInstanceOfSatisfying(SourceQueryException.class, error -> assertThat(error.code())
+                        .isEqualTo(SourceQueryException.Code.SOURCE_NOT_PREPARED));
+    }
+
+    @Test
     void exact_membership_and_manifest_digest_control_readiness() throws Exception {
         SourceFilesystemFixture fixture = new SourceFilesystemFixture(temp);
         fixture.file("Guide.md", "guide");

@@ -61,6 +61,29 @@ class SourceAccessBoundaryTest {
     }
 
     @Test
+    void symlink_parent_is_denied_by_listing_search_and_direct_read() throws Exception {
+        SourceFilesystemFixture fixture = new SourceFilesystemFixture(temp);
+        fixture.directory("src");
+        fixture.file("src/safe.java", "sealed-source");
+        AdmittedSourceRevision admitted = fixture.publish(Optional.empty());
+        Path outside = temp.resolve("outside-published");
+        Files.move(fixture.tree.resolve("src"), outside);
+        Files.createSymbolicLink(fixture.tree.resolve("src"), outside);
+        assertThatThrownBy(() -> fixture.service().listFiles(admitted,
+                new FileListRequest(fixture.context, "src", 20, Optional.empty())))
+                .isInstanceOfSatisfying(SourceQueryException.class, error -> assertThat(error.code())
+                        .isEqualTo(SourceQueryException.Code.SOURCE_UNAVAILABLE));
+        assertThatThrownBy(() -> fixture.service().searchText(admitted,
+                new TextSearchRequest(fixture.context, "sealed-source", "src", Optional.empty(), 20)))
+                .isInstanceOfSatisfying(SourceQueryException.class, error -> assertThat(error.code())
+                        .isEqualTo(SourceQueryException.Code.SOURCE_UNAVAILABLE));
+        assertThatThrownBy(() -> fixture.service().readSource(admitted,
+                new ReadSourceRequest(fixture.context, "src/safe.java", 1, 1, Optional.empty())))
+                .isInstanceOfSatisfying(SourceQueryException.class, error -> assertThat(error.code())
+                        .isEqualTo(SourceQueryException.Code.SOURCE_UNAVAILABLE));
+    }
+
+    @Test
     void cursor_from_other_directory_or_invalid_position_is_not_admitted() throws Exception {
         SourceFilesystemFixture fixture = new SourceFilesystemFixture(temp);
         fixture.file("a.java", "a");

@@ -5,6 +5,8 @@ import com.java.semantic.model.source.SourceReadContract.*;
 import com.java.semantic.query.application.QueryCursorCodec;
 import com.java.semantic.query.config.SourceAccessProperties;
 import com.java.semantic.query.source.SourceQueryException.Code;
+import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
@@ -59,6 +61,10 @@ public final class LocalRepositorySourceService implements RepositorySourcePort 
                     ? Optional.of(entry.byteLength()) : Optional.empty(), hint));
         });
         if (!directorySeen[0]) throw new SourceQueryException(Code.SOURCE_NOT_FOUND);
+        if (!Files.isDirectory(directory.isEmpty() ? admitted.tree() : resolver.physical(admitted, directory),
+                LinkOption.NOFOLLOW_LINKS)) {
+            throw new SourceQueryException(Code.SOURCE_UNAVAILABLE);
+        }
         if (!boundarySeen[0]) throw new SourceQueryException(Code.INVALID_ARGUMENT);
         Optional<String> cursor = hasMore[0] ? Optional.of(QueryCursorCodec.encode(binding,
                 List.of(items.getLast().path()))) : Optional.empty();

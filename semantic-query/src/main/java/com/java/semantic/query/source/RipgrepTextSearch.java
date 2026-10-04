@@ -55,7 +55,11 @@ public final class RipgrepTextSearch {
     }
 
     private TextSearchResult run(AdmittedSourceRevision admitted, TextSearchRequest request, String directory, String glob) {
-        long deadline = LocalSourceRevisionCatalog.deadline(properties.searchTimeout());
+        long operationDeadline = SourceOperationDeadline.cap(
+                LocalSourceRevisionCatalog.deadline(properties.searchTimeout()));
+        long remaining = Math.max(0, operationDeadline - System.nanoTime());
+        long cleanupReserve = Math.min(TimeUnit.MILLISECONDS.toNanos(250), remaining / 4);
+        long deadline = operationDeadline - cleanupReserve;
         LocalSourceRevisionCatalog.noLinks(admitted.tree());
         if (!Files.isDirectory(admitted.tree(), java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
             throw new SourceQueryException(Code.SOURCE_UNAVAILABLE);
@@ -82,8 +86,7 @@ public final class RipgrepTextSearch {
         } catch (IOException exception) { throw new SourceQueryException(Code.SOURCE_UNAVAILABLE, exception); }
         try { process.getOutputStream().close(); }
         catch (IOException exception) {
-            process.destroyForcibly();
-            process.onExit().join();
+            cleanup(process, List.of(), operationDeadline);
             throw new SourceQueryException(Code.SOURCE_UNAVAILABLE, exception);
         }
         List<TextMatch> matches = new ArrayList<>();
@@ -121,31 +124,53 @@ public final class RipgrepTextSearch {
             Thread.currentThread().interrupt();
             throw new SourceQueryException(Code.SOURCE_TIMEOUT, exception);
         } finally {
-            boolean interrupted = Thread.interrupted();
-            try {
-                if (process.isAlive()) process.destroy();
-                try {
-                    if (!process.waitFor(100, TimeUnit.MILLISECONDS)) process.destroyForcibly();
-                } catch (InterruptedException exception) {
-                    interrupted = true;
-                    process.destroyForcibly();
-                }
-                while (process.isAlive()) {
-                    try { process.waitFor(); }
-                    catch (InterruptedException exception) { interrupted = true; process.destroyForcibly(); }
-                }
-                try { process.getInputStream().close(); process.getErrorStream().close(); }
-                catch (IOException exception) { /* Pipes belong to the terminated child. */ }
-                stdout.interrupt(); stderr.interrupt();
-                for (Thread reader : List.of(stdout, stderr)) {
-                    while (reader.isAlive()) {
-                        try { reader.join(); }
-                        catch (InterruptedException exception) { interrupted = true; }
-                    }
-                }
-            } finally {
-                if (interrupted) Thread.currentThread().interrupt();
+            cleanup(process, List.of(stdout, stderr), operationDeadline);
+        }
+    }
+
+    private static void cleanup(Process process, List<Thread> readers, long deadline) {
+        boolean interrupted = Thread.interrupted();
+        // Capture descendants before killing the parent: after reparenting they are no longer discoverable.
+        List<ProcessHandle> descendants = process.descendants().toList();
+        try {
+            for (ProcessHandle descendant : descendants) {
+                if (descendant.isAlive()) descendant.destroyForcibly();
             }
+            if (process.isAlive()) process.destroyForcibly();
+            while (process.isAlive() && System.nanoTime() < deadline) {
+                try {
+                    process.waitFor(Math.min(TimeUnit.MILLISECONDS.toNanos(10),
+                            Math.max(1, deadline - System.nanoTime())), TimeUnit.NANOSECONDS);
+                } catch (InterruptedException exception) { interrupted = true; }
+                if (process.isAlive()) process.destroyForcibly();
+            }
+            for (ProcessHandle descendant : descendants) {
+                while (descendant.isAlive() && System.nanoTime() < deadline) {
+                    descendant.destroyForcibly();
+                    try { Thread.sleep(1); }
+                    catch (InterruptedException exception) { interrupted = true; }
+                }
+            }
+            for (Thread reader : readers) {
+                while (reader.isAlive() && System.nanoTime() < deadline) {
+                    try { reader.join(1); }
+                    catch (InterruptedException exception) { interrupted = true; }
+                }
+                if (reader.isAlive()) reader.interrupt();
+            }
+            for (Thread reader : readers) {
+                while (reader.isAlive() && System.nanoTime() < deadline) {
+                    try { reader.join(1); }
+                    catch (InterruptedException exception) { interrupted = true; }
+                }
+            }
+            if (process.isAlive() || readers.stream().anyMatch(Thread::isAlive)) {
+                throw new SourceQueryException(Code.SOURCE_UNAVAILABLE);
+            }
+            try { process.getInputStream().close(); process.getErrorStream().close(); }
+            catch (IOException exception) { /* Owned streams are closed after their readers exit. */ }
+        } finally {
+            if (interrupted) Thread.currentThread().interrupt();
         }
     }
 

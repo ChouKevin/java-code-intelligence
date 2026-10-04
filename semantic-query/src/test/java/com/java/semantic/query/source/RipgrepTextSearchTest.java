@@ -8,6 +8,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.Optional;
@@ -126,6 +127,86 @@ class RipgrepTextSearchTest {
         assertThatThrownBy(() -> service.searchText(admitted, request))
                 .isInstanceOfSatisfying(SourceQueryException.class,
                         error -> assertThat(error.code()).isEqualTo(SourceQueryException.Code.SOURCE_TIMEOUT));
+    }
+
+    @Test
+    void timed_out_search_does_not_wait_on_a_stubborn_parent_and_inherited_descendant_pipes() throws Exception {
+        SourceFilesystemFixture fixture = new SourceFilesystemFixture(temp);
+        fixture.file("a.java", "needle");
+        AdmittedSourceRevision admitted = fixture.publish(Optional.empty());
+        Path marker = temp.resolve("spawn-once");
+        Path ready = temp.resolve("descendant-ready");
+        Path parentPid = temp.resolve("stubborn-parent.pid");
+        Path childPid = temp.resolve("pipe-holder.pid");
+        Path printed = temp.resolve("partial-frame-printed");
+        Files.createFile(marker);
+        Path executable = script("if [ -e '" + marker + "' ]; then\n"
+                + "  /bin/rm '" + marker + "'\n"
+                + "  trap '' TERM\n"
+                + "  echo $$ > '" + parentPid + "'\n"
+                + "  /bin/sh -c 'trap \"\" TERM; : > \"" + ready + "\"; while :; do :; done' &\n"
+                + "  echo $! > '" + childPid + "'\n"
+                + "  while [ ! -e '" + ready + "' ]; do :; done\n"
+                + "  printf '{\"type\":\"match\"'\n"
+                + "  : > '" + printed + "'\n"
+                + "  while :; do :; done\n"
+                + "fi\nexit 1");
+        SourceAccessProperties access = new SourceAccessProperties(fixture.root, executable, List.of("sample"),
+                65_536, Duration.ofMillis(700), Duration.ofSeconds(2), Duration.ofSeconds(2), 1);
+        LocalRepositorySourceService service = new LocalRepositorySourceService(access, fixture.mapper);
+        TextSearchRequest request = new TextSearchRequest(fixture.context, "needle", "", Optional.empty(), 20);
+        CountDownLatch completed = new CountDownLatch(1);
+        AtomicReference<Throwable> outcome = new AtomicReference<>();
+        long started = System.nanoTime();
+        Thread search = Thread.ofVirtual().start(() -> {
+            try { service.searchText(admitted, request); }
+            catch (Throwable exception) { outcome.set(exception); }
+            finally { completed.countDown(); }
+        });
+        boolean returned;
+        long elapsed = Long.MAX_VALUE;
+        try {
+            long until = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
+            while ((!Files.exists(ready) || !Files.exists(printed) || !Files.exists(childPid)
+                    || !Files.exists(parentPid)) && System.nanoTime() < until) Thread.sleep(10);
+            assertThat(Files.exists(ready)).isTrue();
+            assertThat(Files.exists(printed)).isTrue();
+            assertThat(Files.exists(childPid)).isTrue();
+            returned = completed.await(2, TimeUnit.SECONDS);
+            elapsed = System.nanoTime() - started;
+            if (returned) {
+                assertThat(recordedAlive(parentPid)).as("runner reaps its direct child before returning").isFalse();
+                assertThat(recordedAlive(childPid)).as("runner terminates inherited-pipe descendant before returning").isFalse();
+            }
+        } finally {
+            // This test owns both PIDs, including on RED; never leave an inherited pipe open in Maven.
+            try { terminateRecorded(childPid); }
+            finally {
+                terminateRecorded(parentPid);
+                search.interrupt();
+                search.join(2000);
+            }
+        }
+        assertThat(returned).as("timeout must not wait forever on inherited stdout/stderr").isTrue();
+        assertThat(elapsed).as("cleanup belongs to the 700ms operation, not a separate two-second grace")
+                .isLessThan(TimeUnit.MILLISECONDS.toNanos(1000));
+        assertThat(search.isAlive()).isFalse();
+        assertThat(outcome.get()).isInstanceOfSatisfying(SourceQueryException.class,
+                error -> assertThat(error.code()).isEqualTo(SourceQueryException.Code.SOURCE_TIMEOUT));
+        TextSearchResult next = service.searchText(admitted, request);
+        assertThat(next.matches()).isEmpty();
+        assertThat(next.scanComplete()).isTrue();
+    }
+
+    private static boolean recordedAlive(Path pidFile) throws Exception {
+        long pid = Long.parseLong(Files.readString(pidFile).trim());
+        return ProcessHandle.of(pid).map(ProcessHandle::isAlive).orElse(false);
+    }
+
+    private static void terminateRecorded(Path pidFile) throws Exception {
+        if (!Files.exists(pidFile)) return;
+        long pid = Long.parseLong(Files.readString(pidFile).trim());
+        ProcessHandle.of(pid).ifPresent(ProcessHandle::destroyForcibly);
     }
 
     private Path script(String body) throws Exception {
