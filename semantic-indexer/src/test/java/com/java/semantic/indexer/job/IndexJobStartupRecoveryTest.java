@@ -32,7 +32,7 @@ class IndexJobStartupRecoveryTest {
         }
         try (DurableSourceFiles writer = new DurableSourceFiles(root.resolve("source-admin"))) {
             FileSourceJobStore jobs = new FileSourceJobStore(properties, JsonMapper.builder().build(), writer);
-            jobs.recover(new SourcePublicationStore(properties, JsonMapper.builder().build(), writer));
+            jobs.recover(new SourcePublicationStore(properties, JsonMapper.builder().build(), writer, jobs));
             assertThat(jobs.find(repository, runningRequest).orElseThrow().phase()).isEqualTo(SourcePreparationJob.Phase.FAILED);
             assertThat(jobs.find(repository, runningRequest).orElseThrow().failureCode()).contains("WORKER_INTERRUPTED");
             assertThat(jobs.claimNext().orElseThrow().requestId()).isEqualTo(acceptedRequest.value());

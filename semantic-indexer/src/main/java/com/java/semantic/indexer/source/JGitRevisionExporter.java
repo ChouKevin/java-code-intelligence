@@ -79,7 +79,12 @@ public final class JGitRevisionExporter {
                         continue;
                     }
                     if (SourcePathPolicy.isExcluded(path)) {
-                        counts.excluded++;
+                        if (mode.equals(FileMode.TREE)) {
+                            // Visit only to count tracked leaves; never export or open excluded blobs.
+                            walk.enterSubtree();
+                        } else {
+                            counts.excluded++;
+                        }
                         continue;
                     }
                     if (mode.equals(FileMode.TREE)) {

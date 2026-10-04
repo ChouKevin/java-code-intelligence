@@ -2,6 +2,7 @@ package com.java.semantic.indexer.api;
 
 import com.java.semantic.indexer.application.IndexerPreparationErrorMapper;
 import java.util.Map;
+import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
@@ -9,6 +10,12 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 @RestControllerAdvice
 public final class IndexerApiExceptionHandler {
     private final IndexerPreparationErrorMapper errors = new IndexerPreparationErrorMapper();
+
+    @ExceptionHandler(HttpMessageNotReadableException.class)
+    public ResponseEntity<Map<String, Object>> invalidJsonEnvelope(HttpMessageNotReadableException exception) {
+        IndexerPreparationErrorMapper.Failure failure = errors.map(new IllegalArgumentException("invalid JSON envelope"));
+        return ResponseEntity.status(failure.status()).body(failure.body());
+    }
 
     @ExceptionHandler(RuntimeException.class)
     public ResponseEntity<Map<String, Object>> applicationFailure(RuntimeException exception) {

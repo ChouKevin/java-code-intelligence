@@ -34,7 +34,7 @@ class SourcePreparationPublicationTest {
                 RepositoryProperties properties = properties(fixture);
                 RepositoryRegistry registry = new RepositoryRegistry(properties);
                 FileSourceJobStore jobs = new FileSourceJobStore(properties, mapper, owner);
-                SourcePublicationStore publications = new SourcePublicationStore(properties, mapper, owner);
+                SourcePublicationStore publications = new SourcePublicationStore(properties, mapper, owner, jobs);
                 RepositoryRevisionResolver resolver = new RepositoryRevisionResolver(registry, properties);
                 JGitRevisionExporter exporter = new JGitRevisionExporter(resolver, registry, mapper);
                 RepositorySourceManager manager = new RepositorySourceManager(jobs, resolver, exporter, publications, registry, properties);
@@ -72,7 +72,7 @@ class SourcePreparationPublicationTest {
             try (DurableSourceFiles owner = new DurableSourceFiles(fixture.admin)) {
                 RepositoryRegistry registry = new RepositoryRegistry(properties);
                 FileSourceJobStore jobs = new FileSourceJobStore(properties, mapper, owner);
-                SourcePublicationStore publications = new SourcePublicationStore(properties, mapper, owner);
+                SourcePublicationStore publications = new SourcePublicationStore(properties, mapper, owner, jobs);
                 RepositoryRevisionResolver resolver = new RepositoryRevisionResolver(registry, properties);
                 RepositorySourceManager manager = new RepositorySourceManager(jobs, resolver,
                         new JGitRevisionExporter(resolver, registry, mapper), publications, registry, properties);
@@ -114,7 +114,7 @@ class SourcePreparationPublicationTest {
                 assertThatThrownBy(() -> new DurableSourceFiles(fixture.admin)).isInstanceOf(java.io.IOException.class);
                 RepositoryRegistry registry = new RepositoryRegistry(properties);
                 FileSourceJobStore jobs = new FileSourceJobStore(properties, mapper, owner);
-                SourcePublicationStore published = new SourcePublicationStore(properties, mapper, owner);
+                SourcePublicationStore published = new SourcePublicationStore(properties, mapper, owner, jobs);
                 RepositoryRevisionResolver resolver = new RepositoryRevisionResolver(registry, properties);
                 RepositorySourceManager manager = new RepositorySourceManager(jobs, resolver,
                         new JGitRevisionExporter(resolver, registry, mapper), published, registry, properties);
@@ -135,6 +135,49 @@ class SourcePreparationPublicationTest {
     }
 
     @Test
+    void delayed_acceptance_never_rewinds_the_same_job_or_overwrites_a_newer_completed_job() throws Exception {
+        try (LocalSourceFixture fixture = new LocalSourceFixture(root)) {
+            String revision = fixture.commit("A.java", "class A {}\n".getBytes(StandardCharsets.UTF_8), "A");
+            RepositoryProperties properties = properties(fixture);
+            try (DurableSourceFiles owner = new DurableSourceFiles(fixture.admin)) {
+                RepositoryRegistry registry = new RepositoryRegistry(properties);
+                FileSourceJobStore jobs = new FileSourceJobStore(properties, mapper, owner);
+                SourcePublicationStore publications = new SourcePublicationStore(properties, mapper, owner, jobs);
+                RepositoryRevisionResolver resolver = new RepositoryRevisionResolver(registry, properties);
+                RepositorySourceManager manager = new RepositorySourceManager(jobs, resolver,
+                        new JGitRevisionExporter(resolver, registry, mapper), publications, registry, properties);
+                SourcePreparationService service = new SourcePreparationService(jobs, publications, registry);
+                SourcePreparationJob acceptedA = service.prepareSource(fixture.repository,
+                        new PreparationRequestId(UUID.randomUUID().toString()), Optional.empty());
+                SourcePreparationJob runningA = jobs.claimNext().orElseThrow();
+                publications.updatePreparation(runningA);
+                // The servlet's ACCEPTED state write can lag the dispatcher's durable claim.
+                publications.updatePreparation(acceptedA);
+                assertThat(publications.state(fixture.repository).preparation().phase())
+                        .isEqualTo(com.java.semantic.model.source.SourceRepositoryState.PreparationPhase.RUNNING);
+                SourcePreparationJob completedA = manager.execute(runningA);
+                assertThat(completedA.phase()).isEqualTo(SourcePreparationJob.Phase.COMPLETE);
+                publications.updatePreparation(acceptedA);
+                assertThat(publications.state(fixture.repository).preparation().phase())
+                        .isEqualTo(com.java.semantic.model.source.SourceRepositoryState.PreparationPhase.COMPLETE);
+                SourcePreparationJob acceptedB = service.prepareSource(fixture.repository,
+                        new PreparationRequestId(UUID.randomUUID().toString()),
+                        Optional.of(RepositoryRevision.ofSha(revision)));
+                SourcePreparationJob runningB = jobs.claimNext().orElseThrow();
+                publications.updatePreparation(runningB);
+                SourcePreparationJob completedB = manager.execute(runningB);
+                assertThat(completedB.phase()).isEqualTo(SourcePreparationJob.Phase.COMPLETE);
+                // A delayed older admission must not replace B's newer public preparation identity.
+                publications.updatePreparation(acceptedA);
+                assertThat(publications.state(fixture.repository).preparation().phase())
+                        .isEqualTo(com.java.semantic.model.source.SourceRepositoryState.PreparationPhase.COMPLETE);
+                assertThat(publications.state(fixture.repository).preparation().jobId())
+                        .contains(acceptedB.jobId());
+            }
+        }
+    }
+
+    @Test
     void cross_filesystem_atomic_rename_failure_never_publishes_membership() throws Exception {
         Path memory = Path.of("/dev/shm");
         org.junit.jupiter.api.Assumptions.assumeTrue(Files.isWritable(memory)
@@ -147,7 +190,7 @@ class SourcePreparationPublicationTest {
             try (DurableSourceFiles owner = new DurableSourceFiles(fixture.admin)) {
                 RepositoryRegistry registry = new RepositoryRegistry(properties);
                 FileSourceJobStore jobs = new FileSourceJobStore(properties, mapper, owner);
-                SourcePublicationStore published = new SourcePublicationStore(properties, mapper, owner);
+                SourcePublicationStore published = new SourcePublicationStore(properties, mapper, owner, jobs);
                 RepositoryRevisionResolver resolver = new RepositoryRevisionResolver(registry, properties);
                 PreparationRequestId request = new PreparationRequestId(UUID.randomUUID().toString());
                 jobs.admit(fixture.repository, request,

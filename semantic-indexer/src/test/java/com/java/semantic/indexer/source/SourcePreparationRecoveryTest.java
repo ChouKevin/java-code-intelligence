@@ -5,6 +5,7 @@ import com.java.semantic.indexer.job.IndexJobId;
 import com.java.semantic.indexer.job.PreparationRequestId;
 import com.java.semantic.indexer.job.SourcePreparationJob;
 import com.java.semantic.model.repository.RepositoryRevision;
+import com.java.semantic.model.source.PreparedRevision;
 import com.java.semantic.model.source.SourceRepositoryState;
 import com.java.semantic.model.source.SourceRevisionManifest;
 import com.java.semantic.repository.config.RepositoryProperties;
@@ -34,7 +35,7 @@ class SourcePreparationRecoveryTest {
             try (DurableSourceFiles writer = new DurableSourceFiles(fixture.admin)) {
                 RepositoryRegistry registry = new RepositoryRegistry(properties);
                 FileSourceJobStore jobs = new FileSourceJobStore(properties, mapper, writer);
-                SourcePublicationStore published = new SourcePublicationStore(properties, mapper, writer);
+                SourcePublicationStore published = new SourcePublicationStore(properties, mapper, writer, jobs);
                 RepositoryRevisionResolver resolver = new RepositoryRevisionResolver(registry, properties);
                 JGitRevisionExporter exporter = new JGitRevisionExporter(resolver, registry, mapper);
                 RepositorySourceManager manager = new RepositorySourceManager(jobs, resolver, exporter, published, registry, properties);
@@ -58,7 +59,7 @@ class SourcePreparationRecoveryTest {
             }
             try (DurableSourceFiles writer = new DurableSourceFiles(fixture.admin)) {
                 FileSourceJobStore reopenedJobs = new FileSourceJobStore(properties, mapper, writer);
-                SourcePublicationStore recoveredState = new SourcePublicationStore(properties, mapper, writer);
+                SourcePublicationStore recoveredState = new SourcePublicationStore(properties, mapper, writer, reopenedJobs);
                 reopenedJobs.recover(recoveredState);
                 assertThat(reopenedJobs.find(fixture.repository, new PreparationRequestId(requestB)).orElseThrow().phase())
                         .isEqualTo(SourcePreparationJob.Phase.FAILED);
@@ -86,18 +87,23 @@ class SourcePreparationRecoveryTest {
             String revisionB;
             String requestB;
             String republicationJobId;
-            String receiptA;
+            PreparedRevision receiptA;
+            byte[] originalManifestA;
+            byte[] originalTreeA;
             try (DurableSourceFiles writer = new DurableSourceFiles(fixture.admin)) {
                 RepositoryRegistry registry = new RepositoryRegistry(properties);
                 FileSourceJobStore jobs = new FileSourceJobStore(properties, mapper, writer);
-                SourcePublicationStore store = new SourcePublicationStore(properties, mapper, writer);
+                SourcePublicationStore store = new SourcePublicationStore(properties, mapper, writer, jobs);
                 RepositoryRevisionResolver resolver = new RepositoryRevisionResolver(registry, properties);
                 JGitRevisionExporter exporter = new JGitRevisionExporter(resolver, registry, mapper);
                 SourcePreparationService service = new SourcePreparationService(jobs, store, registry);
                 RepositorySourceManager manager = new RepositorySourceManager(jobs, resolver, exporter, store, registry, properties);
                 service.prepareSource(fixture.repository, new PreparationRequestId(UUID.randomUUID().toString()), Optional.empty());
                 manager.execute(jobs.claimNext().orElseThrow());
-                receiptA = store.state(fixture.repository).published().get(revisionA).firstPublishedJobId();
+                receiptA = store.state(fixture.repository).published().get(revisionA);
+                Path publicationA = fixture.published.resolve("orders/revisions").resolve(revisionA);
+                originalManifestA = Files.readAllBytes(publicationA.resolve("manifest.json"));
+                originalTreeA = Files.readAllBytes(publicationA.resolve("tree/A.java"));
                 revisionB = fixture.commit("B.java", "class B {}\n".getBytes(StandardCharsets.UTF_8), "B");
                 PreparationRequestId request = new PreparationRequestId(UUID.randomUUID().toString());
                 requestB = request.value();
@@ -114,7 +120,7 @@ class SourcePreparationRecoveryTest {
             }
             try (DurableSourceFiles writer = new DurableSourceFiles(fixture.admin)) {
                 FileSourceJobStore reopenedJobs = new FileSourceJobStore(properties, mapper, writer);
-                SourcePublicationStore recovered = new SourcePublicationStore(properties, mapper, writer);
+                SourcePublicationStore recovered = new SourcePublicationStore(properties, mapper, writer, reopenedJobs);
                 reopenedJobs.recover(recovered);
                 assertThat(reopenedJobs.find(fixture.repository, new PreparationRequestId(requestB)).orElseThrow().phase())
                         .isEqualTo(SourcePreparationJob.Phase.COMPLETE);
@@ -132,9 +138,11 @@ class SourcePreparationRecoveryTest {
                 assertThat(republished.phase()).isEqualTo(SourcePreparationJob.Phase.COMPLETE);
                 assertThat(recovered.state(fixture.repository).current().orElseThrow().publicationJobId())
                         .isEqualTo(republicationJobId);
-                assertThat(recovered.state(fixture.repository).published().get(revisionA).firstPublishedJobId())
-                        .isEqualTo(receiptA);
-                assertThat(republished.publication().orElseThrow().firstPublishedJobId()).isEqualTo(receiptA);
+                assertThat(recovered.state(fixture.repository).published().get(revisionA)).isEqualTo(receiptA);
+                assertThat(republished.publication().orElseThrow()).isEqualTo(receiptA);
+                Path publicationA = fixture.published.resolve("orders/revisions").resolve(revisionA);
+                assertThat(Files.readAllBytes(publicationA.resolve("manifest.json"))).isEqualTo(originalManifestA);
+                assertThat(Files.readAllBytes(publicationA.resolve("tree/A.java"))).isEqualTo(originalTreeA);
             }
         }
     }

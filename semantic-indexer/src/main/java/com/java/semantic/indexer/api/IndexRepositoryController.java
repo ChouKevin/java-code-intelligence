@@ -45,6 +45,9 @@ public final class IndexRepositoryController {
     }
 
     private static Map<String, Object> inputs(String repositoryId, Map<String, Object> body) {
+        if (body == null) {
+            throw new IllegalArgumentException("request body must be an object");
+        }
         if (body.containsKey("repositoryId")) {
             throw new IllegalArgumentException("repositoryId belongs only in HTTP path");
         }

@@ -69,10 +69,38 @@ class IndexerPreparationTransportIT {
                             "{\"requestId\":\"" + originalRequest + "\"}", "admin-secret");
                     assertThat(duplicate.statusCode()).isEqualTo(409);
                     assertThat(mapper.readTree(duplicate.body())).isEqualTo(mapper.valueToTree(reused.structuredContent()));
+                    String invalidRequest = UUID.randomUUID().toString();
                     HttpResponse<String> invalid = http(base, "/index/repositories/orders/source", "POST",
-                            "{\"requestId\":\"" + UUID.randomUUID() + "\",\"obsolete\":true}", "admin-secret");
+                            "{\"requestId\":\"" + invalidRequest + "\",\"obsolete\":true}", "admin-secret");
                     assertThat(invalid.statusCode()).isEqualTo(400);
                     assertThat(invalid.body()).doesNotContain(fixture.remote.toString(), fixture.admin.toString(), "admin-secret");
+                    McpSchema.CallToolResult invalidTool = client.callTool(
+                            McpSchema.CallToolRequest.builder("prepare_source")
+                                    .arguments(Map.of("repositoryId", "orders", "requestId", invalidRequest,
+                                            "obsolete", true)).build());
+                    assertThat(invalidTool.isError()).isTrue();
+                    assertThat(mapper.readTree(invalid.body()))
+                            .isEqualTo(mapper.valueToTree(invalidTool.structuredContent()));
+                }
+            }
+        }
+    }
+
+    @Test
+    void invalid_json_envelopes_return_public_invalid_argument_instead_of_source_unavailable() throws Exception {
+        try (LocalSourceFixture fixture = new LocalSourceFixture(root)) {
+            try (ConfigurableApplicationContext context = fixture.start()) {
+                String base = "http://127.0.0.1:"
+                        + ((WebServerApplicationContext) context).getWebServer().getPort();
+                for (String body : java.util.List.of("", "{", "null", "[]", "42")) {
+                    HttpResponse<String> response = http(base, "/index/repositories/orders/source",
+                            "POST", body, "admin-secret");
+                    assertThat(response.statusCode()).as("HTTP status for JSON body %s", body).isEqualTo(400);
+                    JsonNode failure = mapper.readTree(response.body());
+                    assertThat(failure.get("code").asString()).isEqualTo("INVALID_ARGUMENT");
+                    assertThat(failure.get("retryable").asBoolean()).isFalse();
+                    assertThat(response.body()).doesNotContain(
+                            fixture.remote.toString(), fixture.admin.toString(), "admin-secret");
                 }
             }
         }

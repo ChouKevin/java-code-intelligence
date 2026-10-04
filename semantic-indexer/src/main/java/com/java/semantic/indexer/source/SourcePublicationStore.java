@@ -1,5 +1,7 @@
 package com.java.semantic.indexer.source;
 
+import com.java.semantic.indexer.job.FileSourceJobStore;
+import com.java.semantic.indexer.job.IndexJobId;
 import com.java.semantic.indexer.job.SourcePreparationJob;
 import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.model.source.PreparedRevision;
@@ -36,11 +38,14 @@ public final class SourcePublicationStore {
     private final Path admin;
     private final Path published;
     private final ObjectMapper mapper;
+    private final FileSourceJobStore jobs;
 
-    public SourcePublicationStore(RepositoryProperties properties, ObjectMapper mapper, DurableSourceFiles ownership) {
+    public SourcePublicationStore(RepositoryProperties properties, ObjectMapper mapper,
+            DurableSourceFiles ownership, FileSourceJobStore jobs) {
         this.admin = Path.of(properties.getSourceAdminRoot()).toAbsolutePath().normalize();
         this.published = Path.of(properties.getSourcePublishedRoot()).toAbsolutePath().normalize();
         this.mapper = mapper;
+        this.jobs = jobs;
     }
 
     public synchronized SourceRepositoryState state(RepositoryId id) {
@@ -60,16 +65,32 @@ public final class SourcePublicationStore {
         }
     }
 
-    public synchronized void updatePreparation(SourcePreparationJob job) {
-        RepositoryId id = new RepositoryId(job.repositoryId());
-        SourceRepositoryState old = state(id);
-        PreparationPhase phase = PreparationPhase.valueOf(job.phase().name());
-        if (old.preparation().jobId().isPresent() && !old.preparation().jobId().orElseThrow().equals(job.jobId())
-                && job.phase() != SourcePreparationJob.Phase.ACCEPTED) {
-            return;
+    public void updatePreparation(SourcePreparationJob job) {
+        // Claim/admission is durable before its public status. Serialize their observation with
+        // job writes so a delayed ACCEPTED update cannot rewind RUNNING or a later admission.
+        synchronized (jobs) {
+            SourcePreparationJob persisted = jobs.find(new RepositoryId(job.repositoryId()),
+                    new IndexJobId(job.jobId())).orElseThrow();
+            if (persisted.phase() != job.phase()) {
+                return;
+            }
+            synchronized (this) {
+                RepositoryId id = new RepositoryId(job.repositoryId());
+                SourceRepositoryState old = state(id);
+                PreparationPhase phase = PreparationPhase.valueOf(job.phase().name());
+                if (old.preparation().jobId().isPresent()) {
+                    if (!old.preparation().jobId().orElseThrow().equals(job.jobId())) {
+                        if (job.phase() != SourcePreparationJob.Phase.ACCEPTED) {
+                            return;
+                        }
+                    } else if (phase.ordinal() <= old.preparation().phase().ordinal()) {
+                        return;
+                    }
+                }
+                replace(new SourceRepositoryState(old.formatVersion(), id.value(), old.current(), old.published(),
+                        new PreparationStatus(phase, Optional.of(job.jobId()), job.failureCode())));
+            }
         }
-        replace(new SourceRepositoryState(old.formatVersion(), id.value(), old.current(), old.published(),
-                new PreparationStatus(phase, Optional.of(job.jobId()), job.failureCode())));
     }
 
     public synchronized Path seal(SourcePreparationJob job, Path staging, SourceRevisionManifest manifest) {

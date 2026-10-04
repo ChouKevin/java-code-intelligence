@@ -32,7 +32,7 @@ class ProjectGuideSourceTest {
             try (DurableSourceFiles writer = new DurableSourceFiles(fixture.admin)) {
                 RepositoryRegistry registry = new RepositoryRegistry(properties);
                 FileSourceJobStore jobs = new FileSourceJobStore(properties, mapper, writer);
-                SourcePublicationStore store = new SourcePublicationStore(properties, mapper, writer);
+                SourcePublicationStore store = new SourcePublicationStore(properties, mapper, writer, jobs);
                 RepositoryRevisionResolver resolver = new RepositoryRevisionResolver(registry, properties);
                 RepositorySourceManager manager = new RepositorySourceManager(jobs, resolver,
                         new JGitRevisionExporter(resolver, registry, mapper), store, registry, properties);
@@ -66,7 +66,10 @@ class ProjectGuideSourceTest {
             fixture.commit("pointer.txt", ("version https://git-lfs.github.com/spec/v1\n"
                     + "oid sha256:" + "a".repeat(64) + "\nsize 1\n").getBytes(StandardCharsets.US_ASCII), "lfs");
             fixture.commit("target/hidden.java", "hidden".getBytes(StandardCharsets.UTF_8), "excluded");
-            Files.createSymbolicLink(fixture.remote.resolve("outside.java"), Path.of("/etc/passwd"));
+            fixture.commit("target/nested/also-hidden.java",
+                    "also hidden".getBytes(StandardCharsets.UTF_8), "second excluded file");
+            Path outside = Files.writeString(root.resolve("outside-target.java"), "not exported");
+            Files.createSymbolicLink(fixture.remote.resolve("outside.java"), outside);
             fixture.git.add().addFilepattern("outside.java").call();
             fixture.git.commit().setAuthor("Source fixture", "fixture@example.test").setMessage("link").call();
             org.eclipse.jgit.dircache.DirCache cache = fixture.git.getRepository().lockDirCache();
@@ -88,7 +91,7 @@ class ProjectGuideSourceTest {
                 RepositoryProperties properties = SourcePreparationPublicationTest.properties(fixture);
                 RepositoryRegistry registry = new RepositoryRegistry(properties);
                 FileSourceJobStore jobs = new FileSourceJobStore(properties, mapper, writer);
-                SourcePublicationStore store = new SourcePublicationStore(properties, mapper, writer);
+                SourcePublicationStore store = new SourcePublicationStore(properties, mapper, writer, jobs);
                 RepositoryRevisionResolver resolver = new RepositoryRevisionResolver(registry, properties);
                 RepositorySourceManager manager = new RepositorySourceManager(jobs, resolver,
                         new JGitRevisionExporter(resolver, registry, mapper), store, registry, properties);
@@ -102,10 +105,12 @@ class ProjectGuideSourceTest {
                         .containsEntry(EntryStatus.LFS_POINTER, 1L)
                         .containsEntry(EntryStatus.SYMLINK, 1L)
                         .containsEntry(EntryStatus.SUBMODULE, 1L);
-                assertThat(manifest.coverage().excludedFileCount()).isGreaterThan(0);
+                assertThat(manifest.coverage().excludedFileCount()).isEqualTo(2);
                 Path tree = fixture.published.resolve("orders/revisions").resolve(complete.resolvedRevision().orElseThrow())
                         .resolve("tree");
                 assertThat(Files.exists(tree.resolve("ok.java"))).isTrue();
+                assertThat(Files.exists(tree.resolve("target/hidden.java"))).isFalse();
+                assertThat(Files.exists(tree.resolve("target/nested/also-hidden.java"))).isFalse();
                 assertThat(Files.exists(tree.resolve("binary.dat"))).isFalse();
                 assertThat(Files.exists(tree.resolve("invalid.txt"))).isFalse();
                 assertThat(Files.exists(tree.resolve("pointer.txt"))).isFalse();
@@ -124,7 +129,7 @@ class ProjectGuideSourceTest {
                 RepositoryRegistry registry = new RepositoryRegistry(properties);
                 assertThat(registry.descriptors().getFirst().projectGuidePath()).isEmpty();
                 FileSourceJobStore jobs = new FileSourceJobStore(properties, mapper, writer);
-                SourcePublicationStore store = new SourcePublicationStore(properties, mapper, writer);
+                SourcePublicationStore store = new SourcePublicationStore(properties, mapper, writer, jobs);
                 RepositoryRevisionResolver resolver = new RepositoryRevisionResolver(registry, properties);
                 RepositorySourceManager manager = new RepositorySourceManager(jobs, resolver,
                         new JGitRevisionExporter(resolver, registry, mapper), store, registry, properties);
@@ -169,7 +174,7 @@ class ProjectGuideSourceTest {
                 RepositoryProperties properties = SourcePreparationPublicationTest.properties(fixture);
                 RepositoryRegistry registry = new RepositoryRegistry(properties);
                 FileSourceJobStore jobs = new FileSourceJobStore(properties, mapper, writer);
-                SourcePublicationStore store = new SourcePublicationStore(properties, mapper, writer);
+                SourcePublicationStore store = new SourcePublicationStore(properties, mapper, writer, jobs);
                 RepositoryRevisionResolver resolver = new RepositoryRevisionResolver(registry, properties);
                 RepositorySourceManager manager = new RepositorySourceManager(jobs, resolver,
                         new JGitRevisionExporter(resolver, registry, mapper), store, registry, properties);

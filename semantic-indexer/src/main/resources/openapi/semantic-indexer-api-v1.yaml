@@ -63,8 +63,27 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/Job'}
+        '400':
+          description: Invalid JSON envelope or preparation argument
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Failure'}
+        '401':
+          description: Admin token missing or invalid
+        '403':
+          description: Index administration disabled
         '409':
           description: Request identity reused or repository active
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Failure'}
+        '404':
+          description: Repository not configured
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Failure'}
+        '503':
+          description: Source preparation unavailable
           content:
             application/json:
               schema: {$ref: '#/components/schemas/Failure'}
@@ -90,8 +109,22 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/Job'}
+        '400':
+          description: Invalid or ambiguous job selector
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Failure'}
+        '401':
+          description: Admin token missing or invalid
+        '403':
+          description: Index administration disabled
         '404':
           description: Unknown original request or job
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Failure'}
+        '503':
+          description: Source preparation unavailable
           content:
             application/json:
               schema: {$ref: '#/components/schemas/Failure'}
