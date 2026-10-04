@@ -251,7 +251,8 @@ class SourcePreparationPublicationTest {
                 RepositoryRevisionResolver resolver = new RepositoryRevisionResolver(registry, properties);
                 PreparationRequestId request = new PreparationRequestId(UUID.randomUUID().toString());
                 jobs.admit(fixture.repository, request,
-                        Optional.of(RepositoryRevision.ofSha(revision)), "main", Optional.empty());
+                        Optional.of(RepositoryRevision.ofSha(revision)), "main", registry.origin(fixture.repository),
+                        Optional.empty());
                 SourcePreparationJob claimed = jobs.claimNext().orElseThrow();
                 SourcePreparationJob pinned = jobs.recordResolved(fixture.repository, new IndexJobId(claimed.jobId()),
                         resolver.resolve(fixture.repository, Optional.of(RepositoryRevision.ofSha(revision))));

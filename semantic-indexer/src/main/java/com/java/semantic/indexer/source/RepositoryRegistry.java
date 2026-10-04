@@ -17,9 +17,15 @@ import org.springframework.stereotype.Component;
 public final class RepositoryRegistry {
     private static final Pattern BRANCH = Pattern.compile("[A-Za-z0-9][A-Za-z0-9._/-]*");
     private final Map<String, RepositoryProperties.RepositoryConfig> configured;
+    private final Map<String, String> origins;
+    private final Map<String, String> endpoints;
+    private final ApprovedOriginBinding binding;
 
     public RepositoryRegistry(RepositoryProperties properties) {
         configured = Map.copyOf(properties.getRepositories());
+        binding = new ApprovedOriginBinding(properties);
+        java.util.Map<String, String> approved = new java.util.HashMap<>();
+        java.util.Map<String, String> approvedEndpoints = new java.util.HashMap<>();
         for (Map.Entry<String, RepositoryProperties.RepositoryConfig> entry : configured.entrySet()) {
             new RepositoryId(entry.getKey());
             RepositoryProperties.RepositoryConfig repository = entry.getValue();
@@ -31,7 +37,40 @@ public final class RepositoryRegistry {
             if (repository.getDisplayName().isBlank()) {
                 throw new IllegalArgumentException("repository display name must be configured");
             }
+            approved.put(entry.getKey(), ApprovedOriginBinding.fingerprint(repository.getUrl()));
+            approvedEndpoints.put(entry.getKey(), repository.getUrl());
         }
+        origins = Map.copyOf(approved);
+        endpoints = Map.copyOf(approvedEndpoints);
+    }
+
+    public void bindAll() {
+        for (String id : configured.keySet()) {
+            ensureEndpoint(id);
+        }
+        for (String id : configured.keySet()) {
+            binding.preflight(new RepositoryId(id), origins.get(id));
+        }
+        for (String id : configured.keySet()) {
+            binding.bind(new RepositoryId(id), origins.get(id));
+        }
+    }
+
+    public String origin(RepositoryId id) {
+        ensureEndpoint(id.value());
+        binding.bind(id, origins.get(id.value()));
+        return origins.get(id.value());
+    }
+
+    public void requireOrigin(RepositoryId id, String expected) {
+        if (!origin(id).equals(expected)) {
+            throw new IllegalStateException("approved repository origin changed since acceptance");
+        }
+    }
+
+    public String endpoint(RepositoryId id) {
+        require(id);
+        return endpoints.get(id.value());
     }
 
     public RepositoryProperties.RepositoryConfig require(RepositoryId id) {
@@ -39,7 +78,17 @@ public final class RepositoryRegistry {
         if (java.util.Objects.isNull(config)) {
             throw new RepositoryNotConfiguredException();
         }
+        ensureEndpoint(id.value());
+        binding.bind(id, origins.get(id.value()));
         return config;
+    }
+
+    private void ensureEndpoint(String id) {
+        RepositoryProperties.RepositoryConfig config = configured.get(id);
+        if (java.util.Objects.isNull(config)) throw new RepositoryNotConfiguredException();
+        if (!config.getUrl().equals(endpoints.get(id))) {
+            throw new IllegalStateException("approved repository origin changed since startup");
+        }
     }
 
     public List<SourceRepositoryDescriptor> descriptors() {

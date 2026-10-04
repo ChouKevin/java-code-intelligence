@@ -1,6 +1,7 @@
 package com.java.semantic.indexer.application;
 
 import com.java.semantic.indexer.job.SourcePreparationJob;
+import com.java.semantic.model.source.SourceRevisionManifest;
 import com.java.semantic.indexer.source.SourcePreparationService;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -27,7 +28,7 @@ public final class IndexerPreparationFacade {
 
     public static Map<String, Object> result(SourcePreparationJob job) {
         Map<String, Object> values = new LinkedHashMap<>();
-        values.put("formatVersion", job.formatVersion());
+        values.put("formatVersion", SourceRevisionManifest.FORMAT_VERSION);
         values.put("jobId", job.jobId());
         values.put("repositoryId", job.repositoryId());
         values.put("requestId", job.requestId());

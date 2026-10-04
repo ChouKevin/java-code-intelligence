@@ -12,6 +12,33 @@ Indexer config uses `semantic.source-admin-root` (`SEMANTIC_SOURCE_ADMIN_ROOT`, 
 
 Indexer publishes a sanitized `repositories.json`; registration is **not** preparation. The private bare repository/jobs/staging live under `source-admin`; published `repositories.json`, `<id>/state.json`, and `<id>/revisions/<sha>/{manifest.json,inventory.jsonl,tree/}` live under `source-published`. The manifest and policy formats are version **1**. Query admits only an allowlisted ID and a revision in atomic state membership whose receipt/manifest digest and versions match. A directory on disk alone, including an orphan after interruption, grants no read. Staging and final revision directory are on the same filesystem: Indexer flushes the complete tree/metadata, atomically renames the revision, then atomically replaces state containing membership and current together. No copy fallback or in-place overwrite of an existing published SHA.
 
+## Repository origin and storage identity
+
+Each repository ID is durably bound to the exact approved Git endpoint string.
+Indexer stores an opaque SHA-256 fingerprint in
+`source-admin/repositories/<id>/origin.sha256` and
+`source-published/<id>/origin.sha256`; raw URLs and Git credentials are not
+published. Keep the configured URL spelling stable: scheme, host, port, SSH user,
+path and spelling differences distinguish origins. Embedded URL passwords,
+queries and fragments are unsupported; provide authentication through the separate
+Git credential settings and never embed tokens in URLs.
+
+Startup validates both namespaces before rewriting the registry or dispatching
+work. Admission, cached-object/already-published reuse, worker execution and
+recovery also check the binding. A URL change under the same ID is not a rename:
+use a new repository ID with fresh per-ID namespaces, or explicitly fresh storage.
+Replacing just the admin or published root cannot rebind the other namespace.
+Do not edit binding files or infer an origin from leftover Git objects.
+
+Private durable jobs now use **format version 2** and retain the origin accepted
+with the request through every transition. Public manifest/state/descriptor and
+HTTP/MCP result formats remain **version 1**, with unchanged result fields.
+There is no private-job-v1 decoder or automatic adoption of populated unbound
+namespaces. For pre-release unbound source storage, preserve the old roots for a
+matching rollback, bootstrap new private/published roots, and explicitly prepare
+the required revisions again. Do not run an old Indexer against the new private
+job format or mix old unbound data into the new namespaces.
+
 ## MCP session lifecycle
 
 Query `/mcp` uses stateful Streamable HTTP. Each independent client initializes its

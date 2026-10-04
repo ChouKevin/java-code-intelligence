@@ -37,6 +37,10 @@ prompts, chat history, embeddings, or inferred business facts.
 - Public source identity is exactly `repositoryId + revision`. Preserve the
   `RepositoryId` and 40-character lowercase SHA-1 `RepositoryRevision` invariants.
   Navigation requests and responses must carry the same exact identity.
+- Bind each repository ID immutably to its approved Git origin in both private
+  and published storage. Persist that origin in accepted jobs and verify it before
+  admission, cached reuse, execution, publication and recovery. A changed origin
+  requires a new ID/fresh namespace; never adopt populated unbound storage.
 - Query may read any published revision admitted by repository state membership
   and its matching manifest. This replaces current-generation-only admission:
   publishing B must not invalidate an existing A context.

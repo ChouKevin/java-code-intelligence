@@ -55,8 +55,8 @@ class IndexAdminSecurityTest {
         filter.doFilter(request, response, (incoming, outgoing) ->
                 ((jakarta.servlet.http.HttpServletResponse) outgoing).setStatus(204));
         assertThat(response.getStatus()).isEqualTo(401);
-        SourcePreparationJob job = new SourcePreparationJob(1, "opaque-job", "orders",
-                "00000000-0000-0000-0000-000000000001", Optional.empty(), "main",
+        SourcePreparationJob job = new SourcePreparationJob(SourcePreparationJob.FORMAT_VERSION, "opaque-job", "orders",
+                "00000000-0000-0000-0000-000000000001", Optional.empty(), "main", "a".repeat(64),
                 SourcePreparationJob.Phase.ACCEPTED, Instant.EPOCH, Optional.empty(), Optional.empty(),
                 Optional.empty(), Optional.empty());
         String json = JsonMapper.builder().build().writeValueAsString(IndexerPreparationFacade.result(job));

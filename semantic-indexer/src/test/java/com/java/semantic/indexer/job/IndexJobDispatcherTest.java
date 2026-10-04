@@ -25,17 +25,20 @@ class IndexJobDispatcherTest {
             FileSourceJobStore jobs = new FileSourceJobStore(properties, JsonMapper.builder().build(), owner);
             RepositoryId repository = new RepositoryId("orders");
             PreparationRequestId firstRequest = new PreparationRequestId(UUID.randomUUID().toString());
-            SourcePreparationJob first = jobs.admit(repository, firstRequest, Optional.empty(), "main", Optional.empty());
+            SourcePreparationJob first = jobs.admit(repository, firstRequest, Optional.empty(), "main",
+                    "a".repeat(64), Optional.empty());
             assertThatThrownBy(() -> jobs.admit(repository, new PreparationRequestId(UUID.randomUUID().toString()),
-                    Optional.empty(), "main", Optional.empty())).isInstanceOf(IndexJobAlreadyActiveException.class);
+                    Optional.empty(), "main", "a".repeat(64), Optional.empty()))
+                    .isInstanceOf(IndexJobAlreadyActiveException.class);
             SourcePreparationJob claimed = jobs.claimNext().orElseThrow();
             assertThat(claimed.jobId()).isEqualTo(first.jobId());
             assertThat(jobs.claimNext()).isEmpty();
             assertThatThrownBy(() -> jobs.admit(repository, new PreparationRequestId(UUID.randomUUID().toString()),
-                    Optional.empty(), "main", Optional.empty())).isInstanceOf(IndexJobAlreadyActiveException.class);
+                    Optional.empty(), "main", "a".repeat(64), Optional.empty()))
+                    .isInstanceOf(IndexJobAlreadyActiveException.class);
             jobs.fail(repository, new IndexJobId(claimed.jobId()), "PREPARATION_FAILED");
             SourcePreparationJob next = jobs.admit(repository, new PreparationRequestId(UUID.randomUUID().toString()),
-                    Optional.empty(), "main", Optional.empty());
+                    Optional.empty(), "main", "a".repeat(64), Optional.empty());
             assertThat(jobs.claimNext().orElseThrow().jobId()).isEqualTo(next.jobId());
         }
     }

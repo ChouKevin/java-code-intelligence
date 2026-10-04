@@ -26,9 +26,9 @@ Do not reuse old Mongo/JDT, semantic-review or Git-review acceptance reports as 
 
 ## PR #2 repair verification (2026-10-04)
 
-After the client-isolation, search-admission, registry-snapshot and MCP lifecycle
-repairs, the controller ran the complete Java 21 reactor: **91 tests passed**
-(Model 6, Indexer 29, Query 56; zero failures/errors/skips). The run supplied a real
+After the client-isolation, search-admission, registry-snapshot, MCP lifecycle and
+durable-origin repairs, the controller ran the complete Java 21 reactor:
+**97 tests passed** (Model 6, Indexer 35, Query 56; zero failures/errors/skips). The run supplied a real
 ripgrep executable through `-Dsource.test.rg`; no workstation fallback was added.
 The clean `scripts/test-source-mcp.sh` also passed with real Git/ripgrep,
 independent Indexer and warm/cold Query processes, native MCP/HTTP parity, and
@@ -51,6 +51,17 @@ regressions had observed behavioral failures before their production fixes.
 
 Deadline-exhaustion coverage holds cleanup past the lifecycle budget and verifies
 that graceful close fails without starting a second cleanup waiting period.
+
+Origin regressions use two unrelated local Git remotes and cover cached A objects,
+an ACCEPTED A request across restart, published-namespace reuse with fresh admin
+storage, and rejection of populated unbound storage. A separate real
+Indexer/Query restart probe passed five scenarios: A-to-B URL change rejected
+under the same ID/roots with A evidence unchanged; the public binding survives
+admin replacement; the private binding survives published-root replacement;
+same-origin restart preserves original-job lookup and exact-SHA reuse; and a new
+repository ID accepts B without changing A. The original implementation failed
+both the deterministic origin assertions and the real changed-origin startup
+probe before the correction.
 
 Query now requires the [MCP session lifecycle](source-mcp.md#mcp-session-lifecycle).
 The pinned provider retains abandoned sessions until shutdown; this verification

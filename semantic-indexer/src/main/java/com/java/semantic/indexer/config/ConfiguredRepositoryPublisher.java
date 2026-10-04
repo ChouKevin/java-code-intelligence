@@ -29,10 +29,12 @@ public final class ConfiguredRepositoryPublisher {
     public void publish() {
         List<SourceRepositoryDescriptor> descriptors = registry.descriptors();
         try {
+            byte[] bytes = mapper.writeValueAsBytes(descriptors);
+            if (bytes.length > 1024 * 1024) throw new IOException("repository registry exceeds its size limit");
+            registry.bindAll();
             DurableSourceFiles.ensureDirectories(path.getParent(), path.getParent(),
                     DurableSourceFiles.Visibility.PUBLISHED);
-            DurableSourceFiles.atomicBytes(path, mapper.writeValueAsBytes(descriptors), 1024 * 1024,
-                    DurableSourceFiles.Visibility.PUBLISHED);
+            DurableSourceFiles.atomicBytes(path, bytes, 1024 * 1024, DurableSourceFiles.Visibility.PUBLISHED);
         } catch (IOException exception) {
             throw new IllegalStateException("repository registry cannot be published", exception);
         }

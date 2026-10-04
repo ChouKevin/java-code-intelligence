@@ -6,6 +6,10 @@ A source-first service for retrieving traceable evidence from an approved Git re
 
 Follow [Source MCP operations](docs/operations/source-mcp.md) to bootstrap a **new** service-owned local POSIX `/data` mount, inject separate secrets, configure approved repository IDs/URLs/default branches on Indexer and an explicit Query repository allowlist, then start both applications. Query mounts **only** `/data/source-published` read-only; Indexer owns the full `/data` parent. Startup registers sanitized descriptors; it does **not** fetch or prepare source. Keep the Indexer admin service private behind controlled TLS/ingress; expose Query read endpoints only to authorized clients.
 
+Repository IDs are durably bound to their approved Git origin in both storage
+namespaces. Repointing an existing ID or adopting populated unbound pre-release
+storage fails closed; see [origin identity and rebuild rules](docs/operations/source-mcp.md#repository-origin-and-storage-identity).
+
 Save a canonical lowercase UUID `requestId` durably **before** calling Indexer `prepare_source` (`POST /index/repositories/{repositoryId}/source` or private `/mcp`); optional `revision` must be a full lowercase 40-character SHA-1 commit. Get the original job by **either** `jobId` or `requestId` at `GET /index/repositories/{repositoryId}/jobs`. If the acceptance response is lost, look up the **original** request ID; do not resubmit or auto-retry an unknown outcome. Once COMPLETE, discover with `get_context`, copy the returned `{repositoryId, revision}` and retain it for every navigation call. Revision A remains readable after B is published. See [agent acceptance](docs/operations/mcp-agent-acceptance.md).
 
 ## Interfaces

@@ -26,7 +26,7 @@ clients 同時使用相同 JSON-RPC request ID 都能成功；取消只影響所
 
 ## PR #2 修復驗證（2026-10-04）
 
-修復後完整 reactor **91 PASS**（Model 6、Indexer 29、Query 56，零
+修復後完整 reactor **97 PASS**（Model 6、Indexer 35、Query 56，零
 failures/errors/skips），clean 真實 MCP journey 亦通過。額外獨立 JVM／socket
 probe 證明相同 request ID 不跨 client 衝突、同 session 並行重複 ID 被拒絕且不
 中斷原呼叫、foreign cancellation 不影響另一 session。Owner cancellation 保留
@@ -35,6 +35,14 @@ probe 證明相同 request ID 不跨 client 衝突、同 session 並行重複 ID
 回歸測試涵蓋 admission 前的 permit、registry/cursor 單一快照、清理完成前不可
 完成 DELETE／graceful close，以及取消後仍可寫出 MCP 回應；完整範圍見
 [修復驗證](testing.md#pr-2-repair-verification-2026-10-04)。
+
+另以兩個不相關的 local Git remotes 實跑五個重啟情境：同 ID／roots 改指向 B
+被拒且 A 證據不變、替換任一側 storage 仍保留另一側 origin 綁定、同 origin
+重啟保留原 job 查詢與 exact-SHA 重用，以及新 ID 可準備 B 而不改動 A。
+尚未發布的 A cache、跨重啟 ACCEPTED intent 與未綁定既有資料拒絕由回歸測試
+涵蓋；private job format 2／重建規則見
+[origin identity](source-mcp.md#repository-origin-and-storage-identity)。
+
 這些結果不代表已完成實際模型客戶端、正式 TLS 或容量驗收。
 
 ## PR #2 review 前的 Phase 1 紀錄（2026-10-04）

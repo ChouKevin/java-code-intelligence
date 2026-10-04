@@ -39,6 +39,7 @@ public final class SourcePublicationStore {
     private final Path published;
     private final ObjectMapper mapper;
     private final FileSourceJobStore jobs;
+    private final RepositoryRegistry registry;
 
     public SourcePublicationStore(RepositoryProperties properties, ObjectMapper mapper,
             DurableSourceFiles ownership, FileSourceJobStore jobs) {
@@ -46,9 +47,11 @@ public final class SourcePublicationStore {
         this.published = Path.of(properties.getSourcePublishedRoot()).toAbsolutePath().normalize();
         this.mapper = mapper;
         this.jobs = jobs;
+        this.registry = new RepositoryRegistry(properties);
     }
 
     public synchronized SourceRepositoryState state(RepositoryId id) {
+        registry.require(id);
         Path file = published.resolve(id.value()).resolve("state.json");
         if (!Files.exists(file)) {
             return new SourceRepositoryState(SourceRevisionManifest.FORMAT_VERSION, id.value(), Optional.empty(),
@@ -66,6 +69,7 @@ public final class SourcePublicationStore {
     }
 
     public void updatePreparation(SourcePreparationJob job) {
+        registry.requireOrigin(new RepositoryId(job.repositoryId()), job.originFingerprint());
         // Claim/admission is durable before its public status. Serialize their observation with
         // job writes so a delayed ACCEPTED update cannot rewind RUNNING or a later admission.
         synchronized (jobs) {
@@ -100,6 +104,7 @@ public final class SourcePublicationStore {
     }
 
     public synchronized Path seal(SourcePreparationJob job, Path staging, SourceRevisionManifest manifest) {
+        registry.requireOrigin(new RepositoryId(job.repositoryId()), job.originFingerprint());
         requireJobContext(job, manifest);
         Path finalPath = revisionPath(manifest.context());
         if (Files.exists(finalPath)) {
@@ -136,6 +141,7 @@ public final class SourcePublicationStore {
     }
 
     public synchronized PreparedRevision publish(SourcePreparationJob job, SourceRevisionManifest manifest) {
+        registry.requireOrigin(new RepositoryId(job.repositoryId()), job.originFingerprint());
         requireJobContext(job, manifest);
         RepositoryId repository = new RepositoryId(job.repositoryId());
         SourceRepositoryState previous = state(repository);
@@ -161,6 +167,7 @@ public final class SourcePublicationStore {
     }
 
     public synchronized Optional<PreparedRevision> lookupPublishedJob(SourcePreparationJob job) {
+        registry.requireOrigin(new RepositoryId(job.repositoryId()), job.originFingerprint());
         if (job.phase() != SourcePreparationJob.Phase.RUNNING || job.resolvedRevision().isEmpty()) {
             return Optional.empty();
         }
@@ -180,6 +187,10 @@ public final class SourcePublicationStore {
         } catch (RuntimeException exception) {
             return Optional.empty();
         }
+    }
+
+    public void requireJobOrigin(SourcePreparationJob job) {
+        registry.requireOrigin(new RepositoryId(job.repositoryId()), job.originFingerprint());
     }
 
     public SourceRevisionManifest manifest(SourceContext context, String digest) {

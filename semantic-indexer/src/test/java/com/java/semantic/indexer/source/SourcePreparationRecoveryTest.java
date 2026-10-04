@@ -289,8 +289,8 @@ class SourcePreparationRecoveryTest {
         DurableJob stored = mapper.readValue(Files.readAllBytes(record), DurableJob.class);
         SourcePreparationJob job = stored.job();
         SourcePreparationJob shifted = new SourcePreparationJob(job.formatVersion(), job.jobId(), job.repositoryId(),
-                job.requestId(), job.requestedRevision(), job.defaultBranch(), job.phase(), timestamp,
-                job.resolvedRevision(), job.expectedCurrent(), job.publication(), job.failureCode());
+                job.requestId(), job.requestedRevision(), job.defaultBranch(), job.originFingerprint(), job.phase(),
+                timestamp, job.resolvedRevision(), job.expectedCurrent(), job.publication(), job.failureCode());
         Files.write(record, mapper.writeValueAsBytes(new DurableJob(stored.sequence(), shifted)));
     }
 

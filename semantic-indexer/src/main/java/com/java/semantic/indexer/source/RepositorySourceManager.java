@@ -40,6 +40,7 @@ public final class RepositorySourceManager {
     public SourcePreparationJob execute(SourcePreparationJob claimed) {
         RepositoryId repository = new RepositoryId(claimed.repositoryId());
         IndexJobId id = new IndexJobId(claimed.jobId());
+        registry.requireOrigin(repository, claimed.originFingerprint());
         try {
             if (claimed.resolvedRevision().isEmpty() && claimed.requestedRevision().isEmpty()
                     && !registry.require(repository).getDefaultBranch().equals(claimed.defaultBranch())) {

@@ -46,7 +46,7 @@ public final class RepositoryRevisionResolver {
             RefSpec spec = requested.isPresent()
                     ? new RefSpec("+refs/heads/*:refs/source-heads/*")
                     : new RefSpec("+refs/heads/" + branch + ":" + local);
-            org.eclipse.jgit.api.FetchCommand fetch = git.fetch().setRemote(config.getUrl())
+            org.eclipse.jgit.api.FetchCommand fetch = git.fetch().setRemote(registry.endpoint(repository))
                     .setRefSpecs(spec).setRemoveDeletedRefs(false).setCheckFetchedObjects(true)
                     .setRecurseSubmodules(org.eclipse.jgit.lib.SubmoduleConfig.FetchRecurseSubmodulesMode.NO)
                     .setTagOpt(org.eclipse.jgit.transport.TagOpt.NO_TAGS).setTimeout(30);
@@ -77,6 +77,7 @@ public final class RepositoryRevisionResolver {
     }
 
     public Git open(RepositoryId repository) throws IOException {
+        registry.require(repository);
         Path path = barePath(repository);
         DurableSourceFiles.ensureDirectories(adminRoot, path.getParent(),
                 DurableSourceFiles.Visibility.PRIVATE);

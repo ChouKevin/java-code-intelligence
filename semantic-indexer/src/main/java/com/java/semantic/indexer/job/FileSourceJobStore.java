@@ -6,7 +6,6 @@ import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.model.repository.RepositoryRevision;
 import com.java.semantic.model.source.PreparedRevision;
 import com.java.semantic.model.source.SourceRepositoryState.CurrentPublication;
-import com.java.semantic.model.source.SourceRevisionManifest;
 import java.io.IOException;
 import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
@@ -46,7 +45,8 @@ public final class FileSourceJobStore {
     }
 
     public synchronized SourcePreparationJob admit(RepositoryId repository, PreparationRequestId request,
-            Optional<RepositoryRevision> revision, String defaultBranch, Optional<CurrentPublication> current) {
+            Optional<RepositoryRevision> revision, String defaultBranch, String originFingerprint,
+            Optional<CurrentPublication> current) {
         Optional<SourcePreparationJob> previous = find(repository, request);
         if (previous.isPresent()) {
             throw new PreparationRequestReusedException(new IndexJobId(previous.orElseThrow().jobId()), request);
@@ -65,10 +65,10 @@ public final class FileSourceJobStore {
                     }
                 }
             }
-            SourcePreparationJob job = new SourcePreparationJob(SourceRevisionManifest.FORMAT_VERSION,
+            SourcePreparationJob job = new SourcePreparationJob(SourcePreparationJob.FORMAT_VERSION,
                     IndexJobId.create().value(), repository.value(), request.value(), revision.map(RepositoryRevision::value),
-                    defaultBranch, SourcePreparationJob.Phase.ACCEPTED, Instant.now(), Optional.empty(), current,
-                    Optional.empty(), Optional.empty());
+                    defaultBranch, originFingerprint, SourcePreparationJob.Phase.ACCEPTED, Instant.now(), Optional.empty(),
+                    current, Optional.empty(), Optional.empty());
             save(job, reserve(repository.value(), request.value(), hasJobs));
             acceptedJobs.put(repository.value(), job);
             return job;
@@ -183,6 +183,7 @@ public final class FileSourceJobStore {
                             throw new IOException("invalid private admission record");
                         }
                         SourcePreparationJob job = stored.job();
+                        publications.requireJobOrigin(job);
                         if (job.phase() == SourcePreparationJob.Phase.RUNNING) {
                             Optional<PreparedRevision> publication = publications.lookupPublishedJob(job);
                             SourcePreparationJob recovered = publication.isPresent()
