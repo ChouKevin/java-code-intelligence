@@ -69,7 +69,7 @@ class SourceTransportErrorParityTest {
             assertThat(fixture.mapper.readTree(((McpSchema.TextContent) mcp.content().getFirst()).text()))
                     .isEqualTo(httpJson);
             assertThat(mcp.isError()).isTrue();
-            assertThat(httpJson.get("code").asText()).isEqualTo(code.name());
+            assertThat(httpJson.get("code").asString()).isEqualTo(code.name());
             assertThat(payload).doesNotContain("private", "credentials");
         }
     }

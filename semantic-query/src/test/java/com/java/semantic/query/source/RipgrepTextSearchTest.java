@@ -61,6 +61,34 @@ class RipgrepTextSearchTest {
     }
 
     @Test
+    void utf8_bom_search_columns_include_the_preserved_source_prefix() throws Exception {
+        SourceFilesystemFixture fixture = new SourceFilesystemFixture(temp);
+        fixture.file("bom.java", "\uFEFF🙂 needle\r\n");
+        AdmittedSourceRevision admitted = fixture.publish(Optional.empty());
+        TextSearchResult result = fixture.service().searchText(admitted, new TextSearchRequest(fixture.context,
+                "needle", "", Optional.empty(), 20));
+        assertThat(result.matches()).singleElement().satisfies(match -> {
+            assertThat(match.line()).isEqualTo(1);
+            assertThat(match.column()).isEqualTo(5);
+            assertThat(match.matchedText()).isEqualTo("needle");
+        });
+    }
+
+    @Test
+    void bounded_search_selects_a_stable_path_ordered_prefix_across_files() throws Exception {
+        SourceFilesystemFixture fixture = new SourceFilesystemFixture(temp);
+        fixture.file("z.java", "needle\n");
+        fixture.file("b.java", "needle\n");
+        fixture.file("a.java", "needle\n");
+        AdmittedSourceRevision admitted = fixture.publish(Optional.empty());
+        TextSearchResult result = fixture.service().searchText(admitted, new TextSearchRequest(fixture.context,
+                "needle", "", Optional.empty(), 2));
+        assertThat(result.matches()).extracting(TextMatch::path).containsExactly("a.java", "b.java");
+        assertThat(result.truncated()).isTrue();
+        assertThat(result.scanComplete()).isFalse();
+    }
+
+    @Test
     void bounded_child_flood_error_and_deadline_leave_no_live_child() throws Exception {
         SourceFilesystemFixture fixture = new SourceFilesystemFixture(temp);
         fixture.file("a.java", "needle");

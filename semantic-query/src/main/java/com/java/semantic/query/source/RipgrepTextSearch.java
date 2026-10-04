@@ -69,7 +69,8 @@ public final class RipgrepTextSearch {
             resolver.physical(admitted, directory);
         }
         List<String> command = new ArrayList<>(List.of(properties.rgExecutable().toString(), "--no-config", "--json",
-                "--fixed-strings", "--case-sensitive", "--line-number", "--hidden", "--no-ignore", "--no-messages"));
+                "--fixed-strings", "--case-sensitive", "--line-number", "--hidden", "--no-ignore", "--no-messages",
+                "--sort", "path", "--encoding", "none"));
         if (!glob.isEmpty()) { command.add("--glob"); command.add(glob); }
         command.addAll(List.of("--glob", "!.git/**", "--glob", "!target/**", "--glob", "!build/**",
                 "--glob", "!.gradle/**", "--glob", "!node_modules/**", "--glob", "!generated/**",
@@ -263,9 +264,9 @@ public final class RipgrepTextSearch {
             Set<String> verified) {
         try {
             JsonNode event = mapper.readTree(frame);
-            if (!"match".equals(event.path("type").asText())) return;
+            if (!"match".equals(event.path("type").asString())) return;
             JsonNode data = event.path("data");
-            String path = data.path("path").path("text").asText();
+            String path = data.path("path").path("text").asString();
             if (path.startsWith("./")) path = path.substring(2);
             SourcePathResolver.safeFile(path);
             if (!directory.isEmpty() && !path.startsWith(directory + "/")) throw new SourceQueryException(Code.SOURCE_UNAVAILABLE);
@@ -279,7 +280,7 @@ public final class RipgrepTextSearch {
             Path physical = resolver.readable(admitted, entry);
             if (verified.add(path)) verifyContent(physical, entry, deadline);
             String matchedPath = path;
-            String line = data.path("lines").path("text").asText();
+            String line = data.path("lines").path("text").asString();
             int number = data.path("line_number").asInt();
             byte[] lineBytes = line.getBytes(StandardCharsets.UTF_8);
             for (JsonNode submatch : data.path("submatches")) {

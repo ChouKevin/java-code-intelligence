@@ -48,8 +48,8 @@ class McpWireSerializationContractTest {
                     "jsonrpc", "2.0", "id", 1, "method", "tools/call",
                     "params", Map.of("name", "search_text", "arguments", input))))).get("result");
             assertThat(result.get("isError").asBoolean()).isTrue();
-            assertThat(result.get("structuredContent").get("code").asText()).isEqualTo("INVALID_ARGUMENT");
-            assertThat(mapper.readTree(result.get("content").get(0).get("text").asText()))
+            assertThat(result.get("structuredContent").get("code").asString()).isEqualTo("INVALID_ARGUMENT");
+            assertThat(mapper.readTree(result.get("content").get(0).get("text").asString()))
                     .isEqualTo(result.get("structuredContent"));
             tools.jackson.databind.JsonNode removed = mapper.readTree(request(transport, mapper.writeValueAsString(Map.of(
                     "jsonrpc", "2.0", "id", 2, "method", "tools/call",

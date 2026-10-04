@@ -82,7 +82,7 @@ class HttpMcpParityTest {
         assertThat(httpJson).isEqualTo(mapper.readTree(mapper.writeValueAsString(mcp.structuredContent())));
         assertThat(mapper.readTree(((McpSchema.TextContent) mcp.content().getFirst()).text())).isEqualTo(httpJson);
         assertThat(mcp.isError()).isEqualTo(expectedError);
-        if (expectedCode != null) assertThat(httpJson.get("code").asText()).isEqualTo(expectedCode); // cs-allow
+        if (expectedCode != null) assertThat(httpJson.get("code").asString()).isEqualTo(expectedCode); // cs-allow
         assertThat(payload).doesNotContain("/published/", "password", "source-admin");
     }
 }

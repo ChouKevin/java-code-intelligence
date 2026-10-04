@@ -75,7 +75,7 @@ class SourceReadResponseBudgetTest {
             assertThat(wire.getBytes(StandardCharsets.UTF_8).length).isLessThanOrEqualTo(524_288);
             JsonNode nativeResult = fixture.mapper.readTree(wire).get("result");
             assertThat(nativeResult.get("structuredContent")).isEqualTo(httpJson);
-            assertThat(fixture.mapper.readTree(nativeResult.get("content").get(0).get("text").asText()))
+            assertThat(fixture.mapper.readTree(nativeResult.get("content").get(0).get("text").asString()))
                     .isEqualTo(httpJson);
             SourceResult page = fixture.mapper.treeToValue(httpJson, SourceResult.class);
             reconstructed.append(page.content());

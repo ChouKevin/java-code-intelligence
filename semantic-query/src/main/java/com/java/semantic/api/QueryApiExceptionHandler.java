@@ -47,7 +47,7 @@ public final class QueryApiExceptionHandler {
             case "INVALID_ARGUMENT" -> HttpStatus.BAD_REQUEST;
             case "REPOSITORY_NOT_FOUND", "REVISION_NOT_PREPARED", "SOURCE_NOT_FOUND" -> HttpStatus.NOT_FOUND;
             case "SOURCE_NOT_PREPARED" -> HttpStatus.CONFLICT;
-            case "SOURCE_UNSUPPORTED" -> HttpStatus.UNPROCESSABLE_ENTITY;
+            case "SOURCE_UNSUPPORTED" -> HttpStatus.UNPROCESSABLE_CONTENT;
             case "SOURCE_BUSY", "SOURCE_UNAVAILABLE" -> HttpStatus.SERVICE_UNAVAILABLE;
             case "SOURCE_TIMEOUT" -> HttpStatus.GATEWAY_TIMEOUT;
             default -> throw new IllegalArgumentException("unknown source error code");

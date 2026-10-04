@@ -20,7 +20,7 @@ class QueryApiExceptionHandlerTest {
                 Code.SOURCE_NOT_PREPARED, HttpStatus.CONFLICT,
                 Code.REVISION_NOT_PREPARED, HttpStatus.NOT_FOUND,
                 Code.SOURCE_NOT_FOUND, HttpStatus.NOT_FOUND,
-                Code.SOURCE_UNSUPPORTED, HttpStatus.UNPROCESSABLE_ENTITY,
+                Code.SOURCE_UNSUPPORTED, HttpStatus.UNPROCESSABLE_CONTENT,
                 Code.SOURCE_BUSY, HttpStatus.SERVICE_UNAVAILABLE,
                 Code.SOURCE_UNAVAILABLE, HttpStatus.SERVICE_UNAVAILABLE,
                 Code.SOURCE_TIMEOUT, HttpStatus.GATEWAY_TIMEOUT);
