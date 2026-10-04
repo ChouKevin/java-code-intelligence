@@ -145,15 +145,23 @@ class ProjectGuideSourceTest {
     }
 
     @Test
-    void invalid_raw_git_path_is_counted_without_publishing_unsafe_name() throws Exception {
+    void invalid_raw_git_path_is_counted_but_invalid_excluded_descendants_count_as_files() throws Exception {
         try (LocalSourceFixture fixture = new LocalSourceFixture(root)) {
             org.eclipse.jgit.lib.Repository repo = fixture.git.getRepository();
             org.eclipse.jgit.lib.ObjectId revision;
             try (org.eclipse.jgit.lib.ObjectInserter objects = repo.newObjectInserter()) {
                 org.eclipse.jgit.lib.ObjectId text = objects.insert(org.eclipse.jgit.lib.Constants.OBJ_BLOB,
                         "class Safe {}\n".getBytes(StandardCharsets.UTF_8));
+                org.eclipse.jgit.lib.TreeFormatter nested = new org.eclipse.jgit.lib.TreeFormatter();
+                nested.append("Nested.java", org.eclipse.jgit.lib.FileMode.REGULAR_FILE, text);
+                org.eclipse.jgit.lib.TreeFormatter excluded = new org.eclipse.jgit.lib.TreeFormatter();
+                excluded.append(new byte[] {(byte) 0xfd, '.', 'j', 'a', 'v', 'a'},
+                        org.eclipse.jgit.lib.FileMode.REGULAR_FILE, text);
+                excluded.append(new byte[] {(byte) 0xfe}, org.eclipse.jgit.lib.FileMode.TREE,
+                        objects.insert(nested));
                 org.eclipse.jgit.lib.TreeFormatter tree = new org.eclipse.jgit.lib.TreeFormatter();
                 tree.append("Safe.java", org.eclipse.jgit.lib.FileMode.REGULAR_FILE, text);
+                tree.append("target", org.eclipse.jgit.lib.FileMode.TREE, objects.insert(excluded));
                 tree.append(new byte[] {(byte) 0xff, '.', 'j', 'a', 'v', 'a'},
                         org.eclipse.jgit.lib.FileMode.REGULAR_FILE, text);
                 org.eclipse.jgit.lib.CommitBuilder commit = new org.eclipse.jgit.lib.CommitBuilder();
@@ -185,9 +193,10 @@ class ProjectGuideSourceTest {
                 SourceRevisionManifest manifest = store.manifest(complete.publication().orElseThrow().context(),
                         complete.publication().orElseThrow().manifestDigest());
                 assertThat(manifest.coverage().unsupportedCounts()).containsEntry(EntryStatus.UNSUPPORTED_PATH, 1L);
+                assertThat(manifest.coverage().excludedFileCount()).isEqualTo(2);
                 Path sealed = fixture.published.resolve("orders/revisions").resolve(revision.name());
                 assertThat(Files.readString(sealed.resolve("inventory.jsonl"))).contains("Safe.java")
-                        .doesNotContain("�");
+                        .doesNotContain("target", "�");
                 assertThat(Files.readAllBytes(sealed.resolve("tree/Safe.java")))
                         .isEqualTo("class Safe {}\n".getBytes(StandardCharsets.UTF_8));
             }

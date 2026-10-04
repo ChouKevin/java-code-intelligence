@@ -71,16 +71,29 @@ public final class JGitRevisionExporter {
                         java.nio.file.attribute.PosixFilePermissions.fromString("rw-------"));
                 walk.addTree(commit.getTree());
                 walk.setRecursive(false);
+                int excludedDepth = -1;
                 while (walk.next()) {
-                    String path = safePath(walk.getRawPath());
                     FileMode mode = walk.getFileMode(0);
+                    if (excludedDepth >= 0) {
+                        if (walk.getDepth() > excludedDepth) {
+                            if (mode.equals(FileMode.TREE)) {
+                                walk.enterSubtree();
+                            } else {
+                                counts.excluded++;
+                            }
+                            continue;
+                        }
+                        excludedDepth = -1;
+                    }
+                    String path = safePath(walk.getRawPath());
                     if (path.isEmpty()) {
                         counts.unsupported(EntryStatus.UNSUPPORTED_PATH);
                         continue;
                     }
                     if (SourcePathPolicy.isExcluded(path)) {
                         if (mode.equals(FileMode.TREE)) {
-                            // Visit only to count tracked leaves; never export or open excluded blobs.
+                            // Once excluded, count all tracked leaves without decoding names or opening blobs.
+                            excludedDepth = walk.getDepth();
                             walk.enterSubtree();
                         } else {
                             counts.excluded++;

@@ -28,8 +28,11 @@ public final class SourcePreparationService {
     public SourcePreparationJob prepareSource(RepositoryId repository, PreparationRequestId request,
             Optional<RepositoryRevision> revision) {
         String branch = repositories.require(repository).getDefaultBranch();
-        SourcePreparationJob accepted = jobs.admit(repository, request, revision, branch,
-                publications.state(repository).current());
+        SourcePreparationJob accepted;
+        synchronized (jobs) {
+            accepted = jobs.admit(repository, request, revision, branch,
+                    publications.state(repository).current());
+        }
         publications.updatePreparation(accepted);
         return accepted;
     }

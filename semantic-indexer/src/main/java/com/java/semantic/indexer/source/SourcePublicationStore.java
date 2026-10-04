@@ -1,7 +1,7 @@
 package com.java.semantic.indexer.source;
 
 import com.java.semantic.indexer.job.FileSourceJobStore;
-import com.java.semantic.indexer.job.IndexJobId;
+import com.java.semantic.indexer.job.PreparationRequestId;
 import com.java.semantic.indexer.job.SourcePreparationJob;
 import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.model.source.PreparedRevision;
@@ -70,7 +70,9 @@ public final class SourcePublicationStore {
         // job writes so a delayed ACCEPTED update cannot rewind RUNNING or a later admission.
         synchronized (jobs) {
             SourcePreparationJob persisted = jobs.find(new RepositoryId(job.repositoryId()),
-                    new IndexJobId(job.jobId())).orElseThrow();
+                    new PreparationRequestId(job.requestId()))
+                    .filter(stored -> stored.jobId().equals(job.jobId()))
+                    .orElseThrow(() -> new IllegalStateException("source job identity mismatch"));
             if (persisted.phase() != job.phase()) {
                 return;
             }

@@ -6,6 +6,7 @@ import com.java.semantic.indexer.job.PreparationRequestId;
 import com.java.semantic.indexer.job.PreparationRequestReusedException;
 import com.java.semantic.indexer.job.SourcePreparationJob;
 import com.java.semantic.model.repository.RepositoryRevision;
+import com.java.semantic.model.source.SourceRepositoryState.CurrentPublication;
 import com.java.semantic.repository.config.RepositoryProperties;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -173,6 +174,62 @@ class SourcePreparationPublicationTest {
                         .isEqualTo(com.java.semantic.model.source.SourceRepositoryState.PreparationPhase.COMPLETE);
                 assertThat(publications.state(fixture.repository).preparation().jobId())
                         .contains(acceptedB.jobId());
+            }
+        }
+    }
+
+    @Test
+    void admission_after_prior_completion_uses_current_publication_even_if_request_arrived_earlier() throws Exception {
+        try (LocalSourceFixture fixture = new LocalSourceFixture(root)) {
+            fixture.commit("A.java", "class A {}\n".getBytes(StandardCharsets.UTF_8), "A");
+            RepositoryProperties properties = properties(fixture);
+            try (DurableSourceFiles owner = new DurableSourceFiles(fixture.admin)) {
+                RepositoryRegistry registry = new RepositoryRegistry(properties);
+                FileSourceJobStore jobs = new FileSourceJobStore(properties, mapper, owner);
+                SourcePublicationStore publications = new SourcePublicationStore(properties, mapper, owner, jobs);
+                RepositoryRevisionResolver resolver = new RepositoryRevisionResolver(registry, properties);
+                RepositorySourceManager manager = new RepositorySourceManager(jobs, resolver,
+                        new JGitRevisionExporter(resolver, registry, mapper), publications, registry, properties);
+                SourcePreparationService service = new SourcePreparationService(jobs, publications, registry);
+                service.prepareSource(fixture.repository, new PreparationRequestId(UUID.randomUUID().toString()),
+                        Optional.empty());
+                assertThat(manager.execute(jobs.claimNext().orElseThrow()).phase())
+                        .isEqualTo(SourcePreparationJob.Phase.COMPLETE);
+                String revisionB = fixture.commit("B.java", "class B {}\n".getBytes(StandardCharsets.UTF_8), "B");
+                service.prepareSource(fixture.repository, new PreparationRequestId(UUID.randomUUID().toString()),
+                        Optional.of(RepositoryRevision.ofSha(revisionB)));
+                SourcePreparationJob runningB = jobs.claimNext().orElseThrow();
+                java.util.concurrent.atomic.AtomicReference<SourcePreparationJob> pending =
+                        new java.util.concurrent.atomic.AtomicReference<>();
+                java.util.concurrent.atomic.AtomicReference<Throwable> workerFailure =
+                        new java.util.concurrent.atomic.AtomicReference<>();
+                Thread incoming = new Thread(() -> {
+                    try {
+                        pending.set(service.prepareSource(fixture.repository,
+                                new PreparationRequestId(UUID.randomUUID().toString()), Optional.empty()));
+                    } catch (Throwable exception) {
+                        workerFailure.set(exception);
+                    }
+                }, "source-admission-before-completion");
+                CurrentPublication publishedB;
+                synchronized (jobs) {
+                    incoming.start();
+                    long deadline = System.nanoTime() + java.time.Duration.ofSeconds(10).toNanos();
+                    while (incoming.getState() != Thread.State.BLOCKED && System.nanoTime() < deadline) {
+                        Thread.sleep(2);
+                    }
+                    assertThat(incoming.getState()).isEqualTo(Thread.State.BLOCKED);
+                    assertThat(manager.execute(runningB).phase()).isEqualTo(SourcePreparationJob.Phase.COMPLETE);
+                    publishedB = publications.state(fixture.repository).current().orElseThrow();
+                }
+                incoming.join(10_000);
+                assertThat(incoming.isAlive()).isFalse();
+                assertThat(workerFailure.get()).isNull();
+                assertThat(pending.get()).isNotNull();
+                SourcePreparationJob afterB = manager.execute(jobs.claimNext().orElseThrow());
+                assertThat(afterB.phase()).isEqualTo(SourcePreparationJob.Phase.COMPLETE);
+                assertThat(afterB.expectedCurrent()).contains(publishedB);
+                assertThat(afterB.publication().orElseThrow().context().revision()).isEqualTo(revisionB);
             }
         }
     }
