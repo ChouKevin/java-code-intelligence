@@ -19,6 +19,7 @@ import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
 
 /** One application operation and JSON result for both transports. */
 @Configuration
@@ -27,6 +28,11 @@ import tools.jackson.databind.ObjectMapper;
 @ConditionalOnProperty(prefix = "spring.ai.mcp.server", name = "enabled", havingValue = "true", matchIfMissing = true)
 public class QueryMcpToolCatalogConfiguration {
     private static final SemanticQueryErrorMapper ERRORS = new SemanticQueryErrorMapper();
+
+    @Bean("mcpServerJsonMapper")
+    JsonMapper mcpServerJsonMapper(JsonMapper.Builder builder) {
+        return builder.build();
+    }
 
     @Bean
     @Primary
