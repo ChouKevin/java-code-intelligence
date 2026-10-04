@@ -6,22 +6,14 @@ on:
 
 jobs:
   unit:
-    name: Docker/JDT-free reactor unit tests
+    name: Source reactor tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
         with: { distribution: temurin, java-version: '21' }
+      - run: sudo apt-get update && sudo apt-get install -y ripgrep
       - run: mvn --batch-mode --no-transfer-progress clean test
-
-  mongo-integration:
-    name: Mongo integration
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
-        with: { distribution: temurin, java-version: '21' }
-      - run: mvn --batch-mode --no-transfer-progress -pl semantic-indexer,semantic-query -am -Pmongo-it test
 
   fixture-tests:
     name: Deterministic fixture projects
@@ -34,41 +26,23 @@ jobs:
       - run: mvn --batch-mode --no-transfer-progress -f semantic-indexer/fixtures/uat/order-service/pom.xml test
       - run: mvn --batch-mode --no-transfer-progress -f semantic-indexer/fixtures/uat/video-service/pom.xml test
 
-  indexer-jdtls-smoke:
-    name: Indexer JDT LS smoke
+  source-journey:
+    name: Real source MCP journey
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
         with: { distribution: temurin, java-version: '21' }
-      - run: bash scripts/install-jdtls.sh /opt/jdtls
-      - run: >-
-          JDTLS_HOME=/opt/jdtls mvn --batch-mode --no-transfer-progress -pl semantic-indexer -am -Pjdtls-it
-          -Dtest=InternalReferencesJdtLsIT
-          -Dsurefire.failIfNoSpecifiedTests=false test
+      - run: sudo apt-get update && sudo apt-get install -y ripgrep
+      - run: scripts/test-source-mcp.sh
 
-  indexer-query-contract:
-    name: Real Indexer to Query contract
+  source-images:
+    name: Source image isolation
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
         with: { distribution: temurin, java-version: '21' }
-      - run: bash scripts/install-jdtls.sh /opt/jdtls
-      - run: JDTLS_HOME=/opt/jdtls scripts/test-indexer-query-contract.sh
-
-  query-image-isolation:
-    name: Query image isolation
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - run: docker build -f Dockerfile.query -t java-semantic-query:ci .
-      - run: bash scripts/test-query-image.sh java-semantic-query:ci
-
-  indexer-image-smoke:
-    name: Indexer image build and JDT smoke
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - run: docker build -f Dockerfile.indexer -t java-semantic-indexer:ci .
-      - run: bash scripts/smoke-jdtls-image.sh java-semantic-indexer:ci
+      - run: docker build -f Dockerfile.indexer -t java-source-indexer:phase1 .
+      - run: docker build -f Dockerfile.query -t java-source-query:phase1 .
+      - run: QUERY_IMAGE=java-source-query:phase1 INDEXER_IMAGE=java-source-indexer:phase1 scripts/test-source-images.sh

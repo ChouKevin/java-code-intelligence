@@ -10,7 +10,13 @@ COPY semantic-query semantic-query
 RUN mvn --batch-mode --no-transfer-progress -pl semantic-query -am -DskipTests package
 
 FROM eclipse-temurin:21-jre
+RUN apt-get update && apt-get install -y --no-install-recommends ripgrep \
+    && groupadd --gid 10002 source-reader \
+    && useradd --uid 10002 --gid 10002 --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin source-reader \
+    && mkdir -p /data/source-published \
+    && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY --from=build /workspace/semantic-query/target/semantic-query-0.0.1-SNAPSHOT-exec.jar /app/semantic-query.jar
+USER 10002:10002
 EXPOSE 8080
 ENTRYPOINT ["java", "-jar", "/app/semantic-query.jar"]

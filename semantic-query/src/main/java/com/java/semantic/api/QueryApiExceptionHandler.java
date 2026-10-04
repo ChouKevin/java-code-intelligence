@@ -1,24 +1,9 @@
 package com.java.semantic.api;
 
-import com.java.semantic.query.application.CodeFactKindMismatchException;
-import com.java.semantic.query.application.CodeFactKindUnsupportedException;
-import com.java.semantic.query.application.CodeFactNotFoundException;
-import com.java.semantic.query.application.IndexContractMismatchException;
-import com.java.semantic.query.application.GitEvidenceNotFoundException;
-import com.java.semantic.query.application.GitEvidenceNotReadyException;
-import com.java.semantic.query.application.IndexNotReadyException;
-import com.java.semantic.query.application.InvalidCodeFactQueryException;
-import com.java.semantic.query.application.RepositoryNotFoundException;
-import com.java.semantic.query.application.RevisionOutdatedException;
-import com.java.semantic.query.application.SemanticIndexUnavailableException;
-import com.java.semantic.query.application.ReviewContextMismatchException;
-import com.java.semantic.query.application.ReviewFailedException;
-import com.java.semantic.query.application.ReviewNotFoundException;
-import com.java.semantic.query.application.ReviewNotReadyException;
 import com.java.semantic.query.application.SemanticQueryError;
 import com.java.semantic.query.application.SemanticQueryErrorMapper;
-import com.java.semantic.query.application.MetadataNotPreparedException;
 import jakarta.validation.ConstraintViolationException;
+import java.util.Objects;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
@@ -30,9 +15,10 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
-/** Maps HTTP status mechanics onto the shared Semantic application error body. */
+/** HTTP status mechanics over the same source failure body returned by MCP. */
 @RestControllerAdvice
 public final class QueryApiExceptionHandler {
+
     private final SemanticQueryErrorMapper errorMapper;
 
     public QueryApiExceptionHandler() {
@@ -40,16 +26,10 @@ public final class QueryApiExceptionHandler {
     }
 
     QueryApiExceptionHandler(SemanticQueryErrorMapper errorMapper) {
-        this.errorMapper = java.util.Objects.requireNonNull(errorMapper, "semantic query error mapper is required");
+        this.errorMapper = Objects.requireNonNull(errorMapper, "source error mapper");
     }
 
-    @ExceptionHandler({RevisionOutdatedException.class, RepositoryNotFoundException.class, ReviewNotFoundException.class,
-            ReviewNotReadyException.class, ReviewFailedException.class, ReviewContextMismatchException.class,
-            GitEvidenceNotFoundException.class, GitEvidenceNotReadyException.class, CodeFactNotFoundException.class,
-            CodeFactKindMismatchException.class, IndexNotReadyException.class, IndexContractMismatchException.class,
-            SemanticIndexUnavailableException.class, InvalidCodeFactQueryException.class, MetadataNotPreparedException.class,
-            com.mongodb.MongoException.class, org.springframework.dao.DataAccessException.class,
-            CodeFactKindUnsupportedException.class, IllegalArgumentException.class})
+    @ExceptionHandler(RuntimeException.class)
     public ResponseEntity<SemanticQueryError> failure(RuntimeException exception) {
         SemanticQueryError error = errorMapper.map(exception);
         return ResponseEntity.status(status(error)).body(error);
@@ -64,12 +44,13 @@ public final class QueryApiExceptionHandler {
 
     private static HttpStatus status(SemanticQueryError error) {
         return switch (error.code()) {
-            case "REPOSITORY_NOT_FOUND", "REVIEW_NOT_FOUND", "FACT_NOT_FOUND", "GIT_EVIDENCE_NOT_FOUND" -> HttpStatus.NOT_FOUND;
-            case "REVISION_OUTDATED", "REVIEW_NOT_READY", "REVIEW_FAILED", "GIT_EVIDENCE_NOT_READY",
-                    "REVIEW_CONTEXT_MISMATCH", "METADATA_NOT_PREPARED" -> HttpStatus.CONFLICT;
-            case "INDEX_UNAVAILABLE" -> HttpStatus.SERVICE_UNAVAILABLE;
-            case "INVALID_ARGUMENT", "FACT_KIND_MISMATCH" -> HttpStatus.BAD_REQUEST;
-            default -> throw new IllegalArgumentException("unknown Semantic Query error code");
+            case "INVALID_ARGUMENT" -> HttpStatus.BAD_REQUEST;
+            case "REPOSITORY_NOT_FOUND", "REVISION_NOT_PREPARED", "SOURCE_NOT_FOUND" -> HttpStatus.NOT_FOUND;
+            case "SOURCE_NOT_PREPARED" -> HttpStatus.CONFLICT;
+            case "SOURCE_UNSUPPORTED" -> HttpStatus.UNPROCESSABLE_CONTENT;
+            case "SOURCE_BUSY", "SOURCE_UNAVAILABLE" -> HttpStatus.SERVICE_UNAVAILABLE;
+            case "SOURCE_TIMEOUT" -> HttpStatus.GATEWAY_TIMEOUT;
+            default -> throw new IllegalArgumentException("unknown source error code");
         };
     }
 }

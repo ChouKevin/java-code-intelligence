@@ -1,65 +1,20 @@
 # Testing and verification
 
-Run the commands below from the reactor root with Java 21 and Maven 3.9 or
-later. Each profile sets the same Surefire include and exclude properties. Run
-profiles as separate commands; `-Pmongo-it,jdtls-it` does not create a union of
-the two test sets because later profile values overwrite the same properties.
+Run from the reactor root with Java 21, Maven 3.9+, Git and a real absolute-path ripgrep executable for source journeys. Ordinary tests need no MongoDB, Docker or JDT LS. Use Docker only for image/build isolation checks. These commands exercise source contracts, **not** target repository tests, agent/model reasoning, production TLS or capacity.
 
-| Entry point | Command | Required environment | Scope |
-| --- | --- | --- | --- |
-| Ordinary suite | `mvn --batch-mode --no-transfer-progress test` | Java 21 and Maven; no Docker, JDT LS, or deployment | Domain, architecture, application facade, and HTTP/MCP transport and wiring contracts |
-| Mongo integration | `mvn --batch-mode --no-transfer-progress -Pmongo-it verify` | Java 21, Maven, and Docker | Mongo storage and generation contracts, including `SourceSliceContractIT`; this profile is separate from the ordinary suite |
-| Full JDT LS profile | `JDTLS_HOME=/opt/jdtls mvn --batch-mode --no-transfer-progress -Pjdtls-it test` | Java 21, Maven, and a real JDT LS installation; some scenarios also need Docker | All scenarios tagged `jdtls-it`; a valid directory satisfies the basic prerequisite, while the existing startup checks report an incomplete installation |
-| Local fixture contract | `JDTLS_HOME=/opt/jdtls scripts/test-indexer-query-contract.sh` | Java 21, Maven, Docker, and a real JDT LS installation | Payment, order, and video fixture indexing through the exporter and temporary Mongo to a temporary Query HTTP/MCP server, followed by projection evolution; it does not use an existing deployment |
-| Semantic/codebase journey | `SEMANTIC_REVIEW_INDEXER_IMAGE=semantic-indexer:review-local scripts/test-semantic-review-journey.sh` | Java21, Maven, Docker, freshly built production Indexer image and executable jars | Maintenance/writer/reader separation, cold fixed-branch MCP preparation, requestId recovery, guide states, published/current/review transitions, installation-fingerprint reuse and cold Mongo-only Query |
-| Git/recovery journey | `JDTLS_HOME=/opt/jdtls scripts/test-git-review-context-journey.sh` | Java21, Maven, Docker, real JDT LS and fresh executable jars | Independent host JVMs, COMMIT root/ordinary/merge and direct RANGE equal/reverse/divergent, metadata/review requestId recovery, HTTP/native MCP parity, source/patch paging and cross-JVM READY validation |
-| Deployed Query profile | `mvn --batch-mode --no-transfer-progress -Pdeployed-it test` | Java 21, Maven, an available Query deployment, and the three deployment variables below | The actual deployed Query HTTP/MCP contract |
-| Fixture Maven tests | See commands below | Java 21 and Maven | Focused deterministic payment, order, and video fixture project tests |
-| Image checks | See commands below | Docker | Indexer JDT LS image smoke and Query image isolation |
+## Verification commands
 
-When a real JDT LS test is selected, an unset, empty, nonexistent, or
-non-directory `JDTLS_HOME` is a test failure before expensive setup; it is not a
-skip. Fixture-only checks remain runnable without `JDTLS_HOME`, and unrelated
-platform assumptions remain independent checks.
+| Check | Command | What it covers |
+| --- | --- | --- |
+| Ordinary native suite | `mvn --batch-mode --no-transfer-progress test` | Model, Indexer and Query source behavior, HTTP/MCP contracts, security and architecture; no external service |
+| Real native MCP source journey | `SOURCE_TEST_RG=/absolute/path/to/rg scripts/test-source-mcp.sh` | Clean package, real temporary Git A/B, independent Indexer and Query JVMs, native SDK and HTTP, original-request lookup, warm/cold exact source read |
+| Indexer image | `docker build -f Dockerfile.indexer -t java-source-indexer:phase1 .` | Source-only writer artifact |
+| Query image | `docker build -f Dockerfile.query -t java-source-query:phase1 .` | Source-only reader image with ripgrep |
+| Started-image smoke | `QUERY_IMAGE=java-source-query:phase1 INDEXER_IMAGE=java-source-indexer:phase1 scripts/test-source-images.sh` | Fresh Git preparation; Query published-only read-only mount; distinct non-root UID and actual search/read |
 
-The local-trusted `JdtLsProperties` convenience constructor selects the running
-JVM's `java.home/bin/java`, so launch and effective-input attestation identify
-the same JDK rather than resolving a bare `java` command against unrelated host
-paths. `EffectiveEnvironmentJdtLsIT` verifies that changing an unrelated host
-file does not invalidate a prepared analysis, while changing actual dependency
-bytes still fails its unchanged-input guard. Deployed configurations continue
-to select the explicit `JDTLS_JAVA_EXECUTABLE` inside the Indexer image.
+`SOURCE_TEST_RG` must point to a real executable ripgrep at an **absolute path**; when `/usr/bin/rg` is unavailable set the variable explicitly. The journey script checks Java 21, Git and rg, creates a new `mktemp` root, packages clean executable jars, runs only `SourceMcpJourneyIT` using the `deployed-it` profile, removes **only its disposable** Git/service roots and reports its artifact directory. It does not clear existing `data/`. Image smoke needs Docker, Git, curl, jq and jar and likewise uses a disposable root. Run the two image builds before image smoke; building images alone does not establish mount isolation.
 
-The same real-JDT suite covers a modular source root whose only type is
-package-private, differs from its filename, and sits deeper than twelve
-directories. Imported-root proof must use actual JDT declarations, not filename
-or depth guesses. It also rejects same-SHA generation reuse from the older
-unversioned analyzer identity.
-
-`DispatchedBuildIT` requires imported resource-only mapper XML to survive the
-production preparation, export, and Mongo publication path as both source and
-`MAPPER_STATEMENT` evidence. The semantic review journey reads mapper facts and
-source through current and review HTTP/MCP operations after Indexer is stopped.
-Its changed-installation case modifies only the disposable container's JDT
-directory, not the shared image or an existing deployment.
-
-For the deployed profile, use test-only placeholders and keep its token
-separate from the production Query variable `SEMANTIC_QUERY_API_TOKEN`:
-
-```bash
-SEMANTIC_BASE_URL='<deployed-query-base-url>' \
-SEMANTIC_API_TOKEN='<deployed-query-test-token>' \
-SEMANTIC_UAT_REPOSITORY='<uat-repository-id>' \
-mvn --batch-mode --no-transfer-progress -Pdeployed-it test
-```
-
-`SEMANTIC_API_TOKEN` is read by the deployed acceptance test and must
-authenticate to the chosen Query. That Query's server configuration uses
-`SEMANTIC_QUERY_API_TOKEN` for its read credential; the values may be the same
-when the deployment is configured that way, but the variable names have
-separate roles.
-
-Run each deterministic fixture test as its own command:
+The existing fixture projects can be checked separately if needed (these tests exercise their own fixture behavior, not source-service acceptance):
 
 ```bash
 mvn --batch-mode --no-transfer-progress -f semantic-indexer/fixtures/uat/payment-service/pom.xml test
@@ -67,89 +22,69 @@ mvn --batch-mode --no-transfer-progress -f semantic-indexer/fixtures/uat/order-s
 mvn --batch-mode --no-transfer-progress -f semantic-indexer/fixtures/uat/video-service/pom.xml test
 ```
 
-Build and run the image checks independently:
+Do not reuse old Mongo/JDT, semantic-review or Git-review acceptance reports as Source MCP results. A successful native SDK journey is not evidence of OMP/Codex/Claude model use, private Git coverage, TLS or 50-user load. The [agent checklist](mcp-agent-acceptance.md) separates those layers.
 
-```bash
-docker build -f Dockerfile.indexer -t java-semantic-indexer:uat .
-scripts/smoke-jdtls-image.sh java-semantic-indexer:uat
-docker build -f Dockerfile.query -t java-semantic-query:uat .
-scripts/test-query-image.sh java-semantic-query:uat
-```
+## PR #2 repair verification (2026-10-04)
 
-The local prerequisite regression is a cheap shell-only check and does not
-start Maven, Docker, or JDT LS:
+After the client-isolation, search-admission, registry-snapshot, MCP lifecycle and
+durable-origin repairs, the controller ran the complete Java 21 reactor at `c11caab`:
+**97 tests passed** (Model 6, Indexer 35, Query 56; zero failures/errors/skips). The run supplied a real
+ripgrep executable through `-Dsource.test.rg`; no workstation fallback was added.
+The clean `scripts/test-source-mcp.sh` also passed with real Git/ripgrep,
+independent Indexer and warm/cold Query processes, native MCP/HTTP parity, and
+exact A/B source citations.
 
-```bash
-bash scripts/test-indexer-query-contract-prerequisites.sh
-```
+The subsequent credential-only correction ran the **10 origin regressions** and
+rebuilt only Indexer/Model. Four actual Indexer startup probes rejected malformed
+password URLs, HTTP and HTTPS token user-info, and malformed HTTP authorities;
+the full startup diagnostics contained no sentinel secret and no registry was
+published. Parser disclosure and HTTP credential acceptance were observed before
+the fix. Unchanged Query/session scenarios retain the checkpoint evidence below;
+the final commit still goes through the complete CI gate.
 
-The contract script rejects an unset, empty, or non-directory `JDTLS_HOME`
-before it starts Maven. It reports the variable and directory requirement
-without echoing the configured path. It does not repair Docker, authentication,
-or an incomplete JDT LS installation.
+A separate actual-socket probe initialized two Query sessions and verified that
+both clients could use the same in-flight JSON-RPC ID; a concurrent duplicate
+inside one session was rejected without interrupting its owner. Foreign
+cancellation left the other client's real search intact; owner cancellation
+returned a structured `SOURCE_TIMEOUT`, reaped its subprocess, and allowed later
+searches. Two real searches across the sessions caused a third request to return
+`SOURCE_BUSY`. DELETE completed only after its child was reaped; Query shutdown
+also reaped an active child before JVM exit.
 
-CI keeps all existing job IDs and display names. The
-`indexer-jdtls-smoke` job selects the focused `InternalReferencesJdtLsIT`
-scenario and retains `-Dsurefire.failIfNoSpecifiedTests=false` for upstream
-reactor modules. The `indexer-query-contract` job keeps the local contract
-script, whose real fixture phase is `FixtureFullIndexJdtLsIT` followed by
-`ToolProjectionEvolutionIT`. The ordinary, Mongo, fixture, and image jobs keep
-their existing commands. This smoke selection does not claim that CI runs every
-`jdtls-it` scenario; use the full profile for that targeted local acceptance.
+Deterministic reactor regressions proved that the permit precedes catalog
+admission, a registry replacement cannot bind an old page to the new digest,
+DELETE/graceful close wait while terminal cleanup holds the search permit, and
+cancelled tool responses survive interrupt-sensitive servlet I/O. The defect
+regressions had observed behavioral failures before their production fixes.
 
-The local fixture SDK journey is a disposable-service check and does not
-evaluate an LLM Agent. The deployed profile is the entry point for an existing
-Query deployment; neither profile turns an empty indexed result into a business
-conclusion.
+Deadline-exhaustion coverage holds cleanup past the lifecycle budget and verifies
+that graceful close fails without starting a second cleanup waiting period.
 
-Both packaged-service journeys are explicitly opt-in; their ordinary/profile
-skips are not acceptance. Dedicated scripts fail missing prerequisites rather
-than turning an unavailable image/jar/JDT installation into success. Build the
-production Indexer image before the semantic journey. That journey exercises
-LINUX_UID; the Git host journey deliberately uses LOCAL_TRUSTED only for its
-controlled fixture. The image journey gives cold Query a separate Mongo read
-credential. Both cold readers have no configured Indexer URL, Git/JDT path or
-source-workspace fallback; the host Git fixture is not a least-privilege DB-role
-certification. Its intentionally >4-MiB search-budget source uses an explicit
-8-MiB per-file export ceiling; the production default remains 2 MiB.
+Origin regressions use two unrelated local Git remotes and cover cached A objects,
+an ACCEPTED A request across restart, published-namespace reuse with fresh admin
+storage, and rejection of populated unbound storage. A separate real
+Indexer/Query restart probe passed five scenarios: A-to-B URL change rejected
+under the same ID/roots with A evidence unchanged; the public binding survives
+admin replacement; the private binding survives published-root replacement;
+same-origin restart preserves original-job lookup and exact-SHA reuse; and a new
+repository ID accepts B without changing A. The original implementation failed
+both the deterministic origin assertions and the real changed-origin startup
+probe before the correction.
 
-The semantic journey enables the existing `uat` publication gate only in its
-controlled container. BUILD C remains held while old-current and READY-review
-reads are asserted; a `finally` release precedes completion polling. An active
-job alone is not used as proof that publication cannot occur between reads.
-Production profiles and defaults remain unchanged.
+Query now requires the [MCP session lifecycle](source-mcp.md#mcp-session-lifecycle).
+The pinned provider retains abandoned sessions until shutdown; this verification
+does not establish idle-session capacity, external model-client acceptance,
+private-production Git access, or deployed TLS. Image/deployment gates remain
+separate from the local socket evidence.
 
-The Git restart scenario first publishes real evidence, stops Indexer, then
-constructs the original job's publication-before-terminal durable state. A new
-JVM must validate the existing READY graph/digest and reconcile the same job
-without replacing the comparison. This is a recovery-state regression, not
-an observed real crash.
+## Initial Phase 1 evidence before PR #2 review (2026-10-04)
 
-A focused real-JDT diagnostic on 2026-10-01 traced the video/order fixture
-`SOURCE_SCAN_FAILED` / `NoSuchFileException` warnings to the imported but absent
-`src/main/resources` root. Their existing production Java roots covered all
-10/10 and 7/7 expected Java files respectively. This explains those fixture
-warnings only; investigate other failed roots instead of treating the warning
-as a blanket acceptable condition. The diagnostic did not suppress logging.
+The controller observed the final source-only ordinary reactor of **84 passing tests** (Model 6, Indexer 29, Query 49; zero failures/errors/skips and no compiler warnings) with a real ripgrep path supplied because host `/usr/bin/rg` is absent. The final clean `scripts/test-source-mcp.sh` passed with real native SDK, HTTP, local Git/rg, separate Indexer and warm/cold Query processes. Retained **disposable-run** evidence is `/tmp/source-mcp-journey.Qhy1JQFv/artifacts/` (ephemeral local path, not a committed fixture or reproducibility guarantee). `revisions.json` records A `395566e8f884883d147020d42c21b4b281185a41`, B `c8acbff5042091b9f36c8d4eb2b3296b3e4f82c7`; `job-a.json` records original request `9e86e823-5689-4ac9-ba37-4a58e33c1611` and durable COMPLETE identity. A remains unchanged after B and after known-SHA republishing, with manifest/inventory/tree hashes checked. Every actually returned fixture repo/SHA/path/line citation is compared to the exact Git blob. Cold Query reads A/B after Indexer stops and disposable remote/private paths become unavailable. Only intentional JSON response/request/provenance artifacts are retained; raw Git/process logs are not copied.
 
-## Actual clients and deployment acceptance
+Both matching source images were built after the final fixes, and the final started-container `scripts/test-source-images.sh` passed real Git preparation, actual ripgrep search/read, Query child-only read-only mount, distinct UID 10001 writer/10002 reader, and absence of Query private credentials/mount. Nondefault published-root/rg environment paths work through the real application; an invalid rg path fails startup. Final command/output evidence: ordinary reactor `artifact://297`, clean journey `artifact://300`, focused authorization/recovery/search gate `artifact://292` (32 passing tests), Indexer image `artifact://290`, Query image `artifact://291`, and successful final image smoke `bg72`. The whole-branch review's four original findings and both dependent residual findings are CLOSED; the final dependent review of production checkpoint `bc1bd3d` returns no findings and the controller accepts the Phase 1 implementation. Reviewer execution was read-only; runtime evidence is controller-observed. Main integration and external release-environment checks remain separate decisions. These evidence paragraphs were updated after the observed checks, not used to infer them.
 
-Scripted real-JDT/native SDK journeys prove their stated local boundaries, not
-OMP/Codex/Claude model behavior, a VM certificate or private credentials. Actual
-client acceptance uses isolated prepared services and a committed approved
-repository. Check tools discovery on both endpoints, model-readable results,
-saved-requestId preparation/recovery and at least one exact-context review
-diff→relations/outline→source journey. Preserve current, stop Indexer and retain
-the cold Query evidence. Record client/version, calls/bytes/time and bounded
-source citations; authentication failure remains unverified, not SDK success.
-See [MCP Agent Acceptance](mcp-agent-acceptance.md) and the
-[review procedure](semantic-review.md#current-generations-and-review-preparation).
-A remote deployment additionally requires the approved VM, private Mongo/admin
-path, safe credential distribution, Query TLS certificate and hostname
-validation, and its real OMP client configuration.
+An additional actual ENOSPC smoke exhausted only a fresh owned 32 MiB Docker tmpfs (free bytes 0): B stayed pinned/RUNNING while storage was full, then lookup of the **same** request after restart returned FAILED without replay; A remained readable and all revision file hashes unchanged, and B context was denied. Only the created containers/named tmpfs volume were removed; no existing service data or shared host filesystem was filled. Final disposable evidence: `/tmp/source-enospc-p6hdofy7/evidence.json`. The real 15,000-file/100-authorized-match probe now returns the correct complete result at 829 ms. The harder 15,000-tracked/1,000-untracked-prefix limit-one probe changed from SOURCE_TIMEOUT at 4,762 ms and repeated complete inventory reads to the correct authorized prefix at 1,707 ms; native JDK FileRead tracing records exactly 3,045,000 bytes in the full verification stack, matching the inventory size once. A nonroot `src` variant returns the correct prefix at 1,982 ms with one full 3,105,098-byte verification. Remaining reads are bounded positional seeks, not repeated digest/order passes. A real rejected-legacy-config socket probe returned exact pinned source/HTTP 200 before the fix; after the before-bind gate it rejected startup without opening the source-serving web server. Native reversed-audit-clock and reservation-gap/corrupt-order scenarios preserve durable acceptance and newest terminal status without timestamp ordering or new public job fields.
 
-`SEMANTIC_API_TOKEN` belongs to the deployed acceptance client invocation shown
-above. The Query server itself reads `SEMANTIC_QUERY_API_TOKEN`; keep client and
-server configuration names distinct even when a deployment provisions equal
-values. The full operation sequence and what to record are in
-[Semantic review deployment and operation](semantic-review.md).
+## Release checks and boundaries
+
+Before deployment check explicit repository allowlist/secret separation, private admin TLS ingress, matching format/policy-1 namespace and same-filesystem atomic publication. Verify direct-child pagination/cursors, UTF-8/CRLF/long-line read continuation, bounded literal rg, unsupported/excluded paths, guide hint status, A/B exact reads and failure-preserves-A. Query must remain readable on a published revision after Indexer stops; an orphan directory or registered-but-unprepared repo is **not** an admissible source. Verify the actual client against both `/mcp` endpoints independently. Neither a skipped test nor an HTTP-only response proves MCP/model acceptance. See [Source MCP operations](source-mcp.md) for startup, original-request recovery and rollback.

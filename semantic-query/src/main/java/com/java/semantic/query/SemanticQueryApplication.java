@@ -1,37 +1,24 @@
 package com.java.semantic.query;
 
-import com.java.semantic.model.index.SemanticAnalysisEvidence;
-import java.util.Optional;
-import org.bson.Document;
-import org.springframework.beans.factory.config.BeanPostProcessor;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
-import org.springframework.core.convert.converter.Converter;
-import org.springframework.data.mongodb.core.convert.MappingMongoConverter;
-import org.springframework.data.mongodb.core.convert.MongoCustomConversions;
-
-import com.java.semantic.query.application.CurrentGenerationSelector;
-import com.java.semantic.query.application.SelectedGenerationGuard;
-import com.java.semantic.query.application.ReadContextSelector;
-import com.java.semantic.query.application.CodeFactReadService;
-import com.java.semantic.query.application.ContextDiscoveryService;
-import com.java.semantic.query.application.ReviewManifestReadService;
-import com.java.semantic.query.application.GitEvidenceReadService;
 import com.java.semantic.query.application.SemanticQueryFacade;
-import com.java.semantic.query.application.SelectedSemanticQueryService;
-import com.java.semantic.query.config.ConfiguredReadPolicy;
-import com.java.semantic.query.config.GitEvidenceProperties;
-import com.java.semantic.query.config.ReadPolicyProperties;
-import com.java.semantic.query.config.SemanticQueryProperties;
-import com.java.semantic.query.store.MongoIndexSchemaVerifier;
-import org.springframework.boot.ApplicationRunner;
+import com.java.semantic.query.config.SourceAccessProperties;
+import com.java.semantic.query.source.LocalRepositorySourceService;
+import com.java.semantic.query.source.LocalSourceRevisionCatalog;
+import com.java.semantic.query.source.RepositorySourcePort;
+import com.java.semantic.query.source.SourceRevisionCatalog;
+import java.util.List;
+import org.springframework.beans.factory.config.BeanFactoryPostProcessor;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import org.springframework.boot.context.properties.bind.Bindable;
+import org.springframework.boot.context.properties.bind.Binder;
 import org.springframework.context.annotation.Bean;
-import org.springframework.data.mongodb.core.MongoTemplate;
+import org.springframework.core.env.Environment;
+import tools.jackson.databind.ObjectMapper;
 
 @SpringBootApplication(scanBasePackages = {"com.java.semantic.query", "com.java.semantic.api", "com.java.semantic.mcp"})
-@EnableConfigurationProperties({SemanticQueryProperties.class, ReadPolicyProperties.class, GitEvidenceProperties.class})
+@EnableConfigurationProperties(SourceAccessProperties.class)
 public class SemanticQueryApplication {
 
     public static void main(String[] args) {
@@ -39,105 +26,33 @@ public class SemanticQueryApplication {
     }
 
     @Bean
-    ConfiguredReadPolicy configuredReadPolicy(ReadPolicyProperties properties, GitEvidenceProperties gitEvidenceProperties) {
-        return new ConfiguredReadPolicy(properties, gitEvidenceProperties);
+    SourceRevisionCatalog sourceRevisionCatalog(SourceAccessProperties properties, ObjectMapper mapper) {
+        return new LocalSourceRevisionCatalog(properties, mapper);
     }
 
     @Bean
-    CurrentGenerationSelector currentGenerationSelector(MongoTemplate template, ConfiguredReadPolicy policy,
-                                                         SemanticQueryProperties properties) {
-        return new CurrentGenerationSelector(template, policy, properties.storageTimeout());
+    RepositorySourcePort repositorySourcePort(SourceAccessProperties properties, ObjectMapper mapper) {
+        return new LocalRepositorySourceService(properties, mapper);
     }
 
     @Bean
-    SelectedGenerationGuard selectedGenerationGuard(MongoTemplate template, ConfiguredReadPolicy policy,
-                                                   SemanticQueryProperties properties) {
-        return new SelectedGenerationGuard(template, policy, properties.storageTimeout());
+    SemanticQueryFacade semanticQueryFacade(SourceRevisionCatalog catalog, RepositorySourcePort source,
+            SourceAccessProperties properties) {
+        return new SemanticQueryFacade(catalog, source, properties.maxActiveSearches());
     }
 
     @Bean
-    ReviewManifestReadService reviewManifestReadService(MongoTemplate template, ConfiguredReadPolicy policy,
-                                                        SemanticQueryProperties properties) {
-        return new ReviewManifestReadService(template, policy, properties.storageTimeout());
-    }
-
-    @Bean
-    ReadContextSelector readContextSelector(CurrentGenerationSelector current, ReviewManifestReadService reviews,
-            SelectedGenerationGuard guard, ConfiguredReadPolicy policy) {
-        return new ReadContextSelector(current, reviews, guard, policy);
-    }
-
-    @Bean
-    ContextDiscoveryService contextDiscoveryService(MongoTemplate template, ConfiguredReadPolicy policy,
-            SemanticQueryProperties properties, CurrentGenerationSelector current, ReadContextSelector contexts,
-            ReviewManifestReadService reviews) {
-        return new ContextDiscoveryService(template, policy, properties.storageTimeout(), current, contexts, reviews);
-    }
-
-    @Bean
-    CodeFactReadService codeFactReadService(MongoTemplate template, SelectedGenerationGuard guard, SemanticQueryProperties properties) {
-        return new CodeFactReadService(template, guard, properties.storageTimeout());
-    }
-
-    @Bean
-    SelectedSemanticQueryService selectedSemanticQueryService(MongoTemplate template, SelectedGenerationGuard guard,
-            SemanticQueryProperties properties, CodeFactReadService facts) {
-        return new SelectedSemanticQueryService(template, guard, properties.storageTimeout(), facts);
-    }
-
-    @Bean
-    GitEvidenceReadService gitEvidenceReadService(MongoTemplate template, ConfiguredReadPolicy policy,
-            SemanticQueryProperties properties, CodeFactReadService facts) {
-        return new GitEvidenceReadService(template, policy, properties.storageTimeout(), facts);
-    }
-
-    @Bean
-    SemanticQueryFacade semanticQueryFacade(ContextDiscoveryService discovery, ReadContextSelector contexts,
-            SelectedSemanticQueryService semantic, GitEvidenceReadService evidence) {
-        return new SemanticQueryFacade(discovery, contexts, semantic, evidence);
-    }
-    @Bean
-    ApplicationRunner semanticIndexSchemaGate(MongoTemplate template, SemanticQueryProperties properties) {
-        return arguments -> new MongoIndexSchemaVerifier(template, properties.storageTimeout()).verify();
-    }
-
-    @Bean
-    static BeanPostProcessor mongoMappingConverterConfiguration() {
-        return new BeanPostProcessor() {
-            @Override
-            public Object postProcessBeforeInitialization(Object bean, String beanName) {
-                if (bean instanceof MappingMongoConverter converter) {
-                    converter.setMapKeyDotReplacement("__dot__");
+    static BeanFactoryPostProcessor rejectLegacyRestrictions(Environment environment) {
+        return beanFactory -> {
+            Binder binder = Binder.get(environment);
+            for (String name : List.of("forbidden-repositories", "forbidden-packages", "forbidden-classes",
+                    "forbidden-methods")) {
+                String key = "semantic.query.read-policy." + name;
+                List<String> restrictions = binder.bind(key, Bindable.listOf(String.class)).orElse(List.of());
+                if (!restrictions.isEmpty()) {
+                    throw new IllegalStateException("Remove legacy Query read-policy restrictions before starting source-only Query: " + key);
                 }
-                return bean;
             }
         };
     }
-
-    @Bean
-    @ConditionalOnMissingBean(MongoCustomConversions.class)
-    MongoCustomConversions queryMongoCustomConversions() {
-        return MongoCustomConversions.create(adapter -> {
-            adapter.registerConverter(new LimitationWriter());
-            adapter.registerConverter(new LimitationReader());
-        });
-    }
-
-    private static final class LimitationWriter implements Converter<SemanticAnalysisEvidence.Limitation, Document> {
-        @Override
-        public Document convert(SemanticAnalysisEvidence.Limitation limitation) {
-            Document document = new Document("code", limitation.code());
-            limitation.sourcePath().ifPresent(sourcePath -> document.append("sourcePath", sourcePath));
-            return document;
-        }
-    }
-
-    private static final class LimitationReader implements Converter<Document, SemanticAnalysisEvidence.Limitation> {
-        @Override
-        public SemanticAnalysisEvidence.Limitation convert(Document document) {
-            return new SemanticAnalysisEvidence.Limitation(document.getString("code"),
-                    Optional.ofNullable(document.get("sourcePath")).map(String.class::cast));
-        }
-    }
-
 }

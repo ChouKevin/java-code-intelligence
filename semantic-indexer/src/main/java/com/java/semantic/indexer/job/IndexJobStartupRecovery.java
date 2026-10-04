@@ -1,27 +1,28 @@
 package com.java.semantic.indexer.job;
 
 import com.java.semantic.indexer.config.ConfiguredRepositoryPublisher;
+import com.java.semantic.indexer.source.SourcePublicationStore;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
 import org.springframework.stereotype.Component;
 
-import java.util.Objects;
-
-/** Reconciles committed targets, then closes interrupted running jobs before serving work. */
+/** Reconciles only committed publication proofs; never replays interrupted RUNNING work. */
 @Component
 public final class IndexJobStartupRecovery implements ApplicationRunner {
-    private final IndexJobStore jobs;
-    private final ConfiguredRepositoryPublisher repositories;
+    private final FileSourceJobStore jobs;
+    private final SourcePublicationStore publications;
+    private final ConfiguredRepositoryPublisher registry;
 
-    public IndexJobStartupRecovery(IndexJobStore jobs, ConfiguredRepositoryPublisher repositories) {
-        this.jobs = Objects.requireNonNull(jobs, "jobs is required");
-        this.repositories = Objects.requireNonNull(repositories, "configured repository publisher is required");
+    public IndexJobStartupRecovery(FileSourceJobStore jobs, SourcePublicationStore publications,
+            ConfiguredRepositoryPublisher registry) {
+        this.jobs = jobs;
+        this.publications = publications;
+        this.registry = registry;
     }
 
     @Override
     public void run(ApplicationArguments arguments) {
-        repositories.publish();
-        jobs.reconcileCommittedJobs();
-        jobs.failUnreconciledRunningJobs();
+        registry.publish();
+        jobs.recover(publications);
     }
 }

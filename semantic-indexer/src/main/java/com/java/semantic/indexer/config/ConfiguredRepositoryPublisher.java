@@ -1,48 +1,42 @@
 package com.java.semantic.indexer.config;
 
-import com.java.semantic.model.index.IndexCollections;
-import com.java.semantic.repository.application.RepositoryRuntimeRegistry;
-import com.java.semantic.repository.domain.RepositoryRuntime;
-import com.mongodb.client.model.Filters;
-import com.mongodb.client.model.UpdateOptions;
-import com.mongodb.client.model.Updates;
-import org.bson.conversions.Bson;
-import org.springframework.data.mongodb.core.MongoTemplate;
-import org.springframework.stereotype.Component;
-
-import java.time.Instant;
-import java.util.ArrayList;
-import java.util.Date;
+import com.java.semantic.indexer.source.DurableSourceFiles;
+import com.java.semantic.indexer.source.RepositoryRegistry;
+import com.java.semantic.model.source.SourceRepositoryDescriptor;
+import com.java.semantic.repository.config.RepositoryProperties;
+import java.io.IOException;
+import java.nio.file.Path;
 import java.util.List;
-import java.util.Objects;
+import org.springframework.stereotype.Component;
+import tools.jackson.databind.ObjectMapper;
 
-/** Publishes only non-sensitive configuration fields; evidence pointers are never replaced. */
+/** Publishes a bounded JSON array of sanitized descriptors; never Git credentials or private paths. */
 @Component
 public final class ConfiguredRepositoryPublisher {
-    private final MongoTemplate template;
-    private final RepositoryRuntimeRegistry repositories;
+    private final RepositoryRegistry registry;
+    private final ObjectMapper mapper;
+    private final Path path;
+    private final DurableSourceFiles ownership;
 
-    public ConfiguredRepositoryPublisher(MongoTemplate template, RepositoryRuntimeRegistry repositories) {
-        this.template = Objects.requireNonNull(template, "mongo template is required");
-        this.repositories = Objects.requireNonNull(repositories, "repository registry is required");
+    public ConfiguredRepositoryPublisher(RepositoryRegistry registry, RepositoryProperties properties,
+            ObjectMapper mapper, DurableSourceFiles ownership) {
+        this.registry = registry;
+        this.mapper = mapper;
+        this.ownership = ownership;
+        path = Path.of(properties.getSourcePublishedRoot()).toAbsolutePath().normalize().resolve("repositories.json");
     }
 
     public void publish() {
-        List<RepositoryRuntime> configured = repositories.all();
-        List<String> ids = configured.stream().map(runtime -> runtime.repositoryId().value()).toList();
-        Date configuredAt = Date.from(Instant.now());
-        for (RepositoryRuntime runtime : configured) {
-            List<Bson> fields = new ArrayList<>();
-            fields.add(Updates.set("configured", true));
-            fields.add(Updates.set("displayName", runtime.status().displayName()));
-            fields.add(Updates.set("defaultBranch", runtime.defaultBranch()));
-            fields.add(Updates.set("configuredAt", configuredAt));
-            fields.add(runtime.projectGuidePath().<Bson>map(path -> Updates.set("projectGuidePath", path))
-                    .orElseGet(() -> Updates.unset("projectGuidePath")));
-            template.getCollection(IndexCollections.REPOSITORIES).updateOne(
-                    Filters.eq("repoId", runtime.repositoryId().value()), Updates.combine(fields), new UpdateOptions().upsert(true));
+        List<SourceRepositoryDescriptor> descriptors = registry.descriptors();
+        try {
+            byte[] bytes = mapper.writeValueAsBytes(descriptors);
+            if (bytes.length > 1024 * 1024) throw new IOException("repository registry exceeds its size limit");
+            registry.bindAll();
+            DurableSourceFiles.ensureDirectories(path.getParent(), path.getParent(),
+                    DurableSourceFiles.Visibility.PUBLISHED);
+            DurableSourceFiles.atomicBytes(path, bytes, 1024 * 1024, DurableSourceFiles.Visibility.PUBLISHED);
+        } catch (IOException exception) {
+            throw new IllegalStateException("repository registry cannot be published", exception);
         }
-        template.getCollection(IndexCollections.REPOSITORIES).updateMany(Filters.nin("repoId", ids),
-                Updates.combine(Updates.set("configured", false), Updates.set("configuredAt", configuredAt)));
     }
 }

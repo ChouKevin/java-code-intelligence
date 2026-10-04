@@ -18,7 +18,9 @@ class QueryArchitectureTest {
                     "com.java.semantic.syntax..",
                     "com.java.semantic.repository..", "com.java.semantic.callgraph..", "com.java.semantic.config..",
                     "com.java.semantic.diagnostic..",
-                    "org.eclipse.jgit..", "org.eclipse.lsp4j..", "org.eclipse.jdt..", "com.github.benmanes.caffeine..");
+                    "org.eclipse.jgit..", "org.eclipse.lsp4j..", "org.eclipse.jdt..",
+                    "com.mongodb..", "org.bson..", "org.springframework.data.mongodb..",
+                    "com.github.benmanes.caffeine..");
 
     static final ArchRule application_does_not_depend_on_transport = noClasses()
             .that().resideInAnyPackage("com.java.semantic.query.application..")

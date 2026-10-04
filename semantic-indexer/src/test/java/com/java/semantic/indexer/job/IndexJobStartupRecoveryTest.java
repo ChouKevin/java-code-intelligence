@@ -1,118 +1,52 @@
 package com.java.semantic.indexer.job;
 
-import com.java.semantic.indexer.config.ConfiguredRepositoryPublisher;
-import java.time.Duration;
+import com.java.semantic.indexer.source.DurableSourceFiles;
+import com.java.semantic.indexer.source.RepositoryRegistry;
+import com.java.semantic.indexer.source.SourcePublicationStore;
+import com.java.semantic.model.repository.RepositoryId;
+import com.java.semantic.repository.config.RepositoryProperties;
+import java.nio.file.Path;
 import java.util.Optional;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.TimeUnit;
+import java.util.UUID;
 import org.junit.jupiter.api.Test;
-import org.springframework.boot.DefaultApplicationArguments;
-import org.springframework.boot.SpringBootConfiguration;
-import org.springframework.boot.WebApplicationType;
-import org.springframework.boot.builder.SpringApplicationBuilder;
-import org.springframework.context.ConfigurableApplicationContext;
-import org.springframework.context.annotation.Bean;
+import org.junit.jupiter.api.io.TempDir;
+import tools.jackson.databind.json.JsonMapper;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.when;
-import static org.mockito.Mockito.doAnswer;
 
 class IndexJobStartupRecoveryTest {
-    @Test
-    void startup_reconciles_commits_then_fails_unreconciled_running_jobs() throws Exception {
-        IndexJobStore jobs = mock(IndexJobStore.class);
-
-        ConfiguredRepositoryPublisher publisher = mock(ConfiguredRepositoryPublisher.class);
-        new IndexJobStartupRecovery(jobs, publisher).run(new DefaultApplicationArguments());
-
-        org.mockito.InOrder order = org.mockito.Mockito.inOrder(publisher, jobs);
-        order.verify(publisher).publish();
-        order.verify(jobs).reconcileCommittedJobs();
-        order.verify(jobs).failUnreconciledRunningJobs();
-    }
+    @TempDir Path root;
 
     @Test
-    void polling_starts_only_after_recovery_runner_returns_and_the_application_is_ready() throws Exception {
-        LifecycleFixture fixture = new LifecycleFixture();
-        lifecycleFixture = fixture;
-        ExecutorService launcher = Executors.newSingleThreadExecutor();
-        CompletableFuture<ConfigurableApplicationContext> application = CompletableFuture.supplyAsync(
-                () -> new SpringApplicationBuilder(LifecycleApplication.class).web(WebApplicationType.NONE).run(), launcher);
-
-        try {
-            CompletableFuture.anyOf(fixture.recoveryStarted, application).get(30L, TimeUnit.SECONDS);
-            assertThat(fixture.recoveryStarted.isDone()).isTrue();
-            assertThat(fixture.pollStarted.await(150L, TimeUnit.MILLISECONDS)).isFalse();
-
-            fixture.allowRecovery.countDown();
-            try (ConfigurableApplicationContext context = application.get(30L, TimeUnit.SECONDS)) {
-                assertThat(fixture.pollStarted.await(2L, TimeUnit.SECONDS)).isTrue();
-            }
-        } finally {
-            fixture.allowRecovery.countDown();
-            try {
-                application.get(30L, TimeUnit.SECONDS).close();
-            } finally {
-                launcher.shutdownNow();
-            }
+    void restart_leaves_accepted_work_available_but_fails_unpublished_running_without_refetch() throws Exception {
+        RepositoryProperties properties = new RepositoryProperties();
+        properties.setSourceAdminRoot(root.resolve("source-admin").toString());
+        properties.setSourcePublishedRoot(root.resolve("source-published").toString());
+        RepositoryProperties.RepositoryConfig orders = new RepositoryProperties.RepositoryConfig();
+        orders.setUrl(root.resolve("orders-git").toUri().toString());
+        orders.setDisplayName("Orders");
+        RepositoryProperties.RepositoryConfig other = new RepositoryProperties.RepositoryConfig();
+        other.setUrl(root.resolve("other-git").toUri().toString());
+        other.setDisplayName("Other");
+        properties.setRepositories(java.util.Map.of("orders", orders, "other", other));
+        RepositoryId repository = new RepositoryId("orders");
+        PreparationRequestId runningRequest = new PreparationRequestId(UUID.randomUUID().toString());
+        PreparationRequestId acceptedRequest = new PreparationRequestId(UUID.randomUUID().toString());
+        try (DurableSourceFiles writer = new DurableSourceFiles(root.resolve("source-admin"))) {
+            RepositoryRegistry registry = new RepositoryRegistry(properties);
+            registry.bindAll();
+            FileSourceJobStore jobs = new FileSourceJobStore(properties, JsonMapper.builder().build(), writer);
+            jobs.admit(repository, runningRequest, Optional.empty(), "main", registry.origin(repository), Optional.empty());
+            jobs.claimNext().orElseThrow();
+            RepositoryId second = new RepositoryId("other");
+            jobs.admit(second, acceptedRequest, Optional.empty(), "main", registry.origin(second), Optional.empty());
         }
-    }
-
-    @SpringBootConfiguration
-    static class LifecycleApplication {
-        @Bean
-        IndexJobStore indexJobStore() {
-            return lifecycleFixture.jobs;
-        }
-
-        @Bean
-        IndexJobExecutor indexJobExecutor() {
-            return mock(IndexJobExecutor.class);
-        }
-
-        @Bean
-        IndexJobProperties indexJobProperties() {
-            return new IndexJobProperties(Duration.ofSeconds(1L));
-        }
-
-        @Bean
-        IndexJobStartupRecovery indexJobStartupRecovery(IndexJobStore jobs) {
-            return new IndexJobStartupRecovery(jobs, lifecycleFixture.publisher);
-        }
-
-        @Bean
-        IndexJobDispatcher indexJobDispatcher(IndexJobStore jobs, IndexJobExecutor executor, IndexJobProperties properties) {
-            return new IndexJobDispatcher(jobs, executor, properties);
-        }
-    }
-
-    private static LifecycleFixture lifecycleFixture;
-
-    private static final class LifecycleFixture {
-        private final IndexJobStore jobs = mock(IndexJobStore.class);
-        private final ConfiguredRepositoryPublisher publisher = mock(ConfiguredRepositoryPublisher.class);
-        private final CompletableFuture<Void> recoveryStarted = new CompletableFuture<>();
-        private final CountDownLatch allowRecovery = new CountDownLatch(1);
-        private final CountDownLatch pollStarted = new CountDownLatch(1);
-
-        private LifecycleFixture() {
-            doAnswer(invocation -> {
-                recoveryStarted.complete(null);
-                try {
-                    allowRecovery.await();
-                } catch (InterruptedException exception) {
-                    Thread.currentThread().interrupt();
-                }
-                return null;
-            }).when(publisher).publish();
-            when(jobs.startNextAccepted()).thenAnswer(invocation -> {
-                pollStarted.countDown();
-                return Optional.empty();
-            });
+        try (DurableSourceFiles writer = new DurableSourceFiles(root.resolve("source-admin"))) {
+            FileSourceJobStore jobs = new FileSourceJobStore(properties, JsonMapper.builder().build(), writer);
+            jobs.recover(new SourcePublicationStore(properties, JsonMapper.builder().build(), writer, jobs));
+            assertThat(jobs.find(repository, runningRequest).orElseThrow().phase()).isEqualTo(SourcePreparationJob.Phase.FAILED);
+            assertThat(jobs.find(repository, runningRequest).orElseThrow().failureCode()).contains("WORKER_INTERRUPTED");
+            assertThat(jobs.claimNext().orElseThrow().requestId()).isEqualTo(acceptedRequest.value());
         }
     }
 }

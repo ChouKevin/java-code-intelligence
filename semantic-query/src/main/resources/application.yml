@@ -3,13 +3,11 @@ spring:
     default-property-inclusion: non_absent
     deserialization:
       fail-on-unknown-properties: true
-  mongodb:
-    uri: ${SEMANTIC_MONGODB_URI:mongodb://localhost:27017/semantic?serverSelectionTimeoutMS=2000&connectTimeoutMS=2000&socketTimeoutMS=2000}
   ai:
     mcp:
       server:
         enabled: true
-        protocol: STATELESS
+        protocol: STREAMABLE
         type: SYNC
         stdio: false
         tool-callback-converter: false
@@ -23,19 +21,15 @@ spring:
           prompt: false
           completion: false
 
-management:
-  health:
-    mongodb:
-      enabled: false
-
 semantic:
   query:
     api-token: ${SEMANTIC_QUERY_API_TOKEN:}
-    storage-timeout: ${SEMANTIC_QUERY_STORAGE_TIMEOUT:2s}
-    git-evidence:
+    source:
+      published-root: ${SEMANTIC_SOURCE_PUBLISHED_ROOT:/data/source-published}
+      rg-executable: ${SEMANTIC_QUERY_RG_EXECUTABLE:/usr/bin/rg}
       allowed-repositories: []
-    read-policy:
-      forbidden-repositories: []
-      forbidden-packages: []
-      forbidden-classes: []
-      forbidden-methods: []
+      read-content-bytes: 65536
+      search-timeout: 5s
+      read-timeout: 2s
+      list-timeout: 2s
+      max-active-searches: 2

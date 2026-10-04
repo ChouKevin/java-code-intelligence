@@ -1,7 +1,5 @@
 package com.java.semantic.query.application;
 
-import com.java.semantic.model.index.IndexSchemaContract;
-import com.java.semantic.query.application.ReadContextSelector.AdmittedContext;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.DataInputStream;
@@ -19,7 +17,7 @@ public final class QueryCursorCodec {
     private static final int VERSION = 1;
     private static final int MAX_CHARACTERS = 65536;
     private static final int MAX_POSITIONS = 32;
-    private static final String SCHEMA = IndexSchemaContract.fingerprint();
+    private static final String SCHEMA = "source-first-v1";
     private QueryCursorCodec() { }
 
     public static String binding(String operation, List<String> normalizedFields) {
@@ -35,23 +33,6 @@ public final class QueryCursorCodec {
         }
     }
 
-    public static String binding(String operation, AdmittedContext admitted, List<String> normalizedFilters) {
-        SemanticQueryContract.ReadContext context = admitted.context();
-        SelectedGenerationGuard.SourceContext source = admitted.source();
-        List<String> fields = new ArrayList<>(12 + normalizedFilters.size());
-        fields.add(context.kind().name());
-        fields.add(context.repositoryId());
-        fields.add(context.revision());
-        fields.add(context.reviewId().orElse(""));
-        fields.add(context.side().map(Enum::name).orElse(""));
-        fields.add(source.selected().generationId().value());
-        fields.add(source.selected().manifestDigest().value());
-        fields.add(source.snapshot().snapshotId().value());
-        fields.add(source.snapshot().contentDigest());
-        fields.add(source.fingerprint());
-        fields.addAll(normalizedFilters);
-        return binding(operation, fields);
-    }
 
     public static String encode(String binding, List<String> positions) {
         if (positions.size() > MAX_POSITIONS) throw new IllegalArgumentException("cursor has too many positions");

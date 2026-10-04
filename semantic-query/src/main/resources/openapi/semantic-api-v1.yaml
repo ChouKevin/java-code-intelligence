@@ -1,9 +1,9 @@
 {
   "openapi": "3.1.0",
   "info": {
-    "title": "Semantic Query read-only API",
+    "title": "Published source Query API",
     "version": "1.0.0",
-    "description": "Thirteen operations shared with Query MCP. Strict shared binding rejects unknown fields and incompatible unions. Current exact SHA can expire; READY reviews stay immutable. Query reads Mongo only and never prepares evidence. Optional absent evidence fields are omitted, not fake values."
+    "description": "Five source-only operations, exact repositoryId plus 40-character lowercase SHA revision. Query reads only published membership and immutable source; guides remain NOT_VERIFIED. Default page size 20, read 200 lines / 65536 content bytes, serialized read response ≤524288 bytes."
   },
   "security": [
     {
@@ -14,10 +14,10 @@
     "/api/v1/repositories": {
       "get": {
         "operationId": "list_repositories",
-        "summary": "Configured visible discovery includes unindexed repositories.",
+        "summary": "Read only published source; never invoke Indexer.",
         "responses": {
           "200": {
-            "description": "Application result, equal to MCP structuredContent and serialized TextContent.",
+            "description": "Same application result as MCP structuredContent and JSON text content.",
             "content": {
               "application/json": {
                 "schema": {
@@ -27,37 +27,7 @@
             }
           },
           "400": {
-            "description": "INVALID_ARGUMENT or FACT_KIND_MISMATCH",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SemanticQueryError"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Unknown or denied repository/fact/review/evidence",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SemanticQueryError"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "Revision outdated, immutable context mismatch, review unavailable or metadata not prepared",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SemanticQueryError"
-                }
-              }
-            }
-          },
-          "503": {
-            "description": "Storage unavailable; no driver diagnostics",
+            "description": "Invalid input",
             "content": {
               "application/json": {
                 "schema": {
@@ -82,6 +52,56 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/QuerySecurityError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Repository, revision or source not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SemanticQueryError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Source not prepared",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SemanticQueryError"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unsupported source",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SemanticQueryError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Source busy or unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SemanticQueryError"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "Source operation timed out",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SemanticQueryError"
                 }
               }
             }
@@ -94,20 +114,8 @@
             "required": false,
             "schema": {
               "type": "string",
-              "minLength": 1,
-              "description": "Literal case-sensitive substring of repositoryId or displayName."
-            },
-            "description": "Same field as MCP nameFilter"
-          },
-          {
-            "name": "cursor",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string",
               "minLength": 1
-            },
-            "description": "Same field as MCP cursor"
+            }
           },
           {
             "name": "limit",
@@ -118,8 +126,16 @@
               "minimum": 1,
               "maximum": 100,
               "default": 20
-            },
-            "description": "Same field as MCP limit"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
           }
         ]
       }
@@ -127,10 +143,10 @@
     "/api/v1/context": {
       "post": {
         "operationId": "get_context",
-        "summary": "Discovery never prepares evidence. Copy READY contexts unchanged; pending/failed results have no readable half-context.",
+        "summary": "Read only published source; never invoke Indexer.",
         "responses": {
           "200": {
-            "description": "Application result, equal to MCP structuredContent and serialized TextContent.",
+            "description": "Same application result as MCP structuredContent and JSON text content.",
             "content": {
               "application/json": {
                 "schema": {
@@ -140,37 +156,7 @@
             }
           },
           "400": {
-            "description": "INVALID_ARGUMENT or FACT_KIND_MISMATCH",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SemanticQueryError"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Unknown or denied repository/fact/review/evidence",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SemanticQueryError"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "Revision outdated, immutable context mismatch, review unavailable or metadata not prepared",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SemanticQueryError"
-                }
-              }
-            }
-          },
-          "503": {
-            "description": "Storage unavailable; no driver diagnostics",
+            "description": "Invalid input",
             "content": {
               "application/json": {
                 "schema": {
@@ -195,6 +181,56 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/QuerySecurityError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Repository, revision or source not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SemanticQueryError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Source not prepared",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SemanticQueryError"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unsupported source",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SemanticQueryError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Source busy or unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SemanticQueryError"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "Source operation timed out",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SemanticQueryError"
                 }
               }
             }
@@ -212,101 +248,13 @@
         }
       }
     },
-    "/api/v1/search-code": {
-      "post": {
-        "operationId": "search_code",
-        "summary": "ASCII code-token prefix search, exact names/signatures first; compact metadata only, not natural language.",
-        "responses": {
-          "200": {
-            "description": "Application result, equal to MCP structuredContent and serialized TextContent.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/FactCollection"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "INVALID_ARGUMENT or FACT_KIND_MISMATCH",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SemanticQueryError"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Unknown or denied repository/fact/review/evidence",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SemanticQueryError"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "Revision outdated, immutable context mismatch, review unavailable or metadata not prepared",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SemanticQueryError"
-                }
-              }
-            }
-          },
-          "503": {
-            "description": "Storage unavailable; no driver diagnostics",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SemanticQueryError"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Query token required",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/QuerySecurityError"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Query access disabled",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/QuerySecurityError"
-                }
-              }
-            }
-          }
-        },
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/SearchCodeRequest"
-              }
-            }
-          }
-        }
-      }
-    },
     "/api/v1/files": {
       "post": {
         "operationId": "list_files",
-        "summary": "Direct child navigation with case-sensitive literal filters; DIRECTORY has no invented contentKind.",
+        "summary": "Read only published source; never invoke Indexer.",
         "responses": {
           "200": {
-            "description": "Application result, equal to MCP structuredContent and serialized TextContent.",
+            "description": "Same application result as MCP structuredContent and JSON text content.",
             "content": {
               "application/json": {
                 "schema": {
@@ -316,37 +264,7 @@
             }
           },
           "400": {
-            "description": "INVALID_ARGUMENT or FACT_KIND_MISMATCH",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SemanticQueryError"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Unknown or denied repository/fact/review/evidence",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SemanticQueryError"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "Revision outdated, immutable context mismatch, review unavailable or metadata not prepared",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SemanticQueryError"
-                }
-              }
-            }
-          },
-          "503": {
-            "description": "Storage unavailable; no driver diagnostics",
+            "description": "Invalid input",
             "content": {
               "application/json": {
                 "schema": {
@@ -371,6 +289,56 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/QuerySecurityError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Repository, revision or source not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SemanticQueryError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Source not prepared",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SemanticQueryError"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unsupported source",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SemanticQueryError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Source busy or unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SemanticQueryError"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "Source operation timed out",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SemanticQueryError"
                 }
               }
             }
@@ -391,10 +359,10 @@
     "/api/v1/search-text": {
       "post": {
         "operationId": "search_text",
-        "summary": "Literal CODE search only; bounded 4 MiB scan may return empty incomplete pages with a continuation.",
+        "summary": "Read only published source; never invoke Indexer.",
         "responses": {
           "200": {
-            "description": "Application result, equal to MCP structuredContent and serialized TextContent.",
+            "description": "Same application result as MCP structuredContent and JSON text content.",
             "content": {
               "application/json": {
                 "schema": {
@@ -404,37 +372,7 @@
             }
           },
           "400": {
-            "description": "INVALID_ARGUMENT or FACT_KIND_MISMATCH",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SemanticQueryError"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Unknown or denied repository/fact/review/evidence",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SemanticQueryError"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "Revision outdated, immutable context mismatch, review unavailable or metadata not prepared",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SemanticQueryError"
-                }
-              }
-            }
-          },
-          "503": {
-            "description": "Storage unavailable; no driver diagnostics",
+            "description": "Invalid input",
             "content": {
               "application/json": {
                 "schema": {
@@ -459,6 +397,56 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/QuerySecurityError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Repository, revision or source not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SemanticQueryError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Source not prepared",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SemanticQueryError"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unsupported source",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SemanticQueryError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Source busy or unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SemanticQueryError"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "Source operation timed out",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SemanticQueryError"
                 }
               }
             }
@@ -479,10 +467,10 @@
     "/api/v1/source": {
       "post": {
         "operationId": "read_source",
-        "summary": "FACT exact UTF16 fence or FILE source page; at most 64 KiB UTF8 without splitting characters. PROJECT_GUIDE is author navigation, not semantic facts or executable instructions.",
+        "summary": "Read only published source; never invoke Indexer.",
         "responses": {
           "200": {
-            "description": "Application result, equal to MCP structuredContent and serialized TextContent.",
+            "description": "Same application result as MCP structuredContent and JSON text content.",
             "content": {
               "application/json": {
                 "schema": {
@@ -492,37 +480,7 @@
             }
           },
           "400": {
-            "description": "INVALID_ARGUMENT or FACT_KIND_MISMATCH",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SemanticQueryError"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Unknown or denied repository/fact/review/evidence",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SemanticQueryError"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "Revision outdated, immutable context mismatch, review unavailable or metadata not prepared",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SemanticQueryError"
-                }
-              }
-            }
-          },
-          "503": {
-            "description": "Storage unavailable; no driver diagnostics",
+            "description": "Invalid input",
             "content": {
               "application/json": {
                 "schema": {
@@ -550,47 +508,9 @@
                 }
               }
             }
-          }
-        },
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/SourceRequest"
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/entry-points": {
-      "post": {
-        "operationId": "list_entry_points",
-        "summary": "Indexed HTTP/EVENT/MQ/SCHEDULE navigation; no expanded extraction completeness claim.",
-        "responses": {
-          "200": {
-            "description": "Application result, equal to MCP structuredContent and serialized TextContent.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/EntryPointCollection"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "INVALID_ARGUMENT or FACT_KIND_MISMATCH",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SemanticQueryError"
-                }
-              }
-            }
           },
           "404": {
-            "description": "Unknown or denied repository/fact/review/evidence",
+            "description": "Repository, revision or source not found",
             "content": {
               "application/json": {
                 "schema": {
@@ -600,7 +520,17 @@
             }
           },
           "409": {
-            "description": "Revision outdated, immutable context mismatch, review unavailable or metadata not prepared",
+            "description": "Source not prepared",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SemanticQueryError"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unsupported source",
             "content": {
               "application/json": {
                 "schema": {
@@ -610,7 +540,7 @@
             }
           },
           "503": {
-            "description": "Storage unavailable; no driver diagnostics",
+            "description": "Source busy or unavailable",
             "content": {
               "application/json": {
                 "schema": {
@@ -619,22 +549,12 @@
               }
             }
           },
-          "401": {
-            "description": "Query token required",
+          "504": {
+            "description": "Source operation timed out",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/QuerySecurityError"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Query access disabled",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/QuerySecurityError"
+                  "$ref": "#/components/schemas/SemanticQueryError"
                 }
               }
             }
@@ -645,535 +565,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/EntryPointRequest"
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/outline": {
-      "post": {
-        "operationId": "get_outline",
-        "summary": "TYPE or FILE indexed declarations, including mapper operation; not whole source or guessed outline.",
-        "responses": {
-          "200": {
-            "description": "Application result, equal to MCP structuredContent and serialized TextContent.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/FactCollection"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "INVALID_ARGUMENT or FACT_KIND_MISMATCH",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SemanticQueryError"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Unknown or denied repository/fact/review/evidence",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SemanticQueryError"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "Revision outdated, immutable context mismatch, review unavailable or metadata not prepared",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SemanticQueryError"
-                }
-              }
-            }
-          },
-          "503": {
-            "description": "Storage unavailable; no driver diagnostics",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SemanticQueryError"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Query token required",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/QuerySecurityError"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Query access disabled",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/QuerySecurityError"
-                }
-              }
-            }
-          }
-        },
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/OutlineRequest"
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/relations": {
-      "post": {
-        "operationId": "find_relations",
-        "summary": "One-hop relations; REFERENCES is the projected reference set, not IDE-complete; preserve external/unresolved evidence.",
-        "responses": {
-          "200": {
-            "description": "Application result, equal to MCP structuredContent and serialized TextContent.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RelationCollection"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "INVALID_ARGUMENT or FACT_KIND_MISMATCH",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SemanticQueryError"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Unknown or denied repository/fact/review/evidence",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SemanticQueryError"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "Revision outdated, immutable context mismatch, review unavailable or metadata not prepared",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SemanticQueryError"
-                }
-              }
-            }
-          },
-          "503": {
-            "description": "Storage unavailable; no driver diagnostics",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SemanticQueryError"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Query token required",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/QuerySecurityError"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Query access disabled",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/QuerySecurityError"
-                }
-              }
-            }
-          }
-        },
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/RelationRequest"
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/git/branches": {
-      "post": {
-        "operationId": "list_git_branches",
-        "summary": "Prepared COMPLETE metadata pair; missing metadata requires Indexer refresh_repository_metadata, never Query fetch.",
-        "responses": {
-          "200": {
-            "description": "Application result, equal to MCP structuredContent and serialized TextContent.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/GitBranchCollection"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "INVALID_ARGUMENT or FACT_KIND_MISMATCH",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SemanticQueryError"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Unknown or denied repository/fact/review/evidence",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SemanticQueryError"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "Revision outdated, immutable context mismatch, review unavailable or metadata not prepared",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SemanticQueryError"
-                }
-              }
-            }
-          },
-          "503": {
-            "description": "Storage unavailable; no driver diagnostics",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SemanticQueryError"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Query token required",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/QuerySecurityError"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Query access disabled",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/QuerySecurityError"
-                }
-              }
-            }
-          }
-        },
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/GitBranchRequest"
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/git/commits": {
-      "post": {
-        "operationId": "list_git_commits",
-        "summary": "Prepared branch history, default ten; present full-SHA candidates for user choice, never implicitly choose newest.",
-        "responses": {
-          "200": {
-            "description": "Application result, equal to MCP structuredContent and serialized TextContent.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/GitCommitCollection"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "INVALID_ARGUMENT or FACT_KIND_MISMATCH",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SemanticQueryError"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Unknown or denied repository/fact/review/evidence",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SemanticQueryError"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "Revision outdated, immutable context mismatch, review unavailable or metadata not prepared",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SemanticQueryError"
-                }
-              }
-            }
-          },
-          "503": {
-            "description": "Storage unavailable; no driver diagnostics",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SemanticQueryError"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Query token required",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/QuerySecurityError"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Query access disabled",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/QuerySecurityError"
-                }
-              }
-            }
-          }
-        },
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/GitCommitRequest"
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/git/comparisons": {
-      "post": {
-        "operationId": "compare_revisions",
-        "summary": "Direct before-to-after READY comparison; not merge-base; EMPTY_TREE explicit.",
-        "responses": {
-          "200": {
-            "description": "Application result, equal to MCP structuredContent and serialized TextContent.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ComparisonResult"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "INVALID_ARGUMENT or FACT_KIND_MISMATCH",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SemanticQueryError"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Unknown or denied repository/fact/review/evidence",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SemanticQueryError"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "Revision outdated, immutable context mismatch, review unavailable or metadata not prepared",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SemanticQueryError"
-                }
-              }
-            }
-          },
-          "503": {
-            "description": "Storage unavailable; no driver diagnostics",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SemanticQueryError"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Query token required",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/QuerySecurityError"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Query access disabled",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/QuerySecurityError"
-                }
-              }
-            }
-          }
-        },
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ComparisonRequest"
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/git/file-diff": {
-      "post": {
-        "operationId": "get_file_diff",
-        "summary": "Bounded 64 KiB patch over copied comparisonContext and returned changeId; policy excludes unsafe changes.",
-        "responses": {
-          "200": {
-            "description": "Application result, equal to MCP structuredContent and serialized TextContent.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/FileDiffResult"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "INVALID_ARGUMENT or FACT_KIND_MISMATCH",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SemanticQueryError"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Unknown or denied repository/fact/review/evidence",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SemanticQueryError"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "Revision outdated, immutable context mismatch, review unavailable or metadata not prepared",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SemanticQueryError"
-                }
-              }
-            }
-          },
-          "503": {
-            "description": "Storage unavailable; no driver diagnostics",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SemanticQueryError"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Query token required",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/QuerySecurityError"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Query access disabled",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/QuerySecurityError"
-                }
-              }
-            }
-          }
-        },
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/FileDiffRequest"
+                "$ref": "#/components/schemas/ReadSourceRequest"
               }
             }
           }
@@ -1190,6 +582,24 @@
       }
     },
     "schemas": {
+      "SourceContext": {
+        "type": "object",
+        "properties": {
+          "repositoryId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "revision": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{40}$"
+          }
+        },
+        "required": [
+          "repositoryId",
+          "revision"
+        ],
+        "additionalProperties": false
+      },
       "Page": {
         "type": "object",
         "properties": {
@@ -1201,8 +611,15 @@
             "type": "boolean"
           },
           "nextCursor": {
-            "type": "string",
-            "minLength": 1
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -1211,270 +628,357 @@
         ],
         "additionalProperties": false
       },
-      "CurrentContext": {
+      "GuideInfo": {
         "type": "object",
         "properties": {
-          "kind": {
-            "type": "string",
-            "const": "CURRENT"
-          },
-          "repositoryId": {
-            "type": "string",
-            "minLength": 1
-          },
-          "revision": {
-            "type": "string",
-            "pattern": "^[a-f0-9]{40}$"
-          }
-        },
-        "required": [
-          "kind",
-          "repositoryId",
-          "revision"
-        ],
-        "additionalProperties": false
-      },
-      "ReviewContext": {
-        "type": "object",
-        "properties": {
-          "kind": {
-            "type": "string",
-            "const": "REVIEW"
-          },
-          "repositoryId": {
-            "type": "string",
-            "minLength": 1
-          },
-          "revision": {
-            "type": "string",
-            "pattern": "^[a-f0-9]{40}$"
-          },
-          "reviewId": {
-            "type": "string",
-            "minLength": 1
-          },
-          "side": {
+          "state": {
             "type": "string",
             "enum": [
-              "BEFORE",
-              "AFTER"
+              "AVAILABLE",
+              "MISSING",
+              "INVALID",
+              "DISABLED"
             ]
-          }
-        },
-        "required": [
-          "kind",
-          "repositoryId",
-          "revision",
-          "reviewId",
-          "side"
-        ],
-        "additionalProperties": false
-      },
-      "ReadContext": {
-        "oneOf": [
-          {
-            "$ref": "#/components/schemas/CurrentContext"
           },
-          {
-            "$ref": "#/components/schemas/ReviewContext"
-          }
-        ]
-      },
-      "CurrentSelector": {
-        "type": "object",
-        "properties": {
-          "kind": {
-            "type": "string",
-            "const": "CURRENT"
-          }
-        },
-        "required": [
-          "kind"
-        ],
-        "additionalProperties": false
-      },
-      "ReviewSelector": {
-        "type": "object",
-        "properties": {
-          "kind": {
-            "type": "string",
-            "const": "REVIEW"
-          },
-          "reviewId": {
-            "type": "string",
-            "minLength": 1
-          }
-        },
-        "required": [
-          "kind",
-          "reviewId"
-        ],
-        "additionalProperties": false
-      },
-      "CommitSelector": {
-        "type": "object",
-        "properties": {
-          "kind": {
-            "type": "string",
-            "const": "COMMIT"
-          },
-          "revision": {
-            "type": "string",
-            "pattern": "^[a-f0-9]{40}$"
-          }
-        },
-        "required": [
-          "kind",
-          "revision"
-        ],
-        "additionalProperties": false
-      },
-      "RangeSelector": {
-        "type": "object",
-        "properties": {
-          "kind": {
-            "type": "string",
-            "const": "RANGE"
-          },
-          "beforeRevision": {
-            "type": "string",
-            "pattern": "^[a-f0-9]{40}$"
-          },
-          "afterRevision": {
-            "type": "string",
-            "pattern": "^[a-f0-9]{40}$"
-          }
-        },
-        "required": [
-          "kind",
-          "beforeRevision",
-          "afterRevision"
-        ],
-        "additionalProperties": false
-      },
-      "ContextSelector": {
-        "oneOf": [
-          {
-            "$ref": "#/components/schemas/CurrentSelector"
-          },
-          {
-            "$ref": "#/components/schemas/ReviewSelector"
-          },
-          {
-            "$ref": "#/components/schemas/CommitSelector"
-          },
-          {
-            "$ref": "#/components/schemas/RangeSelector"
-          }
-        ]
-      },
-      "ReviewDiscoverySelector": {
-        "oneOf": [
-          {
-            "$ref": "#/components/schemas/ReviewSelector"
-          },
-          {
-            "$ref": "#/components/schemas/CommitSelector"
-          },
-          {
-            "$ref": "#/components/schemas/RangeSelector"
-          }
-        ]
-      },
-      "EmptyTreeEndpoint": {
-        "type": "object",
-        "properties": {
-          "kind": {
-            "type": "string",
-            "const": "EMPTY_TREE"
-          }
-        },
-        "required": [
-          "kind"
-        ],
-        "additionalProperties": false
-      },
-      "RevisionEndpoint": {
-        "type": "object",
-        "properties": {
-          "kind": {
-            "type": "string",
-            "const": "REVISION"
-          },
-          "revision": {
-            "type": "string",
-            "pattern": "^[a-f0-9]{40}$"
-          }
-        },
-        "required": [
-          "kind",
-          "revision"
-        ],
-        "additionalProperties": false
-      },
-      "ComparisonContext": {
-        "type": "object",
-        "properties": {
-          "repositoryId": {
-            "type": "string",
-            "minLength": 1
-          },
-          "reviewId": {
-            "type": "string",
-            "minLength": 1
-          },
-          "before": {
-            "oneOf": [
+          "path": {
+            "anyOf": [
               {
-                "$ref": "#/components/schemas/EmptyTreeEndpoint"
+                "type": "string",
+                "minLength": 1
               },
               {
-                "$ref": "#/components/schemas/RevisionEndpoint"
+                "type": "null"
               }
             ]
           },
-          "after": {
-            "$ref": "#/components/schemas/RevisionEndpoint"
+          "digest": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "freshness": {
+            "type": "string",
+            "enum": [
+              "NOT_VERIFIED"
+            ]
+          }
+        },
+        "required": [
+          "state",
+          "freshness"
+        ],
+        "additionalProperties": false
+      },
+      "Coverage": {
+        "type": "object",
+        "properties": {
+          "readableFileCount": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "excludedFileCount": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "unsupportedCounts": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        },
+        "required": [
+          "readableFileCount",
+          "excludedFileCount",
+          "unsupportedCounts"
+        ],
+        "additionalProperties": false
+      },
+      "RepositoryCollection": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "repositoryId": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "displayName": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "defaultBranch": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "projectGuidePath": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "sourceStatus": {
+                  "type": "string",
+                  "enum": [
+                    "NOT_PREPARED",
+                    "PREPARING",
+                    "FAILED",
+                    "READY"
+                  ]
+                },
+                "semanticStatus": {
+                  "type": "string",
+                  "enum": [
+                    "NOT_READY"
+                  ]
+                },
+                "revision": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{40}$"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "repositoryId",
+                "displayName",
+                "defaultBranch",
+                "sourceStatus",
+                "semanticStatus"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "page": {
+            "$ref": "#/components/schemas/Page"
+          }
+        },
+        "required": [
+          "items",
+          "page"
+        ],
+        "additionalProperties": false
+      },
+      "ContextResult": {
+        "type": "object",
+        "properties": {
+          "repositoryId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "defaultBranch": {
+            "type": "string",
+            "minLength": 1
+          },
+          "sourceStatus": {
+            "type": "string",
+            "enum": [
+              "NOT_PREPARED",
+              "PREPARING",
+              "FAILED",
+              "READY"
+            ]
+          },
+          "semanticStatus": {
+            "type": "string",
+            "enum": [
+              "NOT_READY"
+            ]
+          },
+          "context": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SourceContext"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "projectGuide": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/GuideInfo"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "coverage": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Coverage"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
           "repositoryId",
-          "reviewId",
-          "before",
-          "after"
+          "defaultBranch",
+          "sourceStatus",
+          "semanticStatus"
         ],
         "additionalProperties": false
       },
-      "FactSourceTarget": {
+      "FileCollection": {
         "type": "object",
         "properties": {
-          "kind": {
-            "type": "string",
-            "const": "FACT"
+          "context": {
+            "$ref": "#/components/schemas/SourceContext"
           },
-          "factId": {
-            "type": "string",
-            "minLength": 1
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "DIRECTORY",
+                    "FILE"
+                  ]
+                },
+                "status": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "enum": [
+                        "TEXT",
+                        "BINARY",
+                        "UNSUPPORTED_ENCODING",
+                        "UNSUPPORTED_PATH",
+                        "SYMLINK",
+                        "SUBMODULE",
+                        "LFS_POINTER"
+                      ]
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "byteLength": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "navigationHint": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "path",
+                "kind",
+                "navigationHint"
+              ],
+              "additionalProperties": false
+            }
           },
-          "contextLines": {
-            "type": "integer",
-            "minimum": 0,
-            "maximum": 20,
-            "default": 0
+          "page": {
+            "$ref": "#/components/schemas/Page"
           }
         },
         "required": [
-          "kind",
-          "factId"
+          "context",
+          "items",
+          "page"
         ],
         "additionalProperties": false
       },
-      "FileSourceTarget": {
+      "TextSearchResult": {
         "type": "object",
         "properties": {
-          "kind": {
-            "type": "string",
-            "const": "FILE"
+          "context": {
+            "$ref": "#/components/schemas/SourceContext"
+          },
+          "matches": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "line": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "column": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "matchedText": {
+                  "type": "string"
+                },
+                "navigationHint": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "path",
+                "line",
+                "column",
+                "matchedText",
+                "navigationHint"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "truncated": {
+            "type": "boolean"
+          },
+          "scanComplete": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "context",
+          "matches",
+          "truncated",
+          "scanComplete"
+        ],
+        "additionalProperties": false
+      },
+      "SourceResult": {
+        "type": "object",
+        "properties": {
+          "context": {
+            "$ref": "#/components/schemas/SourceContext"
           },
           "path": {
             "type": "string",
@@ -1482,105 +986,56 @@
           },
           "startLine": {
             "type": "integer",
-            "minimum": 1,
-            "maximum": 2147483647,
-            "default": 1
+            "minimum": 1
+          },
+          "endLine": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "content": {
+            "type": "string"
+          },
+          "hasMore": {
+            "type": "boolean"
+          },
+          "nextCursor": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "startsMidLine": {
+            "type": "boolean"
+          },
+          "endsMidLine": {
+            "type": "boolean"
+          },
+          "navigationHint": {
+            "type": "boolean"
           }
         },
         "required": [
-          "kind",
-          "path"
+          "context",
+          "path",
+          "startLine",
+          "content",
+          "hasMore",
+          "startsMidLine",
+          "endsMidLine",
+          "navigationHint"
         ],
-        "additionalProperties": false
-      },
-      "SourceTarget": {
-        "oneOf": [
-          {
-            "$ref": "#/components/schemas/FactSourceTarget"
-          },
-          {
-            "$ref": "#/components/schemas/FileSourceTarget"
-          }
-        ]
-      },
-      "OutlineTarget": {
-        "oneOf": [
-          {
-            "type": "object",
-            "properties": {
-              "kind": {
-                "type": "string",
-                "const": "TYPE"
-              },
-              "factId": {
-                "type": "string",
-                "minLength": 1
-              }
-            },
-            "required": [
-              "kind",
-              "factId"
-            ],
-            "additionalProperties": false
-          },
-          {
-            "type": "object",
-            "properties": {
-              "kind": {
-                "type": "string",
-                "const": "FILE"
-              },
-              "path": {
-                "type": "string",
-                "minLength": 1
-              }
-            },
-            "required": [
-              "kind",
-              "path"
-            ],
-            "additionalProperties": false
-          }
-        ]
-      },
-      "Destination": {
-        "type": "object",
-        "properties": {
-          "broker": {
-            "type": "string",
-            "minLength": 1
-          },
-          "destination": {
-            "type": "string",
-            "minLength": 1
-          }
-        },
-        "required": [
-          "broker",
-          "destination"
-        ],
-        "additionalProperties": false
-      },
-      "RepositoryRequest": {
-        "type": "object",
-        "properties": {
-          "nameFilter": {
-            "type": "string",
-            "minLength": 1,
-            "description": "Literal case-sensitive substring of repositoryId or displayName."
-          },
-          "cursor": {
-            "type": "string",
-            "minLength": 1
-          },
-          "limit": {
-            "type": "integer",
-            "minimum": 1,
-            "maximum": 100,
-            "default": 20
-          }
-        },
-        "required": [],
         "additionalProperties": false
       },
       "ContextRequest": {
@@ -1590,81 +1045,13 @@
             "type": "string",
             "minLength": 1
           },
-          "selector": {
-            "$ref": "#/components/schemas/ContextSelector"
-          },
-          "limit": {
-            "type": "integer",
-            "minimum": 1,
-            "maximum": 100,
-            "default": 20
+          "revision": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{40}$"
           }
         },
         "required": [
-          "repositoryId",
-          "selector"
-        ],
-        "additionalProperties": false
-      },
-      "SearchCodeRequest": {
-        "type": "object",
-        "properties": {
-          "context": {
-            "$ref": "#/components/schemas/ReadContext"
-          },
-          "query": {
-            "type": "string",
-            "minLength": 2,
-            "maxLength": 256
-          },
-          "kinds": {
-            "type": "array",
-            "items": {
-              "type": "string",
-              "enum": [
-                "TYPE",
-                "METHOD",
-                "FIELD",
-                "ENUM_CONSTANT",
-                "RECORD_COMPONENT",
-                "MAPPER_STATEMENT",
-                "ANNOTATION_USAGE",
-                "TYPE_USAGE",
-                "SQL_IDENTIFIER",
-                "CONFIGURATION_KEY",
-                "OUTBOUND_API",
-                "MQ_PUBLISHER",
-                "ERROR_CONTRACT",
-                "API_ROUTE",
-                "MQ_DESTINATION",
-                "SCHEDULE"
-              ]
-            },
-            "uniqueItems": true
-          },
-          "packagePrefix": {
-            "type": "string",
-            "pattern": "^[A-Za-z_$][A-Za-z0-9_$]*(?:\\.[A-Za-z_$][A-Za-z0-9_$]*)*$"
-          },
-          "path": {
-            "type": "string",
-            "minLength": 1,
-            "description": "Exact source file path."
-          },
-          "cursor": {
-            "type": "string",
-            "minLength": 1
-          },
-          "limit": {
-            "type": "integer",
-            "minimum": 1,
-            "maximum": 100,
-            "default": 20
-          }
-        },
-        "required": [
-          "context",
-          "query"
+          "repositoryId"
         ],
         "additionalProperties": false
       },
@@ -1672,28 +1059,20 @@
         "type": "object",
         "properties": {
           "context": {
-            "$ref": "#/components/schemas/ReadContext"
+            "$ref": "#/components/schemas/SourceContext"
           },
           "directory": {
             "type": "string"
-          },
-          "nameFilter": {
-            "type": "string",
-            "minLength": 1
-          },
-          "pathFilter": {
-            "type": "string",
-            "minLength": 1
-          },
-          "cursor": {
-            "type": "string",
-            "minLength": 1
           },
           "limit": {
             "type": "integer",
             "minimum": 1,
             "maximum": 100,
             "default": 20
+          },
+          "cursor": {
+            "type": "string",
+            "minLength": 1
           }
         },
         "required": [
@@ -1705,19 +1084,18 @@
         "type": "object",
         "properties": {
           "context": {
-            "$ref": "#/components/schemas/ReadContext"
+            "$ref": "#/components/schemas/SourceContext"
           },
           "query": {
             "type": "string",
             "minLength": 1,
-            "maxLength": 256,
-            "pattern": "^[^\\r\\n]+$",
-            "description": "One literal line, at most 256 Unicode code points; CODE only, never guide text."
+            "maxLength": 512,
+            "description": "At most 256 Unicode code points, literal case-sensitive and single-line."
           },
           "directory": {
             "type": "string"
           },
-          "cursor": {
+          "filePattern": {
             "type": "string",
             "minLength": 1
           },
@@ -1734,14 +1112,20 @@
         ],
         "additionalProperties": false
       },
-      "SourceRequest": {
+      "ReadSourceRequest": {
         "type": "object",
         "properties": {
           "context": {
-            "$ref": "#/components/schemas/ReadContext"
+            "$ref": "#/components/schemas/SourceContext"
           },
-          "target": {
-            "$ref": "#/components/schemas/SourceTarget"
+          "path": {
+            "type": "string",
+            "minLength": 1
+          },
+          "startLine": {
+            "type": "integer",
+            "minimum": 1,
+            "default": 1
           },
           "maxLines": {
             "type": "integer",
@@ -1756,1636 +1140,7 @@
         },
         "required": [
           "context",
-          "target"
-        ],
-        "additionalProperties": false
-      },
-      "EntryPointRequest": {
-        "type": "object",
-        "properties": {
-          "context": {
-            "$ref": "#/components/schemas/ReadContext"
-          },
-          "kind": {
-            "type": "string",
-            "enum": [
-              "HTTP",
-              "EVENT",
-              "MQ",
-              "SCHEDULE"
-            ]
-          },
-          "handlerName": {
-            "type": "string",
-            "minLength": 1
-          },
-          "packagePrefix": {
-            "type": "string",
-            "pattern": "^[A-Za-z_$][A-Za-z0-9_$]*(?:\\.[A-Za-z_$][A-Za-z0-9_$]*)*$"
-          },
-          "httpMethod": {
-            "type": "string",
-            "enum": [
-              "GET",
-              "HEAD",
-              "POST",
-              "PUT",
-              "PATCH",
-              "DELETE",
-              "OPTIONS",
-              "TRACE",
-              "ALL"
-            ]
-          },
-          "path": {
-            "type": "string",
-            "minLength": 1
-          },
-          "eventType": {
-            "type": "string",
-            "minLength": 1
-          },
-          "destination": {
-            "$ref": "#/components/schemas/Destination"
-          },
-          "trigger": {
-            "type": "string",
-            "minLength": 1
-          },
-          "cursor": {
-            "type": "string",
-            "minLength": 1
-          },
-          "limit": {
-            "type": "integer",
-            "minimum": 1,
-            "maximum": 100,
-            "default": 20
-          }
-        },
-        "required": [
-          "context"
-        ],
-        "additionalProperties": false,
-        "allOf": [
-          {"if": {"required": ["httpMethod"]}, "then": {"required": ["kind"], "properties": {"kind": {"const": "HTTP"}}}},
-          {"if": {"required": ["path"]}, "then": {"required": ["kind"], "properties": {"kind": {"const": "HTTP"}}}},
-          {"if": {"required": ["eventType"]}, "then": {"required": ["kind"], "properties": {"kind": {"const": "EVENT"}}}},
-          {"if": {"required": ["destination"]}, "then": {"required": ["kind"], "properties": {"kind": {"const": "MQ"}}}},
-          {"if": {"required": ["trigger"]}, "then": {"required": ["kind"], "properties": {"kind": {"const": "SCHEDULE"}}}}
-        ],
-        "description": "Kind-specific fields require the corresponding explicit kind: HTTP method/path, EVENT eventType, MQ destination, SCHEDULE trigger."
-      },
-      "OutlineRequest": {
-        "type": "object",
-        "properties": {
-          "context": {
-            "$ref": "#/components/schemas/ReadContext"
-          },
-          "target": {
-            "$ref": "#/components/schemas/OutlineTarget"
-          },
-          "kinds": {
-            "type": "array",
-            "items": {
-              "type": "string",
-              "enum": [
-                "TYPE",
-                "METHOD",
-                "FIELD",
-                "ENUM_CONSTANT",
-                "RECORD_COMPONENT",
-                "MAPPER_STATEMENT"
-              ]
-            },
-            "uniqueItems": true
-          },
-          "cursor": {
-            "type": "string",
-            "minLength": 1
-          },
-          "limit": {
-            "type": "integer",
-            "minimum": 1,
-            "maximum": 100,
-            "default": 20
-          }
-        },
-        "required": [
-          "context",
-          "target"
-        ],
-        "additionalProperties": false
-      },
-      "RelationRequest": {
-        "type": "object",
-        "properties": {
-          "context": {
-            "$ref": "#/components/schemas/ReadContext"
-          },
-          "relation": {
-            "type": "string",
-            "enum": [
-              "CALLERS",
-              "CALLEES",
-              "IMPLEMENTATIONS",
-              "REFERENCES"
-            ]
-          },
-          "factId": {
-            "type": "string",
-            "minLength": 1
-          },
-          "cursor": {
-            "type": "string",
-            "minLength": 1
-          },
-          "limit": {
-            "type": "integer",
-            "minimum": 1,
-            "maximum": 100,
-            "default": 20
-          }
-        },
-        "required": [
-          "context",
-          "relation",
-          "factId"
-        ],
-        "additionalProperties": false
-      },
-      "GitBranchRequest": {
-        "type": "object",
-        "properties": {
-          "repositoryId": {
-            "type": "string",
-            "minLength": 1
-          },
-          "cursor": {
-            "type": "string",
-            "minLength": 1
-          },
-          "limit": {
-            "type": "integer",
-            "minimum": 1,
-            "maximum": 100,
-            "default": 20
-          }
-        },
-        "required": [
-          "repositoryId"
-        ],
-        "additionalProperties": false
-      },
-      "GitCommitRequest": {
-        "type": "object",
-        "properties": {
-          "repositoryId": {
-            "type": "string",
-            "minLength": 1
-          },
-          "branch": {
-            "type": "string",
-            "minLength": 1
-          },
-          "cursor": {
-            "type": "string",
-            "minLength": 1
-          },
-          "limit": {
-            "type": "integer",
-            "minimum": 1,
-            "maximum": 100,
-            "default": 10
-          }
-        },
-        "required": [
-          "repositoryId",
-          "branch"
-        ],
-        "additionalProperties": false
-      },
-      "ComparisonRequest": {
-        "type": "object",
-        "properties": {
-          "comparisonContext": {
-            "$ref": "#/components/schemas/ComparisonContext"
-          },
-          "cursor": {
-            "type": "string",
-            "minLength": 1
-          },
-          "limit": {
-            "type": "integer",
-            "minimum": 1,
-            "maximum": 100,
-            "default": 20
-          }
-        },
-        "required": [
-          "comparisonContext"
-        ],
-        "additionalProperties": false
-      },
-      "FileDiffRequest": {
-        "type": "object",
-        "properties": {
-          "comparisonContext": {
-            "$ref": "#/components/schemas/ComparisonContext"
-          },
-          "changeId": {
-            "type": "string",
-            "minLength": 1
-          },
-          "cursor": {
-            "type": "string",
-            "minLength": 1
-          }
-        },
-        "required": [
-          "comparisonContext",
-          "changeId"
-        ],
-        "additionalProperties": false
-      },
-      "SyntaxPosition": {
-        "type": "object",
-        "properties": {
-          "line": {
-            "type": "integer",
-            "minimum": 0
-          },
-          "character": {
-            "type": "integer",
-            "minimum": 0
-          }
-        },
-        "required": [
-          "line",
-          "character"
-        ],
-        "additionalProperties": false,
-        "description": "Zero-based UTF-16 code-unit position."
-      },
-      "SyntaxRange": {
-        "type": "object",
-        "properties": {
-          "start": {
-            "$ref": "#/components/schemas/SyntaxPosition"
-          },
-          "end": {
-            "$ref": "#/components/schemas/SyntaxPosition"
-          }
-        },
-        "required": [
-          "start",
-          "end"
-        ],
-        "additionalProperties": false,
-        "description": "Start-inclusive, end-exclusive."
-      },
-      "CompactFact": {
-        "type": "object",
-        "properties": {
-          "factId": {
-            "type": "string",
-            "minLength": 1
-          },
-          "kind": {
-            "type": "string",
-            "enum": [
-              "TYPE",
-              "METHOD",
-              "FIELD",
-              "ENUM_CONSTANT",
-              "RECORD_COMPONENT",
-              "MAPPER_STATEMENT",
-              "ANNOTATION_USAGE",
-              "TYPE_USAGE",
-              "SQL_IDENTIFIER",
-              "CONFIGURATION_KEY",
-              "OUTBOUND_API",
-              "MQ_PUBLISHER",
-              "ERROR_CONTRACT",
-              "API_ROUTE",
-              "MQ_DESTINATION",
-              "SCHEDULE"
-            ]
-          },
-          "displayName": {
-            "type": "string"
-          },
-          "signature": {
-            "type": "string"
-          },
-          "path": {
-            "type": "string",
-            "minLength": 1
-          },
-          "range": {
-            "$ref": "#/components/schemas/SyntaxRange"
-          },
-          "canonical": {
-            "type": "string",
-            "minLength": 1
-          },
-          "mapperStatementKind": {
-            "type": "string",
-            "enum": [
-              "SELECT",
-              "INSERT",
-              "UPDATE",
-              "DELETE",
-              "ANNOTATION"
-            ]
-          }
-        },
-        "required": [
-          "factId",
-          "kind",
-          "displayName",
-          "path",
-          "range"
-        ],
-        "additionalProperties": false
-      },
-      "RepositoryItem": {
-        "type": "object",
-        "properties": {
-          "repositoryId": {
-            "type": "string",
-            "minLength": 1
-          },
-          "displayName": {
-            "type": "string"
-          },
-          "defaultBranch": {
-            "type": "string",
-            "minLength": 1
-          },
-          "configured": {
-            "type": "boolean"
-          },
-          "publishedRevision": {
-            "type": "string",
-            "pattern": "^[a-f0-9]{40}$"
-          }
-        },
-        "required": [
-          "repositoryId",
-          "displayName",
-          "defaultBranch",
-          "configured"
-        ],
-        "additionalProperties": false
-      },
-      "Coverage": {
-        "type": "object",
-        "properties": {
-          "scope": {
-            "type": "string",
-            "enum": [
-              "GENERATION",
-              "AUTHORIZED_SOURCE_FILES"
-            ]
-          },
-          "readableCode": {
-            "type": "integer",
-            "minimum": 0
-          },
-          "excludedOrUnsupported": {
-            "type": "integer",
-            "minimum": 0
-          },
-          "extractionIssues": {
-            "type": "integer",
-            "minimum": 0
-          },
-          "unresolvedSemanticEvidence": {
-            "type": "integer",
-            "minimum": 0
-          },
-          "omittedMetrics": {
-            "type": "array",
-            "items": {
-              "type": "string",
-              "minLength": 1
-            }
-          }
-        },
-        "required": [
-          "scope",
-          "readableCode",
-          "extractionIssues",
-          "omittedMetrics"
-        ],
-        "additionalProperties": false
-      },
-      "ModuleSummary": {
-        "type": "object",
-        "properties": {
-          "path": {
-            "type": "string"
-          },
-          "sourceRoots": {
-            "type": "object",
-            "properties": {
-              "items": {
-                "type": "array",
-                "items": {
-                  "type": "string"
-                }
-              },
-              "omitted": {
-                "type": "boolean"
-              }
-            },
-            "required": [
-              "items",
-              "omitted"
-            ],
-            "additionalProperties": false
-          }
-        },
-        "required": [
-          "path",
-          "sourceRoots"
-        ],
-        "additionalProperties": false
-      },
-      "PackageSummary": {
-        "type": "object",
-        "properties": {
-          "name": {
-            "type": "string"
-          },
-          "sourceCount": {
-            "type": "integer",
-            "minimum": 0
-          }
-        },
-        "required": [
-          "name",
-          "sourceCount"
-        ],
-        "additionalProperties": false
-      },
-      "EntryKindCount": {
-        "type": "object",
-        "properties": {
-          "kind": {
-            "type": "string",
-            "enum": [
-              "HTTP",
-              "EVENT",
-              "MQ",
-              "SCHEDULE"
-            ]
-          },
-          "count": {
-            "type": "integer",
-            "minimum": 0
-          }
-        },
-        "required": [
-          "kind",
-          "count"
-        ],
-        "additionalProperties": false
-      },
-      "ContextOverview": {
-        "type": "object",
-        "properties": {
-          "modules": {
-            "type": "object",
-            "properties": {
-              "items": {
-                "type": "array",
-                "items": {
-                  "$ref": "#/components/schemas/ModuleSummary"
-                }
-              },
-              "omitted": {
-                "type": "boolean"
-              }
-            },
-            "required": [
-              "items",
-              "omitted"
-            ],
-            "additionalProperties": false
-          },
-          "sourceRoots": {
-            "type": "object",
-            "properties": {
-              "items": {
-                "type": "array",
-                "items": {
-                  "type": "string"
-                }
-              },
-              "omitted": {
-                "type": "boolean"
-              }
-            },
-            "required": [
-              "items",
-              "omitted"
-            ],
-            "additionalProperties": false
-          },
-          "packages": {
-            "type": "object",
-            "properties": {
-              "items": {
-                "type": "array",
-                "items": {
-                  "$ref": "#/components/schemas/PackageSummary"
-                }
-              },
-              "omitted": {
-                "type": "boolean"
-              }
-            },
-            "required": [
-              "items",
-              "omitted"
-            ],
-            "additionalProperties": false
-          },
-          "entryPoints": {
-            "type": "object",
-            "properties": {
-              "items": {
-                "type": "array",
-                "items": {
-                  "$ref": "#/components/schemas/EntryKindCount"
-                }
-              },
-              "omitted": {
-                "type": "boolean"
-              }
-            },
-            "required": [
-              "items",
-              "omitted"
-            ],
-            "additionalProperties": false
-          },
-          "uncountedEntryKinds": {
-            "type": "array",
-            "items": {
-              "type": "string",
-              "enum": [
-                "HTTP",
-                "EVENT",
-                "MQ",
-                "SCHEDULE"
-              ]
-            }
-          },
-          "coverage": {
-            "$ref": "#/components/schemas/Coverage"
-          }
-        },
-        "required": [
-          "modules",
-          "sourceRoots",
-          "packages",
-          "entryPoints",
-          "uncountedEntryKinds",
-          "coverage"
-        ],
-        "additionalProperties": false
-      },
-      "GuideSourceScope": {
-        "type": "object",
-        "properties": {
-          "includedPaths": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
-          "excludedPaths": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
-          "limitations": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          }
-        },
-        "required": [
-          "includedPaths",
-          "excludedPaths",
-          "limitations"
-        ],
-        "additionalProperties": false
-      },
-      "GuideProvenance": {
-        "type": "object",
-        "properties": {
-          "formatVersion": {
-            "type": "integer",
-            "minimum": 0
-          },
-          "promptVersion": {
-            "type": "integer",
-            "minimum": 0
-          },
-          "repositoryId": {
-            "type": "string",
-            "minLength": 1
-          },
-          "analyzedRevision": {
-            "type": "string",
-            "pattern": "^[a-f0-9]{40}$"
-          },
-          "generatedAt": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "sourceScope": {
-            "$ref": "#/components/schemas/GuideSourceScope"
-          }
-        },
-        "required": [
-          "formatVersion",
-          "promptVersion",
-          "repositoryId",
-          "analyzedRevision",
-          "generatedAt",
-          "sourceScope"
-        ],
-        "additionalProperties": false
-      },
-      "GuideInfo": {
-        "type": "object",
-        "properties": {
-          "state": {
-            "type": "string",
-            "enum": [
-              "DISABLED",
-              "ABSENT",
-              "INVALID",
-              "AVAILABLE"
-            ]
-          },
-          "reason": {
-            "type": "string"
-          },
-          "path": {
-            "type": "string",
-            "minLength": 1
-          },
-          "digest": {
-            "type": "string",
-            "minLength": 1
-          },
-          "importedRevision": {
-            "type": "string",
-            "pattern": "^[a-f0-9]{40}$"
-          },
-          "provenance": {
-            "$ref": "#/components/schemas/GuideProvenance"
-          },
-          "freshness": {
-            "type": "string",
-            "minLength": 1
-          }
-        },
-        "required": [
-          "state",
-          "freshness"
-        ],
-        "additionalProperties": false
-      },
-      "JobIdentity": {
-        "type": "object",
-        "properties": {
-          "jobId": {
-            "type": "string",
-            "minLength": 1
-          },
-          "operation": {
-            "type": "string",
-            "minLength": 1
-          },
-          "phase": {
-            "type": "string",
-            "minLength": 1
-          },
-          "requestId": {
-            "type": "string",
-            "minLength": 1
-          }
-        },
-        "required": [
-          "jobId",
-          "operation",
-          "phase"
-        ],
-        "additionalProperties": false
-      },
-      "CurrentContextResult": {
-        "type": "object",
-        "properties": {
-          "repositoryId": {
-            "type": "string",
-            "minLength": 1
-          },
-          "selector": {
-            "$ref": "#/components/schemas/CurrentSelector"
-          },
-          "state": {
-            "type": "string",
-            "enum": [
-              "UNINDEXED",
-              "NOT_PREPARED",
-              "PREPARING",
-              "FAILED",
-              "READY"
-            ]
-          },
-          "configuredBranch": {
-            "type": "string",
-            "minLength": 1
-          },
-          "activeJob": {
-            "$ref": "#/components/schemas/JobIdentity"
-          },
-          "revision": {
-            "type": "string",
-            "pattern": "^[a-f0-9]{40}$"
-          },
-          "indexedAt": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "preparationBranch": {
-            "type": "string",
-            "minLength": 1
-          },
-          "context": {
-            "$ref": "#/components/schemas/ReadContext"
-          },
-          "overview": {
-            "$ref": "#/components/schemas/ContextOverview"
-          },
-          "projectGuide": {
-            "$ref": "#/components/schemas/GuideInfo"
-          }
-        },
-        "required": [
-          "repositoryId",
-          "selector",
-          "state"
-        ],
-        "additionalProperties": false
-      },
-      "ReviewSideContext": {
-        "type": "object",
-        "properties": {
-          "kind": {
-            "type": "string",
-            "enum": [
-              "EMPTY_TREE",
-              "REVISION"
-            ]
-          },
-          "revision": {
-            "type": "string",
-            "pattern": "^[a-f0-9]{40}$"
-          },
-          "context": {
-            "$ref": "#/components/schemas/ReadContext"
-          },
-          "overview": {
-            "$ref": "#/components/schemas/ContextOverview"
-          },
-          "projectGuide": {
-            "$ref": "#/components/schemas/GuideInfo"
-          }
-        },
-        "required": [
-          "kind"
-        ],
-        "additionalProperties": false
-      },
-      "ReviewContextResult": {
-        "type": "object",
-        "properties": {
-          "repositoryId": {
-            "type": "string",
-            "minLength": 1
-          },
-          "selector": {
-            "$ref": "#/components/schemas/ReviewDiscoverySelector"
-          },
-          "state": {
-            "type": "string",
-            "enum": [
-              "UNINDEXED",
-              "NOT_PREPARED",
-              "PREPARING",
-              "FAILED",
-              "READY"
-            ]
-          },
-          "reviewId": {
-            "type": "string",
-            "minLength": 1
-          },
-          "jobId": {
-            "type": "string",
-            "minLength": 1
-          },
-          "failureCategory": {
-            "type": "string",
-            "minLength": 1
-          },
-          "before": {
-            "$ref": "#/components/schemas/ReviewSideContext"
-          },
-          "after": {
-            "$ref": "#/components/schemas/ReviewSideContext"
-          },
-          "comparisonContext": {
-            "$ref": "#/components/schemas/ComparisonContext"
-          }
-        },
-        "required": [
-          "repositoryId",
-          "selector",
-          "state"
-        ],
-        "additionalProperties": false
-      },
-      "ContextResult": {
-        "oneOf": [
-          {
-            "$ref": "#/components/schemas/CurrentContextResult"
-          },
-          {
-            "$ref": "#/components/schemas/ReviewContextResult"
-          }
-        ]
-      },
-      "RepositoryCollection": {
-        "type": "object",
-        "properties": {
-          "items": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/RepositoryItem"
-            }
-          },
-          "page": {
-            "$ref": "#/components/schemas/Page"
-          }
-        },
-        "required": [
-          "items",
-          "page"
-        ],
-        "additionalProperties": false
-      },
-      "FactCollection": {
-        "type": "object",
-        "properties": {
-          "context": {
-            "$ref": "#/components/schemas/ReadContext"
-          },
-          "items": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/CompactFact"
-            }
-          },
-          "page": {
-            "$ref": "#/components/schemas/Page"
-          }
-        },
-        "required": [
-          "context",
-          "items",
-          "page"
-        ],
-        "additionalProperties": false
-      },
-      "EntryTrigger": {
-        "type": "object",
-        "properties": {
-          "httpMethod": {
-            "type": "string",
-            "enum": [
-              "GET",
-              "HEAD",
-              "POST",
-              "PUT",
-              "PATCH",
-              "DELETE",
-              "OPTIONS",
-              "TRACE",
-              "ALL"
-            ]
-          },
-          "path": {
-            "type": "string",
-            "minLength": 1
-          },
-          "eventType": {
-            "type": "string",
-            "minLength": 1
-          },
-          "destination": {
-            "$ref": "#/components/schemas/Destination"
-          },
-          "trigger": {
-            "type": "string",
-            "minLength": 1
-          }
-        },
-        "required": [],
-        "additionalProperties": false
-      },
-      "EntryPointItem": {
-        "type": "object",
-        "properties": {
-          "kind": {
-            "type": "string",
-            "enum": [
-              "HTTP",
-              "EVENT",
-              "MQ",
-              "SCHEDULE"
-            ]
-          },
-          "factId": {
-            "type": "string",
-            "minLength": 1
-          },
-          "handler": {
-            "$ref": "#/components/schemas/CompactFact"
-          },
-          "trigger": {
-            "$ref": "#/components/schemas/EntryTrigger"
-          }
-        },
-        "required": [
-          "kind",
-          "handler",
-          "trigger"
-        ],
-        "additionalProperties": false
-      },
-      "EntryPointCollection": {
-        "type": "object",
-        "properties": {
-          "context": {
-            "$ref": "#/components/schemas/ReadContext"
-          },
-          "items": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/EntryPointItem"
-            }
-          },
-          "page": {
-            "$ref": "#/components/schemas/Page"
-          }
-        },
-        "required": [
-          "context",
-          "items",
-          "page"
-        ],
-        "additionalProperties": false
-      },
-      "ExternalTargetInfo": {
-        "type": "object",
-        "properties": {
-          "kind": {
-            "type": "string",
-            "minLength": 1
-          },
-          "displayName": {
-            "type": "string"
-          },
-          "canonical": {
-            "type": "string",
-            "minLength": 1
-          },
-          "arity": {
-            "type": "integer",
-            "minimum": 0
-          }
-        },
-        "required": [
-          "kind",
-          "displayName"
-        ],
-        "additionalProperties": false
-      },
-      "RelationTarget": {
-        "type": "object",
-        "properties": {
-          "resolution": {
-            "type": "string",
-            "enum": [
-              "INTERNAL",
-              "EXTERNAL",
-              "UNRESOLVED"
-            ]
-          },
-          "fact": {
-            "$ref": "#/components/schemas/CompactFact"
-          },
-          "external": {
-            "$ref": "#/components/schemas/ExternalTargetInfo"
-          }
-        },
-        "required": [
-          "resolution"
-        ],
-        "additionalProperties": false
-      },
-      "Occurrence": {
-        "type": "object",
-        "properties": {
-          "factId": {
-            "type": "string",
-            "minLength": 1
-          },
-          "path": {
-            "type": "string",
-            "minLength": 1
-          },
-          "range": {
-            "$ref": "#/components/schemas/SyntaxRange"
-          }
-        },
-        "required": [
-          "factId",
-          "path",
-          "range"
-        ],
-        "additionalProperties": false
-      },
-      "RelationItem": {
-        "type": "object",
-        "properties": {
-          "relationKind": {
-            "type": "string",
-            "minLength": 1
-          },
-          "origin": {
-            "$ref": "#/components/schemas/CompactFact"
-          },
-          "target": {
-            "$ref": "#/components/schemas/RelationTarget"
-          },
-          "occurrence": {
-            "$ref": "#/components/schemas/Occurrence"
-          }
-        },
-        "required": [
-          "relationKind",
-          "origin",
-          "target",
-          "occurrence"
-        ],
-        "additionalProperties": false
-      },
-      "RelationCollection": {
-        "type": "object",
-        "properties": {
-          "context": {
-            "$ref": "#/components/schemas/ReadContext"
-          },
-          "items": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/RelationItem"
-            }
-          },
-          "page": {
-            "$ref": "#/components/schemas/Page"
-          },
-          "relation": {
-            "type": "string",
-            "enum": [
-              "CALLERS",
-              "CALLEES",
-              "IMPLEMENTATIONS",
-              "REFERENCES"
-            ]
-          },
-          "evidenceScope": {
-            "type": "string",
-            "enum": [
-              "PROJECTED_CALLS",
-              "PROJECTED_IMPLEMENTATIONS",
-              "PROJECTED_REFERENCES"
-            ]
-          }
-        },
-        "required": [
-          "context",
-          "items",
-          "page",
-          "relation",
-          "evidenceScope"
-        ],
-        "additionalProperties": false
-      },
-      "FileItem": {
-        "type": "object",
-        "properties": {
-          "path": {
-            "type": "string",
-            "minLength": 1
-          },
-          "entryType": {
-            "type": "string",
-            "enum": [
-              "FILE",
-              "DIRECTORY"
-            ]
-          },
-          "contentKind": {
-            "type": "string",
-            "enum": [
-              "CODE",
-              "PROJECT_GUIDE"
-            ]
-          },
-          "contentStatus": {
-            "type": "string",
-            "minLength": 1
-          },
-          "byteLength": {
-            "type": "integer",
-            "minimum": 0
-          },
-          "projectGuide": {
-            "$ref": "#/components/schemas/GuideInfo"
-          }
-        },
-        "required": [
-          "path",
-          "entryType"
-        ],
-        "additionalProperties": false
-      },
-      "FileCollection": {
-        "type": "object",
-        "properties": {
-          "context": {
-            "$ref": "#/components/schemas/ReadContext"
-          },
-          "items": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/FileItem"
-            }
-          },
-          "page": {
-            "$ref": "#/components/schemas/Page"
-          }
-        },
-        "required": [
-          "context",
-          "items",
-          "page"
-        ],
-        "additionalProperties": false
-      },
-      "TextMatch": {
-        "type": "object",
-        "properties": {
-          "path": {
-            "type": "string",
-            "minLength": 1
-          },
-          "range": {
-            "$ref": "#/components/schemas/SyntaxRange"
-          },
-          "snippet": {
-            "type": "string"
-          },
-          "snippetTruncated": {
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "path",
-          "range",
-          "snippet",
-          "snippetTruncated"
-        ],
-        "additionalProperties": false
-      },
-      "TextSearchResult": {
-        "type": "object",
-        "properties": {
-          "context": {
-            "$ref": "#/components/schemas/ReadContext"
-          },
-          "items": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/TextMatch"
-            }
-          },
-          "page": {
-            "$ref": "#/components/schemas/Page"
-          },
-          "scanComplete": {
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "context",
-          "items",
-          "page",
-          "scanComplete"
-        ],
-        "additionalProperties": false
-      },
-      "SourceWindow": {
-        "type": "object",
-        "properties": {
-          "start": {
-            "$ref": "#/components/schemas/SyntaxPosition"
-          },
-          "end": {
-            "$ref": "#/components/schemas/SyntaxPosition"
-          }
-        },
-        "required": [
-          "start"
-        ],
-        "additionalProperties": false,
-        "description": "FILE end omitted means through EOF; FACT end is fixed."
-      },
-      "SourceResult": {
-        "type": "object",
-        "properties": {
-          "context": {
-            "$ref": "#/components/schemas/ReadContext"
-          },
-          "target": {
-            "$ref": "#/components/schemas/SourceTarget"
-          },
-          "path": {
-            "type": "string",
-            "minLength": 1
-          },
-          "contentKind": {
-            "type": "string",
-            "enum": [
-              "CODE",
-              "PROJECT_GUIDE"
-            ]
-          },
-          "contentStatus": {
-            "type": "string",
-            "minLength": 1
-          },
-          "content": {
-            "type": "string"
-          },
-          "factRange": {
-            "$ref": "#/components/schemas/SyntaxRange"
-          },
-          "window": {
-            "$ref": "#/components/schemas/SourceWindow"
-          },
-          "pageRange": {
-            "$ref": "#/components/schemas/SyntaxRange"
-          },
-          "rangeComplete": {
-            "type": "boolean"
-          },
-          "startLineComplete": {
-            "type": "boolean"
-          },
-          "endLineComplete": {
-            "type": "boolean"
-          },
-          "nextCursor": {
-            "type": "string",
-            "minLength": 1
-          },
-          "projectGuide": {
-            "$ref": "#/components/schemas/GuideInfo"
-          }
-        },
-        "required": [
-          "context",
-          "target",
-          "path",
-          "contentKind",
-          "contentStatus",
-          "rangeComplete",
-          "startLineComplete",
-          "endLineComplete"
-        ],
-        "additionalProperties": false
-      },
-      "MetadataIdentity": {
-        "type": "object",
-        "properties": {
-          "jobId": {
-            "type": "string",
-            "minLength": 1
-          },
-          "catalogId": {
-            "type": "string",
-            "minLength": 1
-          },
-          "historyId": {
-            "type": "string",
-            "minLength": 1
-          },
-          "branch": {
-            "type": "string",
-            "minLength": 1
-          },
-          "headRevision": {
-            "type": "string",
-            "pattern": "^[a-f0-9]{40}$"
-          },
-          "observedAt": {
-            "type": "string",
-            "format": "date-time"
-          }
-        },
-        "required": [
-          "jobId",
-          "catalogId",
-          "historyId",
-          "branch",
-          "headRevision",
-          "observedAt"
-        ],
-        "additionalProperties": false
-      },
-      "GitBranchItem": {
-        "type": "object",
-        "properties": {
-          "branch": {
-            "type": "string",
-            "minLength": 1
-          },
-          "headRevision": {
-            "type": "string",
-            "pattern": "^[a-f0-9]{40}$"
-          }
-        },
-        "required": [
-          "branch",
-          "headRevision"
-        ],
-        "additionalProperties": false
-      },
-      "GitCommitItem": {
-        "type": "object",
-        "properties": {
-          "revision": {
-            "type": "string",
-            "pattern": "^[a-f0-9]{40}$"
-          },
-          "shortRevision": {
-            "type": "string",
-            "minLength": 1
-          },
-          "parents": {
-            "type": "array",
-            "items": {
-              "type": "string",
-              "pattern": "^[a-f0-9]{40}$"
-            }
-          },
-          "subject": {
-            "type": "string"
-          },
-          "committedAt": {
-            "type": "string",
-            "format": "date-time"
-          }
-        },
-        "required": [
-          "revision",
-          "shortRevision",
-          "parents",
-          "subject",
-          "committedAt"
-        ],
-        "additionalProperties": false
-      },
-      "GitBranchCollection": {
-        "type": "object",
-        "properties": {
-          "repositoryId": {
-            "type": "string",
-            "minLength": 1
-          },
-          "metadata": {
-            "$ref": "#/components/schemas/MetadataIdentity"
-          },
-          "items": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/GitBranchItem"
-            }
-          },
-          "page": {
-            "$ref": "#/components/schemas/Page"
-          }
-        },
-        "required": [
-          "repositoryId",
-          "metadata",
-          "items",
-          "page"
-        ],
-        "additionalProperties": false
-      },
-      "GitCommitCollection": {
-        "type": "object",
-        "properties": {
-          "repositoryId": {
-            "type": "string",
-            "minLength": 1
-          },
-          "metadata": {
-            "$ref": "#/components/schemas/MetadataIdentity"
-          },
-          "items": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/GitCommitItem"
-            }
-          },
-          "page": {
-            "$ref": "#/components/schemas/Page"
-          }
-        },
-        "required": [
-          "repositoryId",
-          "metadata",
-          "items",
-          "page"
-        ],
-        "additionalProperties": false
-      },
-      "ChangeEndpoint": {
-        "type": "object",
-        "properties": {
-          "path": {
-            "type": "string",
-            "minLength": 1
-          },
-          "mode": {
-            "type": "string",
-            "minLength": 1
-          },
-          "blobId": {
-            "type": "string",
-            "minLength": 1
-          },
-          "contentKind": {
-            "type": "string",
-            "enum": [
-              "CODE",
-              "PROJECT_GUIDE"
-            ]
-          },
-          "projectGuide": {
-            "$ref": "#/components/schemas/GuideInfo"
-          }
-        },
-        "required": [
-          "path",
-          "mode",
-          "blobId",
-          "contentKind"
-        ],
-        "additionalProperties": false
-      },
-      "GitChangeItem": {
-        "type": "object",
-        "properties": {
-          "changeId": {
-            "type": "string",
-            "minLength": 1
-          },
-          "kind": {
-            "type": "string",
-            "minLength": 1
-          },
-          "before": {
-            "$ref": "#/components/schemas/ChangeEndpoint"
-          },
-          "after": {
-            "$ref": "#/components/schemas/ChangeEndpoint"
-          },
-          "diffStatus": {
-            "type": "string",
-            "minLength": 1
-          }
-        },
-        "required": [
-          "changeId",
-          "kind",
-          "diffStatus"
-        ],
-        "additionalProperties": false
-      },
-      "GitComparisonPolicyCoverage": {
-        "type": "object",
-        "description": "Immutable policy exclusions across the complete direct comparison, not authorization-filtered coverage. Granular source-restricted readers cannot access this operation. No excluded paths or contents are returned.",
-        "properties": {
-          "excludedChanges": { "type": "integer", "format": "int64", "minimum": 0 },
-          "reasons": {
-            "type": "array",
-            "items": {
-              "type": "object",
-              "properties": {
-                "reason": { "type": "string", "enum": ["UNSUPPORTED_PATH", "SYMLINK", "SUBMODULE", "OUTSIDE_SOURCE_POLICY"] },
-                "count": { "type": "integer", "format": "int64", "minimum": 1 }
-              },
-              "required": ["reason", "count"],
-              "additionalProperties": false
-            }
-          }
-        },
-        "required": ["excludedChanges", "reasons"],
-        "additionalProperties": false
-      },
-      "ComparisonResult": {
-        "type": "object",
-        "properties": {
-          "comparisonContext": {
-            "$ref": "#/components/schemas/ComparisonContext"
-          },
-          "ancestry": {
-            "type": "string",
-            "minLength": 1
-          },
-          "policyCoverage": {
-            "$ref": "#/components/schemas/GitComparisonPolicyCoverage"
-          },
-          "items": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/GitChangeItem"
-            }
-          },
-          "page": {
-            "$ref": "#/components/schemas/Page"
-          }
-        },
-        "required": [
-          "comparisonContext",
-          "ancestry",
-          "policyCoverage",
-          "items",
-          "page"
-        ],
-        "additionalProperties": false
-      },
-      "FileDiffResult": {
-        "type": "object",
-        "properties": {
-          "comparisonContext": {
-            "$ref": "#/components/schemas/ComparisonContext"
-          },
-          "change": {
-            "$ref": "#/components/schemas/GitChangeItem"
-          },
-          "patch": {
-            "type": "string"
-          },
-          "complete": {
-            "type": "boolean"
-          },
-          "nextCursor": {
-            "type": "string",
-            "minLength": 1
-          }
-        },
-        "required": [
-          "comparisonContext",
-          "change",
-          "complete"
+          "path"
         ],
         "additionalProperties": false
       },
@@ -3394,23 +1149,25 @@
         "properties": {
           "code": {
             "type": "string",
-            "minLength": 1
+            "enum": [
+              "INVALID_ARGUMENT",
+              "REPOSITORY_NOT_FOUND",
+              "SOURCE_NOT_PREPARED",
+              "REVISION_NOT_PREPARED",
+              "SOURCE_NOT_FOUND",
+              "SOURCE_UNSUPPORTED",
+              "SOURCE_BUSY",
+              "SOURCE_UNAVAILABLE",
+              "SOURCE_TIMEOUT"
+            ]
           },
           "message": {
             "type": "string"
-          },
-          "retryable": {
-            "type": "boolean"
-          },
-          "currentRevision": {
-            "type": "string",
-            "pattern": "^[a-f0-9]{40}$"
           }
         },
         "required": [
           "code",
-          "message",
-          "retryable"
+          "message"
         ],
         "additionalProperties": false
       },
