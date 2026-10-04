@@ -126,14 +126,17 @@ done
 [ "$(jq -r '.resolvedRevision' "${root}/job.json")" = "${revision}" ] || fail 'resolved Git SHA mismatch'
 
 query_container="$(docker run -d -p 127.0.0.1::8080 \
-  --mount "type=bind,src=${root}/storage/source-published,dst=/data/source-published,readonly" \
+  --mount "type=bind,src=${root}/storage/source-published,dst=/published-evidence,readonly" \
   -e SEMANTIC_QUERY_API_TOKEN=query-smoke-only \
-  -e 'SPRING_APPLICATION_JSON={"semantic":{"query":{"source":{"published-root":"/data/source-published","rg-executable":"/usr/bin/rg","allowed-repositories":["fixture"]}}}}' \
-  "${query_image}")"
+  -e SEMANTIC_SOURCE_PUBLISHED_ROOT=/published-evidence \
+  -e SEMANTIC_QUERY_RG_EXECUTABLE=/tmp/source-smoke-rg \
+  -e 'SPRING_APPLICATION_JSON={"semantic":{"query":{"source":{"allowed-repositories":["fixture"]}}}}' \
+  --entrypoint sh "${query_image}" -ceu \
+  'cp /usr/bin/rg /tmp/source-smoke-rg; exec java -jar /app/semantic-query.jar')"
 query_url="http://$(docker port "${query_container}" 8080/tcp)"
 wait_http "${query_url}/api/v1/repositories" "${query_container}"
 docker inspect "${query_container}" --format '{{json .Mounts}}' | jq -e \
-  'length == 1 and .[0].Destination == "/data/source-published" and .[0].RW == false' >/dev/null \
+  'length == 1 and .[0].Destination == "/published-evidence" and .[0].RW == false' >/dev/null \
   || fail 'Query has a private mount or a writable published mount'
 docker inspect "${indexer_container}" --format '{{json .Mounts}}' | jq -e \
   'length == 2 and any(.[]; .Destination == "/data" and .RW == true)
@@ -161,7 +164,7 @@ status="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 5 \
 
 
 # Probe only a throwaway filename. A root process or a shared UID would hide this bug.
-if docker exec "${query_container}" sh -c 'touch /data/source-published/query-must-not-write' >/dev/null 2>&1; then
+if docker exec "${query_container}" sh -c 'touch /published-evidence/query-must-not-write' >/dev/null 2>&1; then
   fail 'Query can mutate published bind mount'
 fi
 docker exec "${query_container}" sh -ceu '
@@ -173,6 +176,10 @@ docker exec "${query_container}" sh -ceu '
   test ! -e /opt/jdtls
   ! command -v git >/dev/null
 '
+if docker exec -e SEMANTIC_QUERY_RG_EXECUTABLE=/missing-nondefault-rg "${query_container}" \
+    java -jar /app/semantic-query.jar --server.port=0 >"${root}/invalid-rg.log" 2>&1; then
+  fail 'Query ignored the configured nondefault ripgrep executable'
+fi
 docker exec "${indexer_container}" sh -ceu 'test "$(id -u)" = 10001; test -d /data/source-admin; test -d /data/source-published'
 successful=1
 echo 'Source images: real Git preparation, published admission/search/read, dependency and UID isolation passed'
