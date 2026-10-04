@@ -5,7 +5,6 @@ import com.java.semantic.model.source.SourceReadContract.*;
 import com.java.semantic.query.config.SourceAccessProperties;
 import com.java.semantic.query.source.SourceQueryException.Code;
 import java.io.ByteArrayOutputStream;
-import java.io.BufferedInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.ByteBuffer;
@@ -84,20 +83,22 @@ public final class RipgrepTextSearch {
             builder.environment().put("RIPGREP_CONFIG_PATH", "/dev/null");
             process = builder.start();
         } catch (IOException exception) { throw new SourceQueryException(Code.SOURCE_UNAVAILABLE, exception); }
+        AtomicBoolean stopping = new AtomicBoolean();
         try { process.getOutputStream().close(); }
         catch (IOException exception) {
-            cleanup(process, List.of(), operationDeadline);
+            cleanup(process, List.of(), stopping, operationDeadline);
             throw new SourceQueryException(Code.SOURCE_UNAVAILABLE, exception);
         }
         List<TextMatch> matches = new ArrayList<>();
         AtomicReference<Throwable> failure = new AtomicReference<>();
         AtomicBoolean enough = new AtomicBoolean();
         Thread stdout = Thread.ofVirtual().name("source-rg-stdout").start(() -> {
-            try { readMatches(process.getInputStream(), admitted, request, directory, glob, deadline, matches, enough); }
+            try { readMatches(process.getInputStream(), process, stopping, admitted, request, directory, glob,
+                    deadline, matches, enough); }
             catch (Throwable exception) { failure.compareAndSet(null, exception); }
         });
         Thread stderr = Thread.ofVirtual().name("source-rg-stderr").start(() -> {
-            try { drain(process.getErrorStream(), STDERR_CAP); }
+            try { drain(process.getErrorStream(), process, stopping, deadline, STDERR_CAP); }
             catch (Throwable exception) { failure.compareAndSet(null, exception); }
         });
         boolean truncated = false;
@@ -124,15 +125,17 @@ public final class RipgrepTextSearch {
             Thread.currentThread().interrupt();
             throw new SourceQueryException(Code.SOURCE_TIMEOUT, exception);
         } finally {
-            cleanup(process, List.of(stdout, stderr), operationDeadline);
+            cleanup(process, List.of(stdout, stderr), stopping, operationDeadline);
         }
     }
 
-    private static void cleanup(Process process, List<Thread> readers, long deadline) {
+    private static void cleanup(Process process, List<Thread> readers, AtomicBoolean stopping, long deadline) {
         boolean interrupted = Thread.interrupted();
+        stopping.set(true);
         // Capture descendants before killing the parent: after reparenting they are no longer discoverable.
-        List<ProcessHandle> descendants = process.descendants().toList();
+        List<ProcessHandle> descendants = List.of();
         try {
+            descendants = process.descendants().toList();
             for (ProcessHandle descendant : descendants) {
                 if (descendant.isAlive()) descendant.destroyForcibly();
             }
@@ -164,13 +167,24 @@ public final class RipgrepTextSearch {
                     catch (InterruptedException exception) { interrupted = true; }
                 }
             }
-            if (process.isAlive() || readers.stream().anyMatch(Thread::isAlive)) {
-                throw new SourceQueryException(Code.SOURCE_UNAVAILABLE);
-            }
-            try { process.getInputStream().close(); process.getErrorStream().close(); }
-            catch (IOException exception) { /* Owned streams are closed after their readers exit. */ }
         } finally {
+            if (process.isAlive()) process.destroyForcibly();
+            for (ProcessHandle descendant : descendants) {
+                if (descendant.isAlive()) descendant.destroyForcibly();
+            }
+            for (Thread reader : readers) {
+                if (reader.isAlive()) reader.interrupt();
+            }
+            // Readers only perform available()-guarded reads; close each owned pipe even on error.
+            try { process.getInputStream().close(); }
+            catch (IOException exception) { /* The child is already terminated or forcibly terminating. */ }
+            try { process.getErrorStream().close(); }
+            catch (IOException exception) { /* Close the other pipe independently. */ }
             if (interrupted) Thread.currentThread().interrupt();
+        }
+        if (process.isAlive() || descendants.stream().anyMatch(ProcessHandle::isAlive)
+                || readers.stream().anyMatch(Thread::isAlive)) {
+            throw new SourceQueryException(Code.SOURCE_UNAVAILABLE);
         }
     }
 
@@ -186,35 +200,62 @@ public final class RipgrepTextSearch {
         }
     }
 
-    private static void drain(InputStream stream, int cap) throws IOException {
+    private static int available(InputStream stream, Process process, AtomicBoolean stopping, long deadline)
+            throws IOException {
+        while (!stopping.get()) {
+            LocalSourceRevisionCatalog.check(deadline);
+            int count = stream.available();
+            if (count > 0) return count;
+            if (!process.isAlive()) return -1;
+            try { Thread.sleep(1); }
+            catch (InterruptedException exception) {
+                Thread.currentThread().interrupt();
+                throw new SourceQueryException(Code.SOURCE_TIMEOUT, exception);
+            }
+        }
+        return -1;
+    }
+
+    private static void drain(InputStream stream, Process process, AtomicBoolean stopping, long deadline, int cap)
+            throws IOException {
         byte[] buffer = new byte[8192];
         int total = 0;
-        int count;
-        while ((count = stream.read(buffer)) >= 0) {
+        int ready;
+        while ((ready = available(stream, process, stopping, deadline)) > 0) {
+            int count = stream.read(buffer, 0, Math.min(ready, buffer.length));
+            if (count < 0) break;
             total += count;
             if (total > cap) throw new SourceQueryException(Code.SOURCE_UNAVAILABLE);
         }
     }
 
-    private void readMatches(InputStream stream, AdmittedSourceRevision admitted, TextSearchRequest request,
-            String directory, String glob, long deadline, List<TextMatch> matches, AtomicBoolean enough) throws IOException {
+    private void readMatches(InputStream stream, Process process, AtomicBoolean stopping,
+            AdmittedSourceRevision admitted, TextSearchRequest request, String directory, String glob,
+            long deadline, List<TextMatch> matches, AtomicBoolean enough) throws IOException {
         ByteArrayOutputStream frame = new ByteArrayOutputStream();
         Set<String> verified = new HashSet<>();
-        InputStream buffered = new BufferedInputStream(stream);
+        byte[] buffer = new byte[8192];
         int total = 0;
-        int value;
-        while ((value = buffered.read()) != -1 && !enough.get()) {
-            LocalSourceRevisionCatalog.check(deadline);
-            if (++total > STDOUT_CAP) throw new SourceQueryException(Code.SOURCE_UNAVAILABLE);
-            if (value != '\n') {
-                if (frame.size() >= FRAME_CAP) throw new SourceQueryException(Code.SOURCE_UNAVAILABLE);
-                frame.write(value);
-            } else {
-                parseMatch(frame.toByteArray(), admitted, request, directory, glob, deadline, matches, enough, verified);
-                frame.reset();
+        while (!enough.get()) {
+            int ready = available(stream, process, stopping, deadline);
+            if (ready < 0) break;
+            int count = stream.read(buffer, 0, Math.min(ready, buffer.length));
+            if (count < 0) break;
+            for (int index = 0; index < count && !enough.get(); index++) {
+                int value = Byte.toUnsignedInt(buffer[index]);
+                if (++total > STDOUT_CAP) throw new SourceQueryException(Code.SOURCE_UNAVAILABLE);
+                if (value != '\n') {
+                    if (frame.size() >= FRAME_CAP) throw new SourceQueryException(Code.SOURCE_UNAVAILABLE);
+                    frame.write(value);
+                } else {
+                    parseMatch(frame.toByteArray(), admitted, request, directory, glob, deadline, matches, enough, verified);
+                    frame.reset();
+                }
             }
         }
-        if (!enough.get() && frame.size() != 0) throw new SourceQueryException(Code.SOURCE_UNAVAILABLE);
+        if (!stopping.get() && !enough.get() && frame.size() != 0) {
+            throw new SourceQueryException(Code.SOURCE_UNAVAILABLE);
+        }
     }
 
     private void parseMatch(byte[] frame, AdmittedSourceRevision admitted, TextSearchRequest request,
