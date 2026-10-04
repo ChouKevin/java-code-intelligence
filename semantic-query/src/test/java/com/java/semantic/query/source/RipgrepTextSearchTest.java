@@ -3,6 +3,7 @@ package com.java.semantic.query.source;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import com.java.semantic.model.source.SourceReadContract.*;
+import com.java.semantic.query.application.SemanticQueryFacade;
 import com.java.semantic.query.config.SourceAccessProperties;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -186,16 +187,17 @@ class RipgrepTextSearchTest {
         Path executable = script("echo $$ >> '" + pid + "'\nwhile :; do :; done");
         SourceAccessProperties access = new SourceAccessProperties(fixture.root, executable, List.of("sample"),
                 65_536, Duration.ofSeconds(5), Duration.ofSeconds(2), Duration.ofSeconds(2), 2);
-        LocalRepositorySourceService service = new LocalRepositorySourceService(access, fixture.mapper);
+        SemanticQueryFacade facade = new SemanticQueryFacade(fixture.catalog(),
+                new LocalRepositorySourceService(access, fixture.mapper), access.maxActiveSearches());
         TextSearchRequest request = new TextSearchRequest(fixture.context, "needle", "", Optional.empty(), 20);
         AtomicReference<SourceQueryException> firstError = new AtomicReference<>();
         AtomicReference<SourceQueryException> secondError = new AtomicReference<>();
         Thread first = Thread.ofVirtual().start(() -> {
-            try { service.searchText(admitted, request); }
+            try { facade.searchText(request); }
             catch (SourceQueryException exception) { firstError.set(exception); }
         });
         Thread second = Thread.ofVirtual().start(() -> {
-            try { service.searchText(admitted, request); }
+            try { facade.searchText(request); }
             catch (SourceQueryException exception) { secondError.set(exception); }
         });
         long until = System.nanoTime() + TimeUnit.SECONDS.toNanos(3);
@@ -204,7 +206,7 @@ class RipgrepTextSearchTest {
                 Thread.sleep(10);
             }
             assertThat(Files.readAllLines(pid)).hasSize(2);
-            assertThatThrownBy(() -> service.searchText(admitted, request))
+            assertThatThrownBy(() -> facade.searchText(request))
                     .isInstanceOfSatisfying(SourceQueryException.class,
                             error -> assertThat(error.code()).isEqualTo(SourceQueryException.Code.SOURCE_BUSY));
         } finally {
@@ -219,7 +221,7 @@ class RipgrepTextSearchTest {
             long child = Long.parseLong(line.trim());
             assertThat(ProcessHandle.of(child).map(ProcessHandle::isAlive).orElse(false)).isFalse();
         }
-        assertThatThrownBy(() -> service.searchText(admitted, request))
+        assertThatThrownBy(() -> facade.searchText(request))
                 .isInstanceOfSatisfying(SourceQueryException.class,
                         error -> assertThat(error.code()).isEqualTo(SourceQueryException.Code.SOURCE_TIMEOUT));
     }

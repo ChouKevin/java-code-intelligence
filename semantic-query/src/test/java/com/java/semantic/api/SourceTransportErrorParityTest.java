@@ -16,7 +16,7 @@ import com.java.semantic.model.source.SourceReadContract.TextSearchRequest;
 import com.java.semantic.model.source.SourceReadContract.TextSearchResult;
 import com.java.semantic.query.application.SemanticQueryFacade;
 import com.java.semantic.query.source.SourceQueryException.Code;
-import io.modelcontextprotocol.server.McpStatelessServerFeatures;
+import io.modelcontextprotocol.server.McpServerFeatures;
 import io.modelcontextprotocol.spec.McpSchema;
 import java.nio.file.Path;
 import java.util.Map;
@@ -50,7 +50,8 @@ class SourceTransportErrorParityTest {
                     throw new SourceQueryException(code, new IllegalStateException("/private/credentials"));
                 }
             };
-            SemanticQueryFacade facade = new SemanticQueryFacade(fixture.catalog(), failing);
+            SemanticQueryFacade facade = new SemanticQueryFacade(fixture.catalog(), failing,
+                    fixture.properties.maxActiveSearches());
             MockMvc http = standaloneSetup(new SemanticQueryController(facade))
                     .setControllerAdvice(new QueryApiExceptionHandler())
                     .setMessageConverters(new JacksonJsonHttpMessageConverter(fixture.mapper)).build();
@@ -59,7 +60,7 @@ class SourceTransportErrorParityTest {
             String payload = http.perform(post("/api/v1/source").contentType("application/json")
                     .content(fixture.mapper.writeValueAsBytes(input))).andExpect(status().is(caseUnderTest.getValue()))
                     .andReturn().getResponse().getContentAsString();
-            McpStatelessServerFeatures.SyncToolSpecification tool = new QueryMcpToolCatalogConfiguration()
+            McpServerFeatures.SyncToolSpecification tool = new QueryMcpToolCatalogConfiguration()
                     .mcpQueryToolSpecifications(facade, fixture.mapper).stream()
                     .filter(value -> value.tool().name().equals("read_source")).findFirst().orElseThrow();
             McpSchema.CallToolResult mcp = tool.callHandler().apply(null,

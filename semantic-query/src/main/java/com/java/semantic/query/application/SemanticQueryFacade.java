@@ -12,20 +12,27 @@ import com.java.semantic.model.source.SourceReadContract.TextSearchRequest;
 import com.java.semantic.model.source.SourceReadContract.TextSearchResult;
 import com.java.semantic.query.source.RepositorySourcePort;
 import com.java.semantic.query.source.SourceRevisionCatalog;
+import com.java.semantic.query.source.SourceQueryException;
 import com.java.semantic.query.source.SourceOperationDeadline;
 import java.time.Duration;
 import java.util.Map;
 import java.util.Objects;
+import java.util.concurrent.Semaphore;
 
 /** The sole source application contract shared by HTTP and MCP. */
 public final class SemanticQueryFacade {
 
     private final SourceRevisionCatalog catalog;
     private final RepositorySourcePort source;
+    private final Semaphore searchSlots;
 
-    public SemanticQueryFacade(SourceRevisionCatalog catalog, RepositorySourcePort source) {
+    public SemanticQueryFacade(SourceRevisionCatalog catalog, RepositorySourcePort source, int maxActiveSearches) {
         this.catalog = Objects.requireNonNull(catalog, "source revision catalog");
         this.source = Objects.requireNonNull(source, "repository source reader");
+        if (maxActiveSearches < 1 || maxActiveSearches > 2) {
+            throw new IllegalArgumentException("active search limit must be between one and two");
+        }
+        this.searchSlots = new Semaphore(maxActiveSearches);
     }
 
     public Object execute(String operation, Map<String, ?> input) {
@@ -53,8 +60,13 @@ public final class SemanticQueryFacade {
     }
 
     public TextSearchResult searchText(TextSearchRequest request) {
-        return SourceOperationDeadline.within(Duration.ofSeconds(5),
-                () -> source.searchText(catalog.admit(request.context()), request));
+        return SourceOperationDeadline.within(Duration.ofSeconds(5), () -> {
+            if (!searchSlots.tryAcquire()) {
+                throw new SourceQueryException(SourceQueryException.Code.SOURCE_BUSY);
+            }
+            try { return source.searchText(catalog.admit(request.context()), request); }
+            finally { searchSlots.release(); }
+        });
     }
 
     public SourceResult readSource(ReadSourceRequest request) {

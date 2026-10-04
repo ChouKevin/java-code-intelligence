@@ -3,13 +3,13 @@ package com.java.semantic.mcp;
 import com.java.semantic.query.application.SemanticQueryErrorMapper;
 import com.java.semantic.query.application.SemanticQueryFacade;
 import io.modelcontextprotocol.server.McpServer;
-import io.modelcontextprotocol.server.McpStatelessServerFeatures;
-import io.modelcontextprotocol.server.McpStatelessSyncServer;
+import io.modelcontextprotocol.server.McpServerFeatures;
+import io.modelcontextprotocol.server.McpSyncServer;
 import io.modelcontextprotocol.spec.McpSchema;
-import io.modelcontextprotocol.spec.McpStatelessServerTransport;
+import io.modelcontextprotocol.spec.McpStreamableServerTransportProvider;
 import java.util.List;
-import org.springframework.ai.mcp.server.webmvc.transport.WebMvcStatelessServerTransport;
-import org.springframework.ai.mcp.server.common.autoconfigure.McpServerStatelessAutoConfiguration;
+import org.springframework.ai.mcp.server.webmvc.transport.WebMvcStreamableServerTransportProvider;
+import org.springframework.ai.mcp.server.common.autoconfigure.McpServerAutoConfiguration;
 import org.springframework.ai.mcp.server.common.autoconfigure.properties.McpServerProperties;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.context.annotation.Primary;
@@ -23,7 +23,7 @@ import tools.jackson.databind.json.JsonMapper;
 
 /** One application operation and JSON result for both transports. */
 @Configuration
-@ImportAutoConfiguration(exclude = McpServerStatelessAutoConfiguration.class)
+@ImportAutoConfiguration(exclude = McpServerAutoConfiguration.class)
 @EnableConfigurationProperties(McpServerProperties.class)
 @ConditionalOnProperty(prefix = "spring.ai.mcp.server", name = "enabled", havingValue = "true", matchIfMissing = true)
 public class QueryMcpToolCatalogConfiguration {
@@ -36,13 +36,13 @@ public class QueryMcpToolCatalogConfiguration {
 
     @Bean
     @Primary
-    McpStatelessServerTransport cancellableMcpTransport(WebMvcStatelessServerTransport delegate) {
-        return new CancellableMcpTransport(delegate);
+    McpStreamableServerTransportProvider sessionOwnedMcpTransport(WebMvcStreamableServerTransportProvider delegate) {
+        return new SessionOwnedMcpTransport(delegate);
     }
 
     @Bean(destroyMethod = "close")
-    public McpStatelessSyncServer queryMcpServer(McpStatelessServerTransport transport, McpServerProperties properties,
-            @Qualifier("mcpQueryToolSpecifications") List<McpStatelessServerFeatures.SyncToolSpecification> tools) {
+    public McpSyncServer queryMcpServer(McpStreamableServerTransportProvider transport, McpServerProperties properties,
+            @Qualifier("mcpQueryToolSpecifications") List<McpServerFeatures.SyncToolSpecification> tools) {
         // SDK schema rejection bypasses the shared structured application error contract.
         return McpServer.sync(transport).serverInfo(properties.getName(), properties.getVersion())
                 .instructions(properties.getInstructions()).requestTimeout(properties.getRequestTimeout())
@@ -51,14 +51,14 @@ public class QueryMcpToolCatalogConfiguration {
     }
 
     @Bean
-    public List<McpStatelessServerFeatures.SyncToolSpecification> mcpQueryToolSpecifications(
+    public List<McpServerFeatures.SyncToolSpecification> mcpQueryToolSpecifications(
             SemanticQueryFacade facade, ObjectMapper mapper) {
         return SemanticMcpToolCatalog.tools().stream().map(definition -> {
             McpSchema.Tool tool = McpSchema.Tool.builder(definition.name(), SemanticMcpSchemaCatalog.inputSchema(definition.name()))
                     .description(definition.description()).outputSchema(SemanticMcpSchemaCatalog.outputSchema(definition.name()))
                     .annotations(McpSchema.ToolAnnotations.builder().readOnlyHint(true).destructiveHint(false)
                             .idempotentHint(true).build()).build();
-            return McpStatelessServerFeatures.SyncToolSpecification.builder().tool(tool)
+            return McpServerFeatures.SyncToolSpecification.builder().tool(tool)
                     .callHandler((context, request) -> {
                         Object result;
                         boolean error = false;

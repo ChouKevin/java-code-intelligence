@@ -12,6 +12,29 @@ Indexer config uses `semantic.source-admin-root` (`SEMANTIC_SOURCE_ADMIN_ROOT`, 
 
 Indexer publishes a sanitized `repositories.json`; registration is **not** preparation. The private bare repository/jobs/staging live under `source-admin`; published `repositories.json`, `<id>/state.json`, and `<id>/revisions/<sha>/{manifest.json,inventory.jsonl,tree/}` live under `source-published`. The manifest and policy formats are version **1**. Query admits only an allowlisted ID and a revision in atomic state membership whose receipt/manifest digest and versions match. A directory on disk alone, including an orphan after interruption, grants no read. Staging and final revision directory are on the same filesystem: Indexer flushes the complete tree/metadata, atomically renames the revision, then atomically replaces state containing membership and current together. No copy fallback or in-place overwrite of an existing published SHA.
 
+## MCP session lifecycle
+
+Query `/mcp` uses stateful Streamable HTTP. Each independent client initializes its
+own session, retains the server-issued `Mcp-Session-Id`, sends
+`notifications/initialized`, and includes that session ID and the negotiated
+`MCP-Protocol-Version` on subsequent requests and notifications. Continue sending
+`X-Api-Token` on every request; a session ID is not a substitute for authorization.
+Use a Streamable HTTP MCP client that manages this lifecycle rather than issuing
+uninitialized `tools/call` POSTs.
+
+JSON-RPC request IDs are scoped to a session: independent clients may reuse the
+same ID without rejecting or cancelling each other's calls. Send
+`notifications/cancelled` with the owning session and request ID to stop its work.
+Close an unused session with `DELETE /mcp` carrying the same headers. After Query
+restarts, initialize a new session; an already-published exact source context
+remains valid and does not require new preparation. Indexer retains its separate
+stateless preparation endpoint and admin token.
+
+The pinned MCP provider retains a session until client `DELETE` or server
+shutdown; it has no supported idle-eviction setting. Clients must close unused
+sessions. Abandoned sessions consume memory until shutdown, so the two-search
+limit is not a bound on idle session count or a capacity guarantee.
+
 ## Prepare, discover, navigate
 
 Use the private Indexer `/mcp` (`prepare_source`, `get_job`) or the equivalent HTTP calls below, with `X-Api-Token: <admin-secret>`. Save a **canonical lowercase UUID** in durable client storage before the POST. Example bodies omit any secret:
@@ -45,6 +68,13 @@ The example SHA is **A from a disposable observed fixture**; replace it with the
 `filePattern` matches repository-relative paths; `directory` narrows that same scope and does not rebase the glob. For example, directory `src` with pattern `src/*.java` searches Java files directly under `src`. A read beyond EOF returns empty content with absent `endLine`; an empty response's `startLine` alone is not a citable source range.
 
 Search uses ripgrep's path-sorted directory traversal so the bounded result window and HTTP/MCP order do not depend on worker scheduling. Each search checks complete inventory digest/order once using one read-only file handle; bounded positional lookups on that verified handle validate candidate windows without retaining a whole-repository index. Each unique authorized file is hashed once, and untracked physical hits cannot consume the authorized result limit or cause a false complete scan. Directory traversal order is not global lexicographic file-path order (for example, `a/z.java` can precede `a.java` in rg output); preserve the actual rg prefix. The two-search concurrency limit and original 5s wall deadline still apply; there is no heap sort or search continuation.
+
+The search permit is acquired before revision admission and inventory I/O, remains
+held through subprocess cleanup, and is shared by HTTP and MCP. Excess requests
+receive `SOURCE_BUSY` without entering admission. Repository listing parses its
+descriptors and computes its cursor binding from the same registry byte snapshot;
+if the registry changes between pages, obtain a new listing rather than reusing
+the rejected cursor.
 
 Only tracked regular supported text at the pinned commit is readable. The same policy excludes `.git`, `target`, `build`, `.gradle`, `node_modules`, `generated` at any depth and `*.class`; direct read cannot bypass it. Symlinks are not followed, submodules are not initialized, binary/unsupported encoding/path/LFS pointers are explicitly unsupported; no filters, hooks, LFS hydration or build scripts execute. A guide optionally committed at configured `project-guide-path` is `AVAILABLE`, `MISSING`, `INVALID` or `DISABLED`, always `freshness: NOT_VERIFIED` if represented. It is a navigation hint, not verified business truth, and its absence never blocks source readiness. See the [external authoring prompt](repository-context-prompt.md).
 

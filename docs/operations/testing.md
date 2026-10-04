@@ -24,7 +24,32 @@ mvn --batch-mode --no-transfer-progress -f semantic-indexer/fixtures/uat/video-s
 
 Do not reuse old Mongo/JDT, semantic-review or Git-review acceptance reports as Source MCP results. A successful native SDK journey is not evidence of OMP/Codex/Claude model use, private Git coverage, TLS or 50-user load. The [agent checklist](mcp-agent-acceptance.md) separates those layers.
 
-## Observed local evidence (2026-10-04 snapshot)
+## PR #2 repair verification (2026-10-04)
+
+After the client-isolation, search-admission and registry-snapshot repairs, the
+controller ran the complete Java 21 reactor: **87 tests passed** (Model 6,
+Indexer 29, Query 52; zero failures/errors/skips). The run supplied a real
+ripgrep executable through `-Dsource.test.rg`; no workstation fallback was added.
+The clean `scripts/test-source-mcp.sh` also passed with real Git/ripgrep,
+independent Indexer and warm/cold Query processes, native MCP/HTTP parity, and
+exact A/B source citations.
+
+A separate actual-socket probe initialized two Query sessions and verified that
+both clients could use the same in-flight JSON-RPC ID. Foreign cancellation left
+the other client's real search intact; owner cancellation reaped its subprocess,
+and a later search succeeded. Two real searches across the sessions caused a
+third request to return `SOURCE_BUSY`. Deterministic reactor regressions also
+proved that the permit precedes catalog admission and that a registry replacement
+cannot bind an old page to the new registry digest. Each regression had observed
+behavioral failure before its production fix.
+
+Query now requires the [MCP session lifecycle](source-mcp.md#mcp-session-lifecycle).
+The pinned provider retains abandoned sessions until shutdown; this verification
+does not establish idle-session capacity, external model-client acceptance,
+private-production Git access, or deployed TLS. Image/deployment gates remain
+separate from the local socket evidence.
+
+## Initial Phase 1 evidence before PR #2 review (2026-10-04)
 
 The controller observed the final source-only ordinary reactor of **84 passing tests** (Model 6, Indexer 29, Query 49; zero failures/errors/skips and no compiler warnings) with a real ripgrep path supplied because host `/usr/bin/rg` is absent. The final clean `scripts/test-source-mcp.sh` passed with real native SDK, HTTP, local Git/rg, separate Indexer and warm/cold Query processes. Retained **disposable-run** evidence is `/tmp/source-mcp-journey.Qhy1JQFv/artifacts/` (ephemeral local path, not a committed fixture or reproducibility guarantee). `revisions.json` records A `395566e8f884883d147020d42c21b4b281185a41`, B `c8acbff5042091b9f36c8d4eb2b3296b3e4f82c7`; `job-a.json` records original request `9e86e823-5689-4ac9-ba37-4a58e33c1611` and durable COMPLETE identity. A remains unchanged after B and after known-SHA republishing, with manifest/inventory/tree hashes checked. Every actually returned fixture repo/SHA/path/line citation is compared to the exact Git blob. Cold Query reads A/B after Indexer stops and disposable remote/private paths become unavailable. Only intentional JSON response/request/provenance artifacts are retained; raw Git/process logs are not copied.
 

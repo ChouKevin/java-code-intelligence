@@ -20,14 +20,13 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
-import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
-/** Owns the child, both pipes, reader threads, deadline, and slot on every exit path. */
+/** Owns the child, both pipes, reader threads, and deadline on every exit path. */
 public final class RipgrepTextSearch {
     private static final int STDOUT_CAP = 4 * 1024 * 1024;
     private static final int FRAME_CAP = 1024 * 1024;
@@ -36,22 +35,18 @@ public final class RipgrepTextSearch {
     private final SourceAccessProperties properties;
     private final SourcePathResolver resolver;
     private final ObjectMapper mapper;
-    private final Semaphore slots;
 
     public RipgrepTextSearch(SourceAccessProperties properties, SourcePathResolver resolver, ObjectMapper mapper) {
         this.properties = Objects.requireNonNull(properties);
         this.resolver = Objects.requireNonNull(resolver);
         this.mapper = Objects.requireNonNull(mapper);
-        this.slots = new Semaphore(properties.maxActiveSearches());
     }
 
     public TextSearchResult search(AdmittedSourceRevision admitted, TextSearchRequest request) {
         if (!admitted.context().equals(request.context())) throw new SourceQueryException(Code.INVALID_ARGUMENT);
         String directory = SourcePathResolver.safeDirectory(request.directory());
         String glob = request.filePattern().map(SourcePathResolver::safeGlob).orElse("");
-        if (!slots.tryAcquire()) throw new SourceQueryException(Code.SOURCE_BUSY);
-        try { return run(admitted, request, directory, glob); }
-        finally { slots.release(); }
+        return run(admitted, request, directory, glob);
     }
 
     private TextSearchResult run(AdmittedSourceRevision admitted, TextSearchRequest request, String directory, String glob) {

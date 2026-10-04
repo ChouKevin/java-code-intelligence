@@ -14,7 +14,7 @@ import com.java.semantic.mcp.QueryMcpToolCatalogConfiguration;
 import com.java.semantic.mcp.SemanticMcpToolCatalog;
 import com.java.semantic.model.source.SourceReadContract.ContextRequest;
 import com.java.semantic.query.application.SemanticQueryFacade;
-import io.modelcontextprotocol.server.McpStatelessServerFeatures;
+import io.modelcontextprotocol.server.McpServerFeatures;
 import io.modelcontextprotocol.spec.McpSchema;
 import java.nio.file.Path;
 import java.util.List;
@@ -36,13 +36,14 @@ class HttpMcpParityTest {
         fixture.directory("src");
         fixture.file("src/Order.java", "class Order { String name = \"訂單\"; }\n");
         fixture.publish(Optional.empty());
-        SemanticQueryFacade facade = new SemanticQueryFacade(fixture.catalog(), fixture.service());
+        SemanticQueryFacade facade = new SemanticQueryFacade(fixture.catalog(), fixture.service(),
+                fixture.properties.maxActiveSearches());
         QuerySecurityProperties security = new QuerySecurityProperties();
         security.setApiToken("query-token");
         MockMvc http = standaloneSetup(new SemanticQueryController(facade)).setControllerAdvice(new QueryApiExceptionHandler())
                 .setMessageConverters(new JacksonJsonHttpMessageConverter(fixture.mapper))
                 .addFilters(new QueryTokenFilter(security)).build();
-        List<McpStatelessServerFeatures.SyncToolSpecification> tools = new QueryMcpToolCatalogConfiguration()
+        List<McpServerFeatures.SyncToolSpecification> tools = new QueryMcpToolCatalogConfiguration()
                 .mcpQueryToolSpecifications(facade, fixture.mapper);
         assertThat(SemanticMcpToolCatalog.tools()).extracting(SemanticMcpToolCatalog.ToolDefinition::name)
                 .containsExactly("list_repositories", "get_context", "list_files", "search_text", "read_source");
@@ -66,7 +67,7 @@ class HttpMcpParityTest {
         assertThat(facade.getContext(new ContextRequest("sample", Optional.empty())).context()).contains(fixture.context);
     }
 
-    private static void assertParity(MockMvc http, List<McpStatelessServerFeatures.SyncToolSpecification> tools,
+    private static void assertParity(MockMvc http, List<McpServerFeatures.SyncToolSpecification> tools,
             tools.jackson.databind.ObjectMapper mapper, String operation, String path, Map<String, Object> input,
             boolean expectedError, int expectedStatus, String expectedCode) throws Exception {
         String payload = (operation.equals("list_repositories")
@@ -74,7 +75,7 @@ class HttpMcpParityTest {
                 : http.perform(post(path).header(QueryTokenFilter.TOKEN_HEADER, "query-token")
                         .contentType("application/json").content(mapper.writeValueAsString(input))))
                 .andExpect(status().is(expectedStatus)).andReturn().getResponse().getContentAsString();
-        McpStatelessServerFeatures.SyncToolSpecification tool = tools.stream()
+        McpServerFeatures.SyncToolSpecification tool = tools.stream()
                 .filter(value -> value.tool().name().equals(operation)).findFirst().orElseThrow();
         McpSchema.CallToolResult mcp = tool.callHandler().apply(null,
                 McpSchema.CallToolRequest.builder(operation).arguments(input).build());

@@ -8,12 +8,12 @@ import static org.springframework.test.web.servlet.setup.MockMvcBuilders.standal
 import com.java.semantic.api.QueryApiExceptionHandler;
 import com.java.semantic.api.SemanticQueryController;
 import com.java.semantic.mcp.QueryMcpToolCatalogConfiguration;
-import com.java.semantic.mcp.CancellableMcpTransport;
+import com.java.semantic.mcp.SessionOwnedMcpTransport;
 import com.java.semantic.model.source.SourceReadContract.SourceResult;
 import com.java.semantic.query.application.SemanticQueryFacade;
-import io.modelcontextprotocol.server.McpStatelessServerFeatures;
+import io.modelcontextprotocol.server.McpServerFeatures;
 import io.modelcontextprotocol.json.jackson3.JacksonMcpJsonMapper;
-import io.modelcontextprotocol.server.McpStatelessSyncServer;
+import io.modelcontextprotocol.server.McpSyncServer;
 import io.modelcontextprotocol.spec.McpSchema;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
@@ -24,7 +24,7 @@ import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.springframework.ai.mcp.server.common.autoconfigure.properties.McpServerProperties;
-import org.springframework.ai.mcp.server.webmvc.transport.WebMvcStatelessServerTransport;
+import org.springframework.ai.mcp.server.webmvc.transport.WebMvcStreamableServerTransportProvider;
 import org.springframework.http.converter.json.JacksonJsonHttpMessageConverter;
 import org.springframework.test.web.servlet.MockMvc;
 import tools.jackson.databind.JsonNode;
@@ -38,18 +38,20 @@ class SourceReadResponseBudgetTest {
         String content = "\u0001\\\"\t中😀".repeat(40_000) + "\r\n";
         fixture.file("src/字 \"quoted\".java", content);
         fixture.publish(Optional.empty());
-        SemanticQueryFacade facade = new SemanticQueryFacade(fixture.catalog(), fixture.service());
+        SemanticQueryFacade facade = new SemanticQueryFacade(fixture.catalog(), fixture.service(),
+                fixture.properties.maxActiveSearches());
         MockMvc http = standaloneSetup(new SemanticQueryController(facade)).setControllerAdvice(new QueryApiExceptionHandler())
                 .setMessageConverters(new JacksonJsonHttpMessageConverter(fixture.mapper)).build();
         QueryMcpToolCatalogConfiguration configuration = new QueryMcpToolCatalogConfiguration();
-        List<McpStatelessServerFeatures.SyncToolSpecification> tools = configuration.mcpQueryToolSpecifications(
+        List<McpServerFeatures.SyncToolSpecification> tools = configuration.mcpQueryToolSpecifications(
                 facade, fixture.mapper);
-        McpStatelessServerFeatures.SyncToolSpecification tool = tools.stream()
+        McpServerFeatures.SyncToolSpecification tool = tools.stream()
                 .filter(value -> value.tool().name().equals("read_source")).findFirst().orElseThrow();
-        WebMvcStatelessServerTransport transport = WebMvcStatelessServerTransport.builder()
-                .jsonMapper(new JacksonMcpJsonMapper(fixture.mapper)).messageEndpoint("/mcp").build();
-        McpStatelessSyncServer server = configuration.queryMcpServer(new CancellableMcpTransport(transport),
+        WebMvcStreamableServerTransportProvider transport = WebMvcStreamableServerTransportProvider.builder()
+                .jsonMapper(new JacksonMcpJsonMapper(fixture.mapper)).mcpEndpoint("/mcp").build();
+        McpSyncServer server = configuration.queryMcpServer(new SessionOwnedMcpTransport(transport),
                 new McpServerProperties(), tools);
+        McpWireTestClient client = new McpWireTestClient(transport, fixture.mapper);
         try {
         Map<String, Object> context = Map.of("repositoryId", "sample", "revision", SourceFilesystemFixture.SHA);
         StringBuilder reconstructed = new StringBuilder(content.length());
@@ -69,9 +71,10 @@ class SourceReadResponseBudgetTest {
             assertThat(mcp.isError()).isFalse();
             assertThat(body.getBytes(StandardCharsets.UTF_8).length).isLessThanOrEqualTo(524_288);
             assertThat(fixture.mapper.writeValueAsBytes(mcp).length).isLessThanOrEqualTo(524_288);
-            String wire = McpWireSerializationContractTest.request(transport,
-                    fixture.mapper.writeValueAsString(Map.of("jsonrpc", "2.0", "id", pages + 1, "method", "tools/call",
-                            "params", Map.of("name", "read_source", "arguments", request))));
+            McpWireTestClient.Response response = client.request(fixture.mapper.writeValueAsString(Map.of(
+                    "jsonrpc", "2.0", "id", pages + 2, "method", "tools/call",
+                    "params", Map.of("name", "read_source", "arguments", request))));
+            String wire = McpWireTestClient.jsonBody(response.body());
             assertThat(wire.getBytes(StandardCharsets.UTF_8).length).isLessThanOrEqualTo(524_288);
             JsonNode nativeResult = fixture.mapper.readTree(wire).get("result");
             assertThat(nativeResult.get("structuredContent")).isEqualTo(httpJson);
@@ -87,6 +90,7 @@ class SourceReadResponseBudgetTest {
         assertThat(reconstructed.toString().getBytes(StandardCharsets.UTF_8))
                 .isEqualTo(content.getBytes(StandardCharsets.UTF_8));
         } finally {
+            client.delete();
             server.close();
         }
     }

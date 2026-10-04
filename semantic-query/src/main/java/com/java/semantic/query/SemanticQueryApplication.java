@@ -36,8 +36,9 @@ public class SemanticQueryApplication {
     }
 
     @Bean
-    SemanticQueryFacade semanticQueryFacade(SourceRevisionCatalog catalog, RepositorySourcePort source) {
-        return new SemanticQueryFacade(catalog, source);
+    SemanticQueryFacade semanticQueryFacade(SourceRevisionCatalog catalog, RepositorySourcePort source,
+            SourceAccessProperties properties) {
+        return new SemanticQueryFacade(catalog, source, properties.maxActiveSearches());
     }
 
     @Bean

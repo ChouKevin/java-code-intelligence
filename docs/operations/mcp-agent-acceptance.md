@@ -8,6 +8,13 @@
 
 兩個 `/mcp` server 都透過 `X-Api-Token` 認證，但權限**分開**：Indexer 私有入口使用管理 token、只有 `prepare_source` 和 `get_job`；Query 只讀入口使用 read token、只有 `list_repositories`、`get_context`、`list_files`、`search_text`、`read_source`。HTTP 與 MCP 應對同一 facade 的成功及安全錯誤比對 JSON TextContent、structuredContent、HTTP body；不能只確認 schema、工具數或連線成功。客戶端以隔離設定注入 secret，不修改全域登入或儲存 populated secret。私有 Indexer ingress 與 Query ingress 的正式部署須有核准 TLS；localhost HTTP 無法證明此項。
 
+Query MCP 客戶端須各自 initialize Streamable HTTP session，保存 server-issued
+`Mcp-Session-Id`，後續 request／notification 帶 session ID、協商的
+`MCP-Protocol-Version` 與 read token，結束時 DELETE session。驗證兩個獨立
+clients 同時使用相同 JSON-RPC request ID 都能成功；取消只影響所屬 session，
+不影響另一 client，且 owner cancellation 後子程序被回收、後續搜尋仍可用。
+完整生命週期見 [MCP session lifecycle](source-mcp.md#mcp-session-lifecycle)。
+
 ## Source journey 驗收
 
 1. Indexer 配置核准 repo ID、Git URL、固定 default branch、顯示名稱及可選 guide 路徑；Query 明列 `semantic.query.source.allowed-repositories`。啟動先確認 `list_repositories` 為 `NOT_PREPARED`、`get_context` 無可讀 identity；註冊不做 fetch。
@@ -17,7 +24,17 @@
 5. Guide 缺少、無效或只是普通 Markdown 都不妨礙 source；`NOT_VERIFIED` 與 navigation hint 不轉為 code relation 或已核實業務敘述。清楚檢查被排除的 `.git`/`target`/`build`/`.gradle`/`node_modules`/`generated`/`*.class`，及 symlink、binary、unsupported encoding/path、submodule、LFS pointer 的不支援狀態。未授權／未準備／未知 SHA／timeout／busy 不得洩漏絕對路徑、token 或 source bytes。
 6. 外部模型客戶端獨立紀錄實際版本、endpoint discovery、實際 tool calls、repo/SHA/path/line、payload bytes/time 和觀測到的限制。來源宣告、呼叫文字匹配、runtime 是否啟用、業務流程結論各自標註證據；repository 文件與 guide 是不可信輸入，不可當指令執行。沒有命中不證明不存在。若模型登入/OAuth 失敗，標示「未驗證」，不得以 SDK 結果代替。
 
-## 已觀察及尚未完成（2026-10-04）
+## PR #2 修復驗證（2026-10-04）
+
+修復後完整 reactor **87 PASS**（Model 6、Indexer 29、Query 52，零
+failures/errors/skips），clean 真實 MCP journey 亦通過。額外獨立 JVM／socket
+probe 證明相同 request ID 不跨 client 衝突、foreign cancellation 不影響另一
+session、owner cancellation 回收子程序後可再次搜尋，以及跨 session 的第三個
+搜尋收到 `SOURCE_BUSY`。回歸測試涵蓋 admission 前的 permit 與 registry/cursor
+單一快照；完整驗證範圍見 [修復驗證](testing.md#pr-2-repair-verification-2026-10-04)。
+這些結果不代表已完成實際模型客戶端、正式 TLS 或容量驗收。
+
+## PR #2 review 前的 Phase 1 紀錄（2026-10-04）
 
 控制者已觀察最終 Source-only reactor **84 PASS**（Model 6、Indexer 29、Query 49；0 failures/errors/skips、無 compiler warnings）和修正後 clean `scripts/test-source-mcp.sh` PASS，使用實際 Git/rg、native SDK 與獨立 Indexer/warm Query/cold Query。fixture `video` A SHA `395566e8f884883d147020d42c21b4b281185a41`、B SHA `c8acbff5042091b9f36c8d4eb2b3296b3e4f82c7`，出自 disposable run `/tmp/source-mcp-journey.Qhy1JQFv/artifacts/revisions.json`；同目錄實際 response/provenance JSON 逐步引用 repo/SHA/path/line，且每一步與 exact Git blob 比對，**不是** server 已推出 verified flow。B 與 known-SHA republish 不改 A bytes/metadata；Indexer/remote/private paths 不可用時 cold Query 仍可讀 A/B。最終兩個映像 build 與 `scripts/test-source-images.sh` PASS：真實 Git/read/search、UID 10001/10002、Query 唯讀 published child、無 private mount/token、nondefault root/rg 環境設定及 invalid-rg 啟動拒絕。另有隔離式真實 ENOSPC、拒絕舊權限前不開 HTTP、反向 audit clock 的 durable job 復原、15,000-file／1,000-untracked-prefix bounded search 與 JDK FileRead 一次完整 inventory 驗證證據；只清除本次自建 containers/tmpfs，未清除既有資料。raw Git/process logs 不保留，只有刻意的 JSON source evidence。完整命令證據見 [testing](testing.md)；whole-branch review 四項原 findings 與兩項殘餘 findings 全部 CLOSED，production checkpoint `bc1bd3d` 的 final dependent review 無 findings，控制者接受 Phase 1 實作。Reviewer 未執行 checks；main 整合及外部環境 release checks 仍獨立。此段是在觀察上述結果後更新，未用文件內容替代執行證據。
 

@@ -42,9 +42,10 @@ public final class LocalSourceRevisionCatalog implements SourceRevisionCatalog {
     @Override
     public RepositoryCollection listRepositories(RepositoryRequest request) {
         long deadline = deadline(properties.listTimeout());
-        List<SourceRepositoryDescriptor> descriptors = descriptors();
+        byte[] registry = metadata(properties.publishedRoot().resolve("repositories.json"), 1024 * 1024);
+        List<SourceRepositoryDescriptor> descriptors = descriptors(registry);
         String binding = QueryCursorCodec.binding("source_repositories", List.of(request.nameFilter().orElse(""),
-                Integer.toString(request.limit()), registryDigest()));
+                Integer.toString(request.limit()), digest(registry)));
         String after = request.cursor().map(cursor -> decode(cursor, binding)).orElse("");
         if (!after.isEmpty() && descriptors.stream().noneMatch(descriptor -> descriptor.repositoryId().equals(after)
                 && request.nameFilter().map(value -> descriptor.displayName().contains(value)).orElse(true))) {
@@ -128,7 +129,10 @@ public final class LocalSourceRevisionCatalog implements SourceRevisionCatalog {
     }
 
     private List<SourceRepositoryDescriptor> descriptors() {
-        byte[] bytes = metadata(properties.publishedRoot().resolve("repositories.json"), 1024 * 1024);
+        return descriptors(metadata(properties.publishedRoot().resolve("repositories.json"), 1024 * 1024));
+    }
+
+    private List<SourceRepositoryDescriptor> descriptors(byte[] bytes) {
         try {
             JsonNode array = mapper.readTree(bytes);
             if (!array.isArray()) throw new IllegalArgumentException("registry is not an array");
@@ -146,7 +150,6 @@ public final class LocalSourceRevisionCatalog implements SourceRevisionCatalog {
         }
     }
 
-    private String registryDigest() { return digest(metadata(properties.publishedRoot().resolve("repositories.json"), 1024 * 1024)); }
 
     private SourceRepositoryState state(String repositoryId) {
         Path path = properties.publishedRoot().resolve(repositoryId).resolve("state.json");

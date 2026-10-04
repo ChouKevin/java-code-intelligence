@@ -12,6 +12,10 @@ Save a canonical lowercase UUID `requestId` durably **before** calling Indexer `
 
 Every HTTP and `/mcp` call requires `X-Api-Token`: `SEMANTIC_INDEXER_ADMIN_TOKEN` for private preparation, `SEMANTIC_QUERY_API_TOKEN` for reading. HTTP and MCP share input validation, results and safe errors.
 
+Query MCP uses an initialized Streamable HTTP session per client; retain the
+server-issued session ID for calls and cancellation, then close the session.
+See the [MCP session lifecycle](docs/operations/source-mcp.md#mcp-session-lifecycle).
+
 | Indexer MCP | Private HTTP |
 | --- | --- |
 | `prepare_source` | `POST /index/repositories/{repositoryId}/source` |
