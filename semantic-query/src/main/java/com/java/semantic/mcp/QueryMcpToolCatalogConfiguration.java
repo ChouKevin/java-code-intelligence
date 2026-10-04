@@ -8,9 +8,11 @@ import io.modelcontextprotocol.server.McpStatelessSyncServer;
 import io.modelcontextprotocol.spec.McpSchema;
 import io.modelcontextprotocol.spec.McpStatelessServerTransport;
 import java.util.List;
+import org.springframework.ai.mcp.server.webmvc.transport.WebMvcStatelessServerTransport;
 import org.springframework.ai.mcp.server.common.autoconfigure.McpServerStatelessAutoConfiguration;
 import org.springframework.ai.mcp.server.common.autoconfigure.properties.McpServerProperties;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.context.annotation.Primary;
 import org.springframework.boot.autoconfigure.ImportAutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
@@ -26,8 +28,14 @@ import tools.jackson.databind.ObjectMapper;
 public class QueryMcpToolCatalogConfiguration {
     private static final SemanticQueryErrorMapper ERRORS = new SemanticQueryErrorMapper();
 
+    @Bean
+    @Primary
+    McpStatelessServerTransport cancellableMcpTransport(WebMvcStatelessServerTransport delegate) {
+        return new CancellableMcpTransport(delegate);
+    }
+
     @Bean(destroyMethod = "close")
-    McpStatelessSyncServer queryMcpServer(McpStatelessServerTransport transport, McpServerProperties properties,
+    public McpStatelessSyncServer queryMcpServer(McpStatelessServerTransport transport, McpServerProperties properties,
             @Qualifier("mcpQueryToolSpecifications") List<McpStatelessServerFeatures.SyncToolSpecification> tools) {
         // SDK schema rejection bypasses the shared structured application error contract.
         return McpServer.sync(transport).serverInfo(properties.getName(), properties.getVersion())

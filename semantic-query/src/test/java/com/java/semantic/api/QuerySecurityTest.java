@@ -15,7 +15,7 @@ class QuerySecurityTest {
         properties.setApiToken("query-token");
         QueryTokenFilter filter = new QueryTokenFilter(properties);
 
-        MockHttpServletRequest absentHttpToken = new MockHttpServletRequest("POST", "/api/v1/search-code");
+        MockHttpServletRequest absentHttpToken = new MockHttpServletRequest("POST", "/api/v1/search-text");
         MockHttpServletResponse absentHttpResponse = new MockHttpServletResponse();
         filter.doFilter(absentHttpToken, absentHttpResponse, (request, response) ->
                 ((jakarta.servlet.http.HttpServletResponse) response).setStatus(204));
@@ -40,7 +40,7 @@ class QuerySecurityTest {
         properties.setApiToken("query-token");
         QueryTokenFilter filter = new QueryTokenFilter(properties);
 
-        for (String servletPath : new String[]{"/api/v1/search-code", "/mcp"}) {
+        for (String servletPath : new String[]{"/api/v1/search-text", "/mcp"}) {
             MockHttpServletRequest absentToken = requestUnderContext(servletPath);
             MockHttpServletResponse absentTokenResponse = new MockHttpServletResponse();
             filter.doFilter(absentToken, absentTokenResponse, (request, response) ->

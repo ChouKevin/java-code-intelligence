@@ -25,8 +25,8 @@
     <properties>
         <java.version>21</java.version>
         <archunit.version>1.3.0</archunit.version>
-        <!-- Ordinary runs do not require Docker or a real JDT language server. -->
-        <test.excluded.groups>jdtls-it,mongo-it,deployed-it</test.excluded.groups>
+        <!-- The real deployed source journey is opt-in; ordinary tests need no external services. -->
+        <test.excluded.groups>deployed-it</test.excluded.groups>
         <test.included.groups></test.included.groups>
     </properties>
 
@@ -38,16 +38,6 @@
                 <version>2.0.1</version>
                 <type>pom</type>
                 <scope>import</scope>
-            </dependency>
-            <dependency>
-                <groupId>org.eclipse.lsp4j</groupId>
-                <artifactId>org.eclipse.lsp4j</artifactId>
-                <version>1.0.0</version>
-            </dependency>
-            <dependency>
-                <groupId>org.eclipse.jdt</groupId>
-                <artifactId>org.eclipse.jdt.core</artifactId>
-                <version>3.46.0</version>
             </dependency>
             <dependency>
                 <groupId>org.eclipse.jgit</groupId>
@@ -90,24 +80,10 @@
 
     <profiles>
         <profile>
-            <id>jdtls-it</id>
-            <properties>
-                <test.included.groups>jdtls-it</test.included.groups>
-                <test.excluded.groups>mongo-it</test.excluded.groups>
-            </properties>
-        </profile>
-        <profile>
-            <id>mongo-it</id>
-            <properties>
-                <test.included.groups>mongo-it</test.included.groups>
-                <test.excluded.groups>jdtls-it</test.excluded.groups>
-            </properties>
-        </profile>
-        <profile>
             <id>deployed-it</id>
             <properties>
                 <test.included.groups>deployed-it</test.included.groups>
-                <test.excluded.groups>jdtls-it,mongo-it</test.excluded.groups>
+                <test.excluded.groups></test.excluded.groups>
             </properties>
         </profile>
     </profiles>

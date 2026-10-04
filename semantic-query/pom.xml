@@ -20,10 +20,6 @@
         </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-data-mongodb</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-validation</artifactId>
         </dependency>
         <dependency>
@@ -37,10 +33,6 @@
         <dependency>
             <groupId>org.springframework.ai</groupId>
             <artifactId>spring-ai-autoconfigure-mcp-server-webmvc</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>org.springframework.ai</groupId>
-            <artifactId>spring-ai-commons</artifactId>
         </dependency>
         <dependency>
             <groupId>org.springframework.ai</groupId>
@@ -66,16 +58,6 @@
             <artifactId>archunit-junit5</artifactId>
             <scope>test</scope>
         </dependency>
-        <dependency>
-            <groupId>org.testcontainers</groupId>
-            <artifactId>testcontainers-mongodb</artifactId>
-            <scope>test</scope>
-        </dependency>
-        <dependency>
-            <groupId>org.testcontainers</groupId>
-            <artifactId>testcontainers-junit-jupiter</artifactId>
-            <scope>test</scope>
-        </dependency>
     </dependencies>
 
     <build>
@@ -92,6 +74,13 @@
                                 <bannedDependencies>
                                     <searchTransitive>true</searchTransitive>
                                     <excludes>
+                                        <exclude>org.mongodb:*</exclude>
+                                        <exclude>org.springframework.data:spring-data-mongodb</exclude>
+                                        <exclude>org.springframework.boot:spring-boot-starter-data-mongodb</exclude>
+                                        <exclude>org.eclipse.jdt:*</exclude>
+                                        <exclude>org.eclipse.lsp4j:*</exclude>
+                                        <exclude>org.eclipse.jgit:*</exclude>
+                                        <exclude>com.java.semantic:semantic-indexer</exclude>
                                         <exclude>org.springframework.ai:spring-ai-model</exclude>
                                         <exclude>org.springframework.ai:spring-ai-chat-model</exclude>
                                         <exclude>org.springframework.ai:spring-ai-embedding-model</exclude>
