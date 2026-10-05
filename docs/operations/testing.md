@@ -25,7 +25,7 @@ Deletions and both sides of renames count; mixed changes take the union.
 | Only known prose: README.md, AGENTS.md, docs/** | no | no | no |
 | Root/module POMs, shared Model, CI or selector scripts | yes | yes | yes |
 | Indexer/Query main Java | yes | yes | no |
-| App resources/config/security/bootstrap, source admission/path authorization | yes | yes | yes |
+| App resources/config/security/bootstrap, origin binding/startup recovery, source admission/path authorization | yes | yes | yes |
 | Ordinary test sources/helpers only | yes | no | no |
 | SourceMcpJourneyIT, native journey launcher, video source corpus | no | yes | no |
 | Dockerfiles, .env.example, image smoke launcher | no | no | yes |

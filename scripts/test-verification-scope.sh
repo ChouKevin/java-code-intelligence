@@ -58,6 +58,8 @@ change query-behavior true true false semantic-query/src/main/java/com/java/sema
 change app-resources true true true semantic-query/src/main/resources/application.yml
 change app-security true true true semantic-indexer/src/main/java/com/java/semantic/indexer/api/IndexerAdminTokenFilter.java
 change app-bootstrap true true true semantic-query/src/main/java/com/java/semantic/query/SemanticQueryApplication.java
+change origin-security true true true semantic-indexer/src/main/java/com/java/semantic/indexer/source/ApprovedOriginBinding.java
+change recovery-bootstrap true true true semantic-indexer/src/main/java/com/java/semantic/indexer/job/IndexJobStartupRecovery.java
 change ordinary-tests true false false semantic-indexer/src/test/java/com/java/semantic/indexer/source/LocalSourceFixture.java
 change journey-test false true false semantic-indexer/src/test/java/com/java/semantic/indexer/uat/SourceMcpJourneyIT.java
 change journey-launcher false true false scripts/test-source-mcp.sh
@@ -105,7 +107,20 @@ expect missing-base true true true --head HEAD
 expect unavailable-base true true true --base 0000000000000000000000000000000000000000 --head HEAD
 expect unavailable-head true true true --base "$base" --head missing-revision
 expect explicit-full true true true --full
-# Real diff failure: invoke outside a Git repository, with no mocked Git process.
+# Remove only an owned loose tree object: commits still resolve, but diff must fail.
+mkdir -p docs
+printf 'owned nonempty tree for diff failure\n' > docs/broken-diff.md
+git add -- docs/broken-diff.md
+git commit --quiet -m nonempty-diff-tree
+tree="$(git rev-parse HEAD^{tree})"
+rm -- ".git/objects/${tree:0:2}/${tree:2}"
+git rev-parse --verify HEAD^{commit} >/dev/null
+git rev-parse --verify HEAD~1^{commit} >/dev/null
+if git diff --no-ext-diff --no-textconv --no-renames --name-only -z HEAD~1 HEAD -- > "$run_root/broken-diff" 2> "$run_root/broken-diff.log"; then
+  echo 'FAIL: missing tree did not cause a real Git diff failure' >&2
+  exit 1
+fi
+expect failed-diff true true true --base HEAD~1 --head HEAD
 cd "$run_root"
-expect failed-diff true true true --base "$base" --head "$base"
+expect unavailable-repository true true true --base "$base" --head "$base"
 printf 'PASS: %s real temporary-Git scenarios\n' "$scenarios"

@@ -41,6 +41,8 @@ while IFS= read -r -d '' path; do
       unit=true journey=true images=true ;;
     semantic-indexer/src/test/java/com/java/semantic/indexer/uat/SourceMcpJourneyIT.java|scripts/test-source-mcp.sh|semantic-indexer/fixtures/uat/video-service/*)
       journey=true ;;
+    */src/main/java/*/ApprovedOriginBinding.java|*/src/main/java/*/IndexJobStartupRecovery.java)
+      unit=true journey=true images=true ;;
     semantic-indexer/src/main/resources/*|semantic-query/src/main/resources/*|*/src/main/java/*/config/*|*/src/main/java/*/SemanticIndexerApplication.java|*/src/main/java/*/SemanticQueryApplication.java|*/src/main/java/*Security*.java|*/src/main/java/*TokenFilter.java|*/src/main/java/*/SourcePathResolver.java|*/src/main/java/*/LocalSourceRevisionCatalog.java)
       unit=true journey=true images=true ;;
     semantic-indexer/src/main/java/*.java|semantic-query/src/main/java/*.java)
