@@ -5,3 +5,7 @@ target/
 *.log
 .idea/
 .worktrees/
+
+# Local agent execution records and planning vaults
+/.superpowers/
+/docs/superpowers/

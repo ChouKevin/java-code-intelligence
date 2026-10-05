@@ -1,6 +1,136 @@
 # Testing and verification
 
-Run from the reactor root with Java 21, Maven 3.9+, Git and a real absolute-path ripgrep executable for source journeys. Ordinary tests need no MongoDB, Docker or JDT LS. Use Docker only for image/build isolation checks. These commands exercise source contracts, **not** target repository tests, agent/model reasoning, production TLS or capacity.
+Run from the reactor root. These checks exercise current Source-first contracts,
+**not** target-repository business builds, agent/model reasoning, production TLS
+or capacity. [Roadmap Phase 2–6](../roadmap.md) features/dependencies/workloads
+are not prerequisites for this cleanup or Phase 1 verification.
+
+## Select scope; separate tasks from feature acceptance
+
+The single routing implementation is `scripts/verification-scope.sh`. It selects
+checks only; it never starts Maven, Docker or services. Run from the reactor root:
+
+```bash
+bash scripts/verification-scope.sh --base <base-commit> --head <feature-head>
+bash scripts/verification-scope.sh --full
+bash scripts/test-verification-scope.sh
+```
+
+Output is exactly three lines: `unit=true|false`, `journey=true|false`,
+`images=true|false`. An unavailable base/head/diff or unknown path selects all.
+Deletions and both sides of renames count; mixed changes take the union.
+
+| Changed surface | Ordinary reactor | Native journey | Images |
+| --- | --- | --- | --- |
+| Only known prose: README.md, AGENTS.md, docs/** | no | no | no |
+| Root/module POMs, shared Model, CI or selector scripts | yes | yes | yes |
+| Indexer/Query main Java | yes | yes | no |
+| App resources/config/security/bootstrap, origin binding/startup recovery, source admission/path authorization | yes | yes | yes |
+| Ordinary test sources/helpers only | yes | no | no |
+| SourceMcpJourneyIT, native journey launcher, video source corpus | no | yes | no |
+| Dockerfiles, .env.example, image smoke launcher | no | no | yes |
+| Unknown/unavailable diff or explicit full gate | yes | yes | yes |
+
+**Intermediate tasks:** use the smallest affected native test or changed-path
+smoke and local checkpoint commits. No CI or image build/smoke, locally or
+remotely; no intermediate push or ready PR. Reuse valid same-snapshot evidence.
+The table selects coverage, not permission to run full gates after every task.
+
+**Final feature acceptance:** finish all feature tasks and local review, then
+publish only with authorization. CI runs on non-draft PR `opened`, `reopened`,
+`synchronize` and `ready_for_review`; there is no push/post-merge trigger.
+Draft events can start a workflow whose jobs are skipped; draft gating does not
+mean zero workflow events. Optional `workflow_dispatch` selects all lanes for
+final acceptance once registered on the default branch. Superseded runs cancel
+only within the same PR/ref. Each lane checks out the exact PR head, not the
+synthetic merge commit.
+
+`Feature acceptance` is the terminal gate: selected lanes must succeed; failures,
+cancellations and unexpected skips fail closed. An intentional docs-only
+three-lane skip succeeds after selector regressions. Changing branch protection
+to require this gate needs separate approval. Local shell checks do not prove
+GitHub job routing: final acceptance must exercise the ready feature PR and an
+owned docs-only probe PR (close without merge and retire only its probe branch).
+
+Run selected images on isolated CI, not in the default local loop. This cleanup
+changes CI, so its final integrated gate selects reactor, journey and images.
+Diagnose failed gates and verify the corrected snapshot; never infer success
+from a script existing or a gate being scheduled.
+
+## Prerequisites and launcher controls
+
+| Boundary | Required | Not required / ownership |
+| --- | --- | --- |
+| Scope selector regressions | Bash and Git | Temporary local Git only; no JVM/container/services |
+| Ordinary native tests | Java 21, Maven 3.9.x; Git for local preparation tests; real rg for actual search tests | No Docker, MongoDB, JDT LS or PostgreSQL service |
+| Native MCP journey | Java 21, Maven 3.9.x, Git, configured absolute executable real ripgrep | Independent JVMs and disposable roots; no target-repository builds |
+| Final image builds/smoke | Isolated CI Docker engine/builder, Git, curl, jq, jar; Java 21/Maven 3.9.x for the CI environment | Non-root writer UID 10001 / reader UID 10002; only the published child is mounted read-only by Query |
+| Current Source-first runtime | Separate Indexer admin / Query read tokens, Indexer-only Git credentials, Query allowlist, new private/published POSIX roots | No Mongo/JDT service; keep unrelated local PostgreSQL and Docker/data running |
+
+Prefer a standard system ripgrep installation. Do not commit a workstation/editor
+fallback, install/uninstall packages or change global settings as a test workaround.
+`SOURCE_TEST_RG` is a test launcher control, mapped to Maven `source.test.rg`;
+ordinary actual-search tests also accept that Maven property directly.
+`MAVEN_CMD` selects the native journey's Maven executable.
+`SEMANTIC_QUERY_RG_EXECUTABLE` configures production Query; it is not a replacement
+for the test control. Do not source Indexer secrets into Query.
+
+### Focused local commands
+
+Choose the actual affected classes; these examples are templates, not recorded
+verification. Configure an installed real absolute rg first:
+
+```bash
+export SOURCE_TEST_RG=/absolute/path/to/rg
+
+mvn --batch-mode --no-transfer-progress -pl semantic-query -am \
+  -Dtest=RipgrepTextSearchTest,SearchAdmissionTest \
+  -Dsurefire.failIfNoSpecifiedTests=false -Dsource.test.rg="$SOURCE_TEST_RG" test
+
+mvn --batch-mode --no-transfer-progress -pl semantic-indexer -am \
+  -Dtest=ApprovedOriginBindingTest,SourcePreparationPublicationTest,SourcePreparationRecoveryTest \
+  -Dsurefire.failIfNoSpecifiedTests=false test
+
+# Final full ordinary gate, when selected; not every task.
+mvn --batch-mode --no-transfer-progress -Dsource.test.rg="$SOURCE_TEST_RG" test
+
+# Changed source boundary only, admitted as one serial lane.
+SOURCE_TEST_RG="$SOURCE_TEST_RG" scripts/test-source-mcp.sh
+```
+
+`failIfNoSpecifiedTests=false` permits upstream modules without the named class;
+it does not permit a zero-test green. Identify the intended classes and actual
+scenario counts in the report. Clean after deleting Java/build outputs or at a
+fresh final gate, not every unchanged loop.
+
+### Resource and host/data safeguards
+
+Allow only one heavy local verification lane across all worktrees. Do not overlap
+Maven, real journey, Docker builds/smoke or another executor; no Maven `-T` or extra
+parallel test forks. Journey service JVMs belong to that one lane. `MAVEN_OPTS`
+does not by itself bound test forks or launched service JVMs.
+
+Before admission, require WSL `MemAvailable` and Windows free physical RAM each
+at least 6 GiB, swap used at most 256 MiB with no sustained swap-in/out in a short
+sample, and at least 20 GiB free on both Linux and the actual Windows volume
+holding data/swap. Missing metrics or insufficient headroom means defer to an
+admitted lane/CI, not retry under pressure. Virtual ext4 capacity is not additional
+physical SSD capacity. Observe only owned runs with bounded low-rate sampling;
+if either available RAM falls below 2 GiB or swap grows 512 MiB within 30 seconds,
+stop admitting work and gracefully cancel the owned verification process group.
+Retain diagnostics/original request IDs; never terminate unrelated IDE/services.
+
+Preserve separate admin/read tokens, Indexer-only credentials/private jobs/staging,
+immutable published roots, Query allowlist and read-only published-child mount.
+Image smoke retains its failure root/request ID after unknown acceptance outcomes;
+native journey removes its disposable work/logs and retains response artifacts.
+Neither script authorizes deleting existing managed roots or user service data.
+
+Keep local PostgreSQL (including `java-agent-uat-postgres-1`), its Docker engine
+and data running. Do not stop Docker/WSL, change global limits or prune containers,
+images, volumes or caches. Any named legacy container retirement needs separate
+owner confirmation; unresolved ownership/use means leave it intact. Container-only
+approval does not approve deleting mounts/data/volumes, clones or IDE tooling.
 
 ## Verification commands
 
@@ -14,76 +144,29 @@ Run from the reactor root with Java 21, Maven 3.9+, Git and a real absolute-path
 
 `SOURCE_TEST_RG` must point to a real executable ripgrep at an **absolute path**; when `/usr/bin/rg` is unavailable set the variable explicitly. The journey script checks Java 21, Git and rg, creates a new `mktemp` root, packages clean executable jars, runs only `SourceMcpJourneyIT` using the `deployed-it` profile, removes **only its disposable** Git/service roots and reports its artifact directory. It does not clear existing `data/`. Image smoke needs Docker, Git, curl, jq and jar and likewise uses a disposable root. Run the two image builds before image smoke; building images alone does not establish mount isolation.
 
-The existing fixture projects can be checked separately if needed (these tests exercise their own fixture behavior, not source-service acceptance):
-
-```bash
-mvn --batch-mode --no-transfer-progress -f semantic-indexer/fixtures/uat/payment-service/pom.xml test
-mvn --batch-mode --no-transfer-progress -f semantic-indexer/fixtures/uat/order-service/pom.xml test
-mvn --batch-mode --no-transfer-progress -f semantic-indexer/fixtures/uat/video-service/pom.xml test
-```
+The journey treats `semantic-indexer/fixtures/uat/video-service/` as source data,
+not a business project to build. It copies only Git-tracked `pom.xml` and
+`src/main/` paths, then generates the existing order/payment guides in its disposable
+repository. Stage newly added video fixture files before running the local journey;
+tracked file edits use their working-tree bytes. Untracked reports, build outputs,
+test inputs and nested Git metadata are not fixture inputs. The order/payment
+business projects, unused version patch and standalone fixture-Maven gate are retired.
 
 Do not reuse old Mongo/JDT, semantic-review or Git-review acceptance reports as Source MCP results. A successful native SDK journey is not evidence of OMP/Codex/Claude model use, private Git coverage, TLS or 50-user load. The [agent checklist](mcp-agent-acceptance.md) separates those layers.
 
-## PR #2 repair verification (2026-10-04)
+## Verification evidence and deployment limits
 
-After the client-isolation, search-admission, registry-snapshot, MCP lifecycle and
-durable-origin repairs, the controller ran the complete Java 21 reactor at `c11caab`:
-**97 tests passed** (Model 6, Indexer 35, Query 56; zero failures/errors/skips). The run supplied a real
-ripgrep executable through `-Dsource.test.rg`; no workstation fallback was added.
-The clean `scripts/test-source-mcp.sh` also passed with real Git/ripgrep,
-independent Indexer and warm/cold Query processes, native MCP/HTTP parity, and
-exact A/B source citations.
+Historical acceptance and repair results remain in [PR #2 and its CI runs](https://github.com/ChouKevin/java-code-intelligence/pull/2),
+with local experiment details in the repair ledger. They are checkpoint evidence,
+not a requirement to replay every historical scenario for every change. Choose
+checks for the changed boundary; do not present older results as new verification.
 
-The subsequent credential-only correction ran the **10 origin regressions** and
-rebuilt only Indexer/Model. Four actual Indexer startup probes rejected malformed
-password URLs, HTTP and HTTPS token user-info, and malformed HTTP authorities;
-the full startup diagnostics contained no sentinel secret and no registry was
-published. Parser disclosure and HTTP credential acceptance were observed before
-the fix. Unchanged Query/session scenarios retain the checkpoint evidence below;
-the final commit still goes through the complete CI gate.
-
-A separate actual-socket probe initialized two Query sessions and verified that
-both clients could use the same in-flight JSON-RPC ID; a concurrent duplicate
-inside one session was rejected without interrupting its owner. Foreign
-cancellation left the other client's real search intact; owner cancellation
-returned a structured `SOURCE_TIMEOUT`, reaped its subprocess, and allowed later
-searches. Two real searches across the sessions caused a third request to return
-`SOURCE_BUSY`. DELETE completed only after its child was reaped; Query shutdown
-also reaped an active child before JVM exit.
-
-Deterministic reactor regressions proved that the permit precedes catalog
-admission, a registry replacement cannot bind an old page to the new digest,
-DELETE/graceful close wait while terminal cleanup holds the search permit, and
-cancelled tool responses survive interrupt-sensitive servlet I/O. The defect
-regressions had observed behavioral failures before their production fixes.
-
-Deadline-exhaustion coverage holds cleanup past the lifecycle budget and verifies
-that graceful close fails without starting a second cleanup waiting period.
-
-Origin regressions use two unrelated local Git remotes and cover cached A objects,
-an ACCEPTED A request across restart, published-namespace reuse with fresh admin
-storage, and rejection of populated unbound storage. A separate real
-Indexer/Query restart probe passed five scenarios: A-to-B URL change rejected
-under the same ID/roots with A evidence unchanged; the public binding survives
-admin replacement; the private binding survives published-root replacement;
-same-origin restart preserves original-job lookup and exact-SHA reuse; and a new
-repository ID accepts B without changing A. The original implementation failed
-both the deterministic origin assertions and the real changed-origin startup
-probe before the correction.
-
-Query now requires the [MCP session lifecycle](source-mcp.md#mcp-session-lifecycle).
-The pinned provider retains abandoned sessions until shutdown; this verification
-does not establish idle-session capacity, external model-client acceptance,
-private-production Git access, or deployed TLS. Image/deployment gates remain
-separate from the local socket evidence.
-
-## Initial Phase 1 evidence before PR #2 review (2026-10-04)
-
-The controller observed the final source-only ordinary reactor of **84 passing tests** (Model 6, Indexer 29, Query 49; zero failures/errors/skips and no compiler warnings) with a real ripgrep path supplied because host `/usr/bin/rg` is absent. The final clean `scripts/test-source-mcp.sh` passed with real native SDK, HTTP, local Git/rg, separate Indexer and warm/cold Query processes. Retained **disposable-run** evidence is `/tmp/source-mcp-journey.Qhy1JQFv/artifacts/` (ephemeral local path, not a committed fixture or reproducibility guarantee). `revisions.json` records A `395566e8f884883d147020d42c21b4b281185a41`, B `c8acbff5042091b9f36c8d4eb2b3296b3e4f82c7`; `job-a.json` records original request `9e86e823-5689-4ac9-ba37-4a58e33c1611` and durable COMPLETE identity. A remains unchanged after B and after known-SHA republishing, with manifest/inventory/tree hashes checked. Every actually returned fixture repo/SHA/path/line citation is compared to the exact Git blob. Cold Query reads A/B after Indexer stops and disposable remote/private paths become unavailable. Only intentional JSON response/request/provenance artifacts are retained; raw Git/process logs are not copied.
-
-Both matching source images were built after the final fixes, and the final started-container `scripts/test-source-images.sh` passed real Git preparation, actual ripgrep search/read, Query child-only read-only mount, distinct UID 10001 writer/10002 reader, and absence of Query private credentials/mount. Nondefault published-root/rg environment paths work through the real application; an invalid rg path fails startup. Final command/output evidence: ordinary reactor `artifact://297`, clean journey `artifact://300`, focused authorization/recovery/search gate `artifact://292` (32 passing tests), Indexer image `artifact://290`, Query image `artifact://291`, and successful final image smoke `bg72`. The whole-branch review's four original findings and both dependent residual findings are CLOSED; the final dependent review of production checkpoint `bc1bd3d` returns no findings and the controller accepts the Phase 1 implementation. Reviewer execution was read-only; runtime evidence is controller-observed. Main integration and external release-environment checks remain separate decisions. These evidence paragraphs were updated after the observed checks, not used to infer them.
-
-An additional actual ENOSPC smoke exhausted only a fresh owned 32 MiB Docker tmpfs (free bytes 0): B stayed pinned/RUNNING while storage was full, then lookup of the **same** request after restart returned FAILED without replay; A remained readable and all revision file hashes unchanged, and B context was denied. Only the created containers/named tmpfs volume were removed; no existing service data or shared host filesystem was filled. Final disposable evidence: `/tmp/source-enospc-p6hdofy7/evidence.json`. The real 15,000-file/100-authorized-match probe now returns the correct complete result at 829 ms. The harder 15,000-tracked/1,000-untracked-prefix limit-one probe changed from SOURCE_TIMEOUT at 4,762 ms and repeated complete inventory reads to the correct authorized prefix at 1,707 ms; native JDK FileRead tracing records exactly 3,045,000 bytes in the full verification stack, matching the inventory size once. A nonroot `src` variant returns the correct prefix at 1,982 ms with one full 3,105,098-byte verification. Remaining reads are bounded positional seeks, not repeated digest/order passes. A real rejected-legacy-config socket probe returned exact pinned source/HTTP 200 before the fix; after the before-bind gate it rejected startup without opening the source-serving web server. Native reversed-audit-clock and reservation-gap/corrupt-order scenarios preserve durable acceptance and newest terminal status without timestamp ordering or new public job fields.
+Query requires the [MCP session lifecycle](source-mcp.md#mcp-session-lifecycle).
+The pinned provider retains abandoned sessions until shutdown. Native SDK,
+socket and image checks do not establish idle-session capacity, external
+OMP/Codex/Claude model-client acceptance, private-production Git access, deployed
+TLS, or 50-user capacity. Image/mount checks and external release-environment
+acceptance remain separate from native source verification.
 
 ## Release checks and boundaries
 

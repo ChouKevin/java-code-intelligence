@@ -21,6 +21,29 @@ release acceptance.
 Source evidence is not a business conclusion. The service does not contain an LLM,
 prompts, chat history, embeddings, or inferred business facts.
 
+## Session and worktree scope
+
+- At session start, resolve the task's working directory, repository root and
+  revision once. Use the user-approved task/handoff baseline; do not assume the
+  original main checkout is current merely because it is the parent directory.
+- Read code, configuration, tests and operations guidance from the same worktree.
+  Give workers its absolute root and require explicit paths or a confirmed cwd.
+  If files contradict the approved baseline, resolve the workspace mismatch before
+  changing code or running an unrelated legacy suite.
+- Preserve dirty user worktrees. Do not reset, stash, pull or overwrite them to
+  reach a task baseline; use the approved isolated worktree instead.
+- Historical plans and acceptance logs are evidence, not outstanding task lists.
+  Use current code and operations contracts; do not restart a completed migration.
+- Context files load when a session starts. Do not assume editing this file
+  replaces an already-injected instruction snapshot. Restart/reload from the
+  correct worktree when injected rules conflict with its current instructions.
+- Keep local plans/specs in `docs/superpowers/` and agent execution records in
+  `.superpowers/`; neither belongs in team commits. Do not ignore shared agent
+  guidance such as this file or unrelated tracked editor configuration.
+- Follow the current roadmap phase. Do not add dependencies, runtime workers,
+  scaffold endpoints or acceptance workloads for future phases; preserve current
+  source, authorization, durability and recovery guarantees.
+
 ## Hard boundaries
 
 - `semantic-query` reads only the independently published source volume with a
@@ -109,8 +132,8 @@ prompts, chat history, embeddings, or inferred business facts.
   durable file jobs, one dispatcher, immutable export, and atomic publication.
 - `semantic-query/`: source revision admission, filesystem list/read, bounded
   ripgrep search, one application facade, HTTP/MCP, security, and error mapping.
-- `semantic-indexer/fixtures/uat/`: deterministic payment, order, and video fixture
-  source owned by this repository.
+- `semantic-indexer/fixtures/uat/`: tracked video source corpus for the real source
+  journey, not a prerequisite business build. Order/payment guide cases are generated.
 - `docs/operations/`: Source-first deployment, preparation, recovery, and rebuild
   procedures; obsolete semantic instructions must not describe the new release.
 - `scripts/`: real source MCP journeys and container isolation checks.
@@ -147,48 +170,90 @@ Mongo onboarding does not apply to this release.
 - HTTP and MCP share one application facade, validation, result contract, and error
   mapper. Keep tool names, descriptions, schemas, dispatch, structured/text results,
   and HTTP equivalents aligned; cover success and error parity.
-- Persisted source format starts at version 1. Policy/format changes must not
-  rewrite an existing SHA's published tree; use a new storage namespace and explicit
-  preparation/context discovery. Do not add old Mongo schema compatibility.
+- Public manifest/state/descriptor and HTTP/MCP result formats remain version 1;
+  private durable jobs use version 2 with the accepted origin binding. Do not
+  conflate these versions or add a private-job-v1/old Mongo compatibility decoder.
+  Policy/format changes must not rewrite an existing SHA's published tree; use a
+  new storage namespace and explicit preparation/context discovery.
 - Preserve exact source bytes/ranges and explicit unsupported states. Keep paths,
   guide provenance, exclusion rules, and cursor bindings consistent across tools.
 - Preserve asynchronous durable admission, one active job per repository, pinned
   commits, explicit retry intents, expected-parent publication, and startup recovery.
-- P1-A fixes shared contracts/preparation; P1-B adds source readers; P1-C cuts over
-  transport/runtime; P1-D delivers deployment and the real source journey.
-  Independent A/B adapter work may run concurrently only after shared contracts
-  are fixed; shared files have one owner. Only complete A-D is deployable Phase 1.
-- Update README, operations, OpenAPI, MCP schemas, application configuration,
-  `.env.example`, Dockerfiles, CI, and image isolation checks with the cutover.
+- Fix shared contracts before parallel adapter changes, and give shared files one
+  integration owner. Completed Phase 1 implementation steps are not new tasks.
+- Update affected README, operations, OpenAPI, MCP schemas, configuration, images
+  and CI alongside a changed contract; do not rebuild unrelated surfaces.
 
 ## Verification
 
-Use Java 21 and run commands from the reactor root. The Phase 1 ordinary suite
-must require neither MongoDB, Docker, nor a real JDT LS:
+Use Java 21 and Maven 3.9.x from the selected worktree's reactor root. Follow
+`docs/operations/testing.md` for commands. Separate intermediate task checks from
+final feature acceptance; a task completion is not a release gate.
+Use `bash scripts/verification-scope.sh --base <commit> --head <commit>` for
+final lane selection (`--full` for explicit acceptance); unknown/unavailable
+diffs select all. CI and local guidance consume the same selector. Non-draft
+feature-ready PR events or final dispatch trigger CI; pushes do not. Draft
+events may still create skipped workflow runs. The terminal `Feature acceptance`
+gate rejects required lane skips/cancellations. Branch protection is separate.
+
+### Intermediate tasks
+
+- Do not run CI or Docker image builds/smoke, locally or remotely. Use local
+  checkpoint commits; do not push/open a ready PR that triggers CI mid-feature.
+  Inspect current workflow triggers before assuming remote pushes are inert.
+- Run only the smallest affected native tests and necessary changed-path smoke.
+  Journey/fixture-source changes use the real journey rather than unrelated
+  fixture business builds. Prose-only changes need guidance/link checks only.
+- Reuse valid same-snapshot evidence. A new session, reviewer or task boundary
+  does not require another full reactor, journey or historical acceptance replay.
+- Allow at most one resource-heavy local verification lane across all worktrees.
+  Never overlap Maven, a real journey, Docker builds or another executor's checks.
+  Check host and WSL memory, swap and physical disk headroom before a heavy run;
+  if insufficient, defer the run rather than retrying under pressure. Cancel only
+  owned work on resource exhaustion, preserving diagnostics and request IDs.
+- Keep the user's local PostgreSQL and its Docker engine/data running. Do not
+  stop Docker/WSL, prune data/caches, alter global limits or terminate unrelated
+  IDE/service processes to make a check pass. PostgreSQL is not a Source-first
+  product or test dependency.
+
+### Final feature acceptance
+
+- Complete all feature tasks and local review before triggering CI. Run the
+  selected gates on that integrated snapshot; keep pending/failed gates explicit.
+- Indexer/Query behavior changes require affected ordinary tests and the real
+  source journey. Image, mount, startup or security changes also need image smoke.
+- Shared Model/build/CI changes or uncertain scope select full ordinary, journey
+  and image gates. Mixed changes use their union. This selection does not require
+  running full gates at every intermediate task.
+- Run image builds/smoke on an isolated CI runner, not in the default local loop.
+  Do not duplicate the same acceptance on branch push and PR or after every task.
+  Local image verification requires a separately approved, resource-bounded run.
+- Diagnose final-gate failures, fix the cause and verify the corrected snapshot.
+  Do not suppress failures, widen timeouts or reuse old results for changed code.
+  Final acceptance is required before declaring the feature complete or merging.
+
+The ordinary reactor requires no MongoDB, Docker or real JDT LS:
 
 ```bash
 mvn --batch-mode --no-transfer-progress test
 ```
 
-Run affected focused tests and the required real source journey:
+For the selected source boundary, run `scripts/test-source-mcp.sh` with a real
+local Git remote, real ripgrep, independent Indexer/Query processes and disposable
+roots. Set `SOURCE_TEST_RG` explicitly to an absolute real rg executable when
+needed; do not commit a workstation/editor fallback. At final acceptance, the
+selected image gate builds both images and runs `scripts/test-source-images.sh`
+on CI. Report actual results, not script presence, scheduled or skipped checks.
 
-```bash
-scripts/test-source-mcp.sh
-```
+Full release acceptance covers A/B pinning, cold Query with Indexer/remote stopped,
+durable request recovery, publication crash windows and orphan denial, unprepared
+states, authorization/traversal/symlink/exclusions, Unicode/CRLF/oversized-line/EOF
+cursors, literal/global-limit/exit1/timeout/overflow/process cleanup, guide
+non-authority, and HTTP/MCP success/error parity.
 
-The journey uses a real local Git remote, real ripgrep, independent Indexer and
-Query processes, and temporary data roots without Mongo or a JDT LS installation.
-When image or mount boundaries change, build both Docker images and run
-`scripts/test-source-images.sh`. Report the actual results, not script presence.
-
-Acceptance covers A/B pinning, cold Query with Indexer/remote stopped, durable
-request recovery, publication crash windows and orphan denial, unprepared states,
-authorization/traversal/symlink/exclusions, Unicode/CRLF/oversized-line/EOF cursors,
-literal/global-limit/exit1/timeout/overflow/process cleanup, guide non-authority,
-and HTTP/MCP success/error parity.
-
-Show one fixture flow using actual source responses with repository, SHA, path,
-and line. The external agent, not the server, produces the flow conclusion.
+For full agent acceptance, show one fixture flow using actual source responses
+with repository, SHA, path and line. The external agent, not the server, produces
+the flow conclusion.
 Do not reuse old Mongo/JDT acceptance reports as Source-first evidence. Report
 missing prerequisites and unexecuted checks explicitly; tests alone do not prove
 the deployable source journey. Pure prose changes do not require runtime tests.
