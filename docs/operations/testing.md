@@ -1,6 +1,9 @@
 # Testing and verification
 
-Run from the reactor root with Java 21, Maven 3.9+, Git and a real absolute-path ripgrep executable for source journeys. Ordinary tests need no MongoDB, Docker or JDT LS. Use Docker only for image/build isolation checks. These commands exercise source contracts, **not** target repository tests, agent/model reasoning, production TLS or capacity.
+Run from the reactor root. These checks exercise current Source-first contracts,
+**not** target-repository business builds, agent/model reasoning, production TLS
+or capacity. [Roadmap Phase 2–6](../roadmap.md) features/dependencies/workloads
+are not prerequisites for this cleanup or Phase 1 verification.
 
 ## Select scope; separate tasks from feature acceptance
 
@@ -53,6 +56,81 @@ Run selected images on isolated CI, not in the default local loop. This cleanup
 changes CI, so its final integrated gate selects reactor, journey and images.
 Diagnose failed gates and verify the corrected snapshot; never infer success
 from a script existing or a gate being scheduled.
+
+## Prerequisites and launcher controls
+
+| Boundary | Required | Not required / ownership |
+| --- | --- | --- |
+| Scope selector regressions | Bash and Git | Temporary local Git only; no JVM/container/services |
+| Ordinary native tests | Java 21, Maven 3.9.x; Git for local preparation tests; real rg for actual search tests | No Docker, MongoDB, JDT LS or PostgreSQL service |
+| Native MCP journey | Java 21, Maven 3.9.x, Git, configured absolute executable real ripgrep | Independent JVMs and disposable roots; no target-repository builds |
+| Final image builds/smoke | Isolated CI Docker engine/builder, Git, curl, jq, jar; Java 21/Maven 3.9.x for the CI environment | Non-root writer UID 10001 / reader UID 10002; only the published child is mounted read-only by Query |
+| Current Source-first runtime | Separate Indexer admin / Query read tokens, Indexer-only Git credentials, Query allowlist, new private/published POSIX roots | No Mongo/JDT service; keep unrelated local PostgreSQL and Docker/data running |
+
+Prefer a standard system ripgrep installation. Do not commit a workstation/editor
+fallback, install/uninstall packages or change global settings as a test workaround.
+`SOURCE_TEST_RG` is a test launcher control, mapped to Maven `source.test.rg`;
+ordinary actual-search tests also accept that Maven property directly.
+`MAVEN_CMD` selects the native journey's Maven executable.
+`SEMANTIC_QUERY_RG_EXECUTABLE` configures production Query; it is not a replacement
+for the test control. Do not source Indexer secrets into Query.
+
+### Focused local commands
+
+Choose the actual affected classes; these examples are templates, not recorded
+verification. Configure an installed real absolute rg first:
+
+```bash
+export SOURCE_TEST_RG=/absolute/path/to/rg
+
+mvn --batch-mode --no-transfer-progress -pl semantic-query -am \
+  -Dtest=RipgrepTextSearchTest,SearchAdmissionTest \
+  -Dsurefire.failIfNoSpecifiedTests=false -Dsource.test.rg="$SOURCE_TEST_RG" test
+
+mvn --batch-mode --no-transfer-progress -pl semantic-indexer -am \
+  -Dtest=ApprovedOriginBindingTest,SourcePreparationPublicationTest,SourcePreparationRecoveryTest \
+  -Dsurefire.failIfNoSpecifiedTests=false test
+
+# Final full ordinary gate, when selected; not every task.
+mvn --batch-mode --no-transfer-progress -Dsource.test.rg="$SOURCE_TEST_RG" test
+
+# Changed source boundary only, admitted as one serial lane.
+SOURCE_TEST_RG="$SOURCE_TEST_RG" scripts/test-source-mcp.sh
+```
+
+`failIfNoSpecifiedTests=false` permits upstream modules without the named class;
+it does not permit a zero-test green. Identify the intended classes and actual
+scenario counts in the report. Clean after deleting Java/build outputs or at a
+fresh final gate, not every unchanged loop.
+
+### Resource and host/data safeguards
+
+Allow only one heavy local verification lane across all worktrees. Do not overlap
+Maven, real journey, Docker builds/smoke or another executor; no Maven `-T` or extra
+parallel test forks. Journey service JVMs belong to that one lane. `MAVEN_OPTS`
+does not by itself bound test forks or launched service JVMs.
+
+Before admission, require WSL `MemAvailable` and Windows free physical RAM each
+at least 6 GiB, swap used at most 256 MiB with no sustained swap-in/out in a short
+sample, and at least 20 GiB free on both Linux and the actual Windows volume
+holding data/swap. Missing metrics or insufficient headroom means defer to an
+admitted lane/CI, not retry under pressure. Virtual ext4 capacity is not additional
+physical SSD capacity. Observe only owned runs with bounded low-rate sampling;
+if either available RAM falls below 2 GiB or swap grows 512 MiB within 30 seconds,
+stop admitting work and gracefully cancel the owned verification process group.
+Retain diagnostics/original request IDs; never terminate unrelated IDE/services.
+
+Preserve separate admin/read tokens, Indexer-only credentials/private jobs/staging,
+immutable published roots, Query allowlist and read-only published-child mount.
+Image smoke retains its failure root/request ID after unknown acceptance outcomes;
+native journey removes its disposable work/logs and retains response artifacts.
+Neither script authorizes deleting existing managed roots or user service data.
+
+Keep local PostgreSQL (including `java-agent-uat-postgres-1`), its Docker engine
+and data running. Do not stop Docker/WSL, change global limits or prune containers,
+images, volumes or caches. Any named legacy container retirement needs separate
+owner confirmation; unresolved ownership/use means leave it intact. Container-only
+approval does not approve deleting mounts/data/volumes, clones or IDE tooling.
 
 ## Verification commands
 
