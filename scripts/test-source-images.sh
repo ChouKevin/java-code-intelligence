@@ -4,7 +4,7 @@ set -euo pipefail
 # Operates exclusively on a fresh temporary directory and disposable containers.
 indexer_image="${INDEXER_IMAGE:-java-source-indexer:phase1}"
 query_image="${QUERY_IMAGE:-java-source-query:phase1}"
-for program in docker git curl jq jar; do
+for program in docker git curl jq jar javac; do
   command -v "${program}" >/dev/null || { echo "missing prerequisite: ${program}" >&2; exit 1; }
 done
 
@@ -32,6 +32,10 @@ cleanup() {
   rm -rf "${root}"
 }
 trap cleanup EXIT
+repository_root="$(git rev-parse --show-toplevel)"
+mkdir -p "${root}/peer-classes"
+javac -d "${root}/peer-classes" \
+  "${repository_root}/semantic-query/src/test/java/com/java/semantic/query/source/SourceReadLockPeer.java"
 
 fail() { echo "source image smoke failed: $*" >&2; exit 1; }
 mkdir -p "${root}/fixture" "${root}/storage/source-published"
@@ -85,6 +89,7 @@ indexer_container="$(docker run -d -p 127.0.0.1::8080 \
   --mount "type=bind,src=${root}/storage,dst=/data" \
   --mount "type=bind,src=${root}/fixture,dst=/fixture,readonly" \
   -e SEMANTIC_INDEXER_ADMIN_TOKEN=indexer-smoke-only \
+  -e SEMANTIC_SOURCE_RETENTION_INTERVAL=1s \
   -e 'SPRING_APPLICATION_JSON={"semantic":{"repositories":{"fixture":{"url":"file:///fixture","default-branch":"main","display-name":"Smoke Fixture"}}}}' \
   "${indexer_image}")"
 indexer_url="http://$(docker port "${indexer_container}" 8080/tcp)"
@@ -181,5 +186,93 @@ if docker exec -e SEMANTIC_QUERY_RG_EXECUTABLE=/missing-nondefault-rg "${query_c
   fail 'Query ignored the configured nondefault ripgrep executable'
 fi
 docker exec "${indexer_container}" sh -ceu 'test "$(id -u)" = 10001; test -d /data/source-admin; test -d /data/source-published'
+# This peer proves OS/UID/read-only-mount locking, not an in-flight HTTP request.
+# Native facade tests separately exercise full-operation lease ownership.
+printf 'package smoke;\nclass Example { String marker = "source-image-needle-B"; }\n' > "${root}/fixture/Example.java"
+git -C "${root}/fixture" add Example.java
+git -C "${root}/fixture" commit -qm 'replacement source fixture B'
+revision_b="$(git -C "${root}/fixture" rev-parse HEAD)"
+IFS= read -r request_b < /proc/sys/kernel/random/uuid
+printf '%s\n' "${request_b}" > "${root}/request-id-b"
+sync -f "${root}/request-id-b"
+status="$(curl -sS -o "${root}/job-b.json" -w '%{http_code}' --max-time 10 \
+  -H 'X-Api-Token: indexer-smoke-only' -H 'Content-Type: application/json' \
+  -d "{\"requestId\":\"${request_b}\",\"revision\":\"${revision_b}\"}" "${indexer_url}/index/repositories/fixture/source")"
+[ "${status}" = 202 ] || fail "B preparation admission returned HTTP ${status}"
+for ((attempt=0; attempt<60; attempt++)); do
+  status="$(curl -sS -o "${root}/job-b.json" -w '%{http_code}' --max-time 5 \
+    -H 'X-Api-Token: indexer-smoke-only' \
+    "${indexer_url}/index/repositories/fixture/jobs?requestId=${request_b}")"
+  [ "${status}" = 200 ] || fail "B original request lookup returned HTTP ${status}"
+  phase="$(jq -r '.phase' "${root}/job-b.json")"
+  if [ "${phase}" = COMPLETE ]; then break; fi
+  [ "${phase}" != FAILED ] || fail 'B preparation failed'
+  sleep 1
+done
+[ "${phase}" = COMPLETE ] || fail 'B preparation did not complete'
+[ "$(jq -r '.resolvedRevision' "${root}/job-b.json")" = "${revision_b}" ] || fail 'B resolved SHA mismatch'
+post_query source "{\"context\":{\"repositoryId\":\"fixture\",\"revision\":\"${revision}\"},\"path\":\"Example.java\"}"
+jq -e '.content | contains("source-image-needle-B") | not' "${root}/query.json" >/dev/null || fail 'A changed after B publication'
+docker stop "${indexer_container}" >/dev/null
+# Only disposable private metadata is aged. No published manifest/tree bytes are changed.
+docker run --rm --user 10001:10001 --mount "type=bind,src=${root}/storage,dst=/data" \
+  --entrypoint sh "${indexer_image}" -ceu 'cat /data/source-admin/repositories/fixture/retention.json' \
+  > "${root}/retention-before.json"
+aged_at="$(date -u -d '31 days ago' '+%Y-%m-%dT%H:%M:%SZ')"
+jq --arg sha "${revision}" --arg age "${aged_at}" '.retiredAt[$sha] = $age' \
+  "${root}/retention-before.json" > "${root}/retention-aged.json"
+chmod 0644 "${root}/retention-aged.json"
+docker run --rm --user 10001:10001 --mount "type=bind,src=${root}/storage,dst=/data" \
+  --mount "type=bind,src=${root}/retention-aged.json,dst=/retention-aged.json,readonly" \
+  --entrypoint sh "${indexer_image}" -ceu '
+    cp /retention-aged.json /data/source-admin/repositories/fixture/retention-aged.tmp
+    chmod 0600 /data/source-admin/repositories/fixture/retention-aged.tmp
+    sync
+    mv /data/source-admin/repositories/fixture/retention-aged.tmp /data/source-admin/repositories/fixture/retention.json
+    sync
+  '
+docker exec "${query_container}" mkdir -p /tmp/source-lock-peer
+docker cp "${root}/peer-classes/." "${query_container}:/tmp/source-lock-peer"
+docker exec -d --user 10002:10002 "${query_container}" java -cp /tmp/source-lock-peer \
+  com.java.semantic.query.source.SourceReadLockPeer shared /published-evidence/fixture/read.lock \
+  /tmp/source-gc-peer-ready /tmp/source-gc-peer-release 60000
+peer_ready=0
+for ((attempt=0; attempt<10; attempt++)); do
+  if docker exec "${query_container}" test -f /tmp/source-gc-peer-ready; then peer_ready=1; break; fi
+  sleep 1
+done
+[ "${peer_ready}" = 1 ] || fail 'reader UID peer could not acquire shared lock on read-only mount'
+docker start "${indexer_container}" >/dev/null
+wait_http "${indexer_url}/index/repositories/fixture/jobs?requestId=${request_b}" "${indexer_container}"
+busy=0
+for ((attempt=0; attempt<30; attempt++)); do
+  docker logs "${indexer_container}" > "${root}/gc.log" 2>&1
+  if grep -Eq 'event=source_gc_skip .*repositoryId=fixture reason=READ_IN_PROGRESS' "${root}/gc.log"; then busy=1; break; fi
+  sleep 1
+done
+[ "${busy}" = 1 ] || fail 'startup GC did not report read-in-progress protection'
+post_query source "{\"context\":{\"repositoryId\":\"fixture\",\"revision\":\"${revision}\"},\"path\":\"Example.java\"}"
+jq -e '.content | contains("source-image-needle")' "${root}/query.json" >/dev/null || fail 'busy A became unreadable'
+docker exec --user 10002:10002 "${query_container}" touch /tmp/source-gc-peer-release
+deleted=0
+for ((attempt=0; attempt<30; attempt++)); do
+  status="$(curl -sS -o "${root}/expired.json" -w '%{http_code}' --max-time 5 \
+    -H 'X-Api-Token: query-smoke-only' -H 'Content-Type: application/json' \
+    -d "{\"repositoryId\":\"fixture\",\"revision\":\"${revision}\"}" "${query_url}/api/v1/context")"
+  if [ "${status}" = 404 ] && jq -e '.code == "REVISION_NOT_PREPARED"' "${root}/expired.json" >/dev/null \
+      && docker exec "${indexer_container}" test ! -e "/data/source-published/fixture/revisions/${revision}" \
+      && docker exec "${indexer_container}" test ! -e /data/source-admin/repositories/fixture/pending-delete.json; then
+    deleted=1; break
+  fi
+  sleep 1
+done
+[ "${deleted}" = 1 ] || fail 'scheduled retry did not withdraw expired A after peer release'
+docker logs "${indexer_container}" > "${root}/gc.log" 2>&1
+grep -Eq "event=source_gc_deleted .*repositoryId=fixture revision=${revision} .*result=deleted" "${root}/gc.log" \
+  || fail 'A physical deletion completion event missing'
+post_query search-text "{\"context\":{\"repositoryId\":\"fixture\",\"revision\":\"${revision_b}\"},\"query\":\"source-image-needle-B\"}"
+jq -e '.matches | any(.path == "Example.java" and .line == 2)' "${root}/query.json" >/dev/null || fail 'retained B search failed'
+post_query source "{\"context\":{\"repositoryId\":\"fixture\",\"revision\":\"${revision_b}\"},\"path\":\"Example.java\"}"
+jq -e '.content | contains("source-image-needle-B")' "${root}/query.json" >/dev/null || fail 'retained B read failed'
 successful=1
-echo 'Source images: real Git preparation, published admission/search/read, dependency and UID isolation passed'
+echo 'Source images: real Git A/B, read-only UID locking, busy skip, scheduled cleanup, retained B and isolation passed'

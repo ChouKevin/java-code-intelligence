@@ -39,7 +39,7 @@ class SourcePreparationRecoveryTest {
             try (DurableSourceFiles writer = new DurableSourceFiles(fixture.admin)) {
                 RepositoryRegistry registry = new RepositoryRegistry(properties);
                 FileSourceJobStore jobs = new FileSourceJobStore(properties, mapper, writer);
-                SourcePublicationStore published = new SourcePublicationStore(properties, mapper, writer, jobs);
+                SourcePublicationStore published = com.java.semantic.indexer.source.SourceLifecycleFixture.publications(properties, mapper, writer, jobs);
                 SourcePreparationService service = new SourcePreparationService(jobs, published, registry);
                 SourcePreparationJob accepted = service.prepareSource(fixture.repository, request, Optional.empty());
                 jobId = accepted.jobId();
@@ -50,7 +50,7 @@ class SourcePreparationRecoveryTest {
                 RepositoryRevisionResolver resolver = new RepositoryRevisionResolver(registry, properties);
                 RepositorySourceManager manager = new RepositorySourceManager(jobs, resolver,
                         new JGitRevisionExporter(resolver, registry, mapper), published, registry, properties);
-                IndexJobDispatcher dispatcher = new IndexJobDispatcher(jobs, new IndexJobExecutor(manager), published);
+                IndexJobDispatcher dispatcher = new IndexJobDispatcher(jobs, new IndexJobExecutor(manager), published, SourceLifecycleFixture.collector(properties, mapper, published));
                 try {
                     assertThatThrownBy(dispatcher::dispatchOnce).isInstanceOf(IllegalStateException.class);
                     assertThat(jobs.find(fixture.repository, request).orElseThrow().phase())
@@ -65,7 +65,7 @@ class SourcePreparationRecoveryTest {
             }
             try (DurableSourceFiles writer = new DurableSourceFiles(fixture.admin)) {
                 FileSourceJobStore jobs = new FileSourceJobStore(properties, mapper, writer);
-                SourcePublicationStore published = new SourcePublicationStore(properties, mapper, writer, jobs);
+                SourcePublicationStore published = com.java.semantic.indexer.source.SourceLifecycleFixture.publications(properties, mapper, writer, jobs);
                 jobs.recover(published);
                 assertThat(jobs.find(fixture.repository, request).orElseThrow().phase())
                         .isEqualTo(SourcePreparationJob.Phase.FAILED);
@@ -91,7 +91,7 @@ class SourcePreparationRecoveryTest {
             try (DurableSourceFiles writer = new DurableSourceFiles(fixture.admin)) {
                 RepositoryRegistry registry = new RepositoryRegistry(properties);
                 FileSourceJobStore jobs = new FileSourceJobStore(properties, mapper, writer);
-                SourcePublicationStore published = new SourcePublicationStore(properties, mapper, writer, jobs);
+                SourcePublicationStore published = com.java.semantic.indexer.source.SourceLifecycleFixture.publications(properties, mapper, writer, jobs);
                 SourcePreparationService service = new SourcePreparationService(jobs, published, registry);
                 service.prepareSource(fixture.repository, older, Optional.empty());
                 byte[] acceptedState = Files.readAllBytes(stateFile);
@@ -101,7 +101,7 @@ class SourcePreparationRecoveryTest {
                 RepositoryRevisionResolver resolver = new RepositoryRevisionResolver(registry, properties);
                 RepositorySourceManager manager = new RepositorySourceManager(jobs, resolver,
                         new JGitRevisionExporter(resolver, registry, mapper), published, registry, properties);
-                IndexJobDispatcher dispatcher = new IndexJobDispatcher(jobs, new IndexJobExecutor(manager), published);
+                IndexJobDispatcher dispatcher = new IndexJobDispatcher(jobs, new IndexJobExecutor(manager), published, SourceLifecycleFixture.collector(properties, mapper, published));
                 try {
                     assertThatThrownBy(dispatcher::dispatchOnce).isInstanceOf(IllegalStateException.class);
                 } finally {
@@ -114,7 +114,7 @@ class SourcePreparationRecoveryTest {
             }
             try (DurableSourceFiles writer = new DurableSourceFiles(fixture.admin)) {
                 FileSourceJobStore jobs = new FileSourceJobStore(properties, mapper, writer);
-                SourcePublicationStore published = new SourcePublicationStore(properties, mapper, writer, jobs);
+                SourcePublicationStore published = com.java.semantic.indexer.source.SourceLifecycleFixture.publications(properties, mapper, writer, jobs);
                 jobs.recover(published);
                 assertThat(published.state(fixture.repository).preparation().jobId()).contains(newerJobId);
                 assertThat(published.state(fixture.repository).preparation().phase())
@@ -137,7 +137,7 @@ class SourcePreparationRecoveryTest {
             String newerJobId;
             try (DurableSourceFiles writer = new DurableSourceFiles(fixture.admin)) {
                 FileSourceJobStore jobs = new FileSourceJobStore(properties, mapper, writer);
-                SourcePublicationStore published = new SourcePublicationStore(properties, mapper, writer, jobs);
+                SourcePublicationStore published = com.java.semantic.indexer.source.SourceLifecycleFixture.publications(properties, mapper, writer, jobs);
                 SourcePreparationService service = new SourcePreparationService(jobs, published,
                         new RepositoryRegistry(properties));
                 service.prepareSource(fixture.repository, older, Optional.empty());
@@ -151,7 +151,7 @@ class SourcePreparationRecoveryTest {
             rewriteAuditTime(fixture, newer, Instant.parse("2000-01-01T00:00:00Z"));
             try (DurableSourceFiles writer = new DurableSourceFiles(fixture.admin)) {
                 FileSourceJobStore reopened = new FileSourceJobStore(properties, mapper, writer);
-                SourcePublicationStore published = new SourcePublicationStore(properties, mapper, writer, reopened);
+                SourcePublicationStore published = com.java.semantic.indexer.source.SourceLifecycleFixture.publications(properties, mapper, writer, reopened);
                 reopened.recover(published);
                 assertThat(reopened.claimNext().orElseThrow().jobId()).isEqualTo(newerJobId);
                 assertThat(published.state(fixture.repository).preparation().jobId()).contains(newerJobId);
@@ -169,7 +169,7 @@ class SourcePreparationRecoveryTest {
             String newerJobId;
             try (DurableSourceFiles writer = new DurableSourceFiles(fixture.admin)) {
                 FileSourceJobStore jobs = new FileSourceJobStore(properties, mapper, writer);
-                SourcePublicationStore published = new SourcePublicationStore(properties, mapper, writer, jobs);
+                SourcePublicationStore published = com.java.semantic.indexer.source.SourceLifecycleFixture.publications(properties, mapper, writer, jobs);
                 SourcePreparationService service = new SourcePreparationService(jobs, published,
                         new RepositoryRegistry(properties));
                 service.prepareSource(fixture.repository, older, Optional.empty());
@@ -186,7 +186,7 @@ class SourcePreparationRecoveryTest {
             rewriteAuditTime(fixture, newer, Instant.parse("2000-01-01T00:00:00Z"));
             try (DurableSourceFiles writer = new DurableSourceFiles(fixture.admin)) {
                 FileSourceJobStore reopened = new FileSourceJobStore(properties, mapper, writer);
-                SourcePublicationStore published = new SourcePublicationStore(properties, mapper, writer, reopened);
+                SourcePublicationStore published = com.java.semantic.indexer.source.SourceLifecycleFixture.publications(properties, mapper, writer, reopened);
                 reopened.recover(published);
                 assertThat(published.state(fixture.repository).preparation().jobId()).contains(newerJobId);
                 assertThat(published.state(fixture.repository).preparation().phase())
@@ -205,7 +205,7 @@ class SourcePreparationRecoveryTest {
             String acceptedId;
             try (DurableSourceFiles writer = new DurableSourceFiles(fixture.admin)) {
                 FileSourceJobStore jobs = new FileSourceJobStore(properties, mapper, writer);
-                SourcePublicationStore published = new SourcePublicationStore(properties, mapper, writer, jobs);
+                SourcePublicationStore published = com.java.semantic.indexer.source.SourceLifecycleFixture.publications(properties, mapper, writer, jobs);
                 acceptedId = new SourcePreparationService(jobs, published, new RepositoryRegistry(properties))
                         .prepareSource(fixture.repository, request, Optional.empty()).jobId();
             }
@@ -213,7 +213,7 @@ class SourcePreparationRecoveryTest {
             Files.writeString(fixture.admin.resolve("jobs/orders/admission-sequence"), "2");
             try (DurableSourceFiles writer = new DurableSourceFiles(fixture.admin)) {
                 FileSourceJobStore jobs = new FileSourceJobStore(properties, mapper, writer);
-                SourcePublicationStore published = new SourcePublicationStore(properties, mapper, writer, jobs);
+                SourcePublicationStore published = com.java.semantic.indexer.source.SourceLifecycleFixture.publications(properties, mapper, writer, jobs);
                 jobs.recover(published);
                 assertThat(jobs.claimNext().orElseThrow().jobId()).isEqualTo(acceptedId);
                 SourcePreparationJob failed = jobs.fail(fixture.repository, new IndexJobId(acceptedId),
@@ -234,7 +234,7 @@ class SourcePreparationRecoveryTest {
             RepositoryProperties properties = SourcePreparationPublicationTest.properties(fixture);
             try (DurableSourceFiles writer = new DurableSourceFiles(fixture.admin)) {
                 FileSourceJobStore jobs = new FileSourceJobStore(properties, mapper, writer);
-                SourcePublicationStore published = new SourcePublicationStore(properties, mapper, writer, jobs);
+                SourcePublicationStore published = com.java.semantic.indexer.source.SourceLifecycleFixture.publications(properties, mapper, writer, jobs);
                 new SourcePreparationService(jobs, published, new RepositoryRegistry(properties))
                         .prepareSource(fixture.repository, new PreparationRequestId(UUID.randomUUID().toString()),
                                 Optional.empty());
@@ -242,7 +242,7 @@ class SourcePreparationRecoveryTest {
             Files.delete(fixture.admin.resolve("jobs/orders/admission-sequence"));
             try (DurableSourceFiles writer = new DurableSourceFiles(fixture.admin)) {
                 FileSourceJobStore reopened = new FileSourceJobStore(properties, mapper, writer);
-                SourcePublicationStore published = new SourcePublicationStore(properties, mapper, writer, reopened);
+                SourcePublicationStore published = com.java.semantic.indexer.source.SourceLifecycleFixture.publications(properties, mapper, writer, reopened);
                 assertThatThrownBy(() -> reopened.recover(published)).isInstanceOf(IllegalStateException.class);
                 assertThat(published.state(fixture.repository).preparation().phase())
                         .isEqualTo(SourceRepositoryState.PreparationPhase.ACCEPTED);
@@ -259,7 +259,7 @@ class SourcePreparationRecoveryTest {
             PreparationRequestId newer = new PreparationRequestId(UUID.randomUUID().toString());
             try (DurableSourceFiles writer = new DurableSourceFiles(fixture.admin)) {
                 FileSourceJobStore jobs = new FileSourceJobStore(properties, mapper, writer);
-                SourcePublicationStore published = new SourcePublicationStore(properties, mapper, writer, jobs);
+                SourcePublicationStore published = com.java.semantic.indexer.source.SourceLifecycleFixture.publications(properties, mapper, writer, jobs);
                 SourcePreparationService service = new SourcePreparationService(jobs, published,
                         new RepositoryRegistry(properties));
                 service.prepareSource(fixture.repository, older, Optional.empty());
@@ -275,7 +275,7 @@ class SourcePreparationRecoveryTest {
             Files.write(newerFile, mapper.writeValueAsBytes(new DurableJob(first.sequence(), second.job())));
             try (DurableSourceFiles writer = new DurableSourceFiles(fixture.admin)) {
                 FileSourceJobStore reopened = new FileSourceJobStore(properties, mapper, writer);
-                SourcePublicationStore published = new SourcePublicationStore(properties, mapper, writer, reopened);
+                SourcePublicationStore published = com.java.semantic.indexer.source.SourceLifecycleFixture.publications(properties, mapper, writer, reopened);
                 assertThatThrownBy(() -> reopened.recover(published)).isInstanceOf(IllegalStateException.class);
             }
         }
@@ -307,7 +307,7 @@ class SourcePreparationRecoveryTest {
             try (DurableSourceFiles writer = new DurableSourceFiles(fixture.admin)) {
                 RepositoryRegistry registry = new RepositoryRegistry(properties);
                 FileSourceJobStore jobs = new FileSourceJobStore(properties, mapper, writer);
-                SourcePublicationStore published = new SourcePublicationStore(properties, mapper, writer, jobs);
+                SourcePublicationStore published = com.java.semantic.indexer.source.SourceLifecycleFixture.publications(properties, mapper, writer, jobs);
                 RepositoryRevisionResolver resolver = new RepositoryRevisionResolver(registry, properties);
                 JGitRevisionExporter exporter = new JGitRevisionExporter(resolver, registry, mapper);
                 RepositorySourceManager manager = new RepositorySourceManager(jobs, resolver, exporter, published, registry, properties);
@@ -331,7 +331,7 @@ class SourcePreparationRecoveryTest {
             }
             try (DurableSourceFiles writer = new DurableSourceFiles(fixture.admin)) {
                 FileSourceJobStore reopenedJobs = new FileSourceJobStore(properties, mapper, writer);
-                SourcePublicationStore recoveredState = new SourcePublicationStore(properties, mapper, writer, reopenedJobs);
+                SourcePublicationStore recoveredState = com.java.semantic.indexer.source.SourceLifecycleFixture.publications(properties, mapper, writer, reopenedJobs);
                 reopenedJobs.recover(recoveredState);
                 assertThat(reopenedJobs.find(fixture.repository, new PreparationRequestId(requestB)).orElseThrow().phase())
                         .isEqualTo(SourcePreparationJob.Phase.FAILED);
@@ -365,7 +365,7 @@ class SourcePreparationRecoveryTest {
             try (DurableSourceFiles writer = new DurableSourceFiles(fixture.admin)) {
                 RepositoryRegistry registry = new RepositoryRegistry(properties);
                 FileSourceJobStore jobs = new FileSourceJobStore(properties, mapper, writer);
-                SourcePublicationStore store = new SourcePublicationStore(properties, mapper, writer, jobs);
+                SourcePublicationStore store = com.java.semantic.indexer.source.SourceLifecycleFixture.publications(properties, mapper, writer, jobs);
                 RepositoryRevisionResolver resolver = new RepositoryRevisionResolver(registry, properties);
                 JGitRevisionExporter exporter = new JGitRevisionExporter(resolver, registry, mapper);
                 SourcePreparationService service = new SourcePreparationService(jobs, store, registry);
@@ -392,7 +392,7 @@ class SourcePreparationRecoveryTest {
             }
             try (DurableSourceFiles writer = new DurableSourceFiles(fixture.admin)) {
                 FileSourceJobStore reopenedJobs = new FileSourceJobStore(properties, mapper, writer);
-                SourcePublicationStore recovered = new SourcePublicationStore(properties, mapper, writer, reopenedJobs);
+                SourcePublicationStore recovered = com.java.semantic.indexer.source.SourceLifecycleFixture.publications(properties, mapper, writer, reopenedJobs);
                 reopenedJobs.recover(recovered);
                 assertThat(reopenedJobs.find(fixture.repository, new PreparationRequestId(requestB)).orElseThrow().phase())
                         .isEqualTo(SourcePreparationJob.Phase.COMPLETE);

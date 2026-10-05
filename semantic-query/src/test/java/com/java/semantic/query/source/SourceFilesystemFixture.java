@@ -30,6 +30,8 @@ final class SourceFilesystemFixture {
     final SourceContext context = new SourceContext("sample", SHA);
     final List<SourceInventoryEntry> entries = new ArrayList<>();
     final SourceAccessProperties properties;
+    final SourceReadLocks locks;
+    private final LocalSourceRevisionCatalog catalog;
 
     SourceFilesystemFixture(Path temp) throws IOException {
         root = temp.resolve("published");
@@ -39,6 +41,9 @@ final class SourceFilesystemFixture {
         properties = new SourceAccessProperties(root, Path.of(System.getProperty("source.test.rg", "/usr/bin/rg")),
                 List.of("sample"), 65_536,
                 Duration.ofSeconds(5), Duration.ofSeconds(2), Duration.ofSeconds(2), 2);
+        Files.write(root.resolve("sample/read.lock"), new byte[0]);
+        locks = new SourceReadLocks(root);
+        catalog = new LocalSourceRevisionCatalog(properties, mapper, locks);
     }
 
     void file(String path, String text) throws IOException {
@@ -54,7 +59,7 @@ final class SourceFilesystemFixture {
         entries.add(new SourceInventoryEntry(path, EntryKind.DIRECTORY, Optional.empty(), 0, Optional.empty(), Optional.empty()));
     }
 
-    AdmittedSourceRevision publish(Optional<String> guide) throws IOException {
+    void publish(Optional<String> guide) throws IOException {
         entries.sort((left, right) -> SourcePathResolver.compare(SourcePathResolver.key(left), SourcePathResolver.key(right)));
         java.io.ByteArrayOutputStream bytes = new java.io.ByteArrayOutputStream();
         for (SourceInventoryEntry entry : entries) {
@@ -67,7 +72,7 @@ final class SourceFilesystemFixture {
                 entries.stream().filter(item -> item.path().equals(guide.orElseThrow()))
                         .findFirst().orElseThrow().contentDigest(), GuideFreshness.NOT_VERIFIED)
                 : new GuideInfo(GuideState.DISABLED, Optional.empty(), Optional.empty(), GuideFreshness.NOT_VERIFIED);
-        SourceRevisionManifest manifest = new SourceRevisionManifest(1, 1, context, now, info,
+        SourceRevisionManifest manifest = new SourceRevisionManifest(1, SourceRevisionManifest.POLICY_VERSION, context, now, info,
                 new SourceRevisionManifest.Coverage(entries.stream().filter(item -> item.status().equals(Optional.of(EntryStatus.TEXT))).count(),
                         0, Map.of()), LocalSourceRevisionCatalog.digest(bytes.toByteArray()));
         byte[] manifestBytes = mapper.writeValueAsBytes(manifest);
@@ -81,9 +86,9 @@ final class SourceFilesystemFixture {
         Files.write(root.resolve("sample/state.json"), mapper.writeValueAsBytes(state));
         Files.write(root.resolve("repositories.json"), mapper.writeValueAsBytes(List.of(
                 new SourceRepositoryDescriptor("sample", "Sample", "main", guide))));
-        return new LocalSourceRevisionCatalog(properties, mapper).admit(context);
     }
 
     LocalRepositorySourceService service() { return new LocalRepositorySourceService(properties, mapper); }
-    LocalSourceRevisionCatalog catalog() { return new LocalSourceRevisionCatalog(properties, mapper); }
+    LocalSourceRevisionCatalog catalog() { return catalog; }
+    AdmittedSourceRevision admit() { return catalog.admit(context); }
 }

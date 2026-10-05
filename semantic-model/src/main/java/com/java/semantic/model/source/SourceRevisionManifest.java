@@ -11,7 +11,7 @@ public record SourceRevisionManifest(int formatVersion, int policyVersion, Sourc
         GuideInfo projectGuide, Coverage coverage, String inventoryDigest) {
 
     public static final int FORMAT_VERSION = 1;
-    public static final int POLICY_VERSION = 1;
+    public static final int POLICY_VERSION = 2;
 
     public SourceRevisionManifest {
         ModelValidation.require(formatVersion == FORMAT_VERSION, "unsupported source format version");

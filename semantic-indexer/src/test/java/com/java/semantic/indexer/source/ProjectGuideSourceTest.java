@@ -32,7 +32,7 @@ class ProjectGuideSourceTest {
             try (DurableSourceFiles writer = new DurableSourceFiles(fixture.admin)) {
                 RepositoryRegistry registry = new RepositoryRegistry(properties);
                 FileSourceJobStore jobs = new FileSourceJobStore(properties, mapper, writer);
-                SourcePublicationStore store = new SourcePublicationStore(properties, mapper, writer, jobs);
+                SourcePublicationStore store = com.java.semantic.indexer.source.SourceLifecycleFixture.publications(properties, mapper, writer, jobs);
                 RepositoryRevisionResolver resolver = new RepositoryRevisionResolver(registry, properties);
                 RepositorySourceManager manager = new RepositorySourceManager(jobs, resolver,
                         new JGitRevisionExporter(resolver, registry, mapper), store, registry, properties);
@@ -91,7 +91,7 @@ class ProjectGuideSourceTest {
                 RepositoryProperties properties = SourcePreparationPublicationTest.properties(fixture);
                 RepositoryRegistry registry = new RepositoryRegistry(properties);
                 FileSourceJobStore jobs = new FileSourceJobStore(properties, mapper, writer);
-                SourcePublicationStore store = new SourcePublicationStore(properties, mapper, writer, jobs);
+                SourcePublicationStore store = com.java.semantic.indexer.source.SourceLifecycleFixture.publications(properties, mapper, writer, jobs);
                 RepositoryRevisionResolver resolver = new RepositoryRevisionResolver(registry, properties);
                 RepositorySourceManager manager = new RepositorySourceManager(jobs, resolver,
                         new JGitRevisionExporter(resolver, registry, mapper), store, registry, properties);
@@ -129,7 +129,7 @@ class ProjectGuideSourceTest {
                 RepositoryRegistry registry = new RepositoryRegistry(properties);
                 assertThat(registry.descriptors().getFirst().projectGuidePath()).isEmpty();
                 FileSourceJobStore jobs = new FileSourceJobStore(properties, mapper, writer);
-                SourcePublicationStore store = new SourcePublicationStore(properties, mapper, writer, jobs);
+                SourcePublicationStore store = com.java.semantic.indexer.source.SourceLifecycleFixture.publications(properties, mapper, writer, jobs);
                 RepositoryRevisionResolver resolver = new RepositoryRevisionResolver(registry, properties);
                 RepositorySourceManager manager = new RepositorySourceManager(jobs, resolver,
                         new JGitRevisionExporter(resolver, registry, mapper), store, registry, properties);
@@ -182,7 +182,7 @@ class ProjectGuideSourceTest {
                 RepositoryProperties properties = SourcePreparationPublicationTest.properties(fixture);
                 RepositoryRegistry registry = new RepositoryRegistry(properties);
                 FileSourceJobStore jobs = new FileSourceJobStore(properties, mapper, writer);
-                SourcePublicationStore store = new SourcePublicationStore(properties, mapper, writer, jobs);
+                SourcePublicationStore store = com.java.semantic.indexer.source.SourceLifecycleFixture.publications(properties, mapper, writer, jobs);
                 RepositoryRevisionResolver resolver = new RepositoryRevisionResolver(registry, properties);
                 RepositorySourceManager manager = new RepositorySourceManager(jobs, resolver,
                         new JGitRevisionExporter(resolver, registry, mapper), store, registry, properties);

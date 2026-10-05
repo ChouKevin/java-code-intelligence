@@ -178,6 +178,9 @@ class SourceMcpJourneyIT {
                         "directory", "../"), "INVALID_ARGUMENT", 400);
                 assertError(sourceMcp, read, "get_context", Map.of("repositoryId", "unregistered"),
                         "REPOSITORY_NOT_FOUND", 404);
+                String returnB = requestId(VIDEO, "return-b-before-gc");
+                call(privateMcp, "prepare_source", Map.of("repositoryId", VIDEO, "requestId", returnB, "revision", b));
+                assertThat(complete(privateMcp, index, VIDEO, returnB).get("resolvedRevision").asString()).isEqualTo(b);
             }
             stop(indexer);
             indexer = null;
@@ -197,7 +200,7 @@ class SourceMcpJourneyIT {
                 assertTools(coldMcp, "list_repositories", "get_context", "list_files", "search_text", "read_source");
                 JsonNode coldRepositories = pair(coldMcp, cold, "list_repositories", Map.of(),
                         "cold-repositories");
-                assertThat(coldRepositories.get("items").toString()).contains("\"video\"", a);
+                assertThat(coldRepositories.get("items").toString()).contains("\"video\"", b);
                 JsonNode coldA = context(coldMcp, cold, VIDEO, Map.of("revision", a), "cold-context-a");
                 JsonNode coldB = context(coldMcp, cold, VIDEO, Map.of("revision", b), "cold-context-b");
                 exercise(coldMcp, cold, coldA.get("context"), a, "cold-a");
@@ -213,6 +216,49 @@ class SourceMcpJourneyIT {
                     .isEqualTo(publishedBeforeCold);
             assertThat(Files.exists(work.resolve("source-admin"))).isFalse();
             assertThat(Files.exists(work.resolve("remote.git"))).isFalse();
+            // Age only the private fixture metadata after the original cold-reader guarantees were checked.
+            Files.move(work.resolve("remote-disabled.git"), remote, StandardCopyOption.ATOMIC_MOVE);
+            Files.move(work.resolve("checkout-disabled"), checkout, StandardCopyOption.ATOMIC_MOVE);
+            Files.move(work.resolve("admin-disabled"), admin, StandardCopyOption.ATOMIC_MOVE);
+            try (McpSyncClient retainedMcp = mcp(cold, readToken)) {
+                Map<String, Object> identityA = Map.of("repositoryId", VIDEO, "revision", a);
+                JsonNode firstPage = pair(retainedMcp, cold, "read_source", Map.of("context", identityA,
+                        "path", VIDEO_PATH, "startLine", 1, "maxLines", 1), "gc-a-cursor-before");
+                assertThat(firstPage.get("hasMore").asBoolean()).isTrue();
+                String cursor = firstPage.get("nextCursor").asString();
+                Path retirementFile = admin.resolve("repositories/video/retention.json");
+                com.java.semantic.indexer.source.SourceRetentionStore.RetentionState old = mapper.readValue(
+                        Files.readAllBytes(retirementFile), com.java.semantic.indexer.source.SourceRetentionStore.RetentionState.class);
+                Map<String, java.time.Instant> dates = new java.util.HashMap<>(old.retiredAt());
+                dates.put(a, java.time.Instant.now().minus(Duration.ofDays(31)));
+                com.java.semantic.indexer.source.DurableSourceFiles.atomicBytes(retirementFile, mapper.writeValueAsBytes(
+                        new com.java.semantic.indexer.source.SourceRetentionStore.RetentionState(1, old.repositoryId(),
+                                old.originFingerprint(), dates)), 4L * 1024 * 1024,
+                        com.java.semantic.indexer.source.DurableSourceFiles.Visibility.PRIVATE);
+                indexer = launch("indexer", indexPort);
+                ready(indexer, index, "/index/repositories/video/jobs?requestId=" + firstRequest, adminToken, 200);
+                long gcDeadline = System.nanoTime() + Duration.ofSeconds(30).toNanos();
+                Path revisionA = published.resolve("video/revisions").resolve(a);
+                while ((Files.exists(revisionA) || !Files.readString(work.resolve("indexer.log")).lines().anyMatch(line ->
+                        line.contains("event=source_gc_deleted") && line.contains("revision=" + a)))
+                        && indexer.isAlive() && System.nanoTime() - gcDeadline < 0) Thread.sleep(50);
+                assertThat(Files.exists(revisionA)).as("startup GC completes physical deletion of retired A").isFalse();
+                assertError(retainedMcp, cold, "get_context", Map.of("repositoryId", VIDEO, "revision", a), "REVISION_NOT_PREPARED", 404);
+                assertError(retainedMcp, cold, "read_source", Map.of("context", identityA, "path", VIDEO_PATH), "REVISION_NOT_PREPARED", 404);
+                assertError(retainedMcp, cold, "read_source", Map.of("context", identityA, "path", VIDEO_PATH,
+                        "startLine", 1, "maxLines", 1, "cursor", cursor), "REVISION_NOT_PREPARED", 404);
+                JsonNode retainedB = context(retainedMcp, cold, VIDEO, Map.of("revision", b), "gc-context-b");
+                assertIdentity(retainedB, VIDEO, b);
+                exercise(retainedMcp, cold, retainedB.get("context"), b, "gc-b");
+                String logs = Files.readString(work.resolve("indexer.log"));
+                String deleted = logs.lines().filter(line -> line.contains("event=source_gc_deleted")
+                        && line.contains("repositoryId=video") && line.contains("revision=" + a)).findFirst().orElseThrow();
+                String run = deleted.substring(deleted.indexOf("gcRunId=") + 8).split(" ")[0];
+                assertThat(logs).contains("event=source_gc_start gcRunId=" + run);
+                assertThat(logs).doesNotContain(adminToken, readToken);
+                Files.writeString(artifacts.resolve("gc-proof.txt"), "repositoryId=video revision=" + a
+                        + " withdrawn; retainedRevision=" + b + " gcRunId=" + run + "\n");
+            }
             Files.writeString(artifacts.resolve("revisions.json"), mapper.writeValueAsString(Map.of("A", a, "B", b)));
         } finally {
             stop(query);

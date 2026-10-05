@@ -6,6 +6,7 @@ import com.java.semantic.query.source.LocalRepositorySourceService;
 import com.java.semantic.query.source.LocalSourceRevisionCatalog;
 import com.java.semantic.query.source.RepositorySourcePort;
 import com.java.semantic.query.source.SourceRevisionCatalog;
+import com.java.semantic.query.source.SourceReadLocks;
 import java.util.List;
 import org.springframework.beans.factory.config.BeanFactoryPostProcessor;
 import org.springframework.boot.SpringApplication;
@@ -26,8 +27,13 @@ public class SemanticQueryApplication {
     }
 
     @Bean
-    SourceRevisionCatalog sourceRevisionCatalog(SourceAccessProperties properties, ObjectMapper mapper) {
-        return new LocalSourceRevisionCatalog(properties, mapper);
+    SourceRevisionCatalog sourceRevisionCatalog(SourceAccessProperties properties, ObjectMapper mapper, SourceReadLocks locks) {
+        return new LocalSourceRevisionCatalog(properties, mapper, locks);
+    }
+
+    @Bean
+    SourceReadLocks sourceReadLocks(SourceAccessProperties properties) {
+        return new SourceReadLocks(properties.publishedRoot());
     }
 
     @Bean

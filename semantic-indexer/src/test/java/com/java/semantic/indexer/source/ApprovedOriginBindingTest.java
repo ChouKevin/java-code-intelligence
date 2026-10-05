@@ -4,7 +4,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.catchThrowable;
 
-import com.java.semantic.indexer.config.ConfiguredRepositoryPublisher;
 import com.java.semantic.indexer.job.FileSourceJobStore;
 import com.java.semantic.indexer.job.PreparationRequestId;
 import com.java.semantic.indexer.job.SourcePreparationJob;
@@ -36,22 +35,20 @@ class ApprovedOriginBindingTest {
             RepositoryProperties approvedA = SourcePreparationPublicationTest.properties(fixture);
             try (DurableSourceFiles owner = new DurableSourceFiles(fixture.admin)) {
                 RepositoryRegistry registry = new RepositoryRegistry(approvedA);
-                new ConfiguredRepositoryPublisher(registry, approvedA, mapper, owner).publish();
+                SourceLifecycleFixture.publisher(registry, approvedA, mapper, owner).publish();
                 assertThat(new RepositoryRevisionResolver(registry, approvedA).resolve(fixture.repository,
                         Optional.of(RepositoryRevision.ofSha(revisionA))).value()).isEqualTo(revisionA);
             }
             byte[] registryA = Files.readAllBytes(fixture.published.resolve("repositories.json"));
             RepositoryProperties approvedB = forRemote(fixture, other);
             try (DurableSourceFiles owner = new DurableSourceFiles(fixture.admin)) {
-                assertThatThrownBy(() -> new ConfiguredRepositoryPublisher(
-                        new RepositoryRegistry(approvedB), approvedB, mapper, owner).publish())
+                assertThatThrownBy(() -> SourceLifecycleFixture.publisher(new RepositoryRegistry(approvedB), approvedB, mapper, owner).publish())
                         .isInstanceOf(IllegalStateException.class);
                 assertThat(Files.readAllBytes(fixture.published.resolve("repositories.json"))).isEqualTo(registryA);
                 assertThat(Files.exists(fixture.published.resolve("orders/state.json"))).isFalse();
                 RepositoryProperties freshPublicB = forRemote(fixture, other);
                 freshPublicB.setSourcePublishedRoot(root.resolve("fresh-public").toString());
-                assertThatThrownBy(() -> new ConfiguredRepositoryPublisher(
-                        new RepositoryRegistry(freshPublicB), freshPublicB, mapper, owner).publish())
+                assertThatThrownBy(() -> SourceLifecycleFixture.publisher(new RepositoryRegistry(freshPublicB), freshPublicB, mapper, owner).publish())
                         .isInstanceOf(IllegalStateException.class);
                 assertThat(Files.exists(root.resolve("fresh-public/orders"))).isFalse();
             }
@@ -69,17 +66,16 @@ class ApprovedOriginBindingTest {
             byte[] originalJob;
             try (DurableSourceFiles owner = new DurableSourceFiles(fixture.admin)) {
                 RepositoryRegistry registry = new RepositoryRegistry(approvedA);
-                new ConfiguredRepositoryPublisher(registry, approvedA, mapper, owner).publish();
+                SourceLifecycleFixture.publisher(registry, approvedA, mapper, owner).publish();
                 FileSourceJobStore jobs = new FileSourceJobStore(approvedA, mapper, owner);
-                SourcePublicationStore publications = new SourcePublicationStore(approvedA, mapper, owner, jobs);
+                SourcePublicationStore publications = new SourcePublicationStore(approvedA, mapper, owner, jobs, new SourceRetentionStore(approvedA, mapper, new RepositoryRegistry(approvedA)));
                 acceptedId = new SourcePreparationService(jobs, publications, registry)
                         .prepareSource(fixture.repository, request, Optional.empty()).jobId();
                 originalJob = Files.readAllBytes(fixture.admin.resolve("jobs/orders").resolve(request.value() + ".json"));
             }
             RepositoryProperties approvedB = forRemote(fixture, other);
             try (DurableSourceFiles owner = new DurableSourceFiles(fixture.admin)) {
-                assertThatThrownBy(() -> new ConfiguredRepositoryPublisher(
-                        new RepositoryRegistry(approvedB), approvedB, mapper, owner).publish())
+                assertThatThrownBy(() -> SourceLifecycleFixture.publisher(new RepositoryRegistry(approvedB), approvedB, mapper, owner).publish())
                         .isInstanceOf(IllegalStateException.class);
                 FileSourceJobStore persisted = new FileSourceJobStore(approvedB, mapper, owner);
                 SourcePreparationJob unchanged = persisted.find(fixture.repository, request).orElseThrow();
@@ -87,7 +83,7 @@ class ApprovedOriginBindingTest {
                 assertThat(unchanged.phase()).isEqualTo(SourcePreparationJob.Phase.ACCEPTED);
                 RepositoryRegistry changed = new RepositoryRegistry(approvedB);
                 RepositoryRevisionResolver resolver = new RepositoryRevisionResolver(changed, approvedB);
-                SourcePublicationStore publications = new SourcePublicationStore(approvedB, mapper, owner, persisted);
+                SourcePublicationStore publications = new SourcePublicationStore(approvedB, mapper, owner, persisted, new SourceRetentionStore(approvedB, mapper, new RepositoryRegistry(approvedB)));
                 RepositorySourceManager manager = new RepositorySourceManager(persisted, resolver,
                         new JGitRevisionExporter(resolver, changed, mapper), publications, changed, approvedB);
                 assertThatThrownBy(() -> manager.execute(unchanged)).isInstanceOf(IllegalStateException.class);
@@ -107,9 +103,9 @@ class ApprovedOriginBindingTest {
             RepositoryProperties approvedA = SourcePreparationPublicationTest.properties(fixture);
             try (DurableSourceFiles owner = new DurableSourceFiles(fixture.admin)) {
                 RepositoryRegistry registry = new RepositoryRegistry(approvedA);
-                new ConfiguredRepositoryPublisher(registry, approvedA, mapper, owner).publish();
+                SourceLifecycleFixture.publisher(registry, approvedA, mapper, owner).publish();
                 FileSourceJobStore jobs = new FileSourceJobStore(approvedA, mapper, owner);
-                SourcePublicationStore publications = new SourcePublicationStore(approvedA, mapper, owner, jobs);
+                SourcePublicationStore publications = new SourcePublicationStore(approvedA, mapper, owner, jobs, new SourceRetentionStore(approvedA, mapper, new RepositoryRegistry(approvedA)));
                 new SourcePreparationService(jobs, publications, registry).prepareSource(fixture.repository,
                         new PreparationRequestId(UUID.randomUUID().toString()), Optional.empty());
                 RepositoryRevisionResolver resolver = new RepositoryRevisionResolver(registry, approvedA);
@@ -124,8 +120,7 @@ class ApprovedOriginBindingTest {
             RepositoryProperties approvedB = forRemote(fixture, other);
             approvedB.setSourceAdminRoot(root.resolve("fresh-admin").toString());
             try (DurableSourceFiles owner = new DurableSourceFiles(root.resolve("fresh-admin"))) {
-                assertThatThrownBy(() -> new ConfiguredRepositoryPublisher(
-                        new RepositoryRegistry(approvedB), approvedB, mapper, owner).publish())
+                assertThatThrownBy(() -> SourceLifecycleFixture.publisher(new RepositoryRegistry(approvedB), approvedB, mapper, owner).publish())
                         .isInstanceOf(IllegalStateException.class);
             }
             assertThat(Files.readAllBytes(source)).isEqualTo(original);
@@ -141,8 +136,7 @@ class ApprovedOriginBindingTest {
             Files.createDirectories(fixture.published.resolve("orders"));
             Files.writeString(fixture.published.resolve("orders/state.json"), "unbound-source-evidence");
             try (DurableSourceFiles owner = new DurableSourceFiles(fixture.admin)) {
-                assertThatThrownBy(() -> new ConfiguredRepositoryPublisher(
-                        new RepositoryRegistry(properties), properties, mapper, owner).publish())
+                assertThatThrownBy(() -> SourceLifecycleFixture.publisher(new RepositoryRegistry(properties), properties, mapper, owner).publish())
                         .isInstanceOf(IllegalStateException.class);
                 assertThat(Files.readString(fixture.published.resolve("orders/state.json")))
                         .isEqualTo("unbound-source-evidence");
@@ -158,8 +152,7 @@ class ApprovedOriginBindingTest {
             try (DurableSourceFiles owner = new DurableSourceFiles(fixture.admin)) {
                 Files.createDirectories(objectStore);
                 Files.writeString(objectStore.resolve("config"), "unbound-object-evidence");
-                assertThatThrownBy(() -> new ConfiguredRepositoryPublisher(
-                        new RepositoryRegistry(properties), properties, mapper, owner).publish())
+                assertThatThrownBy(() -> SourceLifecycleFixture.publisher(new RepositoryRegistry(properties), properties, mapper, owner).publish())
                         .isInstanceOf(IllegalStateException.class);
                 assertThat(Files.readString(objectStore.resolve("config"))).isEqualTo("unbound-object-evidence");
             }
@@ -176,9 +169,9 @@ class ApprovedOriginBindingTest {
             String fingerprint;
             try (DurableSourceFiles owner = new DurableSourceFiles(fixture.admin)) {
                 RepositoryRegistry registry = new RepositoryRegistry(properties);
-                new ConfiguredRepositoryPublisher(registry, properties, mapper, owner).publish();
+                SourceLifecycleFixture.publisher(registry, properties, mapper, owner).publish();
                 FileSourceJobStore jobs = new FileSourceJobStore(properties, mapper, owner);
-                SourcePublicationStore publications = new SourcePublicationStore(properties, mapper, owner, jobs);
+                SourcePublicationStore publications = new SourcePublicationStore(properties, mapper, owner, jobs, new SourceRetentionStore(properties, mapper, new RepositoryRegistry(properties)));
                 SourcePreparationJob job = new SourcePreparationService(jobs, publications, registry)
                         .prepareSource(fixture.repository, request, Optional.empty());
                 jobId = job.jobId();
@@ -186,9 +179,9 @@ class ApprovedOriginBindingTest {
             }
             try (DurableSourceFiles owner = new DurableSourceFiles(fixture.admin)) {
                 RepositoryRegistry registry = new RepositoryRegistry(properties);
-                new ConfiguredRepositoryPublisher(registry, properties, mapper, owner).publish();
+                SourceLifecycleFixture.publisher(registry, properties, mapper, owner).publish();
                 FileSourceJobStore jobs = new FileSourceJobStore(properties, mapper, owner);
-                SourcePublicationStore publications = new SourcePublicationStore(properties, mapper, owner, jobs);
+                SourcePublicationStore publications = new SourcePublicationStore(properties, mapper, owner, jobs, new SourceRetentionStore(properties, mapper, new RepositoryRegistry(properties)));
                 jobs.recover(publications);
                 SourcePreparationJob accepted = jobs.claimNext().orElseThrow();
                 assertThat(accepted.jobId()).isEqualTo(jobId);

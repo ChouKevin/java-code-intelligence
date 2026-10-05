@@ -70,7 +70,7 @@ class SourceContextContractTest {
         fixture.publish(Optional.empty());
         SourceAccessProperties denyAll = new SourceAccessProperties(fixture.root, fixture.properties.rgExecutable(),
                 List.of(), 65_536, Duration.ofSeconds(5), Duration.ofSeconds(2), Duration.ofSeconds(2), 2);
-        LocalSourceRevisionCatalog hidden = new LocalSourceRevisionCatalog(denyAll, fixture.mapper);
+        LocalSourceRevisionCatalog hidden = new LocalSourceRevisionCatalog(denyAll, fixture.mapper, fixture.locks);
         assertThat(hidden.listRepositories(new RepositoryRequest(Optional.empty(), 20, Optional.empty())).items()).isEmpty();
         assertThatThrownBy(() -> hidden.admit(fixture.context))
                 .isInstanceOfSatisfying(SourceQueryException.class, error -> assertThat(error.code())
@@ -88,17 +88,19 @@ class SourceContextContractTest {
         fixture.file("a.java", "file");
         fixture.file("a/z.java", "nested");
         fixture.file("é.java", "unicode");
-        AdmittedSourceRevision admitted = fixture.publish(Optional.empty());
-        LocalRepositorySourceService service = fixture.service();
-        FileCollection first = service.listFiles(admitted, new FileListRequest(fixture.context, "", 1, Optional.empty()));
-        assertThat(first.items()).extracting(FileEntry::path).containsExactly("a.java");
-        FileCollection second = service.listFiles(admitted, new FileListRequest(fixture.context, "", 1,
-                first.page().nextCursor()));
-        assertThat(second.items()).extracting(FileEntry::path).containsExactly("a");
-        FileCollection third = service.listFiles(admitted, new FileListRequest(fixture.context, "", 1,
-                second.page().nextCursor()));
-        assertThat(third.items()).extracting(FileEntry::path).containsExactly("é.java");
-        assertThat(third.page().hasMore()).isFalse();
+        fixture.publish(Optional.empty());
+        try (AdmittedSourceRevision admitted = fixture.admit()) {
+            LocalRepositorySourceService service = fixture.service();
+            FileCollection first = service.listFiles(admitted, new FileListRequest(fixture.context, "", 1, Optional.empty()));
+            assertThat(first.items()).extracting(FileEntry::path).containsExactly("a.java");
+            FileCollection second = service.listFiles(admitted, new FileListRequest(fixture.context, "", 1,
+                    first.page().nextCursor()));
+            assertThat(second.items()).extracting(FileEntry::path).containsExactly("a");
+            FileCollection third = service.listFiles(admitted, new FileListRequest(fixture.context, "", 1,
+                    second.page().nextCursor()));
+            assertThat(third.items()).extracting(FileEntry::path).containsExactly("é.java");
+            assertThat(third.page().hasMore()).isFalse();
+        }
     }
 
 }

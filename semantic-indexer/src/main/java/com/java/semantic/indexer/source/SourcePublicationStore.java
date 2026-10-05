@@ -5,6 +5,8 @@ import com.java.semantic.indexer.job.PreparationRequestId;
 import com.java.semantic.indexer.job.SourcePreparationJob;
 import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.model.source.PreparedRevision;
+import com.java.semantic.model.repository.RepositoryRevision;
+import com.java.semantic.indexer.source.SourceRetentionStore.DeleteIntent;
 import com.java.semantic.model.source.SourceContext;
 import com.java.semantic.model.source.SourceInventoryEntry;
 import com.java.semantic.model.source.SourceReadContract.EntryKind;
@@ -26,12 +28,15 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 import tools.jackson.databind.ObjectMapper;
 
 /** Immutable revisions and one atomic, bounded membership/current state replacement. */
 @Component
 public final class SourcePublicationStore {
+    private static final Logger LOG = LoggerFactory.getLogger(SourcePublicationStore.class);
     private static final long MAX_STATE = 4L * 1024 * 1024;
     private static final long MAX_MANIFEST = 64 * 1024;
     private static final int MAX_FRAME = 64 * 1024;
@@ -41,13 +46,44 @@ public final class SourcePublicationStore {
     private final FileSourceJobStore jobs;
     private final RepositoryRegistry registry;
 
+    private final SourceRetentionStore retention;
     public SourcePublicationStore(RepositoryProperties properties, ObjectMapper mapper,
-            DurableSourceFiles ownership, FileSourceJobStore jobs) {
+            DurableSourceFiles ownership, FileSourceJobStore jobs, SourceRetentionStore retention) {
         this.admin = Path.of(properties.getSourceAdminRoot()).toAbsolutePath().normalize();
         this.published = Path.of(properties.getSourcePublishedRoot()).toAbsolutePath().normalize();
         this.mapper = mapper;
         this.jobs = jobs;
         this.registry = new RepositoryRegistry(properties);
+        this.retention = retention;
+    }
+
+    public synchronized void initializeLifecycle(RepositoryId id) {
+        SourceRepositoryState state = state(id);
+        for (PreparedRevision receipt : state.published().values()) {
+            validateRevision(revisionPath(receipt.context()), receipt.context(), receipt.manifestDigest());
+        }
+        retention.initialize(id, state);
+    }
+
+    /** Caller holds the exclusive read guard; serialize against preparation status writes. */
+    public synchronized boolean withdraw(DeleteIntent intent, Instant now) {
+        RepositoryId id = new RepositoryId(intent.repositoryId());
+        registry.requireOrigin(id, intent.originFingerprint());
+        if (retention.pendingDeletion(id).filter(intent::equals).isEmpty()) {
+            throw new IllegalStateException("deletion intent changed");
+        }
+        SourceRepositoryState latest = state(id);
+        if (latest.current().filter(current -> current.revision().equals(intent.revision())).isPresent()) return false;
+        PreparedRevision receipt = latest.published().get(intent.revision());
+        if (Objects.isNull(receipt)) return false;
+        if (!receipt.manifestDigest().equals(intent.manifestDigest())) throw new IllegalStateException("deletion digest mismatch");
+        Instant retired = retention.reconcile(id, latest, now).get(intent.revision());
+        if (Objects.isNull(retired) || now.isBefore(retired.plus(SourceRetentionStore.RETENTION))) return false;
+        validateRevision(revisionPath(receipt.context()), receipt.context(), receipt.manifestDigest());
+        Map<String, PreparedRevision> membership = new HashMap<>(latest.published());
+        membership.remove(intent.revision());
+        replace(new SourceRepositoryState(latest.formatVersion(), id.value(), latest.current(), membership, latest.preparation()));
+        return true;
     }
 
     public synchronized SourceRepositoryState state(RepositoryId id) {
@@ -106,6 +142,7 @@ public final class SourcePublicationStore {
     public synchronized Path seal(SourcePreparationJob job, Path staging, SourceRevisionManifest manifest) {
         registry.requireOrigin(new RepositoryId(job.repositoryId()), job.originFingerprint());
         requireJobContext(job, manifest);
+        retention.beforePublication(new RepositoryId(job.repositoryId()), RepositoryRevision.ofSha(manifest.context().revision()));
         Path finalPath = revisionPath(manifest.context());
         if (Files.exists(finalPath)) {
             PreparedRevision existing = state(new RepositoryId(job.repositoryId())).published().get(manifest.context().revision());
@@ -161,8 +198,16 @@ public final class SourcePublicationStore {
         membership.put(manifest.context().revision(), receipt);
         CurrentPublication current = new CurrentPublication(manifest.context().revision(), manifestDigest,
                 job.jobId(), Instant.now());
+        retention.beforePublication(repository, RepositoryRevision.ofSha(current.revision()));
         replace(new SourceRepositoryState(SourceRevisionManifest.FORMAT_VERSION, repository.value(), Optional.of(current),
                 membership, new PreparationStatus(PreparationPhase.COMPLETE, Optional.of(job.jobId()), Optional.empty())));
+        try {
+            retention.afterPublication(repository, previous.current(), current);
+        } catch (RuntimeException exception) {
+            // Publication already committed. A missing retirement entry earns a fresh window on reconciliation.
+            LOG.error("event=source_retirement_record_failed repositoryId={} revision={} stage=post_publication errorCode=RETIREMENT_WRITE_FAILED exceptionType={}",
+                    repository.value(), current.revision(), exception.getClass().getSimpleName());
+        }
         return receipt;
     }
 

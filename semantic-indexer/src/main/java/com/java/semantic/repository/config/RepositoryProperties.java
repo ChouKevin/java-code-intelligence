@@ -1,5 +1,6 @@
 package com.java.semantic.repository.config;
 
+import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
@@ -13,6 +14,7 @@ public class RepositoryProperties {
     private String gitUsername = "";
     private String gitToken = "";
     private Map<String, RepositoryConfig> repositories = new LinkedHashMap<>();
+    private final SourceRetentionConfig sourceRetention = new SourceRetentionConfig();
 
     public String getSourceAdminRoot() { return sourceAdminRoot; }
     public void setSourceAdminRoot(String root) { sourceAdminRoot = Objects.requireNonNull(root); }
@@ -25,6 +27,21 @@ public class RepositoryProperties {
     public Map<String, RepositoryConfig> getRepositories() { return repositories; }
     public void setRepositories(Map<String, RepositoryConfig> configured) {
         repositories = Objects.requireNonNull(configured);
+    }
+
+    public SourceRetentionConfig getSourceRetention() { return sourceRetention; }
+
+    public static final class SourceRetentionConfig {
+        private boolean enabled = true;
+        private Duration interval = Duration.ofHours(24);
+        public boolean isEnabled() { return enabled; }
+        public void setEnabled(boolean enabled) { this.enabled = enabled; }
+        public Duration getInterval() { return interval; }
+        public void setInterval(Duration interval) {
+            Objects.requireNonNull(interval, "retention interval");
+            if (interval.isNegative() || interval.isZero()) throw new IllegalArgumentException("retention interval must be positive");
+            this.interval = interval;
+        }
     }
 
     @Override

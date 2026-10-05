@@ -23,41 +23,45 @@ class SourceAccessBoundaryTest {
         fixture.file("a.java", "2");
         fixture.file("中.java", "3");
         fixture.file("🙂.java", "4");
-        AdmittedSourceRevision admitted = fixture.publish(Optional.empty());
-        List<String> paths = new ArrayList<>();
-        Optional<String> cursor = Optional.empty();
-        do {
-            FileCollection page = fixture.service().listFiles(admitted, new FileListRequest(fixture.context, "", 1, cursor));
-            paths.addAll(page.items().stream().map(FileEntry::path).toList());
-            cursor = page.page().nextCursor();
-        } while (cursor.isPresent());
-        assertThat(paths).containsExactly("a.java", "a", "中.java", "🙂.java");
-        assertThat(fixture.service().listFiles(admitted, new FileListRequest(fixture.context, "a", 20, Optional.empty()))
-                .items()).extracting(FileEntry::path).containsExactly("a/子");
+        fixture.publish(Optional.empty());
+        try (AdmittedSourceRevision admitted = fixture.admit()) {
+            List<String> paths = new ArrayList<>();
+            Optional<String> cursor = Optional.empty();
+            do {
+                FileCollection page = fixture.service().listFiles(admitted, new FileListRequest(fixture.context, "", 1, cursor));
+                paths.addAll(page.items().stream().map(FileEntry::path).toList());
+                cursor = page.page().nextCursor();
+            } while (cursor.isPresent());
+            assertThat(paths).containsExactly("a.java", "a", "中.java", "🙂.java");
+            assertThat(fixture.service().listFiles(admitted, new FileListRequest(fixture.context, "a", 20, Optional.empty()))
+                    .items()).extracting(FileEntry::path).containsExactly("a/子");
+        }
     }
 
     @Test
     void excluded_traversal_symlinks_and_untracked_files_do_not_become_source() throws Exception {
         SourceFilesystemFixture fixture = new SourceFilesystemFixture(temp);
         fixture.file("safe.java", "safe");
-        AdmittedSourceRevision admitted = fixture.publish(Optional.empty());
-        Files.writeString(fixture.tree.resolve("untracked.java"), "untracked");
-        assertThatThrownBy(() -> fixture.service().readSource(admitted,
-                new ReadSourceRequest(fixture.context, "untracked.java", 1, 1, Optional.empty())))
-                .isInstanceOfSatisfying(SourceQueryException.class, error -> assertThat(error.code())
-                        .isEqualTo(SourceQueryException.Code.SOURCE_NOT_FOUND));
-        assertThatThrownBy(() -> fixture.service().readSource(admitted,
-                new ReadSourceRequest(fixture.context, "target/safe.java", 1, 1, Optional.empty())))
-                .isInstanceOf(SourceQueryException.class);
-        assertThatThrownBy(() -> fixture.service().readSource(admitted,
-                new ReadSourceRequest(fixture.context, "../safe.java", 1, 1, Optional.empty())))
-                .isInstanceOf(IllegalArgumentException.class);
-        Files.delete(fixture.tree.resolve("safe.java"));
-        Files.createSymbolicLink(fixture.tree.resolve("safe.java"), Path.of("untracked.java"));
-        assertThatThrownBy(() -> fixture.service().readSource(admitted,
-                new ReadSourceRequest(fixture.context, "safe.java", 1, 1, Optional.empty())))
-                .isInstanceOfSatisfying(SourceQueryException.class, error -> assertThat(error.code())
-                        .isEqualTo(SourceQueryException.Code.SOURCE_UNAVAILABLE));
+        fixture.publish(Optional.empty());
+        try (AdmittedSourceRevision admitted = fixture.admit()) {
+            Files.writeString(fixture.tree.resolve("untracked.java"), "untracked");
+            assertThatThrownBy(() -> fixture.service().readSource(admitted,
+                    new ReadSourceRequest(fixture.context, "untracked.java", 1, 1, Optional.empty())))
+                    .isInstanceOfSatisfying(SourceQueryException.class, error -> assertThat(error.code())
+                            .isEqualTo(SourceQueryException.Code.SOURCE_NOT_FOUND));
+            assertThatThrownBy(() -> fixture.service().readSource(admitted,
+                    new ReadSourceRequest(fixture.context, "target/safe.java", 1, 1, Optional.empty())))
+                    .isInstanceOf(SourceQueryException.class);
+            assertThatThrownBy(() -> fixture.service().readSource(admitted,
+                    new ReadSourceRequest(fixture.context, "../safe.java", 1, 1, Optional.empty())))
+                    .isInstanceOf(IllegalArgumentException.class);
+            Files.delete(fixture.tree.resolve("safe.java"));
+            Files.createSymbolicLink(fixture.tree.resolve("safe.java"), Path.of("untracked.java"));
+            assertThatThrownBy(() -> fixture.service().readSource(admitted,
+                    new ReadSourceRequest(fixture.context, "safe.java", 1, 1, Optional.empty())))
+                    .isInstanceOfSatisfying(SourceQueryException.class, error -> assertThat(error.code())
+                            .isEqualTo(SourceQueryException.Code.SOURCE_UNAVAILABLE));
+        }
     }
 
     @Test
@@ -65,22 +69,24 @@ class SourceAccessBoundaryTest {
         SourceFilesystemFixture fixture = new SourceFilesystemFixture(temp);
         fixture.directory("src");
         fixture.file("src/safe.java", "sealed-source");
-        AdmittedSourceRevision admitted = fixture.publish(Optional.empty());
-        Path outside = temp.resolve("outside-published");
-        Files.move(fixture.tree.resolve("src"), outside);
-        Files.createSymbolicLink(fixture.tree.resolve("src"), outside);
-        assertThatThrownBy(() -> fixture.service().listFiles(admitted,
-                new FileListRequest(fixture.context, "src", 20, Optional.empty())))
-                .isInstanceOfSatisfying(SourceQueryException.class, error -> assertThat(error.code())
-                        .isEqualTo(SourceQueryException.Code.SOURCE_UNAVAILABLE));
-        assertThatThrownBy(() -> fixture.service().searchText(admitted,
-                new TextSearchRequest(fixture.context, "sealed-source", "src", Optional.empty(), 20)))
-                .isInstanceOfSatisfying(SourceQueryException.class, error -> assertThat(error.code())
-                        .isEqualTo(SourceQueryException.Code.SOURCE_UNAVAILABLE));
-        assertThatThrownBy(() -> fixture.service().readSource(admitted,
-                new ReadSourceRequest(fixture.context, "src/safe.java", 1, 1, Optional.empty())))
-                .isInstanceOfSatisfying(SourceQueryException.class, error -> assertThat(error.code())
-                        .isEqualTo(SourceQueryException.Code.SOURCE_UNAVAILABLE));
+        fixture.publish(Optional.empty());
+        try (AdmittedSourceRevision admitted = fixture.admit()) {
+            Path outside = temp.resolve("outside-published");
+            Files.move(fixture.tree.resolve("src"), outside);
+            Files.createSymbolicLink(fixture.tree.resolve("src"), outside);
+            assertThatThrownBy(() -> fixture.service().listFiles(admitted,
+                    new FileListRequest(fixture.context, "src", 20, Optional.empty())))
+                    .isInstanceOfSatisfying(SourceQueryException.class, error -> assertThat(error.code())
+                            .isEqualTo(SourceQueryException.Code.SOURCE_UNAVAILABLE));
+            assertThatThrownBy(() -> fixture.service().searchText(admitted,
+                    new TextSearchRequest(fixture.context, "sealed-source", "src", Optional.empty(), 20)))
+                    .isInstanceOfSatisfying(SourceQueryException.class, error -> assertThat(error.code())
+                            .isEqualTo(SourceQueryException.Code.SOURCE_UNAVAILABLE));
+            assertThatThrownBy(() -> fixture.service().readSource(admitted,
+                    new ReadSourceRequest(fixture.context, "src/safe.java", 1, 1, Optional.empty())))
+                    .isInstanceOfSatisfying(SourceQueryException.class, error -> assertThat(error.code())
+                            .isEqualTo(SourceQueryException.Code.SOURCE_UNAVAILABLE));
+        }
     }
 
     @Test
@@ -90,14 +96,16 @@ class SourceAccessBoundaryTest {
         fixture.file("b.java", "b");
         fixture.directory("sub");
         fixture.file("sub/c.java", "c");
-        AdmittedSourceRevision admitted = fixture.publish(Optional.empty());
-        FileCollection first = fixture.service().listFiles(admitted, new FileListRequest(fixture.context, "", 1, Optional.empty()));
-        assertThatThrownBy(() -> fixture.service().listFiles(admitted, new FileListRequest(fixture.context,
-                "sub", 1, first.page().nextCursor()))).isInstanceOf(SourceQueryException.class);
-        String binding = com.java.semantic.query.application.QueryCursorCodec.binding("source_files", List.of(
-                fixture.context.repositoryId(), fixture.context.revision(), admitted.manifestDigest(), "", "1"));
-        String forged = com.java.semantic.query.application.QueryCursorCodec.encode(binding, List.of("ghost.java"));
-        assertThatThrownBy(() -> fixture.service().listFiles(admitted, new FileListRequest(fixture.context,
-                "", 1, Optional.of(forged)))).isInstanceOf(SourceQueryException.class);
+        fixture.publish(Optional.empty());
+        try (AdmittedSourceRevision admitted = fixture.admit()) {
+            FileCollection first = fixture.service().listFiles(admitted, new FileListRequest(fixture.context, "", 1, Optional.empty()));
+            assertThatThrownBy(() -> fixture.service().listFiles(admitted, new FileListRequest(fixture.context,
+                    "sub", 1, first.page().nextCursor()))).isInstanceOf(SourceQueryException.class);
+            String binding = com.java.semantic.query.application.QueryCursorCodec.binding("source_files", List.of(
+                    fixture.context.repositoryId(), fixture.context.revision(), admitted.manifestDigest(), "", "1"));
+            String forged = com.java.semantic.query.application.QueryCursorCodec.encode(binding, List.of("ghost.java"));
+            assertThatThrownBy(() -> fixture.service().listFiles(admitted, new FileListRequest(fixture.context,
+                    "", 1, Optional.of(forged)))).isInstanceOf(SourceQueryException.class);
+        }
     }
 }

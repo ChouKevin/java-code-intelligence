@@ -16,6 +16,15 @@ synthetic fixtures. See [local-only configuration and evidence](docs/operations/
 
 Save a canonical lowercase UUID `requestId` durably **before** calling Indexer `prepare_source` (`POST /index/repositories/{repositoryId}/source` or private `/mcp`); optional `revision` must be a full lowercase 40-character SHA-1 commit. Get the original job by **either** `jobId` or `requestId` at `GET /index/repositories/{repositoryId}/jobs`. If the acceptance response is lost, look up the **original** request ID; do not resubmit or auto-retry an unknown outcome. Once COMPLETE, discover with `get_context`, copy the returned `{repositoryId, revision}` and retain it for every navigation call. Revision A remains readable after B is published. See [agent acceptance](docs/operations/mcp-agent-acceptance.md).
 
+Source policy **2** adds scheduled revision retention: non-current snapshots remain
+for at least 30 elapsed days after replacement; current is never reclaimed.
+Indexer checks when idle at startup, then every 24h after a scan ends. Busy reads
+or preparation can delay cleanup. `SEMANTIC_SOURCE_RETENTION_ENABLED=false`
+stops new and pending physical deletion; the interval is configurable.
+Deploy both applications together on fresh private/published namespaces; policy-1
+trees are not migrated. A reclaimed exact context fails explicitly rather than
+reading latest. See [retention and recovery](docs/operations/source-mcp.md#revision-retention-and-recovery).
+
 ## Interfaces
 
 Every HTTP and `/mcp` call requires `X-Api-Token`: `SEMANTIC_INDEXER_ADMIN_TOKEN` for private preparation, `SEMANTIC_QUERY_API_TOKEN` for reading. HTTP and MCP share input validation, results and safe errors.

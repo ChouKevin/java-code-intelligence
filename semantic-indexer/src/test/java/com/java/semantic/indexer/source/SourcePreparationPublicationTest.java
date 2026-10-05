@@ -35,7 +35,7 @@ class SourcePreparationPublicationTest {
                 RepositoryProperties properties = properties(fixture);
                 RepositoryRegistry registry = new RepositoryRegistry(properties);
                 FileSourceJobStore jobs = new FileSourceJobStore(properties, mapper, owner);
-                SourcePublicationStore publications = new SourcePublicationStore(properties, mapper, owner, jobs);
+                SourcePublicationStore publications = com.java.semantic.indexer.source.SourceLifecycleFixture.publications(properties, mapper, owner, jobs);
                 RepositoryRevisionResolver resolver = new RepositoryRevisionResolver(registry, properties);
                 JGitRevisionExporter exporter = new JGitRevisionExporter(resolver, registry, mapper);
                 RepositorySourceManager manager = new RepositorySourceManager(jobs, resolver, exporter, publications, registry, properties);
@@ -73,7 +73,7 @@ class SourcePreparationPublicationTest {
             try (DurableSourceFiles owner = new DurableSourceFiles(fixture.admin)) {
                 RepositoryRegistry registry = new RepositoryRegistry(properties);
                 FileSourceJobStore jobs = new FileSourceJobStore(properties, mapper, owner);
-                SourcePublicationStore publications = new SourcePublicationStore(properties, mapper, owner, jobs);
+                SourcePublicationStore publications = com.java.semantic.indexer.source.SourceLifecycleFixture.publications(properties, mapper, owner, jobs);
                 RepositoryRevisionResolver resolver = new RepositoryRevisionResolver(registry, properties);
                 RepositorySourceManager manager = new RepositorySourceManager(jobs, resolver,
                         new JGitRevisionExporter(resolver, registry, mapper), publications, registry, properties);
@@ -82,8 +82,7 @@ class SourcePreparationPublicationTest {
                         .prepareSource(fixture.repository, request, Optional.empty());
                 SourcePreparationJob complete = manager.execute(jobs.claimNext().orElseThrow());
                 assertThat(complete.phase()).isEqualTo(SourcePreparationJob.Phase.COMPLETE);
-                new com.java.semantic.indexer.config.ConfiguredRepositoryPublisher(
-                        registry, properties, mapper, owner).publish();
+                SourceLifecycleFixture.publisher(registry, properties, mapper, owner).publish();
                 Path revision = fixture.published.resolve("orders/revisions")
                         .resolve(complete.resolvedRevision().orElseThrow());
                 assertThat(Files.getPosixFilePermissions(fixture.admin))
@@ -115,7 +114,7 @@ class SourcePreparationPublicationTest {
                 assertThatThrownBy(() -> new DurableSourceFiles(fixture.admin)).isInstanceOf(java.io.IOException.class);
                 RepositoryRegistry registry = new RepositoryRegistry(properties);
                 FileSourceJobStore jobs = new FileSourceJobStore(properties, mapper, owner);
-                SourcePublicationStore published = new SourcePublicationStore(properties, mapper, owner, jobs);
+                SourcePublicationStore published = com.java.semantic.indexer.source.SourceLifecycleFixture.publications(properties, mapper, owner, jobs);
                 RepositoryRevisionResolver resolver = new RepositoryRevisionResolver(registry, properties);
                 RepositorySourceManager manager = new RepositorySourceManager(jobs, resolver,
                         new JGitRevisionExporter(resolver, registry, mapper), published, registry, properties);
@@ -143,7 +142,7 @@ class SourcePreparationPublicationTest {
             try (DurableSourceFiles owner = new DurableSourceFiles(fixture.admin)) {
                 RepositoryRegistry registry = new RepositoryRegistry(properties);
                 FileSourceJobStore jobs = new FileSourceJobStore(properties, mapper, owner);
-                SourcePublicationStore publications = new SourcePublicationStore(properties, mapper, owner, jobs);
+                SourcePublicationStore publications = com.java.semantic.indexer.source.SourceLifecycleFixture.publications(properties, mapper, owner, jobs);
                 RepositoryRevisionResolver resolver = new RepositoryRevisionResolver(registry, properties);
                 RepositorySourceManager manager = new RepositorySourceManager(jobs, resolver,
                         new JGitRevisionExporter(resolver, registry, mapper), publications, registry, properties);
@@ -186,7 +185,7 @@ class SourcePreparationPublicationTest {
             try (DurableSourceFiles owner = new DurableSourceFiles(fixture.admin)) {
                 RepositoryRegistry registry = new RepositoryRegistry(properties);
                 FileSourceJobStore jobs = new FileSourceJobStore(properties, mapper, owner);
-                SourcePublicationStore publications = new SourcePublicationStore(properties, mapper, owner, jobs);
+                SourcePublicationStore publications = com.java.semantic.indexer.source.SourceLifecycleFixture.publications(properties, mapper, owner, jobs);
                 RepositoryRevisionResolver resolver = new RepositoryRevisionResolver(registry, properties);
                 RepositorySourceManager manager = new RepositorySourceManager(jobs, resolver,
                         new JGitRevisionExporter(resolver, registry, mapper), publications, registry, properties);
@@ -247,7 +246,7 @@ class SourcePreparationPublicationTest {
             try (DurableSourceFiles owner = new DurableSourceFiles(fixture.admin)) {
                 RepositoryRegistry registry = new RepositoryRegistry(properties);
                 FileSourceJobStore jobs = new FileSourceJobStore(properties, mapper, owner);
-                SourcePublicationStore published = new SourcePublicationStore(properties, mapper, owner, jobs);
+                SourcePublicationStore published = com.java.semantic.indexer.source.SourceLifecycleFixture.publications(properties, mapper, owner, jobs);
                 RepositoryRevisionResolver resolver = new RepositoryRevisionResolver(registry, properties);
                 PreparationRequestId request = new PreparationRequestId(UUID.randomUUID().toString());
                 jobs.admit(fixture.repository, request,
@@ -290,8 +289,7 @@ class SourcePreparationPublicationTest {
         try (LocalSourceFixture fixture = new LocalSourceFixture(root)) {
             RepositoryProperties properties = properties(fixture);
             try (DurableSourceFiles writer = new DurableSourceFiles(fixture.admin)) {
-                new com.java.semantic.indexer.config.ConfiguredRepositoryPublisher(
-                        new RepositoryRegistry(properties), properties, mapper, writer).publish();
+                SourceLifecycleFixture.publisher(new RepositoryRegistry(properties), properties, mapper, writer).publish();
                 Path registryFile = fixture.published.resolve("repositories.json");
                 byte[] committed = Files.readAllBytes(registryFile);
                 Map<String, RepositoryProperties.RepositoryConfig> many = new java.util.LinkedHashMap<>();
@@ -303,8 +301,7 @@ class SourcePreparationPublicationTest {
                     many.put("repo-" + index, config);
                 }
                 properties.setRepositories(many);
-                assertThatThrownBy(() -> new com.java.semantic.indexer.config.ConfiguredRepositoryPublisher(
-                        new RepositoryRegistry(properties), properties, mapper, writer).publish())
+                assertThatThrownBy(() -> SourceLifecycleFixture.publisher(new RepositoryRegistry(properties), properties, mapper, writer).publish())
                         .isInstanceOf(IllegalStateException.class);
                 assertThat(Files.readAllBytes(registryFile)).isEqualTo(committed);
             }

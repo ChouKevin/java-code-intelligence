@@ -2,7 +2,7 @@
 
 ## 狀態與重建決策
 
-本文件涵蓋 Source-first 重建 roadmap。Phase 1 runtime 已實作無 Mongo／JDT 的 source cutover；實際命令、證據與驗收限制見 [測試與驗收](operations/testing.md)。Phase 2–6 仍是規劃，不是現有能力；本次未清除任何既有服務資料。
+本文件涵蓋 Source-first 重建 roadmap。Phase 1 runtime 已實作無 Mongo／JDT 的 source cutover；實際命令、證據與驗收限制見 [測試與驗收](operations/testing.md)。Phase 2 本次僅新增最小 revision retention／讀取保護／回收 log，最終驗收仍須通過對應 gates；其餘多 repo 管理與 Phase 3–6 仍是規劃。本次不清除既有服務資料。
 
 採用 **clean cutover + 選擇性重用**：不遷移舊 Mongo generations、source snapshots、review records、job records 或舊 client contexts；保留有價值的 transport、security、identity 與 Git 安全處理。Git history 留存舊實作，不為未來可能重用而在新 runtime 維持停用的舊系統。
 
@@ -86,9 +86,17 @@ Private Indexer 提供 `prepare_source`、`get_job`。準備與原始 requestId 
 
 Semantic search、outline、entry points、relations、review/diff/history tools、SQLite、parser、JDT precision resolver、cross-repo inference。
 
-Phase 1 保留所有已發布 revisions，不做線上 GC；磁碟滿的準備失敗不得移除既有 READY。最低限度 registry／immutable publication 是 Phase 1 前置，不延後到 Phase 2。
+歷史 Phase 1 release 保留所有已發布 revisions，不做線上 GC；本次 policy-2 最小 retention feature 改為下節的受保護回收。磁碟滿的準備失敗仍不得移除既有 READY。最低限度 registry／immutable publication 是 Phase 1 前置，不延後到 Phase 2。
 
 ## Phase 2 — 約 9 個 Repositories 的運行管理
+
+本次最小功能：policy 2／新 namespace；non-current 從被取代起保留至少
+30×24 小時，預設 24h fixed-delay idle 檢查，可停用；同一 dispatcher 回收，
+跨程序 shared read guard 保護正在讀取的來源，pending intent 驅動安全恢复，
+gcRunId 串接操作 log。沒有 quota、額外 worker、管理 API 或九個真實 repo 壓測。
+操作與重新準備邊界見 [revision retention](operations/source-mcp.md#revision-retention-and-recovery)。
+以下完整多 repo 運行項目仍是規劃：
+
 
 - 沿用 Phase 1 identity、registry 與 manifest，不改 Source of Truth。
 - 加入 retention、受控回收、磁碟 quota、concurrent read 與單 dispatcher fetch 排程。

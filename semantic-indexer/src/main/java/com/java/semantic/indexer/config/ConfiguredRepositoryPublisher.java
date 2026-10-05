@@ -2,6 +2,8 @@ package com.java.semantic.indexer.config;
 
 import com.java.semantic.indexer.source.DurableSourceFiles;
 import com.java.semantic.indexer.source.RepositoryRegistry;
+import com.java.semantic.indexer.source.SourcePublicationStore;
+import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.model.source.SourceRepositoryDescriptor;
 import com.java.semantic.repository.config.RepositoryProperties;
 import java.io.IOException;
@@ -17,12 +19,14 @@ public final class ConfiguredRepositoryPublisher {
     private final ObjectMapper mapper;
     private final Path path;
     private final DurableSourceFiles ownership;
+    private final SourcePublicationStore publications;
 
     public ConfiguredRepositoryPublisher(RepositoryRegistry registry, RepositoryProperties properties,
-            ObjectMapper mapper, DurableSourceFiles ownership) {
+            ObjectMapper mapper, DurableSourceFiles ownership, SourcePublicationStore publications) {
         this.registry = registry;
         this.mapper = mapper;
         this.ownership = ownership;
+        this.publications = publications;
         path = Path.of(properties.getSourcePublishedRoot()).toAbsolutePath().normalize().resolve("repositories.json");
     }
 
@@ -32,6 +36,9 @@ public final class ConfiguredRepositoryPublisher {
             byte[] bytes = mapper.writeValueAsBytes(descriptors);
             if (bytes.length > 1024 * 1024) throw new IOException("repository registry exceeds its size limit");
             registry.bindAll();
+            for (SourceRepositoryDescriptor descriptor : descriptors) {
+                publications.initializeLifecycle(new RepositoryId(descriptor.repositoryId()));
+            }
             DurableSourceFiles.ensureDirectories(path.getParent(), path.getParent(),
                     DurableSourceFiles.Visibility.PUBLISHED);
             DurableSourceFiles.atomicBytes(path, bytes, 1024 * 1024, DurableSourceFiles.Visibility.PUBLISHED);

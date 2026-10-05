@@ -11,6 +11,8 @@ import java.util.Optional;
 public record SourceRepositoryState(int formatVersion, String repositoryId, Optional<CurrentPublication> current,
         Map<String, PreparedRevision> published, PreparationStatus preparation) {
 
+    public static final String READ_LOCK_FILE_NAME = "read.lock";
+
     public SourceRepositoryState {
         ModelValidation.require(formatVersion == SourceRevisionManifest.FORMAT_VERSION,
                 "unsupported source state format version");
