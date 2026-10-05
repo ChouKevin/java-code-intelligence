@@ -25,7 +25,7 @@ class SourceGcRecoveryTest {
 
     @Test
     void resume_intent_before_after_withdrawal_and_after_partial_delete() throws Exception {
-        for (String stage : List.of("intent", "withdrawn", "partial")) {
+        for (String stage : List.of("intent", "withdrawn", "partial", "manifest_absent", "directory_absent")) {
             try (SourceRetentionPublicationTest.Lifecycle fixture = new SourceRetentionPublicationTest.Lifecycle(root.resolve(stage))) {
                 String a = fixture.commit("A"); fixture.prepare(a);
                 String b = fixture.commit("B"); fixture.prepare(b);
@@ -36,6 +36,17 @@ class SourceGcRecoveryTest {
                 if (!stage.equals("intent")) assertThat(fixture.publications.withdraw(intent, now)).isTrue();
                 Path revision = fixture.git.published.resolve("orders/revisions").resolve(a);
                 if (stage.equals("partial")) Files.delete(revision.resolve("tree/A.java"));
+                if (stage.equals("manifest_absent") || stage.equals("directory_absent")) {
+                    Files.delete(revision.resolve("manifest.json"));
+                }
+                if (stage.equals("directory_absent")) {
+                    try (java.util.stream.Stream<Path> paths = Files.walk(revision)) {
+                        for (Path path : paths.sorted(java.util.Comparator.reverseOrder()).toList()) Files.delete(path);
+                    }
+                }
+                Path unrelated = fixture.git.published.resolve("unrelated/revisions").resolve(a).resolve("tree/Evidence.java");
+                Files.createDirectories(unrelated.getParent());
+                Files.writeString(unrelated, "other repository bytes");
                 SourceRetentionStore reopened = new SourceRetentionStore(fixture.properties, fixture.mapper, fixture.registry);
                 new SourceGarbageCollector(fixture.properties, fixture.registry, fixture.publications, reopened,
                         Clock.fixed(now, ZoneOffset.UTC)).runIfDue();
@@ -43,6 +54,35 @@ class SourceGcRecoveryTest {
                 assertThat(reopened.pendingDeletion(fixture.git.repository)).isEmpty();
                 assertThat(fixture.state().current().orElseThrow().revision()).isEqualTo(b);
                 assertThat(Files.readString(fixture.git.published.resolve("orders/revisions").resolve(b).resolve("tree/A.java"))).isEqualTo("B");
+                assertThat(Files.readString(unrelated)).isEqualTo("other repository bytes");
+            }
+        }
+    }
+
+    @Test
+    void lost_or_corrupt_initialized_metadata_cannot_authorize_new_deletion() throws Exception {
+        for (String damage : List.of("lost_retirement", "corrupt_retirement", "corrupt_intent", "lost_withdrawn_intent")) {
+            try (SourceRetentionPublicationTest.Lifecycle fixture = new SourceRetentionPublicationTest.Lifecycle(root.resolve(damage))) {
+                String a = fixture.commit("A"); fixture.prepare(a);
+                String b = fixture.commit("B"); fixture.prepare(b);
+                Instant now = Instant.now();
+                fixture.writeRetired(Map.of(a, now.minus(SourceRetentionStore.RETENTION)));
+                Path metadata = fixture.git.admin.resolve("repositories/orders");
+                if (damage.equals("lost_retirement")) Files.delete(metadata.resolve("retention.json"));
+                if (damage.equals("corrupt_retirement")) Files.writeString(metadata.resolve("retention.json"), "{broken");
+                if (damage.equals("corrupt_intent")) Files.writeString(metadata.resolve("pending-delete.json"), "{broken");
+                if (damage.equals("lost_withdrawn_intent")) {
+                    SourceRetentionStore.DeleteIntent intent = fixture.intent(a);
+                    fixture.retention.beginDeletion(intent);
+                    assertThat(fixture.publications.withdraw(intent, now)).isTrue();
+                    Files.delete(metadata.resolve("pending-delete.json"));
+                }
+                SourceGarbageCollectorTest.collector(fixture, Clock.fixed(now, ZoneOffset.UTC)).runIfDue();
+                assertThat(fixture.state().current().orElseThrow().revision()).isEqualTo(b);
+                assertThat(Files.readString(fixture.git.published.resolve("orders/revisions").resolve(a).resolve("tree/A.java"))).isEqualTo("A");
+                assertThat(Files.readString(fixture.git.published.resolve("orders/revisions").resolve(b).resolve("tree/A.java"))).isEqualTo("B");
+                if (!damage.equals("lost_withdrawn_intent")) assertThat(fixture.state().published()).containsKeys(a, b);
+                else assertThat(fixture.state().published()).containsKey(b).doesNotContainKey(a);
             }
         }
     }
@@ -107,6 +147,26 @@ class SourceGcRecoveryTest {
             assertThat(fixture.state().current().orElseThrow().revision()).isEqualTo(b);
             assertThat(Files.readString(fixture.git.published.resolve("orders/revisions").resolve(a).resolve("tree/A.java"))).isEqualTo("A");
         }
+    }
+
+    @Test
+    void interrupted_scan_reports_partial_and_preserves_due_revision() throws Exception {
+        Logger logger = (Logger) LoggerFactory.getLogger(SourceGarbageCollector.class);
+        ListAppender<ILoggingEvent> capture = new ListAppender<>(); capture.start(); logger.addAppender(capture);
+        try (SourceRetentionPublicationTest.Lifecycle fixture = new SourceRetentionPublicationTest.Lifecycle(root)) {
+            String a = fixture.commit("A"); fixture.prepare(a);
+            String b = fixture.commit("B"); fixture.prepare(b);
+            Instant now = Instant.now();
+            fixture.writeRetired(Map.of(a, now.minus(SourceRetentionStore.RETENTION)));
+            Thread.currentThread().interrupt();
+            try { SourceGarbageCollectorTest.collector(fixture, Clock.fixed(now, ZoneOffset.UTC)).runIfDue(); }
+            finally { Thread.interrupted(); }
+            assertThat(capture.list.stream().map(ILoggingEvent::getFormattedMessage).toList()).anyMatch(message ->
+                    message.contains("event=source_gc_end") && message.contains("result=partial")
+                            && message.contains("stopReason=INTERRUPTED"));
+            assertThat(fixture.state().published()).containsKeys(a, b);
+            assertThat(Files.readString(fixture.git.published.resolve("orders/revisions").resolve(a).resolve("tree/A.java"))).isEqualTo("A");
+        } finally { Thread.interrupted(); logger.detachAppender(capture); capture.stop(); }
     }
 
     @Test

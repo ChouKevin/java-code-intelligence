@@ -85,11 +85,44 @@ public final class SourceReadLocks {
         private final RepositoryId id;
         private final Entry entry;
         private boolean closed;
+        private int consumers;
+        private boolean released;
+        private Runnable afterRelease;
+        /** Child/worker ownership survives the bounded request scope until actual completion. */
+        public synchronized Consumer retain() {
+            if (closed) throw new IllegalStateException("admission already closed");
+            consumers++;
+            return new Consumer(this);
+        }
+        public synchronized void onRelease(Runnable action) {
+            if (Objects.nonNull(afterRelease) || released) throw new IllegalStateException("release callback already set or released");
+            afterRelease = Objects.requireNonNull(action);
+        }
         private Lease(SourceReadLocks owner, RepositoryId id, Entry entry) { this.owner = owner; this.id = id; this.entry = entry; }
         @Override public synchronized void close() {
             if (closed) return;
             closed = true;
-            owner.release(id, entry);
+            releaseIfFinished();
+        }
+        private synchronized void consumerFinished() {
+            consumers--;
+            releaseIfFinished();
+        }
+        private void releaseIfFinished() {
+            if (!closed || consumers != 0 || released) return;
+            released = true;
+            try { owner.release(id, entry); }
+            finally { if (Objects.nonNull(afterRelease)) afterRelease.run(); }
+        }
+        public static final class Consumer implements AutoCloseable {
+            private final Lease lease;
+            private boolean closed;
+            private Consumer(Lease lease) { this.lease = lease; }
+            @Override public synchronized void close() {
+                if (closed) return;
+                closed = true;
+                lease.consumerFinished();
+            }
         }
     }
 }

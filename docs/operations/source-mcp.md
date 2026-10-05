@@ -103,6 +103,9 @@ one channel until the last owner closes it. GC obtains a nonblocking exclusive
 guard, rechecks eligibility and atomically withdraws membership, then releases
 the guard **before** physical deletion. Missing/unsafe locks or unsupported
 locking fail closed. This deployment supports local POSIX filesystems, not NFS.
+Query retains the shared guard and search slot until all spawned processes and
+source-reading workers actually terminate, even when bounded cleanup returns an
+error. A termination request alone does not make the revision collectable.
 
 `source-admin/repositories/<id>/retention.json` records origin-bound retirements;
 `pending-delete.json` records at most one origin/digest-bound deletion intent.
@@ -111,6 +114,14 @@ published intent is revalidated; a no-longer-eligible/current intent is cancelle
 A withdrawn intent resumes the same managed path, including partial deletion.
 The pending intent fences same-SHA sealing/publication until durable cleanup.
 Do not manually clear an intent or re-advertise a partially deleted tree.
+An incomplete/corrupt initialized lock/retention pair or invalid pending metadata
+rejects **Indexer startup as a whole**, before repository advertisement. After a
+successful startup, a repository's GC metadata error stops that repository's
+collection rather than granting deletion authority. Existing independent Query
+reads do not depend on Indexer startup. Diagnose the original service-owned
+namespace; do not recreate a stable lock inode, clear markers, or automatically
+adopt incomplete/populated storage. Interrupted first bootstrap can require a
+new, explicitly provisioned namespace after ownership confirmation.
 
 Disabling GC stops new deletion and pending physical recovery. Withdrawn revisions
 stay withdrawn; re-enabling allows cleanup. A reclaimed context or continuation
@@ -125,6 +136,8 @@ not raw messages/URLs/tokens/paths. Recovery retains the original intent's run I
 Deleted events report actual files and logical bytes deleted **in that attempt**,
 plus duration; bytes are not filesystem space freed or an invented pre-crash total.
 End summaries distinguish success/partial/failed and protected/busy/failure counts.
+Interrupted/disabled incomplete runs report `result=partial` with
+`stopReason=INTERRUPTED` or `DISABLED`, never complete success.
 Log delivery is not the durable recovery authority or an exactly-once guarantee.
 
 

@@ -338,10 +338,17 @@ public final class SourcePublicationStore {
                     || listedUnsupportedPaths > coveredUnsupportedPaths) {
                 throw new IOException("inventory coverage mismatch");
             }
-            try (java.util.stream.Stream<Path> paths = Files.walk(path.resolve("tree"))) {
-                if (paths.filter(file -> Files.isRegularFile(file, LinkOption.NOFOLLOW_LINKS)).count() != readable) {
-                    throw new IOException("unindexed file in published tree");
+            try (java.util.stream.Stream<Path> paths = Files.walk(path)) {
+                long physicalFiles = 0;
+                java.util.Iterator<Path> entries = paths.iterator();
+                while (entries.hasNext()) {
+                    Path file = entries.next();
+                    if (Files.isRegularFile(file, LinkOption.NOFOLLOW_LINKS)) {
+                        if (file.startsWith(path.resolve("tree"))) physicalFiles++;
+                    } else if (!Files.isDirectory(file, LinkOption.NOFOLLOW_LINKS))
+                        throw new IOException("unsafe published revision entry");
                 }
+                if (physicalFiles != readable) throw new IOException("unindexed file in published tree");
             }
             return digest;
         } catch (IOException | RuntimeException exception) {

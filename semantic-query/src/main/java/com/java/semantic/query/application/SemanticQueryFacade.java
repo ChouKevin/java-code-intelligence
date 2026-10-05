@@ -68,10 +68,13 @@ public final class SemanticQueryFacade {
             if (!searchSlots.tryAcquire()) {
                 throw new SourceQueryException(SourceQueryException.Code.SOURCE_BUSY);
             }
+            boolean admittedSlot = false;
             try (AdmittedSourceRevision admitted = catalog.admit(request.context())) {
+                admitted.lease().onRelease(searchSlots::release);
+                admittedSlot = true;
                 return source.searchText(admitted, request);
             }
-            finally { searchSlots.release(); }
+            finally { if (!admittedSlot) searchSlots.release(); }
         });
     }
 

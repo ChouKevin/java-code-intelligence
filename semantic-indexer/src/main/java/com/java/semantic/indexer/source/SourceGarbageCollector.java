@@ -39,7 +39,10 @@ public final class SourceGarbageCollector {
     private final Path published;
     private Instant nextRun = Instant.MIN;
     private boolean firstRun = true;
-    private static final class Counts { long deleted; long skipped; long failed; long current; long young; }
+    private static final class Counts {
+        long deleted; long skipped; long failed; long current; long young;
+        String stopReason = "none";
+    }
     private record Deleted(long files, long bytes) {}
 
     public SourceGarbageCollector(RepositoryProperties properties, RepositoryRegistry registry,
@@ -62,7 +65,7 @@ public final class SourceGarbageCollector {
         firstRun = false;
         try {
             for (SourceRepositoryDescriptor descriptor : registry.descriptors()) {
-                if (Thread.currentThread().isInterrupted() || !properties.getSourceRetention().isEnabled()) break;
+                if (stopped(counts)) break;
                 scan(new RepositoryId(descriptor.repositoryId()), run, counts);
             }
         } catch (RuntimeException exception) {
@@ -70,9 +73,11 @@ public final class SourceGarbageCollector {
             failure(run, "none", "none", "scan", exception);
         } finally {
             nextRun = clock.instant().plus(properties.getSourceRetention().getInterval());
-            String result = counts.failed == 0 ? "success" : counts.deleted > 0 || counts.skipped > 0 ? "partial" : "failed";
-            LOG.info("event=source_gc_end gcRunId={} result={} deleted={} skipped={} failed={} current={} underRetention={} durationMs={}",
-                    run, result, counts.deleted, counts.skipped, counts.failed, counts.current, counts.young, elapsed(started));
+            stopped(counts);
+            String result = !counts.stopReason.equals("none") ? "partial" : counts.failed == 0 ? "success"
+                    : counts.deleted > 0 || counts.skipped > 0 ? "partial" : "failed";
+            LOG.info("event=source_gc_end gcRunId={} result={} stopReason={} deleted={} skipped={} failed={} current={} underRetention={} durationMs={}",
+                    run, result, counts.stopReason, counts.deleted, counts.skipped, counts.failed, counts.current, counts.young, elapsed(started));
         }
     }
 
@@ -88,7 +93,7 @@ public final class SourceGarbageCollector {
             SourceRepositoryState state = publications.state(id);
             Map<String, Instant> retired = retention.reconcile(id, state, clock.instant());
             for (PreparedRevision receipt : state.published().values()) {
-                if (Thread.currentThread().isInterrupted() || !properties.getSourceRetention().isEnabled()) return;
+                if (stopped(counts)) return;
                 String sha = receipt.context().revision();
                 if (state.current().filter(current -> current.revision().equals(sha)).isPresent()) { counts.current++; continue; }
                 Instant at = retired.get(sha);
@@ -107,7 +112,7 @@ public final class SourceGarbageCollector {
         long started = System.nanoTime();
         String stage = "admission_lock";
         try {
-            if (!properties.getSourceRetention().isEnabled()) return false;
+            if (stopped(counts)) return false;
             registry.requireOrigin(id, intent.originFingerprint());
             retention.requireLock(id);
             Path lockPath = published.resolve(id.value()).resolve(SourceRepositoryState.READ_LOCK_FILE_NAME);
@@ -143,6 +148,7 @@ public final class SourceGarbageCollector {
                             return true;
                         }
                         // Validate before persisting a new intent, and revalidate again at withdrawal.
+                        requireDirectories(published.resolve(id.value()).resolve("revisions").resolve(intent.revision()));
                         publications.manifest(receipt.context(), intent.manifestDigest());
                         stage = "intent";
                         retention.beginDeletion(intent);
@@ -162,7 +168,7 @@ public final class SourceGarbageCollector {
                 }
             }
             // Withdrawal is durable. Other published revisions may be read throughout physical deletion.
-            if (!withdrawn || !properties.getSourceRetention().isEnabled()) return false;
+            if (!withdrawn || stopped(counts)) return false;
             stage = "physical_delete";
             Deleted deleted = deleteTree(id, intent);
             stage = "finish";
@@ -231,6 +237,11 @@ public final class SourceGarbageCollector {
             path = path.resolve(segment);
             if (!Files.isDirectory(path, LinkOption.NOFOLLOW_LINKS)) throw new IOException("unsafe deletion parent");
         }
+    }
+    private boolean stopped(Counts counts) {
+        if (Thread.currentThread().isInterrupted()) counts.stopReason = "INTERRUPTED";
+        else if (!properties.getSourceRetention().isEnabled()) counts.stopReason = "DISABLED";
+        return !counts.stopReason.equals("none");
     }
     private static long elapsed(long started) { return (System.nanoTime() - started) / 1_000_000; }
     private static void recovered(DeleteIntent intent, boolean recovery, String result) {

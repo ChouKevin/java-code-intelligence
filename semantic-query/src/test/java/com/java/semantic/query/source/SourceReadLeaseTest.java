@@ -118,6 +118,75 @@ class SourceReadLeaseTest {
         }
     }
 
+    @Test
+    void cleanup_overrun_keeps_guard_and_search_slot_until_real_source_worker_exits() throws Exception {
+        SourceFilesystemFixture fixture = new SourceFilesystemFixture(root);
+        fixture.file("A.java", "retained bytes");
+        fixture.publish(Optional.empty());
+        CountDownLatch entered = new CountDownLatch(1);
+        CountDownLatch resume = new CountDownLatch(1);
+        java.util.concurrent.atomic.AtomicReference<Throwable> workerFailure = new java.util.concurrent.atomic.AtomicReference<>();
+        java.util.concurrent.atomic.AtomicReference<Thread> worker = new java.util.concurrent.atomic.AtomicReference<>();
+        java.util.concurrent.atomic.AtomicBoolean firstSearch = new java.util.concurrent.atomic.AtomicBoolean(true);
+        RepositorySourcePort delayedCleanup = new RepositorySourcePort() {
+            public FileCollection listFiles(AdmittedSourceRevision admitted, FileListRequest request) {
+                return fixture.service().listFiles(admitted, request);
+            }
+            public SourceResult readSource(AdmittedSourceRevision admitted, ReadSourceRequest request) {
+                return fixture.service().readSource(admitted, request);
+            }
+            public TextSearchResult searchText(AdmittedSourceRevision admitted, TextSearchRequest request) {
+                if (!firstSearch.getAndSet(false)) return fixture.service().searchText(admitted, request);
+                Process process;
+                try { process = new ProcessBuilder("/bin/sh", "-c", "while :; do :; done").start(); }
+                catch (java.io.IOException exception) { throw new SourceQueryException(SourceQueryException.Code.SOURCE_UNAVAILABLE, exception); }
+                SourceReadLocks.Lease.Consumer child = admitted.lease().retain();
+                SourceReadLocks.Lease.Consumer reader = admitted.lease().retain();
+                Thread active = Thread.ofVirtual().start(() -> {
+                    try (java.io.InputStream input = Files.newInputStream(fixture.tree.resolve("A.java"))) {
+                        entered.countDown();
+                        boolean interrupted = false;
+                        while (true) {
+                            try { resume.await(); break; }
+                            catch (InterruptedException exception) { interrupted = true; }
+                        }
+                        assertThat(new String(input.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8)).isEqualTo("retained bytes");
+                        if (interrupted) Thread.currentThread().interrupt();
+                    } catch (Throwable exception) { workerFailure.set(exception); }
+                    finally { reader.close(); }
+                });
+                worker.set(active);
+                try { assertThat(entered.await(1, TimeUnit.SECONDS)).isTrue(); }
+                catch (InterruptedException exception) { Thread.currentThread().interrupt(); }
+                RipgrepTextSearch.cleanup(process, List.of(active), new java.util.concurrent.atomic.AtomicBoolean(),
+                        System.nanoTime(), child);
+                throw new AssertionError("live source worker must make cleanup fail");
+            }
+        };
+        SemanticQueryFacade facade = new SemanticQueryFacade(fixture.catalog(), delayedCleanup, 1);
+        TextSearchRequest search = new TextSearchRequest(fixture.context, "retained", "", Optional.empty(), 20);
+        try (Peer peer = new Peer(fixture, root.resolve("cleanup-peer"))) {
+            assertThatThrownBy(() -> facade.searchText(search)).isInstanceOfSatisfying(SourceQueryException.class,
+                    error -> assertThat(error.code()).isEqualTo(SourceQueryException.Code.SOURCE_UNAVAILABLE));
+            peer.start();
+            peer.assertBlocked();
+            assertThatThrownBy(() -> facade.searchText(search)).isInstanceOfSatisfying(SourceQueryException.class,
+                    error -> assertThat(error.code()).isEqualTo(SourceQueryException.Code.SOURCE_BUSY));
+            resume.countDown();
+            worker.get().join(2000);
+            assertThat(worker.get().isAlive()).isFalse();
+            assertThat(workerFailure.get()).isNull();
+            peer.assertAcquired();
+        } finally {
+            resume.countDown();
+            if (java.util.Objects.nonNull(worker.get())) worker.get().join(2000);
+        }
+        assertThat(facade.searchText(search).matches()).singleElement().satisfies(match -> {
+            assertThat(match.path()).isEqualTo("A.java");
+            assertThat(match.matchedText()).isEqualTo("retained");
+        });
+    }
+
     private static ReadSourceRequest request(SourceFilesystemFixture fixture) {
         return new ReadSourceRequest(fixture.context, "A.java", 1, 200, Optional.empty());
     }
