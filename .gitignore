@@ -1,11 +1,42 @@
 target/
+*.class
+*.hprof
 .env
+.env.*
+!.env.example
+
+# Private deployment settings; keep real repository registrations local
+/.local/
+*.local.yml
+*.local.yaml
+*.local.json
+*.local.properties
+application-local*.yml
+application-local*.yaml
+application-local*.properties
+secrets/
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa*
+id_ed25519*
+
 /data/
 /jdtls/
 *.log
 .idea/
+.vscode/
+.settings/
+.classpath
+.project
+.factorypath
+*.iml
+*.code-workspace
 .worktrees/
 
 # Local agent execution records and planning vaults
 /.superpowers/
 /docs/superpowers/
+/evidence/
+/*-report.md

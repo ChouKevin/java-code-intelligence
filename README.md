@@ -10,6 +10,10 @@ Repository IDs are durably bound to their approved Git origin in both storage
 namespaces. Repointing an existing ID or adopting populated unbound pre-release
 storage fails closed; see [origin identity and rebuild rules](docs/operations/source-mcp.md#repository-origin-and-storage-identity).
 
+Keep real repository registrations, the Query allowlist, credentials and MCP
+client settings local; the public repo contains only generic configuration and
+synthetic fixtures. See [local-only configuration and evidence](docs/operations/source-mcp.md#local-only-configuration-and-evidence).
+
 Save a canonical lowercase UUID `requestId` durably **before** calling Indexer `prepare_source` (`POST /index/repositories/{repositoryId}/source` or private `/mcp`); optional `revision` must be a full lowercase 40-character SHA-1 commit. Get the original job by **either** `jobId` or `requestId` at `GET /index/repositories/{repositoryId}/jobs`. If the acceptance response is lost, look up the **original** request ID; do not resubmit or auto-retry an unknown outcome. Once COMPLETE, discover with `get_context`, copy the returned `{repositoryId, revision}` and retain it for every navigation call. Revision A remains readable after B is published. See [agent acceptance](docs/operations/mcp-agent-acceptance.md).
 
 ## Interfaces
