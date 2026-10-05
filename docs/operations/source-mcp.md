@@ -2,6 +2,32 @@
 
 This release is source-first, not the old semantic-review service. Indexer is the **only writer** and holds approved Git URLs/credentials, private durable jobs and staging. Query has a distinct read token and accesses only immutable published source; it never calls Indexer, fetches Git, prepares commits or executes repository code. Both are separate Java 21 processes; use a local POSIX filesystem, not NFS or independent distributed mounts. No MongoDB, JDT LS, parser, inference server or target repository build is required.
 
+## Local-only configuration and evidence
+
+Keep the actual source repository IDs, Git URLs, branch assignments, guide paths,
+Query allowlist and MCP client settings outside version control. This includes
+the operator's nine-repository deployment: the public repo ships configuration
+keys and synthetic fixtures, not that deployment's inventory.
+
+Prefer configuration outside this checkout. When local files are needed here,
+use ignored `.local/indexer.yml` and `.local/query.yml`, with separate environments
+and credentials for each service. `.local/` is a Git/Docker-context exclusion,
+not an automatic configuration loader; supply these files through the existing
+external deployment configuration mechanism. Never mount Indexer configuration
+or credentials into Query. Keep real values out of `.env.example`, packaged
+`application.yml`, documentation, fixtures, commit messages and PR descriptions.
+
+Git and the Docker context also exclude local environment overrides, private key
+files and secrets directories. Existing `data/mcp-repositories/` source clones,
+runtime settings and preparation records stay local; do not copy them into tracked
+files or delete them as repository housekeeping. IDE metadata, agent/spec-vault
+records and generated evidence are not shared source artifacts.
+
+Ignoring an already-tracked file is insufficient: remove it from the Git index
+while preserving its local copy. This removes it from subsequent remote trees,
+not Git history or existing clones. Exposed credentials require rotation and a
+separately approved history-cleanup procedure; ignore rules cannot revoke them.
+
 ## Bootstrap and trust boundaries
 
 Provision a **new** service-owned host parent for one Indexer `/data` bind mount. Bootstrap ownership before first startup: parent and private admin directories owned by writer UID:GID `10001:10001`, private mode `0700`; `/data/source-published` owned by writer, mode `0755`, published directories readable/traversable and files `0644` before atomic publication. The Query container runs UID:GID `10002:10002` and receives **only** the published child at `/data/source-published:ro`. Bind mounting the full parent into Query, or staging and published as separate volumes, defeats the isolation/same-filesystem atomic rename prerequisite. Protect the published parent against untrusted replacement; do not assume a read-only application flag can substitute for the mount and UID boundary. On the host keep `/data` private; use an administrator-controlled bootstrap for a new empty mount, not a recursive chown/delete of pre-existing data. The [image smoke](testing.md#verification-commands) exercises the actual UID/mount/read-only boundary on a fresh disposable root.
