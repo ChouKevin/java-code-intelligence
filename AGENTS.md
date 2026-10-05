@@ -189,6 +189,12 @@ Mongo onboarding does not apply to this release.
 Use Java 21 and Maven 3.9.x from the selected worktree's reactor root. Follow
 `docs/operations/testing.md` for commands. Separate intermediate task checks from
 final feature acceptance; a task completion is not a release gate.
+Use `bash scripts/verification-scope.sh --base <commit> --head <commit>` for
+final lane selection (`--full` for explicit acceptance); unknown/unavailable
+diffs select all. CI and local guidance consume the same selector. Non-draft
+feature-ready PR events or final dispatch trigger CI; pushes do not. Draft
+events may still create skipped workflow runs. The terminal `Feature acceptance`
+gate rejects required lane skips/cancellations. Branch protection is separate.
 
 ### Intermediate tasks
 

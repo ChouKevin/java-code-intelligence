@@ -2,6 +2,58 @@
 
 Run from the reactor root with Java 21, Maven 3.9+, Git and a real absolute-path ripgrep executable for source journeys. Ordinary tests need no MongoDB, Docker or JDT LS. Use Docker only for image/build isolation checks. These commands exercise source contracts, **not** target repository tests, agent/model reasoning, production TLS or capacity.
 
+## Select scope; separate tasks from feature acceptance
+
+The single routing implementation is `scripts/verification-scope.sh`. It selects
+checks only; it never starts Maven, Docker or services. Run from the reactor root:
+
+```bash
+bash scripts/verification-scope.sh --base <base-commit> --head <feature-head>
+bash scripts/verification-scope.sh --full
+bash scripts/test-verification-scope.sh
+```
+
+Output is exactly three lines: `unit=true|false`, `journey=true|false`,
+`images=true|false`. An unavailable base/head/diff or unknown path selects all.
+Deletions and both sides of renames count; mixed changes take the union.
+
+| Changed surface | Ordinary reactor | Native journey | Images |
+| --- | --- | --- | --- |
+| Only known prose: README.md, AGENTS.md, docs/** | no | no | no |
+| Root/module POMs, shared Model, CI or selector scripts | yes | yes | yes |
+| Indexer/Query main Java | yes | yes | no |
+| App resources/config/security/bootstrap, source admission/path authorization | yes | yes | yes |
+| Ordinary test sources/helpers only | yes | no | no |
+| SourceMcpJourneyIT, native journey launcher, video source corpus | no | yes | no |
+| Dockerfiles, .env.example, image smoke launcher | no | no | yes |
+| Unknown/unavailable diff or explicit full gate | yes | yes | yes |
+
+**Intermediate tasks:** use the smallest affected native test or changed-path
+smoke and local checkpoint commits. No CI or image build/smoke, locally or
+remotely; no intermediate push or ready PR. Reuse valid same-snapshot evidence.
+The table selects coverage, not permission to run full gates after every task.
+
+**Final feature acceptance:** finish all feature tasks and local review, then
+publish only with authorization. CI runs on non-draft PR `opened`, `reopened`,
+`synchronize` and `ready_for_review`; there is no push/post-merge trigger.
+Draft events can start a workflow whose jobs are skipped; draft gating does not
+mean zero workflow events. Optional `workflow_dispatch` selects all lanes for
+final acceptance once registered on the default branch. Superseded runs cancel
+only within the same PR/ref. Each lane checks out the exact PR head, not the
+synthetic merge commit.
+
+`Feature acceptance` is the terminal gate: selected lanes must succeed; failures,
+cancellations and unexpected skips fail closed. An intentional docs-only
+three-lane skip succeeds after selector regressions. Changing branch protection
+to require this gate needs separate approval. Local shell checks do not prove
+GitHub job routing: final acceptance must exercise the ready feature PR and an
+owned docs-only probe PR (close without merge and retire only its probe branch).
+
+Run selected images on isolated CI, not in the default local loop. This cleanup
+changes CI, so its final integrated gate selects reactor, journey and images.
+Diagnose failed gates and verify the corrected snapshot; never infer success
+from a script existing or a gate being scheduled.
+
 ## Verification commands
 
 | Check | Command | What it covers |

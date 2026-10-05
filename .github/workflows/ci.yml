@@ -1,15 +1,52 @@
 name: ci
 
 on:
-  push:
   pull_request:
+    types: [opened, reopened, synchronize, ready_for_review]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
+  changes:
+    name: Select final verification lanes
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    outputs:
+      unit: ${{ steps.scope.outputs.unit }}
+      journey: ${{ steps.scope.outputs.journey }}
+      images: ${{ steps.scope.outputs.images }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - run: bash scripts/test-verification-scope.sh
+      - id: scope
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          if [[ "$EVENT" == workflow_dispatch ]]; then
+            bash scripts/verification-scope.sh --full >> "$GITHUB_OUTPUT"
+          else
+            bash scripts/verification-scope.sh --base "$BASE" --head "$HEAD" >> "$GITHUB_OUTPUT"
+          fi
   unit:
     name: Source reactor tests
+    needs: changes
+    if: needs.changes.outputs.unit == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - uses: actions/setup-java@v4
         with: { distribution: temurin, java-version: '21' }
       - run: sudo apt-get update && sudo apt-get install -y ripgrep
@@ -17,9 +54,13 @@ jobs:
 
   source-journey:
     name: Real source MCP journey
+    needs: changes
+    if: needs.changes.outputs.journey == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - uses: actions/setup-java@v4
         with: { distribution: temurin, java-version: '21' }
       - run: sudo apt-get update && sudo apt-get install -y ripgrep
@@ -28,10 +69,39 @@ jobs:
   source-images:
     name: Source image isolation
     runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.images == 'true'
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - uses: actions/setup-java@v4
         with: { distribution: temurin, java-version: '21' }
       - run: docker build -f Dockerfile.indexer -t java-source-indexer:phase1 .
       - run: docker build -f Dockerfile.query -t java-source-query:phase1 .
       - run: QUERY_IMAGE=java-source-query:phase1 INDEXER_IMAGE=java-source-indexer:phase1 scripts/test-source-images.sh
+
+  acceptance:
+    name: Feature acceptance
+    needs: [changes, unit, source-journey, source-images]
+    if: always() && (github.event_name == 'workflow_dispatch' || github.event.pull_request.draft == false)
+    runs-on: ubuntu-latest
+    steps:
+      - env:
+          CHANGES_RESULT: ${{ needs.changes.result }}
+          UNIT_SELECTED: ${{ needs.changes.outputs.unit }}
+          JOURNEY_SELECTED: ${{ needs.changes.outputs.journey }}
+          IMAGES_SELECTED: ${{ needs.changes.outputs.images }}
+          UNIT_RESULT: ${{ needs.unit.result }}
+          JOURNEY_RESULT: ${{ needs.source-journey.result }}
+          IMAGES_RESULT: ${{ needs.source-images.result }}
+        run: |
+          [[ "$CHANGES_RESULT" == success ]] || exit 1
+          for lane in unit journey images; do
+            selected="${lane^^}_SELECTED"
+            result="${lane^^}_RESULT"
+            case "${!selected}:${!result}" in
+              true:success|false:skipped) ;;
+              *) echo "Required verification did not succeed: $lane (${!selected}:${!result})" >&2; exit 1 ;;
+            esac
+          done
