@@ -54,3 +54,5 @@ dispatch; CI has no push trigger. Images belong on isolated final-acceptance CI,
 not the default workstation loop. See [prerequisites, focused commands and
 resource/data safeguards](docs/operations/testing.md). Local PostgreSQL and its
 Docker engine/data remain untouched; they are not Source-first dependencies.
+
+Temporary final-acceptance routing probe: documentation only; close without merge.
