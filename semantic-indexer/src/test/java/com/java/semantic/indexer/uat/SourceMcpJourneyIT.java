@@ -258,6 +258,8 @@ class SourceMcpJourneyIT {
                 assertThat(logs).doesNotContain(adminToken, readToken);
                 Files.writeString(artifacts.resolve("gc-proof.txt"), "repositoryId=video revision=" + a
                         + " withdrawn; retainedRevision=" + b + " gcRunId=" + run + "\n");
+                System.out.println("Source journey GC completion: " + deleted);
+                System.out.println("Source journey expired A context/read/cursor: HTTP/MCP REVISION_NOT_PREPARED; retained B=" + b);
             }
             Files.writeString(artifacts.resolve("revisions.json"), mapper.writeValueAsString(Map.of("A", a, "B", b)));
         } finally {
@@ -400,6 +402,7 @@ class SourceMcpJourneyIT {
                     "content", read.get("content").asString()));
         }
         Files.writeString(artifacts.resolve(label + "-provenance.json"), mapper.writeValueAsString(citations));
+        System.out.println("Source journey fixture provenance " + label + ": " + mapper.writeValueAsString(citations));
     }
 
     private void assertGuide(JsonNode result, String expected) {

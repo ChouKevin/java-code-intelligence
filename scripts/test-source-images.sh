@@ -274,5 +274,8 @@ post_query search-text "{\"context\":{\"repositoryId\":\"fixture\",\"revision\":
 jq -e '.matches | any(.path == "Example.java" and .line == 2)' "${root}/query.json" >/dev/null || fail 'retained B search failed'
 post_query source "{\"context\":{\"repositoryId\":\"fixture\",\"revision\":\"${revision_b}\"},\"path\":\"Example.java\"}"
 jq -e '.content | contains("source-image-needle-B")' "${root}/query.json" >/dev/null || fail 'retained B read failed'
+printf 'Source image evidence: repositoryId=fixture reclaimedRevision=%s retainedRevision=%s queryUid=10002 publishedMount=read-only busySkip=READ_IN_PROGRESS expiredContext=REVISION_NOT_PREPARED retainedPath=Example.java retainedMatchLine=2\n' \
+  "${revision}" "${revision_b}"
+grep -E "event=source_gc_deleted .*repositoryId=fixture revision=${revision} .*result=deleted" "${root}/gc.log"
 successful=1
 echo 'Source images: real Git A/B, read-only UID locking, busy skip, scheduled cleanup, retained B and isolation passed'

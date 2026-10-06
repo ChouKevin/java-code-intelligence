@@ -107,9 +107,17 @@ Retention focused checks: `SourceRetentionPublicationTest`, `SourceReadLeaseTest
 `SourceGarbageCollectorTest`, `SourceGcRecoveryTest` plus affected publication,
 recovery and transport scenarios. They use disposable roots and controlled Clocks
 for 30-day boundaries; no production test-clock flag or real-repository aging.
+The publication fixture also fills the existing bounded retirement record to its
+limit: the real post-publication write fails, while the committed job/current and
+both revisions remain valid and later reconciliation restores a fresh window.
+This is deterministic metadata-write failure evidence, not kernel power-loss or
+fsync durability proof.
 The native journey keeps its original A/B/cold-source proof, then ages only its
 stopped disposable Indexer's private retirement entry and checks GC withdrawal,
 stale context/cursor HTTP/MCP parity and retained B bytes.
+CI journey output exposes only synthetic fixture citations and safe GC completion
+fields, so repository/SHA/path/line and stale-context outcomes can be inspected
+without retaining raw private process logs or committing generated evidence.
 
 The final image smoke compiles a JDK-only test peer with javac, copies its package
 tree into Query `/tmp`, and takes a shared lock as UID 10002 on Query's actual

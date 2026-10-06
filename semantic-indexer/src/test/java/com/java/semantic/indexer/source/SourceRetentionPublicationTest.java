@@ -1,5 +1,8 @@
 package com.java.semantic.indexer.source;
 
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import com.java.semantic.indexer.config.ConfiguredRepositoryPublisher;
 import com.java.semantic.indexer.job.FileSourceJobStore;
 import com.java.semantic.indexer.job.PreparationRequestId;
@@ -11,11 +14,13 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.time.Instant;
 import java.util.Map;
+import java.util.HashMap;
 import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import java.nio.file.Path;
+import org.slf4j.LoggerFactory;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -54,6 +59,45 @@ class SourceRetentionPublicationTest {
             assertThat(fixture.retention.reconcile(fixture.git.repository, fixture.state(), observed)).containsEntry(a, observed);
             assertThat(fixture.state().current().orElseThrow().revision()).isEqualTo(b);
         }
+    }
+
+    @Test
+    void post_publication_retirement_write_limit_failure_does_not_fail_committed_publication() throws Exception {
+        Logger logger = (Logger) LoggerFactory.getLogger(SourcePublicationStore.class);
+        ListAppender<ILoggingEvent> capture = new ListAppender<>();
+        capture.start(); logger.addAppender(capture);
+        try (Lifecycle fixture = new Lifecycle(root)) {
+            String a = fixture.commit("A"); fixture.prepare(a);
+            String b = fixture.commit("B");
+            SourceRetentionStore.RetentionState empty = new SourceRetentionStore.RetentionState(1, "orders",
+                    fixture.registry.origin(fixture.git.repository), Map.of());
+            int emptyBytes = fixture.mapper.writeValueAsBytes(empty).length;
+            SourceRetentionStore.RetentionState one = new SourceRetentionStore.RetentionState(1, "orders",
+                    empty.originFingerprint(), Map.of("0".repeat(40), Instant.EPOCH));
+            int entryBytes = fixture.mapper.writeValueAsBytes(one).length - emptyBytes + 1;
+            int count = (4 * 1024 * 1024 - emptyBytes + 1) / entryBytes;
+            Map<String, Instant> entries = new HashMap<>();
+            for (int index = 0; index < count; index++) {
+                String suffix = Integer.toHexString(index);
+                entries.put("0".repeat(40 - suffix.length()) + suffix, Instant.EPOCH);
+            }
+            fixture.writeRetired(entries);
+            Path record = fixture.git.admin.resolve("repositories/orders/retention.json");
+            byte[] before = Files.readAllBytes(record);
+            fixture.prepare(b);
+            assertThat(capture.list.stream().map(ILoggingEvent::getFormattedMessage).toList()).anyMatch(message ->
+                    message.contains("event=source_retirement_record_failed") && message.contains("revision=" + b)
+                            && message.contains("errorCode=RETIREMENT_WRITE_FAILED"));
+            assertThat(fixture.state().current().orElseThrow().revision()).isEqualTo(b);
+            assertThat(fixture.state().preparation().phase()).isEqualTo(SourceRepositoryState.PreparationPhase.COMPLETE);
+            assertThat(fixture.state().published()).containsKeys(a, b);
+            assertThat(Files.readAllBytes(record)).isEqualTo(before);
+            assertThat(Files.readString(fixture.git.published.resolve("orders/revisions").resolve(a).resolve("tree/A.java"))).isEqualTo("A");
+            assertThat(Files.readString(fixture.git.published.resolve("orders/revisions").resolve(b).resolve("tree/A.java"))).isEqualTo("B");
+            Instant observed = Instant.now().plusSeconds(86400);
+            assertThat(fixture.retention.reconcile(fixture.git.repository, fixture.state(), observed))
+                    .containsEntry(a, observed).doesNotContainKey(b);
+        } finally { logger.detachAppender(capture); capture.stop(); }
     }
 
     @Test
