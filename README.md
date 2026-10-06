@@ -65,5 +65,5 @@ run only focused native checks and keep commits local: no CI or image builds.
 Complete the whole feature and local review before an authorized ready PR/final
 dispatch; CI has no push trigger. Images belong on isolated final-acceptance CI,
 not the default workstation loop. See [prerequisites, focused commands and
-resource/data safeguards](docs/operations/testing.md). Local PostgreSQL and its
-Docker engine/data remain untouched; they are not Source-first dependencies.
+resource/data safeguards](docs/operations/testing.md). Existing unrelated services,
+container engines and data remain untouched by verification.

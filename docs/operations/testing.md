@@ -62,10 +62,10 @@ from a script existing or a gate being scheduled.
 | Boundary | Required | Not required / ownership |
 | --- | --- | --- |
 | Scope selector regressions | Bash and Git | Temporary local Git only; no JVM/container/services |
-| Ordinary native tests | Java 21, Maven 3.9.x; Git for local preparation tests; real rg for actual search tests | No Docker, MongoDB, JDT LS or PostgreSQL service |
+| Ordinary native tests | Java 21, Maven 3.9.x; Git for local preparation tests; real rg for actual search tests | No external database, Docker or language-server service |
 | Native MCP journey | Java 21, Maven 3.9.x, Git, configured absolute executable real ripgrep | Independent JVMs and disposable roots; no target-repository builds |
 | Final image builds/smoke | Isolated CI Docker engine/builder, Git, curl, jq, jar, javac; Java 21/Maven 3.9.x for the CI environment | Non-root writer UID 10001 / reader UID 10002; only the published child is mounted read-only by Query |
-| Current Source-first runtime | Separate Indexer admin / Query read tokens, Indexer-only Git credentials, Query allowlist, new private/published POSIX roots | No Mongo/JDT service; keep unrelated local PostgreSQL and Docker/data running |
+| Current Source-first runtime | Separate Indexer admin / Query read tokens, Indexer-only Git credentials, Query allowlist, new private/published POSIX roots | No database or language-server service; preserve unrelated services and data |
 
 Prefer a standard system ripgrep installation. Do not commit a workstation/editor
 fallback, install/uninstall packages or change global settings as a test workaround.
@@ -135,15 +135,16 @@ Maven, real journey, Docker builds/smoke or another executor; no Maven `-T` or e
 parallel test forks. Journey service JVMs belong to that one lane. `MAVEN_OPTS`
 does not by itself bound test forks or launched service JVMs.
 
-Before admission, require WSL `MemAvailable` and Windows free physical RAM each
-at least 6 GiB, swap used at most 256 MiB with no sustained swap-in/out in a short
-sample, and at least 20 GiB free on both Linux and the actual Windows volume
-holding data/swap. Missing metrics or insufficient headroom means defer to an
-admitted lane/CI, not retry under pressure. Virtual ext4 capacity is not additional
-physical SSD capacity. Observe only owned runs with bounded low-rate sampling;
-if either available RAM falls below 2 GiB or swap grows 512 MiB within 30 seconds,
-stop admitting work and gracefully cancel the owned verification process group.
-Retain diagnostics/original request IDs; never terminate unrelated IDE/services.
+Before admission, apply operator-approved memory, swap and physical-disk limits
+from local instructions. When present, read `.local/workstation-safety.md` at the
+repository root; keep machine-specific thresholds and service names in that
+ignored file rather than shared product guidance. Account for the actual backing
+storage and host capacity, not just a virtual filesystem's reported free space.
+Absent limits, missing metrics or insufficient headroom means defer to an
+authorized isolated runner, not retry under pressure. Observe only owned runs
+with bounded, low-rate sampling; if a local stop threshold is crossed, stop
+admitting work and gracefully cancel only the owned verification process group.
+Retain diagnostics and original request IDs.
 
 Preserve separate admin/read tokens, Indexer-only credentials/private jobs/staging,
 immutable published roots, Query allowlist and read-only published-child mount.
@@ -151,11 +152,12 @@ Image smoke retains its failure root/request ID after unknown acceptance outcome
 native journey removes its disposable work/logs and retains response artifacts.
 Neither script authorizes deleting existing managed roots or user service data.
 
-Keep local PostgreSQL (including `java-agent-uat-postgres-1`), its Docker engine
-and data running. Do not stop Docker/WSL, change global limits or prune containers,
-images, volumes or caches. Any named legacy container retirement needs separate
-owner confirmation; unresolved ownership/use means leave it intact. Container-only
-approval does not approve deleting mounts/data/volumes, clones or IDE tooling.
+Keep unrelated services, container engines, development environments and their
+data running and intact. Verification does not authorize changing global resource
+limits, stopping unrelated processes or pruning shared storage/caches. Retirement
+requires separate ownership/use confirmation and approval; unresolved ownership
+means leave it intact. Container-only approval does not authorize deleting mounts,
+data, volumes, developer clones or IDE tooling.
 
 ## Verification commands
 
