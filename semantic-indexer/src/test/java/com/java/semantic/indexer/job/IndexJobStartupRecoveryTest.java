@@ -36,6 +36,8 @@ class IndexJobStartupRecoveryTest {
             RepositoryRegistry registry = new RepositoryRegistry(properties);
             registry.bindAll();
             FileSourceJobStore jobs = new FileSourceJobStore(properties, JsonMapper.builder().build(), writer);
+            com.java.semantic.indexer.source.SourceLifecycleFixture.publications(properties,
+                    JsonMapper.builder().build(), writer, jobs);
             jobs.admit(repository, runningRequest, Optional.empty(), "main", registry.origin(repository), Optional.empty());
             jobs.claimNext().orElseThrow();
             RepositoryId second = new RepositoryId("other");
@@ -43,7 +45,7 @@ class IndexJobStartupRecoveryTest {
         }
         try (DurableSourceFiles writer = new DurableSourceFiles(root.resolve("source-admin"))) {
             FileSourceJobStore jobs = new FileSourceJobStore(properties, JsonMapper.builder().build(), writer);
-            jobs.recover(new SourcePublicationStore(properties, JsonMapper.builder().build(), writer, jobs));
+            jobs.recover(com.java.semantic.indexer.source.SourceLifecycleFixture.publications(properties, JsonMapper.builder().build(), writer, jobs));
             assertThat(jobs.find(repository, runningRequest).orElseThrow().phase()).isEqualTo(SourcePreparationJob.Phase.FAILED);
             assertThat(jobs.find(repository, runningRequest).orElseThrow().failureCode()).contains("WORKER_INTERRUPTED");
             assertThat(jobs.claimNext().orElseThrow().requestId()).isEqualTo(acceptedRequest.value());

@@ -102,8 +102,13 @@ prompts, chat history, embeddings, or inferred business facts.
 - Published receipts and current publication job identity must support recovery
   after publication succeeds but before a job reaches COMPLETE. Reuse a validated,
   already-published SHA without overwriting its immutable tree.
-- Keep all published revisions in Phase 1; no online GC. Failed preparation,
-  interrupted jobs, or disk exhaustion must preserve the existing READY revision.
+- Policy 2 retains non-current revisions for at least 30 elapsed days after
+  replacement; current is never reclaimed. The existing idle dispatcher scans
+  at startup and with configurable 24h fixed delay; disabling stops pending deletion.
+  Shared read guards cover full operations and process cleanup; durable private
+  intents fence same-SHA publication and recover only validated managed paths.
+  Use fresh namespaces, not policy-1 migration. No quota or extra worker/API.
+  Failed preparation, interrupted jobs or disk exhaustion preserve existing READY.
 - List, search, and read share authorization, containment, and exclusion policy.
   Reject traversal, absolute/drive/UNC paths, backslashes, malformed relative paths,
   symlink access, cross-context cursors, and unauthorized repository access.

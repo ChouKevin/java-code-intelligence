@@ -22,5 +22,8 @@ semantic:
     admin-token: ${SEMANTIC_INDEXER_ADMIN_TOKEN:}
   source-admin-root: ${SEMANTIC_SOURCE_ADMIN_ROOT:/data/source-admin}
   source-published-root: ${SEMANTIC_SOURCE_PUBLISHED_ROOT:/data/source-published}
+  source-retention:
+    enabled: ${SEMANTIC_SOURCE_RETENTION_ENABLED:true}
+    interval: ${SEMANTIC_SOURCE_RETENTION_INTERVAL:24h}
   git-username: ${GIT_USERNAME:}
   git-token: ${GIT_TOKEN:}

@@ -3,6 +3,7 @@ package com.java.semantic.repository.config;
 import com.java.semantic.indexer.source.DurableSourceFiles;
 import java.io.IOException;
 import java.nio.file.Path;
+import java.time.Clock;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -10,6 +11,9 @@ import org.springframework.context.annotation.Configuration;
 @Configuration(proxyBeanMethods = false)
 @EnableConfigurationProperties(RepositoryProperties.class)
 public class RepositoryConfiguration {
+    @Bean
+    Clock sourceRetentionClock() { return Clock.systemUTC(); }
+
     @Bean(destroyMethod = "close")
     DurableSourceFiles sourceWriterOwnership(RepositoryProperties properties) throws IOException {
         Path admin = Path.of(properties.getSourceAdminRoot()).toAbsolutePath().normalize();

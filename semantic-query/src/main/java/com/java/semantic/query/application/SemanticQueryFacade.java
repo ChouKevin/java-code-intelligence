@@ -11,6 +11,7 @@ import com.java.semantic.model.source.SourceReadContract.SourceResult;
 import com.java.semantic.model.source.SourceReadContract.TextSearchRequest;
 import com.java.semantic.model.source.SourceReadContract.TextSearchResult;
 import com.java.semantic.query.source.RepositorySourcePort;
+import com.java.semantic.query.source.AdmittedSourceRevision;
 import com.java.semantic.query.source.SourceRevisionCatalog;
 import com.java.semantic.query.source.SourceQueryException;
 import com.java.semantic.query.source.SourceOperationDeadline;
@@ -55,8 +56,11 @@ public final class SemanticQueryFacade {
     }
 
     public FileCollection listFiles(FileListRequest request) {
-        return SourceOperationDeadline.within(Duration.ofSeconds(2),
-                () -> source.listFiles(catalog.admit(request.context()), request));
+        return SourceOperationDeadline.within(Duration.ofSeconds(2), () -> {
+            try (AdmittedSourceRevision admitted = catalog.admit(request.context())) {
+                return source.listFiles(admitted, request);
+            }
+        });
     }
 
     public TextSearchResult searchText(TextSearchRequest request) {
@@ -64,13 +68,21 @@ public final class SemanticQueryFacade {
             if (!searchSlots.tryAcquire()) {
                 throw new SourceQueryException(SourceQueryException.Code.SOURCE_BUSY);
             }
-            try { return source.searchText(catalog.admit(request.context()), request); }
-            finally { searchSlots.release(); }
+            boolean admittedSlot = false;
+            try (AdmittedSourceRevision admitted = catalog.admit(request.context())) {
+                admitted.lease().onRelease(searchSlots::release);
+                admittedSlot = true;
+                return source.searchText(admitted, request);
+            }
+            finally { if (!admittedSlot) searchSlots.release(); }
         });
     }
 
     public SourceResult readSource(ReadSourceRequest request) {
-        return SourceOperationDeadline.within(Duration.ofSeconds(2),
-                () -> source.readSource(catalog.admit(request.context()), request));
+        return SourceOperationDeadline.within(Duration.ofSeconds(2), () -> {
+            try (AdmittedSourceRevision admitted = catalog.admit(request.context())) {
+                return source.readSource(admitted, request);
+            }
+        });
     }
 }

@@ -1,6 +1,8 @@
 package com.java.semantic.indexer.job;
 
 import com.java.semantic.indexer.source.SourcePublicationStore;
+import com.java.semantic.indexer.source.SourceGarbageCollector;
+import java.util.Optional;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -16,6 +18,7 @@ public final class IndexJobDispatcher implements ApplicationListener<Application
     private final FileSourceJobStore jobs;
     private final IndexJobExecutor executor;
     private final SourcePublicationStore publications;
+    private final SourceGarbageCollector collector;
     private final ScheduledExecutorService worker = Executors.newSingleThreadScheduledExecutor(task -> {
         Thread thread = new Thread(task, "source-preparation-dispatcher");
         thread.setDaemon(true);
@@ -23,10 +26,12 @@ public final class IndexJobDispatcher implements ApplicationListener<Application
     });
     private final AtomicBoolean running = new AtomicBoolean();
 
-    public IndexJobDispatcher(FileSourceJobStore jobs, IndexJobExecutor executor, SourcePublicationStore publications) {
+    public IndexJobDispatcher(FileSourceJobStore jobs, IndexJobExecutor executor, SourcePublicationStore publications,
+            SourceGarbageCollector collector) {
         this.jobs = jobs;
         this.executor = executor;
         this.publications = publications;
+        this.collector = collector;
     }
 
     @Override
@@ -42,10 +47,19 @@ public final class IndexJobDispatcher implements ApplicationListener<Application
     }
 
     public void dispatchOnce() {
-        jobs.pendingStatus().ifPresent(publications::updatePreparation);
-        jobs.claimNext().ifPresent(job -> {
-            try {
-                publications.updatePreparation(job);
+        Optional<SourcePreparationJob> pending = jobs.pendingStatus();
+        if (pending.isPresent()) {
+            publications.updatePreparation(pending.orElseThrow());
+            return;
+        }
+        Optional<SourcePreparationJob> claimed = jobs.claimNext();
+        if (claimed.isEmpty()) {
+            collector.runIfDue();
+            return;
+        }
+        SourcePreparationJob job = claimed.orElseThrow();
+        try {
+            publications.updatePreparation(job);
             } catch (RuntimeException exception) {
                 SourcePreparationJob failed = jobs.fail(new com.java.semantic.model.repository.RepositoryId(job.repositoryId()),
                         new IndexJobId(job.jobId()), "PREPARATION_FAILED");
@@ -56,8 +70,7 @@ public final class IndexJobDispatcher implements ApplicationListener<Application
                 }
                 throw exception;
             }
-            executor.execute(job);
-        });
+        executor.execute(job);
     }
 
     private void dispatchScheduled() {

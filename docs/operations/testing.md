@@ -64,7 +64,7 @@ from a script existing or a gate being scheduled.
 | Scope selector regressions | Bash and Git | Temporary local Git only; no JVM/container/services |
 | Ordinary native tests | Java 21, Maven 3.9.x; Git for local preparation tests; real rg for actual search tests | No Docker, MongoDB, JDT LS or PostgreSQL service |
 | Native MCP journey | Java 21, Maven 3.9.x, Git, configured absolute executable real ripgrep | Independent JVMs and disposable roots; no target-repository builds |
-| Final image builds/smoke | Isolated CI Docker engine/builder, Git, curl, jq, jar; Java 21/Maven 3.9.x for the CI environment | Non-root writer UID 10001 / reader UID 10002; only the published child is mounted read-only by Query |
+| Final image builds/smoke | Isolated CI Docker engine/builder, Git, curl, jq, jar, javac; Java 21/Maven 3.9.x for the CI environment | Non-root writer UID 10001 / reader UID 10002; only the published child is mounted read-only by Query |
 | Current Source-first runtime | Separate Indexer admin / Query read tokens, Indexer-only Git credentials, Query allowlist, new private/published POSIX roots | No Mongo/JDT service; keep unrelated local PostgreSQL and Docker/data running |
 
 Prefer a standard system ripgrep installation. Do not commit a workstation/editor
@@ -102,6 +102,31 @@ SOURCE_TEST_RG="$SOURCE_TEST_RG" scripts/test-source-mcp.sh
 it does not permit a zero-test green. Identify the intended classes and actual
 scenario counts in the report. Clean after deleting Java/build outputs or at a
 fresh final gate, not every unchanged loop.
+
+Retention focused checks: `SourceRetentionPublicationTest`, `SourceReadLeaseTest`,
+`SourceGarbageCollectorTest`, `SourceGcRecoveryTest` plus affected publication,
+recovery and transport scenarios. They use disposable roots and controlled Clocks
+for 30-day boundaries; no production test-clock flag or real-repository aging.
+The publication fixture also fills the existing bounded retirement record to its
+limit: the real post-publication write fails, while the committed job/current and
+both revisions remain valid and later reconciliation restores a fresh window.
+This is deterministic metadata-write failure evidence, not kernel power-loss or
+fsync durability proof.
+The native journey keeps its original A/B/cold-source proof, then ages only its
+stopped disposable Indexer's private retirement entry and checks GC withdrawal,
+stale context/cursor HTTP/MCP parity and retained B bytes.
+CI journey output exposes only synthetic fixture citations and safe GC completion
+fields, so repository/SHA/path/line and stale-context outcomes can be inspected
+without retaining raw private process logs or committing generated evidence.
+
+The final image smoke compiles a JDK-only test peer with javac, copies its package
+tree into Query `/tmp`, and takes a shared lock as UID 10002 on Query's actual
+read-only mount. This proves OS/UID/mount locking, **not** an in-flight HTTP request;
+native facade/reader tests cover operation ownership. Only that disposable image
+fixture sets the ordinary retention interval to `1s` for bounded scheduled retry;
+production default remains `24h`. Selected policy/shared/read-only changes require
+the full ordinary/journey/image final lanes on an authorized isolated runner.
+Presence of these checks is not evidence of execution or release acceptance.
 
 ### Resource and host/data safeguards
 
@@ -170,4 +195,4 @@ acceptance remain separate from native source verification.
 
 ## Release checks and boundaries
 
-Before deployment check explicit repository allowlist/secret separation, private admin TLS ingress, matching format/policy-1 namespace and same-filesystem atomic publication. Verify direct-child pagination/cursors, UTF-8/CRLF/long-line read continuation, bounded literal rg, unsupported/excluded paths, guide hint status, A/B exact reads and failure-preserves-A. Query must remain readable on a published revision after Indexer stops; an orphan directory or registered-but-unprepared repo is **not** an admissible source. Verify the actual client against both `/mcp` endpoints independently. Neither a skipped test nor an HTTP-only response proves MCP/model acceptance. See [Source MCP operations](source-mcp.md) for startup, original-request recovery and rollback.
+Before deployment check explicit repository allowlist/secret separation, private admin TLS ingress, public format-1/policy-2 fresh namespaces, stable read locks and same-filesystem atomic publication. Verify direct-child pagination/cursors, UTF-8/CRLF/long-line read continuation, bounded literal rg, unsupported/excluded paths, guide hint status, A/B exact reads and failure-preserves-A. Verify retirement/republication boundaries, busy-read skip, pending-delete recovery, disabled GC, stale-context denial and retained current bytes. Query must remain readable on a published revision after Indexer stops; an orphan directory or registered-but-unprepared repo is **not** an admissible source. Verify the actual client against both `/mcp` endpoints independently. Neither a skipped test nor an HTTP-only response proves MCP/model acceptance. See [Source MCP operations](source-mcp.md) for startup, original-request recovery and rollback.

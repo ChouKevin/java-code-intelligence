@@ -1,5 +1,6 @@
 package com.java.semantic.query.source;
 
+import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.model.source.PreparedRevision;
 import com.java.semantic.model.source.SourceContext;
 import com.java.semantic.model.source.SourceReadContract;
@@ -32,11 +33,13 @@ public final class LocalSourceRevisionCatalog implements SourceRevisionCatalog {
     private final SourceAccessProperties properties;
     private final ObjectMapper mapper;
     private final SourcePathResolver resolver;
+    private final SourceReadLocks locks;
 
-    public LocalSourceRevisionCatalog(SourceAccessProperties properties, ObjectMapper mapper) {
+    public LocalSourceRevisionCatalog(SourceAccessProperties properties, ObjectMapper mapper, SourceReadLocks locks) {
         this.properties = Objects.requireNonNull(properties);
         this.mapper = Objects.requireNonNull(mapper);
         this.resolver = new SourcePathResolver(mapper);
+        this.locks = Objects.requireNonNull(locks);
     }
 
     @Override
@@ -58,14 +61,16 @@ public final class LocalSourceRevisionCatalog implements SourceRevisionCatalog {
             if (descriptor.repositoryId().compareTo(after) <= 0
                     || request.nameFilter().filter(value -> !descriptor.displayName().contains(value)).isPresent()) continue;
             if (items.size() == request.limit()) { hasMore = true; break; }
-            SourceRepositoryState state = state(descriptor.repositoryId());
-            Optional<String> revision = state.current().map(SourceRepositoryState.CurrentPublication::revision);
-            SourceStatus status = status(state);
-            if (revision.isPresent()) {
-                admit(new SourceContext(descriptor.repositoryId(), revision.orElseThrow()));
+            try (SourceReadLocks.Lease lease = locks.acquire(new RepositoryId(descriptor.repositoryId()), deadline)) {
+                SourceRepositoryState state = state(descriptor.repositoryId());
+                Optional<String> revision = state.current().map(SourceRepositoryState.CurrentPublication::revision);
+                SourceStatus status = status(state);
+                if (revision.isPresent()) {
+                    admitLocked(new SourceContext(descriptor.repositoryId(), revision.orElseThrow()), lease, deadline);
+                }
+                items.add(new RepositoryItem(descriptor.repositoryId(), descriptor.displayName(), descriptor.defaultBranch(),
+                        safeGuide(descriptor.projectGuidePath()), status, SemanticStatus.NOT_READY, revision));
             }
-            items.add(new RepositoryItem(descriptor.repositoryId(), descriptor.displayName(), descriptor.defaultBranch(),
-                    safeGuide(descriptor.projectGuidePath()), status, SemanticStatus.NOT_READY, revision));
         }
         Optional<String> next = hasMore ? Optional.of(QueryCursorCodec.encode(binding,
                 List.of(items.getLast().repositoryId()))) : Optional.empty();
@@ -77,19 +82,21 @@ public final class LocalSourceRevisionCatalog implements SourceRevisionCatalog {
         SourceRepositoryDescriptor descriptor = descriptors().stream()
                 .filter(item -> item.repositoryId().equals(request.repositoryId())).findFirst()
                 .orElseThrow(() -> new SourceQueryException(SourceQueryException.Code.REPOSITORY_NOT_FOUND));
-        SourceRepositoryState state = state(descriptor.repositoryId());
-        if (request.revision().isPresent()) {
-            SourceContext context = new SourceContext(descriptor.repositoryId(), request.revision().orElseThrow());
-            if (!state.published().containsKey(context.revision())) {
-                throw new SourceQueryException(SourceQueryException.Code.REVISION_NOT_PREPARED);
+        long deadline = deadline(properties.listTimeout());
+        try (SourceReadLocks.Lease lease = locks.acquire(new RepositoryId(descriptor.repositoryId()), deadline)) {
+            SourceRepositoryState state = state(descriptor.repositoryId());
+            if (request.revision().isPresent()) {
+                SourceContext context = new SourceContext(descriptor.repositoryId(), request.revision().orElseThrow());
+                if (!state.published().containsKey(context.revision())) {
+                    throw new SourceQueryException(SourceQueryException.Code.REVISION_NOT_PREPARED);
+                }
+                return ready(descriptor, admitLocked(context, lease, deadline));
             }
-            AdmittedSourceRevision admitted = admit(context);
-            return ready(descriptor, admitted);
+            if (state.current().isEmpty()) return new ContextResult(descriptor.repositoryId(), descriptor.defaultBranch(),
+                    status(state), SemanticStatus.NOT_READY, Optional.empty(), Optional.empty(), Optional.empty());
+            return ready(descriptor, admitLocked(new SourceContext(descriptor.repositoryId(),
+                    state.current().orElseThrow().revision()), lease, deadline));
         }
-        if (state.current().isEmpty()) return new ContextResult(descriptor.repositoryId(), descriptor.defaultBranch(),
-                status(state), SemanticStatus.NOT_READY, Optional.empty(), Optional.empty(), Optional.empty());
-        AdmittedSourceRevision admitted = admit(new SourceContext(descriptor.repositoryId(), state.current().orElseThrow().revision()));
-        return ready(descriptor, admitted);
     }
 
     private ContextResult ready(SourceRepositoryDescriptor descriptor, AdmittedSourceRevision admitted) {
@@ -104,6 +111,19 @@ public final class LocalSourceRevisionCatalog implements SourceRevisionCatalog {
         if (descriptors().stream().noneMatch(item -> item.repositoryId().equals(context.repositoryId()))) {
             throw new SourceQueryException(SourceQueryException.Code.REPOSITORY_NOT_FOUND);
         }
+        SourceReadLocks.Lease lease = locks.acquire(new RepositoryId(context.repositoryId()), deadline);
+        boolean transferred = false;
+        try {
+            AdmittedSourceRevision admitted = admitLocked(context, lease, deadline);
+            transferred = true;
+            return admitted;
+        } finally {
+            if (!transferred) lease.close();
+        }
+    }
+
+    /** The caller owns this lease, including for discovery-only validation. */
+    private AdmittedSourceRevision admitLocked(SourceContext context, SourceReadLocks.Lease lease, long deadline) {
         SourceRepositoryState state = state(context.repositoryId());
         PreparedRevision receipt = state.published().get(context.revision());
         if (Objects.isNull(receipt)) throw new SourceQueryException(state.published().isEmpty()
@@ -125,7 +145,7 @@ public final class LocalSourceRevisionCatalog implements SourceRevisionCatalog {
                 || !resolver.inventoryDigest(inventory, deadline).equals(manifest.inventoryDigest())) {
             throw new SourceQueryException(SourceQueryException.Code.SOURCE_UNAVAILABLE);
         }
-        return new AdmittedSourceRevision(context, manifest, receipt.manifestDigest(), tree, inventory);
+        return new AdmittedSourceRevision(context, manifest, receipt.manifestDigest(), tree, inventory, lease);
     }
 
     private List<SourceRepositoryDescriptor> descriptors() {

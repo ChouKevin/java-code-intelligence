@@ -4,6 +4,11 @@ import com.java.semantic.model.source.SourceContext;
 import com.java.semantic.model.source.SourceRevisionManifest;
 import java.nio.file.Path;
 
-/** Paths are private admission evidence, never part of a public result. */
+/** Owned admission guard; caller closes after the complete reader/process operation. Paths stay private. */
 public record AdmittedSourceRevision(SourceContext context, SourceRevisionManifest manifest,
-        String manifestDigest, Path tree, Path inventory) { }
+        String manifestDigest, Path tree, Path inventory, SourceReadLocks.Lease lease) implements AutoCloseable {
+    public AdmittedSourceRevision {
+        java.util.Objects.requireNonNull(lease, "owned read lease");
+    }
+    @Override public void close() { lease.close(); }
+}

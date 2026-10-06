@@ -36,7 +36,7 @@ Run Indexer and Query with **separate secret-store injections** of `SEMANTIC_IND
 
 Indexer config uses `semantic.source-admin-root` (`SEMANTIC_SOURCE_ADMIN_ROOT`, default `/data/source-admin`) and `semantic.source-published-root` (`SEMANTIC_SOURCE_PUBLISHED_ROOT`, default `/data/source-published`). For each approved ID configure `semantic.repositories.<id>.url`, `.default-branch`, `.display-name`, and optional `.project-guide-path` on **Indexer only**. Query config `semantic.query.source.published-root` (actual YAML environment placeholder `SEMANTIC_SOURCE_PUBLISHED_ROOT`), `rg-executable` (`SEMANTIC_QUERY_RG_EXECUTABLE`, default `/usr/bin/rg`) and explicit `allowed-repositories` list. Query also supports `read-content-bytes`, `search-timeout`, `read-timeout`, `list-timeout`, `max-active-searches`; shipped values are 65,536 bytes, 5s, 2s, 2s and 2. Empty allowlist denies all repositories, regardless of registered IDs. Remove old repository/package/class/method restriction settings, including structured list entries, only after explicitly approving a new repository/source scope; retained nonempty obsolete restrictions reject Query during context initialization, before the web server binds, even if the same repository is explicitly allowed under the new source policy. Query has no private Git URL/token.
 
-Indexer publishes a sanitized `repositories.json`; registration is **not** preparation. The private bare repository/jobs/staging live under `source-admin`; published `repositories.json`, `<id>/state.json`, and `<id>/revisions/<sha>/{manifest.json,inventory.jsonl,tree/}` live under `source-published`. The manifest and policy formats are version **1**. Query admits only an allowlisted ID and a revision in atomic state membership whose receipt/manifest digest and versions match. A directory on disk alone, including an orphan after interruption, grants no read. Staging and final revision directory are on the same filesystem: Indexer flushes the complete tree/metadata, atomically renames the revision, then atomically replaces state containing membership and current together. No copy fallback or in-place overwrite of an existing published SHA.
+Indexer publishes a sanitized `repositories.json`; registration is **not** preparation. The private bare repository/jobs/staging live under `source-admin`; published `repositories.json`, `<id>/state.json`, `<id>/read.lock`, and `<id>/revisions/<sha>/{manifest.json,inventory.jsonl,tree/}` live under `source-published`. Public manifest/state/result format remains **1**; source lifecycle policy is **2**, and private preparation jobs remain **2**. Query admits only an allowlisted ID and a revision in atomic state membership whose receipt/manifest digest and versions match. A directory on disk alone, including an orphan after interruption, grants no read. Staging and final revision directory are on the same filesystem: Indexer flushes the complete tree/metadata, atomically renames the revision, then atomically replaces state containing membership and current together. No copy fallback or in-place overwrite of an existing published SHA.
 
 ## Repository origin and storage identity
 
@@ -67,6 +67,79 @@ namespaces. For pre-release unbound source storage, preserve the old roots for a
 matching rollback, bootstrap new private/published roots, and explicitly prepare
 the required revisions again. Do not run an old Indexer against the new private
 job format or mix old unbound data into the new namespaces.
+
+## Revision retention and recovery
+
+Policy 2 requires **fresh private and published roots** and matching Indexer/Query
+releases. Explicitly prepare each required exact SHA; do not rewrite policy-1
+manifests, migrate old lifecycle metadata, or run an old Query on this namespace.
+Public formats/results remain 1 and preparation jobs remain 2; lifecycle JSON is
+private format 1 and is not an old-job compatibility decoder.
+
+When B replaces current A, A receives at least `30 × 24h` from that UTC publication
+instant, not from its commit/preparation date. Current is never reclaimed. Making
+A current again clears its old retirement time; its next replacement starts a
+fresh full window. Repeating the same current does not reset other retirements.
+Missing post-publication timestamps receive a fresh window at reconciliation;
+corrupt/missing initialized records fail closed rather than authorize deletion.
+
+Only Indexer deletes snapshots, on its existing idle dispatcher after startup
+recovery. Waiting preparation takes priority. Configure only:
+
+| Indexer property | Environment | Default |
+| --- | --- | --- |
+| `semantic.source-retention.enabled` | `SEMANTIC_SOURCE_RETENTION_ENABLED` | `true` |
+| `semantic.source-retention.interval` | `SEMANTIC_SOURCE_RETENTION_INTERVAL` | `24h` |
+
+Interval must be positive; the next scan is due after the preceding scan ends.
+Busy repositories are skipped without blocking readers; continuous preparation
+or readers can extend retention. There is no quota/free-space guarantee, missed
+daily scans are not replayed, and no additional GC service/API is provided.
+
+Indexer creates each stable `<id>/read.lock` before advertising the repository.
+Query opens it read-only and holds a shared OS guard from state admission through
+the final source bytes and ripgrep termination/reaping. Same-JVM readers share
+one channel until the last owner closes it. GC obtains a nonblocking exclusive
+guard, rechecks eligibility and atomically withdraws membership, then releases
+the guard **before** physical deletion. Missing/unsafe locks or unsupported
+locking fail closed. This deployment supports local POSIX filesystems, not NFS.
+Query retains the shared guard and search slot until all spawned processes and
+source-reading workers actually terminate, even when bounded cleanup returns an
+error. A termination request alone does not make the revision collectable.
+
+`source-admin/repositories/<id>/retention.json` records origin-bound retirements;
+`pending-delete.json` records at most one origin/digest-bound deletion intent.
+Recovery only follows a validated intent, never an unmarked orphan. A still-
+published intent is revalidated; a no-longer-eligible/current intent is cancelled.
+A withdrawn intent resumes the same managed path, including partial deletion.
+The pending intent fences same-SHA sealing/publication until durable cleanup.
+Do not manually clear an intent or re-advertise a partially deleted tree.
+An incomplete/corrupt initialized lock/retention pair or invalid pending metadata
+rejects **Indexer startup as a whole**, before repository advertisement. After a
+successful startup, a repository's GC metadata error stops that repository's
+collection rather than granting deletion authority. Existing independent Query
+reads do not depend on Indexer startup. Diagnose the original service-owned
+namespace; do not recreate a stable lock inode, clear markers, or automatically
+adopt incomplete/populated storage. Interrupted first bootstrap can require a
+new, explicitly provisioned namespace after ownership confirmation.
+
+Disabling GC stops new deletion and pending physical recovery. Withdrawn revisions
+stay withdrawn; re-enabling allows cleanup. A reclaimed context or continuation
+returns existing `REVISION_NOT_PREPARED` (HTTP 404/MCP error), never latest.
+Sessions/cursors do not extend retention between requests. After pending cleanup,
+explicitly prepare the same exact SHA if the approved remote still supplies it.
+
+Search private Indexer logs by `gcRunId` and `event=source_gc_*`: start/end,
+deleted, skip (`reason=READ_IN_PROGRESS`), failure and recovery. Failures carry
+`repositoryId`, optional `revision`, `stage`, stable `errorCode` and exception type,
+not raw messages/URLs/tokens/paths. Recovery retains the original intent's run ID.
+Deleted events report actual files and logical bytes deleted **in that attempt**,
+plus duration; bytes are not filesystem space freed or an invented pre-crash total.
+End summaries distinguish success/partial/failed and protected/busy/failure counts.
+Interrupted/disabled incomplete runs report `result=partial` with
+`stopReason=INTERRUPTED` or `DISABLED`, never complete success.
+Log delivery is not the durable recovery authority or an exactly-once guarantee.
+
 
 ## MCP session lifecycle
 
@@ -143,4 +216,4 @@ Query errors are safe and transport-equivalent: `INVALID_ARGUMENT` (400), `REPOS
 
 ## Release and recovery
 
-A fully published receipt plus state `current.publicationJobId` can reconcile a previously RUNNING job to `COMPLETE` on Indexer restart. Otherwise an interrupted RUNNING job becomes `WORKER_INTERRUPTED`: no automatic fetch, replay, orphan adoption or half-tree publication. Private durable terminal jobs are the status-publication outbox: a failed public preparation-state write is retried by the dispatcher and the latest per-repository terminal status is reconciled on restart, without replacing a newer preparation status. The latest private job is determined by an atomically reserved monotonic per-repository admission sequence and private request-linked job envelope, not wall-clock `acceptedAt`; a reservation without a committed job leaves a harmless gap, while missing/corrupt private ordering refuses recovery rather than guessing. This is a new private admin-root format: do not point this release at prior unwrapped private job records or expect a legacy decoder; use the new service-owned namespace, not an old data migration. Published source format and immutable revision receipts remain version 1. `get_job` by the original request ID is authoritative while public status has not converged; do not submit a new request to repair a stale public status. A failed or disk-full B leaves READY A readable; existing published revisions and their first-publication receipts remain, and Phase 1 has **no GC**. A completed B does not invalidate exact A context. Readership remains independent of Indexer/remote availability after publication.
+A fully published receipt plus state `current.publicationJobId` can reconcile a previously RUNNING job to `COMPLETE` on Indexer restart. Otherwise an interrupted RUNNING job becomes `WORKER_INTERRUPTED`: no automatic fetch, replay, orphan adoption or half-tree publication. Private durable terminal jobs are the status-publication outbox: a failed public preparation-state write is retried by the dispatcher and the latest per-repository terminal status is reconciled on restart, without replacing a newer preparation status. The latest private job is determined by an atomically reserved monotonic per-repository admission sequence and private request-linked job envelope, not wall-clock `acceptedAt`; a reservation without a committed job leaves a harmless gap, while missing/corrupt private ordering refuses recovery rather than guessing. This is a new private admin-root format: do not point this release at prior unwrapped private job records or expect a legacy decoder; use the new service-owned namespace, not an old data migration. Published source format and immutable revision receipts remain version 1. `get_job` by the original request ID is authoritative while public status has not converged; do not submit a new request to repair a stale public status. A failed or disk-full B leaves READY A readable. Successful B starts A's policy-2 retirement window; only eligible non-current revisions may later be withdrawn by GC. Readership remains independent of Indexer/remote availability while publication membership remains.

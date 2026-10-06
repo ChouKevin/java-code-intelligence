@@ -91,23 +91,28 @@ public final class RipgrepTextSearch {
             builder.environment().put("RIPGREP_CONFIG_PATH", "/dev/null");
             process = builder.start();
         } catch (IOException exception) { throw new SourceQueryException(Code.SOURCE_UNAVAILABLE, exception); }
+        SourceReadLocks.Lease.Consumer childOwner = admitted.lease().retain();
         AtomicBoolean stopping = new AtomicBoolean();
         try { process.getOutputStream().close(); }
         catch (IOException exception) {
-            cleanup(process, List.of(), stopping, operationDeadline);
+            cleanup(process, List.of(), stopping, operationDeadline, childOwner);
             throw new SourceQueryException(Code.SOURCE_UNAVAILABLE, exception);
         }
         List<TextMatch> matches = new ArrayList<>();
         AtomicReference<Throwable> failure = new AtomicReference<>();
         AtomicBoolean enough = new AtomicBoolean();
+        SourceReadLocks.Lease.Consumer stdoutOwner = admitted.lease().retain();
+        SourceReadLocks.Lease.Consumer stderrOwner = admitted.lease().retain();
         Thread stdout = Thread.ofVirtual().name("source-rg-stdout").start(() -> {
             try { readMatches(process.getInputStream(), process, stopping, admitted, request, directory, glob,
                     deadline, matches, enough, inventory); }
             catch (Throwable exception) { failure.compareAndSet(null, exception); }
+            finally { stdoutOwner.close(); }
         });
         Thread stderr = Thread.ofVirtual().name("source-rg-stderr").start(() -> {
             try { drain(process.getErrorStream(), process, stopping, deadline, STDERR_CAP); }
             catch (Throwable exception) { failure.compareAndSet(null, exception); }
+            finally { stderrOwner.close(); }
         });
         boolean truncated = false;
         int exit = -1;
@@ -133,11 +138,12 @@ public final class RipgrepTextSearch {
             Thread.currentThread().interrupt();
             throw new SourceQueryException(Code.SOURCE_TIMEOUT, exception);
         } finally {
-            cleanup(process, List.of(stdout, stderr), stopping, operationDeadline);
+            cleanup(process, List.of(stdout, stderr), stopping, operationDeadline, childOwner);
         }
     }
 
-    private static void cleanup(Process process, List<Thread> readers, AtomicBoolean stopping, long deadline) {
+    static void cleanup(Process process, List<Thread> readers, AtomicBoolean stopping, long deadline,
+            SourceReadLocks.Lease.Consumer childOwner) {
         boolean interrupted = Thread.interrupted();
         stopping.set(true);
         // Capture descendants before killing the parent: after reparenting they are no longer discoverable.
@@ -188,6 +194,12 @@ public final class RipgrepTextSearch {
             catch (IOException exception) { /* The child is already terminated or forcibly terminating. */ }
             try { process.getErrorStream().close(); }
             catch (IOException exception) { /* Close the other pipe independently. */ }
+            // Process completion callbacks, not kill requests, release surviving child ownership.
+            List<java.util.concurrent.CompletableFuture<?>> exits = new ArrayList<>();
+            exits.add(process.onExit());
+            for (ProcessHandle descendant : descendants) exits.add(descendant.onExit());
+            java.util.concurrent.CompletableFuture.allOf(exits.toArray(java.util.concurrent.CompletableFuture[]::new))
+                    .thenRun(childOwner::close);
             if (interrupted) Thread.currentThread().interrupt();
         }
         if (process.isAlive() || descendants.stream().anyMatch(ProcessHandle::isAlive)

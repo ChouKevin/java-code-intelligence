@@ -24,6 +24,10 @@ class RepositorySnapshotPaginationTest {
     @Test
     void atomic_registry_replacement_never_binds_old_descriptors_to_new_digest() throws Exception {
         Path published = Files.createDirectory(temp.resolve("published"));
+        for (String id : List.of("sample", "zeta")) {
+            Files.createDirectory(published.resolve(id));
+            Files.createFile(published.resolve(id).resolve("read.lock"));
+        }
         Path registry = published.resolve("repositories.json");
         Path replacement = published.resolve("replacement.json");
         JsonMapper writer = JsonMapper.builder().build();
@@ -50,7 +54,7 @@ class RepositorySnapshotPaginationTest {
                 return snapshot;
             }
         };
-        LocalSourceRevisionCatalog catalog = new LocalSourceRevisionCatalog(properties, mapper);
+        LocalSourceRevisionCatalog catalog = new LocalSourceRevisionCatalog(properties, mapper, new SourceReadLocks(published));
         RepositoryCollection first = catalog.listRepositories(new RepositoryRequest(Optional.empty(), 1, Optional.empty()));
         assertThat(first.items()).extracting(item -> item.displayName()).containsExactly("Sample A");
         assertThat(first.page().nextCursor()).isPresent();
