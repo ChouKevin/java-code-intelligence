@@ -243,6 +243,10 @@ for ((attempt=0; attempt<10; attempt++)); do
 done
 [ "${peer_ready}" = 1 ] || fail 'reader UID peer could not acquire shared lock on read-only mount'
 docker start "${indexer_container}" >/dev/null
+# An omitted host port is allocated at start; a restart can change the published binding.
+previous_indexer_url="${indexer_url}"
+indexer_url="http://$(docker port "${indexer_container}" 8080/tcp)"
+printf 'Source image restart binding: previous=%s current=%s\n' "${previous_indexer_url}" "${indexer_url}"
 wait_http "${indexer_url}/index/repositories/fixture/jobs?requestId=${request_b}" "${indexer_container}"
 busy=0
 for ((attempt=0; attempt<30; attempt++)); do
