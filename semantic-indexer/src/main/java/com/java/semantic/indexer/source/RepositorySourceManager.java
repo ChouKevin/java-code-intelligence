@@ -25,6 +25,7 @@ public final class RepositorySourceManager {
     private final SourcePublicationStore publications;
     private final RepositoryRegistry registry;
     private final Path stagingRoot;
+    private final SourceCapacityGuard capacity;
 
     public RepositorySourceManager(FileSourceJobStore jobs, RepositoryRevisionResolver resolver,
             JGitRevisionExporter exporter, SourcePublicationStore publications, RepositoryRegistry registry,
@@ -34,6 +35,7 @@ public final class RepositorySourceManager {
         this.exporter = exporter;
         this.publications = publications;
         this.registry = registry;
+        capacity = new SourceCapacityGuard(properties);
         stagingRoot = Path.of(properties.getSourceAdminRoot()).toAbsolutePath().normalize().resolve("staging");
     }
 
@@ -42,6 +44,7 @@ public final class RepositorySourceManager {
         IndexJobId id = new IndexJobId(claimed.jobId());
         registry.requireOrigin(repository, claimed.originFingerprint());
         try {
+            capacity.check();
             if (claimed.resolvedRevision().isEmpty() && claimed.requestedRevision().isEmpty()
                     && !registry.require(repository).getDefaultBranch().equals(claimed.defaultBranch())) {
                 throw new IllegalStateException("configured branch changed since acceptance");
@@ -53,6 +56,7 @@ public final class RepositorySourceManager {
             RepositoryRevision revision = claimed.resolvedRevision().map(RepositoryRevision::ofSha)
                     .or(() -> previouslyPublished).orElseGet(() -> resolver.resolve(repository, requested));
             SourcePreparationJob pinned = jobs.recordResolved(repository, id, revision);
+            capacity.check();
             SourceContext context = new SourceContext(repository.value(), revision.value());
             PreparedRevision existing = previous.published().get(revision.value());
             SourceRevisionManifest manifest;
@@ -65,6 +69,7 @@ public final class RepositorySourceManager {
                 Files.createDirectory(staging, java.nio.file.attribute.PosixFilePermissions.asFileAttribute(
                         java.nio.file.attribute.PosixFilePermissions.fromString("rwx------")));
                 manifest = exporter.export(repository, revision, staging);
+                capacity.check();
                 publications.seal(pinned, staging, manifest);
             }
             PreparedRevision receipt = publications.publish(pinned, manifest);
@@ -77,7 +82,9 @@ public final class RepositorySourceManager {
             }
             org.slf4j.LoggerFactory.getLogger(RepositorySourceManager.class)
                     .warn("Source preparation failed for repository {}", repository.value());
-            SourcePreparationJob failed = jobs.fail(repository, id, "PREPARATION_FAILED");
+            String failureCode = exception instanceof SourceCapacityGuard.CapacityException capacityFailure
+                    ? capacityFailure.failureCode() : "PREPARATION_FAILED";
+            SourcePreparationJob failed = jobs.fail(repository, id, failureCode);
             publications.updatePreparation(failed);
             return failed;
         }

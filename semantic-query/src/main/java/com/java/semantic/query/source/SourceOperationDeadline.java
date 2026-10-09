@@ -11,14 +11,20 @@ public final class SourceOperationDeadline {
     private SourceOperationDeadline() { }
 
     public static <T> T within(Duration maximum, Supplier<T> operation) {
+        return within(maximum, operation, () -> new SourceQueryException(SourceQueryException.Code.SOURCE_TIMEOUT));
+    }
+
+    public static <T> T within(Duration maximum, Supplier<T> operation,
+            Supplier<? extends RuntimeException> timeout) {
         Objects.requireNonNull(operation);
+        Objects.requireNonNull(timeout);
         Long previous = CURRENT.get();
         long deadline = System.nanoTime() + maximum.toNanos();
         long effective = Objects.isNull(previous) ? deadline : Math.min(previous, deadline);
         CURRENT.set(effective);
         try {
             T result = operation.get();
-            LocalSourceRevisionCatalog.check(effective);
+            if (Thread.currentThread().isInterrupted() || System.nanoTime() >= effective) throw timeout.get();
             return result;
         }
         finally {
@@ -27,7 +33,7 @@ public final class SourceOperationDeadline {
         }
     }
 
-    static long cap(long proposed) {
+    public static long cap(long proposed) {
         Long current = CURRENT.get();
         return Objects.isNull(current) ? proposed : Math.min(current, proposed);
     }

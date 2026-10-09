@@ -9,6 +9,8 @@ import com.java.semantic.model.source.SourceRepositoryState;
 import com.java.semantic.model.source.SourceRepositoryState.*;
 import com.java.semantic.model.source.SourceRevisionManifest;
 import com.java.semantic.query.config.SourceAccessProperties;
+import com.java.semantic.query.index.LocalIndexReader;
+import com.java.semantic.query.index.RepositoryIndexPort;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -31,6 +33,7 @@ final class SourceFilesystemFixture {
     final List<SourceInventoryEntry> entries = new ArrayList<>();
     final SourceAccessProperties properties;
     final SourceReadLocks locks;
+    final RepositoryIndexPort index;
     private final LocalSourceRevisionCatalog catalog;
 
     SourceFilesystemFixture(Path temp) throws IOException {
@@ -43,7 +46,8 @@ final class SourceFilesystemFixture {
                 Duration.ofSeconds(5), Duration.ofSeconds(2), Duration.ofSeconds(2), 2);
         Files.write(root.resolve("sample/read.lock"), new byte[0]);
         locks = new SourceReadLocks(root);
-        catalog = new LocalSourceRevisionCatalog(properties, mapper, locks);
+        index = new LocalIndexReader(temp.resolve("index-published"), mapper);
+        catalog = new LocalSourceRevisionCatalog(properties, mapper, locks, index);
     }
 
     void file(String path, String text) throws IOException {
@@ -85,7 +89,7 @@ final class SourceFilesystemFixture {
         Files.createDirectories(root.resolve("sample"));
         Files.write(root.resolve("sample/state.json"), mapper.writeValueAsBytes(state));
         Files.write(root.resolve("repositories.json"), mapper.writeValueAsBytes(List.of(
-                new SourceRepositoryDescriptor("sample", "Sample", "main", guide))));
+                new SourceRepositoryDescriptor("sample", "Sample", "main", guide, Optional.empty()))));
     }
 
     LocalRepositorySourceService service() { return new LocalRepositorySourceService(properties, mapper); }

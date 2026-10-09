@@ -1,5 +1,6 @@
 package com.java.semantic.indexer.source;
 
+import com.java.semantic.indexer.index.IndexGarbageCollector;
 import com.java.semantic.indexer.source.SourceRetentionStore.DeleteIntent;
 import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.model.source.PreparedRevision;
@@ -36,6 +37,7 @@ public final class SourceGarbageCollector {
     private final SourcePublicationStore publications;
     private final SourceRetentionStore retention;
     private final Clock clock;
+    private final IndexGarbageCollector indexes;
     private final Path published;
     private Instant nextRun = Instant.MIN;
     private boolean firstRun = true;
@@ -46,17 +48,22 @@ public final class SourceGarbageCollector {
     private record Deleted(long files, long bytes) {}
 
     public SourceGarbageCollector(RepositoryProperties properties, RepositoryRegistry registry,
-            SourcePublicationStore publications, SourceRetentionStore retention, Clock clock) {
+            SourcePublicationStore publications, SourceRetentionStore retention, Clock clock, IndexGarbageCollector indexes) {
         this.properties = properties;
         this.registry = registry;
         this.publications = publications;
         this.retention = retention;
         this.clock = clock;
+        this.indexes = indexes;
         published = Path.of(properties.getSourcePublishedRoot()).toAbsolutePath().normalize();
     }
 
+    public boolean isDue() {
+        return properties.getSourceRetention().isEnabled() && !clock.instant().isBefore(nextRun);
+    }
+
     public void runIfDue() {
-        if (!properties.getSourceRetention().isEnabled() || clock.instant().isBefore(nextRun)) return;
+        if (!isDue()) return;
         String run = UUID.randomUUID().toString();
         long started = System.nanoTime();
         Counts counts = new Counts();
@@ -132,7 +139,10 @@ public final class SourceGarbageCollector {
                     SourceRepositoryState latest = publications.state(id);
                     Map<String, Instant> retirement = retention.reconcile(id, latest, clock.instant());
                     if (latest.current().filter(current -> current.revision().equals(intent.revision())).isPresent()) {
-                        if (recovery) retention.cancelDeletion(intent);
+                        if (recovery) {
+                            indexes.cancelSource(intent);
+                            retention.cancelDeletion(intent);
+                        }
                         counts.skipped++;
                         recovered(intent, recovery, "cancelled_current");
                         return true;
@@ -142,7 +152,10 @@ public final class SourceGarbageCollector {
                         if (!receipt.manifestDigest().equals(intent.manifestDigest())) throw new IOException("deletion receipt changed");
                         Instant at = retirement.get(intent.revision());
                         if (Objects.isNull(at) || clock.instant().isBefore(at.plus(SourceRetentionStore.RETENTION))) {
-                            if (recovery) retention.cancelDeletion(intent);
+                            if (recovery) {
+                                indexes.cancelSource(intent);
+                                retention.cancelDeletion(intent);
+                            }
                             counts.young++;
                             recovered(intent, recovery, "cancelled_not_due");
                             return true;
@@ -152,9 +165,11 @@ public final class SourceGarbageCollector {
                         publications.manifest(receipt.context(), intent.manifestDigest());
                         stage = "intent";
                         retention.beginDeletion(intent);
+                        indexes.beginSource(intent);
                         stage = "withdrawal";
                         withdrawn = publications.withdraw(intent, clock.instant());
                         if (!withdrawn) {
+                            indexes.cancelSource(intent);
                             retention.cancelDeletion(intent);
                             counts.skipped++;
                             recovered(intent, recovery, "cancelled_not_due");
@@ -163,6 +178,7 @@ public final class SourceGarbageCollector {
                     } else {
                         if (!recovery || retention.pendingDeletion(id).filter(intent::equals).isEmpty())
                             throw new IOException("unmarked tree is not reclaimable");
+                        indexes.beginSource(intent);
                         withdrawn = true;
                     }
                 }
@@ -171,6 +187,8 @@ public final class SourceGarbageCollector {
             if (!withdrawn || stopped(counts)) return false;
             stage = "physical_delete";
             Deleted deleted = deleteTree(id, intent);
+            stage = "companion_index";
+            if (!indexes.finishSource(intent)) return false;
             stage = "finish";
             retention.finishDeletion(intent);
             counts.deleted++;
@@ -210,7 +228,7 @@ public final class SourceGarbageCollector {
             });
             Files.walkFileTree(tree, new SimpleFileVisitor<>() {
                 @Override public FileVisitResult visitFile(Path path, BasicFileAttributes attrs) throws IOException {
-                    if (Thread.currentThread().isInterrupted()) throw new IOException("collection interrupted");
+                    requirePhysicalCollection();
                     if (!attrs.isRegularFile()) throw new IOException("unsafe deletion entry");
                     long bytes = attrs.size();
                     Files.delete(path);
@@ -220,6 +238,7 @@ public final class SourceGarbageCollector {
                 @Override public FileVisitResult postVisitDirectory(Path path, IOException failure) throws IOException {
                     if (Objects.nonNull(failure)) throw failure;
                     DurableSourceFiles.forceDirectory(path);
+                    requirePhysicalCollection();
                     Files.delete(path);
                     DurableSourceFiles.forceDirectory(path.getParent());
                     return FileVisitResult.CONTINUE;
@@ -228,6 +247,11 @@ public final class SourceGarbageCollector {
         }
         DurableSourceFiles.forceDirectory(parent);
         return new Deleted(totals[0], totals[1]);
+    }
+
+    private void requirePhysicalCollection() throws IOException {
+        if (Thread.currentThread().isInterrupted() || !properties.getSourceRetention().isEnabled())
+            throw new IOException("physical collection disabled or interrupted");
     }
 
     private void requireDirectories(Path leaf) throws IOException {

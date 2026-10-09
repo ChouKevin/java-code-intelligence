@@ -12,12 +12,14 @@ RUN mvn --batch-mode --no-transfer-progress -pl semantic-indexer -am -Dmaven.tes
 FROM eclipse-temurin:21-jre
 RUN groupadd --gid 10001 source-writer \
     && useradd --uid 10001 --gid 10001 --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin source-writer \
-    && mkdir -p /data/source-admin /data/source-published \
-    && chown -R source-writer:source-writer /data \
-    && chmod 0700 /data /data/source-admin \
-    && chmod 0755 /data/source-published
+    && mkdir -p /data/source-admin /data/source-published /data/index-published /tmp/sqlite-native \
+    && chown -R source-writer:source-writer /data /tmp/sqlite-native \
+    && chmod 0700 /data /data/source-admin /tmp/sqlite-native \
+    && chmod 0755 /data/source-published /data/index-published
 WORKDIR /app
 COPY --from=build /workspace/semantic-indexer/target/semantic-indexer-0.0.1-SNAPSHOT.jar /app/semantic-indexer.jar
+# JNI extraction is process-private, never in either published namespace.
+ENV JAVA_TOOL_OPTIONS="-Dorg.sqlite.tmpdir=/tmp/sqlite-native"
 USER 10001:10001
 EXPOSE 8080
 ENTRYPOINT ["java", "-jar", "/app/semantic-indexer.jar"]

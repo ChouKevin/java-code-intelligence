@@ -2,6 +2,30 @@
 
 這是**外部** agent 在獨立、已核准 clone 上製作可選導覽的交接文字，不是 Source MCP 服務內的 prompt runtime，也不是來源資料的授權。操作者先核准閱讀範圍、clone、完整 SHA 及 repository-relative 輸出路徑；agent 不存取 Indexer 私有倉庫／published volume，不替服務執行 Git fetch、checkout、build、test 或導覽生成。開發者審閱導覽的來源、版本與敏感內容後，經目標 repo 正常 PR/commit 流程納入設定的 `semantic.repositories.<id>.project-guide-path`，再明示新 `prepare_source`。無 guide、普通 Markdown 或缺少 frontmatter 都不阻礙 source publication；`AVAILABLE/MISSING/INVALID/DISABLED` 是 metadata，`freshness: NOT_VERIFIED` 不代表內容正確或過期。
 
+只需要新增 repo 的簡短業務描述、關鍵詞與查詢入口時，先使用
+[describe-repository skill](../../skills/describe-repository/SKILL.md)。
+它產出本機待審閱草稿，不自動加入 MCP 目錄；下列流程則用於目標 repo 內的較完整導覽。
+
+## 短版業務 discovery metadata（與 guide 分開）
+
+只需要 repo 的短摘要與查詢關鍵詞時，用
+[describe-repository](../../skills/describe-repository/SKILL.md) 產生本機
+`DRAFT`。若要回答「程式如何實作業務規則／計算／條件／流程」，用
+[query-business-code](../../skills/query-business-code/SKILL.md)；不以 hint
+代替 source 查證。
+
+Metadata 發布有獨立的人工交接：人工明確核准**該摘要／關鍵詞的確切內容及
+analyzed revision** 後，還須另行授權操作者或 Agent 修改 Indexer 外部設定
+`semantic.repositories.<id>.navigation-hint`，明列 `review-status: APPROVED`，
+再明示啟動／重啟 Indexer。草稿、此 prompt 的 Markdown、`project-guide-path`
+都不會自動匯入 metadata；也不會自動註冊 repository、prepare/fetch source
+或發布。完整欄位驗證、撤除與游標失效規則見
+[Source MCP operations](source-mcp.md#optional-human-reviewed-business-discovery-hint)。
+
+本文件下方的 guide 仍是另一種 repo 內文件：經人工審閱後依目標 repo 正常
+PR/commit，再對該 commit 明示 `prepare_source`。它可以作為 `NOT_VERIFIED`
+navigation hint，但不會驗證其內容。
+
 ## 任務輸入（由操作者填寫，不是成品）
 
 ```text

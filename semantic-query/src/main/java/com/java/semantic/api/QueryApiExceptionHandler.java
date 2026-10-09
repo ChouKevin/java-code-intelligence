@@ -15,7 +15,7 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
-/** HTTP status mechanics over the same source failure body returned by MCP. */
+/** HTTP status mechanics over the same safe Query failure body returned by MCP. */
 @RestControllerAdvice
 public final class QueryApiExceptionHandler {
 
@@ -45,12 +45,15 @@ public final class QueryApiExceptionHandler {
     private static HttpStatus status(SemanticQueryError error) {
         return switch (error.code()) {
             case "INVALID_ARGUMENT" -> HttpStatus.BAD_REQUEST;
-            case "REPOSITORY_NOT_FOUND", "REVISION_NOT_PREPARED", "SOURCE_NOT_FOUND" -> HttpStatus.NOT_FOUND;
-            case "SOURCE_NOT_PREPARED" -> HttpStatus.CONFLICT;
+            case "REPOSITORY_NOT_FOUND", "REVISION_NOT_PREPARED", "SOURCE_NOT_FOUND",
+                    "INDEX_GENERATION_EXPIRED" -> HttpStatus.NOT_FOUND;
+            case "SOURCE_NOT_PREPARED", "SOURCE_SUMMARY_UNAVAILABLE", "INDEX_NOT_CURRENT",
+                    "INDEX_NOT_PREPARED", "INDEX_INCOMPATIBLE" -> HttpStatus.CONFLICT;
             case "SOURCE_UNSUPPORTED" -> HttpStatus.UNPROCESSABLE_CONTENT;
-            case "SOURCE_BUSY", "SOURCE_UNAVAILABLE" -> HttpStatus.SERVICE_UNAVAILABLE;
-            case "SOURCE_TIMEOUT" -> HttpStatus.GATEWAY_TIMEOUT;
-            default -> throw new IllegalArgumentException("unknown source error code");
+            case "SOURCE_RESULT_TOO_LARGE", "INDEX_RESULT_TOO_LARGE" -> HttpStatus.CONTENT_TOO_LARGE;
+            case "SOURCE_BUSY", "SOURCE_UNAVAILABLE", "INDEX_UNAVAILABLE", "INDEX_BUSY" -> HttpStatus.SERVICE_UNAVAILABLE;
+            case "SOURCE_TIMEOUT", "INDEX_TIMEOUT" -> HttpStatus.GATEWAY_TIMEOUT;
+            default -> throw new IllegalArgumentException("unknown query error code");
         };
     }
 }

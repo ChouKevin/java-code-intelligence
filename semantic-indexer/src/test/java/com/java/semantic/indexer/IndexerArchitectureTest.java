@@ -17,9 +17,7 @@ class IndexerArchitectureTest {
                 "com.java.semantic.monitoring..",
                 "org.springframework.data.mongodb..",
                 "com.mongodb..",
-                "org.bson..",
-                "org.eclipse.jdt..",
-                "org.eclipse.lsp4j..")
+                "org.bson..")
                 .check(new ClassFileImporter().importUrl(
                         SemanticIndexerApplication.class.getProtectionDomain().getCodeSource().getLocation()));
     }

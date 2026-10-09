@@ -2,20 +2,27 @@ package com.java.semantic.query.application;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.java.semantic.model.index.IndexContract;
 import com.java.semantic.model.source.SourceContext;
 import com.java.semantic.model.source.SourceReadContract.*;
+import com.java.semantic.query.index.LocalIndexReader;
 import com.java.semantic.query.source.AdmittedSourceRevision;
 import com.java.semantic.query.source.RepositorySourcePort;
 import com.java.semantic.query.source.SourceQueryException;
 import com.java.semantic.query.source.SourceRevisionCatalog;
+import java.nio.file.Path;
 import java.util.Optional;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Function;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+import tools.jackson.databind.json.JsonMapper;
 
 class SearchAdmissionTest {
+    @TempDir Path temp;
     @Test
     void searches_reserve_capacity_before_admission_and_release_it_after_failure_and_exit() throws Exception {
         SourceContext context = new SourceContext("sample", "0123456789abcdef0123456789abcdef01234567");
@@ -51,9 +58,11 @@ class SearchAdmissionTest {
             @Override public TextSearchResult searchText(AdmittedSourceRevision admitted, TextSearchRequest value) {
                 throw new AssertionError("admission must fail before search");
             }
-            @Override public SourceResult readSource(AdmittedSourceRevision admitted, ReadSourceRequest value) { throw new UnsupportedOperationException(); }
+            @Override public SourceResult readSource(AdmittedSourceRevision admitted, ReadSourceRequest value,
+                    Function<Optional<String>, IndexContract.FoldResult> folds) { throw new UnsupportedOperationException(); }
         };
-        SemanticQueryFacade facade = new SemanticQueryFacade(catalog, source, 2);
+        SemanticQueryFacade facade = new SemanticQueryFacade(catalog, source,
+                new LocalIndexReader(temp.resolve("index-published"), JsonMapper.builder().build()), 2);
         AtomicReference<SourceQueryException> firstError = new AtomicReference<>();
         AtomicReference<SourceQueryException> secondError = new AtomicReference<>();
         AtomicReference<SourceQueryException> fourthError = new AtomicReference<>();

@@ -1,6 +1,9 @@
 package com.java.semantic.query;
 
 import com.java.semantic.query.application.SemanticQueryFacade;
+import com.java.semantic.query.config.IndexAccessProperties;
+import com.java.semantic.query.index.LocalIndexReader;
+import com.java.semantic.query.index.RepositoryIndexPort;
 import com.java.semantic.query.config.SourceAccessProperties;
 import com.java.semantic.query.source.LocalRepositorySourceService;
 import com.java.semantic.query.source.LocalSourceRevisionCatalog;
@@ -19,7 +22,7 @@ import org.springframework.core.env.Environment;
 import tools.jackson.databind.ObjectMapper;
 
 @SpringBootApplication(scanBasePackages = {"com.java.semantic.query", "com.java.semantic.api", "com.java.semantic.mcp"})
-@EnableConfigurationProperties(SourceAccessProperties.class)
+@EnableConfigurationProperties({SourceAccessProperties.class, IndexAccessProperties.class})
 public class SemanticQueryApplication {
 
     public static void main(String[] args) {
@@ -27,8 +30,9 @@ public class SemanticQueryApplication {
     }
 
     @Bean
-    SourceRevisionCatalog sourceRevisionCatalog(SourceAccessProperties properties, ObjectMapper mapper, SourceReadLocks locks) {
-        return new LocalSourceRevisionCatalog(properties, mapper, locks);
+    SourceRevisionCatalog sourceRevisionCatalog(SourceAccessProperties properties, ObjectMapper mapper,
+            SourceReadLocks locks, RepositoryIndexPort index) {
+        return new LocalSourceRevisionCatalog(properties, mapper, locks, index);
     }
 
     @Bean
@@ -42,9 +46,14 @@ public class SemanticQueryApplication {
     }
 
     @Bean
+    RepositoryIndexPort repositoryIndexPort(SourceAccessProperties source, IndexAccessProperties index, ObjectMapper mapper) {
+        return new LocalIndexReader(index.resolveRoot(source), mapper);
+    }
+
+    @Bean
     SemanticQueryFacade semanticQueryFacade(SourceRevisionCatalog catalog, RepositorySourcePort source,
-            SourceAccessProperties properties) {
-        return new SemanticQueryFacade(catalog, source, properties.maxActiveSearches());
+            RepositoryIndexPort index, SourceAccessProperties properties) {
+        return new SemanticQueryFacade(catalog, source, index, properties.maxActiveSearches());
     }
 
     @Bean

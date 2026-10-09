@@ -33,6 +33,12 @@ public final class ConfiguredRepositoryPublisher {
     public void publish() {
         List<SourceRepositoryDescriptor> descriptors = registry.descriptors();
         try {
+            for (SourceRepositoryDescriptor descriptor : descriptors) {
+                if (descriptor.navigationHint().isPresent()
+                        && mapper.writeValueAsBytes(descriptor.navigationHint().orElseThrow()).length > 2048) {
+                    throw new IOException("repository navigation hint exceeds its size limit");
+                }
+            }
             byte[] bytes = mapper.writeValueAsBytes(descriptors);
             if (bytes.length > 1024 * 1024) throw new IOException("repository registry exceeds its size limit");
             registry.bindAll();

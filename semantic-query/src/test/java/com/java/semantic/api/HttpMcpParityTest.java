@@ -25,18 +25,17 @@ import org.junit.jupiter.api.io.TempDir;
 import org.springframework.http.converter.json.JacksonJsonHttpMessageConverter;
 import org.springframework.test.web.servlet.MockMvc;
 import tools.jackson.databind.JsonNode;
-import tools.jackson.databind.json.JsonMapper;
 
 class HttpMcpParityTest {
     @TempDir Path temp;
 
     @Test
-    void five_source_operations_and_safe_failure_categories_have_identical_http_and_mcp_results() throws Exception {
+    void source_and_index_operations_share_transport_results_and_safe_failure_categories() throws Exception {
         SourceFilesystemFixture fixture = new SourceFilesystemFixture(temp);
         fixture.directory("src");
         fixture.file("src/Order.java", "class Order { String name = \"訂單\"; }\n");
         fixture.publish(Optional.empty());
-        SemanticQueryFacade facade = new SemanticQueryFacade(fixture.catalog(), fixture.service(),
+        SemanticQueryFacade facade = new SemanticQueryFacade(fixture.catalog(), fixture.service(), fixture.index,
                 fixture.properties.maxActiveSearches());
         QuerySecurityProperties security = new QuerySecurityProperties();
         security.setApiToken("query-token");
@@ -46,7 +45,8 @@ class HttpMcpParityTest {
         List<McpServerFeatures.SyncToolSpecification> tools = new QueryMcpToolCatalogConfiguration()
                 .mcpQueryToolSpecifications(facade, fixture.mapper);
         assertThat(SemanticMcpToolCatalog.tools()).extracting(SemanticMcpToolCatalog.ToolDefinition::name)
-                .containsExactly("list_repositories", "get_context", "list_files", "search_text", "read_source");
+                .containsExactly("list_repositories", "get_context", "list_files", "search_text", "read_source",
+                        "search_code", "get_outline", "list_entry_points");
         Map<String, Object> context = Map.of("repositoryId", "sample", "revision", SourceFilesystemFixture.SHA);
         assertParity(http, tools, fixture.mapper, "list_repositories", "/api/v1/repositories", Map.of(), false, 200, null);
         assertParity(http, tools, fixture.mapper, "get_context", "/api/v1/context", Map.of("repositoryId", "sample"), false, 200, null);
@@ -55,6 +55,12 @@ class HttpMcpParityTest {
                 Map.of("context", context, "query", "Order"), false, 200, null);
         assertParity(http, tools, fixture.mapper, "read_source", "/api/v1/source",
                 Map.of("context", context, "path", "src/Order.java"), false, 200, null);
+        assertParity(http, tools, fixture.mapper, "search_code", "/api/v1/search-code",
+                Map.of("context", context, "query", "Order", "match", "prefix"), true, 409, "INDEX_NOT_PREPARED");
+        assertParity(http, tools, fixture.mapper, "get_outline", "/api/v1/outline",
+                Map.of("context", context, "path", "src/Order.java"), true, 409, "INDEX_NOT_PREPARED");
+        assertParity(http, tools, fixture.mapper, "list_entry_points", "/api/v1/entry-points",
+                Map.of("context", context), true, 409, "INDEX_NOT_PREPARED");
         assertParity(http, tools, fixture.mapper, "get_context", "/api/v1/context",
                 Map.of("repositoryId", "other"), true, 404, "REPOSITORY_NOT_FOUND");
         assertParity(http, tools, fixture.mapper, "get_context", "/api/v1/context",
@@ -64,8 +70,19 @@ class HttpMcpParityTest {
         assertParity(http, tools, fixture.mapper, "read_source", "/api/v1/source",
                 Map.of("context", Map.of("repositoryId", "sample", "revision", "main"), "path", "src/Order.java"),
                 true, 400, "INVALID_ARGUMENT");
+        assertParity(http, tools, fixture.mapper, "search_code", "/api/v1/search-code",
+                Map.of("context", context, "query", "Order", "match", "contains"), true, 400, "INVALID_ARGUMENT");
+        assertParity(http, tools, fixture.mapper, "search_code", "/api/v1/search-code",
+                Map.of("context", context, "query", "Order", "match", "regex"), true, 400, "INVALID_ARGUMENT");
+        assertParity(http, tools, fixture.mapper, "search_code", "/api/v1/search-code",
+                Map.of("context", context, "query", "Order", "match", "exact", "regex", true),
+                true, 400, "INVALID_ARGUMENT");
+        assertParity(http, tools, fixture.mapper, "search_code", "/api/v1/search-code",
+                Map.of("context", Map.of("repositoryId", "sample", "revision", "main"),
+                        "query", "Order", "match", "exact"), true, 400, "INVALID_ARGUMENT");
         assertThat(facade.getContext(new ContextRequest("sample", Optional.empty())).context()).contains(fixture.context);
     }
+
 
     private static void assertParity(MockMvc http, List<McpServerFeatures.SyncToolSpecification> tools,
             tools.jackson.databind.ObjectMapper mapper, String operation, String path, Map<String, Object> input,

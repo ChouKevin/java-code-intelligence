@@ -42,9 +42,7 @@ public class IndexerMcpToolCatalogConfiguration {
         return IndexerPreparationContract.OPERATIONS.stream().sorted().map(name -> {
             boolean lookup = name.equals("get_job");
             McpSchema.Tool tool = McpSchema.Tool.builder(name, IndexerPreparationSchemas.input(name))
-                    .description(lookup ? "Look up the original repository-scoped job by jobId XOR requestId."
-                            : "Persist a source preparation request before fetching Git objects; poll get_job by requestId.")
-                    .outputSchema(IndexerPreparationSchemas.output())
+                    .description(description(name)).outputSchema(IndexerPreparationSchemas.output(name))
                     .annotations(McpSchema.ToolAnnotations.builder().readOnlyHint(lookup).destructiveHint(false)
                             .idempotentHint(lookup).build()).build();
             return McpStatelessServerFeatures.SyncToolSpecification.builder().tool(tool)
@@ -52,12 +50,26 @@ public class IndexerMcpToolCatalogConfiguration {
         }).toList();
     }
 
+    private static String description(String operation) {
+        return switch (operation) {
+            case "prepare_source" -> "Privately submit durable source preparation. Omit revision to fetch the configured default-branch HEAD, pin its SHA and update current only upon successful publication. Provide an exact full SHA to prepare historical membership only: current remains unchanged, even if the SHA equals current. Neither mode automatically prepares a syntax index. Persist a new canonical requestId before calling; recover uncertain acceptance with get_job and that original ID, never resubmit. Source COMPLETE means published original source, not index readiness.";
+            case "prepare_semantic_index" -> "Privately build a syntax index and Java fold metadata only for the already-published exact current SHA, with a new saved canonical requestId after source COMPLETE. Non-current or absent-current requests fail INDEX_NOT_CURRENT; never substitute another SHA. Retained older indexes remain readable but cannot be rebuilt while historical. No Git fetch or current change occurs. Acceptance is not READY; recover uncertainty through get_job with the original ID. Source stays readable if indexing fails. Query never prepares implicitly; results are syntax evidence, not resolved runtime behavior.";
+            case "get_job" -> "Read one repository-scoped durable source or semantic preparation job. Supply exactly one of jobId or the original requestId; use the original requestId to recover uncertain acceptance, and never submit it again as a new job. Inspect phase and failureCode: acceptance is not READY, source and index readiness are independent, and semantic coverage may be partial. Semantic evidence remains syntax-only. This lookup does not prepare work or switch a revision.";
+            default -> throw new IllegalArgumentException("unknown preparation operation");
+        };
+    }
+
     private static McpSchema.CallToolResult invoke(String name, Map<String, Object> fields,
             IndexerPreparationFacade facade, ObjectMapper mapper) {
         Map<String, Object> result;
         boolean error = false;
         try {
-            result = name.equals("get_job") ? facade.getJob(fields) : facade.prepareSource(fields);
+            result = switch (name) {
+                case "get_job" -> facade.getJob(fields);
+                case "prepare_source" -> facade.prepareSource(fields);
+                case "prepare_semantic_index" -> facade.prepareSemanticIndex(fields);
+                default -> throw new IllegalArgumentException("unknown preparation operation");
+            };
         } catch (RuntimeException exception) {
             result = ERRORS.map(exception).body();
             error = true;

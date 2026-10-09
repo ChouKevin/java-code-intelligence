@@ -60,6 +60,9 @@ change app-security true true true semantic-indexer/src/main/java/com/java/seman
 change app-bootstrap true true true semantic-query/src/main/java/com/java/semantic/query/SemanticQueryApplication.java
 change origin-security true true true semantic-indexer/src/main/java/com/java/semantic/indexer/source/ApprovedOriginBinding.java
 change recovery-bootstrap true true true semantic-indexer/src/main/java/com/java/semantic/indexer/job/IndexJobStartupRecovery.java
+change sqlite-writer true true true semantic-indexer/src/main/java/com/java/semantic/indexer/index/SqliteIndexBuilder.java
+change sqlite-reader true true true semantic-query/src/main/java/com/java/semantic/query/index/LocalIndexReader.java
+change syntax-parser true true true semantic-indexer/src/main/java/com/java/semantic/indexer/index/JavaSyntaxExtractor.java
 change ordinary-tests true false false semantic-indexer/src/test/java/com/java/semantic/indexer/source/LocalSourceFixture.java
 change journey-test false true false semantic-indexer/src/test/java/com/java/semantic/indexer/uat/SourceMcpJourneyIT.java
 change journey-launcher false true false scripts/test-source-mcp.sh

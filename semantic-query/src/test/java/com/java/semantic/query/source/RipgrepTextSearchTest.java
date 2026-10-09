@@ -204,7 +204,7 @@ class RipgrepTextSearchTest {
         SourceAccessProperties access = new SourceAccessProperties(fixture.root, executable, List.of("sample"),
                 65_536, Duration.ofSeconds(5), Duration.ofSeconds(2), Duration.ofSeconds(2), 2);
         SemanticQueryFacade facade = new SemanticQueryFacade(fixture.catalog(),
-                new LocalRepositorySourceService(access, fixture.mapper), access.maxActiveSearches());
+                new LocalRepositorySourceService(access, fixture.mapper), fixture.index, access.maxActiveSearches());
         TextSearchRequest request = new TextSearchRequest(fixture.context, "needle", "", Optional.empty(), 20);
         AtomicReference<SourceQueryException> firstError = new AtomicReference<>();
         AtomicReference<SourceQueryException> secondError = new AtomicReference<>();

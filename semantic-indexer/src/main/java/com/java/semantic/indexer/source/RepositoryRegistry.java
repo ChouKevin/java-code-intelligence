@@ -1,6 +1,7 @@
 package com.java.semantic.indexer.source;
 
 import com.java.semantic.model.repository.RepositoryId;
+import com.java.semantic.model.source.RepositoryNavigationHint;
 import com.java.semantic.model.source.SourcePathPolicy;
 import com.java.semantic.model.source.SourceRepositoryDescriptor;
 import com.java.semantic.repository.config.RepositoryProperties;
@@ -20,6 +21,7 @@ public final class RepositoryRegistry {
     private final Map<String, String> origins;
     private final Map<String, String> endpoints;
     private final ApprovedOriginBinding binding;
+    private final List<SourceRepositoryDescriptor> descriptors;
 
     public RepositoryRegistry(RepositoryProperties properties) {
         configured = Map.copyOf(properties.getRepositories());
@@ -42,6 +44,7 @@ public final class RepositoryRegistry {
         }
         origins = Map.copyOf(approved);
         endpoints = Map.copyOf(approvedEndpoints);
+        descriptors = buildDescriptors();
     }
 
     public void bindAll() {
@@ -92,15 +95,32 @@ public final class RepositoryRegistry {
     }
 
     public List<SourceRepositoryDescriptor> descriptors() {
+        return descriptors;
+    }
+
+    private List<SourceRepositoryDescriptor> buildDescriptors() {
         List<SourceRepositoryDescriptor> results = new ArrayList<>();
         for (String id : configured.keySet()) {
             RepositoryProperties.RepositoryConfig config = configured.get(id);
             Optional<String> guide = Optional.of(config.getProjectGuidePath()).filter(path -> !path.isBlank())
                     .filter(path -> path.endsWith(".md") && safePath(path));
-            results.add(new SourceRepositoryDescriptor(id, config.getDisplayName(), config.getDefaultBranch(), guide));
+            results.add(new SourceRepositoryDescriptor(id, config.getDisplayName(), config.getDefaultBranch(), guide,
+                    navigationHint(config.getNavigationHint())));
         }
         results.sort(Comparator.comparing(SourceRepositoryDescriptor::repositoryId));
         return List.copyOf(results);
+    }
+
+    private static Optional<RepositoryNavigationHint> navigationHint(RepositoryProperties.NavigationHintConfig config) {
+        if (java.util.Objects.isNull(config)) return Optional.empty();
+        String status = config.getReviewStatus();
+        if ("DRAFT".equals(status)) return Optional.empty();
+        if (!"APPROVED".equals(status)) {
+            throw new IllegalArgumentException("navigation hint requires explicit DRAFT or APPROVED review status");
+        }
+        return Optional.of(new RepositoryNavigationHint(config.getSummary(), config.getKeywords(),
+                config.getAnalyzedRevision(), RepositoryNavigationHint.ReviewStatus.APPROVED,
+                RepositoryNavigationHint.Trust.NOT_VERIFIED));
     }
 
     private static boolean safePath(String path) {

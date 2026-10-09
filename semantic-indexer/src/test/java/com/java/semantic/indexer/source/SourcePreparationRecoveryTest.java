@@ -2,7 +2,6 @@ package com.java.semantic.indexer.source;
 
 import com.java.semantic.indexer.job.FileSourceJobStore;
 import com.java.semantic.indexer.job.IndexJobDispatcher;
-import com.java.semantic.indexer.job.IndexJobExecutor;
 import com.java.semantic.indexer.job.IndexJobId;
 import com.java.semantic.indexer.job.PreparationRequestId;
 import com.java.semantic.indexer.job.SourcePreparationJob;
@@ -50,7 +49,7 @@ class SourcePreparationRecoveryTest {
                 RepositoryRevisionResolver resolver = new RepositoryRevisionResolver(registry, properties);
                 RepositorySourceManager manager = new RepositorySourceManager(jobs, resolver,
                         new JGitRevisionExporter(resolver, registry, mapper), published, registry, properties);
-                IndexJobDispatcher dispatcher = new IndexJobDispatcher(jobs, new IndexJobExecutor(manager), published, SourceLifecycleFixture.collector(properties, mapper, published));
+                IndexJobDispatcher dispatcher = SourceLifecycleFixture.dispatcher(properties, mapper, writer, jobs, published, manager);
                 try {
                     assertThatThrownBy(dispatcher::dispatchOnce).isInstanceOf(IllegalStateException.class);
                     assertThat(jobs.find(fixture.repository, request).orElseThrow().phase())
@@ -101,7 +100,7 @@ class SourcePreparationRecoveryTest {
                 RepositoryRevisionResolver resolver = new RepositoryRevisionResolver(registry, properties);
                 RepositorySourceManager manager = new RepositorySourceManager(jobs, resolver,
                         new JGitRevisionExporter(resolver, registry, mapper), published, registry, properties);
-                IndexJobDispatcher dispatcher = new IndexJobDispatcher(jobs, new IndexJobExecutor(manager), published, SourceLifecycleFixture.collector(properties, mapper, published));
+                IndexJobDispatcher dispatcher = SourceLifecycleFixture.dispatcher(properties, mapper, writer, jobs, published, manager);
                 try {
                     assertThatThrownBy(dispatcher::dispatchOnce).isInstanceOf(IllegalStateException.class);
                 } finally {
@@ -397,7 +396,7 @@ class SourcePreparationRecoveryTest {
                 assertThat(reopenedJobs.find(fixture.repository, new PreparationRequestId(requestB)).orElseThrow().phase())
                         .isEqualTo(SourcePreparationJob.Phase.COMPLETE);
                 assertThat(recovered.state(fixture.repository).published().keySet()).contains(revisionA, revisionB);
-                assertThat(recovered.state(fixture.repository).current().orElseThrow().revision()).isEqualTo(revisionB);
+                assertThat(recovered.state(fixture.repository).current().orElseThrow().revision()).isEqualTo(revisionA);
                 RepositoryRegistry registry = new RepositoryRegistry(properties);
                 RepositoryRevisionResolver resolver = new RepositoryRevisionResolver(registry, properties);
                 RepositorySourceManager manager = new RepositorySourceManager(reopenedJobs, resolver,
@@ -408,8 +407,8 @@ class SourcePreparationRecoveryTest {
                 SourcePreparationJob republished = manager.execute(reopenedJobs.claimNext().orElseThrow());
                 republicationJobId = republished.jobId();
                 assertThat(republished.phase()).isEqualTo(SourcePreparationJob.Phase.COMPLETE);
-                assertThat(recovered.state(fixture.repository).current().orElseThrow().publicationJobId())
-                        .isEqualTo(republicationJobId);
+                assertThat(recovered.state(fixture.repository).current().orElseThrow().revision()).isEqualTo(revisionA);
+                assertThat(recovered.state(fixture.repository).preparation().jobId()).contains(republicationJobId);
                 assertThat(recovered.state(fixture.repository).published().get(revisionA)).isEqualTo(receiptA);
                 assertThat(republished.publication().orElseThrow()).isEqualTo(receiptA);
                 Path publicationA = fixture.published.resolve("orders/revisions").resolve(revisionA);

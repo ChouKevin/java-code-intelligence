@@ -2,6 +2,7 @@ package com.java.semantic.query.source;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.java.semantic.mcp.QueryMcpToolCatalogConfiguration;
 import jakarta.servlet.http.HttpServletResponse;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
@@ -28,7 +29,7 @@ final class McpWireTestClient {
     McpWireTestClient(WebMvcStreamableServerTransportProvider transport, JsonMapper mapper) throws Exception {
         this.transport = transport;
         this.mapper = mapper;
-        Response initialized = request(transport, "POST", mapper.writeValueAsString(java.util.Map.of(
+        Response initialized = request(transport, mapper, "POST", mapper.writeValueAsString(java.util.Map.of(
                 "jsonrpc", "2.0", "id", 1, "method", "initialize", "params", java.util.Map.of(
                         "protocolVersion", "2025-06-18", "capabilities", java.util.Map.of(),
                         "clientInfo", java.util.Map.of("name", "test-client", "version", "1")))), null);
@@ -41,10 +42,10 @@ final class McpWireTestClient {
 
     String session() { return session; }
 
-    Response request(String body) throws Exception { return request(transport, "POST", body, session); }
+    Response request(String body) throws Exception { return request(transport, mapper, "POST", body, session); }
     Response request(String body, Function<MockHttpServletResponse, HttpServletResponse> responseSurface)
             throws Exception {
-        return request(transport, "POST", body, session, responseSurface);
+        return request(transport, mapper, "POST", body, session, responseSurface);
     }
 
     JsonNode call(String body) throws Exception {
@@ -53,14 +54,14 @@ final class McpWireTestClient {
         return mapper.readTree(jsonBody(response.body()));
     }
 
-    void delete() throws Exception { assertThat(request(transport, "DELETE", "", session).status()).isEqualTo(200); }
+    void delete() throws Exception { assertThat(request(transport, mapper, "DELETE", "", session).status()).isEqualTo(200); }
 
-    static Response request(WebMvcStreamableServerTransportProvider transport, String method, String body,
+    static Response request(WebMvcStreamableServerTransportProvider transport, JsonMapper mapper, String method, String body,
             String session) throws Exception {
-        return request(transport, method, body, session, output -> output);
+        return request(transport, mapper, method, body, session, output -> output);
     }
 
-    private static Response request(WebMvcStreamableServerTransportProvider transport, String method, String body,
+    private static Response request(WebMvcStreamableServerTransportProvider transport, JsonMapper mapper, String method, String body,
             String session, Function<MockHttpServletResponse, HttpServletResponse> responseSurface) throws Exception {
         MockHttpServletRequest servlet = new MockHttpServletRequest(method, "/mcp");
         servlet.setAsyncSupported(true);
@@ -74,7 +75,9 @@ final class McpWireTestClient {
         List<HttpMessageConverter<?>> converters = List.of(new StringHttpMessageConverter(),
                 new JacksonJsonHttpMessageConverter());
         ServerRequest input = ServerRequest.create(servlet, converters);
-        ServerResponse response = transport.getRouterFunction().route(input).orElseThrow().handle(input);
+        ServerResponse response = new QueryMcpToolCatalogConfiguration()
+                .webMvcStreamableServerRouterFunction(transport, mapper)
+                .route(input).orElseThrow().handle(input);
         MockHttpServletResponse output = new MockHttpServletResponse();
         response.writeTo(servlet, responseSurface.apply(output), () -> converters);
         return new Response(output.getStatus(), output.getHeader("Mcp-Session-Id"),

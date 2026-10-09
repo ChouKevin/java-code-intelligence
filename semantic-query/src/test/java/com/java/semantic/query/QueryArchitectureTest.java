@@ -12,13 +12,13 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 class QueryArchitectureTest {
 
-    static final ArchRule query_does_not_depend_on_indexer_or_language_server = noClasses().should()
+    static final ArchRule query_does_not_depend_on_indexer_or_private_backends = noClasses().should()
             .dependOnClassesThat().resideInAnyPackage(
                     "com.java.semantic", "com.java.semantic.indexer..", "com.java.semantic.semantic..",
                     "com.java.semantic.syntax..",
                     "com.java.semantic.repository..", "com.java.semantic.callgraph..", "com.java.semantic.config..",
                     "com.java.semantic.diagnostic..",
-                    "org.eclipse.jgit..", "org.eclipse.lsp4j..", "org.eclipse.jdt..",
+                    "org.eclipse.jgit..",
                     "com.mongodb..", "org.bson..", "org.springframework.data.mongodb..",
                     "com.github.benmanes.caffeine..");
 
@@ -29,8 +29,8 @@ class QueryArchitectureTest {
 
 
     @Test
-    void query_does_not_depend_on_indexer_or_language_server() {
-        query_does_not_depend_on_indexer_or_language_server.check(queryProductionClasses());
+    void query_does_not_depend_on_indexer_or_private_backends() {
+        query_does_not_depend_on_indexer_or_private_backends.check(queryProductionClasses());
     }
 
     @Test
@@ -43,7 +43,7 @@ class QueryArchitectureTest {
         JavaClasses probe = new ClassFileImporter().importClasses(QueryArchitectureTest.class,
                 IndexerRootRuntimeStandIn.class);
 
-        assertThat(query_does_not_depend_on_indexer_or_language_server.evaluate(probe).hasViolation()).isTrue();
+        assertThat(query_does_not_depend_on_indexer_or_private_backends.evaluate(probe).hasViolation()).isTrue();
     }
 
     private static JavaClasses queryProductionClasses() {

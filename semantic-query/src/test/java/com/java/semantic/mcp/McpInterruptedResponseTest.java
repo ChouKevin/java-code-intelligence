@@ -44,7 +44,7 @@ class McpInterruptedResponseTest {
         SourceAccessProperties properties = new SourceAccessProperties(fixture.root, executable, List.of("sample"),
                 65_536, Duration.ofSeconds(5), Duration.ofSeconds(2), Duration.ofSeconds(2), 1);
         SemanticQueryFacade facade = new SemanticQueryFacade(fixture.catalog(),
-                new LocalRepositorySourceService(properties, fixture.mapper), 1);
+                new LocalRepositorySourceService(properties, fixture.mapper), fixture.index, 1);
         JsonMapper mapper = JsonMapper.builder().build();
         WebMvcStreamableServerTransportProvider transport = WebMvcStreamableServerTransportProvider.builder()
                 .jsonMapper(new JacksonMcpJsonMapper(mapper)).mcpEndpoint("/mcp").build();

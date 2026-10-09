@@ -20,7 +20,7 @@ class SourceContextContractTest {
     void unprepared_and_unknown_sha_never_trigger_source_preparation() throws Exception {
         SourceFilesystemFixture fixture = new SourceFilesystemFixture(temp);
         Files.write(fixture.root.resolve("repositories.json"), fixture.mapper.writeValueAsBytes(List.of(
-                new com.java.semantic.model.source.SourceRepositoryDescriptor("sample", "Sample", "main", Optional.empty()))));
+                new com.java.semantic.model.source.SourceRepositoryDescriptor("sample", "Sample", "main", Optional.empty(), Optional.empty()))));
         assertThat(fixture.catalog().getContext(new ContextRequest("sample", Optional.empty())).sourceStatus())
                 .isEqualTo(SourceStatus.NOT_PREPARED);
         assertThatThrownBy(() -> fixture.catalog().admit(fixture.context))
@@ -70,7 +70,7 @@ class SourceContextContractTest {
         fixture.publish(Optional.empty());
         SourceAccessProperties denyAll = new SourceAccessProperties(fixture.root, fixture.properties.rgExecutable(),
                 List.of(), 65_536, Duration.ofSeconds(5), Duration.ofSeconds(2), Duration.ofSeconds(2), 2);
-        LocalSourceRevisionCatalog hidden = new LocalSourceRevisionCatalog(denyAll, fixture.mapper, fixture.locks);
+        LocalSourceRevisionCatalog hidden = new LocalSourceRevisionCatalog(denyAll, fixture.mapper, fixture.locks, fixture.index);
         assertThat(hidden.listRepositories(new RepositoryRequest(Optional.empty(), 20, Optional.empty())).items()).isEmpty();
         assertThatThrownBy(() -> hidden.admit(fixture.context))
                 .isInstanceOfSatisfying(SourceQueryException.class, error -> assertThat(error.code())
@@ -91,13 +91,11 @@ class SourceContextContractTest {
         fixture.publish(Optional.empty());
         try (AdmittedSourceRevision admitted = fixture.admit()) {
             LocalRepositorySourceService service = fixture.service();
-            FileCollection first = service.listFiles(admitted, new FileListRequest(fixture.context, "", 1, Optional.empty()));
+            FileCollection first = service.listFiles(admitted, new FileListRequest(fixture.context, "", 1, 1, Optional.empty()));
             assertThat(first.items()).extracting(FileEntry::path).containsExactly("a.java");
-            FileCollection second = service.listFiles(admitted, new FileListRequest(fixture.context, "", 1,
-                    first.page().nextCursor()));
+            FileCollection second = service.listFiles(admitted, new FileListRequest(fixture.context, "", 1, 1, first.page().nextCursor()));
             assertThat(second.items()).extracting(FileEntry::path).containsExactly("a");
-            FileCollection third = service.listFiles(admitted, new FileListRequest(fixture.context, "", 1,
-                    second.page().nextCursor()));
+            FileCollection third = service.listFiles(admitted, new FileListRequest(fixture.context, "", 1, 1, second.page().nextCursor()));
             assertThat(third.items()).extracting(FileEntry::path).containsExactly("é.java");
             assertThat(third.page().hasMore()).isFalse();
         }

@@ -1,7 +1,7 @@
 package com.java.semantic.indexer.source;
 
+import com.java.semantic.indexer.index.IndexLifecycleFixture;
 import com.java.semantic.indexer.job.IndexJobDispatcher;
-import com.java.semantic.indexer.job.IndexJobExecutor;
 import com.java.semantic.indexer.job.PreparationRequestId;
 import com.java.semantic.model.repository.RepositoryRevision;
 import java.nio.channels.FileChannel;
@@ -76,14 +76,15 @@ class SourceGarbageCollectorTest {
             fixture.writeRetired(Map.of(a, now.minus(SourceRetentionStore.RETENTION)));
             fixture.service.prepareSource(fixture.git.repository, new PreparationRequestId(UUID.randomUUID().toString()),
                     Optional.of(RepositoryRevision.ofSha(a)));
-            IndexJobDispatcher dispatcher = new IndexJobDispatcher(fixture.jobs, new IndexJobExecutor(fixture.manager),
-                    fixture.publications, collector(fixture, new MutableClock(now)));
+            IndexLifecycleFixture indexes = new IndexLifecycleFixture(fixture.properties, fixture.mapper, fixture.owner,
+                    fixture.jobs, fixture.publications, new MutableClock(now));
+            IndexJobDispatcher dispatcher = indexes.dispatcher(fixture.manager, collector(fixture, new MutableClock(now)));
             try {
                 dispatcher.dispatchOnce();
-                assertThat(fixture.state().current().orElseThrow().revision()).isEqualTo(a);
+                assertThat(fixture.state().current().orElseThrow().revision()).isEqualTo(b);
                 assertThat(fixture.state().published()).containsKeys(a, b);
                 dispatcher.dispatchOnce();
-                assertThat(fixture.state().published()).containsKeys(a, b);
+                assertThat(fixture.state().published()).containsKey(b).doesNotContainKey(a);
             } finally { dispatcher.stop(); }
         }
     }
@@ -111,8 +112,10 @@ class SourceGarbageCollectorTest {
         }
     }
 
-    static SourceGarbageCollector collector(SourceRetentionPublicationTest.Lifecycle fixture, Clock clock) {
-        return new SourceGarbageCollector(fixture.properties, fixture.registry, fixture.publications, fixture.retention, clock);
+    static SourceGarbageCollector collector(SourceRetentionPublicationTest.Lifecycle fixture, Clock clock) throws java.io.IOException {
+        IndexLifecycleFixture indexes = new IndexLifecycleFixture(fixture.properties, fixture.mapper, fixture.owner,
+                fixture.jobs, fixture.publications, clock);
+        return new SourceGarbageCollector(fixture.properties, fixture.registry, fixture.publications, fixture.retention, clock, indexes.collector);
     }
     static final class MutableClock extends Clock {
         Instant now;

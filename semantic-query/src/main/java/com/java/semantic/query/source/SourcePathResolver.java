@@ -26,6 +26,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.function.Consumer;
+import tools.jackson.core.JacksonException;
 import tools.jackson.databind.ObjectMapper;
 
 /** Streams canonical inventory, and never follows filesystem links into source data. */
@@ -104,7 +105,7 @@ public final class SourcePathResolver {
             }
             if (frame.size() != 0 || !HexFormat.of().formatHex(digest.digest())
                     .equals(admitted.manifest().inventoryDigest())) throw new SourceQueryException(Code.SOURCE_UNAVAILABLE);
-        } catch (IOException | IllegalArgumentException | NoSuchAlgorithmException exception) {
+        } catch (IOException | IllegalArgumentException | NoSuchAlgorithmException | JacksonException exception) {
             throw new SourceQueryException(Code.SOURCE_UNAVAILABLE, exception);
         }
     }

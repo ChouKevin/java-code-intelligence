@@ -19,6 +19,10 @@
             <version>${project.version}</version>
         </dependency>
         <dependency>
+            <groupId>org.xerial</groupId>
+            <artifactId>sqlite-jdbc</artifactId>
+        </dependency>
+        <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-validation</artifactId>
         </dependency>
@@ -77,9 +81,8 @@
                                         <exclude>org.mongodb:*</exclude>
                                         <exclude>org.springframework.data:spring-data-mongodb</exclude>
                                         <exclude>org.springframework.boot:spring-boot-starter-data-mongodb</exclude>
-                                        <exclude>org.eclipse.jdt:*</exclude>
-                                        <exclude>org.eclipse.lsp4j:*</exclude>
                                         <exclude>org.eclipse.jgit:*</exclude>
+                                        <exclude>com.github.javaparser:*</exclude>
                                         <exclude>com.java.semantic:semantic-indexer</exclude>
                                         <exclude>org.springframework.ai:spring-ai-model</exclude>
                                         <exclude>org.springframework.ai:spring-ai-chat-model</exclude>

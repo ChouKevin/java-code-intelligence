@@ -25,7 +25,7 @@ class McpWireSerializationContractTest {
         fixture.file("Order.java", "class Order {}\n");
         fixture.publish(Optional.empty());
         JsonMapper mapper = JsonMapper.builder().build();
-        SemanticQueryFacade facade = new SemanticQueryFacade(fixture.catalog(), fixture.service(),
+        SemanticQueryFacade facade = new SemanticQueryFacade(fixture.catalog(), fixture.service(), fixture.index,
                 fixture.properties.maxActiveSearches());
         WebMvcStreamableServerTransportProvider transport = WebMvcStreamableServerTransportProvider.builder()
                 .jsonMapper(new JacksonMcpJsonMapper(mapper)).mcpEndpoint("/mcp").build();
@@ -45,7 +45,7 @@ class McpWireSerializationContractTest {
                     .isEqualTo(result.get("structuredContent"));
             tools.jackson.databind.JsonNode removed = client.call(mapper.writeValueAsString(Map.of(
                     "jsonrpc", "2.0", "id", 3, "method", "tools/call",
-                    "params", Map.of("name", "search_code", "arguments", Map.of()))));
+                    "params", Map.of("name", "resolve_runtime_calls", "arguments", Map.of()))));
             assertThat(removed.has("error") || removed.path("result").path("isError").asBoolean()).isTrue();
             assertThat(removed.toString()).doesNotContain("Order.java", "class Order");
         } finally {

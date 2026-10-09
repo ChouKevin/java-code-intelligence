@@ -24,6 +24,9 @@ spring:
 semantic:
   query:
     api-token: ${SEMANTIC_QUERY_API_TOKEN:}
+    index:
+      # Blank derives index-published beside the configured source published root.
+      published-root: ${SEMANTIC_INDEX_PUBLISHED_ROOT:}
     source:
       published-root: ${SEMANTIC_SOURCE_PUBLISHED_ROOT:/data/source-published}
       rg-executable: ${SEMANTIC_QUERY_RG_EXECUTABLE:/usr/bin/rg}

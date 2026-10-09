@@ -10,6 +10,7 @@ import java.io.IOException;
 import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.LinkOption;
 import java.time.Instant;
 import java.util.HashMap;
 import java.util.Iterator;
@@ -17,6 +18,7 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.function.Consumer;
 import org.springframework.stereotype.Component;
 import tools.jackson.databind.ObjectMapper;
 
@@ -108,6 +110,45 @@ public final class FileSourceJobStore {
             return Optional.empty();
         } catch (IOException exception) {
             throw unavailable(exception);
+        }
+    }
+
+    public synchronized boolean hasActive(RepositoryId repository) {
+        Path directory = jobsRoot.resolve(repository.value());
+        if (!Files.exists(directory, LinkOption.NOFOLLOW_LINKS)) return false;
+        try (DirectoryStream<Path> entries = Files.newDirectoryStream(directory, "*.json")) {
+            for (Path path : entries) {
+                SourcePreparationJob job = read(path);
+                requireStoredIdentity(repository, path, job);
+                if (job.phase() == SourcePreparationJob.Phase.ACCEPTED
+                        || job.phase() == SourcePreparationJob.Phase.RUNNING) return true;
+            }
+            return false;
+        } catch (IOException exception) {
+            throw unavailable(exception);
+        }
+    }
+
+    /** Startup coordination streams original intents without retaining historical records. */
+    public synchronized void visit(RepositoryId repository, Consumer<SourcePreparationJob> consumer) {
+        Path directory = jobsRoot.resolve(repository.value());
+        if (!Files.exists(directory, LinkOption.NOFOLLOW_LINKS)) return;
+        try (DirectoryStream<Path> entries = Files.newDirectoryStream(directory, "*.json")) {
+            for (Path path : entries) {
+                SourcePreparationJob job = read(path);
+                requireStoredIdentity(repository, path, job);
+                consumer.accept(job);
+            }
+        } catch (IOException exception) {
+            throw unavailable(exception);
+        }
+    }
+
+    private static void requireStoredIdentity(RepositoryId repository, Path path, SourcePreparationJob job) throws IOException {
+        if (!Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS)
+                || !job.repositoryId().equals(repository.value())
+                || !path.getFileName().toString().equals(job.requestId() + ".json")) {
+            throw new IOException("source job identity mismatch");
         }
     }
 

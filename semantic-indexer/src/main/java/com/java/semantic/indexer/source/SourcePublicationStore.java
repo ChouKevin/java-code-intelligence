@@ -196,17 +196,20 @@ public final class SourcePublicationStore {
                 manifestDigest, job.jobId(), manifest.preparedAt());
         Map<String, PreparedRevision> membership = new HashMap<>(previous.published());
         membership.put(manifest.context().revision(), receipt);
-        CurrentPublication current = new CurrentPublication(manifest.context().revision(), manifestDigest,
-                job.jobId(), Instant.now());
-        retention.beforePublication(repository, RepositoryRevision.ofSha(current.revision()));
-        replace(new SourceRepositoryState(SourceRevisionManifest.FORMAT_VERSION, repository.value(), Optional.of(current),
+        Instant publishedAt = Instant.now();
+        Optional<CurrentPublication> nextCurrent = job.requestedRevision().isEmpty()
+                ? Optional.of(new CurrentPublication(manifest.context().revision(), manifestDigest, job.jobId(), publishedAt))
+                : previous.current();
+        RepositoryRevision revision = RepositoryRevision.ofSha(manifest.context().revision());
+        retention.beforePublication(repository, revision);
+        replace(new SourceRepositoryState(SourceRevisionManifest.FORMAT_VERSION, repository.value(), nextCurrent,
                 membership, new PreparationStatus(PreparationPhase.COMPLETE, Optional.of(job.jobId()), Optional.empty())));
         try {
-            retention.afterPublication(repository, previous.current(), current);
+            retention.afterPublication(repository, previous.current(), nextCurrent, revision, publishedAt);
         } catch (RuntimeException exception) {
             // Publication already committed. A missing retirement entry earns a fresh window on reconciliation.
             LOG.error("event=source_retirement_record_failed repositoryId={} revision={} stage=post_publication errorCode=RETIREMENT_WRITE_FAILED exceptionType={}",
-                    repository.value(), current.revision(), exception.getClass().getSimpleName());
+                    repository.value(), revision.value(), exception.getClass().getSimpleName());
         }
         return receipt;
     }
@@ -218,13 +221,13 @@ public final class SourcePublicationStore {
         }
         try {
             SourceRepositoryState current = state(new RepositoryId(job.repositoryId()));
-            CurrentPublication pointer = current.current().orElseThrow();
-            if (!pointer.publicationJobId().equals(job.jobId())
-                    || !pointer.revision().equals(job.resolvedRevision().orElseThrow())) {
+            if (current.preparation().phase() != PreparationPhase.COMPLETE
+                    || current.preparation().jobId().filter(job.jobId()::equals).isEmpty()) {
                 return Optional.empty();
             }
-            PreparedRevision receipt = current.published().get(pointer.revision());
-            if (Objects.isNull(receipt) || !receipt.manifestDigest().equals(pointer.manifestDigest())) {
+            PreparedRevision receipt = current.published().get(job.resolvedRevision().orElseThrow());
+            if (Objects.isNull(receipt)
+                    || !receipt.context().equals(new SourceContext(job.repositoryId(), job.resolvedRevision().orElseThrow()))) {
                 return Optional.empty();
             }
             validateRevision(revisionPath(receipt.context()), receipt.context(), Optional.of(receipt.manifestDigest()));

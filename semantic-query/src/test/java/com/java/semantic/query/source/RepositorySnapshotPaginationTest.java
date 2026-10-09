@@ -7,6 +7,7 @@ import com.java.semantic.model.source.SourceReadContract.RepositoryCollection;
 import com.java.semantic.model.source.SourceReadContract.RepositoryRequest;
 import com.java.semantic.model.source.SourceRepositoryDescriptor;
 import com.java.semantic.query.config.SourceAccessProperties;
+import com.java.semantic.query.index.LocalIndexReader;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
@@ -32,11 +33,11 @@ class RepositorySnapshotPaginationTest {
         Path replacement = published.resolve("replacement.json");
         JsonMapper writer = JsonMapper.builder().build();
         Files.write(registry, writer.writeValueAsBytes(List.of(
-                new SourceRepositoryDescriptor("sample", "Sample A", "main", Optional.empty()),
-                new SourceRepositoryDescriptor("zeta", "Zeta A", "main", Optional.empty()))));
+                new SourceRepositoryDescriptor("sample", "Sample A", "main", Optional.empty(), Optional.empty()),
+                new SourceRepositoryDescriptor("zeta", "Zeta A", "main", Optional.empty(), Optional.empty()))));
         Files.write(replacement, writer.writeValueAsBytes(List.of(
-                new SourceRepositoryDescriptor("sample", "Sample B", "main", Optional.empty()),
-                new SourceRepositoryDescriptor("zeta", "Zeta B", "main", Optional.empty()))));
+                new SourceRepositoryDescriptor("sample", "Sample B", "main", Optional.empty(), Optional.empty()),
+                new SourceRepositoryDescriptor("zeta", "Zeta B", "main", Optional.empty(), Optional.empty()))));
         SourceAccessProperties properties = new SourceAccessProperties(published,
                 Path.of(System.getProperty("source.test.rg", "/usr/bin/rg")),
                 List.of("sample", "zeta"), 65_536, Duration.ofSeconds(5), Duration.ofSeconds(2),
@@ -54,7 +55,8 @@ class RepositorySnapshotPaginationTest {
                 return snapshot;
             }
         };
-        LocalSourceRevisionCatalog catalog = new LocalSourceRevisionCatalog(properties, mapper, new SourceReadLocks(published));
+        LocalSourceRevisionCatalog catalog = new LocalSourceRevisionCatalog(properties, mapper,
+                new SourceReadLocks(published), new LocalIndexReader(temp.resolve("index-published"), mapper));
         RepositoryCollection first = catalog.listRepositories(new RepositoryRequest(Optional.empty(), 1, Optional.empty()));
         assertThat(first.items()).extracting(item -> item.displayName()).containsExactly("Sample A");
         assertThat(first.page().nextCursor()).isPresent();

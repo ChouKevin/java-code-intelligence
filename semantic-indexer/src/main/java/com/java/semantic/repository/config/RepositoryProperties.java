@@ -1,7 +1,9 @@
 package com.java.semantic.repository.config;
 
+import java.nio.file.Path;
 import java.time.Duration;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import org.springframework.boot.context.properties.ConfigurationProperties;
@@ -11,15 +13,22 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 public class RepositoryProperties {
     private String sourceAdminRoot = "/data/source-admin";
     private String sourcePublishedRoot = "/data/source-published";
+    private String indexPublishedRoot = "";
     private String gitUsername = "";
     private String gitToken = "";
     private Map<String, RepositoryConfig> repositories = new LinkedHashMap<>();
     private final SourceRetentionConfig sourceRetention = new SourceRetentionConfig();
-
+    private final SourceCapacityConfig sourceCapacity = new SourceCapacityConfig();
     public String getSourceAdminRoot() { return sourceAdminRoot; }
     public void setSourceAdminRoot(String root) { sourceAdminRoot = Objects.requireNonNull(root); }
     public String getSourcePublishedRoot() { return sourcePublishedRoot; }
     public void setSourcePublishedRoot(String root) { sourcePublishedRoot = Objects.requireNonNull(root); }
+    public String getIndexPublishedRoot() {
+        return indexPublishedRoot.isBlank()
+                ? Path.of(sourcePublishedRoot).toAbsolutePath().normalize().getParent().resolve("index-published").toString()
+                : indexPublishedRoot;
+    }
+    public void setIndexPublishedRoot(String root) { indexPublishedRoot = Objects.requireNonNull(root); }
     public String getGitUsername() { return gitUsername; }
     public void setGitUsername(String name) { gitUsername = Objects.requireNonNull(name); }
     public String getGitToken() { return gitToken; }
@@ -30,9 +39,10 @@ public class RepositoryProperties {
     }
 
     public SourceRetentionConfig getSourceRetention() { return sourceRetention; }
+    public SourceCapacityConfig getSourceCapacity() { return sourceCapacity; }
 
     public static final class SourceRetentionConfig {
-        private boolean enabled = true;
+        private volatile boolean enabled = true;
         private Duration interval = Duration.ofHours(24);
         public boolean isEnabled() { return enabled; }
         public void setEnabled(boolean enabled) { this.enabled = enabled; }
@@ -41,6 +51,21 @@ public class RepositoryProperties {
             Objects.requireNonNull(interval, "retention interval");
             if (interval.isNegative() || interval.isZero()) throw new IllegalArgumentException("retention interval must be positive");
             this.interval = interval;
+        }
+    }
+    public static final class SourceCapacityConfig {
+        private long maxManagedBytes;
+        private long minFreeBytes;
+
+        public long getMaxManagedBytes() { return maxManagedBytes; }
+        public void setMaxManagedBytes(long maxManagedBytes) {
+            if (maxManagedBytes < 0) throw new IllegalArgumentException("maximum managed bytes must be nonnegative");
+            this.maxManagedBytes = maxManagedBytes;
+        }
+        public long getMinFreeBytes() { return minFreeBytes; }
+        public void setMinFreeBytes(long minFreeBytes) {
+            if (minFreeBytes < 0) throw new IllegalArgumentException("minimum free bytes must be nonnegative");
+            this.minFreeBytes = minFreeBytes;
         }
     }
 
@@ -54,6 +79,7 @@ public class RepositoryProperties {
         private String url = "";
         private String defaultBranch = "main";
         private String projectGuidePath = "";
+        private NavigationHintConfig navigationHint;
 
         public String getDisplayName() { return displayName; }
         public void setDisplayName(String name) { displayName = Objects.requireNonNull(name); }
@@ -63,5 +89,24 @@ public class RepositoryProperties {
         public void setDefaultBranch(String branch) { defaultBranch = Objects.requireNonNull(branch); }
         public String getProjectGuidePath() { return projectGuidePath; }
         public void setProjectGuidePath(String path) { projectGuidePath = Objects.requireNonNull(path); }
+        public NavigationHintConfig getNavigationHint() { return navigationHint; }
+        public void setNavigationHint(NavigationHintConfig hint) { navigationHint = hint; }
+    }
+
+    /** Nullable on RepositoryConfig so omitted settings remain distinct from an unreviewed hint. */
+    public static final class NavigationHintConfig {
+        private String reviewStatus;
+        private String summary;
+        private List<String> keywords;
+        private String analyzedRevision;
+
+        public String getReviewStatus() { return reviewStatus; }
+        public void setReviewStatus(String status) { reviewStatus = status; }
+        public String getSummary() { return summary; }
+        public void setSummary(String summary) { this.summary = summary; }
+        public List<String> getKeywords() { return keywords; }
+        public void setKeywords(List<String> keywords) { this.keywords = keywords; }
+        public String getAnalyzedRevision() { return analyzedRevision; }
+        public void setAnalyzedRevision(String revision) { analyzedRevision = revision; }
     }
 }

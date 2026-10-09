@@ -1,7 +1,15 @@
 openapi: 3.1.0
 info:
-  title: Private source preparation API
+  title: Private source and semantic-index preparation API
   version: 1.0.0
+  description: >-
+    Private Indexer control plane. A source request without revision explicitly refreshes
+    the configured default branch and advances current only after successful publication;
+    an exact SHA prepares membership only. New semantic-index jobs require the exact
+    published current SHA; historical indexes remain readable. Both operations accept
+    asynchronously and return durable jobs, not READY results. Persist a canonical
+    requestId before submission and recover uncertain acceptance through get_job with
+    the original ID.
 security:
   - adminToken: []
 components:
@@ -12,40 +20,236 @@ components:
       name: X-Api-Token
   schemas:
     Job:
+      oneOf:
+        - $ref: '#/components/schemas/SourceJob'
+        - $ref: '#/components/schemas/SemanticIndexJob'
+      discriminator:
+        propertyName: operation
+        mapping:
+          prepare_source: '#/components/schemas/SourceJob'
+          prepare_semantic_index: '#/components/schemas/SemanticIndexJob'
+      description: Repository-scoped source or semantic job, discriminated by operation.
+    SourceJob:
       type: object
-      required: [formatVersion, jobId, repositoryId, requestId, defaultBranch, phase, acceptedAt]
+      description: Source preparation result; operation identifies the application result, not private persisted format.
+      additionalProperties: false
+      required: [formatVersion, operation, jobId, repositoryId, requestId, defaultBranch, phase, acceptedAt]
       properties:
-        formatVersion: {type: integer, const: 1}
-        jobId: {type: string}
-        repositoryId: {type: string}
-        requestId: {type: string, format: uuid}
-        defaultBranch: {type: string}
-        requestedRevision: {type: string, pattern: '^[0-9a-f]{40}$'}
-        resolvedRevision: {type: string, pattern: '^[0-9a-f]{40}$'}
-        phase: {type: string, enum: [ACCEPTED, RUNNING, COMPLETE, FAILED]}
-        acceptedAt: {type: string, format: date-time}
-        expectedCurrent: {type: object}
-        publication: {type: object}
-        failureCode: {type: string}
+        formatVersion:
+          type: integer
+          const: 1
+          description: Public source-preparation result format.
+        operation:
+          type: string
+          const: prepare_source
+          description: Job operation discriminator.
+        jobId:
+          type: string
+          minLength: 1
+          description: Durable source job identity.
+        repositoryId:
+          type: string
+          pattern: '^[a-z0-9](?:[a-z0-9_-]{0,61}[a-z0-9])?$'
+          description: Configured repository identifier.
+        requestId:
+          type: string
+          format: uuid
+          pattern: '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+          description: Original canonical request UUID used for acceptance recovery.
+        defaultBranch:
+          type: string
+          minLength: 1
+          description: Configured branch used when revision was omitted.
+        requestedRevision:
+          type: string
+          pattern: '^[0-9a-f]{40}$'
+          description: Optional explicitly requested full lowercase commit SHA.
+        resolvedRevision:
+          type: string
+          pattern: '^[0-9a-f]{40}$'
+          description: Optional exact revision resolved by source preparation.
+        phase:
+          type: string
+          enum: [ACCEPTED, RUNNING, COMPLETE, FAILED]
+          description: Durable asynchronous source-job phase; acceptance is not publication readiness.
+        acceptedAt:
+          type: string
+          format: date-time
+          description: Durable acceptance time in ISO-8601 date-time form.
+        expectedCurrent:
+          $ref: '#/components/schemas/CurrentPublication'
+          description: Optional source-current snapshot used for publication safety.
+        publication:
+          $ref: '#/components/schemas/SourceReceipt'
+          description: Optional source receipt, present after successful completion.
+        failureCode:
+          type: string
+          pattern: '^[A-Z][A-Z0-9_]{0,63}$'
+          description: Optional safe terminal failure code; raw failure text is never returned.
+    SemanticIndexJob:
+      type: object
+      description: Semantic-index result; HTTP 202 is durable acceptance, never READY.
+      additionalProperties: false
+      required: [formatVersion, operation, jobId, repositoryId, requestId, revision, indexGeneration, phase, acceptedAt]
+      properties:
+        formatVersion:
+          type: integer
+          const: 1
+          description: Semantic-job result format version.
+        operation:
+          type: string
+          const: prepare_semantic_index
+          description: Job operation discriminator.
+        jobId:
+          type: string
+          minLength: 1
+          description: Durable semantic job identity.
+        repositoryId:
+          type: string
+          pattern: '^[a-z0-9](?:[a-z0-9_-]{0,61}[a-z0-9])?$'
+          description: Configured repository identifier.
+        requestId:
+          type: string
+          format: uuid
+          pattern: '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+          description: Original canonical request UUID used for acceptance recovery.
+        revision:
+          type: string
+          pattern: '^[0-9a-f]{40}$'
+          description: Exact already-published source commit being indexed; no branch resolution occurs.
+        indexGeneration:
+          type: string
+          format: uuid
+          pattern: '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+          description: New immutable generation assigned to this build.
+        phase:
+          type: string
+          enum: [ACCEPTED, RUNNING, COMPLETE, FAILED]
+          description: Durable asynchronous semantic-job phase; acceptance is not index readiness.
+        acceptedAt:
+          type: string
+          format: date-time
+          description: Durable acceptance time in ISO-8601 date-time form.
+        publication:
+          $ref: '#/components/schemas/IndexReceipt'
+          description: Optional immutable index receipt, present after successful completion.
+        failureCode:
+          type: string
+          pattern: '^[A-Z][A-Z0-9_]{0,63}$'
+          description: Optional safe terminal failure code; raw failure text is never returned.
+    CurrentPublication:
+      type: object
+      additionalProperties: false
+      required: [revision, manifestDigest, publicationJobId, publishedAt]
+      properties:
+        revision: {type: string, pattern: '^[0-9a-f]{40}$', description: Exact previously selected source revision.}
+        manifestDigest: {type: string, pattern: '^[0-9a-f]{64}$', description: Source manifest SHA-256 digest.}
+        publicationJobId: {type: string, minLength: 1, description: Source job that committed current publication.}
+        publishedAt: {type: string, format: date-time, description: Publication timestamp.}
+    SourceReceipt:
+      type: object
+      additionalProperties: false
+      required: [context, manifestDigest, firstPublishedJobId, preparedAt]
+      properties:
+        context: {$ref: '#/components/schemas/SourceContext', description: Exact repository and revision committed to source publication.}
+        manifestDigest: {type: string, pattern: '^[0-9a-f]{64}$', description: Source manifest SHA-256 digest.}
+        firstPublishedJobId: {type: string, minLength: 1, description: Source job that first published this revision.}
+        preparedAt: {type: string, format: date-time, description: Preparation completion timestamp.}
+    IndexReceipt:
+      type: object
+      additionalProperties: false
+      required: [manifest, manifestDigest, jobId, requestId]
+      properties:
+        manifest: {$ref: '#/components/schemas/IndexManifest', description: Immutable index-manifest provenance.}
+        manifestDigest: {type: string, pattern: '^[0-9a-f]{64}$', description: Index manifest SHA-256 digest.}
+        jobId: {type: string, format: uuid, description: Semantic job identity recorded in the receipt.}
+        requestId: {type: string, format: uuid, description: Original request identity recorded in the receipt.}
+    IndexManifest:
+      type: object
+      additionalProperties: false
+      required: [formatVersion, context, originFingerprint, indexGeneration, sourceManifestDigest, inventoryDigest, profile, coverage, databaseBytes, databaseDigest, preparedAt]
+      properties:
+        formatVersion: {type: integer, minimum: 1, description: Index manifest format version.}
+        context: {$ref: '#/components/schemas/SourceContext', description: Exact source repository and revision indexed.}
+        originFingerprint: {type: string, pattern: '^[0-9a-f]{64}$', description: One-way approved-origin fingerprint, not a Git URL or credential.}
+        indexGeneration: {type: string, format: uuid, description: Immutable published index generation.}
+        sourceManifestDigest: {type: string, pattern: '^[0-9a-f]{64}$', description: Digest of the exact published source manifest.}
+        inventoryDigest: {type: string, pattern: '^[0-9a-f]{64}$', description: Digest of the authorized source inventory.}
+        profile: {$ref: '#/components/schemas/IndexProfile', description: Parser and schema profile used to build this generation.}
+        coverage: {$ref: '#/components/schemas/IndexCoverage', description: Java syntax-index coverage.}
+        databaseBytes: {type: integer, minimum: 1, maximum: 67108864, description: Sealed SQLite database size in bytes; maximum 67,108,864.}
+        databaseDigest: {type: string, pattern: '^[0-9a-f]{64}$', description: SHA-256 digest of the sealed database artifact.}
+        preparedAt: {type: string, format: date-time, description: Index build publication timestamp.}
+    IndexProfile:
+      type: object
+      additionalProperties: false
+      required: [schemaVersion, policyVersion, engine, version, languageLevel, unicodeEscapes, tabSize]
+      properties:
+        schemaVersion: {type: integer, enum: [1, 2], description: Known reader profiles use schema 1 or 2; only paired 1/1 and 2/2 profiles are supported.}
+        policyVersion: {type: integer, enum: [1, 2], description: Known reader profiles use policy 1 or 2; only paired 1/1 and 2/2 profiles are supported.}
+        engine: {type: string, minLength: 1, description: Parser engine name.}
+        version: {type: string, minLength: 1, description: Parser engine version.}
+        languageLevel: {type: string, minLength: 1, description: Configured Java language level.}
+        unicodeEscapes: {type: boolean, description: Whether Java Unicode escapes are interpreted.}
+        tabSize: {type: integer, minimum: 1, description: Parser tab width in columns.}
+    IndexCoverage:
+      type: object
+      additionalProperties: false
+      required: [javaFiles, parsedFiles, failedFiles, unsupportedFiles, tooLargeFiles, declarations, complete]
+      properties:
+        javaFiles: {type: integer, minimum: 0, description: Case-sensitive .java inventory files.}
+        parsedFiles: {type: integer, minimum: 0, description: Java files parsed successfully.}
+        failedFiles: {type: integer, minimum: 0, description: Java files whose syntax parse failed.}
+        unsupportedFiles: {type: integer, minimum: 0, description: Java files unsupported by this parser profile.}
+        tooLargeFiles: {type: integer, minimum: 0, description: Java files over 1,048,576 bytes.}
+        declarations: {type: integer, minimum: 0, maximum: 200000, description: Indexed declarations; maximum 200,000 per generation.}
+        complete: {type: boolean, description: True exactly when every Java inventory file was parsed.}
+    SourceContext:
+      type: object
+      additionalProperties: false
+      required: [repositoryId, revision]
+      properties:
+        repositoryId: {type: string, minLength: 1, description: Exact configured repository identifier.}
+        revision: {type: string, pattern: '^[0-9a-f]{40}$', description: Exact full lowercase Git commit SHA.}
     Failure:
       type: object
+      additionalProperties: false
       required: [code, message, retryable]
       properties:
-        code: {type: string}
-        message: {type: string}
-        retryable: {type: boolean}
-        jobId: {type: string}
-        requestId: {type: string, format: uuid}
+        code:
+          type: string
+          enum: [INVALID_ARGUMENT, REQUEST_ID_REUSED, REQUEST_NOT_FOUND, JOB_NOT_FOUND, REPOSITORY_NOT_FOUND, REPOSITORY_ACTIVE, SOURCE_UNAVAILABLE, SOURCE_NOT_PREPARED, INDEX_NOT_PREPARED, INDEX_NOT_CURRENT, INDEX_UNAVAILABLE, INDEX_INCOMPATIBLE, INDEX_GENERATION_EXPIRED, INDEX_RESULT_TOO_LARGE, INDEX_BUSY, INDEX_TIMEOUT]
+          description: Stable safe error code; INDEX_NOT_CURRENT is a current-only new-index admission conflict.
+        message:
+          type: string
+          description: Fixed safe recovery advice; raw exceptions, credentials and filesystem paths are not returned.
+        retryable:
+          type: boolean
+          description: Whether this transport error is marked as potentially retryable.
+        jobId:
+          type: string
+          description: Optional existing job identity relevant to request-ID reuse recovery.
+        requestId:
+          type: string
+          format: uuid
+          description: Optional original request identity relevant to acceptance recovery.
 paths:
   /index/repositories/{repositoryId}/source:
     parameters:
       - name: repositoryId
         in: path
         required: true
-        schema: {type: string}
+        description: Configured repository identifier; not accepted in the body.
+        schema: {type: string, pattern: '^[a-z0-9](?:[a-z0-9_-]{0,61}[a-z0-9])?$'}
     post:
       operationId: prepare_source
-      description: Persist acceptance before returning 202. Lost response requires lookup by the original requestId, not resubmission.
+      description: >-
+        Persist a new source-preparation intent before returning 202. Omitting revision fetches the
+        configured default branch, pins its HEAD SHA and advances current only after successful
+        publication. Supplying an exact SHA adds/reuses readable source membership only and never
+        changes current, even when that SHA equals current. Acceptance does not guarantee capacity
+        or publication. Persist the original canonical requestId and recover a lost or uncertain
+        result through get_job with that same ID; never resubmit it as new work.
       requestBody:
         required: true
         content:
@@ -55,35 +259,99 @@ paths:
               additionalProperties: false
               required: [requestId]
               properties:
-                requestId: {type: string, format: uuid}
-                revision: {type: string, pattern: '^[0-9a-f]{40}$'}
+                requestId: {type: string, format: uuid, pattern: '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$', description: Canonical UUID for this durable intent; persist before calling.}
+                revision: {type: string, pattern: '^[0-9a-f]{40}$', description: Optional exact full lowercase commit SHA; omission requests the configured default-branch refresh, while a supplied SHA is membership-only and never promotes current.}
       responses:
         '202':
-          description: Durable acceptance
+          description: Durable acceptance; inspect phase before treating source as READY.
           content:
             application/json:
-              schema: {$ref: '#/components/schemas/Job'}
+              schema: {$ref: '#/components/schemas/SourceJob'}
         '400':
-          description: Invalid JSON envelope or preparation argument
+          description: Invalid JSON envelope or preparation argument.
           content:
             application/json:
               schema: {$ref: '#/components/schemas/Failure'}
-        '401':
-          description: Admin token missing or invalid
-        '403':
-          description: Index administration disabled
+        '401': {description: Admin token missing or invalid.}
+        '403': {description: Index administration disabled.}
         '409':
-          description: Request identity reused or repository active
+          description: Request identity reused or repository already has active work.
           content:
             application/json:
               schema: {$ref: '#/components/schemas/Failure'}
         '404':
-          description: Repository not configured
+          description: Configured repository not found.
           content:
             application/json:
               schema: {$ref: '#/components/schemas/Failure'}
         '503':
-          description: Source preparation unavailable
+          description: Source preparation unavailable.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Failure'}
+  /index/repositories/{repositoryId}/semantic-index:
+    parameters:
+      - name: repositoryId
+        in: path
+        required: true
+        description: Configured repository identifier; not accepted in the body.
+        schema: {type: string, pattern: '^[a-z0-9](?:[a-z0-9_-]{0,61}[a-z0-9])?$'}
+    post:
+      operationId: prepare_semantic_index
+      description: >-
+        Persist a semantic-index intent only for the exact already-published current source revision.
+        A non-current or absent-current SHA fails INDEX_NOT_CURRENT (HTTP 409); historical indexes
+        already published remain readable, but no new historical index/rebuild is admitted. This
+        never fetches Git, follows a branch, changes source current, or makes the index READY
+        synchronously. HTTP 202 is durable job acceptance only. Persist a new canonical requestId
+        before submission; on uncertain acceptance, call get_job with the original ID rather than
+        resubmitting.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [requestId, revision]
+              properties:
+                requestId: {type: string, format: uuid, pattern: '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$', description: New canonical UUID for this durable index-build intent; persist before calling.}
+                revision: {type: string, pattern: '^[0-9a-f]{40}$', description: Required full lowercase SHA of already-published current source; non-current or absent-current revisions fail INDEX_NOT_CURRENT; branch names and short SHAs are invalid.}
+      responses:
+        '202':
+          description: Durable semantic-index acceptance; this is not index readiness.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/SemanticIndexJob'}
+        '400':
+          description: Invalid JSON envelope, request ID or exact revision.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Failure'}
+        '401': {description: Admin token missing or invalid.}
+        '403': {description: Index administration disabled.}
+        '404':
+          description: Repository or exact published source revision not found.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Failure'}
+        '409':
+          description: Request identity reused, repository already has active work, or the exact revision is not current (INDEX_NOT_CURRENT).
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Failure'}
+        '413':
+          description: Required index result or metadata exceeds its fixed limit.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Failure'}
+        '503':
+          description: Index preparation unavailable or shared repository capacity is busy.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Failure'}
+        '504':
+          description: Bounded index operation timed out.
           content:
             application/json:
               schema: {$ref: '#/components/schemas/Failure'}
@@ -92,39 +360,45 @@ paths:
       - name: repositoryId
         in: path
         required: true
-        schema: {type: string}
+        description: Repository scope for the durable job lookup.
+        schema: {type: string, pattern: '^[a-z0-9](?:[a-z0-9_-]{0,61}[a-z0-9])?$'}
     get:
       operationId: get_job
-      description: Exactly one of jobId and original requestId is required.
+      description: >-
+        Read a source or semantic job for this repository. Supply exactly one of jobId and original
+        requestId. Use requestId to recover uncertain acceptance; never resubmit the original request
+        as a new job. Inspect the operation discriminator and phase; acceptance is not READY.
       parameters:
         - name: jobId
           in: query
-          schema: {type: string}
+          required: false
+          description: Repository-scoped durable job identity; mutually exclusive with requestId.
+          schema: {type: string, minLength: 1}
         - name: requestId
           in: query
-          schema: {type: string, format: uuid}
+          required: false
+          description: Original canonical request UUID for acceptance recovery; mutually exclusive with jobId.
+          schema: {type: string, format: uuid, pattern: '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'}
       responses:
         '200':
-          description: Repository-scoped durable job
+          description: Repository-scoped source or semantic durable job.
           content:
             application/json:
               schema: {$ref: '#/components/schemas/Job'}
         '400':
-          description: Invalid or ambiguous job selector
+          description: Invalid or ambiguous job selector.
           content:
             application/json:
               schema: {$ref: '#/components/schemas/Failure'}
-        '401':
-          description: Admin token missing or invalid
-        '403':
-          description: Index administration disabled
+        '401': {description: Admin token missing or invalid.}
+        '403': {description: Index administration disabled.}
         '404':
-          description: Unknown original request or job
+          description: Original request or job not found in this repository.
           content:
             application/json:
               schema: {$ref: '#/components/schemas/Failure'}
         '503':
-          description: Source preparation unavailable
+          description: Job metadata unavailable.
           content:
             application/json:
               schema: {$ref: '#/components/schemas/Failure'}

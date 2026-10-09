@@ -3,6 +3,8 @@ package com.java.semantic.api;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.java.semantic.model.source.SourceReadContract.RepositoryCollection;
+import com.java.semantic.model.source.SourceReadContract.SourceStatus;
 import com.java.semantic.model.source.SourceReadContract.RepositoryRequest;
 import com.java.semantic.model.source.SourceRepositoryDescriptor;
 import com.java.semantic.query.SemanticQueryApplication;
@@ -22,9 +24,39 @@ import org.springframework.boot.builder.SpringApplicationBuilder;
 import org.springframework.boot.web.server.context.WebServerInitializedEvent;
 import org.springframework.context.ApplicationListener;
 import org.springframework.context.ConfigurableApplicationContext;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 
 class SourceAuthorizationStartupTest {
     @TempDir Path temp;
+
+    @Test
+    void old_registry_without_navigation_hint_reads_with_the_actual_application_mapper() throws Exception {
+        Path published = Files.createDirectory(temp.resolve("published"));
+        Files.createDirectory(published.resolve("sample"));
+        Files.createFile(published.resolve("sample/read.lock"));
+        String registry = """
+                [{"repositoryId":"sample","displayName":"Legacy","defaultBranch":"main","projectGuidePath":null}]
+                """;
+        Files.writeString(published.resolve("repositories.json"), registry);
+        String[] properties = {"semantic.query.source.published-root=" + published,
+                "semantic.query.source.rg-executable=" + System.getProperty("source.test.rg", "/usr/bin/rg"),
+                "semantic.query.source.allowed-repositories[0]=sample", "spring.ai.mcp.server.enabled=false"};
+        try (ConfigurableApplicationContext context = boot(properties)) {
+            ObjectMapper mapper = context.getBean(ObjectMapper.class);
+            SourceRepositoryDescriptor descriptor = mapper.readValue(mapper.readTree(registry).get(0).toString(),
+                    SourceRepositoryDescriptor.class);
+            assertThat(descriptor.navigationHint()).isEmpty();
+            RepositoryCollection result = context.getBean(SourceRevisionCatalog.class)
+                    .listRepositories(new RepositoryRequest(Optional.empty(), 20, Optional.empty()));
+            assertThat(result.items()).hasSize(1);
+            assertThat(result.items().getFirst().navigationHint()).isEmpty();
+            assertThat(result.items().getFirst().sourceStatus())
+                    .isEqualTo(SourceStatus.NOT_PREPARED);
+            JsonNode item = mapper.readTree(mapper.writeValueAsBytes(result)).get("items").get(0);
+            assertThat(!item.has("navigationHint") || item.get("navigationHint").isNull()).isTrue();
+        }
+    }
 
     @Test
     void legacy_restrictions_fail_at_real_startup_and_empty_source_allowlist_denies_discovery() throws Exception {
@@ -34,7 +66,7 @@ class SourceAuthorizationStartupTest {
                 "spring.ai.mcp.server.enabled=false"};
         Files.writeString(published.resolve("repositories.json"),
                 tools.jackson.databind.json.JsonMapper.builder().build().writeValueAsString(List.of(
-                        new SourceRepositoryDescriptor("private", "Private", "main", Optional.empty()))));
+                        new SourceRepositoryDescriptor("private", "Private", "main", Optional.empty(), Optional.empty()))));
         for (String old : new String[] {"forbidden-packages", "forbidden-classes", "forbidden-methods"}) {
             assertThatThrownBy(() -> boot(base, "semantic.query.read-policy." + old + "[0]=com.private.Secret"));
         }
@@ -50,7 +82,7 @@ class SourceAuthorizationStartupTest {
         Path published = Files.createDirectory(temp.resolve("published"));
         Files.writeString(published.resolve("repositories.json"),
                 tools.jackson.databind.json.JsonMapper.builder().build().writeValueAsString(List.of(
-                        new SourceRepositoryDescriptor("private", "Private", "main", Optional.empty()))));
+                        new SourceRepositoryDescriptor("private", "Private", "main", Optional.empty(), Optional.empty()))));
         String[] base = {"semantic.query.source.published-root=" + published,
                 "semantic.query.source.rg-executable=" + System.getProperty("source.test.rg", "/usr/bin/rg"),
                 "semantic.query.source.allowed-repositories[0]=private",

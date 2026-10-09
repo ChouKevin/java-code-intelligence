@@ -22,8 +22,13 @@ semantic:
     admin-token: ${SEMANTIC_INDEXER_ADMIN_TOKEN:}
   source-admin-root: ${SEMANTIC_SOURCE_ADMIN_ROOT:/data/source-admin}
   source-published-root: ${SEMANTIC_SOURCE_PUBLISHED_ROOT:/data/source-published}
+  # Blank derives index-published beside the configured source published root.
+  index-published-root: ${SEMANTIC_INDEX_PUBLISHED_ROOT:}
   source-retention:
     enabled: ${SEMANTIC_SOURCE_RETENTION_ENABLED:true}
     interval: ${SEMANTIC_SOURCE_RETENTION_INTERVAL:24h}
+  source-capacity:
+    max-managed-bytes: ${SEMANTIC_SOURCE_CAPACITY_MAX_MANAGED_BYTES:0}
+    min-free-bytes: ${SEMANTIC_SOURCE_CAPACITY_MIN_FREE_BYTES:0}
   git-username: ${GIT_USERNAME:}
   git-token: ${GIT_TOKEN:}

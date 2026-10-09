@@ -11,7 +11,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
-/** HTTP decoding only; strict source application binding is shared with MCP. */
+/** HTTP decoding only; the strict Query application binder is shared with MCP. */
 @RestController
 @RequestMapping("/api/v1")
 public final class SemanticQueryController {
@@ -42,6 +42,21 @@ public final class SemanticQueryController {
         return facade.execute("search_text", input);
     }
 
+
+    @PostMapping("/search-code")
+    public Object searchCode(@RequestBody Map<String, Object> input) {
+        return facade.execute("search_code", input);
+    }
+
+    @PostMapping("/outline")
+    public Object outline(@RequestBody Map<String, Object> input) {
+        return facade.execute("get_outline", input);
+    }
+
+    @PostMapping("/entry-points")
+    public Object entryPoints(@RequestBody Map<String, Object> input) {
+        return facade.execute("list_entry_points", input);
+    }
     @PostMapping("/source")
     public Object readSource(@RequestBody Map<String, Object> input) {
         return facade.execute("read_source", input);

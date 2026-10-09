@@ -12,7 +12,7 @@ import java.util.Optional;
 public record SourcePreparationJob(int formatVersion, String jobId, String repositoryId, String requestId,
         Optional<String> requestedRevision, String defaultBranch, String originFingerprint, Phase phase, Instant acceptedAt,
         Optional<String> resolvedRevision, Optional<CurrentPublication> expectedCurrent,
-        Optional<PreparedRevision> publication, Optional<String> failureCode) {
+        Optional<PreparedRevision> publication, Optional<String> failureCode) implements PreparationJob {
     public static final int FORMAT_VERSION = 2;
     public enum Phase { ACCEPTED, RUNNING, COMPLETE, FAILED }
 

@@ -196,7 +196,7 @@ class SourcePreparationPublicationTest {
                         .isEqualTo(SourcePreparationJob.Phase.COMPLETE);
                 String revisionB = fixture.commit("B.java", "class B {}\n".getBytes(StandardCharsets.UTF_8), "B");
                 service.prepareSource(fixture.repository, new PreparationRequestId(UUID.randomUUID().toString()),
-                        Optional.of(RepositoryRevision.ofSha(revisionB)));
+                        Optional.empty());
                 SourcePreparationJob runningB = jobs.claimNext().orElseThrow();
                 java.util.concurrent.atomic.AtomicReference<SourcePreparationJob> pending =
                         new java.util.concurrent.atomic.AtomicReference<>();
@@ -304,6 +304,8 @@ class SourcePreparationPublicationTest {
                 assertThatThrownBy(() -> SourceLifecycleFixture.publisher(new RepositoryRegistry(properties), properties, mapper, writer).publish())
                         .isInstanceOf(IllegalStateException.class);
                 assertThat(Files.readAllBytes(registryFile)).isEqualTo(committed);
+                assertThat(Files.exists(fixture.published.resolve("repo-0"))).isFalse();
+                assertThat(Files.exists(fixture.admin.resolve("repositories/repo-0"))).isFalse();
             }
         }
     }

@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.java.semantic.mcp.QueryMcpToolCatalogConfiguration;
 import com.java.semantic.mcp.SessionOwnedMcpTransport;
+import com.java.semantic.model.index.IndexContract;
 import com.java.semantic.model.source.SourceReadContract.FileCollection;
 import com.java.semantic.model.source.SourceReadContract.FileListRequest;
 import com.java.semantic.model.source.SourceReadContract.ReadSourceRequest;
@@ -28,6 +29,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.function.Function;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.springframework.ai.mcp.server.common.autoconfigure.properties.McpServerProperties;
@@ -84,11 +86,12 @@ class McpSessionCloseFenceTest {
             }
 
             @Override
-            public SourceResult readSource(AdmittedSourceRevision revision, ReadSourceRequest request) {
-                return source.readSource(revision, request);
+            public SourceResult readSource(AdmittedSourceRevision revision, ReadSourceRequest request,
+                    Function<Optional<String>, IndexContract.FoldResult> folds) {
+                return source.readSource(revision, request, folds);
             }
         };
-        SemanticQueryFacade facade = new SemanticQueryFacade(fixture.catalog(), delayedCleanup, 1);
+        SemanticQueryFacade facade = new SemanticQueryFacade(fixture.catalog(), delayedCleanup, fixture.index, 1);
         JsonMapper mapper = JsonMapper.builder().build();
         WebMvcStreamableServerTransportProvider transport = WebMvcStreamableServerTransportProvider.builder()
                 .jsonMapper(new JacksonMcpJsonMapper(mapper)).mcpEndpoint("/mcp").build();

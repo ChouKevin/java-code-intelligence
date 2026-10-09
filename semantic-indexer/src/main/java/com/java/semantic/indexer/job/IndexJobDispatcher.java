@@ -1,5 +1,10 @@
 package com.java.semantic.indexer.job;
 
+import com.java.semantic.indexer.application.PreparationCoordinator;
+import com.java.semantic.indexer.index.FileSemanticIndexJobStore;
+import com.java.semantic.indexer.index.IndexGarbageCollector;
+import com.java.semantic.indexer.index.SemanticIndexJob;
+import com.java.semantic.indexer.index.SemanticIndexManager;
 import com.java.semantic.indexer.source.SourcePublicationStore;
 import com.java.semantic.indexer.source.SourceGarbageCollector;
 import java.util.Optional;
@@ -19,6 +24,11 @@ public final class IndexJobDispatcher implements ApplicationListener<Application
     private final IndexJobExecutor executor;
     private final SourcePublicationStore publications;
     private final SourceGarbageCollector collector;
+    private final FileSemanticIndexJobStore indexJobs;
+    private final SemanticIndexManager indexManager;
+    private final IndexGarbageCollector indexCollector;
+    private final PreparationCoordinator coordinator;
+    private boolean indexTurn;
     private final ScheduledExecutorService worker = Executors.newSingleThreadScheduledExecutor(task -> {
         Thread thread = new Thread(task, "source-preparation-dispatcher");
         thread.setDaemon(true);
@@ -27,11 +37,16 @@ public final class IndexJobDispatcher implements ApplicationListener<Application
     private final AtomicBoolean running = new AtomicBoolean();
 
     public IndexJobDispatcher(FileSourceJobStore jobs, IndexJobExecutor executor, SourcePublicationStore publications,
-            SourceGarbageCollector collector) {
+            SourceGarbageCollector collector, FileSemanticIndexJobStore indexJobs, SemanticIndexManager indexManager,
+            IndexGarbageCollector indexCollector, PreparationCoordinator coordinator) {
         this.jobs = jobs;
         this.executor = executor;
         this.publications = publications;
         this.collector = collector;
+        this.indexJobs = indexJobs;
+        this.indexManager = indexManager;
+        this.indexCollector = indexCollector;
+        this.coordinator = coordinator;
     }
 
     @Override
@@ -52,12 +67,20 @@ public final class IndexJobDispatcher implements ApplicationListener<Application
             publications.updatePreparation(pending.orElseThrow());
             return;
         }
+        if (indexTurn && dispatchIndex()) return;
         Optional<SourcePreparationJob> claimed = jobs.claimNext();
         if (claimed.isEmpty()) {
-            collector.runIfDue();
+            if (dispatchIndex()) return;
+            if (collector.isDue() || indexCollector.isDue()) {
+                coordinator.collectIfIdle(() -> {
+                    collector.runIfDue();
+                    indexCollector.runIfDue();
+                });
+            }
             return;
         }
         SourcePreparationJob job = claimed.orElseThrow();
+        indexTurn = true;
         try {
             publications.updatePreparation(job);
             } catch (RuntimeException exception) {
@@ -71,6 +94,14 @@ public final class IndexJobDispatcher implements ApplicationListener<Application
                 throw exception;
             }
         executor.execute(job);
+    }
+
+    private boolean dispatchIndex() {
+        Optional<SemanticIndexJob> claimed = indexJobs.claimNext();
+        if (claimed.isEmpty()) return false;
+        indexTurn = false;
+        indexManager.execute(claimed.orElseThrow());
+        return true;
     }
 
     private void dispatchScheduled() {

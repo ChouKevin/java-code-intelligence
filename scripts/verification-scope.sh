@@ -45,6 +45,9 @@ while IFS= read -r -d '' path; do
       unit=true journey=true images=true ;;
     semantic-indexer/src/main/resources/*|semantic-query/src/main/resources/*|*/src/main/java/*/config/*|*/src/main/java/*/SemanticIndexerApplication.java|*/src/main/java/*/SemanticQueryApplication.java|*/src/main/java/*Security*.java|*/src/main/java/*TokenFilter.java|*/src/main/java/*/SourcePathResolver.java|*/src/main/java/*/LocalSourceRevisionCatalog.java)
       unit=true journey=true images=true ;;
+    semantic-indexer/src/main/java/com/java/semantic/indexer/index/*|semantic-query/src/main/java/com/java/semantic/query/index/*)
+      # Parser/profile, SQLite/JNI and immutable publication/read paths affect images.
+      unit=true journey=true images=true ;;
     semantic-indexer/src/main/java/*.java|semantic-query/src/main/java/*.java)
       unit=true journey=true ;;
     semantic-indexer/src/test/*|semantic-query/src/test/*)

@@ -1,5 +1,7 @@
 package com.java.semantic.indexer.source;
 
+import com.java.semantic.indexer.index.IndexLifecycleFixture;
+import com.java.semantic.indexer.job.IndexJobDispatcher;
 import com.java.semantic.indexer.config.ConfiguredRepositoryPublisher;
 import com.java.semantic.indexer.job.FileSourceJobStore;
 import com.java.semantic.repository.config.RepositoryProperties;
@@ -27,10 +29,14 @@ public final class SourceLifecycleFixture {
                         new SourceRetentionStore(properties, mapper, registry)));
     }
 
-    public static SourceGarbageCollector collector(RepositoryProperties properties, ObjectMapper mapper,
-            SourcePublicationStore publications) {
+    public static IndexJobDispatcher dispatcher(RepositoryProperties properties, ObjectMapper mapper,
+            DurableSourceFiles owner, FileSourceJobStore jobs, SourcePublicationStore publications,
+            RepositorySourceManager manager) throws java.io.IOException {
         RepositoryRegistry registry = new RepositoryRegistry(properties);
-        return new SourceGarbageCollector(properties, registry, publications,
-                new SourceRetentionStore(properties, mapper, registry), java.time.Clock.systemUTC());
+        java.time.Clock clock = java.time.Clock.systemUTC();
+        IndexLifecycleFixture indexes = new IndexLifecycleFixture(properties, mapper, owner, jobs, publications, clock);
+        SourceGarbageCollector collector = new SourceGarbageCollector(properties, registry, publications,
+                new SourceRetentionStore(properties, mapper, registry), clock, indexes.collector);
+        return indexes.dispatcher(manager, collector);
     }
 }

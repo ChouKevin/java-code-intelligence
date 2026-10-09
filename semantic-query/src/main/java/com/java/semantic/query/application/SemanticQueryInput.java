@@ -20,9 +20,10 @@ public final class SemanticQueryInput {
 
     private static final Set<String> REPOSITORIES = Set.of("nameFilter", "cursor", "limit");
     private static final Set<String> CONTEXT = Set.of("repositoryId", "revision");
-    private static final Set<String> FILES = Set.of("context", "directory", "cursor", "limit");
+    private static final Set<String> FILES = Set.of("context", "directory", "cursor", "limit", "depth");
     private static final Set<String> TEXT = Set.of("context", "query", "directory", "filePattern", "limit");
-    private static final Set<String> SOURCE = Set.of("context", "path", "startLine", "maxLines", "cursor");
+    private static final Set<String> SOURCE = Set.of("context", "path", "view", "startLine", "ranges",
+            "tailLines", "maxLines", "contextBefore", "contextAfter", "indexGeneration", "cursor");
     private static final Set<String> SOURCE_CONTEXT = Set.of("repositoryId", "revision");
 
     private SemanticQueryInput() { }
@@ -55,7 +56,7 @@ public final class SemanticQueryInput {
     public static FileListRequest listFiles(Map<String, ?> input) {
         fields(input, FILES);
         return new FileListRequest(readContext(input.get("context")), optionalString(input, "directory").orElse(""),
-                integer(input, "limit", SourceReadContract.DEFAULT_PAGE_LIMIT), optionalString(input, "cursor"));
+                integer(input, "depth", 1), integer(input, "limit", SourceReadContract.DEFAULT_PAGE_LIMIT), optionalString(input, "cursor"));
     }
 
     public static TextSearchRequest searchText(Map<String, ?> input) {
@@ -67,9 +68,37 @@ public final class SemanticQueryInput {
 
     public static ReadSourceRequest readSource(Map<String, ?> input) {
         fields(input, SOURCE);
-        return new ReadSourceRequest(readContext(input.get("context")), string(input, "path"),
-                integer(input, "startLine", 1), integer(input, "maxLines", SourceReadContract.DEFAULT_READ_LINES),
-                optionalString(input, "cursor"));
+        SourceReadContract.View view;
+        try { view = SourceReadContract.View.valueOf(optionalString(input, "view").orElse("auto").toUpperCase(java.util.Locale.ROOT)); }
+        catch (IllegalArgumentException exception) { throw new IllegalArgumentException("view must be auto, raw or summary", exception); }
+        if (input.containsKey("view") && !Set.of("auto", "raw", "summary").contains(string(input, "view"))) {
+            throw new IllegalArgumentException("view must be auto, raw or summary");
+        }
+        java.util.List<SourceReadContract.LineRange> ranges = new java.util.ArrayList<>();
+        if (input.containsKey("ranges")) {
+            if (!(input.get("ranges") instanceof java.util.List<?> values) || values.isEmpty()) {
+                throw new IllegalArgumentException("ranges must be a nonempty array");
+            }
+            if (values.size() > 20) {
+                throw new IllegalArgumentException("at most twenty ranges are allowed");
+            }
+            for (Object value : values) {
+                Map<?, ?> range = object(value);
+                fields(range, Set.of("startLine", "endLine"));
+                if (!range.containsKey("startLine") || !range.containsKey("endLine")) {
+                    throw new IllegalArgumentException("range requires both endpoints");
+                }
+                ranges.add(new SourceReadContract.LineRange(integer(range, "startLine", 0), integer(range, "endLine", 0)));
+            }
+        }
+        boolean contextDefaults = view == SourceReadContract.View.AUTO && ranges.size() == 1;
+        return new ReadSourceRequest(readContext(input.get("context")), string(input, "path"), view,
+                input.containsKey("startLine") ? Optional.of(integer(input, "startLine", 0)) : Optional.empty(),
+                ranges, input.containsKey("tailLines") ? Optional.of(integer(input, "tailLines", 0)) : Optional.empty(),
+                integer(input, "maxLines", SourceReadContract.DEFAULT_READ_LINES),
+                integer(input, "contextBefore", contextDefaults ? 1 : 0),
+                integer(input, "contextAfter", contextDefaults ? 3 : 0),
+                optionalString(input, "indexGeneration"), optionalString(input, "cursor"));
     }
 
     public static SourceContext readContext(Object input) {

@@ -20,7 +20,7 @@ import tools.jackson.databind.json.JsonMapper;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Actual separate JVM preparation and reopen with no Mongo, JDT or production test hook. */
+/** Actual separate JVM preparation and reopen without a production test hook. */
 class IndexerPrivateProcessIT {
     @TempDir Path root;
     private final JsonMapper mapper = JsonMapper.builder().build();

@@ -11,7 +11,7 @@ import java.util.Set;
 
 /** One strict transport-neutral binder; unknown fields and selector ambiguity fail closed. */
 public final class IndexerPreparationContract {
-    public static final Set<String> OPERATIONS = Set.of("prepare_source", "get_job");
+    public static final Set<String> OPERATIONS = Set.of("prepare_source", "prepare_semantic_index", "get_job");
     private IndexerPreparationContract() { }
 
     public record Input(RepositoryId repositoryId, Optional<PreparationRequestId> requestId,
@@ -21,8 +21,8 @@ public final class IndexerPreparationContract {
         if (!OPERATIONS.contains(operation) || Objects.isNull(fields)) {
             throw new IllegalArgumentException("invalid preparation operation or input");
         }
-        Set<String> allowed = operation.equals("prepare_source")
-                ? Set.of("repositoryId", "requestId", "revision") : Set.of("repositoryId", "requestId", "jobId");
+        Set<String> allowed = operation.equals("get_job")
+                ? Set.of("repositoryId", "requestId", "jobId") : Set.of("repositoryId", "requestId", "revision");
         if (!allowed.containsAll(fields.keySet())) {
             throw new IllegalArgumentException("request contains an unknown field");
         }
@@ -34,11 +34,14 @@ public final class IndexerPreparationContract {
         if (operation.equals("get_job") && request.isPresent() == job.isPresent()) {
             throw new IllegalArgumentException("get_job requires exactly one selector");
         }
-        if (operation.equals("prepare_source") && request.isEmpty()) {
-            throw new IllegalArgumentException("prepare_source requires requestId");
+        if (!operation.equals("get_job") && request.isEmpty()) {
+            throw new IllegalArgumentException("preparation requires requestId");
         }
         Optional<RepositoryRevision> revision = fields.containsKey("revision")
                 ? Optional.of(RepositoryRevision.ofSha(text(fields, "revision"))) : Optional.empty();
+        if (operation.equals("prepare_semantic_index") && revision.isEmpty()) {
+            throw new IllegalArgumentException("semantic preparation requires an exact revision");
+        }
         return new Input(repository, request, job, revision);
     }
 

@@ -42,7 +42,7 @@ class McpSessionOwnershipTest {
         SourceAccessProperties properties = new SourceAccessProperties(fixture.root, executable, List.of("sample"),
                 65_536, Duration.ofSeconds(5), Duration.ofSeconds(2), Duration.ofSeconds(2), 2);
         SemanticQueryFacade facade = new SemanticQueryFacade(fixture.catalog(),
-                new LocalRepositorySourceService(properties, fixture.mapper), properties.maxActiveSearches());
+                new LocalRepositorySourceService(properties, fixture.mapper), fixture.index, properties.maxActiveSearches());
         JsonMapper mapper = JsonMapper.builder().build();
         WebMvcStreamableServerTransportProvider transport = WebMvcStreamableServerTransportProvider.builder()
                 .jsonMapper(new JacksonMcpJsonMapper(mapper)).mcpEndpoint("/mcp").build();
@@ -110,7 +110,7 @@ class McpSessionOwnershipTest {
                     closing.cancel(true);
                 }
                 b.delete();
-                assertThat(McpWireTestClient.request(transport, "POST", call, a.session()).status()).isEqualTo(404);
+                assertThat(McpWireTestClient.request(transport, mapper, "POST", call, a.session()).status()).isEqualTo(404);
             } finally {
                 pending.cancel(true);
             }

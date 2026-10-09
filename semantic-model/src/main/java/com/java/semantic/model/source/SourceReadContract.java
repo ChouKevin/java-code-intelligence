@@ -1,5 +1,7 @@
 package com.java.semantic.model.source;
 
+import com.java.semantic.model.index.IndexContract.IndexSummary;
+import com.java.semantic.model.index.IndexContract.Profile;
 import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.model.repository.RepositoryRevision;
 import com.java.semantic.model.source.SourceRevisionManifest.Coverage;
@@ -17,6 +19,7 @@ public final class SourceReadContract {
     public static final int MAX_READ_LINES = 500;
     public static final int DEFAULT_CONTENT_BYTES = 65_536;
     public static final int MAX_READ_RESPONSE_BYTES = 524_288;
+    public static final int MAX_REPOSITORY_RESPONSE_BYTES = 160 * 1024;
 
     private SourceReadContract() { }
 
@@ -37,10 +40,11 @@ public final class SourceReadContract {
         }
     }
 
-    public record FileListRequest(SourceContext context, String directory, int limit, Optional<String> cursor) {
+    public record FileListRequest(SourceContext context, String directory, int depth, int limit, Optional<String> cursor) {
         public FileListRequest {
             context = Objects.requireNonNull(context, "source context");
             directory = SourcePathPolicy.requireDirectory(directory);
+            ModelValidation.require(depth == 1 || depth == 2, "directory depth must be one or two");
             requireLimit(limit);
             cursor = requireCursor(cursor);
         }
@@ -64,15 +68,51 @@ public final class SourceReadContract {
         }
     }
 
-    public record ReadSourceRequest(SourceContext context, String path, int startLine, int maxLines,
+    public record ReadSourceRequest(SourceContext context, String path, View view,
+            Optional<Integer> startLine, List<LineRange> ranges, Optional<Integer> tailLines,
+            int maxLines, int contextBefore, int contextAfter, Optional<String> indexGeneration,
             Optional<String> cursor) {
         public ReadSourceRequest {
             context = Objects.requireNonNull(context, "source context");
             path = SourcePathPolicy.requireFile(path);
-            ModelValidation.require(startLine >= 1, "start line must be positive");
-            ModelValidation.require(maxLines >= 1 && maxLines <= MAX_READ_LINES,
-                    "read line limit must be between 1 and 500");
+            view = Objects.requireNonNull(view, "view");
+            startLine = Objects.requireNonNull(startLine, "start line");
+            ranges = Objects.requireNonNull(ranges, "ranges");
+            ModelValidation.require(ranges.size() <= 20, "at most twenty ranges are allowed");
+            ranges = List.copyOf(ranges);
+            tailLines = Objects.requireNonNull(tailLines, "tail lines");
+            startLine.ifPresent(line -> ModelValidation.require(line >= 1, "start line must be positive"));
+            tailLines.ifPresent(lines -> ModelValidation.require(lines >= 1 && lines <= 500, "tail lines must be 1..500"));
+            int selectors = (startLine.isPresent() ? 1 : 0) + (!ranges.isEmpty() ? 1 : 0) + (tailLines.isPresent() ? 1 : 0);
+            ModelValidation.require(selectors <= 1 && (view != View.SUMMARY || selectors == 0), "ambiguous source selection");
+            ModelValidation.require(maxLines >= 1 && maxLines <= MAX_READ_LINES, "read line limit must be 1..500");
+            ModelValidation.require(contextBefore >= 0 && contextBefore <= 20 && contextAfter >= 0 && contextAfter <= 20,
+                    "context must be 0..20");
+            ModelValidation.require((!ranges.isEmpty() && view != View.RAW) || contextBefore == 0 && contextAfter == 0,
+                    "context requires non-raw ranges");
+            indexGeneration = Objects.requireNonNull(indexGeneration, "index generation");
+            if (indexGeneration.isPresent()) {
+                String value = indexGeneration.orElseThrow();
+                ModelValidation.require(view == View.SUMMARY, "generation requires summary");
+                ModelValidation.require(java.util.UUID.fromString(value).toString().equals(value), "generation must be canonical UUID");
+            }
             cursor = requireCursor(cursor);
+        }
+        public boolean hasSelector() { return startLine.isPresent() || !ranges.isEmpty() || tailLines.isPresent(); }
+    }
+
+    public record LineRange(int startLine, int endLine) {
+        public LineRange {
+            ModelValidation.require(startLine >= 1 && endLine >= startLine, "line range must be positive and ordered");
+        }
+    }
+
+    public record Selection(Optional<Integer> startLine, List<LineRange> ranges, Optional<Integer> tailLines,
+            int contextBefore, int contextAfter) {
+        public Selection {
+            startLine = Objects.requireNonNull(startLine);
+            ranges = List.copyOf(ranges);
+            tailLines = Objects.requireNonNull(tailLines);
         }
     }
 
@@ -86,7 +126,7 @@ public final class SourceReadContract {
 
     public record RepositoryItem(String repositoryId, String displayName, String defaultBranch,
             Optional<String> projectGuidePath, SourceStatus sourceStatus, SemanticStatus semanticStatus,
-            Optional<String> revision) {
+            Optional<String> revision, Optional<RepositoryNavigationHint> navigationHint) {
         public RepositoryItem {
             repositoryId = new RepositoryId(repositoryId).value();
             displayName = ModelValidation.requiredText(displayName, "display name");
@@ -97,6 +137,7 @@ public final class SourceReadContract {
             semanticStatus = Objects.requireNonNull(semanticStatus, "semantic status");
             revision = Objects.requireNonNull(revision, "published revision");
             revision.ifPresent(RepositoryRevision::ofSha);
+            navigationHint = Objects.requireNonNull(navigationHint, "navigation hint");
             ModelValidation.require((sourceStatus == SourceStatus.READY) == revision.isPresent(),
                     "only ready repositories have a published revision");
         }
@@ -104,7 +145,7 @@ public final class SourceReadContract {
 
     public record ContextResult(String repositoryId, String defaultBranch, SourceStatus sourceStatus,
             SemanticStatus semanticStatus, Optional<SourceContext> context, Optional<GuideInfo> projectGuide,
-            Optional<Coverage> coverage) {
+            Optional<Coverage> coverage, Optional<IndexSummary> index) {
         public ContextResult {
             repositoryId = new RepositoryId(repositoryId).value();
             defaultBranch = ModelValidation.requiredText(defaultBranch, "default branch");
@@ -113,6 +154,10 @@ public final class SourceReadContract {
             context = Objects.requireNonNull(context, "source context");
             projectGuide = Objects.requireNonNull(projectGuide, "project guide");
             coverage = Objects.requireNonNull(coverage, "source coverage");
+            index = Objects.requireNonNull(index, "index summary");
+            ModelValidation.require((semanticStatus == SemanticStatus.READY) == index.isPresent()
+                            && (semanticStatus != SemanticStatus.READY || sourceStatus == SourceStatus.READY),
+                    "ready index discovery requires exact ready source and index summary");
             boolean ready = sourceStatus == SourceStatus.READY;
             ModelValidation.require(ready == context.isPresent() && ready == projectGuide.isPresent()
                             && ready == coverage.isPresent(),
@@ -134,12 +179,16 @@ public final class SourceReadContract {
     }
 
     public record FileEntry(String path, EntryKind kind, Optional<EntryStatus> status, Optional<Long> byteLength,
-            boolean navigationHint) {
+            boolean navigationHint, int depth, Optional<ChildPreview> childPreview) {
         public FileEntry {
             path = SourcePathPolicy.requireFile(path);
             kind = Objects.requireNonNull(kind, "entry kind");
             status = Objects.requireNonNull(status, "entry status");
             byteLength = Objects.requireNonNull(byteLength, "byte length");
+            ModelValidation.require(depth == 1 || depth == 2, "entry depth must be one or two");
+            childPreview = Objects.requireNonNull(childPreview, "child preview");
+            ModelValidation.require((kind == EntryKind.DIRECTORY) == childPreview.isPresent(),
+                    "only directories have child preview status");
             byteLength.ifPresent(length -> ModelValidation.require(length >= 0, "byte length must not be negative"));
             ModelValidation.require(kind == EntryKind.FILE ? status.isPresent() && byteLength.isPresent()
                             : status.isEmpty() && byteLength.isEmpty() && !navigationHint,
@@ -165,26 +214,67 @@ public final class SourceReadContract {
         }
     }
 
-    public record SourceResult(SourceContext context, String path, int startLine, Optional<Integer> endLine,
-            String content, boolean hasMore, Optional<String> nextCursor, boolean startsMidLine,
-            boolean endsMidLine, boolean navigationHint) {
+    public record SourceResult(SourceContext context, String path, String blobId, String contentDigest,
+            long byteLength, View requestedView, View effectiveView, Selection requestedSelection,
+            List<LineRange> effectiveSelection, SummaryOutcome summaryOutcome, Optional<String> indexGeneration,
+            Optional<Profile> profile,
+            List<Segment> segments, boolean hasMore, Optional<String> nextCursor, StopReason stopReason,
+            boolean navigationHint) {
         public SourceResult {
-            context = Objects.requireNonNull(context, "source context");
+            context = Objects.requireNonNull(context);
             path = SourcePathPolicy.requireFile(path);
-            ModelValidation.require(startLine >= 1, "start line must be positive");
-            endLine = Objects.requireNonNull(endLine, "end line");
-            if (endLine.isPresent()) {
-                ModelValidation.require(endLine.orElseThrow() >= startLine, "source range must not run backwards");
-            }
-            content = Objects.requireNonNull(content, "source content");
-            ModelValidation.require(content.isEmpty() == endLine.isEmpty(),
-                    "empty source content must not fabricate a line range");
+            blobId = RepositoryRevision.ofSha(blobId).value();
+            contentDigest = ModelValidation.sha256(contentDigest, "source digest");
+            ModelValidation.require(byteLength >= 0, "byte length must be nonnegative");
+            requestedView = Objects.requireNonNull(requestedView);
+            effectiveView = Objects.requireNonNull(effectiveView);
+            requestedSelection = Objects.requireNonNull(requestedSelection);
+            effectiveSelection = List.copyOf(effectiveSelection);
+            summaryOutcome = Objects.requireNonNull(summaryOutcome);
+            indexGeneration = Objects.requireNonNull(indexGeneration);
+            profile = Objects.requireNonNull(profile);
+            segments = List.copyOf(segments);
+            ModelValidation.require(segments.size() <= 500, "too many segments");
             nextCursor = requireCursor(nextCursor);
-            ModelValidation.require(hasMore == nextCursor.isPresent(), "continuation requires a next cursor");
-            ModelValidation.require(!content.isEmpty() || !startsMidLine && !endsMidLine,
-                    "empty content cannot be a partial line");
+            ModelValidation.require(hasMore == nextCursor.isPresent(), "continuation requires cursor");
+            stopReason = Objects.requireNonNull(stopReason);
+            ModelValidation.require(effectiveView != View.AUTO && (effectiveView == View.SUMMARY) == indexGeneration.isPresent()
+                    && indexGeneration.isPresent() == profile.isPresent(), "effective view and index provenance must agree");
+            indexGeneration.ifPresent(value -> ModelValidation.require(java.util.UUID.fromString(value).toString().equals(value),
+                    "generation must be canonical UUID"));
+            long previous = -1;
+            for (Segment segment : segments) {
+                ModelValidation.require(segment.startByte() >= previous && segment.endByte() <= byteLength,
+                        "segments must be ordered within source");
+                previous = segment.endByte();
+            }
+            ModelValidation.require(!hasMore || !segments.isEmpty(), "continuation must advance");
         }
     }
+
+    public record Segment(SegmentKind kind, long startByte, long endByte, int startLine, int endLine,
+            Optional<String> content, boolean startsMidLine, boolean endsMidLine,
+            Optional<String> foldKind, Optional<String> declarationId) {
+        public Segment {
+            kind = Objects.requireNonNull(kind);
+            ModelValidation.require(startByte >= 0 && endByte > startByte && startLine >= 1 && endLine >= startLine,
+                    "segment coordinates must be ordered");
+            content = Objects.requireNonNull(content);
+            foldKind = Objects.requireNonNull(foldKind);
+            declarationId = Objects.requireNonNull(declarationId);
+            ModelValidation.require(kind == SegmentKind.SOURCE ? content.isPresent() && foldKind.isEmpty() && declarationId.isEmpty()
+                    : content.isEmpty() && foldKind.isPresent() && declarationId.isPresent(), "segment payload must match kind");
+        }
+    }
+
+    public enum View { AUTO, RAW, SUMMARY }
+    public enum SegmentKind { SOURCE, ELISION }
+    public enum StopReason { COMPLETE, LINE_BUDGET, CONTENT_BUDGET, SEGMENT_BUDGET, WIRE_BUDGET }
+    public enum SummaryOutcome {
+        NOT_REQUESTED, ELIDED, NO_ELISION, BELOW_SUMMARY_THRESHOLD, UNSUPPORTED_LANGUAGE,
+        INDEX_NOT_READY, INDEX_UNAVAILABLE, FOLD_METADATA_UNAVAILABLE, FILE_PARSE_FAILED, FILE_UNSUPPORTED, FILE_TOO_LARGE
+    }
+    public enum ChildPreview { COMPLETE, ELIDED, NOT_EXPANDED }
 
     public record Page(int returned, boolean hasMore, Optional<String> nextCursor) {
         public Page {
@@ -214,7 +304,7 @@ public final class SourceReadContract {
     }
 
     public enum SourceStatus { NOT_PREPARED, PREPARING, FAILED, READY }
-    public enum SemanticStatus { NOT_READY }
+    public enum SemanticStatus { NOT_READY, READY, UNAVAILABLE }
     public enum EntryKind { DIRECTORY, FILE }
     public enum EntryStatus { TEXT, BINARY, UNSUPPORTED_ENCODING, UNSUPPORTED_PATH, SYMLINK, SUBMODULE, LFS_POINTER }
     public enum GuideState { AVAILABLE, MISSING, INVALID, DISABLED }

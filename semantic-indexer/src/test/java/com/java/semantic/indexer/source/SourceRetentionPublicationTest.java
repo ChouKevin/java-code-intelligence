@@ -30,20 +30,22 @@ class SourceRetentionPublicationTest {
     @TempDir Path root;
 
     @Test
-    void republishing_a_revision_restarts_its_retirement_window() throws Exception {
+    void historical_reuse_preserves_retirement_age_and_current_metadata() throws Exception {
         try (Lifecycle fixture = new Lifecycle(root)) {
             String a = fixture.commit("A");
             fixture.prepare(a);
             String b = fixture.commit("B");
             fixture.prepare(b);
             Instant first = fixture.retention.reconcile(fixture.git.repository, fixture.state(), Instant.now()).get(a);
-            fixture.prepare(a);
-            assertThat(fixture.retention.reconcile(fixture.git.repository, fixture.state(), Instant.now())).doesNotContainKey(a);
-            fixture.prepare(b);
-            Instant second = fixture.state().current().orElseThrow().publishedAt();
+            SourceRepositoryState before = fixture.state();
+            fixture.prepareHistorical(a);
+            assertThat(fixture.state().current()).isEqualTo(before.current());
             assertThat(fixture.retention.reconcile(fixture.git.repository, fixture.state(), Instant.now()))
-                    .containsEntry(a, second).doesNotContainKey(b);
-            assertThat(second).isAfterOrEqualTo(first);
+                    .containsEntry(a, first).doesNotContainKey(b);
+            fixture.prepareHistorical(b);
+            assertThat(fixture.state().current()).isEqualTo(before.current());
+            assertThat(fixture.retention.reconcile(fixture.git.repository, fixture.state(), Instant.now()))
+                    .containsEntry(a, first).doesNotContainKey(b);
         }
     }
 
@@ -179,9 +181,15 @@ class SourceRetentionPublicationTest {
         }
         void prepare(String revision) {
             service.prepareSource(git.repository, new PreparationRequestId(UUID.randomUUID().toString()),
-                    Optional.of(RepositoryRevision.ofSha(revision)));
+                    Optional.empty());
             SourcePreparationJob result = manager.execute(jobs.claimNext().orElseThrow());
             assertThat(result.phase()).isEqualTo(SourcePreparationJob.Phase.COMPLETE);
+            assertThat(result.resolvedRevision()).contains(revision);
+        }
+        void prepareHistorical(String revision) {
+            service.prepareSource(git.repository, new PreparationRequestId(UUID.randomUUID().toString()),
+                    Optional.of(RepositoryRevision.ofSha(revision)));
+            assertThat(manager.execute(jobs.claimNext().orElseThrow()).phase()).isEqualTo(SourcePreparationJob.Phase.COMPLETE);
         }
         SourceRepositoryState state() { return publications.state(git.repository); }
         void writeRetired(Map<String, Instant> entries) throws Exception {

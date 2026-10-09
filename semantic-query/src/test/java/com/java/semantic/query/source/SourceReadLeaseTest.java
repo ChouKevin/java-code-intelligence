@@ -1,5 +1,6 @@
 package com.java.semantic.query.source;
 
+import com.java.semantic.model.index.IndexContract;
 import com.java.semantic.model.source.SourceContext;
 import com.java.semantic.model.source.SourceReadContract.*;
 import com.java.semantic.query.application.SemanticQueryFacade;
@@ -14,6 +15,8 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -30,14 +33,14 @@ class SourceReadLeaseTest {
         CountDownLatch entered = new CountDownLatch(1);
         CountDownLatch resume = new CountDownLatch(1);
         RepositorySourcePort reader = paused(fixture.service(), entered, resume, false);
-        SemanticQueryFacade facade = new SemanticQueryFacade(fixture.catalog(), reader, 2);
+        SemanticQueryFacade facade = new SemanticQueryFacade(fixture.catalog(), reader, fixture.index, 2);
         try (ExecutorService executor = Executors.newSingleThreadExecutor(); Peer peer = new Peer(fixture, root.resolve("peer"))) {
             Future<SourceResult> result = executor.submit(() -> facade.readSource(request(fixture)));
             assertThat(entered.await(1, TimeUnit.SECONDS)).isTrue();
             peer.start();
             peer.assertBlocked();
             resume.countDown();
-            assertThat(result.get(2, TimeUnit.SECONDS).content()).isEqualTo("exact 🙂\r\n");
+            assertThat(sourceText(result.get(2, TimeUnit.SECONDS))).isEqualTo("exact 🙂\r\n");
             peer.assertAcquired();
         } finally { resume.countDown(); }
     }
@@ -51,7 +54,7 @@ class SourceReadLeaseTest {
             CountDownLatch entered = new CountDownLatch(1);
             CountDownLatch resume = new CountDownLatch(1);
             SemanticQueryFacade facade = new SemanticQueryFacade(fixture.catalog(), paused(fixture.service(), entered, resume,
-                    outcome.equals("failure")), 2);
+                    outcome.equals("failure")), fixture.index, 2);
             try (ExecutorService executor = Executors.newSingleThreadExecutor(); Peer peer = new Peer(fixture, root.resolve(outcome + "-peer"))) {
                 AdmittedSourceRevision first = fixture.admit();
                 try {
@@ -63,7 +66,7 @@ class SourceReadLeaseTest {
                     peer.assertBlocked();
                     if (outcome.equals("cancellation")) result.cancel(true);
                     else resume.countDown();
-                    if (outcome.equals("success")) assertThat(result.get(2, TimeUnit.SECONDS).content()).isEqualTo("bytes");
+                    if (outcome.equals("success")) assertThat(sourceText(result.get(2, TimeUnit.SECONDS))).isEqualTo("bytes");
                     if (outcome.equals("failure")) assertThatThrownBy(() -> result.get(2, TimeUnit.SECONDS))
                             .hasCauseInstanceOf(SourceQueryException.class);
                     peer.assertAcquired();
@@ -79,7 +82,7 @@ class SourceReadLeaseTest {
         Files.delete(fixture.root.resolve("sample/read.lock"));
         SourceAccessProperties hidden = new SourceAccessProperties(fixture.root, fixture.properties.rgExecutable(), List.of(),
                 65536, Duration.ofSeconds(5), Duration.ofSeconds(2), Duration.ofSeconds(2), 2);
-        LocalSourceRevisionCatalog catalog = new LocalSourceRevisionCatalog(hidden, fixture.mapper, fixture.locks);
+        LocalSourceRevisionCatalog catalog = new LocalSourceRevisionCatalog(hidden, fixture.mapper, fixture.locks, fixture.index);
         assertThatThrownBy(() -> catalog.admit(new SourceContext("sample", SourceFilesystemFixture.SHA)))
                 .isInstanceOfSatisfying(SourceQueryException.class, error -> assertThat(error.code()).isEqualTo(SourceQueryException.Code.REPOSITORY_NOT_FOUND));
     }
@@ -114,7 +117,9 @@ class SourceReadLeaseTest {
                     error -> assertThat(error.code()).isEqualTo(SourceQueryException.Code.SOURCE_TIMEOUT));
         }
         try (AdmittedSourceRevision admitted = fixture.admit()) {
-            assertThat(fixture.service().readSource(admitted, request(fixture)).content()).isEqualTo("after exclusive release");
+            assertThat(sourceText(fixture.service().readSource(admitted, request(fixture),
+                    generation -> { throw new AssertionError("Raw read must not access an index"); })))
+                    .isEqualTo("after exclusive release");
         }
     }
 
@@ -132,8 +137,9 @@ class SourceReadLeaseTest {
             public FileCollection listFiles(AdmittedSourceRevision admitted, FileListRequest request) {
                 return fixture.service().listFiles(admitted, request);
             }
-            public SourceResult readSource(AdmittedSourceRevision admitted, ReadSourceRequest request) {
-                return fixture.service().readSource(admitted, request);
+            public SourceResult readSource(AdmittedSourceRevision admitted, ReadSourceRequest request,
+                    Function<Optional<String>, IndexContract.FoldResult> folds) {
+                return fixture.service().readSource(admitted, request, folds);
             }
             public TextSearchResult searchText(AdmittedSourceRevision admitted, TextSearchRequest request) {
                 if (!firstSearch.getAndSet(false)) return fixture.service().searchText(admitted, request);
@@ -163,7 +169,7 @@ class SourceReadLeaseTest {
                 throw new AssertionError("live source worker must make cleanup fail");
             }
         };
-        SemanticQueryFacade facade = new SemanticQueryFacade(fixture.catalog(), delayedCleanup, 1);
+        SemanticQueryFacade facade = new SemanticQueryFacade(fixture.catalog(), delayedCleanup, fixture.index, 1);
         TextSearchRequest search = new TextSearchRequest(fixture.context, "retained", "", Optional.empty(), 20);
         try (Peer peer = new Peer(fixture, root.resolve("cleanup-peer"))) {
             assertThatThrownBy(() -> facade.searchText(search)).isInstanceOfSatisfying(SourceQueryException.class,
@@ -187,14 +193,20 @@ class SourceReadLeaseTest {
         });
     }
 
+    private static String sourceText(SourceResult result) {
+        return result.segments().stream().flatMap(segment -> segment.content().stream()).collect(Collectors.joining());
+    }
+
     private static ReadSourceRequest request(SourceFilesystemFixture fixture) {
-        return new ReadSourceRequest(fixture.context, "A.java", 1, 200, Optional.empty());
+        return new ReadSourceRequest(fixture.context, "A.java", View.RAW, Optional.of(1), List.of(),
+                Optional.empty(), 200, 0, 0, Optional.empty(), Optional.empty());
     }
     private static RepositorySourcePort paused(RepositorySourcePort delegate, CountDownLatch entered, CountDownLatch resume, boolean fail) {
         return new RepositorySourcePort() {
             public FileCollection listFiles(AdmittedSourceRevision admitted, FileListRequest request) { return delegate.listFiles(admitted, request); }
             public TextSearchResult searchText(AdmittedSourceRevision admitted, TextSearchRequest request) { return delegate.searchText(admitted, request); }
-            public SourceResult readSource(AdmittedSourceRevision admitted, ReadSourceRequest request) {
+            public SourceResult readSource(AdmittedSourceRevision admitted, ReadSourceRequest request,
+                    Function<Optional<String>, IndexContract.FoldResult> folds) {
                 entered.countDown();
                 try {
                     if (!resume.await(1500, TimeUnit.MILLISECONDS)) throw new SourceQueryException(SourceQueryException.Code.SOURCE_TIMEOUT);
@@ -203,7 +215,7 @@ class SourceReadLeaseTest {
                     throw new SourceQueryException(SourceQueryException.Code.SOURCE_TIMEOUT);
                 }
                 if (fail) throw new SourceQueryException(SourceQueryException.Code.SOURCE_UNAVAILABLE);
-                return delegate.readSource(admitted, request);
+                return delegate.readSource(admitted, request, folds);
             }
         };
     }

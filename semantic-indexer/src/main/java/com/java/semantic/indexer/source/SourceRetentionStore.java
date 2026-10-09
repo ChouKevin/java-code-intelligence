@@ -81,21 +81,23 @@ public final class SourceRetentionStore {
         pendingDeletion(id).filter(intent -> intent.revision().equals(next.value())).ifPresent(intent -> {
             throw new IllegalStateException("revision has pending deletion");
         });
-        RetentionState state = load(id);
-        if (state.retiredAt().containsKey(next.value())) {
-            Map<String, Instant> entries = new HashMap<>(state.retiredAt());
-            entries.remove(next.value());
-            save(new RetentionState(1, id.value(), state.originFingerprint(), entries));
-        }
     }
 
-    public synchronized void afterPublication(RepositoryId id, Optional<CurrentPublication> previous, CurrentPublication next) {
-        if (previous.isEmpty() || previous.orElseThrow().revision().equals(next.revision())) return;
+    public synchronized void afterPublication(RepositoryId id, Optional<CurrentPublication> previous,
+            Optional<CurrentPublication> next, RepositoryRevision publishedRevision, Instant publishedAt) {
         RetentionState state = load(id);
         Map<String, Instant> entries = new HashMap<>(state.retiredAt());
-        entries.remove(next.revision());
-        entries.put(previous.orElseThrow().revision(), next.publishedAt());
-        save(new RetentionState(1, id.value(), state.originFingerprint(), entries));
+        if (next.filter(current -> current.revision().equals(publishedRevision.value())).isPresent()) {
+            entries.remove(publishedRevision.value());
+        } else {
+            entries.putIfAbsent(publishedRevision.value(), publishedAt);
+        }
+        if (!previous.equals(next)) {
+            previous.filter(old -> next.filter(current -> current.revision().equals(old.revision())).isEmpty())
+                    .ifPresent(old -> entries.put(old.revision(), publishedAt));
+        }
+        if (!entries.equals(state.retiredAt()))
+            save(new RetentionState(1, id.value(), state.originFingerprint(), entries));
     }
 
     public synchronized Map<String, Instant> reconcile(RepositoryId id, SourceRepositoryState state, Instant observedAt) {

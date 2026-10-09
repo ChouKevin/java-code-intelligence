@@ -1,5 +1,6 @@
 package com.java.semantic.indexer.source;
 
+import com.java.semantic.indexer.index.IndexLifecycleFixture;
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
@@ -48,8 +49,11 @@ class SourceGcRecoveryTest {
                 Files.createDirectories(unrelated.getParent());
                 Files.writeString(unrelated, "other repository bytes");
                 SourceRetentionStore reopened = new SourceRetentionStore(fixture.properties, fixture.mapper, fixture.registry);
+                Clock clock = Clock.fixed(now, ZoneOffset.UTC);
+                IndexLifecycleFixture indexes = new IndexLifecycleFixture(fixture.properties, fixture.mapper, fixture.owner,
+                        fixture.jobs, fixture.publications, clock);
                 new SourceGarbageCollector(fixture.properties, fixture.registry, fixture.publications, reopened,
-                        Clock.fixed(now, ZoneOffset.UTC)).runIfDue();
+                        clock, indexes.collector).runIfDue();
                 assertThat(Files.exists(revision)).isFalse();
                 assertThat(reopened.pendingDeletion(fixture.git.repository)).isEmpty();
                 assertThat(fixture.state().current().orElseThrow().revision()).isEqualTo(b);
@@ -158,8 +162,9 @@ class SourceGcRecoveryTest {
             String b = fixture.commit("B"); fixture.prepare(b);
             Instant now = Instant.now();
             fixture.writeRetired(Map.of(a, now.minus(SourceRetentionStore.RETENTION)));
+            SourceGarbageCollector collector = SourceGarbageCollectorTest.collector(fixture, Clock.fixed(now, ZoneOffset.UTC));
             Thread.currentThread().interrupt();
-            try { SourceGarbageCollectorTest.collector(fixture, Clock.fixed(now, ZoneOffset.UTC)).runIfDue(); }
+            try { collector.runIfDue(); }
             finally { Thread.interrupted(); }
             assertThat(capture.list.stream().map(ILoggingEvent::getFormattedMessage).toList()).anyMatch(message ->
                     message.contains("event=source_gc_end") && message.contains("result=partial")

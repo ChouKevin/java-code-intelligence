@@ -48,7 +48,16 @@ if [[ ! -f "$indexer_jar" || ! -f "$query_jar" ]]; then
   echo 'Fresh, separately named Indexer and Query executable jars are required' >&2
   exit 1
 fi
+# Snapshot both runtimes into this launcher's exclusively owned root. Fresh child
+# processes (including disabled-native profiles) never race later reactor output.
+mkdir -p "$run_root/work/runtime"
+cp -- "$indexer_jar" "$run_root/work/runtime/indexer.jar"
+cp -- "$query_jar" "$run_root/work/runtime/query.jar"
+indexer_jar="$run_root/work/runtime/indexer.jar"
+query_jar="$run_root/work/runtime/query.jar"
 "$maven" --batch-mode --no-transfer-progress -pl semantic-indexer -am -Pdeployed-it \
   -Dtest=SourceMcpJourneyIT -Dsurefire.failIfNoSpecifiedTests=false \
   -Dsource.journey.root="$run_root" -Dsource.journey.indexer.jar="$indexer_jar" \
   -Dsource.journey.query.jar="$query_jar" -Dsource.test.rg="$rg_executable" test
+echo 'Native MCP transport journey: independent exact A/B sessions, current-only rebuild after explicit refresh, retained generation/summary cursors, segmented Git-byte evidence, historical source-only H, range/tail and 12-of-13 directory preview checks completed.'
+echo 'This launcher does not establish model-answer or OMP-client acceptance; those require separately observed client traces and citations.'

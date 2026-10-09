@@ -1,5 +1,8 @@
 package com.java.semantic.query.source;
 
+import com.java.semantic.model.index.IndexContract;
+import com.java.semantic.model.index.IndexFailure;
+import com.java.semantic.query.index.RepositoryIndexPort;
 import com.java.semantic.model.repository.RepositoryId;
 import com.java.semantic.model.source.PreparedRevision;
 import com.java.semantic.model.source.SourceContext;
@@ -34,12 +37,15 @@ public final class LocalSourceRevisionCatalog implements SourceRevisionCatalog {
     private final ObjectMapper mapper;
     private final SourcePathResolver resolver;
     private final SourceReadLocks locks;
+    private final RepositoryIndexPort index;
 
-    public LocalSourceRevisionCatalog(SourceAccessProperties properties, ObjectMapper mapper, SourceReadLocks locks) {
+    public LocalSourceRevisionCatalog(SourceAccessProperties properties, ObjectMapper mapper,
+            SourceReadLocks locks, RepositoryIndexPort index) {
         this.properties = Objects.requireNonNull(properties);
         this.mapper = Objects.requireNonNull(mapper);
         this.resolver = new SourcePathResolver(mapper);
         this.locks = Objects.requireNonNull(locks);
+        this.index = Objects.requireNonNull(index, "index discovery");
     }
 
     @Override
@@ -54,27 +60,60 @@ public final class LocalSourceRevisionCatalog implements SourceRevisionCatalog {
                 && request.nameFilter().map(value -> descriptor.displayName().contains(value)).orElse(true))) {
             throw new SourceQueryException(SourceQueryException.Code.INVALID_ARGUMENT);
         }
+        List<SourceRepositoryDescriptor> remaining = descriptors.stream()
+                .filter(descriptor -> descriptor.repositoryId().compareTo(after) > 0)
+                .filter(descriptor -> request.nameFilter().map(value -> descriptor.displayName().contains(value)).orElse(true))
+                .toList();
         List<RepositoryItem> items = new ArrayList<>();
-        boolean hasMore = false;
-        for (SourceRepositoryDescriptor descriptor : descriptors) {
+        long itemBytes = 0;
+        Page emptyPage = new Page(0, false, Optional.empty());
+        int envelopeBytes = mapper.writeValueAsBytes(new RepositoryCollection(List.of(), emptyPage)).length
+                - mapper.writeValueAsBytes(emptyPage).length;
+        for (int position = 0; position < remaining.size(); position++) {
             check(deadline);
-            if (descriptor.repositoryId().compareTo(after) <= 0
-                    || request.nameFilter().filter(value -> !descriptor.displayName().contains(value)).isPresent()) continue;
-            if (items.size() == request.limit()) { hasMore = true; break; }
+            SourceRepositoryDescriptor descriptor = remaining.get(position);
+            if (items.size() == request.limit()) return repositoryPage(items, true, binding, deadline);
+            RepositoryItem item;
             try (SourceReadLocks.Lease lease = locks.acquire(new RepositoryId(descriptor.repositoryId()), deadline)) {
                 SourceRepositoryState state = state(descriptor.repositoryId());
                 Optional<String> revision = state.current().map(SourceRepositoryState.CurrentPublication::revision);
                 SourceStatus status = status(state);
+                IndexContract.Discovery indexAvailability = new IndexContract.Discovery(SemanticStatus.NOT_READY, Optional.empty());
                 if (revision.isPresent()) {
-                    admitLocked(new SourceContext(descriptor.repositoryId(), revision.orElseThrow()), lease, deadline);
+                    indexAvailability = discoverIndex(admitLocked(
+                            new SourceContext(descriptor.repositoryId(), revision.orElseThrow()), lease, deadline));
                 }
-                items.add(new RepositoryItem(descriptor.repositoryId(), descriptor.displayName(), descriptor.defaultBranch(),
-                        safeGuide(descriptor.projectGuidePath()), status, SemanticStatus.NOT_READY, revision));
+                item = new RepositoryItem(descriptor.repositoryId(), descriptor.displayName(), descriptor.defaultBranch(),
+                        safeGuide(descriptor.projectGuidePath()), status, indexAvailability.status(), revision,
+                        descriptor.navigationHint());
             }
+            boolean hasMore = position + 1 < remaining.size();
+            int count = items.size() + 1;
+            Optional<String> next = hasMore ? Optional.of(QueryCursorCodec.encode(binding,
+                    List.of(item.repositoryId()))) : Optional.empty();
+            int serializedItemBytes = mapper.writeValueAsBytes(item).length;
+            long candidateBytes = itemBytes + serializedItemBytes + count - 1
+                    + envelopeBytes + mapper.writeValueAsBytes(new Page(count, hasMore, next)).length;
+            check(deadline);
+            if (candidateBytes > SourceReadContract.MAX_REPOSITORY_RESPONSE_BYTES) {
+                if (items.isEmpty()) throw new SourceQueryException(SourceQueryException.Code.SOURCE_RESULT_TOO_LARGE);
+                return repositoryPage(items, true, binding, deadline);
+            }
+            itemBytes += serializedItemBytes;
+            items.add(item);
         }
+        return repositoryPage(items, false, binding, deadline);
+    }
+
+    private RepositoryCollection repositoryPage(List<RepositoryItem> items, boolean hasMore, String binding, long deadline) {
         Optional<String> next = hasMore ? Optional.of(QueryCursorCodec.encode(binding,
                 List.of(items.getLast().repositoryId()))) : Optional.empty();
-        return new RepositoryCollection(items, new Page(items.size(), hasMore, next));
+        RepositoryCollection result = new RepositoryCollection(items, new Page(items.size(), hasMore, next));
+        if (mapper.writeValueAsBytes(result).length > SourceReadContract.MAX_REPOSITORY_RESPONSE_BYTES) {
+            throw new SourceQueryException(SourceQueryException.Code.SOURCE_RESULT_TOO_LARGE);
+        }
+        check(deadline);
+        return result;
     }
 
     @Override
@@ -93,16 +132,25 @@ public final class LocalSourceRevisionCatalog implements SourceRevisionCatalog {
                 return ready(descriptor, admitLocked(context, lease, deadline));
             }
             if (state.current().isEmpty()) return new ContextResult(descriptor.repositoryId(), descriptor.defaultBranch(),
-                    status(state), SemanticStatus.NOT_READY, Optional.empty(), Optional.empty(), Optional.empty());
+                    status(state), SemanticStatus.NOT_READY, Optional.empty(), Optional.empty(), Optional.empty(), Optional.empty());
             return ready(descriptor, admitLocked(new SourceContext(descriptor.repositoryId(),
                     state.current().orElseThrow().revision()), lease, deadline));
         }
     }
 
     private ContextResult ready(SourceRepositoryDescriptor descriptor, AdmittedSourceRevision admitted) {
+        IndexContract.Discovery indexAvailability = discoverIndex(admitted);
         return new ContextResult(descriptor.repositoryId(), descriptor.defaultBranch(), SourceStatus.READY,
-                SemanticStatus.NOT_READY, Optional.of(admitted.context()), Optional.of(admitted.manifest().projectGuide()),
-                Optional.of(admitted.manifest().coverage()));
+                indexAvailability.status(), Optional.of(admitted.context()), Optional.of(admitted.manifest().projectGuide()),
+                Optional.of(admitted.manifest().coverage()), indexAvailability.index());
+    }
+
+    private IndexContract.Discovery discoverIndex(AdmittedSourceRevision admitted) {
+        try {
+            return index.discover(admitted);
+        } catch (IndexFailure unavailable) {
+            return new IndexContract.Discovery(SemanticStatus.UNAVAILABLE, Optional.empty());
+        }
     }
 
     @Override

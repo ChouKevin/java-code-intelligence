@@ -38,7 +38,7 @@ class SourceReadResponseBudgetTest {
         String content = "\u0001\\\"\t中😀".repeat(40_000) + "\r\n";
         fixture.file("src/字 \"quoted\".java", content);
         fixture.publish(Optional.empty());
-        SemanticQueryFacade facade = new SemanticQueryFacade(fixture.catalog(), fixture.service(),
+        SemanticQueryFacade facade = new SemanticQueryFacade(fixture.catalog(), fixture.service(), fixture.index,
                 fixture.properties.maxActiveSearches());
         MockMvc http = standaloneSetup(new SemanticQueryController(facade)).setControllerAdvice(new QueryApiExceptionHandler())
                 .setMessageConverters(new JacksonJsonHttpMessageConverter(fixture.mapper)).build();
@@ -58,7 +58,7 @@ class SourceReadResponseBudgetTest {
         Optional<String> cursor = Optional.empty();
         int pages = 0;
         do {
-            Map<String, Object> request = new HashMap<>(Map.of("context", context, "path", "src/字 \"quoted\".java"));
+            Map<String, Object> request = new HashMap<>(Map.of("context", context, "path", "src/字 \"quoted\".java", "view", "raw"));
             cursor.ifPresent(value -> request.put("cursor", value));
             String body = http.perform(post("/api/v1/source").contentType("application/json")
                     .content(fixture.mapper.writeValueAsBytes(request))).andExpect(status().isOk())
@@ -81,7 +81,7 @@ class SourceReadResponseBudgetTest {
             assertThat(fixture.mapper.readTree(nativeResult.get("content").get(0).get("text").asString()))
                     .isEqualTo(httpJson);
             SourceResult page = fixture.mapper.treeToValue(httpJson, SourceResult.class);
-            reconstructed.append(page.content());
+            page.segments().forEach(segment -> segment.content().ifPresent(reconstructed::append));
             cursor = page.nextCursor();
             pages++;
             assertThat(pages).isLessThan(100);

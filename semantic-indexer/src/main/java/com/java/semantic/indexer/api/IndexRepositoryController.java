@@ -30,6 +30,14 @@ public final class IndexRepositoryController {
         return ResponseEntity.accepted().location(URI.create("/index/repositories/" + result.get("repositoryId")
                 + "/jobs?jobId=" + result.get("jobId"))).body(result);
     }
+    @PostMapping("/semantic-index")
+    public ResponseEntity<Map<String, Object>> prepareSemanticIndex(@PathVariable String repositoryId,
+            @RequestBody Map<String, Object> body) {
+        Map<String, Object> result = facade.prepareSemanticIndex(inputs(repositoryId, body));
+        return ResponseEntity.accepted().location(URI.create("/index/repositories/" + result.get("repositoryId")
+                + "/jobs?jobId=" + result.get("jobId"))).body(result);
+    }
+
 
     @GetMapping("/jobs")
     public ResponseEntity<Map<String, Object>> job(@PathVariable String repositoryId,
